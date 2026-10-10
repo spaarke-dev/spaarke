@@ -221,6 +221,13 @@ public static class ExternalAccessModule
         });
         services.AddScoped<NoAccessShareEnforcer>();
 
+        // unified-access-control-r2 task 114 (owner round 67 amendments 3 + 4(b)) — a Restricted record keeps no direct
+        // share held by a user flagged sprk_isexternal = true. Called by the Assigned-To sync route (the record's save —
+        // where it becomes Restricted) and by AssignedAccessReconciliationJob (the backstop for an out-of-band OOB share).
+        // UNCONDITIONAL (ADR-032): every dependency (participations, the share seam, the Web API client, the tenant cache,
+        // the secure-child synchronizer) is registered unconditionally.
+        services.AddScoped<RestrictedExternalShareRemover>();
+
         // unified-access-control-r2 task 142 (owner round 2 item 5 + Q5; round 3 A1/A2/R3) — the Assigned-To auto-grants.
         //   • AssignedAccessStore — the provenance ledger (sprk_assignedaccess) and the reads no existing reader answers
         //     (a root's registry columns, the systemusers a contact represents, an organization's state, the job's scans),
@@ -613,8 +620,9 @@ public static class ExternalAccessModule
 
         // Task 158 — the safety net for filed records written outside the BFF (wizards, forms, imports, flows) and for a
         // parent's later share changes. Every five minutes (owner R3/R4), ENABLED WITH WRITES: owner round 6 says such a
-        // record IS secure, every write is provisioning's own or the synchronizer's add-only mirror, and nothing here ever
-        // takes a record out of isolation. ADR-052 places it in the BFF on the in-process scheduler (ADR-036 A1 rule 6).
+        // record IS secure, every write is provisioning's own or the synchronizer's add-only mirror. Task 175 (owner round 84,
+        // replacing round 6 item 4): it also takes a filed record OUT of isolation when its secure parents no longer are —
+        // through the unsecure endpoint's own steps — and keeps its Access Permission equal to its parents'. ADR-052 places it in the BFF on the in-process scheduler (ADR-036 A1 rule 6).
         // UNCONDITIONAL (ADR-032): IServiceScopeFactory and TimeProvider are unconditional.
         services.AddScheduledJob<Sprk.Bff.Api.Services.Access.SecureRootInheritanceJob>(
             Sprk.Bff.Api.Services.Access.SecureRootInheritanceJob.DefaultCronSchedule);

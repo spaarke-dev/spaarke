@@ -74,6 +74,12 @@ public static class EntraAppRegRejectionCodes
     /// <summary>H3 requires <c>InterStepState.MiObjectId</c> (UAMI principalId — the FIC <c>subject</c>, per auth-v4 §3.1) populated by H2a before H3 dispatches, in BOTH tenancy models post-task-222 per D-13.</summary>
     public const string MissingUamiObjectId = "appreg-missing-uami-object-id";
 
+    /// <summary>
+    /// Task 230b: assigning the keyless-proof app role on the customer's BFF service principal to the L2 Worker
+    /// identity failed (after the propagation retries). Without it H13 cannot run the stamp's keyless proof.
+    /// </summary>
+    public const string KeylessProofRoleAssignmentFailed = "appreg-keyless-proof-role-assignment-failed";
+
     /// <remarks>
     /// RETIRED 2026-09-29 (task 222 per D-13): the H3 shared-app-reg branch was deleted from
     /// <see cref="H3EntraAppRegHandler"/>. This code is no longer emitted by any live code path.
@@ -158,6 +164,42 @@ public static class EntraAppRegRejectionCodes
 
     /// <summary>ProvisioningRun row was deleted while H3 was in flight.</summary>
     public const string RunDeletedDuringProvisioning = "appreg-run-deleted-during-provisioning";
+
+    /// <summary>
+    /// T240a: the intake <c>dataverseEnvUrl</c> fails <c>DataverseEnvironmentUrlRule</c> (the rule POST /api/runs and H5
+    /// apply), so H3 cannot derive the code pages' SPA redirect. A run that passed intake cannot reach this; it guards a
+    /// run document that predates the rule. Resumable after the operator corrects the run.
+    /// </summary>
+    public const string DataverseEnvUrlInvalid = "appreg-dataverse-env-url-invalid";
+
+    /// <summary>
+    /// T240a: <c>EntraAppRegOptions:PreAuthorizedClientAppIds</c> holds a value that is not a GUID — platform
+    /// configuration drift. Nothing is written to Entra. Resumable after the Worker setting is fixed.
+    /// </summary>
+    public const string PreAuthorizedClientAppIdInvalid = "appreg-preauthorized-client-invalid";
+
+    /// <summary>
+    /// T240a: the app registration has no enabled <c>user_impersonation</c> scope to pre-authorize clients on, after H3's
+    /// own reconcile added it — Entra state H3 cannot repair. Resumable.
+    /// </summary>
+    public const string ClientAccessFailed = "appreg-client-access-failed";
+
+    /// <summary>
+    /// T240a review: an EXISTING registration named <c>spaarke-bff-api-{customerId}</c> is not safe to adopt — more than
+    /// one has that name, it holds a client secret or certificate (stamps are secret-free), it carries a federated
+    /// credential H3 did not create, or someone other than the control plane owns it. H3 would otherwise give it the
+    /// stamp's federated credential and H10 would make it the customer's Dataverse administrator, so a registration
+    /// pre-created under that predictable name by anyone in the tenant must never be taken over. Nothing is written;
+    /// the operator investigates and removes the impostor (or the stale registration), then resumes.
+    /// </summary>
+    public const string AdoptionRefused = "appreg-adoption-refused";
+
+    /// <summary>
+    /// T255 (INCOMING-141 §5): H3 could not put the <c>acct</c> optional claim on the registration's access tokens, or
+    /// did not read it back afterwards. Without it the stamp BFF denies every first sign-in of a customer employee
+    /// (<c>workforce_acct_claim_missing</c>). Resumable — the step is idempotent.
+    /// </summary>
+    public const string AcctClaimFailed = "appreg-acct-claim-failed";
 }
 
 /// <summary>

@@ -11,6 +11,7 @@ if (-not $DataverseUrl) {
 }
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot ".." ".." "scripts" "lib" "Publish-SolutionComponents.ps1")
 
 # Get access token for Dataverse
 $token = az account get-access-token --resource $DataverseUrl --query accessToken -o tsv
@@ -47,6 +48,7 @@ foreach ($wr in $response.value) {
 }
 
 # Update each icon
+$updatedIds = @()
 foreach ($iconName in $iconFiles.Keys) {
     $filePath = $iconFiles[$iconName]
 
@@ -79,6 +81,7 @@ foreach ($iconName in $iconFiles.Keys) {
     try {
         Invoke-RestMethod -Uri $updateUrl -Headers $headers -Method Patch -Body $body
         Write-Host "  Updated successfully"
+        $updatedIds += $webResource.webresourceid
     }
     catch {
         Write-Error "  Failed to update: $_"
@@ -88,15 +91,12 @@ foreach ($iconName in $iconFiles.Keys) {
 Write-Host ""
 Write-Host "Publishing customizations..."
 
-# Publish all customizations
-$publishUrl = "$baseUrl/PublishAllXml"
+# Task 130 (D-83): publish only the theme web resources that were updated above, through the shared scoped-publish module.
+if ($updatedIds.Count -eq 0) { Write-Warning "No web resource was updated; nothing to publish."; return }
 try {
-    Invoke-RestMethod -Uri $publishUrl -Headers $headers -Method Post
+    Invoke-PublishXml -Context @{ Api = $baseUrl; Headers = $headers } -ParameterXml (New-PublishParameterXml -WebResources $updatedIds)
     Write-Host "Published successfully"
 }
 catch {
     Write-Error "Failed to publish: $_"
 }
-
-Write-Host ""
-Write-Host "Done!"

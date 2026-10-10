@@ -98,6 +98,15 @@ public interface IDataverseUserClient
     /// </summary>
     Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// PATCH conditional on the row still being at <paramref name="expectedVersion"/> (its <c>versionnumber</c> as read
+    /// earlier): sends <c>If-Match: W/"{expectedVersion}"</c> instead of <c>*</c>, so a concurrent write in between answers
+    /// 412 and nothing is written. Never creates. Additive default member (ontology task 071): an implementation that cannot
+    /// honour the precondition refuses rather than writing unconditionally.
+    /// </summary>
+    Task<DataverseUserResponse> PatchAsync(string relativePath, string jsonBody, long expectedVersion, CancellationToken cancellationToken) =>
+        throw new NotSupportedException("This client does not support a version-conditional PATCH.");
+
     /// <summary>Issues a DELETE (task-009 <c>dataverse.delete_record</c>).</summary>
     Task<DataverseUserResponse> DeleteAsync(string relativePath, CancellationToken cancellationToken);
 }

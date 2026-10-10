@@ -26,7 +26,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { authenticatedFetch } from '@spaarke/auth';
+import { ApiError, authenticatedFetch, isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
 
 // =============================================
 // Types
@@ -56,7 +56,62 @@ export interface UseDocumentActionsResult {
   emailLink: (documentId: string) => Promise<void>;
   sendToIndex: (documentIds: string[]) => Promise<void>;
   isActing: boolean;
+  /**
+   * The last failed action as a sentence a user can read — "Couldn't delete the document: <reason>" — or
+   * null. Consumers show it in their own notification surface; it clears when the next action starts.
+   */
   actionError: string | null;
+}
+
+// =============================================
+// Failure text
+// =============================================
+
+/** The sentence for an HTTP failure the server did not explain (no ProblemDetails `detail`). */
+function statusSentence(status: number): string | null {
+  if (status === 401) return 'Your sign-in has expired. Refresh the page to sign in again.';
+  if (status === 403) return 'You do not have permission to do this with this document.';
+  if (status === 404) return 'The document was not found.';
+  if (status === 409) return 'The document was changed at the same time by someone else. Refresh and try again.';
+  if (status === 429) return 'Too many requests. Wait a moment and try again.';
+  if (status >= 500) return 'The document service is temporarily unavailable. Try again in a few minutes.';
+  return null;
+}
+
+/**
+ * Why an action failed, for a user. `authenticatedFetch` never returns a non-2xx Response: it throws
+ * `ApiError` (status + ProblemDetails) or, once its 401 retries are spent, `AuthError`. So the reason is
+ * the server's `detail`, else a sentence for the status, else its `title` — never the bare ApiError
+ * message ("HTTP 500") or the browser's "Failed to fetch".
+ */
+function failureReason(err: unknown): string {
+  if (isApiError(err)) {
+    const problem = problemOf(err);
+    const detail = typeof problem?.detail === 'string' ? problem.detail.trim() : '';
+    const title = typeof problem?.title === 'string' ? problem.title.trim() : '';
+    return detail || statusSentence(err.status) || title || `The request failed (HTTP ${err.status}).`;
+  }
+  if (isAuthFailure(err)) return 'Your sign-in has expired. Refresh the page to sign in again.';
+  if (err instanceof TypeError) return 'The Spaarke server could not be reached. Check your connection.';
+  return 'Something went wrong. Try again.';
+}
+
+/** "<frame>: <reason>" — e.g. "Couldn't delete the document: The document was not found." */
+function failureMessage(frame: string, err: unknown): string {
+  return `${frame}: ${failureReason(err)}`;
+}
+
+/** "the document" / "2 documents" for the action frames. */
+function documentsPhrase(count: number): string {
+  return count === 1 ? 'the document' : `${count} documents`;
+}
+
+/**
+ * A non-2xx from a fetch that RETURNS failures (not `@spaarke/auth`'s, which throws) becomes the same
+ * ApiError that fetch would have thrown, so both shapes reach one message path.
+ */
+function throwIfNotOk(response: Response): void {
+  if (!response.ok) throw new ApiError(`HTTP ${response.status}`, response.status, null);
 }
 
 // =============================================
@@ -65,30 +120,20 @@ export interface UseDocumentActionsResult {
 
 async function getDocumentLinks(bffBaseUrl: string, documentId: string): Promise<OpenLinksResponse> {
   const response = await authenticatedFetch(`${bffBaseUrl}/api/documents/${documentId}/open-links`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to get document links: ${response.status}`);
-  }
-
+  throwIfNotOk(response);
   return response.json() as Promise<OpenLinksResponse>;
 }
 
 async function deleteDocument(bffBaseUrl: string, documentId: string): Promise<void> {
   const response = await authenticatedFetch(`${bffBaseUrl}/api/documents/${documentId}`, { method: 'DELETE' });
-
-  if (!response.ok) {
-    throw new Error(`Failed to delete document: ${response.status}`);
-  }
+  throwIfNotOk(response);
 }
 
 async function analyzeDocument(bffBaseUrl: string, documentId: string): Promise<void> {
   const response = await authenticatedFetch(`${bffBaseUrl}/api/documents/${documentId}/analyze`, {
     method: 'POST',
   });
-
-  if (!response.ok && response.status !== 202) {
-    throw new Error(`Failed to send document to index: ${response.status}`);
-  }
+  if (response.status !== 202) throwIfNotOk(response);
 }
 
 // =============================================
@@ -108,7 +153,7 @@ export function useDocumentActions(options: UseDocumentActionsOptions): UseDocum
         const links = await getDocumentLinks(bffBaseUrl, documentId);
         window.open(links.webUrl, '_blank');
       } catch (err) {
-        setActionError(err instanceof Error ? err.message : 'Failed to open document');
+        setActionError(failureMessage("Couldn't open the document", err));
       } finally {
         setIsActing(false);
       }
@@ -129,7 +174,7 @@ export function useDocumentActions(options: UseDocumentActionsOptions): UseDocum
           window.open(links.webUrl, '_blank');
         }
       } catch (err) {
-        setActionError(err instanceof Error ? err.message : 'Failed to open in desktop');
+        setActionError(failureMessage("Couldn't open the document in the desktop app", err));
       } finally {
         setIsActing(false);
       }
@@ -145,9 +190,7 @@ export function useDocumentActions(options: UseDocumentActionsOptions): UseDocum
         const url = `${bffBaseUrl}/api/documents/${documentId}/download`;
         // Use a hidden link to trigger browser download
         const response = await authenticatedFetch(url);
-        if (!response.ok) {
-          throw new Error(`Download failed: ${response.status}`);
-        }
+        throwIfNotOk(response);
         const blob = await response.blob();
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -161,7 +204,7 @@ export function useDocumentActions(options: UseDocumentActionsOptions): UseDocum
         document.body.removeChild(a);
         URL.revokeObjectURL(blobUrl);
       } catch (err) {
-        setActionError(err instanceof Error ? err.message : 'Failed to download document');
+        setActionError(failureMessage("Couldn't download the document", err));
       } finally {
         setIsActing(false);
       }
@@ -183,7 +226,7 @@ export function useDocumentActions(options: UseDocumentActionsOptions): UseDocum
         await Promise.all(documentIds.map(id => deleteDocument(bffBaseUrl, id)));
         onSuccess();
       } catch (err) {
-        setActionError(err instanceof Error ? err.message : 'Failed to delete documents');
+        setActionError(failureMessage(`Couldn't delete ${documentsPhrase(count)}`, err));
       } finally {
         setIsActing(false);
       }
@@ -201,7 +244,7 @@ export function useDocumentActions(options: UseDocumentActionsOptions): UseDocum
         const body = encodeURIComponent(`View this document:\n${links.webUrl}`);
         window.location.href = `mailto:?subject=${subject}&body=${body}`;
       } catch (err) {
-        setActionError(err instanceof Error ? err.message : 'Failed to create email link');
+        setActionError(failureMessage("Couldn't create the email link", err));
       } finally {
         setIsActing(false);
       }
@@ -216,7 +259,7 @@ export function useDocumentActions(options: UseDocumentActionsOptions): UseDocum
       try {
         await Promise.all(documentIds.map(id => analyzeDocument(bffBaseUrl, id)));
       } catch (err) {
-        setActionError(err instanceof Error ? err.message : 'Failed to send to index');
+        setActionError(failureMessage(`Couldn't send ${documentsPhrase(documentIds.length)} to the index`, err));
       } finally {
         setIsActing(false);
       }

@@ -157,6 +157,7 @@ internal sealed class SecureChildShareWorld
     public SecureChildShareWorld ClearQueryFaults()
     {
         _failingTables.Clear();
+        _failingIdListReads.Clear();
         return this;
     }
 
@@ -170,6 +171,18 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    private readonly HashSet<(string Table, Guid Id)> _failingIdListReads = new();
+
+    /// <summary>
+    /// Task 173: makes every read of ONE row through an id LIST (<c>id IN (…)</c>, the parent walk's batched read) throw.
+    /// Listings that do not name the row by id still answer. <see cref="ClearQueryFaults"/> clears it.
+    /// </summary>
+    public SecureChildShareWorld FailingIdListReadsOf(string table, Guid id)
+    {
+        _failingIdListReads.Add((table, id));
+        return this;
+    }
+
     /// <summary>
     /// Makes every PAGED query of one table report more rows to come, however many pages have been read (task 149 r2: a
     /// table larger than the synchronizer's page ceiling, without seeding a hundred thousand rows).
@@ -177,6 +190,36 @@ internal sealed class SecureChildShareWorld
     public SecureChildShareWorld EndlessPagesOf(string table)
     {
         _endlessTables.Add(table);
+        return this;
+    }
+
+    /// <summary>Task 175: every access-record (<c>sprk_accessinheritance</c>) write, in order.</summary>
+    public List<(string Table, Guid Id, string Text)> AccessRecordWrites { get; } = new();
+
+    /// <summary>
+    /// Task 175 fix round: the BFF has lost READ on the field-secured <c>sprk_accessinheritance</c> (its writes still land) —
+    /// every read answers the column as empty, as Dataverse does for a secured column the caller cannot read.
+    /// </summary>
+    public bool HidesAccessRecords { get; set; }
+
+    private readonly HashSet<Guid> _refusedAccessRecordWrites = new();
+
+    /// <summary>Task 175: an access-record write to THIS row throws (recorded first).</summary>
+    public SecureChildShareWorld RefusingAccessRecordWritesOf(Guid id)
+    {
+        _refusedAccessRecordWrites.Add(id);
+        return this;
+    }
+
+    /// <summary>Task 173: every <c>sprk_accesspermission</c> write, in order.</summary>
+    public List<(string Table, Guid Id, int Value)> AccessPermissionWrites { get; } = new();
+
+    private readonly HashSet<Guid> _refusedAccessPermissionWrites = new();
+
+    /// <summary>Task 173: an Access Permission write to THIS row throws (recorded first).</summary>
+    public SecureChildShareWorld RefusingAccessPermissionWritesOf(Guid id)
+    {
+        _refusedAccessPermissionWrites.Add(id);
         return this;
     }
 
@@ -260,6 +303,12 @@ internal sealed class SecureChildShareWorld
                     ? DataversePrincipalRef.User(user.Id)
                     : null;
 
+    /// <summary>Task 175: a column's current value on a row (<c>default</c> when the row or the column is absent).</summary>
+    public T? ValueOf<T>(string table, Guid id, string column) =>
+        _rows.TryGetValue((table, id), out var row) && row.Attributes.TryGetValue(column, out var value) && value is T typed
+            ? typed
+            : default;
+
     /// <summary>Task 148: sets a column on an existing row (a host harness mirroring its root's flag).</summary>
     public void Set(string table, Guid id, string column, object? value)
     {
@@ -303,6 +352,30 @@ internal sealed class SecureChildShareWorld
     /// </summary>
     public void Update(string table, Guid id, Dictionary<string, object> fields)
     {
+        // Task 173: the inherited Access Permission pass writes ONE column, sprk_accesspermission.
+        if (fields.Count == 1 && fields.TryGetValue("sprk_accesspermission", out var level) && level is OptionSetValue option)
+        {
+            AccessPermissionWrites.Add((table, id, option.Value));
+            if (_refusedAccessPermissionWrites.Contains(id))
+                throw new InvalidOperationException("Test: Dataverse refused the Access Permission write.");
+            if (!_rows.TryGetValue((table, id), out var target))
+                throw new InvalidOperationException($"Test: {table} {id} does not exist.");
+            target["sprk_accesspermission"] = option;
+            return;
+        }
+
+        // Task 175 (round 87): the follow writes ONE column, the access record (sprk_accessinheritance).
+        if (fields.Count == 1 && fields.TryGetValue("sprk_accessinheritance", out var marker) && marker is string text)
+        {
+            AccessRecordWrites.Add((table, id, text));
+            if (_refusedAccessRecordWrites.Contains(id))
+                throw new InvalidOperationException("Test: Dataverse refused the access-record write.");
+            if (!_rows.TryGetValue((table, id), out var row))
+                throw new InvalidOperationException($"Test: {table} {id} does not exist.");
+            row["sprk_accessinheritance"] = text;
+            return;
+        }
+
         if (!fields.TryGetValue("ownerid", out var value) || value is not EntityReference owner || fields.Count != 1)
             throw new NotSupportedException($"The test world models owner updates only (got {string.Join(",", fields.Keys)}).");
 
@@ -399,6 +472,34 @@ internal sealed class SecureChildShareWorld
             accessCacheInvalidator);
     }
 
+    /// <summary>
+    /// Task 173: the REAL <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver"/> over this world, as the host
+    /// registers it unconditionally (<c>AddCoreAncestorResolver</c>) — so every job harness composes it like the host does
+    /// (no asymmetric registration; the reconciliation job requires it).
+    /// </summary>
+    public static Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver CoreAncestorsOver(
+        Func<SecureChildShareWorld> current, params string[] tablesWithoutAccessPermission) =>
+        new(EntitiesOver(current).Object, ColumnProbe(tablesWithoutAccessPermission),
+            NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance);
+
+    /// <summary>
+    /// Task 173: the column probe of this world — every lineage lookup, root column and stamp column exists, and so does
+    /// <c>sprk_accesspermission</c>, except on the tables named.
+    /// </summary>
+    public static Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.EntityColumnProbe ColumnProbe(
+        params string[] tablesWithoutAccessPermission) => (table, _) =>
+    {
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (SecureChildLineage.Children.TryGetValue(table, out var lineage))
+            columns.UnionWith(lineage.Lookups.Keys);
+        if (Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.IntermediateRootColumns.TryGetValue(table, out var roots))
+            columns.UnionWith(roots.Select(r => r.Column));
+        columns.UnionWith(Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute));
+        if (!tablesWithoutAccessPermission.Contains(table, StringComparer.OrdinalIgnoreCase))
+            columns.Add("sprk_accesspermission");
+        return Task.FromResult<IReadOnlySet<string>>(columns);
+    };
+
     /// <summary>The two Secure Record names this world uses, as configuration.</summary>
     public static IConfiguration Configuration() =>
         new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -418,6 +519,11 @@ internal sealed class SecureChildShareWorld
                 c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.Equal
                 && c.Values.Single() is Guid id && _failingRowReads.Contains((query.EntityName, id))))
             throw new InvalidOperationException($"Test: this {query.EntityName} row cannot be read.");
+
+        if (query.Criteria.Conditions.Any(c =>
+                c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.In
+                && c.Values.Any(v => v is Guid id && _failingIdListReads.Contains((query.EntityName, id)))))
+            throw new InvalidOperationException($"Test: a {query.EntityName} row in this id list cannot be read.");
 
         var matched = _rows.Values
             .Where(r => r.LogicalName == query.EntityName && Matches(r, query.Criteria))
@@ -454,6 +560,8 @@ internal sealed class SecureChildShareWorld
         var copy = new Entity(row.LogicalName, row.Id);
         foreach (var (column, value) in row.Attributes)
         {
+            if (HidesAccessRecords && column == "sprk_accessinheritance")
+                continue; // field-level security without read: Dataverse answers as if the column were empty
             if (columns.AllColumns || columns.Columns.Contains(column))
                 copy[column] = value;
         }
@@ -509,6 +617,8 @@ internal sealed class SecureChildShareWorld
             // Task 147: the reconciliation job's recent-changes pass filters on modifiedon. A row with no modifiedon
             // (every row a test does not touch) never matches.
             ConditionOperator.GreaterEqual => actual is DateTime at && condition.Values.Single() is DateTime since && at >= since,
+            // Task 173: the Access Permission sweep pages by id (rows are answered in id order, as Dataverse orders them).
+            ConditionOperator.GreaterThan => actual is Guid a && condition.Values.Single() is Guid after && a.CompareTo(after) > 0,
             _ => throw new NotSupportedException($"The test world does not evaluate {condition.Operator}."),
         };
     }

@@ -24,7 +24,7 @@
  * @see src/solutions/LegalWorkspace/src/services/authInit.ts — pattern source
  */
 
-import { createCodePageAuthInitializer, type CodePageAuthInitializer } from '@spaarke/auth';
+import { createCodePageAuthInitializer, type CodePageAuthInitializer, type OkResponse } from '@spaarke/auth';
 import {
   getBffBaseUrl,
   getBffOAuthScope,
@@ -52,7 +52,7 @@ export function ensureAuthInitialized(): Promise<void> {
   return getInitializer().ensureAuthInitialized();
 }
 
-export function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
+export function authenticatedFetch(url: string, init?: RequestInit): Promise<OkResponse> {
   return getInitializer().authenticatedFetch(url, init);
 }
 

@@ -104,8 +104,10 @@ public sealed class ActionSeam : IActionSeam
             new TaskActionInput(
                 Subject: request.Subject,
                 Description: request.Description,
-                ScheduledEnd: request.DueDate?.ToUniversalTime(),
-                FinalDueDate: request.FinalDueDate?.ToUniversalTime(),
+                // Task 098: calendar dates, passed as written. ToUniversalTime() moved an Unspecified/Local midnight
+                // by the machine's offset — the previous day east of UTC — before a Date Only column stored its date.
+                ScheduledEnd: request.DueDate,
+                FinalDueDate: request.FinalDueDate,
                 RegardingObjectId: request.RegardingObjectId,
                 RegardingObjectType: request.RegardingObjectType,
                 OwnerId: request.OwnerId,

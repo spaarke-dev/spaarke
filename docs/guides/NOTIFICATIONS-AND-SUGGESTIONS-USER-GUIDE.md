@@ -68,7 +68,7 @@ Needed by the **Communication Workspace**, *not* by suggestions.
 
 | Add | Why |
 |---|---|
-| Backfill **`systemuser.sprk_isexternal`** (two-option, default *No*) for recipients | Fan-out targeting **fails closed** (zero recipients) for un-backfilled users — correct, but silently "no notifications" for them. |
+| Mark external users **`systemuser.sprk_isexternal` = Yes** (two-option, default *No*) — B2B guests with `scripts/Set-ExternalFlagForB2BGuests.ps1` | Since unified-access-control-r2 task 114 (owner round 67) a **blank flag is INTERNAL**: an external licensed user left blank receives internal-only content. Internal users need no backfill. |
 | **`sprk_communicationrule`** table present | The `communication-assessed` policy gate reads it; deny-by-default without rules. |
 | **023 R-5 fan-out security sign-off** (named human) before enabling in a real environment | Fan-out is a compliance surface — a mis-targeted envelope is an incident. |
 
@@ -95,7 +95,7 @@ Needed by the **Communication Workspace**, *not* by suggestions.
 |---|---|
 | Azure SignalR / connection string | Live push off → **poll fallback** (works, ~30 s slower). |
 | CSP `wss://*.service.signalr.net` entry | Socket blocked → **poll fallback**. |
-| `systemuser.sprk_isexternal` backfill | Communication fan-out silent-zero for those users — **suggestions unaffected**. |
+| `systemuser.sprk_isexternal` = Yes on external users | Without it they are treated as INTERNAL (task 114: blank = internal) and receive internal-only messages — **suggestions unaffected**. |
 | `Notifications:Suggestions:Enabled=false` | No suggestions produced (silent, safe). |
 
 **Shortest path to *producing* a suggestion:** deploy `sprk_notificationoutbox` + the SpaarkeAi code page, set `Notifications:Suggestions:Enabled=true`, and make sure the Daily Briefing runs. ⚠️ This produces rows but does not display them yet (no renderer today — see the status banner); verify production by polling `GET /api/notifications/pending?kind=suggestion`. Real-time push and communication notifications layer on after.
@@ -117,7 +117,7 @@ Both checks run **before** anything is stored or pushed — nothing ungrounded o
 | Symptom | Likely cause & fix |
 |---|---|
 | No suggestions ever appear (on screen) | **Expected today** — the in-Assistant suggestion renderer was removed; there is no visible suggestion surface until `spaarke-notification-spine-r2` (OOB bell) ships. To confirm suggestions are being *produced*, poll `GET /api/notifications/pending?kind=suggestion` (also confirm `Notifications:Suggestions:Enabled=true`, `sprk_notificationoutbox` exists, and the Daily Briefing is running with high-priority items). |
-| Some users get communication notifications, others get none | The silent users are missing the `systemuser.sprk_isexternal` backfill (Tier 2) — fan-out fails closed for them. Backfill the flag. |
+| Some users get communication notifications, others get none | A user flagged `systemuser.sprk_isexternal = Yes` gets no internal-only message — by design; check the flag is right for them. A blank flag is internal since task 114 (it is no longer a cause). |
 | Communication notifications appear on a delay (not instant) | Live SignalR isn't connected — check Tier 1 (`Notifications:SignalR:ConnectionString` present + CSP allows `wss://*.service.signalr.net`). The client is on the poll fallback (working, just slower). |
 
 ---

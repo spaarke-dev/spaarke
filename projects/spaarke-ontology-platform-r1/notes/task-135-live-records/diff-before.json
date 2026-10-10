@@ -1,0 +1,77 @@
+{
+  "playbookId": "a0d49d0d-4a65-f111-ab0c-70a8a590c51c",
+  "nodes": [
+    {
+      "name": "queryMatterContext",
+      "id": "a2d49d0d-4a65-f111-ab0c-70a8a590c51c",
+      "configMatches": true,
+      "executorTypeMatches": true,
+      "outputVariableMatches": true,
+      "liveModifiedOn": "2026-06-29T14:55:23Z"
+    },
+    {
+      "name": "queryKpiAssessments",
+      "id": "669c5310-4a65-f111-ab0c-7ced8ddc4cc6",
+      "configMatches": false,
+      "executorTypeMatches": true,
+      "outputVariableMatches": true,
+      "liveModifiedOn": "2026-06-29T14:55:54Z"
+    },
+    {
+      "name": "retrieveObservations",
+      "id": "c4284512-4a65-f111-ab0c-7ced8ddc4a05",
+      "configMatches": false,
+      "executorTypeMatches": true,
+      "outputVariableMatches": true,
+      "liveModifiedOn": "2026-06-29T14:55:47Z"
+    },
+    {
+      "name": "checkSufficiency",
+      "id": "a3d49d0d-4a65-f111-ab0c-70a8a590c51c",
+      "configMatches": true,
+      "executorTypeMatches": true,
+      "outputVariableMatches": true,
+      "liveModifiedOn": "2026-06-29T14:55:24Z"
+    },
+    {
+      "name": "synthesize",
+      "id": "679c5310-4a65-f111-ab0c-7ced8ddc4cc6",
+      "configMatches": false,
+      "executorTypeMatches": true,
+      "outputVariableMatches": true,
+      "liveModifiedOn": "2026-06-29T14:55:55Z"
+    },
+    {
+      "name": "groundCitations",
+      "id": "689c5310-4a65-f111-ab0c-7ced8ddc4cc6",
+      "configMatches": false,
+      "executorTypeMatches": true,
+      "outputVariableMatches": true,
+      "liveModifiedOn": "2026-06-29T14:55:55Z"
+    },
+    {
+      "name": "ReturnInsightArtifactNode",
+      "id": "d7284512-4a65-f111-ab0c-7ced8ddc4a05",
+      "configMatches": false,
+      "executorTypeMatches": true,
+      "outputVariableMatches": true,
+      "liveModifiedOn": "2026-06-29T14:55:48Z"
+    },
+    {
+      "name": "declineInsufficient",
+      "id": "1e5ff113-4a65-f111-ab0c-70a8a590c51c",
+      "configMatches": false,
+      "executorTypeMatches": true,
+      "outputVariableMatches": true,
+      "liveModifiedOn": "2026-06-29T14:55:24Z"
+    },
+    {
+      "name": "persistEnvelope",
+      "id": "de284512-4a65-f111-ab0c-7ced8ddc4a05",
+      "configMatches": false,
+      "executorTypeMatches": true,
+      "outputVariableMatches": true,
+      "liveModifiedOn": "2026-06-29T14:55:48Z"
+    }
+  ]
+}

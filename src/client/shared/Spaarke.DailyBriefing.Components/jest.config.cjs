@@ -42,6 +42,9 @@ module.exports = {
       "<rootDir>/test/__mocks__/spaarke-ui-components-services.ts",
     "^@spaarke/ui-components$":
       "<rootDir>/test/__mocks__/spaarke-ui-components.tsx",
+    // task 098: the dependency-free `dateLocal` module runs for real (deep import; no mock).
+    "^@spaarke/ui-components/utils/dateLocal$":
+      "<rootDir>/../Spaarke.UI.Components/src/utils/dateLocal.ts",
     // task 092, 2026-10-04 — `legalWorkspaceSectionRegistry.test.ts` imports
     // `sectionRegistry.ts`, whose `composeEditor.registration.ts` section
     // imports `@spaarke/compose-components` (not otherwise a dependency of
@@ -55,6 +58,20 @@ module.exports = {
     // name; a package-only install (CI) has no link for it. Resolve to source,
     // mirroring package.json "exports" ("./utils" -> "./src/utils/index.ts").
     "^@spaarke/daily-briefing-components/(.*)$": "<rootDir>/src/$1/index.ts",
+    // C-9 (task 052): the test mock re-exports the REAL RowActionMenu from @spaarke/ui-components SOURCE. Dedupe React and
+    // Fluent v9 so that source shares this package's instances (otherwise "Invalid hook call" / two tabster cores).
+    "^react$": "<rootDir>/node_modules/react",
+    "^react/(.*)$": "<rootDir>/node_modules/react/$1",
+    "^react-dom$": "<rootDir>/node_modules/react-dom",
+    "^react-dom/(.*)$": "<rootDir>/node_modules/react-dom/$1",
+    "^@fluentui/react-components$":
+      "<rootDir>/node_modules/@fluentui/react-components",
+    "^@fluentui/react-icons$": "<rootDir>/node_modules/@fluentui/react-icons",
+    "^@fluentui/react-tabster$":
+      "<rootDir>/node_modules/@fluentui/react-tabster",
+    "^@fluentui/react-tabster/(.*)$":
+      "<rootDir>/node_modules/@fluentui/react-tabster/$1",
+    "^tabster$": "<rootDir>/node_modules/tabster",
   },
   setupFilesAfterEnv: ["<rootDir>/test/jest.setup.ts"],
   // Coverage thresholds left empty in the initial 0.1.0 release — NFR-05

@@ -8,6 +8,7 @@
             <MenuSection Id="sprk.Access.sprk_workassignment.Form.Section" Title="Access" Sequence="10">
               <Controls Id="sprk.Access.sprk_workassignment.Form.Controls">
                 <Button Id="sprk.Access.sprk_workassignment.Form.UpdateAccess" Command="sprk.Access.sprk_workassignment.UpdateAccess.Command" LabelText="$LocLabels:sprk.Access.sprk_workassignment.UpdateAccess.LabelText" Alt="$LocLabels:sprk.Access.sprk_workassignment.UpdateAccess.LabelText" ToolTipTitle="$LocLabels:sprk.Access.sprk_workassignment.UpdateAccess.LabelText" ToolTipDescription="$LocLabels:sprk.Access.sprk_workassignment.UpdateAccess.ToolTipDescription" ModernImage="Refresh" Sequence="10" />
+                <Button Id="sprk.Access.sprk_workassignment.Form.MakeSecure" Command="sprk.Access.sprk_workassignment.MakeSecure.Command" LabelText="$LocLabels:sprk.Access.sprk_workassignment.MakeSecure.LabelText" Alt="$LocLabels:sprk.Access.sprk_workassignment.MakeSecure.LabelText" ToolTipTitle="$LocLabels:sprk.Access.sprk_workassignment.MakeSecure.LabelText" ToolTipDescription="$LocLabels:sprk.Access.sprk_workassignment.MakeSecure.LabelText" ModernImage="Permissions" Sequence="20" />
                 <Button Id="sprk.Access.sprk_workassignment.Form.RemoveSecure" Command="sprk.Access.sprk_workassignment.RemoveSecure.Command" LabelText="$LocLabels:sprk.Access.sprk_workassignment.RemoveSecure.LabelText" Alt="$LocLabels:sprk.Access.sprk_workassignment.RemoveSecure.LabelText" ToolTipTitle="$LocLabels:sprk.Access.sprk_workassignment.RemoveSecure.LabelText" ToolTipDescription="$LocLabels:sprk.Access.sprk_workassignment.RemoveSecure.LabelText" ModernImage="Cancel" Sequence="30" />
               </Controls>
             </MenuSection>
@@ -56,6 +57,19 @@
     <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
   </Templates>
   <CommandDefinitions>
+    <CommandDefinition Id="sprk.Access.sprk_workassignment.MakeSecure.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Access.sprk_workassignment.MakeSecure.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" />
+        <JavaScriptFunction Library="$webresource:sprk_/scripts/access_ribbon.js" FunctionName="Spaarke.Access.Ribbon.makeSecure">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
     <CommandDefinition Id="sprk.Access.sprk_workassignment.Menu.Command">
       <EnableRules>
         <EnableRule Id="sprk.Access.sprk_workassignment.MenuVisible.EnableRule" />
@@ -142,6 +156,13 @@
           <CrmParameter Value="PrimaryControl" />
         </CustomRule>
       </EnableRule>
+      <EnableRule Id="sprk.Access.sprk_workassignment.MakeSecure.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+        <CustomRule Library="$webresource:sprk_/scripts/access_ribbon.js" FunctionName="Spaarke.Access.Ribbon.canMakeSecure" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
       <EnableRule Id="sprk.Access.sprk_workassignment.MenuVisible.EnableRule">
         <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
         <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
@@ -162,6 +183,11 @@
     </EnableRules>
   </RuleDefinitions>
   <LocLabels>
+    <LocLabel Id="sprk.Access.sprk_workassignment.MakeSecure.LabelText">
+      <Titles>
+        <Title description="Make Secure" languagecode="1033" />
+      </Titles>
+    </LocLabel>
     <LocLabel Id="sprk.Access.sprk_workassignment.Menu.LabelText">
       <Titles>
         <Title description="Access" languagecode="1033" />

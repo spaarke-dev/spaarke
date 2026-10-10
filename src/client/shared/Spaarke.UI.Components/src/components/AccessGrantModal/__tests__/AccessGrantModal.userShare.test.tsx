@@ -16,6 +16,7 @@ import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
+import { apiErrorFor, throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type { IAccessGrantModalProps, IAccessGrantCandidate, IAccessGrantRecord, IUserPick } from '../types';
 
 const renderWithTheme = (ui: React.ReactElement, theme = webLightTheme) =>
@@ -45,14 +46,17 @@ function jsonResponse(body: unknown, ok = true, status = ok ? 200 : 500): Respon
   return {
     ok,
     status,
-    json: async () => body,
+    // A BFF ProblemDetails always carries `status`.
+    json: async () => (ok ? body : { status, ...(body as Record<string, unknown>) }),
   } as unknown as Response;
 }
 
 /** Default fetch mock: /user-shares GET returns no shares; grant/revoke paths
- * succeed with realistic bodies. Individual tests override with mockImplementation. */
+ * succeed with realistic bodies. Individual tests override with mockImplementation.
+ * Like the real `@spaarke/auth` authenticatedFetch, a non-2xx answer is THROWN
+ * (ApiError / AuthError), never returned. */
 function baseAuthenticatedFetch(extra?: (url: string, init?: RequestInit) => Response | null): jest.Mock {
-  return jest.fn(async (url: string, init?: RequestInit) => {
+  return throwingAuthenticatedFetch(async (url: string, init?: RequestInit) => {
     if (extra) {
       const overridden = extra(url, init);
       if (overridden) return overridden;
@@ -233,6 +237,43 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       // Prior Grantee (a contact grant) still renders alongside without being
       // mislabeled — rows merge without duplication or cross-contamination.
       expect(screen.getByText('Prior Grantee')).toBeInTheDocument();
+    });
+
+    // Task 114 (owner round 67 amendment 4(c)): on a Restricted record, an external-flagged user's share is labelled
+    // "External user — no access" until the server removes it; every other share keeps its "Internal user share" label.
+    it('labels a share the server marks externalNoAccess as "External user — no access", and only that one', async () => {
+      const authenticatedFetch = baseAuthenticatedFetch(url =>
+        url.includes('/user-shares')
+          ? jsonResponse({
+              shares: [
+                {
+                  systemUserId: 'systemuser-ext',
+                  fullName: 'Ext Erin',
+                  accessRightsMask: 1,
+                  accessLevel: 100000000,
+                  modifiedOn: '2026-10-06T00:00:00Z',
+                  externalNoAccess: true,
+                },
+                {
+                  systemUserId: 'systemuser-int',
+                  fullName: 'Int Ivan',
+                  accessRightsMask: 1,
+                  accessLevel: 100000000,
+                  modifiedOn: '2026-10-06T00:00:00Z',
+                  externalNoAccess: false,
+                },
+              ],
+            })
+          : null
+      );
+      const props = makeProps({
+        authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      expect(await screen.findByText('Ext Erin')).toBeInTheDocument();
+      expect(screen.getAllByText('External user — no access')).toHaveLength(1);
+      expect(screen.getAllByText(/^Internal user share — last updated/)).toHaveLength(1);
     });
 
     it('revoking a user-share row issues POST /unshare-user with {recordType, recordId, systemUserId} and removes the row on success', async () => {
@@ -512,6 +553,27 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       expect(screen.getByRole('button', { name: 'Revoke' })).toBeDisabled();
     });
 
+    it('reaches the same banner when the host fetch RETURNS the 403 instead of throwing it', async () => {
+      // Every suite above injects the production shape (authenticatedFetch THROWS); this pins the
+      // other shape a host may inject, which the modal still reads from the returned response.
+      const authenticatedFetch = jest.fn(async (url: string) =>
+        url.includes('/user-shares')
+          ? jsonResponse(
+              { title: 'Forbidden', detail: 'Write required.', reasonCode: 'sdap.access.deny.delegation_write_required' },
+              false,
+              403
+            )
+          : jsonResponse({})
+      );
+      const props = makeProps({
+        authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      expect(await screen.findByText('Write access required')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Revoke' })).toBeDisabled();
+    });
+
     it('a 401 renders a distinct "Sign-in expired" banner', async () => {
       const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
       const authenticatedFetch = baseAuthenticatedFetch(url =>
@@ -765,6 +827,126 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       expect(warnSpy).not.toHaveBeenCalled();
       errorSpy.mockRestore();
       warnSpy.mockRestore();
+    });
+  });
+  describe('task 114 — owner test feedback 2026-10-07', () => {
+    const EXTERNAL_PICK: IUserPick = { id: 'systemuser-ext', name: 'Ralph Schroeder', email: 'ralph.schroeder@hotmail.com' };
+
+    function refusingFetch(reasonCode: string, detail: string): jest.Mock {
+      return baseAuthenticatedFetch(url =>
+        url.includes('/share-user') ? jsonResponse({ title: 'Not shared', detail, reasonCode }, false, 422) : null
+      );
+    }
+
+    async function pickAndAdd(name: string): Promise<void> {
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      await screen.findByText(name);
+      await pickLevelFor(name, 'View Only');
+      fireEvent.click(addButton());
+    }
+
+    it('on a Restricted record the "+ User" lookup is asked to leave out users flagged external', async () => {
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => null);
+      renderWithTheme(<AccessGrantModal {...makeProps({ pickUser, accessPermissionState: 'restricted' })} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      await waitFor(() => expect(pickUser).toHaveBeenCalledWith({ excludeExternal: true }));
+    });
+
+    it('on a standard record the "+ User" lookup is not filtered', async () => {
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => null);
+      renderWithTheme(<AccessGrantModal {...makeProps({ pickUser })} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      await waitFor(() => expect(pickUser).toHaveBeenCalledWith({ excludeExternal: false }));
+    });
+
+    it('a picked user row shows the email beside the name', async () => {
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => EXTERNAL_PICK);
+      renderWithTheme(<AccessGrantModal {...makeProps({ pickUser })} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      expect(await screen.findByText('System user · ralph.schroeder@hotmail.com')).toBeInTheDocument();
+    });
+
+    it('the external-user refusal names the person and says why, instead of "1 failed. Please try again."', async () => {
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => EXTERNAL_PICK);
+      const authenticatedFetch = refusingFetch(
+        'sdap.access.user_share.user_not_internal',
+        'This record is Restricted to internal users, and this user is flagged as external, so it was not shared with them.'
+      );
+      renderWithTheme(
+        <AccessGrantModal
+          {...makeProps({
+            pickUser,
+            accessPermissionState: 'restricted',
+            authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+          })}
+        />
+      );
+      await pickAndAdd('Ralph Schroeder');
+      expect(
+        await screen.findByText(
+          /System user Ralph Schroeder \(ralph\.schroeder@hotmail\.com\) is an external user\. Restricted records cannot be shared with external users\./
+        )
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Please try again/)).not.toBeInTheDocument();
+    });
+
+    it('a disabled-user refusal names the person in front of the server sentence', async () => {
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const authenticatedFetch = refusingFetch(
+        'sdap.access.user_share.user_disabled',
+        'This user is disabled, so the record was not shared with them.'
+      );
+      renderWithTheme(
+        <AccessGrantModal
+          {...makeProps({
+            pickUser,
+            authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+          })}
+        />
+      );
+      await pickAndAdd('Uma Userton');
+      expect(
+        await screen.findByText(/System user Uma Userton: This user is disabled, so the record was not shared with them\./)
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Please try again/)).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ['sdap.access.user_share.subject_no_access', 403, 'This person is on the No Access list for this record, so it was not shared with them.'],
+      ['sdap.access.user_share.no_access_unverifiable', 500, 'Whether this person is on the No Access list could not be checked, so nothing was shared. Try again.'],
+    ])('a %s refusal names the person instead of the generic retry message', async (reasonCode, status, detail) => {
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const authenticatedFetch = baseAuthenticatedFetch(url =>
+        url.includes('/share-user') ? jsonResponse({ title: 'Not shared', detail, reasonCode }, false, status) : null
+      );
+      renderWithTheme(
+        <AccessGrantModal
+          {...makeProps({
+            pickUser,
+            authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+          })}
+        />
+      );
+      await pickAndAdd('Uma Userton');
+      expect(await screen.findByText(text => text.includes(`System user Uma Userton: ${detail}`))).toBeInTheDocument();
+      expect(screen.queryByText(/1 failed\. Please try again/)).not.toBeInTheDocument();
+    });
+
+    it('while the lookup is open the modal stays visible (dimmed), instead of disappearing', async () => {
+      let resolvePick: (v: IUserPick | null) => void = () => {};
+      const pickUser = jest.fn(() => new Promise<IUserPick | null>(r => (resolvePick = r)));
+      renderWithTheme(<AccessGrantModal {...makeProps({ pickUser })} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      await waitFor(() => expect(pickUser).toHaveBeenCalled());
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.style.visibility).not.toBe('hidden');
+      expect(dialog.style.filter).toBe('brightness(0.75)');
+      expect(dialog).toHaveAttribute('inert');
+
+      resolvePick(null);
+      await waitFor(() => expect(screen.getByRole('dialog').style.filter).toBe(''));
+      expect(screen.getByRole('dialog')).not.toHaveAttribute('inert');
     });
   });
 });

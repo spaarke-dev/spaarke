@@ -4,7 +4,7 @@
     <title>Mount reconciliation as a Console tab plus one aggregate Work Item</title>
     <phase>5 The worklist surface</phase>
     <gate>051, 057 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One registration file plus a computed count; the surface itself already exists.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -37,6 +37,7 @@
     <constraint source="project">AMENDED 2026-10-07 (v4-prototype-vs-solution #18, #36): the reconciliation surface is ALREADY a registered workspace widget, communications-reconciliation (Spaarke.AI.Widgets register-workspace-widgets.ts ~:1000-1033). First verify that registration mounts it as a Console tab; write a new registration file ONLY if it does not, and never a second registration of the same surface.</constraint>
     <constraint source="project">AMENDED 2026-10-07 (reconciliation W-11; #36; D-24): the aggregate item is task 057's AggregateCard placed at the TOP of the Do lane, excluded from both lanes' counts and hidden while a Do filter is on; R1 shows the total only. Its count is taken from the same feed the Email Review tab uses (CommunicationQueueFeedService), never a separate count of sprk_associationstatus, so the two numbers cannot disagree.</constraint>
     <constraint source="project">SUPERSEDED 2026-10-04: the red register-workspace-widgets.test.ts ("registers communications-list exactly ONCE", red since 0e5d0fafd) is fixed in PR #1123 (task 092), together with the OOM that had masked it. Do NOT re-fix it here. If #1123 has not merged when this task runs, merge master after it does, then confirm the file passes; if it is still red, that is a regression to report, not a fix to redo.</constraint>
+    <constraint source="project">AMENDED 2026-10-09 by the main session (054 author found the POML conflicted with the code): (1) COUNT SOURCE: the Email Review ("Needs Review") tab does NOT use CommunicationQueueFeedService; it is ReconciliationGrid over needs-review.gridconfiguration.json (statecode=0, sprk_communicationtype=100000000, sprk_associationstatus ne Resolved and not null). The aggregate count MUST come from that same grid configuration's FetchXML (one shared hook/helper both use), so "its number equals the Email Review tab's count" holds by construction. Do not use the queue feed (its Total is capped at 200 and access-filtered differently). (2) PLACEMENT: the worklist widget does not exist until task 059; 054 delivers the count source + an AggregateCard (reusing the 051 row component's styling where it fits) and its tests; task 059 places it at the top of the Do lane, excludes it from lane counts and hides it under a Do filter. (3) MISRESOLUTION: owned by task 034 (reason code countsTowardSuppression=false in 036's catalog); 054 does not verify it. (4) REGISTRATION: communications-reconciliation is already registered once (register-workspace-widgets.ts ~:1000-1033); add no second registration; verify the registration test.</constraint>
   </constraints>
 
   <knowledge>
@@ -106,16 +107,18 @@
 
   <acceptance-criteria>
     <criterion testable="true">Given the Console, when the reconciliation tab is opened, then the existing surface renders with no part of it rebuilt.</criterion>
-    <criterion testable="true">Given the worklist, when loaded, then exactly one aggregate reconciliation item appears, at the top of the Do lane, excluded from both lanes' counts, and its number equals the Email Review tab's count.</criterion>
+    <criterion testable="true">The aggregate count is computed from the Needs Review grid configuration's FetchXML through ONE shared source the tab and the card both use, and equals the tab's count (test with the same fixture). Placement at the top of the Do lane, exclusion from lane counts and hiding under a Do filter are verified in task 059.</criterion>
     <criterion testable="true">Given a Do filter, when on, then the aggregate item is hidden.</criterion>
     <criterion testable="true">Negative: individual emails awaiting a match do NOT appear as separate Work Items.</criterion>
     <criterion testable="true">Negative: the aggregate item is not a sprk_signal row.</criterion>
-    <criterion testable="true">Misresolution dismissals are recorded and queryable but do not feed suppression.</criterion>
+    <criterion testable="true">(MOVED to task 034, 2026-10-09) Misresolution dismissals are recorded and queryable but do not feed suppression.</criterion>
     <criterion testable="true">The client builds and the registration test passes.</criterion>
     <criterion testable="true">register-workspace-widgets.test.ts passes in full, including "registers communications-list exactly ONCE", and the reconciliation widget is still registered exactly once.</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-29. design.md section 5.1 and decision 29. Amended 2026-10-07 per reconciliation B.2 row 054, W-11, and #18/#36.</notes>
+
+  <completion>COMPLETED 2026-10-09: PR #1531 merged into docs/ontology-platform-design (4245e605f) after independent review + 2 rounds. Reconciliation tab + aggregate item; count from the Needs Review grid config; placement moved to 059, misresolution to 034. Documented, not fixed (D-106): F-45.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

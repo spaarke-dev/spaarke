@@ -507,7 +507,7 @@ public class InternalUserShareTests
     {
         var result = await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", MatterId, UserId, ExternalAccessLevel.ViewOnly),
-            _shares, _users.Client, _cache.Object, new ThrowingCallerRightsProbe(), _children.Synchronizer(_shares), _guard,
+            _shares, _users.Client, _flags, _cache.Object, new ThrowingCallerRightsProbe(), _children.Synchronizer(_shares), _guard,
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccessTestDoubles.InertMaterializer(),
             AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
@@ -696,18 +696,198 @@ public class InternalUserShareTests
         _shares.Writes.Should().BeEmpty();
     }
 
+    // ── Task 114 (owner round 67, 2026-10-06): the external flag matters on a RESTRICTED record only ──
+    //
+    // Retires task 063's "sprk_isexternal must confirm them internal" (which refused a blank flag, and with it 7 of 11
+    // enabled person users on dev). One rule (InternalShareEndpoints.ClassifyEligibility), asked by /share-user and the
+    // Assigned-To materializer:
+    //   not Restricted → share, whatever the flag (owner ruling 2026-09-18);
+    //   Restricted     → share unless sprk_isexternal = true. A BLANK flag is not external.
+
+    /// <summary>
+    /// The retired refusal, inverted: on a record that is not Restricted, a licensed person flagged external — or with a
+    /// blank flag — receives the share at the requested level, read back, outcome "created".
+    /// </summary>
     [Theory]
-    [InlineData(true)]
-    [InlineData(null)]    // not confirmed internal → refused, as SystemUserIdentityResolver treats it
-    public async Task Share_WithAUserNotConfirmedInternal_Is422AndWritesNothing(bool? isExternal)
+    [InlineData(true)]    // flagged external: shared (2026-09-18 ruling)
+    [InlineData(null)]    // blank: NOT external (round 67) — this used to be refused 422 user_not_internal
+    [InlineData(false)]
+    public async Task Share_OnARecordThatIsNotRestricted_SharesWhateverTheExternalFlag(bool? isExternal)
     {
         _users.SeedPerson(UserId, "Ada Lovelace", isExternal: isExternal);
+
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate);
+
+        var body = OkBody<ShareRecordWithUserResponse>(result);
+        body.Outcome.Should().Be(InternalShareEndpoints.OutcomeCreated);
+        body.AccessLevel.Should().Be(ExternalAccessLevel.Collaborate);
+        body.AccessRightsMask.Should().Be(CollaborateMask);
+        _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().Be(CollaborateMask, "the stored mask is read back");
+    }
+
+    /// <summary>The one refusal the flag still carries: Restricted + flagged external → 422 user_not_internal, nothing written.</summary>
+    [Fact]
+    public async Task Share_OnARestrictedRecord_WithAUserFlaggedExternal_Is422UserNotInternal_AndWritesNothing()
+    {
+        _flags.Flags[MatterId] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        _users.SeedPerson(UserId, "Ada Lovelace", isExternal: true);
 
         var result = await Share(UserId, ExternalAccessLevel.ViewOnly);
 
         ProblemOf(result).Should().Be((422, InternalShareEndpoints.UserNotInternalReasonCode));
+        result.Should().BeOfType<ProblemHttpResult>().Which.ProblemDetails.Detail.Should().Contain("Restricted");
         _shares.Writes.Should().BeEmpty();
     }
+
+    /// <summary>
+    /// Task 174 (owner round 84): a work assignment whose OWN Access Permission is Standard, filed under a RESTRICTED matter,
+    /// is Restricted for this rule too — the same 422 refusal for a user flagged external, nothing written.
+    /// </summary>
+    [Fact]
+    public async Task Share_OnAWorkAssignmentUnderARestrictedMatter_WithAUserFlaggedExternal_Is422UserNotInternal()
+    {
+        var parentMatter = Guid.Parse("17417417-0000-0000-0000-0000000001b1");
+        var world = Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard()
+            .Add("sprk_matter", parentMatter, ("sprk_issecure", false),
+                ("sprk_accesspermission", new Microsoft.Xrm.Sdk.OptionSetValue(ExternalParticipationService.AccessPermissionRestricted)))
+            .Add("sprk_workassignment", MatterId, ("sprk_issecure", false),
+                ("sprk_regardingmatter", new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", parentMatter)));
+        var flags = new GrantPolicyTestDoubles.FlagStubParticipationService(
+            RootRecordFlags.None,
+            Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.EntitiesOver(() => world).Object);
+        flags.Flags[parentMatter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        _users.SeedPerson(UserId, "Ada Lovelace", isExternal: true);
+        var guard = new SecureShareNoAccessGuard(flags, _denyList, _identity, AssignedAccessTestDoubles.NoFilingRows(),
+            NullLogger<SecureShareNoAccessGuard>.Instance);
+
+        var result = await InternalShareEndpoints.ShareAsync(
+            new ShareRecordWithUserRequest("workassignment", MatterId, UserId, ExternalAccessLevel.ViewOnly),
+            _shares, _users.Client, flags, _cache.Object, new StubCallerRightsProbe(FullWorkingRights),
+            _children.Synchronizer(_shares), guard,
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccess,
+            AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+
+        ProblemOf(result).Should().Be((422, InternalShareEndpoints.UserNotInternalReasonCode));
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Task 174 (verifier pass 2 F2a): the common real case — the work assignment IS flagged secure (inheritance set it) but
+    /// its Access Permission is still Standard (nothing writes it until task 175), filed under a secure, RESTRICTED matter.
+    /// It is Restricted for this rule: the same 422 for a user flagged external, nothing written.
+    /// </summary>
+    [Fact]
+    public async Task Share_OnAFlaggedSecureStandardWorkAssignmentUnderARestrictedMatter_WithAUserFlaggedExternal_Is422()
+    {
+        var parentMatter = Guid.Parse("17417417-0000-0000-0000-0000000001b2");
+        var world = Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard()
+            .Add("sprk_matter", parentMatter, ("sprk_issecure", true),
+                ("sprk_accesspermission", new Microsoft.Xrm.Sdk.OptionSetValue(ExternalParticipationService.AccessPermissionRestricted)))
+            .Add("sprk_workassignment", MatterId, ("sprk_issecure", true),
+                ("sprk_regardingmatter", new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", parentMatter)));
+        var flags = new GrantPolicyTestDoubles.FlagStubParticipationService(
+            RootRecordFlags.None,
+            Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.EntitiesOver(() => world).Object);
+        flags.Flags[MatterId] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        flags.Flags[parentMatter] = new RootRecordFlags(IsSecure: true, IsRestricted: true);
+        _users.SeedPerson(UserId, "Ada Lovelace", isExternal: true);
+        var guard = new SecureShareNoAccessGuard(flags, _denyList, _identity, AssignedAccessTestDoubles.NoFilingRows(),
+            NullLogger<SecureShareNoAccessGuard>.Instance);
+
+        var result = await InternalShareEndpoints.ShareAsync(
+            new ShareRecordWithUserRequest("workassignment", MatterId, UserId, ExternalAccessLevel.ViewOnly),
+            _shares, _users.Client, flags, _cache.Object, new StubCallerRightsProbe(FullWorkingRights),
+            _children.Synchronizer(_shares), guard,
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccess,
+            AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+
+        ProblemOf(result).Should().Be((422, InternalShareEndpoints.UserNotInternalReasonCode));
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>The null case, decided (round 67 item 3): a BLANK flag is not external, so it is shared even on a Restricted record.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData(false)]
+    public async Task Share_OnARestrictedRecord_WithABlankOrFalseFlag_IsShared(bool? isExternal)
+    {
+        _flags.Flags[MatterId] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        _users.SeedPerson(UserId, "Ada Lovelace", isExternal: isExternal);
+
+        var result = await Share(UserId, ExternalAccessLevel.ViewOnly);
+
+        OkBody<ShareRecordWithUserResponse>(result).Outcome.Should().Be(InternalShareEndpoints.OutcomeCreated);
+        _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().Be(ViewOnlyMask);
+    }
+
+    /// <summary>
+    /// Fail closed (ADR-003): for a user flagged external, a record whose Restricted state cannot be read — the flag read
+    /// throws, or the record does not come back — is refused 500 read_failed ("could not be read", never "Restricted").
+    /// </summary>
+    [Theory]
+    [InlineData(true)]   // the flag read throws
+    [InlineData(false)]  // the flag read does not return the record (RootRecordFlags.Unreadable)
+    public async Task Share_WithAUserFlaggedExternal_WhenTheRecordsFlagsCannotBeRead_Is500ReadFailed_AndWritesNothing(bool throws)
+    {
+        _users.SeedPerson(UserId, "Ada Lovelace", isExternal: true);
+        if (throws)
+            _flags.ThrowOnRead = true;
+        else
+            _flags.Absent[MatterId] = true;
+
+        var result = await Share(UserId, ExternalAccessLevel.ViewOnly);
+
+        ProblemOf(result).Should().Be((500, InternalShareEndpoints.ReadFailedReasonCode));
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The guards that stay: a disabled account and an application / support / delegated-admin account are refused with
+    /// their OWN codes even when they are ALSO flagged external on a Restricted record — the retired branch lets no
+    /// non-person through, and the external check never masks the first two.
+    /// </summary>
+    [Theory]
+    [InlineData(true, 0, false, InternalShareEndpoints.UserDisabledReasonCode)]
+    [InlineData(false, 3, false, InternalShareEndpoints.UserNotAPersonReasonCode)]  // Support User
+    [InlineData(false, 5, false, InternalShareEndpoints.UserNotAPersonReasonCode)]  // Delegated Admin
+    [InlineData(false, 0, true, InternalShareEndpoints.UserNotAPersonReasonCode)]   // an application user
+    public async Task Share_ADisabledOrNonPersonAccountFlaggedExternal_OnARestrictedRecord_KeepsItsOwnRefusal(
+        bool isDisabled, int accessMode, bool isApplication, string reasonCode)
+    {
+        _flags.Flags[MatterId] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        _users.SeedPerson(UserId, "Ada Lovelace", accessMode: accessMode, isDisabled: isDisabled, isExternal: true,
+            applicationId: isApplication ? Guid.NewGuid() : null);
+
+        var result = await Share(UserId, ExternalAccessLevel.ViewOnly);
+
+        ProblemOf(result).Should().Be((422, reasonCode));
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>Not Restricted, flagged external: a non-person is still refused — only the external branch changed.</summary>
+    [Fact]
+    public async Task Share_AnApplicationAccountFlaggedExternal_OnAnOrdinaryRecord_IsStill422NotAPerson()
+    {
+        _users.SeedPerson(UserId, "Ada Lovelace", isExternal: true, applicationId: Guid.NewGuid());
+
+        ProblemOf(await Share(UserId, ExternalAccessLevel.ViewOnly))
+            .Should().Be((422, InternalShareEndpoints.UserNotAPersonReasonCode));
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>The one rule, as a table (owner round 67 item 2) — the materializer's question as much as /share-user's.</summary>
+    [Theory]
+    [InlineData(false, false, "Eligible")]
+    [InlineData(null, false, "Eligible")]
+    [InlineData(true, false, "Eligible")]
+    [InlineData(false, true, "Eligible")]
+    [InlineData(null, true, "Eligible")]
+    [InlineData(true, true, "ExternalOnRestricted")]
+    [InlineData(true, null, "ExternalOnRestricted")]  // Restricted not read: fail closed
+    [InlineData(null, null, "Eligible")]              // not external: Restricted is never consulted
+    public void ClassifyEligibility_IsTheRestrictedByExternalTable(bool? isExternal, bool? rootIsRestricted, string expected)
+        => InternalShareEndpoints.ClassifyEligibility(false, 0, null, isExternal, rootIsRestricted).ToString()
+            .Should().Be(expected);
 
     /// <summary>The positive twin of the refusals above: every person access mode can receive a share.</summary>
     [Theory]
@@ -832,6 +1012,26 @@ public class InternalUserShareTests
 
         OkBody<UnshareRecordWithUserResponse>(await Unshare(UserId)).Removed.Should().BeTrue();
         _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().BeNull();
+    }
+
+    /// <summary>
+    /// Task 114: /unshare-user takes the per-record removal lease task 143's No Access enforcer and the Restricted remover take
+    /// — while another removal holds it, nothing is removed (409 record_busy) — and releases it afterwards.
+    /// </summary>
+    [Fact]
+    public async Task Unshare_WhileTheRecordsRemovalLeaseIsHeldElsewhere_Is409RecordBusy_AndRemovesNothing()
+    {
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+        var lockId = NoAccessShareEnforcer.RecordLockId(MatterTable, MatterId);
+        var held = await _lease.TryAcquireAsync(lockId, occurrenceUtc: null, TimeSpan.FromMinutes(1), CancellationToken.None);
+
+        ProblemOf(await Unshare(UserId)).Should().Be((409, InternalShareEndpoints.RecordBusyReasonCode));
+        _shares.Writes.Should().BeEmpty();
+
+        await _lease.ReleaseAsync(lockId, held.Token!, CancellationToken.None);
+        OkBody<UnshareRecordWithUserResponse>(await Unshare(UserId)).Removed.Should().BeTrue();
+        (await _lease.TryAcquireAsync(lockId, occurrenceUtc: null, TimeSpan.FromMinutes(1), CancellationToken.None))
+            .Status.Should().Be(Spaarke.Scheduling.ScheduledJobLeaseStatus.Granted, "the unshare released the lease");
     }
 
     [Fact]
@@ -1177,7 +1377,7 @@ public class InternalUserShareTests
         Guid? systemUserId, ExternalAccessLevel? level, string? recordType = "matter", AccessRights? callerRights = null) =>
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest(recordType, MatterId, systemUserId, level),
-            _shares, _users.Client, _cache.Object, new StubCallerRightsProbe(callerRights ?? FullWorkingRights),
+            _shares, _users.Client, _flags, _cache.Object, new StubCallerRightsProbe(callerRights ?? FullWorkingRights),
             _children.Synchronizer(_shares), _guard, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccess, AuthenticatedContext(),
             NullLogger<Program>.Instance,
             CancellationToken.None);
@@ -1217,13 +1417,19 @@ public class InternalUserShareTests
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest(recordType, MatterId, systemUserId),
             _shares, _users.Client, _flags, _cache.Object, AssignedAccess, _children.Synchronizer(_shares),
-            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AuthenticatedContext(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), _lease, AuthenticatedContext(),
             NullLogger<Program>.Instance, CancellationToken.None);
+
+    /// <summary>Task 114: the per-record removal lease /unshare-user takes (task 143's enforcer and the Restricted remover share it).</summary>
+    private readonly Spaarke.Scheduling.IScheduledJobLease _lease = new Spaarke.Scheduling.ProcessLocalScheduledJobLease();
 
     private Task<IResult> List(string? recordType = "matter") =>
         InternalShareEndpoints.ListAsync(
             new RecordUserSharesQuery(recordType, MatterId),
-            _shares, _users.Client, AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+            _shares, _users.Client, _flags, InheritedLedger, AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+
+    /// <summary>Task 175: the inherited-share provenance /user-shares reads (empty unless a test seeds it).</summary>
+    private AssignedAccessTestDoubles.FakeAssignedAccessStore InheritedLedger { get; } = new();
 
     private void AssertNothingReadOrWritten()
     {

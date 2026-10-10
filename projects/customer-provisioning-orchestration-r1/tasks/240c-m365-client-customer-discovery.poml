@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="240c" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Spaarke directory endpoint: shared clients find the caller's own environments and call that customer's BFF</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T240 (G14; owner D11)</phase>
+    <gate>after 240a + 240b</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Client auth flow in the shared auth library + add-in/Teams configuration + H3.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth flow change across clients owned by another project.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Cross-project (spaarkeai-word-add-in-r1) and main-session coordination.</parallel-reason>
+    <tags>auth, m365-clients, provisioning, model1-dedicated, testing</tags>
+    <deps>240a, 240b</deps>
+  </metadata>
+
+  <prompt>Implement the discovery design confirmed by 240b.</prompt>
+
+  <goal>A Dataverse-licensed user (internal or guest) opening the shared add-in or Teams tab reaches their own customer's BFF with a token for it, with no per-customer build.</goal>
+
+  <context>
+    <background>`notes/t240-plan.md` "Recommendation ... a Spaarke directory endpoint" (adopted 2026-10-07 from word-add-in-r1's reply). The directory returns the caller's own `[{customerId, displayName, apiBaseUrl, authority, scope}]` from the registry; membership comes from the token's `groups` claim (ApplicationGroup). Hosted on its own minimal service in `rg-spaarke-shared-prod`, not the L2 control plane. Add-in client code is owned by spaarkeai-word-add-in-r1; the Teams tab by spaarke-SPA-external-access-platform-r3 (`notes/coordination/2026-10-07-to-external-access-r3.md`).</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Only Dataverse-licensed users use these clients (owner 2026-10-07); no anonymous customer directory and no published customer list.</constraint>
+    <constraint source="coordination">Client changes are agreed with spaarkeai-word-add-in-r1 before code.</constraint>
+    <constraint source="live">The new shared-prod service, its app registration, its custom domain and every group assignment on a live tenant are live actions — owner OK first, per action.</constraint>
+    <constraint source="design">No Graph permission on the shared clients; the directory itself needs none (groups claim). Root CLAUDE.md sections 10/11 apply to the new service (placement, justification).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Owner OK for the directory service; confirm the contract with spaarkeai-word-add-in-r1 (URL, sample response) and the Teams shape with spaarke-SPA-external-access-platform-r3.</step>
+    <step order="2">Server side: the directory service + app registration (groups claim ApplicationGroup, add-in pre-authorized); registry fields it needs (BFF app id); the provisioning step that assigns `sprk-{customerId}-users` to the directory app; docs.</step>
+    <step order="3">Client side by the owning projects, against the deployed dev directory.</step>
+    <step order="4">Verify end to end on dev with the 240b guest; Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">On dev, an internal user and the test guest each reach their customer's BFF from Outlook, Word and Teams without a consent prompt.</criterion>
+    <criterion testable="true">The directory returns only the caller's environments; a caller in no environment group gets an empty list (the client shows "no Spaarke environment"); a user in two picks one and is not asked again.</criterion>
+  </acceptance-criteria>
+
+  <notes/>
+</task>

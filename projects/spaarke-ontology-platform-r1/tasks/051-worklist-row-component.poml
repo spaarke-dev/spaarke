@@ -4,7 +4,7 @@
     <title>The one row component: MatterCard + IssueLine</title>
     <phase>5 The worklist surface</phase>
     <gate>057, 012, 007 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New UI surface carrying the row contract; a second row component would be a design failure.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -136,6 +136,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-25, FR-26 (requirements 1-2 here; 3-5 in the wizard, task 058), FR-28 (amended, D-24), FR-48; D-23, D-24; reconciliation W-3..W-6 and B.2 row 051. Amended 2026-10-07: was "WorkItemRow" with evidence block, disclosure and action area; those moved to the wizard. Can build against fixtures now; no longer depends on 050. The prototype is the DESIGN contract, not the implementation: do NOT port its source.</notes>
+
+  <completion>COMPLETED 2026-10-09: PR #1513 merged into docs/ontology-platform-design (9087379955) after independent review + 1 fix round (tone palette to SmartTodo tokens, contrast + focus tests). MatterCard (the one row component) + internal IssueLine in Spaarke.UI.Components/src/components/Worklist; 47 tests. Consumers 038/059 POMLs carry its data contract (pastDueWording, visibleList). Non-blocking findings: notes/defer-issues.md F-22, F-26.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

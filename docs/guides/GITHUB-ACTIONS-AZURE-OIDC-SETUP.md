@@ -22,19 +22,20 @@ Azure accepts that token only if the **exact sentence** has been pre-registered 
 
 ---
 
-## 2. The five subjects you need
+## 2. The four subjects you need
 
 GitHub's assertion changes depending on **how the job runs**. A job that declares `environment:` asserts `environment:NAME` — *not* the branch. So one credential is not enough.
 
 | Subject | Needed by |
 |---|---|
 | `repo:spaarke-dev/spaarke:ref:refs/heads/master` | `publish-provisioning-arm-artifacts`, `build-provisioning-sidecar`, `publish-dataverse-solutions-manifest` |
-| `repo:spaarke-dev/spaarke:pull_request` | none today — its only user, `deploy-infrastructure`'s PR what-if, was retired by task 249 (2026-10-02); harmless to keep |
 | `repo:spaarke-dev/spaarke:environment:dev` | `deploy-spaarke-ai` |
 | `repo:spaarke-dev/spaarke:environment:staging` | `deploy-bff-api` |
 | `repo:spaarke-dev/spaarke:environment:production` | `deploy-bff-api`, `deploy-spaarke-ai` |
 
-Only the first unblocks the currently-red workflow. **The rest will fail identically the first time they actually run** — create all five now rather than rediscovering this four more times.
+Only the first unblocks the currently-red workflow. **The rest will fail identically the first time they actually run** — create all four now rather than rediscovering this three more times.
+
+> **Never add `repo:spaarke-dev/spaarke:pull_request` (removed 2026-10-08, #1446).** No workflow signs in to Azure on a pull request (`build-provisioning-sidecar` and `publish-dataverse-solutions-manifest` skip `azure/login` there). With that subject trusted, any same-repo pull request could edit a workflow and sign in as this app with all of its Azure roles before review. Credential `gh-pull_request` was deleted from the app on 2026-10-08.
 
 ---
 
@@ -70,13 +71,13 @@ If you cannot confirm the match, do not guess — adding credentials to the wron
 
 ## 4. Step 2 — create the credentials
 
-> **Check what already exists first (added 2026-08-27).** Three of the five subjects were already present when this guide was first written, so the loop below as originally published would attempt to recreate them and error partway:
+> **Check what already exists first (added 2026-08-27).** Three of the subjects were already present when this guide was first written, so the loop below as originally published would attempt to recreate them and error partway:
 >
 > ```bash
 > az ad app federated-credential list --id "$APP_ID" --query "[].subject" -o tsv
 > ```
 >
-> As of 2026-08-27 the app holds `environment:dev`, `environment:staging`, `environment:production`, and is missing **only** `ref:refs/heads/master` (the cause of the live `AADSTS700213`) and `pull_request`. The loop below skips subjects that already exist, so it is safe to run whole.
+> As of 2026-08-27 the app holds `environment:dev`, `environment:staging`, `environment:production`, and is missing **only** `ref:refs/heads/master` (the cause of the live `AADSTS700213`). The loop below skips subjects that already exist, so it is safe to run whole.
 
 ### Option A — Azure CLI (idempotent; skips existing)
 
@@ -85,7 +86,7 @@ APP_ID="<Application (client) ID from Step 1>"
 
 EXISTING=$(az ad app federated-credential list --id "$APP_ID" --query "[].subject" -o tsv)
 
-for SUB in "ref:refs/heads/master" "pull_request" \
+for SUB in "ref:refs/heads/master" \
            "environment:dev" "environment:staging" "environment:production"; do
   if grep -qx "repo:spaarke-dev/spaarke:$SUB" <<<"$EXISTING"; then
     echo "skip (exists): $SUB"; continue
@@ -108,7 +109,7 @@ App registration → **Certificates & secrets** → **Federated credentials** �
 
 - Organization: `spaarke-dev`
 - Repository: `spaarke`
-- Entity type: **Branch** (`master`), then repeat for **Pull request** and **Environment** (`dev`, `staging`, `production`)
+- Entity type: **Branch** (`master`), then repeat for **Environment** (`dev`, `staging`, `production`)
 
 ---
 

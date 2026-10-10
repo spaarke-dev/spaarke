@@ -2,7 +2,7 @@
  * StatusBadge — unit tests
  *
  * Covers the task-012 (C-4) acceptance criteria:
- *   - Each tone (neutral/info/warning/critical) renders distinctly
+ *   - Each tone (neutral/info/success/warning/critical) renders distinctly
  *   - An unrecognised tone falls back to the neutral treatment without throwing
  *   - No tone prop (undefined) also falls back to neutral
  *   - Dark mode parity sanity (ADR-021 — component renders without hard-coded colors)
@@ -26,7 +26,7 @@ function renderWithTheme(ui: React.ReactElement, dark = false): void {
 
 describe('StatusBadge', () => {
   describe('Renders each known tone', () => {
-    const tones: StatusBadgeTone[] = ['neutral', 'info', 'warning', 'critical'];
+    const tones: StatusBadgeTone[] = ['neutral', 'info', 'success', 'warning', 'critical'];
 
     it.each(tones)('renders the %s tone with its label and data-tone attribute', tone => {
       renderWithTheme(<StatusBadge label={`Label-${tone}`} tone={tone} />);
@@ -73,7 +73,7 @@ describe('StatusBadge', () => {
 
   describe('Dark mode (ADR-021)', () => {
     it('renders every tone without errors under webDarkTheme', () => {
-      const tones: StatusBadgeTone[] = ['neutral', 'info', 'warning', 'critical'];
+      const tones: StatusBadgeTone[] = ['neutral', 'info', 'success', 'warning', 'critical'];
       for (const tone of tones) {
         const { unmount } = render(
           <FluentProvider theme={webDarkTheme}>

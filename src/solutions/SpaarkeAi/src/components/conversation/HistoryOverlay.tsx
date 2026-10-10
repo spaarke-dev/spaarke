@@ -201,7 +201,13 @@ import {
   LinkRegular,
   DeleteRegular,
 } from "@fluentui/react-icons";
-import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
+import {
+  buildBffApiUrl,
+  isApiError,
+  isAuthFailure,
+  problemOf,
+  type AuthenticatedFetchFn,
+} from "@spaarke/auth";
 import type { IDataService } from "@spaarke/ui-components";
 import { cleanGuid, formatRelativeTime, daysBetweenLocalMidnight } from "@spaarke/ui-components";
 import {
@@ -487,6 +493,9 @@ function mapSession(item: any): HistorySessionRow {
   };
 }
 
+/** Shown when authenticatedFetch's 401 retries are spent — "try again" cannot succeed. */
+const SIGN_IN_EXPIRED_MESSAGE = "Your sign-in has expired. Refresh the page and sign in again.";
+
 /** FR-D8 time-grouping buckets, in display order. */
 const GROUP_ORDER = ["Today", "Yesterday", "This week", "Older"] as const;
 type GroupLabel = (typeof GROUP_ORDER)[number];
@@ -679,9 +688,13 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
           }
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        // authenticatedFetch THROWS for a non-OK response: record its real status (as the `!response.ok`
+        // branch above does) — 401 for an exhausted sign-in — and 0 only for a network failure.
+        const status = isApiError(err) ? err.status : isAuthFailure(err) ? 401 : 0;
+        const message =
+          status > 0 ? `HTTP ${status}` : err instanceof Error ? err.message : String(err);
         logTelemetryError(TELEMETRY_HISTORY_LOAD_FAILURE, {
-          status: 0,
+          status,
           message,
         });
         if (!cancelled) {
@@ -885,6 +898,18 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
       setRelatedSubmitting(false);
       setRelatedTarget(null);
     } catch (err) {
+      // authenticatedFetch THROWS for a non-OK response — same outcome as the `!response.ok` branch:
+      // the server's ProblemDetails detail (400 already-associated), else the friendly fallback.
+      if (isAuthFailure(err)) {
+        setRelatedError(SIGN_IN_EXPIRED_MESSAGE);
+        setRelatedSubmitting(false);
+        return;
+      }
+      if (isApiError(err)) {
+        setRelatedError(problemOf(err)?.detail || "Couldn't set the related record. Try again.");
+        setRelatedSubmitting(false);
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       setRelatedError(message || "Couldn't set the related record. Try again.");
       setRelatedSubmitting(false);
@@ -960,6 +985,18 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
       setRenaming(false);
       setRenameTarget(null);
     } catch (err) {
+      // authenticatedFetch THROWS for a non-OK response — same outcome as the `!response.ok` branch:
+      // the server's ProblemDetails detail, else the friendly fallback (never "HTTP 500").
+      if (isAuthFailure(err)) {
+        setRenameError(SIGN_IN_EXPIRED_MESSAGE);
+        setRenaming(false);
+        return;
+      }
+      if (isApiError(err)) {
+        setRenameError(problemOf(err)?.detail || "Couldn't rename this conversation. Try again.");
+        setRenaming(false);
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       setRenameError(message || "Couldn't rename this conversation. Try again.");
       setRenaming(false);
@@ -1002,20 +1039,32 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
         bffBaseUrl,
         `/api/ai/chat/sessions/${encodeURIComponent(deleteTarget.sessionId)}`
       );
-      const response = await authenticatedFetch(url, { method: "DELETE" });
-      // 204 = deleted; 404 = already gone (e.g., raced with another tab) — both
-      // mean the row should disappear from THIS list. Any other non-ok status
-      // is a genuine failure.
-      if (!response.ok && response.status !== 404) {
-        setDeleteError("Couldn't delete this conversation. Try again.");
-        setDeleting(false);
-        return;
-      }
+      // 204 = deleted. A failure is THROWN (handled below): 404 = already gone (e.g., raced with
+      // another tab) also removes the row; any other status is a genuine failure.
+      await authenticatedFetch(url, { method: "DELETE" });
 
       setSessions((prev) => prev.filter((s) => s.sessionId !== deleteTarget.sessionId));
       setDeleting(false);
       setDeleteTarget(null);
     } catch (err) {
+      // authenticatedFetch THROWS for a non-OK response. A 404 is "already gone" — the row goes, as
+      // above; any other HTTP failure is the genuine-failure sentence.
+      if (isApiError(err, 404)) {
+        setSessions((prev) => prev.filter((s) => s.sessionId !== deleteTarget.sessionId));
+        setDeleting(false);
+        setDeleteTarget(null);
+        return;
+      }
+      if (isAuthFailure(err)) {
+        setDeleteError(SIGN_IN_EXPIRED_MESSAGE);
+        setDeleting(false);
+        return;
+      }
+      if (isApiError(err)) {
+        setDeleteError("Couldn't delete this conversation. Try again.");
+        setDeleting(false);
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       setDeleteError(message || "Couldn't delete this conversation. Try again.");
       setDeleting(false);

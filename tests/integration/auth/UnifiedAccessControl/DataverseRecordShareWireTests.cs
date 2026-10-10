@@ -5,6 +5,7 @@ using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Spaarke.Dataverse;
 using Xunit;
 
@@ -384,6 +385,7 @@ public class DataverseRecordShareWireTests
 
     [Theory(DisplayName = "Task 171 (finding 3): the strict rights read answers only what is an ACCESS answer — a request-level 403 is UNKNOWN")]
     [InlineData(HttpStatusCode.Forbidden, "0x80040220", "None")]      // access-check denial — an answer about the user
+    [InlineData(HttpStatusCode.Forbidden, "0x80048306", "None")]      // "does not have ReadAccess" — the live unshared-user answer
     [InlineData(HttpStatusCode.NotFound, null, "None")]               // Dataverse's "cannot read this record"
     [InlineData(HttpStatusCode.Forbidden, "0x8004A110", "unknown")]   // CannotActOnBehalfOfAnotherUser — the app's fault
     [InlineData(HttpStatusCode.Forbidden, "0x80040216", "unknown")]   // any other 403 code
@@ -402,6 +404,79 @@ public class DataverseRecordShareWireTests
 
         var sent = handler.Requests.Should().ContainSingle().Subject;
         sent.Url.Should().Contain($"systemusers({UserId})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess");
+    }
+
+    [Theory(DisplayName = "Live regression fix: a 5xx or throttled rights read is never an answer — it THROWS, and the revoking caller keeps the grant")]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    public async Task RetrievePrincipalRightsOrUnknownAsync_ServerFault_Throws(HttpStatusCode status)
+    {
+        var handler = new ScriptedHandler(_ => Status(status, null));
+
+        var act = () => new OfflineService(handler).RetrievePrincipalRightsOrUnknownAsync(UserId, "sprk_matters", MatterId);
+
+        await act.Should().ThrowAsync<HttpRequestException>();
+    }
+
+    [Theory(DisplayName = "Live regression fix (F1): the JIT removal pass, end to end over the real rights read — an access-denial answer REMOVES the grant; an impersonation fault or a 5xx KEEPS it")]
+    [InlineData(HttpStatusCode.Forbidden, "0x80048306", true)]   // "does not have ReadAccess" — the live unshared user (run d03f01eb)
+    [InlineData(HttpStatusCode.Forbidden, "0x80040220", true)]   // access-check denial
+    [InlineData(HttpStatusCode.Forbidden, "0x8004A110", false)]  // CannotActOnBehalfOfAnotherUser — the app's fault
+    [InlineData(HttpStatusCode.InternalServerError, null, false)] // a server fault
+    public async Task JitRemoval_OverTheRealRightsRead_RemovesOnlyOnAnAccessAnswer(HttpStatusCode status, string? code, bool removed)
+    {
+        var project = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        const string container = "b!secure-project-container";
+        var markerKey = Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService.MarkerKey(
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService.JitWriterMarkerPrefix, UserId);
+        var markers = new Dictionary<string, string> { [markerKey] = "perm-jit" };
+
+        var rows = new Moq.Mock<IGenericEntityService>();
+        rows.Setup(r => r.GetEntitySetNameAsync("sprk_project", Moq.It.IsAny<CancellationToken>())).ReturnsAsync("sprk_projects");
+        rows.Setup(r => r.RetrieveMultipleAsync(Moq.It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection(
+                [new Microsoft.Xrm.Sdk.Entity("sprk_project", project) { ["sprk_containerid"] = container }]) { MoreRecords = false });
+        rows.Setup(r => r.RetrieveAsync("sprk_project", project, Moq.It.IsAny<string[]>(), Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_project", project)
+            {
+                ["sprk_accesspermission"] = new Microsoft.Xrm.Sdk.OptionSetValue(100000000),
+            });
+        rows.Setup(r => r.RetrieveAsync("systemuser", UserId, Moq.It.IsAny<string[]>(), Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("systemuser", UserId) { ["isdisabled"] = false });
+
+        var membership = new Moq.Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService>(
+            Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.AllowAll(Moq.Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>()),
+            NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService>.Instance);
+        membership.Setup(m => m.ReadMarkersAsync(container, Moq.It.IsAny<CancellationToken>())).ReturnsAsync(markers);
+        membership.Setup(m => m.ReadAccessAsync(container, Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService.ContainerAccess(
+                [new("perm-jit", ["writer"], "u@contoso.example", UserId.ToString())], true, markers));
+        membership.Setup(m => m.RemoveMarkedGrantAsync(container, markerKey, "perm-jit",
+                Moq.It.IsAny<Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService.ContainerAccess>(),
+                Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService.MarkedRemovalOutcome.Removed);
+
+        var registry = new Moq.Mock<Sprk.Bff.Api.Infrastructure.Dataverse.ISecurableEntityRegistry>();
+        registry.Setup(r => r.GetSecurableEntitiesAsync(Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<string> { "sprk_project" });
+
+        var rights = new Sprk.Bff.Api.Services.Access.DataverseRecordShareService(
+            new OfflineService(new ScriptedHandler(_ => Status(status, code))));
+        var sync = new Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync(
+            rows.Object, membership.Object, registry.Object, rights,
+            NullLogger<Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync>.Instance);
+
+        var result = await sync.RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        membership.Verify(m => m.RemoveMarkedGrantAsync(container, markerKey, "perm-jit",
+                Moq.It.IsAny<Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService.ContainerAccess>(),
+                Moq.It.IsAny<CancellationToken>()),
+            removed ? Moq.Times.Once() : Moq.Times.Never(),
+            removed
+                ? "no Read means no Write: a user unshared from the secure record must lose container-wide SPE write"
+                : "a fault of the REQUEST is not an answer about the user — revoking on it would strip every grant each pass");
+        result.Unknown.Should().Be(removed ? 0 : 1);
     }
 
     [Fact(DisplayName = "Task 171 (finding 3): a 200 answer is the rights Dataverse states")]

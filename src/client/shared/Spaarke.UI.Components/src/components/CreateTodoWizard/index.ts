@@ -22,6 +22,14 @@ export type { ICreateTodoStepProps } from './CreateTodoStep';
 export { TodoService } from './todoService';
 export type { ICreateTodoResult } from './todoService';
 
+// Host support shared by the code page and InAppWizardHost (task 112)
+export {
+  withTodoCreatedBroadcast,
+  resolveCurrentUserContact,
+  SPRK_TODO_CHANNEL_NAME,
+  SPRK_TODO_CREATED,
+} from './todoWizardHostSupport';
+
 // Form types
 export type { ICreateTodoFormState, IInitialRegarding, AssociationResult } from './formTypes';
 export { EMPTY_TODO_FORM } from './formTypes';

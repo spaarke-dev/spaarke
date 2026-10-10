@@ -59,8 +59,10 @@ import {
   CalendarLtrRegular,
   WarningRegular,
 } from '@fluentui/react-icons';
+import { daysBetweenLocalMidnight, parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 
 import { getProjectTodos, createTodo, updateTodo, type ODataTodo } from '../api/web-api-client';
+import { TruncatedListNotice } from './TruncatedListNotice';
 import { AccessLevel } from '../types';
 import { SectionCard } from './SectionCard';
 
@@ -263,29 +265,22 @@ const PRIORITY_OPTIONS: PriorityOption[] = [
 // Helper utilities
 // ---------------------------------------------------------------------------
 
-/** Format an ISO date string as a short human-readable date. */
+/**
+ * A to-do due date is a calendar date ("yyyy-MM-dd" — Dataverse Date Only, task 106). `new Date("yyyy-MM-dd")` is UTC
+ * midnight, which every zone west of UTC shows as the PREVIOUS day; parseDueDate builds the local calendar date.
+ */
 function formatDueDate(isoDate: string | null | undefined): string {
-  if (!isoDate) return '';
-  const d = new Date(isoDate);
-  if (isNaN(d.getTime())) return '';
+  const d = parseDueDate(isoDate);
+  if (!d) return '';
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-/** Check if a to-do due date is overdue. */
+/** A to-do is overdue once its due DAY has passed (a to-do due today is not overdue — task 106, D-43). */
 function isOverdue(isoDate: string | null | undefined, isCompleted: boolean): boolean {
-  if (!isoDate || isCompleted) return false;
-  const d = new Date(isoDate);
-  if (isNaN(d.getTime())) return false;
-  return d < new Date();
-}
-
-/** Convert YYYY-MM-DD input value to ISO string for Dataverse. */
-function dateInputToIso(value: string): string | undefined {
-  if (!value) return undefined;
-  // Input type=date provides YYYY-MM-DD; convert to noon UTC to avoid timezone shifts
-  const [year, month, day] = value.split('-').map(Number);
-  const d = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-  return d.toISOString();
+  if (isCompleted) return false;
+  const d = parseDueDate(isoDate);
+  if (!d) return false;
+  return daysBetweenLocalMidnight(new Date(), d) < 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -579,6 +574,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
   const [tasks, setTasks] = React.useState<ODataTodo[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
+  const [truncated, setTruncated] = React.useState(false);
 
   // Status toggle state — tracks which to-do ID is currently being toggled
   const [togglingTaskId, setTogglingTaskId] = React.useState<string | null>(null);
@@ -598,16 +595,19 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
   const loadTasks = React.useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
+    // Task 105: a flag from an earlier read must not sit beside this read's error.
+    setTruncated(false);
 
     try {
       // BFF route /api/v1/external/projects/{id}/todos returns sprk_todo records
       // regarding the given project (server-side resolver). No client-side
       // todoflag filter is needed — the new route returns only to-dos.
+      // The BFF returns every to-do up to its row cap and says `truncated` when it stops short (task 105).
       const todos = await getProjectTodos(projectId, {
         $orderby: 'createdon desc',
-        $top: 200,
       });
-      setTasks(todos);
+      setTasks(todos.items);
+      setTruncated(todos.truncated);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load tasks';
       setLoadError(message);
@@ -681,7 +681,9 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
         const newTodo = await createTodo(projectId, {
           sprk_name: formData.title,
           ...(formData.description ? { sprk_notes: formData.description } : {}),
-          ...(formData.dueDate ? { sprk_duedate: dateInputToIso(formData.dueDate) ?? null } : {}),
+          // The date input's own "yyyy-MM-dd" is the calendar day the user picked — the only shape a Date Only column
+          // accepts (task 106; this used to send toISOString() of noon UTC, which Dataverse now refuses with 400).
+          ...(formData.dueDate ? { sprk_duedate: formData.dueDate } : {}),
           sprk_priorityscore: formData.priority,
         });
 
@@ -738,6 +740,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
               <MessageBarBody>{toggleError}</MessageBarBody>
             </MessageBar>
           )}
+          {!isLoading && <TruncatedListNotice truncated={truncated} shown={tasks.length} noun="tasks" />}
 
           {/* Loading state */}
           {isLoading && (
@@ -747,7 +750,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
           )}
 
           {/* Empty state */}
-          {!isLoading && !loadError && tasks.length === 0 && (
+          {/* Task 105: an incomplete empty list is not "no tasks" — the notice says it could not be read. */}
+          {!isLoading && !loadError && !truncated && tasks.length === 0 && (
             <div className={styles.emptyState} role="status" aria-live="polite">
               <TaskListSquareLtrRegular className={styles.emptyStateIcon} />
               <Text>No tasks yet</Text>

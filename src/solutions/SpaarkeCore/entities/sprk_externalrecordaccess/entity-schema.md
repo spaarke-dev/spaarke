@@ -2,10 +2,17 @@
 
 > **Entity Purpose**: Junction table linking external Contacts (or Organizations — org-wide grants omit the Contact) to polymorphic grant roots (Project / Matter / Work Assignment) with a specific access level. This is the single source of truth for "who can access what" in the external access module, read by the BFF's external authorization layer (`ExternalParticipationService` / `CallerPrincipalResolver`). The Power Pages access model originally described here is RETIRED — external callers are Static Web Apps + Entra External ID (CIAM), broker-only through the BFF (ADR-028 A1).
 >
-> **Schema Version**: 1.1
+> **Schema Version**: 1.2
 > **Created**: 2026-03-16
 > **Project**: sdap-secure-project-module
 > **Corrected**: 2026-08-20 by the `unified-access-control-r2` investigation — field logical names, expiry field name, organization lookup, and never-built features (expiry worker, Power Pages chain, three-plane revocation) verified against `Api/ExternalAccess/GrantExternalAccessEndpoint.cs` + `Infrastructure/ExternalAccess/ExternalParticipationService.cs`; unbuilt behavior is marked NOT IMPLEMENTED below
+> **Corrected 2026-10-07** (`unified-access-control-r2` task 101, against live attribute metadata and `savedqueries` on spaarkedev1):
+> - The **Views** section described views that were never applied. See [`views-schema.md`](views-schema.md) "Live views".
+> - **`sprk_approvedby` / `sprk_approveddate` do not exist** on this table.
+> - **`sprk_name` is not computed.** No write path sets it, so it is empty on every row ([#1394](https://github.com/spaarke-dev/spaarke/issues/1394)).
+> - Two lookups exist live that this file did not list:
+>   - `sprk_invoice` (→ `sprk_invoice`). Never written, and never read by the evaluator (`ExternalParticipationService.cs:1373`).
+>   - `sprk_recordtype` (→ `sprk_recordtype_ref`).
 
 ## Entity Definition
 
@@ -27,7 +34,7 @@
 | Logical Name | Display Name | Type | Required | Max Length | Description |
 |--------------|--------------|------|----------|------------|-------------|
 | sprk_externalrecordaccessid | External Record Access | Uniqueidentifier | Auto | — | Primary key (auto-generated GUID) |
-| sprk_name | Name | String | Computed | 200 | Auto-generated display name (e.g., "Jane Smith → Acme Litigation") |
+| sprk_name | Name | String | No | 200 | ⚠️ **Never written** (2026-10-07: empty on 92 of 92 dev rows; [#1394](https://github.com/spaarke-dev/spaarke/issues/1394)). The original design meant it to be an auto-generated display name (e.g. "Jane Smith → Acme Litigation"); that was never built |
 
 ### Core Lookup Fields
 
@@ -52,7 +59,9 @@
 | sprk_granteddate | Granted Date | DateTime (DateOnly) | Yes | Date access was granted (set to UTC now on create; `GrantExternalAccessEndpoint.cs:300`) |
 | sprk_expiresdate | Expires Date | DateTime (Format DateOnly, Behavior **TimeZoneIndependent**) | No | The grant's expiry. **Corrected 2026-08-20**: the live field is `sprk_expiresdate`, NOT the originally documented `sprk_expiresdate` (verified live, task 070 — the old name 400'd any grant carrying an expiry). **Enforced on read** since tasks 007/107: a row confers access only while `sprk_expiresdate ≥ today`, and a row with NO date confers nothing (see Business Rules §4 below — the old "NOT ENFORCED anywhere" note here was stale and is removed). Every row the BFF writes carries one (task 097: absent → today + 90). ⚠️ **Wire shape** *(task 140, live 2026-10-05)*: because the behaviour is TimeZoneIndependent, the Web API returns the value as a timestamp — `"2026-12-10T00:00:00Z"` — not `yyyy-MM-dd`; the calendar date is the leading ten characters as written. The BFF reads it through `DataverseDateOnlyJsonConverter` (`ExternalGrantRow.ExpiresDate`); System.Text.Json's own `DateOnly` converter throws on that shape. Every read also returns `@odata.etag` (`W/"<versionnumber>"`), which the contact-side writes send back as `If-Match` (session 27 round 42 item 1). |
 
-### Approval Fields (Document/File Access)
+### Approval Fields (Document/File Access) — ⚠️ NOT PRESENT LIVE
+
+> **2026-10-07 (task 101)**: neither column exists on `sprk_externalrecordaccess` (live attribute metadata, spaarkedev1). This is the original design only. Do not select either column; Dataverse answers 400 to a `$select` naming an unknown attribute.
 
 | Logical Name | Display Name | Type | Required | Description |
 |--------------|--------------|------|----------|-------------|
@@ -107,8 +116,8 @@
 - sprk_expiresdate (Expires Date)
 
 **File Access Approval Section**
-- sprk_approvedby (Approved By)
-- sprk_approveddate (Approved Date)
+- ~~sprk_approvedby (Approved By)~~ (not on the table; see Approval Fields)
+- ~~sprk_approveddate (Approved Date)~~
 
 **System Section**
 - createdon, modifiedon, createdby, modifiedby
@@ -117,7 +126,14 @@
 
 ## Views
 
-### Active External Record Access (Default View)
+> **⚠️ Never applied (verified 2026-10-07, task 101).** None of the four views below exists as described:
+> - The live default is "Active External Record Accesses". Its columns are Contact, Name, Record Type, Access Level, Expires Date and Created On, and it sorts by Name.
+> - "Access by Project" does not exist.
+> - "Expiring Access" does not exist, and the filter given for it ("≤ next 30 days") is not one FetchXML can express. Task 101's "External Shares Expiring in 30 Days" replaces it.
+>
+> The live views and the two task-101 expiry views are in [`views-schema.md`](views-schema.md) "Live views". What follows is the original design record only.
+
+### Active External Record Access (Default View) — design, not live
 
 | Column | Width | Sort |
 |--------|-------|------|
@@ -135,7 +151,7 @@
 
 Same columns as above, no filter.
 
-### Access by Project (Subgrid View)
+### Access by Project (Subgrid View) — design, not live
 
 | Column | Width | Sort |
 |--------|-------|------|
@@ -150,7 +166,7 @@ Same columns as above, no filter.
 **Default View Name**: Access by Project
 **Used On**: sprk_project form — External Participants subgrid
 
-### Expiring Access (System View)
+### Expiring Access (System View) — design, not live; superseded by task 101
 
 | Column | Width | Sort |
 |--------|-------|------|
@@ -178,7 +194,7 @@ Same columns as above, no filter.
 | (organization lookup, added task 070) | sprk_organization | sprk_organization | Referential (no cascade) |
 | sprk_externalrecordaccess_grantedby_systemuser | sprk_grantedby | systemuser | Referential (no cascade) |
 | sprk_contact_sprk_externalrecordaccess_grantedbycontact *(task 140; name set by the schema script)* | sprk_grantedbycontact | contact | Referential — NoCascade for Assign/Share/Unshare/Reparent/Merge, Delete RemoveLink |
-| sprk_externalrecordaccess_approvedby_systemuser | sprk_approvedby | systemuser | Referential (no cascade) |
+| ~~sprk_externalrecordaccess_approvedby_systemuser~~ | ~~sprk_approvedby~~ | systemuser | NOT PRESENT live (2026-10-07): the column does not exist |
 
 ---
 
@@ -275,4 +291,4 @@ pac solution import --path SpaarkeCore.zip --force-overwrite
 
 ---
 
-*Schema version: 1.1 | Created: 2026-03-16 | Project: sdap-secure-project-module | Corrected: 2026-08-20 by `unified-access-control-r2` (field names, org lookup, expiry field + unenforced expiry, retired Power Pages model, actual grant/revoke behavior)*
+*Schema version: 1.2 | Created: 2026-03-16 | Project: sdap-secure-project-module | Corrected: 2026-08-20 by `unified-access-control-r2` (field names, org lookup, expiry field + unenforced expiry, retired Power Pages model, actual grant/revoke behavior); 2026-10-07 by task 101 (views never applied, approval fields absent, sprk_name never written, sprk_invoice / sprk_recordtype listed)*

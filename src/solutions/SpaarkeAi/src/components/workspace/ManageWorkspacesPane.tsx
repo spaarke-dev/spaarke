@@ -142,11 +142,6 @@ import {
   Tooltip,
   Input,
   Badge,
-  Menu,
-  MenuTrigger,
-  MenuPopover,
-  MenuList,
-  MenuItem,
   Dialog,
   DialogSurface,
   DialogTitle,
@@ -172,7 +167,7 @@ import {
   AddRegular,
 } from "@fluentui/react-icons";
 import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
-import { OOB_MODAL_SIZES, formatRelativeTime, getXrm } from "@spaarke/ui-components";
+import { formatRelativeTime, navigateToWebResourceSurfaceAsync, RowActionMenu } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import {
   isPinned,
@@ -199,6 +194,9 @@ import { SPAARKEAI_TEMPLATE_FILTER } from "../../constants/workspaceTemplateFilt
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
 // ---------------------------------------------------------------------------
+
+/** Keys of the per-row ⋯ menu actions. */
+type ManageMenuAction = "pin" | "default" | "up" | "down" | "edit" | "delete";
 
 const useStyles = makeStyles({
   // UAT 2026-07-21: standard Power Apps side-pane width (400px). Overriding
@@ -416,32 +414,18 @@ function formatModifiedOn(iso: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Wizard launch helper — Xrm.Navigation.navigateTo
+// Wizard launch helper — navigateToWebResourceSurfaceAsync (in-app; navigateTo fallback)
 //
-// Replicates the canonical pattern in `LegalWorkspace/src/components/Shell/
-// WorkspaceGrid.tsx` (~lines 720-760). Same shape: `pageType: "webresource"`,
-// webresourceName `sprk_workspacelayoutwizard`, data params encode mode +
+// Same data contract as `LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx`
+// (`handleEditLayout`): webresourceName `sprk_workspacelayoutwizard`, data params encode mode +
 // layoutId + bffBaseUrl + (for saveAs) layoutTemplateId + sectionsJson + name
 // + templateFilter (task 102 — forces SpaarkeAi 6-template subset).
 // ---------------------------------------------------------------------------
-
-// Xrm is resolved via the shared cross-frame `getXrm()` from
-// `@spaarke/ui-components` (task 081 / C-8 — this file previously defined a
-// local `getXrm` with its own window/parent/top `??` chain).
 
 async function launchEditWizard(
   layout: WorkspaceLayoutDto,
   bffBaseUrl: string,
 ): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm('navigation') as any;
-  if (!xrm?.Navigation?.navigateTo) {
-    console.warn(
-      "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Edit launch is a no-op.",
-    );
-    return;
-  }
-
   const mode: "edit" | "saveAs" = layout.isSystem ? "saveAs" : "edit";
 
   const parts: string[] = [];
@@ -460,26 +444,20 @@ async function launchEditWizard(
   );
   const data = parts.join("&");
 
-  try {
-    await xrm.Navigation.navigateTo(
-      {
-        pageType: "webresource",
-        webresourceName: "sprk_workspacelayoutwizard",
-        data,
-      },
-      {
-        target: 2,
-        width: OOB_MODAL_SIZES.wizard.width,
-        height: OOB_MODAL_SIZES.wizard.height,
-        title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
-      },
+  // Task 113 (ontology-platform-r1 D-26): IN-APP through the shared primitive while the Console's
+  // InAppWizardHost is mounted (always, in the Console); the same navigateTo(webresource) dialog
+  // otherwise. Resolves when the wizard closes.
+  const outcome = await navigateToWebResourceSurfaceAsync({
+    webresourceName: "sprk_workspacelayoutwizard",
+    data,
+    title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
+  });
+  if (outcome.busy) {
+    console.warn("[ManageWorkspacesPane] A wizard is already open; the layout wizard was not opened.");
+  } else if (!outcome.launched) {
+    console.warn(
+      "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Edit launch is a no-op.",
     );
-  } catch (err: unknown) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const code = (err as any)?.errorCode;
-    if (code !== 2) {
-      console.warn("[ManageWorkspacesPane] Wizard launch error:", err);
-    }
   }
 }
 
@@ -526,15 +504,6 @@ function consumeWizardDialogResult(): void {
 }
 
 async function launchCreateWizard(bffBaseUrl: string): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm('navigation') as any;
-  if (!xrm?.Navigation?.navigateTo) {
-    console.warn(
-      "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Create launch is a no-op.",
-    );
-    return;
-  }
-
   const parts: string[] = [
     "mode=create",
     `bffBaseUrl=${encodeURIComponent(bffBaseUrl ?? "")}`,
@@ -542,26 +511,18 @@ async function launchCreateWizard(bffBaseUrl: string): Promise<void> {
   ];
   const data = parts.join("&");
 
-  try {
-    await xrm.Navigation.navigateTo(
-      {
-        pageType: "webresource",
-        webresourceName: "sprk_workspacelayoutwizard",
-        data,
-      },
-      {
-        target: 2,
-        width: OOB_MODAL_SIZES.wizard.width,
-        height: OOB_MODAL_SIZES.wizard.height,
-        title: "Create New Workspace",
-      },
+  // Task 113 (D-26): in-app while the host is mounted, else the same navigateTo (see launchEditWizard).
+  const outcome = await navigateToWebResourceSurfaceAsync({
+    webresourceName: "sprk_workspacelayoutwizard",
+    data,
+    title: "Create New Workspace",
+  });
+  if (outcome.busy) {
+    console.warn("[ManageWorkspacesPane] A wizard is already open; the layout wizard was not opened.");
+  } else if (!outcome.launched) {
+    console.warn(
+      "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Create launch is a no-op.",
     );
-  } catch (err: unknown) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const code = (err as any)?.errorCode;
-    if (code !== 2) {
-      console.warn("[ManageWorkspacesPane] Create wizard launch error:", err);
-    }
   }
 }
 
@@ -1079,8 +1040,8 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
         </div>
 
         {/* Three-dot (⋯) action menu */}
-        <Menu>
-          <MenuTrigger disableButtonEnhancement>
+        <RowActionMenu<ManageMenuAction>
+          trigger={
             <Tooltip content="More actions" relationship="label">
               <Button
                 className={styles.iconButton}
@@ -1091,112 +1052,90 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
                 data-testid={`manage-more-${layout.id}`}
               />
             </Tooltip>
-          </MenuTrigger>
-          <MenuPopover onClick={(e) => e.stopPropagation()}>
-            <MenuList>
-              {/* 1. Pin / Unpin */}
-              <MenuItem
-                icon={layoutIsPinned ? <PinFilled /> : <PinRegular />}
-                onClick={() => handlePinToggle(layout.id, layout.name)}
-                data-testid={`manage-menu-pin-${layout.id}`}
-              >
-                {layoutIsPinned ? "Unpin" : "Pin"}
-              </MenuItem>
-
-              {/* 2. Set as default */}
-              <Tooltip
-                content={
-                  isDefault
-                    ? "Already the default workspace."
-                    : "Move to the top of the pinned list."
-                }
-                relationship="description"
-              >
-                <MenuItem
-                  icon={<StarRegular />}
-                  disabled={isDefault}
-                  aria-disabled={isDefault}
-                  onClick={() =>
-                    !isDefault && handleSetAsDefault(layout.id, layout.name)
-                  }
-                  data-testid={`manage-menu-default-${layout.id}`}
-                >
-                  Set as default
-                </MenuItem>
-              </Tooltip>
-
-              {/* 3. Move up */}
-              <Tooltip
-                content={
-                  !layoutIsPinned
-                    ? "Pin this workspace first to reorder it."
-                    : canMoveUp
-                      ? "Move up in pinned order."
-                      : "Already at the top."
-                }
-                relationship="description"
-              >
-                <MenuItem
-                  icon={<ArrowUpRegular />}
-                  disabled={!canMoveUp}
-                  aria-disabled={!canMoveUp}
-                  onClick={() => canMoveUp && handleMoveUp(layout.id)}
-                  data-testid={`manage-menu-up-${layout.id}`}
-                >
-                  Move up
-                </MenuItem>
-              </Tooltip>
-
-              {/* 4. Move down */}
-              <Tooltip
-                content={
-                  !layoutIsPinned
-                    ? "Pin this workspace first to reorder it."
-                    : canMoveDown
-                      ? "Move down in pinned order."
-                      : "Already at the bottom."
-                }
-                relationship="description"
-              >
-                <MenuItem
-                  icon={<ArrowDownRegular />}
-                  disabled={!canMoveDown}
-                  aria-disabled={!canMoveDown}
-                  onClick={() => canMoveDown && handleMoveDown(layout.id)}
-                  data-testid={`manage-menu-down-${layout.id}`}
-                >
-                  Move down
-                </MenuItem>
-              </Tooltip>
-
-              {/* 5. Edit */}
-              <Tooltip content={editTooltip} relationship="description">
-                <MenuItem
-                  icon={<EditRegular />}
-                  onClick={() => void handleEdit(layout)}
-                  data-testid={`manage-menu-edit-${layout.id}`}
-                >
-                  Edit
-                </MenuItem>
-              </Tooltip>
-
-              {/* 6. Delete */}
-              <Tooltip content={deleteTooltip} relationship="description">
-                <MenuItem
-                  icon={<DeleteRegular />}
-                  disabled={layout.isSystem}
-                  aria-disabled={layout.isSystem}
-                  onClick={() =>
-                    !layout.isSystem && setDeleteTarget(layout)
-                  }
-                  data-testid={`manage-menu-delete-${layout.id}`}
-                >
-                  Delete
-                </MenuItem>
-              </Tooltip>
-            </MenuList>
-          </MenuPopover>
-        </Menu>
+          }
+          stopPopoverPropagation
+          groups={[
+            [
+              // 1. Pin / Unpin
+              {
+                key: "pin",
+                label: layoutIsPinned ? "Unpin" : "Pin",
+                icon: layoutIsPinned ? <PinFilled /> : <PinRegular />,
+                testId: `manage-menu-pin-${layout.id}`,
+              },
+              // 2. Set as default
+              {
+                key: "default",
+                label: "Set as default",
+                icon: <StarRegular />,
+                disabled: isDefault,
+                tooltip: isDefault
+                  ? "Already the default workspace."
+                  : "Move to the top of the pinned list.",
+                testId: `manage-menu-default-${layout.id}`,
+              },
+              // 3. Move up
+              {
+                key: "up",
+                label: "Move up",
+                icon: <ArrowUpRegular />,
+                disabled: !canMoveUp,
+                tooltip: !layoutIsPinned
+                  ? "Pin this workspace first to reorder it."
+                  : canMoveUp
+                    ? "Move up in pinned order."
+                    : "Already at the top.",
+                testId: `manage-menu-up-${layout.id}`,
+              },
+              // 4. Move down
+              {
+                key: "down",
+                label: "Move down",
+                icon: <ArrowDownRegular />,
+                disabled: !canMoveDown,
+                tooltip: !layoutIsPinned
+                  ? "Pin this workspace first to reorder it."
+                  : canMoveDown
+                    ? "Move down in pinned order."
+                    : "Already at the bottom.",
+                testId: `manage-menu-down-${layout.id}`,
+              },
+              // 5. Edit
+              {
+                key: "edit",
+                label: "Edit",
+                icon: <EditRegular />,
+                tooltip: editTooltip,
+                testId: `manage-menu-edit-${layout.id}`,
+              },
+              // 6. Delete
+              {
+                key: "delete",
+                label: "Delete",
+                icon: <DeleteRegular />,
+                disabled: layout.isSystem,
+                tooltip: deleteTooltip,
+                testId: `manage-menu-delete-${layout.id}`,
+              },
+            ],
+          ]}
+          onAction={(key) => {
+            switch (key) {
+              case "pin":
+                return handlePinToggle(layout.id, layout.name);
+              case "default":
+                return handleSetAsDefault(layout.id, layout.name);
+              case "up":
+                return handleMoveUp(layout.id);
+              case "down":
+                return handleMoveDown(layout.id);
+              case "edit":
+                return void handleEdit(layout);
+              case "delete":
+                return setDeleteTarget(layout);
+            }
+          }}
+        />
       </div>
     );
   };

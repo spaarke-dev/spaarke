@@ -1,0 +1,233 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<AppModule>
+  <UniqueName>sprk_MatterManagement</UniqueName>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <WebResourceId>cbe40852-8bd3-f011-8543-7ced8d1dc988</WebResourceId>
+  <OptimizedFor></OptimizedFor>
+  <statecode>0</statecode>
+  <statuscode>1</statuscode>
+  <FormFactor>1</FormFactor>
+  <ClientType>4</ClientType>
+  <NavigationType>0</NavigationType>
+  <AppModuleComponents>
+    <AppModuleComponent type="1" schemaName="account" />
+    <AppModuleComponent type="1" schemaName="businessunit" />
+    <AppModuleComponent type="1" schemaName="chat" />
+    <AppModuleComponent type="1" schemaName="contact" />
+    <AppModuleComponent type="1" schemaName="documenttemplate" />
+    <AppModuleComponent type="1" schemaName="email" />
+    <AppModuleComponent type="1" schemaName="entity" />
+    <AppModuleComponent type="1" schemaName="environmentvariabledefinition" />
+    <AppModuleComponent type="1" schemaName="environmentvariablevalue" />
+    <AppModuleComponent type="1" schemaName="msdyn_aimodel" />
+    <AppModuleComponent type="1" schemaName="msdyn_aimodelcatalog" />
+    <AppModuleComponent type="1" schemaName="msdyn_analysiscomponent" />
+    <AppModuleComponent type="1" schemaName="msdyn_analysisjob" />
+    <AppModuleComponent type="1" schemaName="msdyn_analysisoverride" />
+    <AppModuleComponent type="1" schemaName="msdyn_analysisresult" />
+    <AppModuleComponent type="1" schemaName="msdyn_analysisresultdetail" />
+    <AppModuleComponent type="1" schemaName="organization" />
+    <AppModuleComponent type="1" schemaName="savedquery" />
+    <AppModuleComponent type="1" schemaName="savedqueryvisualization" />
+    <AppModuleComponent type="1" schemaName="sprk_agreementtype" />
+    <AppModuleComponent type="1" schemaName="sprk_aichatcontextmap" />
+    <AppModuleComponent type="1" schemaName="sprk_aimodeldeployment" />
+    <AppModuleComponent type="1" schemaName="sprk_aisearchindex" />
+    <AppModuleComponent type="1" schemaName="sprk_analysis" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisaction" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisactiontype" />
+    <AppModuleComponent type="1" schemaName="sprk_analysischatmessage" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisdeliverytype" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisemailmetadata" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisknowledge" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisoutput" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisplaybook" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisskill" />
+    <AppModuleComponent type="1" schemaName="sprk_analysistool" />
+    <AppModuleComponent type="1" schemaName="sprk_analysisworkingversion" />
+    <AppModuleComponent type="1" schemaName="sprk_approlemodulemap" />
+    <AppModuleComponent type="1" schemaName="sprk_chartdefinition" />
+    <AppModuleComponent type="1" schemaName="sprk_charttype" />
+    <AppModuleComponent type="1" schemaName="sprk_communication" />
+    <AppModuleComponent type="1" schemaName="sprk_communicationaccount" />
+    <AppModuleComponent type="1" schemaName="sprk_communicationthread" />
+    <AppModuleComponent type="1" schemaName="sprk_container" />
+    <AppModuleComponent type="1" schemaName="sprk_dataverseenvironment" />
+    <AppModuleComponent type="1" schemaName="sprk_document" />
+    <AppModuleComponent type="1" schemaName="sprk_emailartifact" />
+    <AppModuleComponent type="1" schemaName="sprk_emailsaverule" />
+    <AppModuleComponent type="1" schemaName="sprk_emailupdatefield" />
+    <AppModuleComponent type="1" schemaName="sprk_event" />
+    <AppModuleComponent type="1" schemaName="sprk_eventset" />
+    <AppModuleComponent type="1" schemaName="sprk_eventtodo" />
+    <AppModuleComponent type="1" schemaName="sprk_eventtype_ref" />
+    <AppModuleComponent type="1" schemaName="sprk_externalrecordaccess" />
+    <AppModuleComponent type="1" schemaName="sprk_fieldmappingprofile" />
+    <AppModuleComponent type="1" schemaName="sprk_fieldmappingrule" />
+    <AppModuleComponent type="1" schemaName="sprk_gridconfiguration" />
+    <AppModuleComponent type="1" schemaName="sprk_invoice" />
+    <AppModuleComponent type="1" schemaName="sprk_kpiassessment" />
+    <AppModuleComponent type="1" schemaName="sprk_matter" />
+    <AppModuleComponent type="1" schemaName="sprk_mattersubtype_ref" />
+    <AppModuleComponent type="1" schemaName="sprk_mattertype_ref" />
+    <AppModuleComponent type="1" schemaName="sprk_organization" />
+    <AppModuleComponent type="1" schemaName="sprk_organizationtype_ref" />
+    <AppModuleComponent type="1" schemaName="sprk_playbooknode" />
+    <AppModuleComponent type="1" schemaName="sprk_playbooknoderun" />
+    <AppModuleComponent type="1" schemaName="sprk_playbookrun" />
+    <AppModuleComponent type="1" schemaName="sprk_practicearea_ref" />
+    <AppModuleComponent type="1" schemaName="sprk_project" />
+    <AppModuleComponent type="1" schemaName="sprk_projecttype_ref" />
+    <AppModuleComponent type="1" schemaName="sprk_recordtype_ref" />
+    <AppModuleComponent type="1" schemaName="sprk_registrationrequest" />
+    <AppModuleComponent type="1" schemaName="sprk_reportcard" />
+    <AppModuleComponent type="1" schemaName="sprk_reportingentity" />
+    <AppModuleComponent type="1" schemaName="sprk_reportingview" />
+    <AppModuleComponent type="1" schemaName="sprk_speauditlog" />
+    <AppModuleComponent type="1" schemaName="sprk_specontainertypeconfig" />
+    <AppModuleComponent type="1" schemaName="sprk_speenvironment" />
+    <AppModuleComponent type="1" schemaName="sprk_spendsignal" />
+    <AppModuleComponent type="1" schemaName="sprk_spendsnapshot" />
+    <AppModuleComponent type="1" schemaName="sprk_timekeeper" />
+    <AppModuleComponent type="1" schemaName="sprk_todo" />
+    <AppModuleComponent type="1" schemaName="sprk_triagecategory" />
+    <AppModuleComponent type="1" schemaName="sprk_userpreferences" />
+    <AppModuleComponent type="1" schemaName="sprk_userprofile" />
+    <AppModuleComponent type="1" schemaName="sprk_usertype_ref" />
+    <AppModuleComponent type="1" schemaName="sprk_workassignment" />
+    <AppModuleComponent type="1" schemaName="sprk_workoffice" />
+    <AppModuleComponent type="1" schemaName="sprk_workspacelayout" />
+    <AppModuleComponent type="1" schemaName="systemuser" />
+    <AppModuleComponent type="1" schemaName="team" />
+    <AppModuleComponent type="1" schemaName="teamtemplate" />
+    <AppModuleComponent type="1" schemaName="template" />
+    <AppModuleComponent type="1" schemaName="userqueryvisualization" />
+    <AppModuleComponent type="60" id="{04c83cee-5211-4013-a65a-0d4193b9b1e8}" />
+    <AppModuleComponent type="60" id="{69cff312-cfb6-4289-9631-249ab85d2c62}" />
+    <AppModuleComponent type="60" id="{d880c3cf-80e2-42f3-82f9-24d040d09f17}" />
+    <AppModuleComponent type="60" id="{ebaceffc-cd31-40fc-939c-2ec8c990656e}" />
+    <AppModuleComponent type="60" id="{bddc0100-0dbe-4562-aafe-31d08c8ab506}" />
+    <AppModuleComponent type="60" id="{5d764e2e-4ace-4469-a4cf-3422e0428e2e}" />
+    <AppModuleComponent type="60" id="{dfc9bb95-412c-4ea1-883b-363ecbc75e46}" />
+    <AppModuleComponent type="60" id="{7ae9ad5e-447d-432d-b6fc-3a6cb9471011}" />
+    <AppModuleComponent type="60" id="{2205c86d-ed88-4a2f-a447-3b86a8781f2e}" />
+    <AppModuleComponent type="60" id="{cccff382-2b92-467e-bf1b-3db179512af8}" />
+    <AppModuleComponent type="60" id="{449faa0e-f471-48ec-87d0-4719909546d2}" />
+    <AppModuleComponent type="60" id="{91c113ba-def9-4eec-8054-5002501a1395}" />
+    <AppModuleComponent type="60" id="{957a1f9f-0c2d-4759-99e9-54b255957025}" />
+    <AppModuleComponent type="60" id="{7bb87dfd-ec3e-4ed9-8e3e-5725d3067295}" />
+    <AppModuleComponent type="60" id="{661157fe-2fc9-4eaa-835f-5bfa2f7b64f7}" />
+    <AppModuleComponent type="60" id="{6296a9ea-5aec-4ab5-9aa9-5d53e0b4adb8}" />
+    <AppModuleComponent type="60" id="{f3b707fb-3b5f-45f9-9c6b-5e573bb5d19e}" />
+    <AppModuleComponent type="60" id="{4fa382f2-c273-f011-b4cb-6045bdd6a665}" />
+    <AppModuleComponent type="60" id="{4091f99f-ac41-484e-8256-71cac93e22d8}" />
+    <AppModuleComponent type="60" id="{c5e5807d-e20c-f111-8342-7c1e520aa4df}" />
+    <AppModuleComponent type="60" id="{21330267-bee5-f011-8406-7c1e520aa4df}" />
+    <AppModuleComponent type="60" id="{8a82a40b-c2e5-f011-8406-7c1e520aa4df}" />
+    <AppModuleComponent type="60" id="{9088d6a4-4cf2-f011-8406-7c1e520aa4df}" />
+    <AppModuleComponent type="60" id="{7e578eef-761d-f111-88b3-7c1e520aa4df}" />
+    <AppModuleComponent type="60" id="{11d6fcd8-86a3-f011-bbd3-7c1e5215b8b5}" />
+    <AppModuleComponent type="60" id="{d408a721-77d7-f011-8406-7c1e525abd8b}" />
+    <AppModuleComponent type="60" id="{eaf22dcb-9aff-f011-8406-7c1e525abd8b}" />
+    <AppModuleComponent type="60" id="{07000450-aa00-f111-8406-7c1e525abd8b}" />
+    <AppModuleComponent type="60" id="{93aa1c69-0406-f111-8406-7c1e525abd8b}" />
+    <AppModuleComponent type="60" id="{57ee2319-3c21-f111-88b4-7c1e525abd8b}" />
+    <AppModuleComponent type="60" id="{de8439db-38e5-f011-8406-7ced8d1dc1f8}" />
+    <AppModuleComponent type="60" id="{5aa00242-5212-f111-8342-7ced8d1dc988}" />
+    <AppModuleComponent type="60" id="{642e1a65-4201-f111-8407-7ced8d1dc988}" />
+    <AppModuleComponent type="60" id="{90d2eff7-6703-f111-8407-7ced8d1dc988}" />
+    <AppModuleComponent type="60" id="{835b8ee8-ba1d-f111-88b3-7ced8d1dc988}" />
+    <AppModuleComponent type="60" id="{70ec1b6e-5b31-f111-88b5-7ced8d1dc988}" />
+    <AppModuleComponent type="60" id="{b58ec3d8-0982-f111-8076-7ced8ddc4cc6}" />
+    <AppModuleComponent type="60" id="{eca59df4-1364-f111-ab0c-7ced8ddc4cc6}" />
+    <AppModuleComponent type="60" id="{098ae145-1567-41ec-8398-86dbaac70c9b}" />
+    <AppModuleComponent type="60" id="{4aabf594-b30a-490d-bf97-89c67c6777fe}" />
+    <AppModuleComponent type="60" id="{bdb0ae1c-32fa-4374-b637-8dafe107bc44}" />
+    <AppModuleComponent type="60" id="{9c89722c-b4e4-44e5-b118-a3ba58499837}" />
+    <AppModuleComponent type="60" id="{79bcb391-516c-4091-bb53-ae8e4fbb10c9}" />
+    <AppModuleComponent type="60" id="{b01ced05-ecbd-46d8-8d5c-b20827731def}" />
+    <AppModuleComponent type="60" id="{29de27bc-a257-4f29-99cf-bab4a84e688f}" />
+    <AppModuleComponent type="60" id="{bc0f68dd-a4b1-4a8f-bed3-c8f5db2f89cf}" />
+    <AppModuleComponent type="60" id="{aa0fafdb-a9e6-4ac8-b2b2-cbe0172aaa35}" />
+    <AppModuleComponent type="60" id="{b028db32-3619-48a5-ac51-cf3f947b0ef3}" />
+    <AppModuleComponent type="60" id="{2934cf58-7912-4f26-995c-d1eac6da0242}" />
+    <AppModuleComponent type="60" id="{dc4abe3e-5f27-42de-9177-d6df7d0b7c27}" />
+    <AppModuleComponent type="60" id="{c63d7598-1c83-4f78-8d06-df26eb08d9d3}" />
+    <AppModuleComponent type="60" id="{b538470e-af44-4ef3-8a27-e18388b8163c}" />
+    <AppModuleComponent type="60" id="{707fc57b-c5e6-471b-a180-e37ed28a38e2}" />
+    <AppModuleComponent type="60" id="{01124dd8-9bff-4cc0-bb33-ea9d943c3f9f}" />
+    <AppModuleComponent type="60" id="{1fed44d1-ae68-4a41-bd2b-f13acac4acfa}" />
+    <AppModuleComponent type="60" id="{c9e7ec2d-efca-4e4c-b3e3-f63c4bba5e4b}" />
+    <AppModuleComponent type="60" id="{bb6b3ec7-0a01-4c4e-b3ff-f74bc523bb54}" />
+    <AppModuleComponent type="60" id="{8448b78f-8f42-454e-8e2a-f8196b0419af}" />
+    <AppModuleComponent type="62" schemaName="sprk_MatterManagement" />
+  </AppModuleComponents>
+  <AppModuleRoleMaps>
+    <Role id="{88b87c37-1472-4798-ac48-d56509eb6e1d}" />
+    <Role id="{11f93c04-ddf6-f011-8406-7c1e520aa4df}" />
+    <Role id="{75e1b627-2ab6-f111-aaad-0022482913fc}" />
+    <Role id="{627090ff-40a3-4053-8790-584edc5be201}" />
+    <Role id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+  </AppModuleRoleMaps>
+  <LocalizedNames>
+    <LocalizedName description="Matter Management" languagecode="1033" />
+  </LocalizedNames>
+  <appsettings>
+    <appsetting settingdefinitionid.uniquename="AllowNotificationsEarlyAccess">
+      <iscustomizable>1</iscustomizable>
+      <value>true</value>
+    </appsetting>
+    <appsetting settingdefinitionid.uniquename="AppChannel">
+      <iscustomizable>1</iscustomizable>
+      <value>1</value>
+    </appsetting>
+    <appsetting settingdefinitionid.uniquename="appcopilotenabled">
+      <iscustomizable>1</iscustomizable>
+      <value>2</value>
+    </appsetting>
+    <appsetting settingdefinitionid.uniquename="EnablePowerBIQuickReport">
+      <iscustomizable>1</iscustomizable>
+      <value>false</value>
+    </appsetting>
+    <appsetting settingdefinitionid.uniquename="FormFillBarUXEnabled">
+      <iscustomizable>1</iscustomizable>
+      <value>2</value>
+    </appsetting>
+    <appsetting settingdefinitionid.uniquename="HeaderAndNavigationRefresh">
+      <iscustomizable>1</iscustomizable>
+      <value>2</value>
+    </appsetting>
+    <appsetting settingdefinitionid.uniquename="HideShowAs">
+      <iscustomizable>1</iscustomizable>
+      <value>true</value>
+    </appsetting>
+    <appsetting settingdefinitionid.uniquename="IsSmartEmailAddressValidationControlEnabled">
+      <iscustomizable>1</iscustomizable>
+      <value>true</value>
+    </appsetting>
+    <appsetting settingdefinitionid.uniquename="m365copilotmodelappenabled">
+      <iscustomizable>1</iscustomizable>
+      <value>2</value>
+    </appsetting>
+    <appsetting settingdefinitionid.uniquename="MobileCommandingImprovements2022Tablet">
+      <iscustomizable>1</iscustomizable>
+      <value>true</value>
+    </appsetting>
+    <appsetting settingdefinitionid.uniquename="msdyn_TimelineCopilotForApps">
+      <iscustomizable>1</iscustomizable>
+      <value>false</value>
+    </appsetting>
+    <appsetting settingdefinitionid.uniquename="msdyn_TimelineCopilotInteractions">
+      <iscustomizable>1</iscustomizable>
+      <value>false</value>
+    </appsetting>
+    <appsetting settingdefinitionid.uniquename="msdyn_TimelineModernization">
+      <iscustomizable>1</iscustomizable>
+      <value>true</value>
+    </appsetting>
+    <appsetting settingdefinitionid.uniquename="ServerMode">
+      <iscustomizable>1</iscustomizable>
+      <value>false</value>
+    </appsetting>
+  </appsettings>
+</AppModule>

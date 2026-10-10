@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Services.Communication;
 ///   (Subject / Description / DueDate / Regarding / Owner=assigned-to) — app-only, the only create the facade
 ///   exposes;</item>
 ///   <item>the remaining FR-E5 fields the human supplied at reconcile time
-///   (<c>sprk_eventstatus</c> / <c>sprk_completeddate</c> / <c>sprk_basedate</c> / <c>sprk_finalduedate</c>) are
+///   (<c>statuscode</c> / <c>sprk_completeddate</c> / <c>sprk_basedate</c> / <c>sprk_finalduedate</c>) are
 ///   PATCHed on the created task via the caller-impersonated <see cref="IActionSeam.UpdateRecordAsync"/> — so those
 ///   deadline-bearing / status fields carry the confirming user's <c>modifiedby</c> and privilege intersection.</item>
 /// </list>
@@ -91,7 +91,7 @@ public interface ICommunicationCreateTaskApplyService
     /// <summary>
     /// UNDO a just-created task (email-communication-intelligence-r2 B2.2): soft-cancels the <c>sprk_event</c>
     /// identified by <paramref name="taskId"/> (the <c>CreatedTaskId</c> the apply/ad-hoc create returned) by setting
-    /// <c>sprk_eventstatus</c> = Cancelled UNDER THE CALLER'S IMPERSONATION, then writes ONE append-only compensating
+    /// <c>statuscode</c> = Cancelled UNDER THE CALLER'S IMPERSONATION, then writes ONE append-only compensating
     /// audit row for <paramref name="communicationId"/> (provenance + append-only-audit symmetry with the field-undo).
     /// Soft-cancel (not hard delete) so the write is gated by the caller's Dataverse access (a caller who cannot write
     /// the event cannot cancel it — no app-only "delete any event by id" hole), it is reversible, and it preserves the
@@ -114,8 +114,12 @@ public sealed record ApplyCreateTaskRequest
     public DateOnly? FinalDueDate { get; init; }
     public DateOnly? CompletedDate { get; init; }
 
-    /// <summary><c>sprk_eventstatus</c> Choice value (e.g. Completed=2 for the create-and-complete case).</summary>
-    public int? Status { get; init; }
+    /// <summary><c>sprk_event.statuscode</c> value (<see cref="Spaarke.Dataverse.EventStatusCode"/>, e.g. Completed=659490002 for the create-and-complete case). Task 066 (D-28). The wire name is <c>statusCode</c>: the former <c>status</c> carried the deprecated 0-7 vocabulary, whose 1 and 2 are valid statuscodes too (Draft, No Further Action), so a value check cannot tell an old client from a new one. A body that still carries <c>status</c> is refused (<c>STATUS_FIELD_RETIRED</c>).</summary>
+    public int? StatusCode { get; init; }
+
+    /// <summary>Properties the body carries that this record does not declare; only used to refuse the retired <c>status</c>.</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 
     /// <summary>The task Owner (<c>ownerid</c> systemuser) — set at create via
     /// <see cref="CreateTaskRequest.OwnerId"/>.</summary>
@@ -152,8 +156,12 @@ public sealed record CreateAdHocTaskRequest
     public DateOnly? FinalDueDate { get; init; }
     public DateOnly? CompletedDate { get; init; }
 
-    /// <summary><c>sprk_eventstatus</c> Choice value (e.g. Completed=2 for the create-and-complete case).</summary>
-    public int? Status { get; init; }
+    /// <summary><c>sprk_event.statuscode</c> value (<see cref="Spaarke.Dataverse.EventStatusCode"/>, e.g. Completed=659490002 for the create-and-complete case). Task 066 (D-28). The wire name is <c>statusCode</c>: the former <c>status</c> carried the deprecated 0-7 vocabulary, whose 1 and 2 are valid statuscodes too (Draft, No Further Action), so a value check cannot tell an old client from a new one. A body that still carries <c>status</c> is refused (<c>STATUS_FIELD_RETIRED</c>).</summary>
+    public int? StatusCode { get; init; }
+
+    /// <summary>Properties the body carries that this record does not declare; only used to refuse the retired <c>status</c>.</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
     /// <summary>The task Owner (<c>ownerid</c> systemuser).</summary>
     public Guid? AssignedTo { get; init; }
 }
@@ -167,7 +175,7 @@ public sealed record CreateAdHocTaskResult(
     IReadOnlyList<string> FieldsPatched);
 
 /// <summary>Result of a successful <see cref="ICommunicationCreateTaskApplyService.UndoCreateTaskAsync"/> (B2.2). The
-/// task was soft-cancelled (<c>sprk_eventstatus</c> = Cancelled) — carries the task id + the new status value.</summary>
+/// task was soft-cancelled (<c>statuscode</c> = Cancelled) — carries the task id + the new status value.</summary>
 public sealed record UndoCreateTaskResult(Guid TaskId, int NewStatus);
 
 /// <inheritdoc />
@@ -186,15 +194,15 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
     private const string EventEntity = "sprk_event";
 
     // sprk_event FR-E5 fields PATCHed under impersonation (dataverse-describe-verified 2026-08-06): base/final-due/
-    // completed are Date-Only; eventstatus is a Choice (Completed=2). due + owner are set at create via the facade.
+    // completed are Date-Only; status is statuscode + its paired statecode (task 066, D-28). due + owner are set at create via the facade.
     private const string EventBaseDateField = "sprk_basedate";
     private const string EventFinalDueDateField = "sprk_finalduedate";
     private const string EventCompletedDateField = "sprk_completeddate";
-    private const string EventStatusField = "sprk_eventstatus";
+    private const string EventStatusField = "statuscode";
+    private const string EventStateField = "statecode";
 
-    // sprk_eventstatus Choice value for a soft-cancel undo (canonical Events status set: Draft=0, Open=1,
-    // Completed=2, Closed=3, On Hold=4, Cancelled=5, Reassigned=6, Archived=7 — mirrors the client EVENT_STATUS map).
-    private const int EventStatusCancelled = 5;
+    // Soft-cancel undo target: the live statuscode (task 066, D-28; the deprecated 0-7 status column is not written).
+    private const int EventStatusCancelled = EventStatusCode.Cancelled;
 
     /// <summary>The <c>sprk_targetfield</c> sentinel PREFIX Job C writes for a create-task proposal — mirrored from
     /// <c>CommunicationEnrichmentService.CreateTaskSentinelFieldPrefix</c> (duplicated with a "mirrored from" note the
@@ -245,6 +253,9 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 detail: "The caller could not be resolved to a Dataverse systemuser; the apply is refused (fail closed — the write must run under the confirming user's identity, never app-only).",
                 statusCode: 403);
         }
+
+        // (1b) Task 066 F2-A: refuse the retired `status` field BEFORE anything is read or written (see RejectRetiredStatusField).
+        RejectRetiredStatusField(request?.ExtensionData);
 
         // (2) Load the proposal row.
         var row = await LoadReviewLogRowAsync(reviewLogId, ct).ConfigureAwait(false);
@@ -447,6 +458,9 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 statusCode: 403);
         }
 
+        // (1b) Task 066 F2-A: refuse the retired `status` field BEFORE anything is written (see RejectRetiredStatusField).
+        RejectRetiredStatusField(request.ExtensionData);
+
         // (2) Validate the request shape. There is no proposal to derive from, so subject + the regarding (the
         //     confirmed record, NFR-10) are REQUIRED. Association gating is the UI's — matching the applied-proposal
         //     sibling's posture (no second server-side association re-check; see class remarks).
@@ -513,7 +527,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
         var createdTaskId = createResult.TaskId;
 
         // (4) PATCH the remaining FR-E5 fields under the confirming user's impersonation (same as the applied path).
-        var mappings = BuildPatchMappings(request.BaseDate, request.FinalDueDate, request.CompletedDate, request.Status);
+        var mappings = BuildPatchMappings(request.BaseDate, request.FinalDueDate, request.CompletedDate, request.StatusCode);
         UpdateRecordResult? patchResult = null;
         if (mappings.Count > 0)
         {
@@ -610,11 +624,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
             {
                 EntityLogicalName = EventEntity,
                 RecordId = taskId,
-                FieldMappings = new[]
-                {
-                    new ActionFieldMapping(EventStatusField, ActionFieldType.String,
-                        EventStatusCancelled.ToString(CultureInfo.InvariantCulture)),
-                },
+                FieldMappings = StatusMappings(EventStatusCancelled),
                 ImpersonateSystemUserId = callerSystemUserId,
             },
             ct).ConfigureAwait(false);
@@ -663,16 +673,34 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
         }
 
         _logger.LogInformation(
-            "Job C undo: sprk_event {TaskId} soft-cancelled (sprk_eventstatus=Cancelled) under caller {Caller} impersonation; audit row {AuditLogId} written.",
+            "Job C undo: sprk_event {TaskId} soft-cancelled (statuscode=Cancelled) under caller {Caller} impersonation; audit row {AuditLogId} written.",
             taskId, callerSystemUserId, auditLogId);
 
         return new UndoCreateTaskResult(taskId, EventStatusCancelled);
     }
 
+    /// <summary>
+    /// Task 066 F2-A. The request field was renamed <c>status</c> to <c>statusCode</c> when it moved from the deprecated
+    /// 0-7 vocabulary to <c>statuscode</c>. Values 1 and 2 are valid in both vocabularies (Open/Completed there, Draft/No
+    /// Further Action here), so an old client's <c>status</c> cannot be told apart by value and would silently hide the task
+    /// or deactivate it. Any body that still carries <c>status</c> is refused with 422 and nothing is written.
+    /// </summary>
+    internal static void RejectRetiredStatusField(IDictionary<string, JsonElement>? extensionData)
+    {
+        if (extensionData is null || !extensionData.Keys.Any(k => string.Equals(k, "status", StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        throw new SdapProblemException(
+            code: "STATUS_FIELD_RETIRED",
+            title: "Status Field Retired",
+            detail: "The request field 'status' was retired (it carried the deprecated 0-7 status vocabulary). Send 'statusCode' with a sprk_event statuscode value (e.g. 659490002 for Completed) and update the client.",
+            statusCode: 422);
+    }
+
     private static List<ActionFieldMapping> BuildPatchMappings(ApplyCreateTaskRequest? request) =>
         request is null
             ? new List<ActionFieldMapping>()
-            : BuildPatchMappings(request.BaseDate, request.FinalDueDate, request.CompletedDate, request.Status);
+            : BuildPatchMappings(request.BaseDate, request.FinalDueDate, request.CompletedDate, request.StatusCode);
 
     /// <summary>Builds the FR-E5 impersonated-PATCH field mappings (base/final-due/completed dates + status Choice).
     /// Shared by the applied-proposal path and the ad-hoc path so both write the identical field set the same way.</summary>
@@ -687,10 +715,30 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
         if (completedDate is { } c)
             mappings.Add(new ActionFieldMapping(EventCompletedDateField, ActionFieldType.String, FormatDate(c)));
         if (status is { } s)
-            mappings.Add(new ActionFieldMapping(EventStatusField, ActionFieldType.String, s.ToString(CultureInfo.InvariantCulture)));
+            mappings.AddRange(StatusMappings(s));
 
         return mappings;
     }
+
+    /// <summary>
+    /// The status write for an event: <c>statuscode</c> PLUS the <c>statecode</c> it belongs to (Dataverse rejects a
+    /// status change that leaves the pair inconsistent; Completed/Closed are Active, Cancelled is Inactive —
+    /// <see cref="EventStatusCode.GetStateCode"/>). Task 066 (D-28): <c>statuscode</c> is the one status column.
+    /// A value outside the live option set is sent as a String mapping so the metadata-driven coercion rejects it
+    /// fail-loud (the same 422 an invalid status always produced) instead of writing a guess. Internal for tests.
+    /// </summary>
+    internal static ActionFieldMapping[] StatusMappings(int status) =>
+        EventStatusCode.IsDefined(status)
+            ? new[]
+            {
+                new ActionFieldMapping(EventStatusField, ActionFieldType.Number, status.ToString(CultureInfo.InvariantCulture)),
+                new ActionFieldMapping(EventStateField, ActionFieldType.Number,
+                    EventStatusCode.GetStateCode(status).ToString(CultureInfo.InvariantCulture)),
+            }
+            : new[]
+            {
+                new ActionFieldMapping(EventStatusField, ActionFieldType.String, status.ToString(CultureInfo.InvariantCulture)),
+            };
 
     private async Task<Entity?> LoadReviewLogRowAsync(Guid reviewLogId, CancellationToken ct)
     {

@@ -11,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
-using NSubstitute;
+using Moq;
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
@@ -192,7 +192,7 @@ public class RecordKeyedUploadAuthorizationTests
     [Fact(DisplayName = "Task 076: a NON-secure record resolves through the RECORD's own owningbusinessunit")]
     public async Task TwoArgOverload_NonSecureRecord_ResolvesThroughTheRecordsOwnBusinessUnit()
     {
-        var entityService = Substitute.For<IGenericEntityService>();
+        var entityService = new Mock<IGenericEntityService>();
         StubRecordRead(entityService, isSecure: false, ownContainerId: null, withOwningBusinessUnit: true);
         StubBusinessUnitRead(entityService, BusinessUnitContainer);
 
@@ -205,8 +205,9 @@ public class RecordKeyedUploadAuthorizationTests
         decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
         decision.ContainerId.Should().Be(BusinessUnitContainer);
 
-        await entityService.Received(1).RetrieveAsync(
-            "businessunit", BusinessUnitId, Arg.Any<string[]>(), Arg.Any<CancellationToken>());
+        entityService.Verify(
+            s => s.RetrieveAsync("businessunit", BusinessUnitId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(1));
     }
 
     [Fact(DisplayName = "Task 076: a SECURE record with no container FAILS CLOSED and its business unit is never read")]
@@ -216,7 +217,7 @@ public class RecordKeyedUploadAuthorizationTests
         // that the fail-closed path cannot acquire a usable fallback in the first place. Asserting only the
         // throw would pass even if the BU container were fetched and then discarded — one refactor away
         // from being used. So the absence of the read is asserted too.
-        var entityService = Substitute.For<IGenericEntityService>();
+        var entityService = new Mock<IGenericEntityService>();
         StubRecordRead(entityService, isSecure: true, ownContainerId: null, withOwningBusinessUnit: true);
         StubBusinessUnitRead(entityService, BusinessUnitContainer);
 
@@ -227,14 +228,15 @@ public class RecordKeyedUploadAuthorizationTests
         (await act.Should().ThrowAsync<SdapProblemException>())
             .Which.Code.Should().Be("secure_record_container_missing");
 
-        await entityService.DidNotReceive().RetrieveAsync(
-            "businessunit", Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>());
+        entityService.Verify(
+            s => s.RetrieveAsync("businessunit", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never());
     }
 
     [Fact(DisplayName = "Task 076: a SECURE record resolves to its OWN container without consulting its business unit")]
     public async Task TwoArgOverload_SecureRecord_ResolvesToItsOwnContainer()
     {
-        var entityService = Substitute.For<IGenericEntityService>();
+        var entityService = new Mock<IGenericEntityService>();
         StubRecordRead(entityService, isSecure: true, ownContainerId: OwnContainer, withOwningBusinessUnit: true);
         StubBusinessUnitRead(entityService, BusinessUnitContainer);
 
@@ -246,8 +248,9 @@ public class RecordKeyedUploadAuthorizationTests
         decision.ContainerId.Should().Be(OwnContainer,
             "the record's own container wins; the business-unit container must not be substituted");
 
-        await entityService.DidNotReceive().RetrieveAsync(
-            "businessunit", Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>());
+        entityService.Verify(
+            s => s.RetrieveAsync("businessunit", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never());
     }
 
     [Fact(DisplayName = "Task 076: a business unit with no container leaves a non-secure record Unresolved, not failed")]
@@ -256,7 +259,7 @@ public class RecordKeyedUploadAuthorizationTests
         // A legitimate and common state — three of six business units had sprk_containerid unset when this
         // was measured. It must read as "no container available" (which the upload route turns into a 409
         // the operator can act on), never as a secure-record refusal.
-        var entityService = Substitute.For<IGenericEntityService>();
+        var entityService = new Mock<IGenericEntityService>();
         StubRecordRead(entityService, isSecure: false, ownContainerId: null, withOwningBusinessUnit: true);
         StubBusinessUnitRead(entityService, container: null);
 
@@ -271,7 +274,7 @@ public class RecordKeyedUploadAuthorizationTests
     [Fact(DisplayName = "Task 076: an organization-owned record (no owning business unit) is Unresolved, not failed")]
     public async Task TwoArgOverload_RecordWithNoOwningBusinessUnit_YieldsUnresolved()
     {
-        var entityService = Substitute.For<IGenericEntityService>();
+        var entityService = new Mock<IGenericEntityService>();
         StubRecordRead(entityService, isSecure: false, ownContainerId: null, withOwningBusinessUnit: false);
 
         var resolver = BuildResolver(entityService);
@@ -280,8 +283,9 @@ public class RecordKeyedUploadAuthorizationTests
 
         decision.Outcome.Should().Be(ContainerDecisionOutcome.Unresolved);
 
-        await entityService.DidNotReceive().RetrieveAsync(
-            "businessunit", Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>());
+        entityService.Verify(
+            s => s.RetrieveAsync("businessunit", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never());
     }
 
     // ============================================================================================
@@ -308,7 +312,7 @@ public class RecordKeyedUploadAuthorizationTests
         probe.LastEntitySet.Should().Be(entitySet);
         probe.LastRecordId.Should().Be(RecordId);
 
-        var entityService = Substitute.For<IGenericEntityService>();
+        var entityService = new Mock<IGenericEntityService>();
         StubRecordRead(entityService, isSecure: false, ownContainerId: null, withOwningBusinessUnit: true, entity: logicalName);
         StubBusinessUnitRead(entityService, BusinessUnitContainer);
 
@@ -319,8 +323,9 @@ public class RecordKeyedUploadAuthorizationTests
         decision.ContainerId.Should().Be(BusinessUnitContainer);
 
         // The container came from the record the filter authorized: same logical entity, same id.
-        await entityService.Received(1).RetrieveAsync(
-            logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>());
+        entityService.Verify(
+            s => s.RetrieveAsync(logicalName, RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(1));
     }
 
     [Theory(DisplayName = "Task 151: an alias route value for a SECURE record resolves to its OWN container")]
@@ -328,7 +333,7 @@ public class RecordKeyedUploadAuthorizationTests
     [InlineData("matter", "sprk_matter")]
     public async Task AliasRouteValue_SecureRecord_ResolvesItsOwnContainer(string routeValue, string logicalName)
     {
-        var entityService = Substitute.For<IGenericEntityService>();
+        var entityService = new Mock<IGenericEntityService>();
         StubRecordRead(entityService, isSecure: true, ownContainerId: OwnContainer, withOwningBusinessUnit: true, entity: logicalName);
         StubBusinessUnitRead(entityService, BusinessUnitContainer);
 
@@ -353,11 +358,13 @@ public class RecordKeyedUploadAuthorizationTests
 
         // Defence in depth: should the name ever reach the resolver, it is a typed refusal — NOT the
         // Unresolved outcome the handler renders as "No storage container is configured".
-        var entityService = Substitute.For<IGenericEntityService>();
+        var entityService = new Mock<IGenericEntityService>();
         var act = async () => await BuildResolver(entityService).ResolveForRecordAsync(unknown, RecordId);
 
         (await act.Should().ThrowAsync<SdapProblemException>()).Which.Code.Should().Be("container_entity_unknown");
-        await entityService.DidNotReceiveWithAnyArgs().RetrieveAsync(default!, default, default!, default);
+        entityService.Verify(
+            s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never());
     }
 
     // ============================================================================================
@@ -418,9 +425,9 @@ public class RecordKeyedUploadAuthorizationTests
         return Task.CompletedTask;
     }
 
-    private static RecordContainerResolver BuildResolver(IGenericEntityService entityService)
+    private static RecordContainerResolver BuildResolver(Mock<IGenericEntityService> entityService)
     {
-        var registry = Substitute.For<ISecurableEntityRegistry>();
+        var registry = new Mock<ISecurableEntityRegistry>();
         var securable = new HashSet<string>(StringComparer.Ordinal) { MappedEntity, "sprk_project" };
 
         // Task 151: the org's entities by LOGICAL name only, as the real registry knows them — so an alias that
@@ -431,17 +438,17 @@ public class RecordKeyedUploadAuthorizationTests
             "contact", UnmappedEntity
         };
 
-        registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
+        registry.Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult<IReadOnlySet<string>>(securable));
-        registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult(TestEntityCatalog.Classify(call.Arg<string>(), securable, known)));
+        registry.Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string entity, CancellationToken _) => Task.FromResult(TestEntityCatalog.Classify(entity, securable, known)));
 
         return new RecordContainerResolver(
-            registry, entityService, NullLogger<RecordContainerResolver>.Instance);
+            registry.Object, entityService.Object, NullLogger<RecordContainerResolver>.Instance);
     }
 
     private static void StubRecordRead(
-        IGenericEntityService entityService,
+        Mock<IGenericEntityService> entityService,
         bool isSecure,
         string? ownContainerId,
         bool withOwningBusinessUnit,
@@ -460,11 +467,11 @@ public class RecordKeyedUploadAuthorizationTests
         }
 
         entityService
-            .RetrieveAsync(entity, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Setup(s => s.RetrieveAsync(entity, RecordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(row));
     }
 
-    private static void StubBusinessUnitRead(IGenericEntityService entityService, string? container)
+    private static void StubBusinessUnitRead(Mock<IGenericEntityService> entityService, string? container)
     {
         var bu = new Entity("businessunit", BusinessUnitId);
 
@@ -474,7 +481,7 @@ public class RecordKeyedUploadAuthorizationTests
         }
 
         entityService
-            .RetrieveAsync("businessunit", BusinessUnitId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Setup(s => s.RetrieveAsync("businessunit", BusinessUnitId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult(bu));
     }
 
@@ -542,6 +549,50 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
         _fixture.Uploads.Clear();
         _fixture.Conflicts.Clear();
         _fixture.RestampQueue.Children.Clear();
+        _fixture.Attribution.Recorded.Clear();
+        _fixture.Attribution.RecordFaults = false;
+        _fixture.Deleted.Clear();
+    }
+
+    [Fact(DisplayName = "Attach fix: a record-keyed small upload records the created item as uploaded FOR THE CALLER")]
+    public async Task Put_RecordsTheItemForTheCaller()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/todo/{RecordKeyedUploadRouteFixture.TodoUnderPlainProject}/files/notes.txt", new ByteArrayContent([1]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var recorded = _fixture.Attribution.Recorded.Should().ContainSingle().Subject;
+        recorded.Item.Should().Be("item-155", "the item id Graph returned for the upload");
+        recorded.Drive.Should().Be(RecordKeyedUploadRouteFixture.BusinessUnitContainer);
+        recorded.Caller.Should().NotBeNullOrWhiteSpace("the binding names the signed-in caller");
+        recorded.Tenant.Should().NotBeNullOrWhiteSpace("the binding lives in the caller's tenant partition");
+    }
+
+    [Fact(DisplayName = "Attach fix: when the upload binding cannot be recorded the upload answers 503 — a file nobody can attach is not reported as uploaded")]
+    public async Task Put_WhenTheBindingCannotBeRecorded_Is503()
+    {
+        _fixture.Attribution.RecordFaults = true;
+
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/todo/{RecordKeyedUploadRouteFixture.TodoUnderPlainProject}/files/notes.txt", new ByteArrayContent([1]));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        body.Should().Contain("upload_attribution_unavailable");
+        _fixture.Deleted.Should().ContainSingle().Which.Should().Be(
+            RecordKeyedUploadRouteFixture.BusinessUnitContainer + "/item-155",
+            "K2: an upload reported as failed must not leave an orphan file nobody can attach");
+    }
+
+    [Fact(DisplayName = "Verifier F1: an upload SESSION records NO binding (a binding made before the item exists could be matched by another user's file)")]
+    public async Task UploadSession_RecordsNothing()
+    {
+        var response = await _fixture.Client().PostAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderSecureProject}/upload-session?path=big.pdf", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Attribution.Recorded.Should().BeEmpty(
+            "a session-uploaded item can never be attached through /file — so a failed or abandoned session leaves nothing behind");
     }
 
     [Theory(DisplayName = "Task 171 (finding 1): an app-only upload asking to REPLACE is refused 409 upload_replace_not_supported before any Graph call")]
@@ -872,6 +923,35 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
     /// <summary>Task 171 (finding 1): the conflict behaviour each upload reached Graph with.</summary>
     public ConcurrentQueue<ConflictBehavior> Conflicts { get; } = new();
 
+    /// <summary>K2: every item the routes deleted (the orphan cleanup after a failed binding).</summary>
+    public ConcurrentQueue<string> Deleted { get; } = new();
+
+    /// <summary>Task 171 attach fix: what the upload routes recorded as "uploaded for whom".</summary>
+    internal RecordingAttribution Attribution { get; } = new();
+
+    /// <summary>Records each binding; <see cref="RecordFaults"/> makes the write fail (a Redis outage).</summary>
+    internal sealed class RecordingAttribution : Sprk.Bff.Api.Services.Documents.UploadAttribution
+    {
+        public RecordingAttribution()
+            : base(new Sprk.Bff.Api.Infrastructure.Cache.TenantCache(
+                new Microsoft.Extensions.Caching.Distributed.MemoryDistributedCache(
+                    Microsoft.Extensions.Options.Options.Create(new Microsoft.Extensions.Caching.Memory.MemoryDistributedCacheOptions())),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Infrastructure.Cache.TenantCache>.Instance))
+        {
+        }
+
+        public ConcurrentQueue<(string Tenant, string Caller, string Drive, string Item)> Recorded { get; } = new();
+
+        public bool RecordFaults { get; set; }
+
+        public override Task RecordItemAsync(string tenantId, string caller, string drive, string item, CancellationToken ct = default)
+        {
+            if (RecordFaults) return Task.FromException(new TimeoutException("Redis unavailable"));
+            Recorded.Enqueue((tenantId, caller, drive, item));
+            return base.RecordItemAsync(tenantId, caller, drive, item, ct);
+        }
+    }
+
     /// <summary>Task 156: every stale row the resolver enqueued for re-stamping (no Service Bus is reached).</summary>
     internal RecordingRestampQueue RestampQueue { get; } = new();
 
@@ -901,7 +981,10 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
 
             // SCOPED: SpeFileStore's constructor dependencies are scoped (see ShareLinkTestFixture for the trap).
             services.RemoveAll<SpeFileStore>();
-            services.AddScoped<SpeFileStore>(sp => new RecordingSpeFileStore(sp, Uploads, Conflicts));
+            services.AddScoped<SpeFileStore>(sp => new RecordingSpeFileStore(sp, Uploads, Conflicts, Deleted));
+
+            services.RemoveAll<Sprk.Bff.Api.Services.Documents.UploadAttribution>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Documents.UploadAttribution>(Attribution);
 
             // Task 156: where a container_ancestor_stale refusal enqueues the stale row.
             services.RemoveAll<CoreAncestorRestampQueue>();
@@ -920,12 +1003,12 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
             "sprk_analysis", "sprk_document"
         };
 
-        var registry = Substitute.For<ISecurableEntityRegistry>();
-        registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult(TestEntityCatalog.Classify(call.Arg<string>(), securable, known)));
-        registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
+        var registry = new Mock<ISecurableEntityRegistry>();
+        registry.Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((string entity, CancellationToken _) => Task.FromResult(TestEntityCatalog.Classify(entity, securable, known)));
+        registry.Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.FromResult<IReadOnlySet<string>>(securable));
-        return registry;
+        return registry.Object;
     }
 
     private static IGenericEntityService BuildRows()
@@ -1090,11 +1173,11 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
             },
         };
 
-        var service = Substitute.For<IGenericEntityService>();
-        service.RetrieveAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
-            .Returns(call =>
+        var service = new Mock<IGenericEntityService>();
+        service.Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string entity, Guid id, string[] _, CancellationToken _) =>
             {
-                var key = (call.ArgAt<string>(0), call.ArgAt<Guid>(1));
+                var key = (entity, id);
                 if (key == ("sprk_todo", TodoWhoseRowCannotBeRead))
                 {
                     throw new TimeoutException(UnreadableRowFaultText);
@@ -1112,7 +1195,7 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
                     ? Task.FromResult(row)
                     : throw new InvalidOperationException($"Unmodelled read: {key.Item1} {key.Item2}");
             });
-        return service;
+        return service.Object;
     }
 
     private sealed class GrantingProbe : CallerRecordAccessProbe
@@ -1132,8 +1215,10 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
     {
         private readonly ConcurrentQueue<string> _uploads;
         private readonly ConcurrentQueue<ConflictBehavior> _conflicts;
+        private readonly ConcurrentQueue<string> _deleted;
 
-        public RecordingSpeFileStore(IServiceProvider sp, ConcurrentQueue<string> uploads, ConcurrentQueue<ConflictBehavior> conflicts)
+        public RecordingSpeFileStore(
+            IServiceProvider sp, ConcurrentQueue<string> uploads, ConcurrentQueue<ConflictBehavior> conflicts, ConcurrentQueue<string> deleted)
             : base(sp.GetRequiredService<ContainerOperations>(),
                    sp.GetRequiredService<DriveItemOperations>(),
                    sp.GetRequiredService<UploadSessionManager>(),
@@ -1141,6 +1226,13 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
         {
             _uploads = uploads;
             _conflicts = conflicts;
+            _deleted = deleted;
+        }
+
+        public override Task<bool> DeleteFileAsync(string driveId, string itemId, CancellationToken ct = default)
+        {
+            _deleted.Enqueue(driveId + "/" + itemId);
+            return Task.FromResult(true);
         }
 
         // Task 171: the record-keyed routes write APP-ONLY (the record filter decided; the container came from the

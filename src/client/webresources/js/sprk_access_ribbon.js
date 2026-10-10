@@ -45,6 +45,16 @@
  * team in ANOTHER business unit - a secure record reassigned outside Spaarke - unfinished, Make Secure offered. An
  * answer that cannot be had keeps Make Secure hidden on that record (Remove Secure still follows the flag).
  *
+ * A record filed under a parent (task 175, owner round 87: "the parent sets a FLOOR"): a work assignment or project filed
+ * under a matter or project inherits Secure from it and may never be looser, but may be made stricter by hand. The same
+ * can-manage-access answer that gives the Write verdict says whether the record's floor is secure (`floorSecure`) and
+ * whether what it is filed under could be read (`parentUnverifiable`). Make Secure follows its normal rules on such a
+ * record (making a child stricter is allowed); Remove Secure is HIDDEN when floorSecure === true (the record's Secure
+ * comes from the parent; removing it would breach the floor - the server refuses it 409
+ * sdap.access.access_follows_parent); parentUnverifiable === true hides both (fail closed). Otherwise Remove Secure
+ * follows its normal rules (secure + Write; the server enforces F3). An answer without these fields (an older BFF) is "no
+ * floor". A matter never has a parent. Update Access is unaffected.
+ *
  * Every command definition and enable rule lists, IN THIS ORDER, the libraries this script needs (ribbon commands do
  * not load form libraries):
  *   1. sprk_/scripts/bff_auth.js            - Spaarke.BffAuth (MSAL silent SSO; never a popup - ADR-028 INV-5)
@@ -74,12 +84,25 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     // secure transition, the in-place retry, "Someone" for a name that cannot be resolved. 1.4.0 - round 46 item 4: a
     // flagged record a team OTHER than the Secure Record Owners team owns is unfinished too (the server says which team).
     // 1.5.0 - round 53: another team INSIDE the Secure Record business unit is already isolated (Make Secure hidden); the
-    // caller_rights_unverifiable refusal in this script's own words.
-    ns.VERSION = "1.5.0";
+    // caller_rights_unverifiable refusal in this script's own words. 1.6.0 - task 114 (owner round 67 amendment 4(a)):
+    // isShareAllowed / isShareAllowedForSelection, the rules that hide the platform's form and grid Share commands on a
+    // Restricted record (any selected Restricted row, on a grid); the principal_external_on_restricted warning and the
+    // server's no-internal-reader sentence after Make Secure. 1.7.0 - task 175 (owner round 84): Make Secure / Remove
+    // Secure hidden on a record that follows a parent (can-manage-access followsParents / parentUnverifiable, from the
+    // same cached answer); the access_follows_parent refusal. 1.8.0 - task 175 (owner round 87, the parent sets a floor):
+    // Make Secure follows its normal rules on a filed record; Remove Secure hidden when floorSecure is true; both hidden
+    // when parentUnverifiable is true.
+    ns.VERSION = "1.8.0";
 
     var LOG = "[Access.Ribbon v" + ns.VERSION + "]";
     var GATE_PATH = "/api/v1/external-access/can-manage-access";
     var CACHE_KEY_PREFIX = "sprk_access_canmanage_";
+
+    /**
+     * How long the secure-command rules trust a cached gate answer's floor facts (task 175): a record filed or un-filed
+     * since is seen within this time. Update Access keeps the cached Write verdict for the session, as before.
+     */
+    var GATE_FRESH_MS = 30000;
 
     function safeSessionGet(key) {
         try { return window.sessionStorage.getItem(key); } catch (e) { return null; }
@@ -87,6 +110,10 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
     function safeSessionSet(key, value) {
         try { window.sessionStorage.setItem(key, value); } catch (e) { /* private mode: no cache, still correct */ }
+    }
+
+    function safeSessionRemove(key) {
+        try { window.sessionStorage.removeItem(key); } catch (e) { /* nothing cached */ }
     }
 
     function helpersLoaded() {
@@ -105,34 +132,108 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
         return !!body && String(body.recordId || "").replace(/[{}]/g, "").toLowerCase() === record.recordId;
     }
 
-    /** Asks the server whether the caller may manage access on the record; caches true/false (never an error). */
+    /** "No" for the caller: no Write verdict (the floor facts are moot then; fail closed). */
+    var NO_VERDICT = Object.freeze({ can: false, unverifiable: true, floorSecure: true });
+
+    /**
+     * Task 175 (owner round 87): the floor facts of one "yes" answer - `unverifiable` when parentUnverifiable === true
+     * (what the record is filed under could not be read: fail closed), `floorSecure` when floorSecure === true (its Secure
+     * is inherited). A missing or null field (an older BFF, a parentless record) is false: no floor.
+     */
+    function verdictOf(body) {
+        return { can: true, unverifiable: body.parentUnverifiable === true, floorSecure: body.floorSecure === true };
+    }
+
+    /** Caches one verdict for the record: { can, unverifiable, floorSecure, at } as JSON. */
+    function cacheVerdict(cacheKey, verdict) {
+        safeSessionSet(cacheKey, JSON.stringify({
+            can: verdict.can, unverifiable: verdict.unverifiable, floorSecure: verdict.floorSecure, at: Date.now()
+        }));
+    }
+
+    /**
+     * The cached verdict for the record, or null when there is none - or only a value an older version of this script
+     * cached ("true"/"false", or 1.7.0's { can, followsParent }: no floor facts, so it is asked again).
+     */
+    function cachedVerdict(cacheKey) {
+        var raw = safeSessionGet(cacheKey);
+        if (!raw) {
+            return null;
+        }
+
+        try {
+            var v = JSON.parse(raw);
+            return v && typeof v === "object" && typeof v.can === "boolean" && typeof v.unverifiable === "boolean" &&
+                typeof v.floorSecure === "boolean" && typeof v.at === "number" ? v : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    /** The gate questions in flight, per cache key: rules evaluated together share one call. */
+    var pendingGate = {};
+
+    /**
+     * Asks the server whether the caller may manage access on the record and (task 175) its floor facts - ONE call.
+     * Resolves { can, unverifiable, floorSecure } and caches it; never rejects (a failure is NO_VERDICT, not cached -
+     * retried on the next evaluation).
+     */
     function queryCanManage(record, cacheKey) {
-        return Spaarke.AssignedAccess.getApiBaseUrl().then(function (baseUrl) {
+        if (pendingGate[cacheKey]) {
+            return pendingGate[cacheKey];
+        }
+
+        var promise = Spaarke.AssignedAccess.getApiBaseUrl().then(function (baseUrl) {
             return Spaarke.BffAuth.getToken(baseUrl).then(function (token) {
                 if (!token) {
-                    return false; // no silent token: "no" (not cached - a later evaluation may have one)
+                    return NO_VERDICT; // no silent token: "no" (not cached - a later evaluation may have one)
                 }
 
                 var url = gateUrl(baseUrl, record, false);
                 return fetch(url, { headers: { "Accept": "application/json", "Authorization": "Bearer " + token } })
                     .then(function (response) {
                         if (response.status !== 200) {
-                            safeSessionSet(cacheKey, "false");
-                            return false;
+                            cacheVerdict(cacheKey, NO_VERDICT);
+                            return NO_VERDICT;
                         }
 
                         return response.json().then(function (body) {
                             // The answer must be about THIS record (the gate echoes the id it answered about).
                             var can = answersFor(body, record) && body.canManageAccess === true;
-                            safeSessionSet(cacheKey, can ? "true" : "false");
-                            return can;
+                            var verdict = can ? verdictOf(body) : NO_VERDICT;
+                            cacheVerdict(cacheKey, verdict);
+                            return verdict;
                         });
                     });
             });
         }).catch(function (error) {
             console.warn(LOG, "can-manage-access could not be asked; the command stays hidden.", error);
-            return false; // not cached: retried on the next evaluation
+            return NO_VERDICT;
         });
+
+        pendingGate[cacheKey] = promise;
+        var settled = function () { delete pendingGate[cacheKey]; };
+        promise.then(settled, settled);
+        return promise;
+    }
+
+    function gateCacheKey(record) {
+        return CACHE_KEY_PREFIX + record.recordType + "_" + record.recordId;
+    }
+
+    /**
+     * The gate verdict for the record: the cached one when there is one (with `fresh`, only when younger than
+     * GATE_FRESH_MS), otherwise the question to the server. A cache HIT answers synchronously.
+     * @returns {{can: boolean, unverifiable: boolean, floorSecure: boolean}|Promise<object>}
+     */
+    function gateVerdict(record, fresh) {
+        var cacheKey = gateCacheKey(record);
+        var cached = cachedVerdict(cacheKey);
+        if (cached && (!fresh || Date.now() - cached.at < GATE_FRESH_MS)) {
+            return cached;
+        }
+
+        return queryCanManage(record, cacheKey);
     }
 
     /**
@@ -153,11 +254,12 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                 return false; // unsaved record
             }
 
-            var cacheKey = CACHE_KEY_PREFIX + record.recordType + "_" + record.recordId;
-            var cached = safeSessionGet(cacheKey);
-            if (cached === "true") return true;
-            if (cached === "false") return false;
-            return queryCanManage(record, cacheKey);
+            var verdict = gateVerdict(record, false);
+            if (typeof verdict.then === "function") {
+                return verdict.then(function (v) { return v.can === true; });
+            }
+
+            return verdict.can === true;
         } catch (error) {
             console.error(LOG, "canUpdateAccess failed:", error);
             return false;
@@ -172,6 +274,112 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
      */
     ns.isAccessMenuVisible = function (primaryControl) {
         return ns.canUpdateAccess(primaryControl);
+    };
+
+    // =========================================================================================================
+    // Task 114 - the platform's Share command on a Restricted record (owner round 67 amendment 4(a))
+    // =========================================================================================================
+
+    /** sprk_accesspermission = Restricted (internal use only). The same integer the BFF reads (Restricted 100000002). */
+    ns.ACCESS_PERMISSION_RESTRICTED = 100000002;
+
+    /**
+     * EnableRule ADDED to the platform's own form Share command on the project, matter and work assignment main forms
+     * (Merge-AccessRibbon.ps1 copies that command from the live ribbon and appends this rule): Share is hidden on a
+     * Restricted record, so sharing goes through Manage Access "+ User", which refuses a user flagged external there. A
+     * convenience only - the BFF removes such a share wherever it came from (task 114's Restricted remover, on the save
+     * and every 5 minutes).
+     *
+     * Reads the form's own sprk_accesspermission when the form carries it (so an unsaved change to Restricted hides Share
+     * once the ribbon refreshes - assignedaccess_postsave.js refreshes it on change); otherwise the saved value with ONE
+     * Xrm.WebApi.retrieveRecord. A read that fails hides Share (fail closed): "+ User" is still there. An unsaved record
+     * answers true - the platform's own rules keep Share off a new form.
+     * @param {object} primaryControl - the form context
+     * @returns {boolean|Promise<boolean>}
+     */
+    ns.isShareAllowed = function (primaryControl) {
+        try {
+            var attribute = primaryControl && typeof primaryControl.getAttribute === "function"
+                ? primaryControl.getAttribute("sprk_accesspermission")
+                : null;
+            if (attribute) {
+                return attribute.getValue() !== ns.ACCESS_PERMISSION_RESTRICTED;
+            }
+
+            var entity = primaryControl && primaryControl.data && primaryControl.data.entity;
+            var recordId = entity ? (entity.getId() || "").replace(/[{}]/g, "").toLowerCase() : "";
+            if (!recordId) {
+                return true;
+            }
+
+            return Promise.resolve(Xrm.WebApi.retrieveRecord(entity.getEntityName(), recordId, "?$select=sprk_accesspermission"))
+                .then(function (row) {
+                    return !!row && row.sprk_accesspermission !== ns.ACCESS_PERMISSION_RESTRICTED;
+                }, function (error) {
+                    console.warn(LOG, "sprk_accesspermission could not be read; Share stays hidden (use Manage Access).", error);
+                    return false;
+                });
+        } catch (error) {
+            console.error(LOG, "isShareAllowed failed; Share stays hidden.", error);
+            return false;
+        }
+    };
+
+    /** Ids per selection read - keeps the OData filter far below the URL limit. */
+    var SELECTION_BATCH = 50;
+
+    /**
+     * EnableRule ADDED to the platform's own GRID and SUBGRID Share command (task 114 follow-up; Merge-AccessRibbon.ps1
+     * copies those commands from the live ribbon and appends this rule): Share is hidden when ANY selected row is
+     * Restricted. Reads the selected rows' saved sprk_accesspermission (Xrm.WebApi, batched). A row that does not come
+     * back, or a read that fails, hides Share (fail closed); nothing selected answers true (the platform's own rules keep
+     * Share off then). The server's Restricted remover is the backstop either way.
+     * @param {string[]} selectedIds - SelectedControlSelectedItemIds
+     * @param {string} entityName - SelectedEntityTypeName
+     * @returns {boolean|Promise<boolean>}
+     */
+    ns.isShareAllowedForSelection = function (selectedIds, entityName) {
+        try {
+            var ids = (selectedIds || [])
+                .map(function (id) { return String(id || "").replace(/[{}]/g, "").toLowerCase(); })
+                .filter(function (id) { return id.length > 0; });
+            if (ids.length === 0) {
+                return true;
+            }
+            if (!entityName) {
+                return false;
+            }
+
+            var idColumn = entityName + "id";
+            var batches = [];
+            for (var i = 0; i < ids.length; i += SELECTION_BATCH) {
+                batches.push(ids.slice(i, i + SELECTION_BATCH));
+            }
+
+            return Promise.all(batches.map(function (batch) {
+                var filter = batch.map(function (id) { return idColumn + " eq " + id; }).join(" or ");
+                return Promise.resolve(Xrm.WebApi.retrieveMultipleRecords(
+                    entityName, "?$select=" + idColumn + ",sprk_accesspermission&$filter=(" + filter + ")"));
+            })).then(function (results) {
+                var rows = [];
+                results.forEach(function (result) { rows = rows.concat((result && result.entities) || []); });
+                var seen = {};
+                rows.forEach(function (row) { seen[String(row[idColumn] || "").toLowerCase()] = row; });
+                for (var j = 0; j < ids.length; j++) {
+                    var row = seen[ids[j]];
+                    if (!row || row.sprk_accesspermission === ns.ACCESS_PERMISSION_RESTRICTED) {
+                        return false; // Restricted, or not readable: hidden
+                    }
+                }
+                return true;
+            }, function (error) {
+                console.warn(LOG, "The selected rows' sprk_accesspermission could not be read; Share stays hidden.", error);
+                return false;
+            });
+        } catch (error) {
+            console.error(LOG, "isShareAllowedForSelection failed; Share stays hidden.", error);
+            return false;
+        }
     };
 
     // =========================================================================================================
@@ -427,10 +635,12 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
 
     /**
      * Shared body of the two enable rules: the caller may manage access (the cached can-manage-access verdict - Write on
-     * the record, the same rule as Update Access) AND `wanted(state)` holds for the record's secure state. An unknown flag
-     * satisfies neither rule, so a failed or masked read hides both commands.
+     * the record, the same rule as Update Access) AND what the record is filed under could be read (task 175:
+     * parentUnverifiable is not true - fail closed) AND `floorAllows(verdict)` holds (the same answer, at most
+     * GATE_FRESH_MS old) AND `wanted(state)` holds for the record's secure state. An unknown flag satisfies neither rule,
+     * so a failed or masked read hides both commands.
      */
-    function secureCommandEnabled(primaryControl, wanted) {
+    function secureCommandEnabled(primaryControl, wanted, floorAllows) {
         try {
             if (!helpersLoaded()) {
                 return false;
@@ -442,9 +652,24 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                 return false;
             }
 
-            return Promise.all([Promise.resolve(ns.canUpdateAccess(primaryControl)), readSecureState(entityName, record)])
+            return Promise.all([Promise.resolve(gateVerdict(record, true)), readSecureState(entityName, record)])
                 .then(function (answers) {
-                    return answers[0] === true && wanted(answers[1]) === true;
+                    var verdict = answers[0];
+                    if (verdict.can !== true) {
+                        return false;
+                    }
+
+                    if (verdict.unverifiable !== false) {
+                        console.info(LOG, "What this record is filed under could not be read, so Make Secure and Remove " +
+                            "Secure stay hidden.");
+                        return false;
+                    }
+
+                    if (floorAllows && floorAllows(verdict) !== true) {
+                        return false;
+                    }
+
+                    return wanted(answers[1]) === true;
                 })
                 .catch(function (error) {
                     console.warn(LOG, "A secure-command rule failed; the command stays hidden.", error);
@@ -459,7 +684,8 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     /**
      * EnableRule for "Make Secure": the caller has Write, and the record is NOT secure - or it is flagged secure but its
      * transition did not finish (round 40 item 1; acceptance (e) amended: hidden on a PROVISIONED secure record). Calling
-     * it again then finishes the transition: the server resumes or re-runs it.
+     * it again then finishes the transition: the server resumes or re-runs it. On a record filed under a parent the same
+     * rules hold (task 175, owner round 87: making a child stricter is allowed).
      */
     ns.canMakeSecure = function (primaryControl) {
         return secureCommandEnabled(primaryControl, function (state) {
@@ -467,10 +693,21 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
         });
     };
 
-    /** EnableRule for "Remove Secure": the record IS secure and the caller has Write (the server enforces F3). */
+    /**
+     * EnableRule for "Remove Secure": the record IS secure and the caller has Write (the server enforces F3) - and (task
+     * 175, owner round 87) its floor is not secure: a record whose Secure is inherited from what it is filed under cannot
+     * go below that floor, so the command is hidden there.
+     */
     ns.canRemoveSecure = function (primaryControl) {
         return secureCommandEnabled(primaryControl, function (state) {
             return state.secure === true;
+        }, function (verdict) {
+            if (verdict.floorSecure !== false) {
+                console.info(LOG, "This record's Secure designation is inherited from what it is filed under, so Remove " +
+                    "Secure stays hidden (remove it there, or file the record elsewhere).");
+                return false;
+            }
+            return true;
         });
     };
 
@@ -528,11 +765,32 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
             "access. Nothing was changed; you may try again."
     });
 
-    /** A refusal's text: this script's own words for a code in REFUSAL_COPY ({record} filled), else refusalText. */
+    /**
+     * Task 175 (owner round 87): the server's 409 refusal of Remove Secure on a work assignment or project whose floor is
+     * secure - filed under a secure parent (extensions parentRecordType, parentRecordId, parentName). Its `detail` is shown
+     * as sent.
+     */
+    ns.ACCESS_FOLLOWS_PARENT = "sdap.access.access_follows_parent";
+
+    /** That refusal's text when the server sent no `detail`: {record} per table, {parent} its parentName or "its parent". */
+    ns.ACCESS_FOLLOWS_PARENT_FALLBACK = "This {record} is filed under {parent}, which is secure; its secure designation " +
+        "comes from there. Remove it there, or file it elsewhere.";
+
+    /**
+     * A refusal's text: this script's own words for a code in REFUSAL_COPY ({record} filled); for access_follows_parent
+     * without a server message, ACCESS_FOLLOWS_PARENT_FALLBACK; else refusalText (the server's message).
+     */
     ns.refusalFor = function (commandName, result, entityName) {
         var code = reasonCodeOf(result);
+        var word = ns.RECORD_WORDS[entityName] || "record";
         if (code !== null && Object.prototype.hasOwnProperty.call(ns.REFUSAL_COPY, code)) {
-            return ns.REFUSAL_COPY[code].split("{record}").join(ns.RECORD_WORDS[entityName] || "record");
+            return ns.REFUSAL_COPY[code].split("{record}").join(word);
+        }
+
+        var body = result && result.body;
+        if (code === ns.ACCESS_FOLLOWS_PARENT && !(typeof body.detail === "string" && body.detail)) {
+            var parent = typeof body.parentName === "string" && body.parentName.trim() ? body.parentName : "its parent";
+            return ns.ACCESS_FOLLOWS_PARENT_FALLBACK.split("{record}").join(word).split("{parent}").join(parent);
         }
 
         return ns.refusalText(commandName, result);
@@ -567,7 +825,10 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
             "Whether {name} may access this {record} could not be checked, so the {record} was not shared with them. You " +
             "can share it with them later from Manage Access.",
         "sdap.provision.principal_share_failed":
-            "{name} was not given access to this {record}. You can share it with them later from Manage Access."
+            "{name} was not given access to this {record}. You can share it with them later from Manage Access.",
+        // Task 114 (owner round 67, owner wording): a person flagged external on a Restricted record.
+        "sdap.provision.principal_external_on_restricted":
+            "{name} is flagged as an external user and can't be given access to a Restricted record."
     });
 
     /** Round 33 item 5: the warning for a reason code this script does not know (the code is logged as well). */
@@ -629,6 +890,10 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                 return ns.describeSkippedPrincipal(person ? person.reasonCode : undefined, name, entityName);
             });
         })).then(function (lines) {
+            // Task 114: when nobody internal can open the record any more, the server says so - shown last, verbatim.
+            if (body && typeof body.noInternalReaderMessage === "string" && body.noInternalReaderMessage.trim()) {
+                lines.push(body.noInternalReaderMessage);
+            }
             alert(commandName, lines.join("\n\n"));
         });
     }
@@ -685,6 +950,12 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
             if (result.skipped && result.reason === "no-token") {
                 alert(commandName, "Sign-in needed - reload the page and retry. Nothing was changed.");
                 return result;
+            }
+
+            // Task 175: refused because the record's floor is secure and the cached gate answer did not know it - forget
+            // that answer, so the refreshed ribbon asks again and hides Remove Secure.
+            if (reasonCodeOf(result) === ns.ACCESS_FOLLOWS_PARENT) {
+                safeSessionRemove(gateCacheKey(record));
             }
 
             // Whatever the outcome, the record may have changed (a partial pass answers 500): re-read it.

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="257" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Per-customer M365 Copilot agent (§9 Q2) — design and provisioning step</title>
+    <phase>Model 1 dedicated-stamp remediation — §9 Q2 (owner 2026-09-28: per-customer agent); split from T218 (t218-plan.md F13, design 8)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New provisioning surface (M365 app package per customer) with auth implications.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Design work across M365 app catalog, auth and the T240c directory.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Design decisions with the owner.</parallel-reason>
+    <tags>provisioning, m365, copilot, auth</tags>
+    <deps>240c</deps>
+  </metadata>
+
+  <prompt>Decide and build how each customer gets its own Copilot agent bound to its own BFF.</prompt>
+
+  <goal>
+    A design (facts, one recommendation) and then the provisioning step for a per-customer M365 Copilot agent:
+    where the package lives (Model 1 users are guests in Spaarke's tenant, so one app catalog holds every customer's agent),
+    how it reaches the customer's BFF (its own scope, pre-authorization by H3), who can see it (the customer's security
+    group), and how it is updated.
+  </goal>
+
+  <context>
+    <background>src/solutions/CopilotAgent is an M365 declarative-agent / Teams package deployed by scripts/Deploy-CopilotAgent.ps1;
+      it is not Dataverse content, so it is not part of SpaarkeMaster (T218).</background>
+    <relevant-files>
+      <file>src/solutions/CopilotAgent/**; scripts/Deploy-CopilotAgent.ps1</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/t240-plan.md (shared clients, directory)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/t218-plan.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="owner">Per customer (§9 Q2). Research current M365 Copilot agent packaging with the researcher agent before designing.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Facts + research; design note with one recommendation; owner review.</step>
+    <step order="2">Implement the agreed provisioning step; tests; docs; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="false">Design note accepted by the owner.</criterion>
+  </acceptance-criteria>
+
+  <notes/>
+</task>

@@ -187,6 +187,10 @@ public class RecordOwnerAssignmentCensusTests
         new CensusEntry("TaskActionCore.cs", "sprk_event", 1, Disposition.Routed,
             "AI create-task: ForChild over the stamped parents; the caller-supplied owner no longer owns a filed task "
             + "(B2: the assignee belongs in Assigned To, task 152)."),
+        new CensusEntry("InquiryReplyTodoCreator.cs", "sprk_todo", 1, Disposition.Routed,
+            "Ontology task 071 (D-111): the \"Record the outcome of the budget inquiry\" To Do raised when a reply arrives: ForChild "
+            + "over the matter it is filed against (secure-if-any); the person it is for is Assigned To (task 152's rule); a "
+            + "refusal creates nothing and is logged (email capture never fails on it)."),
         new CensusEntry("DocumentCheckoutService.cs", "sprk_fileversion", 1, Disposition.Routed,
             "A file version is content of its document (ContentOf); a refusal is a 409 and nothing is written."),
         new CensusEntry("OfficeService.cs", "sprk_todo", 1, Disposition.Routed,
@@ -405,7 +409,7 @@ public class RecordOwnerAssignmentCensusTests
             "Office invoice quick-create — the resolver's team (task 080)."),
         new OwnerWriteEntry("OfficeService.cs", "CreateTodoAsync", 1, OwnerWriteKind.Routed,
             "Office to-do — secure-if-any over regarding, stamps and carriers."),
-        new OwnerWriteEntry("EmailUploadCaptureService.cs", "CaptureAsync", 1, OwnerWriteKind.Routed,
+        new OwnerWriteEntry("EmailUploadCaptureService.cs", "CaptureWithOutcomeAsync", 1, OwnerWriteKind.Routed, // word-add-in-r1 task 121: the body moved (CaptureAsync wraps it)
             "Upload capture — the team the evaluated filing resolved."),
         new OwnerWriteEntry("IncomingCommunicationProcessor.cs", "CreateCommunicationRecordAsync", 1, OwnerWriteKind.Routed,
             "Inbound email — the team the evaluated filing resolved."),
@@ -419,6 +423,8 @@ public class RecordOwnerAssignmentCensusTests
             "A record's default thread — its record's team; the per-user master thread keeps its user (E2)."),
         new OwnerWriteEntry("TaskActionCore.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
             "AI create-task — ForChild over the stamped parents."),
+        new OwnerWriteEntry("InquiryReplyTodoCreator.cs", "CreateIfNeededAsync", 1, OwnerWriteKind.Routed,
+            "The budget-inquiry outcome To Do (ontology 071) - ForChild over its matter, the resolver's team; nothing is created on a refusal."),
         new OwnerWriteEntry("OwnedChildWrite.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
             "The chat tools' owned create (owner S1 / G5) — the resolver's team, after the as-the-caller checks."),
         new OwnerWriteEntry("SecureChildReconciler.cs", "AssignAsync", 1, OwnerWriteKind.Routed,
@@ -1384,8 +1390,19 @@ public class RecordOwnerAssignmentCensusTests
     private static readonly IReadOnlyDictionary<string, string> RunAsUserWritesThatFileNothing = new Dictionary<string, string>
     {
         ["DataverseSearchDataHandler.cs"] = "POSTs to the Dataverse search action (searchquery) — a READ; writes no row.",
+        ["InquiryDispositionService.cs"] = "Ontology task 071 (D-111): the caller's own PATCHes of scalar columns only (the inquiry's "
+                                           + "disposition and state, the reply's association status, the outcome To Do's state): no lookup "
+                                           + "is written, so nothing is created or re-filed.",
         ["WorkProductRecordPersister.cs"] = "PATCHes ONE registry-declared text column (the work-product envelope JSON) on "
                                             + "the session's host record — never a lookup, so it files nothing anywhere.",
+        ["DecisionActionExecutors.cs"] = "Ontology platform R1 task 044: the caller PATCHes ONE budget amount column (sprk_totalbudget, D-55) and, on a work "
+                                         + "assignment, sprk_responseduedate / sprk_respondedon / sprk_responseoutcome after their Write — plain columns, never a "
+                                         + "lookup or an owner, so nothing is re-filed. The budget revision is created by the writer, owned through "
+                                         + "IRecordOwnershipResolver (ApplyTo); the To Do and event writes go through the child-records cores.",
+        ["EventDueAssigneeWrite.cs"] = "Ontology platform R1 task 044 (#29): PATCHes an event's sprk_duedate and/or its assignee CONTACT "
+                                       + "(sprk_assignedto, statuscode Reassigned, reassigned-by) as the caller, after their Write. It writes no "
+                                       + "regarding/filing lookup and no owner, so the row is filed under the same records and owned by the same "
+                                       + "team before and after; re-filing stays on PATCH /events/{id}/filing.",
     };
 
     [Fact(DisplayName = "Task 146 r2: every run-as-user POST and PATCH in the BFF is classified — routed, or files nothing")]
@@ -1804,7 +1821,7 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("CommunicationService.cs", "SendMessageAsync", "message sender (HTTP caller)"),
         new PersonBearingWriter("CommunicationService.cs", "ArchiveExistingAsync", "the caller asking for an archive"),
         new PersonBearingWriter("CommunicationEndpoints.cs", "ArchiveCommunicationAsync", "hands the HTTP caller to the archive"),
-        new PersonBearingWriter("EmailUploadCaptureService.cs", "CaptureAsync", "the Office user who saved the email"),
+        new PersonBearingWriter("EmailUploadCaptureService.cs", "CaptureWithOutcomeAsync", "the Office user who saved the email"), // task 121: the body moved
         new PersonBearingWriter("MessageAttachmentMaterializer.cs", "MaterializeAsync", "the message's sender, when the caller knows them"),
         new PersonBearingWriter("ThreadResolver.cs", "CreateRecordThreadAsync", "the caller creating a record thread"),
         new PersonBearingWriter("CommunicationProposalApplyService.cs", "ResolveAuditRowOwnerAsync", "the confirming user"),

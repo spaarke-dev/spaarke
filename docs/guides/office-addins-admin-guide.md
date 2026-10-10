@@ -105,7 +105,7 @@ Users (Outlook/Word)
 | Resource | Purpose | Resource Group |
 |----------|---------|----------------|
 | `spe-api-prod-*` | BFF API hosting | `rg-spaarke-prod-westus2` |
-| `spe-office-addins-prod` | Static asset hosting | `rg-spaarke-prod-westus2` |
+| `swa-spaarke-office-addins-prod` — custom domain `https://addins.spaarke.com` (corrected 2026-10-07; the `spe-office-addins-prod` named here before never existed) | Static asset hosting (production, all Model 1 customers) | `rg-spaarke-shared-prod`, subscription "Spaarke Shared Production" |
 | `spaarke-redis-prod` | Caching, rate limiting | `rg-spaarke-prod-westus2` |
 | `spaarke-servicebus-prod` | Job queue processing | `rg-spaarke-prod-westus2` |
 | `spe-insights-prod-*` | Application monitoring | `rg-spaarke-prod-westus2` |
@@ -179,8 +179,8 @@ The Office add-in uses a public client (SPA) registration with Dialog API authen
 | `brk-multihub://localhost` | Reserved for future NAA support |
 | `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/taskpane.html` | Dev SPA redirect |
 | `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/auth-dialog.html` | Dev Dialog API authentication |
-| `https://spe-office-addins-prod.azurestaticapps.net/taskpane.html` | Production SPA redirect |
-| `https://spe-office-addins-prod.azurestaticapps.net/auth-dialog.html` | Production Dialog API authentication |
+
+> **Production uses its own app registration** (corrected 2026-10-07): **Spaarke Office Add-in (Production)**, client ID `1958aec2-0218-495e-8e3c-37133e9b8357`, single tenant, SPA redirects `brk-multihub://addins.spaarke.com` and `https://addins.spaarke.com/auth-callback.html`, Graph `email profile User.Read` admin-consented. It has no API permission of its own: each customer backend pre-authorizes it (customer provisioning, step H3). The app above (`c1258e2d…`) is the **dev** identity only.
 
 > **Note**: When adding new Static Web Apps, ensure their redirect URIs are added to the app registration.
 
@@ -740,7 +740,7 @@ curl https://spe-api-prod-*.azurewebsites.net/healthz
 curl -H "Authorization: Bearer {token}" https://spe-api-prod-*.azurewebsites.net/office/search/matter-types
 
 # Check static assets
-curl -I https://spe-office-addins-prod.azurestaticapps.net/outlook/taskpane.html
+curl -I https://addins.spaarke.com/outlook/taskpane.html   # production (after the first production deploy)
 
 # Stream App Service logs
 az webapp log tail --name spe-api-prod-* --resource-group rg-spaarke-prod-westus2
@@ -939,7 +939,7 @@ Is add-in causing Office crashes?
 | M365 Admin Center | https://admin.microsoft.com |
 | Azure Portal | https://portal.azure.com |
 | BFF API Health | https://spe-api-prod-*.azurewebsites.net/healthz |
-| Static Assets | https://spe-office-addins-prod.azurestaticapps.net |
+| Static Assets | https://addins.spaarke.com (production) |
 
 ### Key Commands
 

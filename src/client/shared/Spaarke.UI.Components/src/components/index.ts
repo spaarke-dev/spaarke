@@ -50,6 +50,16 @@ export * from './Playbook';
 
 // Wizard - Multi-step dialog shell and infrastructure
 export * from './Wizard';
+// InAppWizardHost (task 112, D-26) — exported here, not from the domain-free Wizard barrel,
+// because it mounts the five Create wizards.
+export { InAppWizardHost } from './Wizard/InAppWizardHost';
+export type {
+  IInAppWizardHostProps,
+  IInAppWizardRenderContext,
+  InAppHostedWizardName,
+  InAppWizardRenderer,
+  InAppWizardRenderers,
+} from './Wizard/InAppWizardHost';
 
 // FileUpload - Generic drag-and-drop file upload components
 export * from './FileUpload';
@@ -143,6 +153,10 @@ export * from './PaneHeaderToolsMenu';
 
 // TagFilter - Generic multi-select chip filter for Fluent v9 (FR-SC-01, matter-ui-r1 task 010)
 export * from './TagFilter';
+
+// RowActionMenu - the ONE shared descriptor-driven row-action menu (C-9; DocumentRowMenu and the four former
+// bespoke row menus are built on it)
+export * from './RowActionMenu';
 
 // DocumentRowMenu - 3-dot row-action menu for document grids (FR-SC-02, matter-ui-r1 task 011)
 export * from './DocumentRowMenu';
@@ -301,3 +315,19 @@ export * from './StatusBadge';
 // (/grant, /invite-and-grant, /revoke) — context-agnostic (ADR-012), no Xrm
 // dependency in the shared core.
 export * from './AccessGrantModal';
+
+// StatusBadge - generic status/severity badge (label + tone), no domain
+// vocabulary. The ONE legitimately-new UI primitive added by
+// spaarke-ontology-platform-r1 task 012 (C-4, spec FR-28/FR-41); `success`
+// tone added by task 057 (D-24).
+export * from './StatusBadge';
+
+// ConsoleKit - Spaarke Console kit pieces with no Fluent/shared equivalent:
+// EvidenceLine, StatusBar, RecordRow, AggregateCard + the console-state to
+// StatusBadge-tone table (spaarke-ontology-platform-r1 task 057, FR-28/D-24).
+export * from './ConsoleKit';
+
+// Worklist - MatterCard, the ONE worklist row component (one card per core record,
+// one IssueLine per Work Item; data-driven variants). spaarke-ontology-platform-r1
+// task 051 (FR-25/FR-28, D-24).
+export * from './Worklist';

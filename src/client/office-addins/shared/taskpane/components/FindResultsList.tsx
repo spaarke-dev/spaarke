@@ -8,9 +8,11 @@ import {
   Spinner,
   Text,
   makeStyles,
+  mergeClasses,
   tokens,
   type GriffelStyle,
 } from '@fluentui/react-components';
+import { OpenRegular } from '@fluentui/react-icons';
 import { useLazyResults } from '../hooks/useLazyResults';
 import type { AnnounceMode } from '../hooks/useAnnounce';
 import type { RecordSeedSource, RecordMatch, UseFindRecordMatchesResult } from '../hooks/useFindRecordMatches';
@@ -54,7 +56,8 @@ import { FindSplitPane } from './FindSplitPane';
  * for a document row (`sprk_document`), a hub/parent row (`sprk_matter` / `sprk_project` / `sprk_invoice` /
  * `sprk_document` for an email hub — see `extractHubRecordId`'s doc comment), or a matching-record row
  * (`record.recordType` / `record.recordId`). `FindView` is the only caller and wires this to
- * `openRecord` from `services/openRecordLauncher.ts`, gated on `canOpenBrowserWindow` + `ORG_URL` (NFR-10).
+ * `openRecord` from `services/openRecordLauncher.ts`, gated on `canOpenSpaarkeRecords` (ORG_URL + a way to open a
+ * browser tab — `openBrowserWindow` or, on the web, `window.open`; task 120) (NFR-10).
  * Omitting the prop (no capability / no config) renders every row as plain, non-interactive text — never a
  * dead link.
  *
@@ -120,6 +123,9 @@ const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** A stable empty-array identity — see `DocumentsSection`'s `nodes` memo for why this matters. */
 const EMPTY_NODES: FindResultNode[] = [];
+
+/** Tooltip / description for an openable row (task 119). */
+const OPEN_IN_SPAARKE = 'Open in Spaarke';
 
 /**
  * The real Dataverse id behind a hub node, or `null` when there is none to open.
@@ -268,6 +274,22 @@ const useStyles = makeStyles({
   rowStatic: {
     border: `1px solid ${tokens.colorNeutralStroke2}`,
   },
+  // Task 119 (UAT round 12 O4/W2): an openable row must LOOK openable. A borderless `subtle` button read as
+  // plain text (the static fallback even had the border), so the owner could not tell the rows were links.
+  // Same border as the static row + an open glyph at the end; hover/focus come from the Fluent button states.
+  rowOpenable: {
+    position: 'relative',
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    paddingRight: tokens.spacingHorizontalXXL,
+  },
+  openGlyph: {
+    position: 'absolute',
+    top: tokens.spacingVerticalS,
+    right: tokens.spacingHorizontalS,
+    color: tokens.colorBrandForeground1,
+    fontSize: tokens.fontSizeBase400,
+    pointerEvents: 'none',
+  },
   rowLabel: {
     fontWeight: tokens.fontWeightSemibold,
   },
@@ -358,6 +380,9 @@ function HubSection({
               appearance="subtle"
               size="small"
               className={styles.hubRowButton}
+              icon={<OpenRegular />}
+              iconPosition="after"
+              title={OPEN_IN_SPAARKE}
               onClick={() => onOpenRecord!(target.entityType, target.recordId)}
             >
               {label}
@@ -425,11 +450,13 @@ function ResultRow({
     return (
       <Button
         appearance="subtle"
-        className={styles.row}
+        className={mergeClasses(styles.row, styles.rowOpenable)}
+        title={OPEN_IN_SPAARKE}
         onClick={() => onOpenRecord('sprk_document', cleanGuid(node.id))}
       >
         <span className={styles.rowLabel}>{label}</span>
         {meta && <span className={styles.rowMeta}>{meta}</span>}
+        <OpenRegular className={styles.openGlyph} aria-hidden="true" />
       </Button>
     );
   }
@@ -622,11 +649,13 @@ function RecordRow({
     return (
       <Button
         appearance="subtle"
-        className={styles.row}
+        className={mergeClasses(styles.row, styles.rowOpenable)}
         data-testid="find-record-row"
+        title={OPEN_IN_SPAARKE}
         onClick={() => onOpenRecord(record.recordType, record.recordId)}
       >
         {content}
+        <OpenRegular className={styles.openGlyph} aria-hidden="true" />
       </Button>
     );
   }
@@ -726,7 +755,7 @@ export interface FindResultsListProps {
    * Task 092: opens a document row (`sprk_document`), a parent/hub row (`sprk_matter` /
    * `sprk_project` / `sprk_invoice` / `sprk_document`), or a matching-record row (`record.recordType`)
    * via `(entityType, recordId)`. `FindView` wires this to `openRecord`, gated on
-   * `canOpenBrowserWindow` + `ORG_URL` (NFR-10). Omitted → every row renders as plain, non-interactive
+   * `canOpenSpaarkeRecords` (task 120; NFR-10). Omitted → every row renders as plain, non-interactive
    * text (never a dead link).
    */
   onOpenRecord?: OpenRecordHandler;

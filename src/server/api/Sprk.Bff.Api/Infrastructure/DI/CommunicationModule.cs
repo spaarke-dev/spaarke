@@ -119,6 +119,13 @@ public static class CommunicationModule
         services.AddSingleton<CommunicationAccountService>();
         services.AddSingleton<ApprovedSenderValidator>();
         services.AddSingleton<CommunicationService>();
+        // Budget Inquiry executor (ontology task 070): called by the decision commit route; scoped because it holds the
+        // caller's IDataverseUserClient. The sender delegates to the singleton CommunicationService above.
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryEmailSender>();
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.BudgetInquiryExecutor>();
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryDispositionService>();
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.PolicyActionRateService>();
+        services.AddScoped<Sprk.Bff.Api.Services.Signals.Actions.InquiryReplyTodoCreator>();
         // ADR-010 testing-seam over CommunicationService.ReconstructEnvelopeAsync for the Job B apply path (task 031
         // citation re-verify). Pass-through to the singleton CommunicationService → singleton.
         services.AddSingleton<ICommunicationEnvelopeReader>(sp => sp.GetRequiredService<CommunicationService>());

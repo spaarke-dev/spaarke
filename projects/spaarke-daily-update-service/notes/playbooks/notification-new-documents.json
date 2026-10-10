@@ -11,7 +11,7 @@
   "playbook": {
     "id": "NP-003",
     "name": "New Documents on Your Matters",
-    "description": "Identifies documents added to user's matters since the last check (configurable time window) and creates notifications for each new document.",
+    "description": "Notifies the user of sprk_document records created in the last 24 hours by someone else on their matters, on matters they own, or that they own, one notification per document. The 24-hour window is fixed (the scheduler passes timeWindowHours=24; the timeWindow parameter is not applied yet).",
     "sprk_playbooktype": 2,
     "isPublic": true,
     "isSystemPlaybook": true,
@@ -44,6 +44,7 @@
     {
       "name": "Start",
       "nodeType": "Control",
+      "executorType": 33,
       "actionType": null,
       "canvasType": "start",
       "outputVariable": "start",
@@ -60,6 +61,7 @@
     {
       "name": "Lookup My Matters",
       "nodeType": "Workflow",
+      "executorType": 52,
       "actionType": 52,
       "canvasType": "lookupUserMembership",
       "outputVariable": "myMatters",
@@ -71,12 +73,13 @@
         "entityType": "sprk_matter",
         "targeting": "people",
         "includeRelated": false,
-        "description": "Resolve the matters FOR the executing user via the people-targeting surface (targeting: people, ADR-034 Amendment A3): records they created (human Created By), are named on (Assigned To, via their linked contact) or personally own — never matters reached only through team, business-unit or organization ownership. Resolved IDs are bound to `myMatters.ids` for downstream filtering via {{joinIds myMatters.ids}}."
+        "description": "Resolve the matters FOR the executing user via the people-targeting surface (targeting: people, ADR-034 Amendment A3): records they created (human Created By), are named on (Assigned To, via their linked contact) or personally own — never matters reached only through team, business-unit or organization ownership. Resolved IDs are bound to `myMatters.ids` for downstream filtering (the query writes them as <value> children with fetchInGuids)."
       }
     },
     {
       "name": "Query New Documents",
       "nodeType": "Workflow",
+      "executorType": 51,
       "actionType": 51,
       "canvasType": "queryDataverse",
       "outputVariable": "newDocsQuery",
@@ -87,16 +90,17 @@
         "__actionType": 51,
         "queryMode": true,
         "entityLogicalName": "sprk_document",
-        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_document\"><attribute name=\"sprk_documentname\"/><attribute name=\"sprk_filename\"/><attribute name=\"createdon\"/><attribute name=\"sprk_documentid\"/><attribute name=\"sprk_matter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_matter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"createdon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><condition attribute=\"createdby\" operator=\"ne-userid\"/><filter type=\"or\"><condition attribute=\"sprk_matter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"createdon\" descending=\"true\"/></entity></fetch>",
+        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_document\"><attribute name=\"sprk_documentname\"/><attribute name=\"sprk_filename\"/><attribute name=\"createdon\"/><attribute name=\"sprk_documentid\"/><attribute name=\"sprk_matter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_matter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"createdon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><condition attribute=\"createdby\" operator=\"ne-userid\"/><filter type=\"or\"><condition attribute=\"sprk_matter\" operator=\"in\">{{fetchInGuids myMatters.ids}}</condition><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"createdon\" descending=\"true\"/></entity></fetch>",
         "templateParameters": {
           "timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"
         },
-        "description": "New sprk_document records (createdby != current user, createdon in last {{timeWindowHours}}, default 24h) where EITHER (a) sprk_matter is in the user's myMatters.ids membership set [LookupUserMembership branch], OR (b) the document owner is the current user, OR (c) the related sprk_matter owner is the current user. Outer link so docs without matter linkage still match on ownerid. Note attribute is sprk_documentname (NOT sprk_name)."
+        "description": "sprk_document rows created in the last 24 hours (timeWindowHours; the scheduler passes 24) by someone other than the user, where (a) sprk_matter is one of the user's matters (myMatters.ids from Lookup My Matters, written as <value> children by fetchInGuids; an empty list matches nothing), OR (b) the linked matter's owner is the user, OR (c) the document's own owner is the user. The matter link is outer, so a document with no matter still matches on (c). Newest first, at most 50."
       }
     },
     {
       "name": "Check Results",
       "nodeType": "Control",
+      "executorType": 30,
       "actionType": 30,
       "canvasType": "condition",
       "outputVariable": "hasNewDocs",
@@ -117,6 +121,7 @@
     {
       "name": "Create Notification",
       "nodeType": "Workflow",
+      "executorType": 50,
       "actionType": 50,
       "canvasType": "createNotification",
       "outputVariable": "notification",
@@ -126,7 +131,7 @@
       "configJson": {
         "__actionType": 50,
         "title": "{{newDocsQuery.output.count}} new document(s) on your matters",
-        "body": "{{#each newDocsQuery.output.items}}{{sprk_filename}} added to {{matterName}} ({{createdon}}).\n{{/each}}",
+        "body": "{{#each newDocsQuery.output.items}}{{sprk_filename}} added to {{lookup this 'm.sprk_mattername'}} ({{createdon}}).\n{{/each}}",
         "category": "new-documents",
         "priority": 200000000,
         "recipientId": "{{run.userId}}",
@@ -134,7 +139,7 @@
         "iterateItems": true,
         "itemNotification": {
           "title": "New document: {{item.sprk_filename}}",
-          "body": "{{item.sprk_filename}} was added to {{item.matterName}}",
+          "body": "{{item.sprk_filename}} was added to {{lookup item 'm.sprk_mattername'}}",
           "category": "new-documents",
           "priority": 200000000,
           "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_document&id={{item.sprk_documentid}}",
@@ -147,7 +152,7 @@
           "sourceModifiedOn": "{{item.createdon}}",
           "sourceOwningUser": "{{item.ownerid}}",
           "viaMatterId": "{{item.sprk_matter}}",
-          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterName": "{{lookup item 'm.sprk_mattername'}}",
           "viaMatterMembershipsVariable": "myMatters"
         }
       }

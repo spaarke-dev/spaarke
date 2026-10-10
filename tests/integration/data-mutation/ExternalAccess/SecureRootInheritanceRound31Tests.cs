@@ -108,7 +108,8 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         using var scope = _fixture.Services.CreateScope();
         return await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest(recordType, recordId, user, level),
-            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), _users.Client, new Mock<ITenantCache>().Object,
+            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), _users.Client, _fixture.NoAccessReads,
+            new Mock<ITenantCache>().Object,
             new InternalUserShareTests.StubCallerRightsProbe(
                 AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete
                 | AccessRights.Share),
@@ -128,7 +129,7 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
             new AssignedAccessTestDoubles.Harness(_fixture.InheritedLedger).Materializer,
             scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(),
             scope.ServiceProvider.GetRequiredService<SecureRootInheritance>(),
-            Caller(), NullLogger<Program>.Instance, CancellationToken.None);
+            new Spaarke.Scheduling.ProcessLocalScheduledJobLease(), Caller(), NullLogger<Program>.Instance, CancellationToken.None);
     }
 
     private static (int Status, string? Code, JsonElement Body) Problem(IResult result)
@@ -652,24 +653,25 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
     /// <summary>
     /// Task 158 r1c-v2 — main-session round 39 item 1 REVERSES interpretation xiii (this test asserted the opposite before):
     /// unsecuring a parent ends what it passed on. The matter's unsecure ends the unmodified share it passed on to the secure
-    /// work assignment filed under it — which stays SECURE (never auto-unsecure) — and its row is ended.
+    /// work assignment filed under it, and its row is ended. Task 175 (owner round 84, replacing "never auto-unsecure"): the
+    /// work assignment then follows the matter out of secure in the same call (owned by its business unit's team, its own
+    /// shares revoked).
     /// </summary>
     [Fact]
-    public async Task UnsecuringTheMatter_EndsWhatItPassedOn_AndTheFiledRecordStaysSecure()
+    public async Task UnsecuringTheMatter_EndsWhatItPassedOn_AndTheFiledRecordFollowsIt()
     {
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecuredWorkAssignment(workAssignment, matter);
+        SecureRootInheritanceTests.InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
         await ShareAsync("matter", matter, Colleague);
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror);
 
         (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        _fixture.IsSecureOf(workAssignment).Should().BeTrue("never auto-unsecure");
-        _fixture.OwningTeamOf(workAssignment).Should().Be(SecureTeam);
+        _fixture.IsSecureOf(workAssignment).Should().BeFalse("round 84: it follows the matter out of secure");
+        _fixture.OwningTeamOf(workAssignment).Should().Be(SecureChildShareWorld.GeneralTeam);
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "round 39: the access came only from the matter's share");
-        _fixture.ShareMaskOf(workAssignment, Creator).Should().Be(Mask(ProvisionProjectEndpoint.CreatorAccessRights),
-            "the creator's own share is not the matter's to end");
         var row = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
         row.State.Should().Be(AssignedAccessState.Revoked);
         row.Reason.Should().Be(AssignedAccessReason.AccessRemoved);
@@ -696,7 +698,7 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
 
         run.Success.Should().BeTrue(run.ErrorMessage);
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "its access there came from the matter");
-        _fixture.IsSecureOf(workAssignment).Should().BeTrue("never auto-unsecure");
+        _fixture.IsSecureOf(workAssignment).Should().BeTrue("a record left with no parent keeps its values (round 84)");
         Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.AccessRemoved);
     }
 

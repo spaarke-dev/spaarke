@@ -4,7 +4,7 @@
     <title>sprk_event date columns: UserLocal to Date Only, own PR</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>One-way Dataverse schema change plus a data conversion, then BFF and client date handling.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -53,6 +53,8 @@
   </acceptance-criteria>
 
   <notes>Created 2026-10-05 by the main session on the owner's decision.</notes>
+
+  <completion>COMPLETED 2026-10-08: PR #1359 merged to master by owner approval (merge commit 11dc9b0da; head fcdd78409). Final round independently re-checked (merge-ready, no F-class); task 065 (Briefing reads sprk_duedate, D-27) and D-43 (overdue from 1 day) landed with it. Publish delta +18,125 B. Follow-ups: task 068 (D-63 remaining sprk_finalduedate readers), task 106 (sprk_todo Date Only), #1402 (ISS-011 test-only live-leg cleanup, fixed in 106).</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -21,13 +21,24 @@ public sealed record AssignedAccessListQuery(string? RecordType, Guid? RecordId)
 /// </summary>
 public sealed record AssignedAccessDismissRequest(string? RecordType, Guid? RecordId, Guid? EntryId);
 
-/// <summary>What <c>/assigned-access/sync</c> did: the Assigned-To materialization and the No Access re-application.</summary>
+/// <summary>
+/// What <c>/assigned-access/sync</c> did: the Assigned-To materialization, the No Access re-application and the Restricted
+/// rule for users flagged external.
+/// </summary>
 /// <param name="AssignedAccess">The Assigned-To outcome for the record (task 142).</param>
 /// <param name="NoAccess">Task 143's record-scoped No Access enforcement (owner R3: "Update Access" also re-applies No
 /// Access) — one report per covering entry.</param>
 public sealed record AssignedAccessSyncResponse(
     AssignedAccessOutcome AssignedAccess,
-    IReadOnlyList<NoAccessEnforcementReport> NoAccess);
+    IReadOnlyList<NoAccessEnforcementReport> NoAccess)
+{
+    /// <summary>
+    /// Task 114 (owner round 67): on a Restricted record, the shares of users flagged external that were removed, and
+    /// whether that left a secure record with no internal reader or with an external owner. <c>null</c> only from a caller that did not run the rule. Additive: an older
+    /// client that does not read it is unaffected.
+    /// </summary>
+    public RestrictedExternalShareReport? RestrictedExternal { get; init; }
+}
 
 /// <summary>The record's live Assigned-To ledger entries (Manage Access suggestions and provenance).</summary>
 public sealed record AssignedAccessListResponse(IReadOnlyList<AssignedAccessListEntry> Entries);
@@ -42,7 +53,8 @@ public sealed record AssignedAccessDismissResponse(Guid EntryId, int Declined);
 /// <item><c>POST /assigned-access/sync</c> — called by the MDA form's post-save script
 /// (<c>sprk_assignedaccess_postsave.js</c>), by every client writer after its create (Create Matter / Project / Work
 /// Assignment wizards) and by the "Update Access" ribbon command. Re-applies the record's No Access entries (task 143's
-/// record-scoped enforcer) and then materializes its Assigned-To access — ONE call.</item>
+/// record-scoped enforcer), removes the shares of users flagged external when the record is Restricted (task 114 — the
+/// save is where a record BECOMES Restricted) and then materializes its Assigned-To access — ONE call.</item>
 /// <item><c>GET /assigned-access</c> — the record's ledger entries for Manage Access: suggestions on a secure record
 /// (PendingConfirmation, naming the source field) and the residual read-time access an auto grant's subject keeps.</item>
 /// <item><c>POST /assigned-access/dismiss</c> — Dismiss a suggestion: Declined, which no trigger re-creates while the
@@ -61,8 +73,9 @@ public sealed record AssignedAccessDismissResponse(Guid EntryId, int Declined);
 /// <para><b>Answers</b> (ADR-019: ProblemDetails with a stable reason code, a human message and the trace id — never a
 /// bare 500). 200 with both outcomes. 503 <c>flags_unreadable</c> when the record's access settings could not be read
 /// (nothing written). 500 <c>sync_failed</c> when the record or its ledger could not be read, <c>sync_incomplete</c>
-/// when a write could not be confirmed, <c>no_access_incomplete</c> when a No Access removal could not be confirmed —
-/// each carrying the outcome.</para>
+/// when a write could not be confirmed, <c>no_access_incomplete</c> when a No Access removal could not be confirmed,
+/// <c>restricted_external_incomplete</c> when an external user's share on a Restricted record could not be removed or
+/// confirmed gone — each carrying the outcome.</para>
 /// </remarks>
 public static class AssignedAccessSyncEndpoint
 {
@@ -72,6 +85,7 @@ public static class AssignedAccessSyncEndpoint
     internal const string SyncFailedReasonCode = "sdap.access.assigned.sync_failed";
     internal const string SyncIncompleteReasonCode = "sdap.access.assigned.sync_incomplete";
     internal const string NoAccessIncompleteReasonCode = "sdap.access.assigned.no_access_incomplete";
+    internal const string RestrictedExternalIncompleteReasonCode = "sdap.access.assigned.restricted_external_incomplete";
     internal const string EntryRequiredReasonCode = "sdap.access.assigned.entry_required";
     internal const string EntryNotPendingReasonCode = "sdap.access.assigned.entry_not_pending";
     internal const string ListFailedReasonCode = "sdap.access.assigned.list_failed";
@@ -131,6 +145,7 @@ public static class AssignedAccessSyncEndpoint
         AssignedAccessSyncRequest request,
         AssignedAccessMaterializer materializer,
         NoAccessShareEnforcer noAccessEnforcer,
+        RestrictedExternalShareRemover restrictedExternal,
         IConfiguration configuration,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -147,6 +162,11 @@ public static class AssignedAccessSyncEndpoint
         //     materializer decides — and the materializer consults the same guard, so it never re-creates one.
         var noAccess = await noAccessEnforcer.EnforceForRecordAsync(logical, root.Id, tenants, ct);
 
+        // (1b) Task 114 (owner round 67 item 4): a Restricted record keeps no direct share of a user flagged external. Run
+        //      BEFORE the materializer, so it records a share removed here as Restricted (given back when the record stops
+        //      being Restricted), never as an operator's removal.
+        var restricted = await restrictedExternal.RemoveForRecordAsync(root.Type, root.Id, tenants, ct);
+
         // (2) The Assigned-To invariant, from the record's own columns. The caller's oid becomes sprk_grantedby (A1).
         var outcome = await materializer.MaterializeAsync(
             new AssignedAccessRequest(
@@ -156,7 +176,7 @@ public static class AssignedAccessSyncEndpoint
                 CacheTenants: tenants),
             ct);
 
-        var response = new AssignedAccessSyncResponse(outcome, noAccess);
+        var response = new AssignedAccessSyncResponse(outcome, noAccess) { RestrictedExternal = restricted };
 
         switch (outcome.Status)
         {
@@ -190,6 +210,15 @@ public static class AssignedAccessSyncEndpoint
         {
             return Refused(httpContext, StatusCodes.Status500InternalServerError, "No Access not fully re-applied",
                 NoAccessIncompleteReasonCode, noAccessFailure.Message, response);
+        }
+
+        if (restricted.Failures.FirstOrDefault() is { } restrictedFailure)
+        {
+            logger.LogError(
+                "[ASSIGNED-ACCESS] Sync of {Type} {RecordId}: the Restricted rule for external users is incomplete: {Failures}",
+                root.Type, root.Id, string.Join(" | ", restricted.Failures.Select(f => $"{f.Kind} {f.SystemUserId}")));
+            return Refused(httpContext, StatusCodes.Status500InternalServerError, "Restricted access not fully applied",
+                RestrictedExternalIncompleteReasonCode, restrictedFailure.Message, response);
         }
 
         return TypedResults.Ok(response);

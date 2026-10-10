@@ -163,7 +163,13 @@ export interface ISendEmailDialogProps {
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl: string;
   onSent?: (communicationId: string) => void;
+  /** Notified of every failed send — see the engine's `onError`. Does not, by itself, silence the failure dialog. */
   onError?: (err: SendCommunicationError) => void;
+  /**
+   * Forwarded to the engine. `'host'` turns off the composer's "Email not sent" dialog because the host shows
+   * the failure itself (e.g. an error toast from `onError`). Default `'dialog'`.
+   */
+  sendFailureDisplay?: 'dialog' | 'host';
 
   // — Conversation context (R3 task 020, FR-07/FR-19) — all optional/additive —
   /**
@@ -288,8 +294,10 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
   }, [associations, regarding]);
 
   // While a native lookup pane (To/Cc people picker, "link a record"/"add a
-  // relationship" advanced lookup) is open, HIDE this surface so the (higher
-  // z-index) modal doesn't cover it — same fix as AccessGrantModal (owner UAT
+  // relationship" advanced lookup) is open, the surface YIELDS to it (SprkModal
+  // `yieldToSidePane`): dimmed and inert, with the pane on top of it — or docked
+  // left of the pane where it cannot be layered above (owner #1371, 2026-10-07:
+  // hiding the composer read as it closing; was `hidden` since owner UAT
   // 2026-08-12 #2A/#2B). The modal stays mounted; the draft is preserved. Only
   // applies when `nonBlocking` (an MDA/PCF host that wired the native lookups).
   const [lookupHidden, setLookupHidden] = React.useState(false);
@@ -312,7 +320,7 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
     <SprkModal
       open={open}
       onClose={onClose}
-      hidden={lookupHidden}
+      yieldToSidePane={lookupHidden}
       title={title}
       // fullBleed hosts (record-modal reply, dedicated compose window) start —
       // and stay — at the shell's true-takeover `full` size; everyone else gets

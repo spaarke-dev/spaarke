@@ -980,6 +980,14 @@ proposed from a single case; (C) comply — keep the guard advisory in legacy SD
 `continue-on-error` and the ruleset (Router only) mean a violation never stops a merge; also "Tier 1 advisory first"
 (the DataGrid gate's pattern) — declined by the owner.
 
+| ADR | Rule challenged | Conflict | Path | Rationale |
+|---|---|---|---|---|
+| **ADR-050** | Modals use the named sizes only; no bespoke width/height | Task 056 (PR #1386) moves `WizardShell` into `SprkModal`. Three non-embedded consumers (Console Create Analysis via AI.Widgets, the SemanticSearchControl PCF's Email documents, the external SPA upload) pass raw `maxWidth`/`height` strings, so 056 keeps a transitional `SprkModal.legacySize` and `WizardShell`'s deprecated `maxWidth`/`height` | **A — project-scoped exception (✅ APPROVED by owner 2026-10-07, D-70) — CLOSES when PR #1415 (task 111) merges: it deletes `legacySize` and the deprecated props, with a test that fails if they return (open until then)** | Mapping those consumers now means rebuilding and redeploying the SemanticSearchControl PCF and AI.Widgets inside 056, which is task 111's job (111 already maps consumers 1, 3, 5 and deploys them). The values nearly match named sizes today (1280px/85vh ≈ `lg`, 60vw/70vh ≈ `wizard`). **Time-boxed:** task 111 deletes `legacySize` and the deprecated props, with a test that they no longer exist; no new consumer may use them meanwhile |
+
+**Alternatives considered for ADR-050**: (B) amend ADR-050 to allow a bespoke size escape hatch — rejected; the rule
+is right. (C) comply inside 056 — rejected because it pulls two PCF/package redeploys into a library refactor and
+delays #1386 for no user benefit, when task 111 deploys the same consumers next.
+
 ---
 
 ## 7. Success criteria
@@ -998,8 +1006,7 @@ proposed from a single case; (C) comply — keep the guard advisory in legacy SD
 | 10 | **Something happens in the world**: a confirmed Signal produces an Inquiry through the gate, ~~carrying an SLA~~ *(SLA deferred after R1 — amended 2026-10-07, D-20)*, and the reply resolves it with a `sprk_disposition` queryable per matter and per outside firm | End-to-end on seeded data |
 | 11 | **Classifier recall meets its floor** — **≥ 80% on ≥ 50 labelled items** (D-10) | Labelled-set measurement, number recorded |
 
-**Standing metric, not a criterion**: *action rate per policy* = acted ÷ surfaced, a zero-code Dataverse
-rollup. Below roughly half, a policy is generating noise and is a candidate for retirement or re-thresholding.
+**Standing metric, not a criterion**: *action rate per policy* = acted ÷ (acted + dismissed), per policy version, over the last 90 days, "too few to judge" below 5 (**H-7**, owner-confirmed D-111; administrative closures — Superseded, Policy Retired, Condition Cleared — and open Signals are excluded), computed server-side over `sprk_signal`. Below roughly half, a policy is generating noise and is a candidate for retirement or re-thresholding.
 ⚠️ For **Do** rules this must be computed from **`sprk_signal.sprk_resolutiontype`** — built the other way it
 would report ~0% action rate on every Do rule, making a noisy policy and a perfect one look identical.
 
@@ -1107,13 +1114,24 @@ open list. Each changes the requirements and the task plan; FR text is amended w
 | **D-54** (O-15) | Record the response | **Add response columns to `sprk_workassignment`** (responded-on, outcome; exact set decided in the task) — coordinate with the work-assignment owner and uac-r2 (secure root); the rule reads them | 044, 061; schema task |
 | **D-55** (O-16) | Budget amount write | The budget amount is written **as the signed-in user** (their rights, their audit); the writer only creates the revision | 044 |
 | **D-56** (O-18) | Inquiry due date | **No** response-due date on the inquiry in R1 | 070 |
-| **D-57** (task 060 escalation, 2026-10-07) | Stranded Draft events | **No data change.** The Daily Briefing uses the same open-work predicate as everything else (`EventStatusCode.IsOpenWork`); 060 re-scoped to that code change (own PR) | 060 |
+| **D-57** (task 060 escalation, 2026-10-07) — **SUPERSEDED by D-74** | Stranded Draft events | ~~No data change.~~ The Daily Briefing uses the same open-work predicate as everything else (`EventStatusCode.IsOpenWork`); 060 re-scoped to that code change (own PR) | 060 |
 | **D-58** (task 047 escalation) | Work-assignment response columns | Owner approves as area owner: **`sprk_respondedon`** (Date Only) and **`sprk_responseoutcome`** (choice: Received outside Spaarke / Delivered on the matter / No longer needed), home solution `SpaarkeCore`; notes go in the Decision Record | 047 |
 | **D-59** (task 046 escalation) | Server-side work-assignment create | Build it on uac-r2's **`RecordCreationService`** (team-owned, creator stamped, secured at create under a Secure parent) under uac-r2's review; accept the differences from today's user-owned wizard; the route also checks AppendTo on the parent every time | 046 |
 | **D-60** (found by stream C2) | Solution hygiene | **Remove the 11 foreign tables** (matter, project, document, work assignment …) from `OntologyPlatformSolution` in spaarkedev1 — it only drops the solution reference; keep this project's five tables and its own added columns; before/after component evidence + a GitHub issue | New small task (C2) |
 | **D-61** (uac-r2 review on #1355) | Nightly write volume | The evaluator writes `sprk_lastevaluated` (and any Signal field) **only when the evaluation result changes**; run-level "last evaluated" goes to telemetry, not the Signal row — uac-r2's secure-sync job lists at most 100,000 changed rows per table per pass and fails for every table past that | 031 |
 | **D-62** (uac-r2 question) | Decision Record create | **Remove Console User's Create on `sprk_decisionrecord`** with task 049 (alongside Write on `sprk_signal`); only the BFF commit route creates Decision Records | 049 |
 | **D-63** (task 098 finding, 2026-10-07) | Final due date everywhere | `sprk_finalduedate` is informational **everywhere**: the live notification playbook node "Query Overdue Tasks" (`348b6395-…`), the VisualHost due-date card and the CalendarVisual default all judge/show `sprk_duedate` (the playbook data change is approved by this decision) | Task 068 |
+| **D-64** (task 074 escalation, 2026-10-07) | Recall labelled set | A **synthetic** set drafted by the agent and **labelled blind by the owner** before any classifier run (reported as "recall on a synthetic set"); ≥ 25 fee/rate + ≥ 25 scope/budget positives + ≥ 30 negatives (half hard confusables), ~80–100 items; the gate is **combined fee-OR-scope recall ≥ 80%**, strict per-category recall reported; **one run** (~160–200 model calls), a second only if near the line and with approval. Spaarkedev1 had no usable real mail (292 rows, ~7 team-written positives) | Task 074 |
+| **D-65** (2026-10-07) | Work-assignment create path | **One canonical server create path per table.** uac-r2 has two for `sprk_workassignment` (`RecordCreationService`, `OwnedChildWrite`); uac-r2 is asked (#1355) to name one and retire the other; 046 follows the one they name and never adds a third. Supersedes D-59's specific component choice | 046 |
+| **D-66** (2026-10-07) | AI namespace | The shared Dataverse write core (`OwnedChildWrite` and helpers) moves **out of `Services/Ai/`** to `Services/Dataverse/` (AI → core, never core → AI, per ADR-013's intent) as its **own PR reviewed by uac-r2**; plus an ArchTest pinning the direction. No ADR exception is recorded for 046 | New task 048 |
+| **D-67** (2026-10-07) | 039 live gate | Merge PR #1390 **after uac-r2 approves**, then deploy master to dev and run the rest of the live gate (creates and deletes a `zz-039` Secure matter + its file container) | 039 |
+| **D-68** (2026-10-07) | PR #1391 | Merge **when green and uac-r2 approves** (their code); fix the stale doc comment and file the business-owned-lookup follow-up meanwhile | #1391 |
+| **D-69** (2026-10-07) | Wizard skipped steps | The dashed-ring "skipped" marker is **opt-in** per wizard (one prop); every existing wizard keeps today's tick for a skipped step; the 058 decision wizard opts in. Raised by the #1386 review (F1: the change reached every Create* wizard and looked like an unvisited step) | 056, 058 |
+| **D-70** (2026-10-07) | ADR-050 sizes | **Path A** for 056's transitional size override (`SprkModal.legacySize`, `WizardShell`'s deprecated `maxWidth`/`height`); task 111 removes them when it maps the consumers to named sizes (§6 row) | 056, 111 |
+| **D-71** (2026-10-08) | 111 deploy | Task 111 may deploy the SpaarkeAi, SmartTodo, DocumentRelationshipViewer and external SPA code pages plus the SemanticSearchControl PCF to spaarkedev1 and run the modal regression live | 111 |
+| **D-72** (2026-10-08) | Overdue notification status | The "Query Overdue Tasks" step keeps its Open-only status filter; Draft / On Hold overdue tasks are not notified | 068 |
+| **D-73** (2026-10-08) | Overdue notification order | The step orders by `sprk_duedate`; the repo due-soon copy drops its either-date filter (Final Due Date decides nothing in notifications) | 068 |
+| **D-74** (2026-10-08) | Briefing task statuses | **Supersedes D-57.** The Briefing task channels stay Open only; #1384 closed unmerged; task 060 returns to classifying and fixing the Draft rows in dev | 060 |
 | **D-29** | Smaller | To Do composite score → **calendar days**, one shared function (boards re-rank once). Writer gets **AppendTo** on `sprk_communication`, `sprk_event`, `sprk_todo`, `sprk_workassignment` (closes F26). Caller-unresolved stays **#1312's single 403**. Tier 2 ADR Compliance timeout → **5 min** (own small PR) | Role edits; To Do scoring task; CI PR |
 
 ---

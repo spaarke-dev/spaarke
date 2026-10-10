@@ -17,6 +17,7 @@
 
 import { renderHook, act } from '@testing-library/react';
 import type { RecordSearchResponse, RecordSearchResult, SearchFilters, ApiError } from '../../types';
+import { ApiError as ThrownApiError, AuthError } from '@spaarke/auth';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -394,6 +395,48 @@ describe('useRecordSearch', () => {
   });
 
   // --- search() error handling ---
+
+  // search() goes through @spaarke/auth's authenticatedFetch, which THROWS ApiError(message, status,
+  // problemDetails) / AuthError before handleApiResponse sees a non-OK response. These are the shapes
+  // production delivers; the plain-object rejections further down are handleApiResponse's own shape.
+  describe('search() — errors authenticatedFetch throws', () => {
+    const run = async (err: unknown) => {
+      mockSearch.mockRejectedValue(err);
+      const { result } = renderHook(() => useRecordSearch());
+      await act(async () => {
+        result.current.search('test', matterTypes, defaultFilters);
+      });
+      return result.current;
+    };
+
+    it("shows the server's ProblemDetails detail", async () => {
+      const problem = { title: 'Validation Error', status: 400, detail: 'recordTypes must contain at least one value.' };
+      const state = await run(new ThrownApiError(problem.detail, 400, problem));
+      expect(state.searchState).toBe('error');
+      expect(state.errorMessage).toBe('recordTypes must contain at least one value.');
+    });
+
+    it('shows the generic sentence, not "HTTP 500", when the body was not ProblemDetails', async () => {
+      expect((await run(new ThrownApiError('HTTP 500', 500, null))).errorMessage).toBe('An unexpected error occurred.');
+    });
+
+    it('shows the sign-in sentence for an exhausted 401 (AuthError)', async () => {
+      const state = await run(new AuthError('Authentication failed after all retry attempts', 'auth_exhausted'));
+      expect(state.errorMessage).toBe('You do not have permission to perform this search. Please sign in again.');
+    });
+
+    it('shows the sign-in sentence for a 403', async () => {
+      expect((await run(new ThrownApiError('Forbidden', 403, { title: 'Forbidden', status: 403 }))).errorMessage).toBe(
+        'You do not have permission to perform this search. Please sign in again.'
+      );
+    });
+
+    it('shows the rate-limit sentence for a 429', async () => {
+      expect((await run(new ThrownApiError('HTTP 429', 429, null))).errorMessage).toBe(
+        'Too many requests. Please wait a moment and try again.'
+      );
+    });
+  });
 
   describe('search() — error handling', () => {
     it('should transition to error state on API failure', async () => {

@@ -35,6 +35,8 @@ public class AssignedAccessReconciliationJobTests
         var services = new ServiceCollection();
         services.AddSingleton<AssignedAccessStore>(_h.Store);
         services.AddScoped(_ => _h.Materializer);
+        services.AddScoped(_ => _h.RestrictedRemover);
+        services.AddSingleton(_ => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.EntitiesOver(() => _filing).Object);
         using var provider = services.BuildServiceProvider();
 
         job ??= new AssignedAccessReconciliationJob(
@@ -195,6 +197,8 @@ public class AssignedAccessReconciliationJobTests
         var services = new ServiceCollection();
         services.AddSingleton<AssignedAccessStore>(_h.Store);
         services.AddScoped(_ => _h.Materializer);
+        services.AddScoped(_ => _h.RestrictedRemover);
+        services.AddSingleton(_ => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.EntitiesOver(() => _filing).Object);
         using var provider = services.BuildServiceProvider();
         var job = new AssignedAccessReconciliationJob(
             provider.GetRequiredService<IServiceScopeFactory>(), _h.Time,
@@ -439,6 +443,122 @@ public class AssignedAccessReconciliationJobTests
         AssignedAccessStore.RootFromLedgerKey(null).Should().BeNull();
         AssignedAccessStore.RootFromLedgerKey("not-a-key").Should().BeNull();
         AssignedAccessStore.RootFromLedgerKey($"account:{matter:D}:x").Should().BeNull("only a project, matter or work assignment");
+    }
+
+    // ── Task 114 (owner round 67 amendment 4(b)): the backstop for a share made on a Restricted record afterwards ──
+
+    /// <summary>
+    /// A Restricted record with no Assigned column is still a candidate: an external-flagged user's share made out of band
+    /// (the platform's Share dialog) is removed, and the run says so. An internal user's share stays.
+    /// </summary>
+    [Fact]
+    public async Task ARestrictedRoot_WithAShareOfAUserFlaggedExternal_HasItRemoved_AndTheRunReportsIt()
+    {
+        var matter = Guid.NewGuid();
+        _h.Store.RestrictedRoots[(ExternalGrantRootType.Matter, matter)] = true;
+        _h.Participations.Flags[matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        var external = _h.SystemUser(isExternal: true);
+        var internalUser = _h.SystemUser(isExternal: null);
+        _h.Shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(external), 1);
+        _h.Shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(internalUser), 1);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _h.Shares.MaskOf("sprk_matter", matter, DataversePrincipalRef.User(external)).Should().BeNull();
+        _h.Shares.MaskOf("sprk_matter", matter, DataversePrincipalRef.User(internalUser)).Should().Be(1);
+        var json = Result(result);
+        json.GetProperty("restrictedCandidates").GetInt32().Should().Be(1);
+        json.GetProperty("externalSharesRemoved").GetInt32().Should().Be(1);
+        json.GetProperty("materialized").GetInt32().Should().Be(0, "a Restricted root with no Assigned column is not materialized");
+    }
+
+    /// <summary>
+    /// #1478 (task 175): a work assignment filed under a Restricted matter is Restricted through it before its own column
+    /// catches up, so the sweep visits it too: an external-flagged user's share on it is removed.
+    /// </summary>
+    [Fact]
+    public async Task AWorkAssignmentFiledUnderARestrictedMatter_IsSweptToo()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        _h.Store.RestrictedRoots[(ExternalGrantRootType.Matter, matter)] = true;
+        _h.Participations.Flags[matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        _h.Participations.Flags[workAssignment] = new RootRecordFlags(IsSecure: false, IsRestricted: true); // the effective read
+        _filing.Add("sprk_matter", matter, ("sprk_issecure", false));
+        _filing.Add("sprk_workassignment", workAssignment,
+            ("sprk_regardingmatter", new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter)));
+        var external = _h.SystemUser(isExternal: true);
+        _h.Shares.Seed("sprk_workassignment", workAssignment, DataversePrincipalRef.User(external), 1);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _h.Shares.MaskOf("sprk_workassignment", workAssignment, DataversePrincipalRef.User(external)).Should().BeNull();
+        var json = Result(result);
+        json.GetProperty("restrictedCandidates").GetInt32().Should().Be(2, "the matter and the work assignment filed under it");
+        json.GetProperty("externalSharesRemoved").GetInt32().Should().Be(1);
+    }
+
+    /// <summary>Task 175: the filing the sweep walks below Restricted records (empty unless a test seeds it).</summary>
+    private readonly Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld _filing =
+        Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard();
+
+    /// <summary>
+    /// Restricted wins over the last-reader rule (owner round 67 item 3): the only reader, flagged external, is removed; the
+    /// record is counted noInternalReader for an administrator, and the run stays ok.
+    /// </summary>
+    [Fact]
+    public async Task ARestrictedSecureRoot_WhoseOnlyReaderIsFlaggedExternal_LosesTheShare_IsCountedNoInternalReader_AndTheRunStaysOk()
+    {
+        var matter = Guid.NewGuid();
+        _h.Store.RestrictedRoots[(ExternalGrantRootType.Matter, matter)] = true;
+        _h.Participations.Flags[matter] = new RootRecordFlags(IsSecure: true, IsRestricted: true);
+        var external = _h.SystemUser(isExternal: true);
+        _h.Shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(external), 1);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _h.Shares.MaskOf("sprk_matter", matter, DataversePrincipalRef.User(external)).Should().BeNull();
+        Result(result).GetProperty("noInternalReader").GetInt32().Should().Be(1);
+        Result(result).GetProperty("externalSharesRemoved").GetInt32().Should().Be(1);
+    }
+
+    /// <summary>
+    /// A Restricted record OWNED by a user flagged external: counted (ownerIsExternal) and logged by the remover for an
+    /// administrator to reassign — never revoked, and it does not keep the run partial (follow-up item 2).
+    /// </summary>
+    [Fact]
+    public async Task ARestrictedRootOwnedByAUserFlaggedExternal_IsCounted_AndTheRunStaysOk()
+    {
+        var matter = Guid.NewGuid();
+        _h.Store.RestrictedRoots[(ExternalGrantRootType.Matter, matter)] = true;
+        _h.Participations.Flags[matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        var owner = _h.SystemUser(isExternal: true);
+        _h.Shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(owner), 1);
+        _h.Grants.RootOwners[matter] = owner;
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Result(result).GetProperty("ownerIsExternal").GetInt32().Should().Be(1);
+        _h.Shares.MaskOf("sprk_matter", matter, DataversePrincipalRef.User(owner)).Should().Be(1, "ownership is never touched");
+    }
+
+    /// <summary>A Restricted record's removal that cannot be confirmed fails the run (the root is incomplete).</summary>
+    [Fact]
+    public async Task ARestrictedRoot_WhoseExternalShareCannotBeRemoved_FailsTheRun()
+    {
+        var matter = Guid.NewGuid();
+        _h.Store.RestrictedRoots[(ExternalGrantRootType.Matter, matter)] = true;
+        _h.Participations.Flags[matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        _h.Shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(_h.SystemUser(isExternal: true)), 1);
+        _h.Shares.IgnoreWrites = true;
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Result(result).GetProperty("incompleteTotal").GetInt32().Should().Be(1);
     }
 
     [Fact]

@@ -73,6 +73,7 @@ public sealed class PostUploadIndexingEnqueuerReplaceStaleChunksTests
             _fileIndexingMock.Object,
             _jobSubmissionMock.Object,
             _documentServiceMock.Object,
+            TestDocumentIndexParentResolver.Over(),
             Options.Create(_analysisOptions),
             Options.Create(_options),
             _loggerMock.Object);

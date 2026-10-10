@@ -361,3 +361,26 @@ word/commands/__tests__/quickSaveDialog.test.ts
 shared/taskpane/components/__tests__/SaveFlow.alreadySaved.test.tsx
 shared/taskpane/services/__tests__/documentFilingService.test.ts
 shared/taskpane/services/__tests__/documentIdentityService.stampById.test.ts
+# Task 113 (2026-10-07, provisioning request R1): dev-only sign-in Diagnostics view (token claims, never the token).
+shared/taskpane/services/__tests__/tokenDiagnostics.test.ts
+shared/taskpane/components/views/__tests__/DiagnosticsView.test.tsx
+# Task 116 (2026-10-08, B2B guest UAT in Outlook on the web): email body + attachments captured in the add-in (the server's
+# Graph fetch cannot reach a guest's home mailbox); copy fallback when the Clipboard API is blocked.
+shared/taskpane/services/__tests__/emailContentCapture.test.ts
+shared/taskpane/hooks/__tests__/useSaveFlow.emailContent.test.tsx
+shared/taskpane/components/views/__tests__/SaveView.emailContentCapture.test.tsx
+outlook/commands/__tests__/commands.emailContent.test.ts
+shared/adapters/__tests__/OutlookAdapter.attachmentKinds.test.ts
+shared/taskpane/components/__tests__/AttachmentSelector.saveLimit.test.tsx
+shared/taskpane/utils/__tests__/copyText.test.ts
+# UAT round 12 (2026-10-08): 117 Copy Link = Spaarke record link; 119 Find open affordance; 120 Outlook email identity
+# (already-saved box) + opening records on Office on the web.
+shared/taskpane/components/__tests__/SaveFlow.copyRecordLink.test.tsx
+shared/taskpane/components/__tests__/FindResultsList.openAffordance.test.tsx
+shared/taskpane/__tests__/App.emailIdentity.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.emailAlreadySaved.test.tsx
+shared/taskpane/services/__tests__/documentIdentityService.emailIdentity.test.ts
+shared/taskpane/services/__tests__/openRecordLauncher.webOpen.test.ts
+shared/taskpane/components/__tests__/SaveFlow.messageId.test.tsx
+shared/taskpane/components/views/__tests__/SaveView.messageId.test.tsx
+outlook/commands/__tests__/commands.messageId.test.ts

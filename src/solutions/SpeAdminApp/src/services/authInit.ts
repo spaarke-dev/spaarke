@@ -14,6 +14,7 @@ import {
   initAuth,
   resolveRuntimeConfig,
   authenticatedFetch as sharedAuthFetch,
+  type OkResponse,
 } from "@spaarke/auth";
 
 let _initPromise: Promise<void> | null = null;
@@ -32,6 +33,9 @@ export function ensureAuthInitialized(): Promise<void> {
         const config = await resolveRuntimeConfig();
         await initAuth({
           clientId: config.msalClientId,
+          // The environment's tenant (sprk_TenantId) — a tenant-specific authority is required for B2B guests (#1453).
+          // The library validates it and ignores an invalid value.
+          tenantId: config.tenantId,
           bffBaseUrl: config.bffBaseUrl,
           bffApiScope: config.bffOAuthScope,
         });
@@ -52,7 +56,7 @@ export function ensureAuthInitialized(): Promise<void> {
 export async function authenticatedFetch(
   url: string,
   init?: RequestInit,
-): Promise<Response> {
+): Promise<OkResponse> {
   await ensureAuthInitialized();
   return sharedAuthFetch(url, init);
 }

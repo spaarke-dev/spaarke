@@ -703,9 +703,11 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
          * `string`, so TypeScript could not see it, and the request went to
          * `/items/{configId}/content?configId={itemId}`: a container item that does not exist.
          *
-         * It failed silently on two levels. `authenticatedFetch` resolves for a 404 rather than
-         * throwing, so nothing reached the catch; and the catch only wrote to `console.error`, a
-         * place no operator looks. Download appeared to do nothing at all (UAT round 7).
+         * It failed silently: the catch only wrote to `console.error`, a place no operator looks,
+         * so Download appeared to do nothing at all (UAT round 7). `authenticatedFetch` THROWS for
+         * every non-2xx (ApiError, whose message is the BFF's ProblemDetails detail; AuthError once
+         * its 401 retries are spent), so a failed download reaches the catch below and its reason
+         * lands in the banner.
          */
         const response = await speApiClient.items.download(
           containerId,
@@ -713,8 +715,9 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
           configId
         );
 
-        // A non-2xx here would otherwise be saved to disk AS the file — an error page or JSON
-        // body carrying the document's name. Worse than failing, because it looks like it worked.
+        // Defensive: `authenticatedFetch` throws rather than returning a non-2xx, but a non-2xx
+        // that did get here would be saved to disk AS the file — an error page or JSON body
+        // carrying the document's name. Worse than failing, because it looks like it worked.
         if (!response.ok) {
           failures.push({
             fileName: item.name,

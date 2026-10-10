@@ -62,6 +62,24 @@ public static class SignalsModule
         services.AddScoped<SignalCoreRecordAccess>();
         services.AddScoped<DecisionPlanService>();
 
+        // Decision action executors (task 044, FR-52): one per catalog action the commit route (task 043) calls, except the
+        // inquiry (070) and Assign Work (046). Internal services, not routes; scoped because every write is the request
+        // caller's. DecisionRouteCores adapts the shipped event, child-record and communications cores. Unconditional:
+        // nothing here is feature-gated (bff-extensions.md F.1).
+        services.AddScoped<DecisionRouteCores>();
+        services.AddScoped<IDecisionActionExecutor, ReviseBudgetExecutor>();
+        services.AddScoped<IDecisionActionExecutor, ApproveVarianceExecutor>();
+        services.AddScoped<IDecisionActionExecutor, MarkCompleteExecutor>();
+        services.AddScoped<IDecisionActionExecutor, RescheduleExecutor>();
+        services.AddScoped<IDecisionActionExecutor, ReassignExecutor>();
+        services.AddScoped<IDecisionActionExecutor, SendReminderExecutor>();
+        services.AddScoped<IDecisionActionExecutor, ExtendResponseDateExecutor>();
+        services.AddScoped<IDecisionActionExecutor, RecordTheResponseExecutor>();
+        services.AddScoped<IDecisionActionExecutor, AddTodoExecutor>();
+        services.AddScoped<IDecisionActionExecutor, CreateEventExecutor>();
+        services.AddScoped<IDecisionActionExecutor, SendEmailExecutor>();
+        services.AddScoped<DecisionActionExecutors>();
+
         // RuleBodyDescriber (task 026, FR-48): the read-side plain-language description of a rule body. Stateless over the
         // compiler and the shared sysadmin entity service, both singletons.
         services.AddSingleton<RuleBodyDescriber>();

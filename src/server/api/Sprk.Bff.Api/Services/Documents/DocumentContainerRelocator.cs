@@ -150,6 +150,9 @@ public sealed class DocumentContainerRelocator
     private readonly TimeProvider _time;
     private readonly ILogger<DocumentContainerRelocator> _logger;
 
+    /// <summary>Who an APP-ONLY upload was made for (task 171 attach fix); without it an app-uploaded file is refused.</summary>
+    private readonly UploadAttribution? _uploadAttribution;
+
     /// <summary>The relocation locks this instance holds, by document (each with its heartbeat).</summary>
     private readonly ConcurrentDictionary<Guid, RelocationLease> _leases = new();
 
@@ -174,8 +177,10 @@ public sealed class DocumentContainerRelocator
         IIdempotencyService locks,
         IAccessDataSource access,
         ILogger<DocumentContainerRelocator> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        UploadAttribution? uploadAttribution = null)
     {
+        _uploadAttribution = uploadAttribution;
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _spe = spe ?? throw new ArgumentNullException(nameof(spe));
@@ -418,7 +423,8 @@ public sealed class DocumentContainerRelocator
     /// </list>
     /// </remarks>
     public async Task<PointerAttachResult> AttachFileAsync(
-        Guid documentId, string? callerObjectId, string? driveId, string? itemId, CancellationToken ct = default)
+        Guid documentId, string? callerObjectId, string? driveId, string? itemId, CancellationToken ct = default,
+        string? callerTenantId = null)
     {
         if (documentId == Guid.Empty || string.IsNullOrWhiteSpace(driveId) || string.IsNullOrWhiteSpace(itemId)
             || driveId.Length > 512 || itemId.Length > 512)
@@ -488,20 +494,75 @@ public sealed class DocumentContainerRelocator
         }
 
         var facts = await _spe.GetItemCreatorAsync(drive, item, ct).ConfigureAwait(false);
-        if (facts is null || !Guid.TryParse(facts.UserObjectId, out var uploader) || uploader != caller)
+        var consumeBinding = false;
+        if (facts is not null && Guid.TryParse(facts.UserObjectId, out var uploader) && uploader != Guid.Empty)
         {
-            _logger.LogWarning(
-                "[DOCUMENT-ATTACH] REFUSED: item {Item} of {Drive} is absent or was not uploaded by the caller {Caller} "
-                + "(document {DocumentId}).", item, drive, caller, documentId);
-            return PointerAttachResult.Refused(PointerAttachOutcome.NotTheUploader,
-                "The file was not found, or it was not uploaded by you.");
+            // Uploaded BY A PERSON (Graph createdBy.user): it must be the caller.
+            if (uploader != caller)
+            {
+                return NotTheUploader(documentId, drive, item, caller);
+            }
+        }
+        else if (facts is not null && _resolver.IsUploadedByTheBffIdentity(facts))
+        {
+            // Uploaded APP-ONLY by the BFF (every record-keyed / record-less upload since task 171): Graph cannot say for
+            // whom, so the binding the BFF recorded at upload time must name the caller. "Any BFF-uploaded item" would
+            // admit everyone's files — that is exactly what this check exists to stop.
+            // The ONLY admission for a BFF-uploaded item is an ITEM binding naming the caller, in the caller's tenant
+            // (verifier F1, 2026-10-07: a path / name binding could be matched by another user's file at that path).
+            if (_uploadAttribution is null || string.IsNullOrWhiteSpace(callerTenantId))
+            {
+                return NotTheUploader(documentId, drive, item, caller);
+            }
+
+            UploadAttribution.MatchOutcome match;
+            try
+            {
+                match = await _uploadAttribution.MatchAsync(callerTenantId, caller, drive, item, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "[DOCUMENT-ATTACH] REFUSED: who uploaded item {Item} of {Drive} could not be read (document {DocumentId}); "
+                    + "fail closed.", item, drive, documentId);
+                return PointerAttachResult.Refused(PointerAttachOutcome.UploaderUnverifiable,
+                    "Who uploaded this file could not be confirmed just now. Try attaching it again shortly.");
+            }
+
+            if (match != UploadAttribution.MatchOutcome.Caller)
+            {
+                return NotTheUploader(documentId, drive, item, caller);
+            }
+
+            consumeBinding = true;
+        }
+        else
+        {
+            // Absent, or uploaded by another application.
+            return NotTheUploader(documentId, drive, item, caller);
         }
 
         await WritePointerAsync(documentId, drive, item, facts.WebUrl, alsoWrite: null, ct).ConfigureAwait(false);
+        if (consumeBinding)
+        {
+            // After the pointer is written: the binding has served its one purpose. Consuming it opens no other way of
+            // attaching — a BFF-uploaded item has no admission but its item binding.
+            await _uploadAttribution!.ConsumeAsync(callerTenantId!, item, ct).ConfigureAwait(false);
+        }
+
         _logger.LogInformation(
             "[DOCUMENT-ATTACH] document {DocumentId} -> {Drive}/{Item} (uploaded by its creator, in its derived container).",
             documentId, drive, item);
         return PointerAttachResult.Attached(drive, item, alreadyAttached: false);
+    }
+
+    private PointerAttachResult NotTheUploader(Guid documentId, string drive, string item, Guid caller)
+    {
+        _logger.LogWarning(
+            "[DOCUMENT-ATTACH] REFUSED: item {Item} of {Drive} is absent or was not uploaded by the caller {Caller} "
+            + "(document {DocumentId}).", item, drive, caller, documentId);
+        return PointerAttachResult.Refused(PointerAttachOutcome.NotTheUploader,
+            "The file was not found, or it was not uploaded by you.");
     }
 
     /// <summary>
@@ -2505,6 +2566,9 @@ public enum PointerAttachOutcome
     ContainerUndetermined,
     WrongContainer,
     NotTheUploader,
+
+    /// <summary>The file is an app-only upload and who it was made for could not be read (cache fault) — retryable.</summary>
+    UploaderUnverifiable,
 }
 
 /// <summary>The result of <see cref="DocumentContainerRelocator.AttachFileAsync"/>.</summary>

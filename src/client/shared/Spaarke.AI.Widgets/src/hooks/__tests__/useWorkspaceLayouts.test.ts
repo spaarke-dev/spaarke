@@ -18,6 +18,7 @@
  */
 
 import { renderHook, act, waitFor } from '@testing-library/react';
+import { ApiError, AuthError, type OkResponse } from '@spaarke/auth';
 import {
   useWorkspaceLayouts,
   invalidateLayoutCache,
@@ -66,27 +67,32 @@ const FALLBACK_LAYOUT: WorkspaceLayoutDto = {
 // Mock helpers
 // ---------------------------------------------------------------------------
 
-function mockOkResponse<T>(body: T): Response {
+function mockOkResponse<T>(body: T): OkResponse {
   return {
     ok: true,
     status: 200,
     json: async () => body,
-  } as Response;
+  } as OkResponse;
 }
 
-function mockErrorResponse(status: number): Response {
-  return {
-    ok: false,
-    status,
-    json: async () => ({}),
-  } as Response;
+/**
+ * A failed request as `@spaarke/auth`'s authenticatedFetch delivers it — THROWN, never a returned
+ * non-OK Response: `AuthError` once a 401 exhausts its retries, `ApiError` for any other status.
+ */
+function failure(status: number): Error {
+  return status === 401
+    ? new AuthError('Authentication failed after all retry attempts', 'auth_exhausted')
+    : new ApiError(`HTTP ${status}`, status, null);
 }
 
-function createMockFetch(responses: Record<string, Response>): jest.MockedFunction<AuthenticatedFetch> {
+function createMockFetch(outcomes: Record<string, OkResponse | Error>): jest.MockedFunction<AuthenticatedFetch> {
   return jest.fn(async (url: string) => {
     // Match on path suffix so tests don't have to specify the full base url
-    for (const [pathSuffix, response] of Object.entries(responses)) {
-      if (url.endsWith(pathSuffix)) return response;
+    for (const [pathSuffix, outcome] of Object.entries(outcomes)) {
+      if (url.endsWith(pathSuffix)) {
+        if (outcome instanceof Error) throw outcome;
+        return outcome;
+      }
     }
     throw new Error(`Unexpected fetch URL: ${url}`);
   });
@@ -171,7 +177,7 @@ describe('useWorkspaceLayouts — fallbackLayout', () => {
   it('renders fallbackLayout when list is empty AND no default resolved', async () => {
     const fetchMock = createMockFetch({
       '/workspace/layouts': mockOkResponse([]),
-      '/workspace/layouts/default': mockErrorResponse(404),
+      '/workspace/layouts/default': failure(404),
     });
 
     const { result } = renderHook(() =>
@@ -343,7 +349,7 @@ describe('useWorkspaceLayouts — auth deferral', () => {
 describe('useWorkspaceLayouts — 401/403 paths', () => {
   it('warns + treats list as empty when list endpoint returns 403', async () => {
     const fetchMock = createMockFetch({
-      '/workspace/layouts': mockErrorResponse(403),
+      '/workspace/layouts': failure(403),
       '/workspace/layouts/default': mockOkResponse(FIXTURE_LAYOUT_USER),
     });
 
@@ -369,7 +375,7 @@ describe('useWorkspaceLayouts — 401/403 paths', () => {
   it('warns + falls through cascade when default endpoint returns 401', async () => {
     const fetchMock = createMockFetch({
       '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER, FIXTURE_LAYOUT_SYSTEM]),
-      '/workspace/layouts/default': mockErrorResponse(401),
+      '/workspace/layouts/default': failure(401),
     });
 
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
@@ -388,6 +394,77 @@ describe('useWorkspaceLayouts — 401/403 paths', () => {
     expect(result.current.activeLayout).toEqual(FIXTURE_LAYOUT_USER);
     expect(warnSpy).toHaveBeenCalled();
 
+    warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Failures as @spaarke/auth's authenticatedFetch delivers them: THROWN (ApiError / AuthError), never a
+// returned non-OK Response. Each request must soft-fail on its own — before the fix a throw from one
+// rejected the Promise.all and discarded the other's result (error state / fallback).
+// ---------------------------------------------------------------------------
+
+describe('useWorkspaceLayouts — thrown failures soft-fail per request', () => {
+  function throwingFetch(outcomes: Record<string, OkResponse | Error>): jest.MockedFunction<AuthenticatedFetch> {
+    return jest.fn(async (url: string) => {
+      for (const [pathSuffix, outcome] of Object.entries(outcomes)) {
+        if (url.endsWith(pathSuffix)) {
+          if (outcome instanceof Error) throw outcome;
+          return outcome;
+        }
+      }
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    });
+  }
+
+  it('a thrown 503 on the list keeps the default layout', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const fetchMock = throwingFetch({
+      '/workspace/layouts': new ApiError('HTTP 503', 503, null),
+      '/workspace/layouts/default': mockOkResponse(FIXTURE_LAYOUT_USER),
+    });
+
+    const { result } = renderHook(() =>
+      useWorkspaceLayouts({ bffBaseUrl: 'https://bff.test', authenticatedFetch: fetchMock, isAuthenticated: true })
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.activeLayout).toEqual(FIXTURE_LAYOUT_USER);
+    expect(result.current.error).toBeNull();
+    warnSpy.mockRestore();
+  });
+
+  it('a thrown 500 on the default keeps the list and resolves the active layout from it', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const fetchMock = throwingFetch({
+      '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER, FIXTURE_LAYOUT_SYSTEM]),
+      '/workspace/layouts/default': new ApiError('HTTP 500', 500, null),
+    });
+
+    const { result } = renderHook(() =>
+      useWorkspaceLayouts({ bffBaseUrl: 'https://bff.test', authenticatedFetch: fetchMock, isAuthenticated: true })
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.layouts).toEqual([FIXTURE_LAYOUT_USER, FIXTURE_LAYOUT_SYSTEM]);
+    expect(result.current.activeLayout).toEqual(FIXTURE_LAYOUT_USER);
+    expect(result.current.error).toBeNull();
+    warnSpy.mockRestore();
+  });
+
+  it('an exhausted 401 (AuthError) on the default is soft too', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const fetchMock = throwingFetch({
+      '/workspace/layouts': mockOkResponse([FIXTURE_LAYOUT_USER]),
+      '/workspace/layouts/default': new AuthError('Authentication failed after all retry attempts', 'auth_exhausted'),
+    });
+
+    const { result } = renderHook(() =>
+      useWorkspaceLayouts({ bffBaseUrl: 'https://bff.test', authenticatedFetch: fetchMock, isAuthenticated: true })
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.activeLayout).toEqual(FIXTURE_LAYOUT_USER);
     warnSpy.mockRestore();
   });
 });

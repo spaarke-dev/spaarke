@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 
@@ -168,8 +169,8 @@ public static class PlaybookRunEndpoints
         // Validate request
         if (request.DocumentIds == null || request.DocumentIds.Length == 0)
         {
-            response.StatusCode = StatusCodes.Status400BadRequest;
-            await response.WriteAsJsonAsync(new { error = DocumentIdsRequiredMessage }, cancellationToken);
+            await ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, DocumentIdsRequiredMessage)
+                .ExecuteAsync(context);
             return;
         }
 
@@ -240,7 +241,7 @@ public static class PlaybookRunEndpoints
             var status = await orchestrationService.GetRunStatusAsync(runId, cancellationToken);
             if (status == null)
             {
-                return Results.NotFound(new { error = $"Run {runId} not found" });
+                return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Run {runId} not found");
             }
 
             logger.LogDebug("Retrieved status for run {RunId}: {State}", runId, status.State);
@@ -276,8 +277,8 @@ public static class PlaybookRunEndpoints
             var status = await orchestrationService.GetRunStatusAsync(runId, cancellationToken);
             if (status == null)
             {
-                response.StatusCode = StatusCodes.Status404NotFound;
-                await response.WriteAsJsonAsync(new { error = $"Run {runId} not found" }, cancellationToken);
+                await ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Run {runId} not found")
+                    .ExecuteAsync(context);
                 return;
             }
 
@@ -318,10 +319,12 @@ public static class PlaybookRunEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "Error streaming run {RunId}", runId);
-            if (!cancellationToken.IsCancellationRequested)
+            // A failure before the first SSE frame is a plain HTTP error. Once the stream has started the status
+            // and content type are already on the wire and cannot be changed, so nothing more is written.
+            if (!cancellationToken.IsCancellationRequested && !response.HasStarted)
             {
-                response.StatusCode = StatusCodes.Status500InternalServerError;
-                await response.WriteAsJsonAsync(new { error = "Stream error" }, CancellationToken.None);
+                await ProblemDetailsHelper.FromLegacyError(StatusCodes.Status500InternalServerError, "Stream error")
+                    .ExecuteAsync(context);
             }
         }
     }
@@ -348,7 +351,7 @@ public static class PlaybookRunEndpoints
                 var status = await orchestrationService.GetRunStatusAsync(runId, cancellationToken);
                 if (status == null)
                 {
-                    return Results.NotFound(new { error = $"Run {runId} not found" });
+                    return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Run {runId} not found");
                 }
 
                 // Run exists but wasn't cancelled (already complete)
@@ -433,7 +436,7 @@ public static class PlaybookRunEndpoints
             var detail = await orchestrationService.GetRunDetailAsync(runId, cancellationToken);
             if (detail == null)
             {
-                return Results.NotFound(new { error = $"Run {runId} not found" });
+                return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Run {runId} not found");
             }
 
             logger.LogDebug(

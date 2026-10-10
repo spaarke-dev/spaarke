@@ -19,6 +19,7 @@
 // inline-confirmation injection.
 import type { ChatAttachment, AttachmentChip } from './hooks/useChatFileAttachment';
 import type { INextStepChip } from './OutcomeCard';
+import type { ResponseFetchFn } from '../../utils/fetchTypes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chat Message Types
@@ -816,15 +817,19 @@ export interface IPredefinedPrompt {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Authenticated fetch function — matches `AuthenticatedFetchFn` from `@spaarke/auth`.
- * Caller-supplied so this library does not take a runtime dependency on @spaarke/auth.
+ * Authenticated fetch function — caller-supplied (every host passes `@spaarke/auth`'s
+ * `authenticatedFetch`) so this library does not take a runtime dependency on @spaarke/auth.
  * The function MUST attach a fresh Bearer token (and X-Tenant-Id when applicable)
  * to every call and re-acquire on 401. See `@spaarke/auth/authenticatedFetch`.
+ *
+ * Typed as the EITHER-shape {@link ResponseFetchFn} for now, although `authenticatedFetch` throws on
+ * failure: some hooks here still branch on the returned status (e.g. `useChatContextMapping`'s 404),
+ * so moving to the throwing type is a follow-up, not a mechanical change.
  *
  * Auth v2 (D-AUTH-1, D-AUTH-7): tokens are NEVER snapshotted as strings in component
  * state; callers always go through this function.
  */
-export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+export type AuthenticatedFetchFn = ResponseFetchFn;
 
 /**
  * Token getter for code paths that cannot use `authenticatedFetch` (e.g., SSE streams
@@ -1001,6 +1006,14 @@ export interface ISprkChatProps {
   documents?: IDocumentOption[];
   /** Available playbooks for context switching */
   playbooks?: IPlaybookOption[];
+  /**
+   * Opt in to playbook DISCOVERY: fetch `GET /api/ai/chat/playbooks` and merge the caller's
+   * playbooks into the "Playbook:" selector + the empty-transcript playbook chips.
+   * Default **false** — the SpaarkeAi Assistant selects capabilities from the ADR-039 closed
+   * catalog, not by user playbook pick, and the endpoint returns every playbook the user owns
+   * (uncurated). Explicitly passed `playbooks` still render regardless of this flag.
+   */
+  enablePlaybookDiscovery?: boolean;
   /** Predefined prompt suggestions shown before conversation starts */
   predefinedPrompts?: IPredefinedPrompt[];
   /** Content element ref for highlight-refine feature (detects text selection) */

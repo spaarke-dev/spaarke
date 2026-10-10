@@ -3,7 +3,7 @@
   <metadata>
     <title>Server-side work-assignment create through the BFF</title>
     <phase>4b Commit and actions</phase>
-    <gate>008 complete</gate>
+    <gate>008 complete AND task 048 merged (the write core moves once, before this builds on it)</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Moves the create of a secure-record root from the browser to the server; business-unit cascade semantics must survive exactly.</rigor-reason>
@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>008</deps>
+    <deps>008, 048</deps>
     <tags>bff-api,auth,security,dataverse,endpoints</tags>
     <estimated-effort>5-6 hours</estimated-effort>
   </metadata>
@@ -42,6 +42,7 @@
     <constraint source="ADR-038">Scope: parity proven live: one assignment via the old browser path and one via the BFF for the same inputs, compared field by field, then cleaned up.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check (the work-assignment area is another project's territory).</constraint>
     <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+    <constraint source="uac-r2">D-113 (#1355 comment 6089838200 (uac-r2, 2026-10-09), section 4) SUPERSEDES the new service, new endpoint and new ledger entry above: the canonical core is OwnedChildWrite.CreateAsync, which already creates sprk_workassignment with G5 (Create plus AppendTo on every bound record), the owner from IRecordOwnershipResolver, SecureRootFilingGate.PlanCreateAsync, the creator stamp and the sprk_assignedtointernal materialisation. NO new route and NO third create path: add sprk_workassignment to ChildRecordEndpoints.CreateTables (route POST /api/v1/child-records/sprk_workassignment, already in the route census, so no new ledger entry); task 043 calls OwnedChildWrite.CreateAsync in-process. RecordCreationService (Services/Office) creates only matters and projects; nothing to retire. Since uac-r2 task 175: the filing gate refuses a caller-supplied sprk_issecure, sprk_accesspermission or sprk_accessinheritance, and a filed work assignment takes Secure/Access Permission from its parent, so neither the wizard nor the decision may send those columns. The parity table (wizard vs server) still applies to every other field; the outputs WorkAssignmentCreateService.cs / WorkAssignmentEndpoints.cs are not created.</constraint>
   </constraints>
 
   <knowledge>

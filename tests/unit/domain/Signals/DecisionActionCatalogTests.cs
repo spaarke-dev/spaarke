@@ -6,8 +6,7 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
-using NSubstitute;
-using NSubstitute.ExceptionExtensions;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Signals;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -363,7 +362,7 @@ public class DecisionActionCatalogTests
         var decision = await access.AuthorizeAsync(SignalId, CancellationToken.None);
 
         decision.Outcome.Should().Be(SignalAccessOutcome.Allowed);
-        await users.Received(1).GetAsync($"{set}({CoreId})?$select=createdon", Arg.Any<CancellationToken>());
+        Mock.Get(users).Verify(u => u.GetAsync($"{set}({CoreId})?$select=createdon", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -384,7 +383,7 @@ public class DecisionActionCatalogTests
         var access = Access(users, coreTable: table, coreSet: table + "s");
 
         (await access.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
-        await users.DidNotReceive().GetAsync(Arg.Is<string>(p => p.Contains($"({CoreId})", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
+        Mock.Get(users).Verify(u => u.GetAsync(It.Is<string>(p => p.Contains($"({CoreId})", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -405,7 +404,7 @@ public class DecisionActionCatalogTests
         var access = Access(users);
 
         (await access.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
-        await users.DidNotReceive().GetAsync(Arg.Is<string>(p => p.StartsWith("sprk_matters(", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
+        Mock.Get(users).Verify(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_matters(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -536,7 +535,7 @@ public class DecisionActionCatalogTests
     {
         var access = Access(Users(signal: SignalRow(), core: Ok(new { createdon = "x" })));
         var entities = EntitiesReturningPlan(SeededPlan, ruleBody: PathBBody());
-        entities.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
+        Mock.Get(entities).Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("dataverse is down"));
         var plans = new DecisionPlanService(entities, NullLogger<DecisionPlanService>.Instance);
         var describer = new RuleBodyDescriber(Validator(), entities, NullLogger<RuleBodyDescriber>.Instance);
@@ -569,7 +568,7 @@ public class DecisionActionCatalogTests
         var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404);
-        await entities.DidNotReceive().RetrieveAsync("sprk_policyversion", Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>());
+        Mock.Get(entities).Verify(e => e.RetrieveAsync("sprk_policyversion", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -601,27 +600,28 @@ public class DecisionActionCatalogTests
     private static SignalCoreRecordAccess Access(
         IDataverseUserClient users, string? coreTable = "sprk_matter", string coreSet = "sprk_matters")
     {
-        var entities = Substitute.For<IGenericEntityService>();
+        var entitiesMock = new Mock<IGenericEntityService>();
+        var entities = entitiesMock.Object;
         var typeRow = new Entity("sprk_recordtype_ref", CoreTypeId);
         if (coreTable is not null)
         {
             typeRow["sprk_recordlogicalname"] = coreTable;
         }
 
-        entities.RetrieveAsync("sprk_recordtype_ref", CoreTypeId, Arg.Any<string[]>(), Arg.Any<CancellationToken>()).Returns(typeRow);
-        entities.GetEntitySetNameAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(coreSet);
+        entitiesMock.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", CoreTypeId, It.IsAny<string[]>(), It.IsAny<CancellationToken>())).ReturnsAsync(typeRow);
+        entitiesMock.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(coreSet);
         return new SignalCoreRecordAccess(users, entities, NullLogger<SignalCoreRecordAccess>.Instance);
     }
 
     private static IDataverseUserClient Users(
         DataverseUserResponse signal, DataverseUserResponse? core = null, DataverseUserResponse? who = null)
     {
-        var users = Substitute.For<IDataverseUserClient>();
-        users.GetAsync(Arg.Is<string>(p => p.StartsWith("sprk_signals(", StringComparison.Ordinal)), Arg.Any<CancellationToken>()).Returns(signal);
-        users.GetAsync(Arg.Is<string>(p => !p.StartsWith("sprk_signals(", StringComparison.Ordinal) && p != "WhoAmI"), Arg.Any<CancellationToken>())
-            .Returns(core ?? Fail(404, DataverseUserClientErrorCodes.NotFound));
-        users.GetAsync("WhoAmI", Arg.Any<CancellationToken>()).Returns(who ?? Fail(0, DataverseUserClientErrorCodes.UserContextRequired));
-        return users;
+        var users = new Mock<IDataverseUserClient>();
+        users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>())).ReturnsAsync(signal);
+        users.Setup(u => u.GetAsync(It.Is<string>(p => !p.StartsWith("sprk_signals(", StringComparison.Ordinal) && p != "WhoAmI"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(core ?? Fail(404, DataverseUserClientErrorCodes.NotFound));
+        users.Setup(u => u.GetAsync("WhoAmI", It.IsAny<CancellationToken>())).ReturnsAsync(who ?? Fail(0, DataverseUserClientErrorCodes.UserContextRequired));
+        return users.Object;
     }
 
     private static DataverseUserResponse Ok(object body) =>
@@ -654,7 +654,7 @@ public class DecisionActionCatalogTests
 
     // The rule body is absent from these fixtures, so the describer refuses; the plan must still be served (task 026 wiring).
     private static RuleBodyDescriber NoRuleDescriber() =>
-        new(Validator(), Substitute.For<IGenericEntityService>(), NullLogger<RuleBodyDescriber>.Instance);
+        new(Validator(), new Mock<IGenericEntityService>().Object, NullLogger<RuleBodyDescriber>.Instance);
 
     private static PolicyVersionValidator Validator()
     {
@@ -664,15 +664,15 @@ public class DecisionActionCatalogTests
 
     private static IGenericEntityService EntitiesReturningPlan(string plan, string? ruleBody = null)
     {
-        var entities = Substitute.For<IGenericEntityService>();
+        var entitiesMock = new Mock<IGenericEntityService>();
         var version = new Entity("sprk_policyversion", VersionId) { ["sprk_decisionplan"] = plan };
         if (ruleBody is not null)
         {
             version["sprk_rulebody"] = ruleBody;
         }
 
-        entities.RetrieveAsync("sprk_policyversion", VersionId, Arg.Any<string[]>(), Arg.Any<CancellationToken>()).Returns(version);
-        return entities;
+        entitiesMock.Setup(e => e.RetrieveAsync("sprk_policyversion", VersionId, It.IsAny<string[]>(), It.IsAny<CancellationToken>())).ReturnsAsync(version);
+        return entitiesMock.Object;
     }
 
     // OntologyWriterTelemetry's Meter is process-global; scope the listener per test like SignalWriterTests does.

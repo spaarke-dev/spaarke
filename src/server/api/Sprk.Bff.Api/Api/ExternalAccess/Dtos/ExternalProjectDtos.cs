@@ -14,6 +14,16 @@ public sealed class ExternalCollectionResponse<T>
 {
     [JsonPropertyName("value")]
     public IReadOnlyList<T> Value { get; init; } = [];
+
+    /// <summary>
+    /// <c>true</c> when <see cref="Value"/> is known to be INCOMPLETE: the read stopped at its row cap with more rows
+    /// remaining, or a later page failed after earlier pages were read (unified-access-control-r2 task 105, NFR-03 —
+    /// a cap is never silent). Omitted from the JSON when <c>false</c>, so a complete list is byte-for-byte what it was
+    /// before the field existed; clients read a missing field as <c>false</c>.
+    /// </summary>
+    [JsonPropertyName("truncated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Truncated { get; init; }
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +118,10 @@ public sealed class ExternalTodoDto
     [JsonPropertyName("sprk_notes")]
     public string? SprkNotes { get; init; }
 
+    /// <summary>The to-do due date (<c>sprk_todo.sprk_duedate</c>) as Dataverse returns it: a calendar date, <c>yyyy-MM-dd</c>,
+    /// once the environment's column is Date Only (task 106); a UTC timestamp before that (not normalised here — before
+    /// the conversion its UTC date is not always the picked day). Read it with <c>parseDueDate</c>, never
+    /// <c>new Date(value)</c>.</summary>
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
@@ -170,6 +184,8 @@ public sealed class CreateExternalTodoRequest
     [JsonPropertyName("sprk_notes")]
     public string? SprkNotes { get; init; }
 
+    /// <summary>The due date as a calendar date, <c>yyyy-MM-dd</c> (task 106: Dataverse Date Only refuses a timestamp). A
+    /// timestamp <c>yyyy-MM-ddT…</c> from an earlier client build is read as its leading ten characters; anything else is 400.</summary>
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
@@ -198,6 +214,8 @@ public sealed class UpdateExternalTodoRequest
     [JsonPropertyName("sprk_notes")]
     public string? SprkNotes { get; init; }
 
+    /// <summary>The due date as a calendar date, <c>yyyy-MM-dd</c> (task 106: Dataverse Date Only refuses a timestamp). A
+    /// timestamp <c>yyyy-MM-ddT…</c> from an earlier client build is read as its leading ten characters; anything else is 400.</summary>
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
@@ -215,9 +233,9 @@ public sealed class UpdateExternalTodoRequest
 
     /// <summary>
     /// Update the Dataverse statuscode (1 = Open, 659490001 = In Progress,
-    /// 2 = Completed, 659490002 = Dismissed). Setting Completed/Dismissed
-    /// also moves the record to Inactive statecode (Dataverse handles the
-    /// statecode transition automatically based on statuscode option values).
+    /// 2 = Completed, 659490002 = Dismissed). The BFF writes the matching statecode with it (Completed/Dismissed →
+    /// Inactive, Open/In Progress → Active): Dataverse does NOT move the state itself — a status reason outside the
+    /// row's current state is HTTP 400 (verified live, task 106). Any other value is refused with 400.
     /// </summary>
     [JsonPropertyName("statuscode")]
     public int? Statuscode { get; init; }
@@ -313,6 +331,8 @@ public sealed class ExternalEventDto
     [JsonPropertyName("sprk_name")]
     public string SprkName { get; init; } = "";
 
+    /// <summary>The event due date (<c>sprk_event.sprk_duedate</c>) as a calendar date, <c>yyyy-MM-dd</c> (task 098: Dataverse
+    /// Date Only). Parse it as a local calendar date (<c>parseDueDate</c>), never <c>new Date(value)</c>.</summary>
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
@@ -341,6 +361,8 @@ public sealed class CreateExternalEventRequest
     [JsonPropertyName("sprk_name")]
     public string SprkName { get; init; } = "";
 
+    /// <summary>The due date as a calendar date, <c>yyyy-MM-dd</c> (task 098: Dataverse Date Only refuses a timestamp). A
+    /// timestamp <c>yyyy-MM-ddT…</c> from an earlier client build is read as its leading ten characters; anything else is 400.</summary>
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 

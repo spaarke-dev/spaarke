@@ -336,6 +336,7 @@ public sealed class EmailDraftToolHandler : IToolHandler
             // filed against an invoice would otherwise carry no matter stamp and be invisible to everyone
             // whose access comes from that matter.
             IReadOnlyList<Sprk.Bff.Api.Services.Dataverse.CoreAncestorStamp> ancestorStamps = [];
+            int? inheritedAccessPermission = null;
             if (args.RegardingTable is not null && args.RegardingRecordId is { } ancestorTargetId)
             {
                 var ancestors = await _coreAncestors
@@ -354,6 +355,8 @@ public sealed class EmailDraftToolHandler : IToolHandler
                 }
 
                 ancestorStamps = ancestors.Stamps;
+                // Task 173 (owner round 81): the Access Permission the draft takes from what it is filed under.
+                inheritedAccessPermission = ancestors.InheritedAccessPermission;
             }
 
             // Task 146 r2 (S1 / G5): a draft FILED under a project, matter or work assignment — its regarding, or the
@@ -373,7 +376,7 @@ public sealed class EmailDraftToolHandler : IToolHandler
 
             // Build the record ITEM server-side (Communication-service column contract).
             // DRAFT-ONLY: statuscode/statecode are pinned constants — never model-supplied.
-            var item = BuildCommunicationItem(args, context, ancestorStamps, sender);
+            var item = BuildCommunicationItem(args, context, ancestorStamps, sender, inheritedAccessPermission);
 
             // Reuse the task-009 write mapper: metadata-driven lookup navigation-property
             // resolution for the regarding association, OData-annotation smuggling blocked.
@@ -925,7 +928,8 @@ public sealed class EmailDraftToolHandler : IToolHandler
         EmailDraftArgs args,
         ChatInvocationContext context,
         IReadOnlyList<Sprk.Bff.Api.Services.Dataverse.CoreAncestorStamp> ancestorStamps,
-        Guid? sender = null)
+        Guid? sender = null,
+        int? accessPermission = null)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -984,6 +988,13 @@ public sealed class EmailDraftToolHandler : IToolHandler
                     writer.WriteString("relatedTable", stamp.EntityType);
                     writer.WriteString("recordId", stamp.RecordId.ToString("D"));
                     writer.WriteEndObject();
+                }
+
+                // Task 173 (owner round 81): written only when the regarding gives one — a parentless draft keeps the
+                // column's default (its own value).
+                if (accessPermission is { } level)
+                {
+                    writer.WriteNumber("sprk_accesspermission", level);
                 }
             }
 

@@ -4,7 +4,7 @@
     <title>SUPERSEDED: the gate host and the action that changes something (now tasks 058 + 043)</title>
     <phase>5 The worklist surface</phase>
     <gate>superseded 2026-10-07; do not execute</gate>
-    <status>deferred</status>
+    <status>cancelled</status>
     <rigor>FULL</rigor>
     <rigor-reason>Wires the human-confirmation boundary; this is where a Work Item becomes an effect in the world.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -87,6 +87,19 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
     private void AlsoFiledUnderProject(Guid workAssignment, Guid project) =>
         World.Set("sprk_workassignment", workAssignment, "sprk_regardingproject", new EntityReference("sprk_project", project));
 
+    /// <summary>
+    /// Task 175 (owner round 84, replacing "never auto-unsecure"): after the matter's unsecure has decided what it passed on
+    /// (the round-39 reasons below), the work assignment filed only under it FOLLOWS it out of secure in the same call —
+    /// owned by its business unit's team, every explicit share revoked, as <c>/unsecure-project</c> does.
+    /// </summary>
+    private void ShouldHaveFollowedTheMatter(Guid workAssignment, Guid user)
+    {
+        _fixture.IsSecureOf(workAssignment).Should().BeFalse("round 84: the work assignment follows the matter");
+        _fixture.OwningTeamOf(workAssignment).Should().Be(SecureChildShareWorld.GeneralTeam);
+        _fixture.ShareMaskOf(workAssignment, user).Should().Be(0, "its explicit shares go with its secure designation");
+    }
+
+
     private IReadOnlyList<AssignedAccessLedgerRow> Provenance(Guid filed) => _fixture.InheritedLedger.InheritedRowsOf(filed);
 
     private AssignedAccessLedgerRow ProvenanceFrom(Guid filed, string parentTable, Guid parent, Guid user) =>
@@ -126,7 +139,8 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
         using var scope = _fixture.Services.CreateScope();
         return await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest(recordType, recordId, user, level),
-            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), _users.Client, new Mock<ITenantCache>().Object,
+            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), _users.Client, _fixture.NoAccessReads,
+            new Mock<ITenantCache>().Object,
             new InternalUserShareTests.StubCallerRightsProbe(
                 AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete
                 | AccessRights.Share),
@@ -147,7 +161,7 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
             new AssignedAccessTestDoubles.Harness(_fixture.InheritedLedger).Materializer,
             scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(),
             scope.ServiceProvider.GetRequiredService<SecureRootInheritance>(),
-            Caller(), NullLogger<Program>.Instance, CancellationToken.None);
+            new Spaarke.Scheduling.ProcessLocalScheduledJobLease(), Caller(), NullLogger<Program>.Instance, CancellationToken.None);
     }
 
     private static (int Status, string? Code, JsonElement Body, string? Detail) Problem(IResult result)
@@ -176,13 +190,14 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecuredWorkAssignment(workAssignment, matter);
+        SecureRootInheritanceTests.InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
         _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), ProvisionProjectEndpoint.CollaboratorAccessRights);
         await ShareAsync("matter", matter, Colleague);
         Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).State.Should().Be(AssignedAccessState.CoveredByExisting);
 
         (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mask(ProvisionProjectEndpoint.CollaboratorAccessRights), "direct access stays");
+        ShouldHaveFollowedTheMatter(workAssignment, Colleague);
         Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.KeptDirectShare);
     }
 
@@ -193,13 +208,14 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecuredWorkAssignment(workAssignment, matter);
+        SecureRootInheritanceTests.InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
         _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), RecordShareLevels.ViewOnlyRights);
         await ShareAsync("matter", matter, Colleague);
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mask(RecordShareLevels.ViewOnlyRights) | Mirror);
 
         (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mask(RecordShareLevels.ViewOnlyRights));
+        ShouldHaveFollowedTheMatter(workAssignment, Colleague);
         Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.PriorLevelRestored);
     }
 
@@ -210,12 +226,13 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecuredWorkAssignment(workAssignment, matter);
+        SecureRootInheritanceTests.InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
         await ShareAsync("matter", matter, Colleague);
         _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), ProvisionProjectEndpoint.CreatorAccessRights);
 
         (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mask(ProvisionProjectEndpoint.CreatorAccessRights), "modified: kept");
+        ShouldHaveFollowedTheMatter(workAssignment, Colleague);
         Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.KeptModified);
     }
 
@@ -250,15 +267,18 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecuredWorkAssignment(workAssignment, matter);
+        SecureRootInheritanceTests.InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
         await ShareAsync("matter", matter, Colleague);
         _fixture.RemoveShare(workAssignment, DataversePrincipalRef.User(Creator)); // nobody else opens it any more
 
         (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "S5: never the last person who can open it");
+        // S5 held through the matter's step (the row below); the follow then makes the record its business unit's, so it is
+        // never left with nobody who can open it.
+        ShouldHaveFollowedTheMatter(workAssignment, Colleague);
         var row = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
-        row.State.Should().Be(AssignedAccessState.Shared);
-        row.Reason.Should().Be(AssignedAccessReason.KeptLastReader);
+        row.State.Should().Be(AssignedAccessState.Revoked,
+            "kept by the matter's step (S5), then ended by the work assignment's own un-secure with the share itself");
     }
 
     /// <summary>
@@ -400,7 +420,7 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
 
         (await UnshareAsync("matter", matter, Colleague)).Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
 
-        _fixture.IsSecureOf(workAssignment).Should().BeTrue("never auto-unsecure");
+        _fixture.IsSecureOf(workAssignment).Should().BeTrue("an unshare is not an unsecure (the job's round-84 cascade follows later)");
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0);
     }
 

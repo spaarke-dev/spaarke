@@ -27,6 +27,7 @@ import {
   type IResolverWriteContext,
 } from '../../../logic/connections';
 import type { EmailConnectionsReviewProps, EmailTrackingPanelProps } from '../EmailAssociationsAndTracking.types';
+import { DEFAULT_LINK_CATALOG } from '../EmailConnectionsReview.helpers';
 
 function renderWithProvider(ui: React.ReactElement, theme = webLightTheme) {
   return render(<FluentProvider theme={theme}>{ui}</FluentProvider>);
@@ -658,8 +659,9 @@ describe('EmailTrackingPanel', () => {
     expect(switches[1]).toBeChecked(); // highPriority: true
   });
 
-  // unified-access-control-r2 task 138 (owner Q6): a communication INHERITS its parent's Access
-  // Permission; its own column is retired, so the panel offers no access-permission control at all.
+  // unified-access-control-r2 task 138 (owner Q6; task 173, owner round 81): a communication's access comes from its
+  // parent. Its own sprk_accesspermission is a display copy of the parent's value that enforcement never reads, so the
+  // panel offers no access-permission control at all.
   it('renders NO access-permission control — a communication inherits its parent permission (owner Q6)', () => {
     renderWithProvider(<EmailTrackingPanel {...baseTrackingProps()} />);
 
@@ -731,5 +733,59 @@ describe('Negative: production logic, not the stale stub', () => {
     // — matching the generic bracket excludes this file's own prose ABOUT the ban).
     expect(reviewSrc).not.toMatch(/as React\.ComponentType</);
     expect(trackingSrc).not.toMatch(/as React\.ComponentType</);
+  });
+});
+
+describe('C-9: the record-type picker menus are rendered by the shared RowActionMenu', () => {
+  // task 052: the two "Link another record" / "Look up another record" menus moved onto RowActionMenu. Their observable
+  // contract is pinned here (it also holds on the previous hand-rolled <Menu>): one item per catalog entry, labelled
+  // with the display name, keyed by the entity logical name through the item test id.
+  const expectOneItemPerCatalogEntry = async () => {
+    fireEvent.click(screen.getByTestId('link-another-record'));
+    const items = await screen.findAllByRole('menuitem');
+    expect(items).toHaveLength(DEFAULT_LINK_CATALOG.length);
+    DEFAULT_LINK_CATALOG.forEach(entry => {
+      const item = screen.getByTestId(`link-another-record-item-${entry.logicalName}`);
+      expect(item).toHaveTextContent(entry.displayName);
+      expect(item).toHaveAttribute('role', 'menuitem');
+    });
+  };
+
+  it('default variant: the "Link another record" tile opens one item per catalog entry', async () => {
+    renderWithProvider(<EmailConnectionsReview {...baseProps()} />);
+    await expectOneItemPerCatalogEntry();
+  });
+
+  it('reconcile variant: the "Look up another record" field opens one item per catalog entry', async () => {
+    renderWithProvider(<EmailConnectionsReview {...baseProps({ variant: 'reconcile' })} />);
+    await expectOneItemPerCatalogEntry();
+  });
+
+  it('a custom linkAnotherCatalog drives the items (not the default)', async () => {
+    const catalog = [
+      { ...DEFAULT_LINK_CATALOG[0], logicalName: 'sprk_custom', displayName: 'Custom thing', recordTypeRefId: 'x' },
+    ];
+    renderWithProvider(<EmailConnectionsReview {...baseProps({ linkAnotherCatalog: catalog })} />);
+    fireEvent.click(screen.getByTestId('link-another-record'));
+    const items = await screen.findAllByRole('menuitem');
+    expect(items).toHaveLength(1);
+    expect(screen.getByTestId('link-another-record-item-sprk_custom')).toHaveTextContent('Custom thing');
+  });
+
+  it('choosing an item goes to the record picker for THAT entity type (Xrm lookupObjects)', async () => {
+    const lookupObjects = jest.fn().mockResolvedValue([]);
+    const w = window as unknown as { Xrm?: unknown };
+    const prev = w.Xrm;
+    w.Xrm = { Utility: { lookupObjects } };
+    try {
+      renderWithProvider(<EmailConnectionsReview {...baseProps()} />);
+      fireEvent.click(screen.getByTestId('link-another-record'));
+      const target = DEFAULT_LINK_CATALOG[1] ?? DEFAULT_LINK_CATALOG[0];
+      fireEvent.click(await screen.findByTestId(`link-another-record-item-${target.logicalName}`));
+      await waitFor(() => expect(lookupObjects).toHaveBeenCalledTimes(1));
+      expect(lookupObjects.mock.calls[0][0]).toMatchObject({ entityTypes: [target.logicalName] });
+    } finally {
+      w.Xrm = prev;
+    }
   });
 });

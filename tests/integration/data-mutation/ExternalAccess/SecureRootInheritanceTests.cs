@@ -105,6 +105,17 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
             fixture.ChildWorld.Set("sprk_workassignment", id, "sprk_name", name);
     }
 
+    /// <summary>
+    /// Task 175 (round 87): the access record task 158 now writes when it secures a record by inheritance — its Secure comes
+    /// from <paramref name="parents"/> (inherited, not its own), so it follows them out when they are un-secured. A record
+    /// without one is never loosened (the backfill rule).
+    /// </summary>
+    internal static void InheritedAccessRecord(
+        ProvisionProjectTestFixture fixture, string table, Guid id, params (string Table, Guid Id)[] parents) =>
+        fixture.ChildWorld.Set(table, id, AccessInheritance.Column, new AccessInheritance(
+            parents.Select(p => $"{p.Table}:{p.Id:D}").ToList(), true, Sprk.Bff.Api.Services.Dataverse.InheritedAccessPermission.Standard,
+            false, null).Serialize());
+
     /// <summary>A <c>sprk_recordtype_ref</c> row standing for <paramref name="logicalName"/>.</summary>
     internal static Guid RecordTypeRef(ProvisionProjectTestFixture fixture, string logicalName)
     {
@@ -445,7 +456,8 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
 
         var result = await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", matter, Colleague, ExternalAccessLevel.Collaborate),
-            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), users.Client, new Mock<ITenantCache>().Object,
+            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), users.Client,
+            scope.ServiceProvider.GetRequiredService<ExternalParticipationService>(), new Mock<ITenantCache>().Object,
             new InternalUserShareTests.StubCallerRightsProbe(
                 AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete
                 | AccessRights.Share),
@@ -665,17 +677,21 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         filed.Should().OnlyContain(id => _fixture.IsSecureOf(id) == true);
     }
 
-    // ── The way back: never auto-unsecure; F3 per related record ────────────────────────────────────────────────────────
+    // ── The way back: task 175 (owner round 84) — a filed record follows its parent out of secure; locked while filed ──────
 
     /// <summary>A work assignment already secured under <paramref name="matter"/> (as the rule leaves it).</summary>
-    private void SecureFiledWorkAssignment(Guid id, Guid matter, Guid? createdBy = null, string? name = null)
+    internal static void SecureFiledWorkAssignment(
+        ProvisionProjectTestFixture fixture, Guid id, Guid matter, Guid? createdBy = null, string? name = null)
     {
-        _fixture.SeedWorkAssignment(id, owningTeamId: SecureTeam, containerId: $"b!wa-{id:N}", isSecure: true, createdBy: createdBy);
-        _fixture.SeedShare(id, DataversePrincipalRef.User(createdBy ?? Creator), ProvisionProjectEndpoint.CreatorAccessRights);
-        World.Set("sprk_workassignment", id, "sprk_regardingmatter", new EntityReference("sprk_matter", matter));
+        fixture.SeedWorkAssignment(id, owningTeamId: SecureTeam, containerId: $"b!wa-{id:N}", isSecure: true, createdBy: createdBy);
+        fixture.SeedShare(id, DataversePrincipalRef.User(createdBy ?? Creator), ProvisionProjectEndpoint.CreatorAccessRights);
+        fixture.ChildWorld.Set("sprk_workassignment", id, "sprk_regardingmatter", new EntityReference("sprk_matter", matter));
         if (name is not null)
-            World.Set("sprk_workassignment", id, "sprk_name", name);
+            fixture.ChildWorld.Set("sprk_workassignment", id, "sprk_name", name);
     }
+
+    private void SecureFiledWorkAssignment(Guid id, Guid matter, Guid? createdBy = null, string? name = null) =>
+        SecureFiledWorkAssignment(_fixture, id, matter, createdBy, name);
 
     private Task<HttpResponseMessage> UnsecureAsync(string recordType, Guid recordId, params (string Type, Guid Id)[] alsoUnsecure) =>
         _fixture.CreateAuthenticatedClient().PostAsJsonAsync(UnsecureRoute, new
@@ -688,17 +704,19 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         });
 
     /// <summary>
-    /// AC 6 + AC 7 (owner round 6 item 4: "stay secure"): unsecuring the matter leaves the work assignment filed under it
-    /// secure — owner, flag, container and shares unchanged — and the response LISTS it (with its name) for the UI to offer.
+    /// Task 175 AC 1 (owner round 84, REPLACING round 6 item 4's "stay secure"): unsecuring the matter un-secures the work
+    /// assignment filed only under it, in the same call — flag cleared, owned by its business unit's team (D-11), its shares
+    /// revoked — and reports it. Not related, though their pair names the matter's id: one typed as an INVOICE (stays secure,
+    /// untouched), one whose type cannot be read (not provably filed here: left to the job, untouched, not listed).
     /// </summary>
     [Fact]
-    public async Task UnsecuringTheParent_LeavesItsSecureWorkAssignmentSecure_AndListsIt()
+    public async Task UnsecuringTheParent_UnsecuresTheWorkAssignmentFiledOnlyUnderIt_AndReportsIt()
     {
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecureFiledWorkAssignment(workAssignment, matter, name: "Due diligence");
+        InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
 
-        // Not related, though their pair names the matter's id: one typed as an INVOICE, one whose type cannot be read.
         var (invoiceTyped, typeUnreadable) = (Guid.NewGuid(), Guid.NewGuid());
         SecureProject(_fixture, invoiceTyped);
         FilePair(_fixture, "sprk_project", invoiceTyped, matter, RecordTypeRef(_fixture, "sprk_invoice"));
@@ -711,27 +729,30 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         _fixture.IsSecureOf(matter).Should().BeFalse();
-        _fixture.IsSecureOf(workAssignment).Should().BeTrue("never auto-unsecure");
-        _fixture.OwningTeamOf(workAssignment).Should().Be(SecureTeam);
-        _fixture.Updates.Should().NotContain(u => u.RecordId == workAssignment);
-        _fixture.Revokes.Should().NotContain(r => r.RecordId == workAssignment);
+        _fixture.IsSecureOf(workAssignment).Should().BeFalse("round 84: the child follows its parent out of secure");
+        _fixture.OwningTeamOf(workAssignment).Should().Be(SecureChildShareWorld.GeneralTeam,
+            "its parent's business unit's team (D-11) — never the memberless Secure team, never a user");
+        _fixture.SharesOn(workAssignment).Should().BeEmpty("its explicit shares are revoked, as /unsecure-project does");
+        foreach (var untouched in new[] { invoiceTyped, typeUnreadable })
+        {
+            _fixture.IsSecureOf(untouched).Should().BeTrue("not provably filed under the matter");
+            _fixture.Updates.Should().NotContain(u => u.RecordId == untouched);
+        }
 
         var body = await JsonOf(response);
-        var listed = body.GetProperty("relatedSecureRecords").EnumerateArray().Single();
-        listed.GetProperty("recordType").GetString().Should().Be("workassignment");
-        listed.GetProperty("recordId").GetGuid().Should().Be(workAssignment);
-        listed.GetProperty("name").GetString().Should().Be("Due diligence");
-        (!body.TryGetProperty("relatedRecordsUnsecured", out var asked) || asked.ValueKind == JsonValueKind.Null)
-            .Should().BeTrue("none was asked for");
+        body.GetProperty("relatedSecureRecords").EnumerateArray().Should().BeEmpty("nothing filed under it is still secure");
+        var outcome = body.GetProperty("relatedRecordsUnsecured").EnumerateArray().Single();
+        outcome.GetProperty("recordId").GetGuid().Should().Be(workAssignment);
+        outcome.GetProperty("outcome").GetString().Should().Be("unsecured");
     }
 
     /// <summary>
-    /// AC 7: passing a subset unsecures EXACTLY those the caller holds F3 on (here: the one they created; the fixture's caller
-    /// holds Write, not Full Access), reports the one they do not as refused (<c>sdap.unsecure.not_permitted</c>) and leaves
-    /// it secure, and reports one that is not filed under the matter as <c>not_related</c>, untouched.
+    /// Task 175 (round 84): <c>alsoUnsecure</c> asks for nothing more — every record filed under the matter follows it, with
+    /// no F3 per related record (the caller created one and not the other; both follow). One filed under ANOTHER matter is
+    /// reported <c>not_related</c> and stays secure.
     /// </summary>
     [Fact]
-    public async Task AlsoUnsecure_UnsecuresExactlyTheRelatedRecordsTheCallerHoldsF3On_AndReportsTheRest()
+    public async Task AlsoUnsecure_IsSubsumed_EveryRecordFiledUnderTheMatterFollowsIt_AndAnUnrelatedOneIsReported()
     {
         var (matter, otherMatter) = (Guid.NewGuid(), Guid.NewGuid());
         var (mine, theirs, elsewhere) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
@@ -739,18 +760,17 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         SecureMatter(_fixture, otherMatter);
         SecureFiledWorkAssignment(mine, matter);
         SecureFiledWorkAssignment(theirs, matter, createdBy: Outsider);
+        InheritedAccessRecord(_fixture, "sprk_workassignment", mine, ("sprk_matter", matter));
+        InheritedAccessRecord(_fixture, "sprk_workassignment", theirs, ("sprk_matter", matter));
         SecureFiledWorkAssignment(elsewhere, otherMatter);
 
-        var response = await UnsecureAsync("matter", matter,
-            ("workassignment", mine), ("workassignment", theirs), ("workassignment", elsewhere));
+        var response = await UnsecureAsync("matter", matter, ("workassignment", elsewhere));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        _fixture.IsSecureOf(mine).Should().BeFalse("the caller created it (F3)");
-        _fixture.OwningTeamOf(mine).Should().BeNull();
-        _fixture.IsSecureOf(theirs).Should().BeTrue("neither Full Access nor its creator — reported, not unsecured");
-        _fixture.OwningTeamOf(theirs).Should().Be(SecureTeam);
+        _fixture.IsSecureOf(mine).Should().BeFalse();
+        _fixture.IsSecureOf(theirs).Should().BeFalse("no F3 per related record: it follows its parent (round 84)");
         _fixture.IsSecureOf(elsewhere).Should().BeTrue("not filed under this matter");
-        _fixture.Updates.Should().NotContain(u => u.RecordId == theirs || u.RecordId == elsewhere);
+        _fixture.Updates.Should().NotContain(u => u.RecordId == elsewhere);
 
         var body = await JsonOf(response);
         var outcomes = body.GetProperty("relatedRecordsUnsecured").EnumerateArray()
@@ -758,44 +778,45 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
                 Outcome: o.GetProperty("outcome").GetString(),
                 Code: o.TryGetProperty("reasonCode", out var code) && code.ValueKind == JsonValueKind.String ? code.GetString() : null));
         outcomes[mine].Should().Be(("unsecured", (string?)null));
-        outcomes[theirs].Should().Be(("refused", (string?)SecureDesignationRemoval.NotPermittedReasonCode));
+        outcomes[theirs].Should().Be(("unsecured", (string?)null));
         outcomes[elsewhere].Should().Be(("refused", (string?)UnsecureProjectEndpoint.ReasonNotRelated));
-        body.GetProperty("relatedSecureRecords").EnumerateArray().Select(r => r.GetProperty("recordId").GetGuid())
-            .Should().Equal(theirs);
     }
 
     /// <summary>
-    /// AC 7, interpretation (owner-reversible): a work assignment whose matter is STILL secure cannot be unsecured — 409
-    /// naming the matter, nothing written; once the matter is not secure, the same call unsecures it.
+    /// Task 175 AC 4 (round 87: the parent sets a floor): un-securing a work assignment filed under a SECURE matter is refused
+    /// 409 <c>access_follows_parent</c> naming the matter, nothing written. Once the matter is not secure the work assignment
+    /// has followed it (its secure was inherited), and the same call is no longer refused.
     /// </summary>
     [Fact]
-    public async Task UnsecuringARelatedRecordWhileItsParentIsStillSecure_IsRefusedNamingTheParent_ThenAllowedOnceItIsNot()
+    public async Task UnsecuringAFiledRecord_UnderASecureParent_IsRefusedNamingIt_AndNotOnceTheParentIsOrdinary()
     {
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter, name: "Project Falcon");
         SecureFiledWorkAssignment(workAssignment, matter);
+        InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
 
         var refused = await UnsecureAsync("workassignment", workAssignment);
 
         refused.StatusCode.Should().Be(HttpStatusCode.Conflict);
         var problem = await JsonOf(refused);
-        problem.GetProperty("reasonCode").GetString().Should().Be(UnsecureProjectEndpoint.ReasonParentStillSecure);
+        problem.GetProperty("reasonCode").GetString().Should().Be(AccessFollowsParent.ReasonCode);
         problem.GetProperty("parentRecordType").GetString().Should().Be("matter");
         problem.GetProperty("parentRecordId").GetGuid().Should().Be(matter);
+        problem.GetProperty("parentName").GetString().Should().Be("Project Falcon");
         problem.GetProperty("detail").GetString().Should().Contain("Project Falcon");
         _fixture.IsSecureOf(workAssignment).Should().BeTrue();
         _fixture.Updates.Should().NotContain(u => u.RecordId == workAssignment, "refused before any write");
 
         (await UnsecureAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
-        var allowed = await UnsecureAsync("workassignment", workAssignment);
+        _fixture.IsSecureOf(workAssignment).Should().BeFalse("it followed the matter");
 
-        allowed.StatusCode.Should().Be(HttpStatusCode.OK, await allowed.Content.ReadAsStringAsync());
-        _fixture.IsSecureOf(workAssignment).Should().BeFalse();
+        var again = await UnsecureAsync("workassignment", workAssignment);
+        again.StatusCode.Should().Be(HttpStatusCode.OK, "round 87: its parent is no longer secure, so no floor stops it (it is already not secure)");
     }
 
     /// <summary>
-    /// ADR-003 on the way back: whether the work assignment's matter is still secure cannot be read — 500
-    /// <c>parent_unverifiable</c>, nothing written (an unreadable parent is never "not secure").
+    /// ADR-003 on the way back: what the work assignment is filed under cannot be read — 500 <c>parent_unverifiable</c>,
+    /// nothing written (an unreadable parent is never "no parent").
     /// </summary>
     [Fact]
     public async Task UnsecuringARelatedRecordWhoseParentCannotBeRead_IsRefused_AndNothingIsWritten()

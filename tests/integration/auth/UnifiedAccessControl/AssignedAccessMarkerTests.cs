@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -47,7 +48,7 @@ public class AssignedAccessMarkerTests
         RevokeExternalAccessEndpoint.RevokeAccessAsync(
             new RevokeAccessRequest(accessRecordId, Guid.Empty, Guid.Empty),
             _h.Grants,
-            new SpeContainerMembershipService(Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance),
+            new SpeContainerMembershipService(TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance),
             _h.Participations,
             _h.Materializer,
             // Task 166: the container is derived from the grant's root. Here the matter's derived container is the shared
@@ -64,7 +65,7 @@ public class AssignedAccessMarkerTests
     private Task<IResult> ShareUser(Guid user) =>
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", _matter, user, ExternalAccessLevel.Collaborate),
-            _h.Shares, _h.Grants, _h.Cache.Mock.Object, new WriteProbe(), Children(), _h.Guard,
+            _h.Shares, _h.Grants, _h.Participations, _h.Cache.Mock.Object, new WriteProbe(), Children(), _h.Guard,
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), _h.Materializer, Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     /// <summary>Batch 4 integration (task 149): the share routes fan out to a secure root's children — the REAL
@@ -76,7 +77,7 @@ public class AssignedAccessMarkerTests
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest("matter", _matter, user),
             _h.Shares, _h.Grants, _h.Participations, _h.Cache.Mock.Object,
-            _h.Materializer, Children(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), Context(), NullLogger<Program>.Instance, CancellationToken.None);
+            _h.Materializer, Children(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), new Spaarke.Scheduling.ProcessLocalScheduledJobLease(), Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Criterion 9 — removal through Manage Access sticks; a manual grant afterwards still succeeds
@@ -114,6 +115,45 @@ public class AssignedAccessMarkerTests
         result.Should().BeOfType<Ok<GrantAccessResponse>>();
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
         Row(contact).State.Should().Be(AssignedAccessState.Adopted);
+    }
+
+    /// <summary>
+    /// Owner round 80 (task 113): a manual re-add over a LAPSED grant is a SET — restored (written) at the picked level with
+    /// today + 90 — and only then is the ledger entry adopted.
+    /// </summary>
+    [Fact]
+    public async Task AManualReAddOverALapsedAutoGrant_RestoresIt_AndOnlyThenIsAdopted()
+    {
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Single();
+        grant.ExpiresDate = Today.AddDays(-1); // it lapsed
+
+        var result = await Grant(contact);
+
+        result.Should().BeOfType<Ok<GrantAccessResponse>>();
+        grant.ExpiresDate.Should().Be(Today.AddDays(ExternalGrantLifecycle.DefaultExpiryDays), "the re-add restored it");
+        Row(contact).State.Should().Be(AssignedAccessState.Adopted);
+    }
+
+    /// <summary>The negative twin: a REFUSED re-add (here the No Access list) writes nothing and adopts nothing.</summary>
+    [Fact]
+    public async Task ARefusedReAddOverALapsedAutoGrant_WritesNothing_AndIsNotAdopted()
+    {
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Single();
+        grant.ExpiresDate = Today.AddDays(-1);
+        var stateBefore = Row(contact).State;
+        _h.DenyList.DenyContactOnRecord(contact, _matter);
+
+        var result = await Grant(contact);
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(422);
+        grant.ExpiresDate.Should().Be(Today.AddDays(-1), "a refused re-add restores nothing");
+        Row(contact).State.Should().Be(stateBefore).And.NotBe(AssignedAccessState.Adopted);
     }
 
     [Fact]

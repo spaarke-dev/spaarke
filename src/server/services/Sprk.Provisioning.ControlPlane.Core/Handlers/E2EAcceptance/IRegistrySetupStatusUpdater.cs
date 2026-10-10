@@ -10,8 +10,7 @@
 //   The transition to `Ready` is CONDITIONAL on ALL of:
 //     - Extended validate script exit 0 (SC #5)
 //     - ALL 7 T1–T7 traps clear (SC #6)
-//     - ALL 5 I1–I5 invariants clear (§4D)
-//     - naming-conformance exit 0 (SC #17)
+//     - the I2–I5 invariants clear on the stamp (§4D; I1 is a build gate — task 230a)
 //     - cost envelope conforms (§15 #14 — advisory-warn only unless opted-in fail)
 //   Partial-pass does NOT transition. On failure, Cosmos state = Quarantined
 //   per §4C rollback semantics.

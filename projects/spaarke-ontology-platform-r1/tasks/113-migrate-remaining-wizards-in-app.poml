@@ -4,7 +4,7 @@
     <title>Migrate the remaining wizards off navigateTo: Summarize Files, Upload Documents, Find Similar, Workspace layout</title>
     <phase>5b Modal system (D-26)</phase>
     <gate>112 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes how four more shipped wizards open from Spaarke React surfaces.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -28,6 +28,9 @@
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</file>
       <file role="modify">src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx</file>
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Wizard/InAppWizardHost.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateProjectWizardWidget.tsx (#1421, added 2026-10-08)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.tsx and src/solutions/CreateWorkAssignmentWizard/src/main.tsx (#1420, added 2026-10-08)</file>
+      <file role="canonical-reference">CreateMatterWizard's onComplete + completeOrClose(recordId, onClose, onComplete) path (#1420)</file>
     </relevant-files>
   </context>
 
@@ -37,6 +40,7 @@
     <constraint source="project">Scope: in the in-app path the wizards must not run their parent-document close hack (the close goes through onClose).</constraint>
     <constraint source="project">Scope: record the SpaarkeAi bundle delta.</constraint>
     <constraint source="ADR-021">Scope: tokens only; light and dark correct.</constraint>
+    <constraint source="owner">ADDED 2026-10-08 (no-parking sweep, D-81 rule; extends the D-26 scope above by exactly these two items): (1) #1421 (ISS-012): CreateProjectWizardWidget's launchCreateProjectDialog (~:140-170) replaces its private Xrm.Navigation.navigateTo(webresource sprk_createprojectwizard) with task 112's shared navigateToWebResourceSurfaceAsync({ webresourceName: 'sprk_createprojectwizard', data, title }), so it opens in-app when InAppWizardHost is mounted and falls back to navigateTo otherwise. VisualHost's sprk_createeventwizard PCF launch stays on navigateTo (launch rule b). (2) #1420 (ISS-011): WorkAssignmentWizardDialog gains onComplete?: (recordId: string) =&gt; void, called on the success path through completeOrClose exactly as CreateMatterWizard does; wire it in the sprk_createworkassignmentwizard code page (writes completeHandoff) and in InAppWizardHost, so launchSurface({ consumerType: 'create-work-assignment' }) resolves committed with the record id and Quick Start's onRecordCreated fires for Assign Work.</constraint>
   </constraints>
 
   <knowledge>
@@ -90,9 +94,13 @@
     <criterion testable="true">Negative: ribbon, subgrid command scripts and non-wizard navigateTo dialogs are unchanged in the diff.</criterion>
     <criterion testable="true">Negative: in the in-app path no code queries the parent document for dialogCloseIconButton.</criterion>
     <criterion testable="true">The bundle delta is recorded; tests cover the stated contract; the packages build.</criterion>
+    <criterion testable="true">#1421: the create-project-wizard widget calls navigateToWebResourceSurfaceAsync, not Xrm.Navigation.navigateTo (test asserts both: in-app when the host is mounted, navigateTo fallback when it is not). The PR closes #1421.</criterion>
+    <criterion testable="true">#1420: finishing Create Work Assignment resolves launchSurface as committed with the new record id in both hosts (code page and in-app); cancelling resolves cancelled; Quick Start's Assign Work card reports the record (tests fail on the old code). The PR closes #1420.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-60; D-26; modal note section 5.2 P5 (part 2 of 2). Deployed by task 114.</notes>
+  <notes>spec.md FR-60; D-26; modal note section 5.2 P5 (part 2 of 2). Deployed by task 114. Amended 2026-10-08 by the no-parking sweep: #1420 and #1421 (found by task 112) folded in; 113 did not cover them before.</notes>
+
+  <completion>COMPLETED 2026-10-09: PR #1480 merged 00fb99eda (Summarize Files, Upload Documents, Find Similar and the Workspace layout wizard open in the in-app modal; closes #1420, #1421, #1479). Console auto-deployed to dev (deploy-spaarke-ai run 05:43Z, success). Live check = task 114.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

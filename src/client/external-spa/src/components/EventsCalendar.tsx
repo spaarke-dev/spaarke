@@ -40,7 +40,9 @@ import {
   MessageBarBody,
 } from '@fluentui/react-components';
 import { AddRegular, CalendarEmptyRegular } from '@fluentui/react-icons';
+import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 import { getEvents, createEvent, ODataEvent, CreateEventPayload } from '../api/web-api-client';
+import { TruncatedListNotice } from './TruncatedListNotice';
 import { AccessLevel, ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -177,7 +179,7 @@ const useStyles = makeStyles({
 /**
  * Map the event's `sprk_status` wire value to a label. The BFF reads it from the
  * event's status of record, Dataverse `statuscode` (task 097 review F2 — the same
- * column POST /api/v1/events/{id}/complete writes; `sprk_eventstatus` is not used).
+ * column POST /api/v1/events/{id}/complete writes; the deprecated second status column is not used).
  * Live option set, verified 2026-10-05. An unknown or missing value is shown as
  * such — never defaulted to "Open".
  */
@@ -230,10 +232,13 @@ interface ParsedDate {
   full: string;
 }
 
+/**
+ * sprk_duedate is a calendar date ("yyyy-MM-dd" — Dataverse Date Only, task 098). `new Date("yyyy-MM-dd")` is UTC
+ * midnight, which every zone west of UTC shows as the PREVIOUS day; parseDueDate builds the local calendar date.
+ */
 function parseDateParts(iso: string | null | undefined): ParsedDate | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return null;
+  const d = parseDueDate(iso);
+  if (!d) return null;
 
   return {
     month: d.toLocaleDateString('en-US', { month: 'short' }),
@@ -377,7 +382,9 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, 
     try {
       const payload: CreateEventPayload = {
         sprk_name: title.trim(),
-        ...(dueDate ? { sprk_duedate: new Date(dueDate).toISOString() } : {}),
+        // Task 098: the date input's own "yyyy-MM-dd" — the column is Date Only and Dataverse refuses a timestamp
+        // (the former toISOString() also turned the picked day into a UTC instant).
+        ...(dueDate ? { sprk_duedate: dueDate } : {}),
         // sprk_status omitted: the BFF creates the event Open (statuscode 659490001) — task 097 review F9.
         // Note: the event-as-todo toggle was removed in R3 task 007 — events are not to-dos.
         'sprk_RegardingProject@odata.bind': `/sprk_projects(${projectId})`, // R5 002: PascalCase nav prop (metadata-verified)
@@ -518,6 +525,8 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
   const [loading, setLoading] = React.useState<boolean>(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = React.useState<boolean>(false);
+  // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
+  const [truncated, setTruncated] = React.useState<boolean>(false);
 
   // -------------------------------------------------------------------------
   // Access level check
@@ -539,14 +548,14 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
       setLoadError(null);
 
       try {
+        // The BFF returns every event up to its row cap and says `truncated` when it stops short (task 105).
         const data = await getEvents(projectId, {
-          // Upcoming: order by due date ascending, exclude completed and cancelled
           $orderby: 'sprk_duedate asc',
-          $top: 50,
         });
 
         if (!cancelled) {
-          setEvents(data);
+          setEvents(data.items);
+          setTruncated(data.truncated);
         }
       } catch (err) {
         if (!cancelled) {
@@ -579,8 +588,8 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
       // Insert new event and re-sort by due date ascending
       const updated = [...prev, newEvent];
       updated.sort((a, b) => {
-        const da = a.sprk_duedate ? new Date(a.sprk_duedate).getTime() : Infinity;
-        const db = b.sprk_duedate ? new Date(b.sprk_duedate).getTime() : Infinity;
+        const da = parseDueDate(a.sprk_duedate)?.getTime() ?? Infinity;
+        const db = parseDueDate(b.sprk_duedate)?.getTime() ?? Infinity;
         return da - db;
       });
       return updated;
@@ -633,19 +642,24 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
         )}
       </div>
 
+      <TruncatedListNotice truncated={truncated} shown={events.length} noun="events" />
+
       {/* Event list or empty state */}
+      {/* Task 105: an incomplete empty list is not "no events" — the notice says it could not be read. */}
       {events.length === 0 ? (
-        <div className={styles.emptyState}>
-          <CalendarEmptyRegular className={styles.emptyStateIcon} />
-          <Text size={400} weight="semibold">
-            No events yet
-          </Text>
-          <Text size={300} className={styles.emptyStateText}>
-            {canCreate
-              ? 'No events have been added to this project. Use the Create Event button to add the first event.'
-              : 'No events have been added to this project yet.'}
-          </Text>
-        </div>
+        truncated ? null : (
+          <div className={styles.emptyState}>
+            <CalendarEmptyRegular className={styles.emptyStateIcon} />
+            <Text size={400} weight="semibold">
+              No events yet
+            </Text>
+            <Text size={300} className={styles.emptyStateText}>
+              {canCreate
+                ? 'No events have been added to this project. Use the Create Event button to add the first event.'
+                : 'No events have been added to this project yet.'}
+            </Text>
+          </div>
+        )
       ) : (
         <div className={styles.eventList}>
           {events.map((event, index) => (

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -34,7 +35,7 @@ public static class ContainerTypePermissionEndpoints
     {
         // GET /api/spe/containertypes/{typeId}/permissions?configId={id}
         group.MapGet("/containertypes/{typeId}/permissions", GetContainerTypePermissionsAsync)
-            // App-only as the config's owning app: the type must be the config's own, and the list names every customer's
+            // Delegated (the signed-in admin): the type must be the config's own, and the list names every customer's
             // app permissions, so the caller must reach every config of the type (task 165, round 20 item 3; round 35 item 5).
             .WithSpeAdminContainerTypeScope()
             .WithName("SpeGetContainerTypePermissions")
@@ -239,8 +240,8 @@ public static class ContainerTypePermissionEndpoints
     /// <summary>
     /// GET /api/spe/containertypes/{typeId}/permissions?configId={id}
     ///
-    /// Resolves the container type config, obtains a Graph client authenticated as the config's app
-    /// registration, retrieves all application permissions for the container type, and returns them
+    /// Resolves the container type config (scope check), then reads the registration's application
+    /// permission grants as the signed-in administrator (delegated), and returns them
     /// as a <see cref="ContainerTypePermissionListDto"/>.
     ///
     /// Responses:
@@ -311,8 +312,8 @@ public static class ContainerTypePermissionEndpoints
         try
         {
             // Retrieve application permissions for the container type from Graph API
-            var permissions = await graphService.GetContainerTypePermissionsForConfigAsync(
-                config, typeId, ct);
+            var permissions = await graphService.GetContainerTypePermissionsForUserAsync(
+                context, typeId, ct);
 
             // null indicates the container type was not found (Graph 404)
             if (permissions is null)
@@ -361,10 +362,10 @@ public static class ContainerTypePermissionEndpoints
             return ex.ToProblemDetails(
                 summary: $"Could not retrieve permissions for container type '{typeId}'.",
                 errorCode: "spe.containertypes.permissions.graph_error",
-                statusCode: StatusCodes.Status500InternalServerError,
+                statusCode: ex.ClientStatusFor(),
                 traceId: context.TraceIdentifier);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex,

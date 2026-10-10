@@ -4,7 +4,7 @@
     <title>Measure classifier recall against the floor (exit gate)</title>
     <phase>7 Inquiry and the classifier</phase>
     <gate>072 complete</gate>
-    <status>not-started</status>
+    <status>blocked</status>
     <rigor>FULL</rigor>
     <rigor-reason>This is a measurement that can FAIL THE PROJECT; it is a gate, not an implementation.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -100,5 +100,11 @@
 
   <notes>spec.md FR-40 and success criterion 11. design.md section 8.0c (D-10). This task CAN FAIL THE PROJECT and that is its purpose.</notes>
 
+  <completion status="blocked" date="2026-10-07" branch="stream/d-074">
+    <summary>BLOCKED at the escalation trigger: no labelled set exists, and building one from spaarkedev1 needs owner judgement. No recall was measured; the gate has neither passed nor failed, and R1 cannot exit on criterion 11 until it is resolved.</summary>
+    <done>D-49 conflict check with the email project: clean (no open PRs on triage; r2 complete and archived; r3 design-only and excludes triage at design.md:126). Three columns created on sprk_triagecategory in spaarkedev1 via the 007 Web API recipe (sprk_MeasuredRecall decimal 0-100 p2, sprk_LabelledSetSize integer, sprk_RecallMeasuredOn DateOnly/DateOnly), PublishXml on the entity only, read back as componenttype-2 members of OntologyPlatformSolution. Values left null (no measurement yet).</done>
+    <blocked-on>Owner decisions 1-5 in notes/classifier-recall-measurement.md section 4: (1) source of items (real redacted mail recommended, or a blind owner-labelled synthetic set, or a hybrid); (2) whether the 50 counts positives (proposal: 25 or more per gated category plus 30 or more negatives, 80-100 items in all); (3) which recall gates (proposal: predicate-level Fee-or-Scope recall of 80 percent or more, with strict per-category recall reported); (4) labelling protocol; (5) in-memory live harness at 2 model calls per item, about 160-200 calls.</blocked-on>
+    <evidence>notes/classifier-recall-measurement.md</evidence>
+  </completion>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

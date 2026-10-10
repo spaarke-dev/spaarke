@@ -18,7 +18,7 @@
  * **Origin**: lifted from legacy App.tsx `executeBulkStatusUpdate` + `executeBulkArchive`
  */
 
-import { registerCommandHandler, cleanGuid, getXrm } from '@spaarke/ui-components';
+import { registerCommandHandler, cleanGuid, getXrm, formatDateOnly } from '@spaarke/ui-components';
 import { EVENT_ENTITY_NAME } from './config';
 
 // Best-effort feedback: the nearest frame that has the member (task 081 round 5).
@@ -27,37 +27,52 @@ const notificationXrm = (): any => getXrm((x: any) => typeof x.App?.addGlobalNot
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const alertXrm = (): any => getXrm((x: any) => typeof x.Navigation?.openAlertDialog === 'function');
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Event status values (match `sprk_event_ribbon_commands.js` global option set)
+// Event status = sprk_event.statuscode (D-28, task 066: the second status column is deprecated and no longer
+// written). The values are the LIVE option set, each with the statecode Dataverse pairs it with; the BFF test
+// EventStatusDeprecationTests pins them against Spaarke.Dataverse.EventStatusCode and the live-verified data model.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const EventStatus = {
-  DRAFT: 0,
-  OPEN: 1,
-  COMPLETED: 2,
-  CLOSED: 3,
-  ON_HOLD: 4,
-  CANCELLED: 5,
-  REASSIGNED: 6,
-  ARCHIVED: 7,
+  DRAFT: 1,
+  OPEN: 659490001,
+  COMPLETED: 659490002,
+  CLOSED: 659490003,
+  ON_HOLD: 659490006,
+  REASSIGNED: 659490007,
+  NO_FURTHER_ACTION: 2,
+  CANCELLED: 659490004,
+  TRANSFERRED: 659490005,
 } as const;
 
 const StateCode = { ACTIVE: 0, INACTIVE: 1 } as const;
+
+/** The statecode each status belongs to. Completed and Closed are ACTIVE (a pairing Dataverse rejects otherwise). */
+const STATE_OF_STATUS: Record<number, number> = {
+  [EventStatus.DRAFT]: StateCode.ACTIVE,
+  [EventStatus.OPEN]: StateCode.ACTIVE,
+  [EventStatus.COMPLETED]: StateCode.ACTIVE,
+  [EventStatus.CLOSED]: StateCode.ACTIVE,
+  [EventStatus.ON_HOLD]: StateCode.ACTIVE,
+  [EventStatus.REASSIGNED]: StateCode.ACTIVE,
+  [EventStatus.NO_FURTHER_ACTION]: StateCode.INACTIVE,
+  [EventStatus.CANCELLED]: StateCode.INACTIVE,
+  [EventStatus.TRANSFERRED]: StateCode.INACTIVE,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Bulk status update (forward-compat custom handler for configjson)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Lifted from legacy App.tsx L731-784. Updates `sprk_eventstatus` for every
+ * Lifted from legacy App.tsx L731-784. Updates `statuscode` (with its paired `statecode`) for every
  * selected record in parallel via `Xrm.WebApi.updateRecord`, then surfaces a
  * `Xrm.App.addGlobalNotification` toast on success.
  *
  * @param eventIds Record GUIDs (already cleaned of curly braces).
- * @param newStatus Target `sprk_eventstatus` option-set value.
+ * @param newStatus Target `statuscode` option-set value (an `EventStatus`).
  * @param statusLabel Human label for the success toast.
  * @param additionalFields Optional extra fields merged into the update payload
- *                         (e.g. `{ sprk_completeddate: new Date().toISOString() }`).
+ *                         (e.g. `{ sprk_completeddate: formatDateOnly(new Date()) }` — a Date Only column, task 098).
  * @returns `true` on success, `false` on any error (also shows an alert dialog).
  */
 async function executeBulkStatusUpdate(
@@ -72,7 +87,7 @@ async function executeBulkStatusUpdate(
   const xrm: any = getXrm();
   if (!xrm?.WebApi) return false;
 
-  const updateData: Record<string, unknown> = { sprk_eventstatus: newStatus };
+  const updateData: Record<string, unknown> = { statuscode: newStatus, statecode: STATE_OF_STATUS[newStatus] };
   if (additionalFields) Object.assign(updateData, additionalFields);
 
   const cleanIds = eventIds.map(id => cleanGuid(id));
@@ -96,10 +111,8 @@ async function executeBulkStatusUpdate(
 }
 
 /**
- * Lifted from legacy App.tsx L794-844. Archive sets BOTH `sprk_eventstatus`
- * AND `statecode` to inactive in two sequential updates per record (the
- * platform requires the status-field update to happen on an active record
- * before deactivation).
+ * Lifted from legacy App.tsx L794-844. Archive is one update per record:
+ * `statuscode` = No Further Action with its paired `statecode` = Inactive (D-28, task 066).
  */
 async function executeBulkArchive(eventIds: ReadonlyArray<string>): Promise<boolean> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -111,8 +124,10 @@ async function executeBulkArchive(eventIds: ReadonlyArray<string>): Promise<bool
   try {
     await Promise.all(
       cleanIds.map(async id => {
-        await xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, id, { sprk_eventstatus: EventStatus.ARCHIVED });
-        await xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, id, { statecode: StateCode.INACTIVE, statuscode: 2 });
+        await xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, id, {
+          statuscode: EventStatus.NO_FURTHER_ACTION,
+          statecode: StateCode.INACTIVE,
+        });
       })
     );
     notificationXrm()?.App?.addGlobalNotification?.({
@@ -171,14 +186,18 @@ export function registerEventHandlers(): void {
     // This generic registration completes the FR-MIG-02 contract; per-status
     // wrappers can be added when configjson surfaces them.
     await executeBulkStatusUpdate(ctx.selectedIds, EventStatus.COMPLETED, 'Completed', {
-      sprk_completeddate: new Date().toISOString(),
+      // Task 098: sprk_completeddate is Date Only — the Web API refuses a timestamp (HTTP 400). The user's LOCAL
+      // calendar day (toISOString() was also the UTC date: tomorrow after ~20:00 Eastern).
+      sprk_completeddate: formatDateOnly(new Date()),
     });
     ctx.refresh();
   });
 
   registerCommandHandler('CompleteEvents', async ctx => {
     await executeBulkStatusUpdate(ctx.selectedIds, EventStatus.COMPLETED, 'Completed', {
-      sprk_completeddate: new Date().toISOString(),
+      // Task 098: sprk_completeddate is Date Only — the Web API refuses a timestamp (HTTP 400). The user's LOCAL
+      // calendar day (toISOString() was also the UTC date: tomorrow after ~20:00 Eastern).
+      sprk_completeddate: formatDateOnly(new Date()),
     });
     ctx.refresh();
   });

@@ -33,14 +33,12 @@ export interface IEventRecord {
   sprk_location?: string;
   /** Reminder datetime */
   sprk_remindat?: string;
-  /**
-   * Event Status (custom field - primary status indicator)
-   * Values: 0=Draft, 1=Open, 2=Completed, 3=Closed, 4=On Hold, 5=Cancelled, 6=Reassigned, 7=Archived
-   */
-  sprk_eventstatus?: number;
-  /** @deprecated Use sprk_eventstatus instead. Kept for backward compatibility. */
+  /** State (Active 0 / Inactive 1) — paired with statuscode (see EventStatus). */
   statecode?: number;
-  /** @deprecated Use sprk_eventstatus instead. Kept for backward compatibility. */
+  /**
+   * Status reason — THE event status (D-28, task 066; the second status column is deprecated and no longer read).
+   * Values: see EventStatus.
+   */
   statuscode?: number;
   /** Priority */
   sprk_priority?: number;
@@ -91,18 +89,19 @@ export interface IEventRecord {
 }
 
 /**
- * Event Status values (sprk_eventstatus custom field)
- * Matches values defined in Dataverse optionset
+ * Event Status = sprk_event.statuscode values (the LIVE option set; Spaarke.Dataverse.EventStatusCode is the
+ * server-side home, pinned by the BFF test EventStatusDeprecationTests).
  */
 export enum EventStatus {
-  Draft = 0,
-  Open = 1,
-  Completed = 2,
-  Closed = 3,
-  OnHold = 4,
-  Cancelled = 5,
-  Reassigned = 6,
-  Archived = 7,
+  Draft = 1,
+  Open = 659490001,
+  Completed = 659490002,
+  Closed = 659490003,
+  OnHold = 659490006,
+  Reassigned = 659490007,
+  NoFurtherAction = 2,
+  Cancelled = 659490004,
+  Transferred = 659490005,
 }
 
 /**
@@ -119,18 +118,21 @@ export const EVENT_STATUS_LABELS: Record<number, string> = {
   [EventStatus.Completed]: "Completed",
   [EventStatus.Closed]: "Closed",
   [EventStatus.OnHold]: "On Hold",
-  [EventStatus.Cancelled]: "Cancelled",
   [EventStatus.Reassigned]: "Reassigned",
-  [EventStatus.Archived]: "Archived",
+  [EventStatus.NoFurtherAction]: "No Further Action",
+  [EventStatus.Cancelled]: "Cancelled",
+  [EventStatus.Transferred]: "Transferred",
 };
 
 /**
- * Active statuses that allow actions (Complete, Cancel, etc.)
+ * Open-work statuses that allow actions (Complete, Cancel, etc.) — the same set as the BFF's
+ * EventStatusCode.IsOpenWork (Draft, Open, On Hold, Reassigned).
  */
 export const ACTIVE_EVENT_STATUSES = [
   EventStatus.Draft,
   EventStatus.Open,
   EventStatus.OnHold,
+  EventStatus.Reassigned,
 ];
 
 /**
@@ -140,8 +142,8 @@ export const TERMINAL_EVENT_STATUSES = [
   EventStatus.Completed,
   EventStatus.Closed,
   EventStatus.Cancelled,
-  EventStatus.Reassigned,
-  EventStatus.Archived,
+  EventStatus.Transferred,
+  EventStatus.NoFurtherAction,
 ];
 
 /**
@@ -164,7 +166,6 @@ export function isEventActive(status: number): boolean {
 export const EVENT_HEADER_SELECT_FIELDS = [
   "sprk_eventid",
   "sprk_eventname",
-  "sprk_eventstatus",
   "statecode", // Keep for backward compatibility / archive detection
   "statuscode", // OOB status reason — used by StatusSection
   "_sprk_eventtype_ref_value",
@@ -187,7 +188,6 @@ export const EVENT_FULL_SELECT_FIELDS = [
   "scheduledend",
   "sprk_location",
   "sprk_remindat",
-  "sprk_eventstatus",
   "statecode", // Keep for backward compatibility / archive detection
   "statuscode", // OOB status reason — used by StatusSection
   "sprk_priority",

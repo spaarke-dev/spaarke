@@ -4,7 +4,7 @@
     <title>Disposition accrual per matter and per outside firm</title>
     <phase>7 Inquiry and the classifier</phase>
     <gate>070 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Produces the compounding asset the product claim rests on.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -89,6 +89,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-37 and success criterion 10. Computing Do-rule action rate from Decision Records would report about 0 percent on every Do rule, making a noisy policy and a perfect one look identical.</notes>
+
+  <completion>COMPLETED 2026-10-09: PR #1532 merged into docs/ontology-platform-design (8264fa5c3) after independent review + 3 rounds. POST /api/v1/inquiries/{serviceRequestId}/disposition (as the caller, If-Match versionnumber; D-111); InquiryReplyTodoCreator at inbound step 4.9 with v5 To Do id. Documented, not fixed (D-106): F-48 (owner may confirm who may record), F-49 (CI timeout).</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

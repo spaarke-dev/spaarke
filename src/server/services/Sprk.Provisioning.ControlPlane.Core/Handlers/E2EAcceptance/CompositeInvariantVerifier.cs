@@ -4,11 +4,12 @@
 // Production <see cref="IE2EInvariantVerifier"/> — composes the set of DI-
 // registered <see cref="IInvariantProbe"/> implementations, one per
 // <see cref="InvariantKind"/>, into the aggregate H13 acceptance-gate consumes.
-// REPLACES <see cref="PlaceholderInvariantVerifier"/>'s DI registration
-// (task 174, Wave G-7 Batch G-7A1).
+// REPLACED PlaceholderInvariantVerifier's DI registration (task 174, Wave G-7
+// Batch G-7A1; the placeholder was deleted by task 230a).
 //
 // SEMANTICS:
-//   For each canonical <see cref="InvariantKind"/> (I1..I5):
+//   For each canonical <see cref="InvariantKind"/> (I2..I5 — task 230a: I1 is
+//   build-time, enforced by the I1 ArchTest, not a runtime probe):
 //     - If exactly ONE <see cref="IInvariantProbe"/> is registered for that
 //       kind → invoke it, forward its outcome verbatim.
 //     - If ZERO probes are registered → return
@@ -23,7 +24,7 @@
 //
 // PROBE ORDER + FAULT ISOLATION:
 //   Probes are invoked in <see cref="InvariantKind"/> enum-declaration order
-//   (I1..I5) — parity with the retired PlaceholderInvariantVerifier's outcomes-
+//   (I2..I5) — parity with the retired PlaceholderInvariantVerifier's outcomes-
 //   array order so H13's aggregate log summary reads identically pre/post-
 //   migration. Each probe runs independently — a Failed / InfraFault from one
 //   probe does NOT short-circuit the remaining probes (H13 decides pass/fail
@@ -46,13 +47,10 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// </summary>
 public sealed class CompositeInvariantVerifier : IE2EInvariantVerifier
 {
+    // Built from the enum (task 230a review): a new InvariantKind is required at once — a kind with no
+    // registered probe returns the deferral InfraFault, never a silent pass.
     private static readonly ImmutableArray<InvariantKind> AllKindsInEnumOrder =
-        ImmutableArray.Create(
-            InvariantKind.I1NoHardcodedTenant,
-            InvariantKind.I2AiSearchTenantFilter,
-            InvariantKind.I3CosmosPartitionKey,
-            InvariantKind.I4SpeContainerResolver,
-            InvariantKind.I5GraphTokenTenant);
+        [.. Enum.GetValues<InvariantKind>().Order()];
 
     private readonly ImmutableDictionary<InvariantKind, IInvariantProbe> _probesByKind;
     private readonly ILogger<CompositeInvariantVerifier> _logger;

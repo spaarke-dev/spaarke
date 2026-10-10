@@ -51,7 +51,7 @@ import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
 import { cleanGuid } from '../../utils/guid';
 import { getXrm } from '../../utils/xrmContext';
 import type { DataGridConfiguration, MembershipFilter } from '../../types/DataGridConfiguration';
-import { isValidDataGridConfiguration } from '../../types/DataGridConfiguration';
+import { fetchConfigRecord, resolveSource } from './resolveGridSource';
 import {
   DataGridContextProvider,
   type DataGridContextValue,
@@ -81,6 +81,7 @@ import { ViewSelector, type SavedView } from './ViewSelector';
 import { useDataGridExternalHost } from './DataGridExternalHost';
 import type { SavedQuerySummary } from '../../services/IDataverseClient';
 import { thinScrollbarStyle } from '../../theme/scrollbar';
+import { isDateOnlyString, parseDueDate } from '../../utils/dateLocal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -584,7 +585,8 @@ export function buildRecordOpenNavArgs(
   return { pageInput, navOptions: LAYOUT_1_NAV_OPTIONS };
 }
 
-function renderCellValue(value: unknown, renderer: string): string {
+/** Formats one cell for display. Exported for tests (task 098). */
+export function renderCellValue(value: unknown, renderer: string): string {
   if (value === null || value === undefined || value === '') return '';
   switch (renderer) {
     case 'currency': {
@@ -601,7 +603,21 @@ function renderCellValue(value: unknown, renderer: string): string {
       if (Number.isNaN(num)) return String(value);
       return `${Math.round(num * 100)}%`;
     }
+    case 'dateonly': {
+      // Task 098: metadata says Date Only BEHAVIOUR — the value is a calendar date ("YYYY-MM-DD"). new Date() would
+      // read it as UTC midnight and show the previous day anywhere west of UTC.
+      if (value instanceof Date) return Number.isNaN(value.getTime()) ? '' : value.toLocaleDateString();
+      const day = parseDueDate(typeof value === 'string' ? value : null);
+      return day ? day.toLocaleDateString() : String(value);
+    }
     case 'date': {
+      // Format DateOnly. A bare "YYYY-MM-DD" is what Dataverse returns ONLY for a Date Only BEHAVIOUR column (UserLocal
+      // and TimeZoneIndependent values always carry a time and "Z"), so it is read as that calendar day even when the
+      // host's metadata did not say so; an instant keeps its local-day rendering.
+      if (isDateOnlyString(value)) {
+        const day = parseDueDate(value);
+        return day ? day.toLocaleDateString() : String(value);
+      }
       try {
         return new Date(value as string | number).toLocaleDateString();
       } catch {
@@ -651,109 +667,6 @@ const INITIAL_LOAD_STATE: ConfigLoadState = {
   isLoading: true,
   error: null,
 };
-
-/**
- * Best-effort fetch of the `sprk_gridconfiguration` record (FR-DG-04 — non-existent
- * configIds MUST fall through gracefully). Returns `null` configRecord on miss.
- */
-async function fetchConfigRecord(
-  dataverseClient: IDataverseClient,
-  configId: string
-): Promise<DataGridConfiguration | null> {
-  try {
-    const rec = await dataverseClient.retrieveRecord<Record<string, unknown>>('sprk_gridconfiguration', configId, [
-      'sprk_configjson',
-    ]);
-    const raw = rec['sprk_configjson'];
-    if (typeof raw !== 'string' || raw.trim() === '') return null;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      // Per FR-DG-03: invalid JSON does NOT throw — fall back to defaults.
-      // eslint-disable-next-line no-console
-      console.warn(`[DataGrid] Invalid JSON in sprk_configjson for configId=${configId}`);
-      return null;
-    }
-    if (!isValidDataGridConfiguration(parsed)) {
-      // eslint-disable-next-line no-console
-      console.warn(`[DataGrid] sprk_configjson did not match v1.0 schema for configId=${configId}`);
-      return null;
-    }
-    return parsed;
-  } catch {
-    // configId not found, OR Xrm threw — graceful fallthrough.
-    return null;
-  }
-}
-
-/**
- * Resolve `source` into a `{ entityName, fetchXml, layoutXml }` triple via savedquery
- * lookup, inline literal, or savedquery-set discovery + first match.
- */
-async function resolveSource(
-  dataverseClient: IDataverseClient,
-  configRecord: DataGridConfiguration | null,
-  fallbackEntityName: string | undefined
-): Promise<SavedQueryResult | null> {
-  if (!configRecord) {
-    // No config record — caller may pass `fallbackEntityName` for synthesized fallback.
-    if (!fallbackEntityName) return null;
-    return null; // No fetchXml available; columns will synthesize from metadata.
-  }
-  const source = configRecord.source;
-  if (source.type === 'savedquery') {
-    try {
-      return await dataverseClient.retrieveSavedQuery(source.savedQueryId);
-    } catch {
-      return null;
-    }
-  }
-  if (source.type === 'inline') {
-    // Inline source carries fetchXml + layoutXml directly; entityName extracted from fetchXml.
-    const entityName = extractEntityFromFetchXml(source.fetchXml) ?? '';
-    return {
-      entityName,
-      fetchXml: source.fetchXml,
-      layoutXml: source.layoutXml,
-      name: configRecord.display?.title ?? 'Inline',
-    };
-  }
-  if (source.type === 'savedquery-set') {
-    try {
-      const queries = await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName);
-      const def = queries.find(q => q.isDefault) ?? queries[0];
-      if (!def) return null;
-      return await dataverseClient.retrieveSavedQuery(def.id);
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-function extractEntityFromFetchXml(fetchXml: string): string | undefined {
-  if (!fetchXml) return undefined;
-  // Primary: DOMParser (browser). Fall back to a regex when DOMParser is
-  // unavailable/returns a parsererror (owner UAT 2026-08-12 #4C — a valid inline
-  // fetchXml was yielding an empty entityName → the "Cannot resolve entityName"
-  // error; the regex makes extraction robust to DOMParser quirks/XML-decl/BOM/
-  // entity-encoded quotes). Matches `<entity name="…">` or `name='…'`.
-  try {
-    if (typeof DOMParser !== 'undefined') {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(fetchXml, 'text/xml');
-      if (!doc.querySelector('parsererror')) {
-        const name = doc.querySelector('entity')?.getAttribute('name');
-        if (name) return name;
-      }
-    }
-  } catch {
-    /* fall through to regex */
-  }
-  const m = /<entity\b[^>]*\bname\s*=\s*['"]([^'"]+)['"]/i.exec(fetchXml);
-  return m?.[1] ?? undefined;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The component

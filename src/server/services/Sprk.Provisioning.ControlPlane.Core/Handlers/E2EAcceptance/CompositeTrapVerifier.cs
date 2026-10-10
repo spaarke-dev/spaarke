@@ -4,7 +4,7 @@
 // Task 185 (Phase C'' Wave G-7 Batch G-7D) — TERMINAL aggregation. Production
 // <see cref="IE2ETrapVerifier"/> that composes the 7 real per-trap probes
 // (tasks 171/172/175/177/178/180; T7 task 238) into the aggregate H13 acceptance-gate
-// consumes. REPLACES <see cref="PlaceholderTrapVerifier"/>'s DI registration.
+// consumes. REPLACED the former PlaceholderTrapVerifier's DI registration (the placeholder was deleted by task 230a).
 //
 // DIRECT PARITY with <see cref="CompositeInvariantVerifier"/> (Batch G-7A1 /
 // task 174). Every semantics rule below mirrors that sibling verifier so H13's
@@ -30,7 +30,7 @@
 //
 // PROBE ORDER + FAULT ISOLATION:
 //   Probes are invoked in <see cref="TrapKind"/> enum-declaration order (T1–T7)
-//   — parity with the retired <see cref="PlaceholderTrapVerifier"/>'s outcomes-
+//   — parity with the retired PlaceholderTrapVerifier's outcomes-
 //   array order so H13's aggregate log summary reads identically pre/post-
 //   migration. Each probe runs independently — a Failed / InfraFault from one
 //   probe does NOT short-circuit the remaining probes (H13 decides
@@ -68,7 +68,7 @@
 //     this — deferred to a future god-class-ratchet or wave.
 //
 // PLACEMENT + JUSTIFICATION (CLAUDE.md §10 / §11):
-//   Existing — <see cref="PlaceholderTrapVerifier"/> stub + 6 real per-trap
+//   Existing — the former PlaceholderTrapVerifier stub + 6 real per-trap
 //     probe classes (each `: ITrapProbe` after task 185's two-token annotation).
 //   Extension — REUSES <see cref="CompositeInvariantVerifier"/>'s composition
 //     pattern verbatim; no new abstractions beyond <see cref="ITrapProbe"/>.

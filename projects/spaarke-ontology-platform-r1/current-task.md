@@ -1,64 +1,41 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-07 late (main session, context-handoff before /compact). State only — history is in git,
-> task `<completion>` blocks and `notes/handoff-history/`. Standing rules: [`CLAUDE.md`](CLAUDE.md). Decisions:
-> [`notes/decisions.md`](notes/decisions.md) (D-1..D-62, none open). Sub-agents never edit this file.
+> **Last Updated**: 2026-10-09 late (main session). State only — history is in git log, task `<completion>`
+> blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (**D-106: ontology critical
+> path only**) and §6 gotchas. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-115; **D-115** = main session merges reviewed, green ontology PRs to master too; **D-107** = merge reviewed ontology PRs into the project branch when green; **D-113** = uac-r2's answers). Issues for after the
+> project: [`notes/defer-issues.md`](notes/defer-issues.md) (D-106 section, F-1..F-49). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | No main-session task — **orchestrating five parallel streams** (owner choice 2026-10-07). Index: 94 tasks; counts + critical path + stream table at the top of `tasks/TASK-INDEX.md`. |
-| **Branch** | `docs/ontology-platform-design` (draft PR #1111), pushed, in sync. Master merged in 2026-10-07. ArchTests 818/818 (I5 fixed by `0977c274d`). |
-| **Next Action** | Wait for agent notifications; for each: verify, merge its branch into this branch (stream branches) or check its PR, mark the POML + TASK-INDEX (both — drift check), and launch the next task in that stream. Ask the owner only for merges of PRs to master and genuine decisions. |
+| **Task** | Orchestrating ontology critical-path lanes. 116 tasks: **65 ✅**, 2 🔄 (039, 130: code merged, live gates pending), 36 🔲, 9 ⏸️ deferred (D-106), 4 🚫. |
+| **Branch** | `docs/ontology-platform-design` (draft #1111). **Synced with master 2026-10-09 (`b2fc3fb78`, includes #1390/#1391, NSubstitute gone; Signal-ownership invariant renumbered I-18).** ArchTests: 9 red in `ExternalSpaGridViewSelectorGuardTests` since #1531 (054 moved `resolveSource` to `resolveGridSource.ts`), lane-guard fixing. |
+| **Rule** | **D-106:** fix only what ontology functionality needs; document everything else in `notes/defer-issues.md`. Every sub-agent/reviewer prompt carries it. Merges: D-107 (branch) + D-115 (master), after review + green CI. |
+| **Critical path** | 039 writer PR + live gate (lane-039) → 037 → 031 evaluator → 032/033/034 → 035 deploy BFF → 038/050 → 059 worklist → 055 deploy Console → 064. Decision path: 040 (after 039) + 048 → 046 → 043 commit route → 058 wizard → 045. |
+| **Next Action** | Act on lane notifications: each PR → independent review (carrying D-106) → merge per D-107/D-115. On lane-039's PR message: review the merge delta (code was reviewed 2026-10-08) and merge; on its final report: close 039 (POML + index), then start **037** and **040**. |
 
-### Running agents (each reports by notification; none merges)
+## Running now (SendMessage resumes an agent by name)
 
-| Agent | Work | Where it lands | On completion |
-|---|---|---|---|
-| 098 | PR #1359 follow-ups: fold in 065 (D-27 `sprk_duedate`) + fix 9 non-working TZ-pin tests | PR #1359 (`C:\wt098`) | Focused independent review → ask owner to merge → mark 098 ✅ (065 already marked ✅ in index — it lands with #1359) → start **106** |
-| 039 | Secure-child Signals/Decision Records (uac-r2 conditions A/B on #1355) | Own PR to master (`C:\wts-039`, `feat/secure-child-signals-039`) + possibly writer change on this branch | Review → ask owner to merge → ✅ → start **037** |
-| Stream C | **036 + 026 MERGED into this branch** (`f7a12a24a`, ArchTests 818/818, Signals 454/454) — stream idle; next free tasks per TASK-INDEX stream table | — | — |
-| Stream C2 | 047 response columns (D-58) → D-60 drop foreign tables from `OntologyPlatformSolution` → 046 WA create on `RecordCreationService` (D-59, uac-r2 review) | Branch `stream/c2-047-046` (`C:\wts-c2`) | Give the D-60 job a POML number (draft in notes) → merge → ✅ |
-| Stream D | **072 MERGED** into this branch (ArchTests 818/818); **074 recall gate** (`C:\wts-d74`, `stream/d-074`) and **073 memo source** (`C:\wts-d73`, `stream/d-073`) running in parallel | Branches → merge back | 074 may escalate for a labelled set / >200 model calls |
-| Stream B | 057 → PR #1382 (review running); **056 running** (own PR, `C:\wts-b56`) | Own PRs to master | Review → ask owner to merge → ✅ |
-| Stream E | 060 → PR #1384 (review running); next **068** (D-63) after #1359 merges | Own PRs to master | Review → ask owner to merge → ✅ |
-
-### Agent IDs (for SendMessage after a reset — a finished agent resumes with its context when messaged)
-
-| ID | Role | State |
+| Lane | What | Then |
 |---|---|---|
-| a810b83c36e7d8f39 | 039 secure-child Signals/DRs (own PR, uac-r2 review) | running |
-| a87c76386416d9b61 | Stream C2: 047 → D-60 solution cleanup → 046 | running |
-| af7588b2ed6612c5f | Stream B: 056 WizardShell on SprkModal (own PR) | running |
-| a7d2ba5e803c9cc47 | Reviewer: 072 (stream D branch) | done |
-| a3f2fdb8356621906 | Reviewer: stream C round 2 (036/026) | done |
-| aeaf761bb094a0bd4 | Reviewer: PR #1359 (098 + 065 + TZ tests) | done — PASS-WITH-FINDINGS |
-| a6065b4aa9ef36798 | Reviewer: PRs #1382 (057) and #1384 (060) | done — both PASS-WITH-FINDINGS |
-| a67ad20f7bead7126 | 098 author (PR #1359) — FINAL round (TZ env Windows teardown, Briefing overdue gap per D-43, small K items); then main session reads diff → ask owner to merge | running |
-| a0c39a85690aeed2a | Stream C author (036/026) — round 3 | running |
-| ab5429413019d8fb9 | Stream D author (072) — merged | idle |
-| a1bcb0bae3c363ca9 | Stream D: 074 recall exit gate | running |
-| af2686291a99e5351 | Stream D2: 073 memo as source #2 | running |
-| a18a719c189250af3 | Stream B author of 057 (PR #1382) — round 2 (Decision Record state resolver R-4, tones, NaN/unknown tier) | running |
-| a17154f00e69eeced | Stream E author of 060 (PR #1384) — round 2 (stale comments, High Priority IsOpenWork, test); conflicts with #1359 header comment; then 068 after #1359 merges | running |
+| **lane-039** | (1) PR of `stream/039-signal-writer` (5 commits, never merged) into the project branch; (2) remaining live gate on dev BFF `ebacd2e15` (uac-r2 deployed it: share/unshare/unsecure, Secure WA case, re-own in ~2 min, load re-measure, cleanup) | Review + merge PR; close 039 |
+| **lane-guard** | Fix `ExternalSpaGridViewSelectorGuardTests` after 054's move (check for a real external-host bypass first); PR to project branch; uac-r2 reviews (their test) | Review → uac-r2 OK → merge |
+| **lane-048** | Mechanical move of `OwnedChildWrite` + helpers to `Services/Dataverse` (off master, `git mv`, one direction ArchTest); PR to **master**, uac-r2 review | Review → uac-r2 OK → merge (D-115) → 046 |
 
-### Critical path to 031
+## Waiting on others
 
-039 → 037 → **031**; 031 also needs **098** merged and **106** (To Do dates). D-61 binds 031: never stamp
-unchanged Signals nightly.
+| What | Waiting for | Then |
+|---|---|---|
+| **046**, **126** | 048 merged (agreed order #1391 ✅ → 048 → 046; #1501 rebases later) | 046 (`OwnedChildWrite.CreateAsync` via `POST /api/v1/child-records/sprk_workassignment`, D-113); 126 (BU-depth AppendTo rule, D-113) |
+| **074** recall exit gate | Owner's labelling page https://claude.ai/artifact/VVoBr33LckyjoUGeWit3aU (24/92) | Finish → `status/final.complete` → resume the 074 agent |
+| **130** live proof, **111/114** | The D-112 full E2E dev deploy (035 BFF + 055 Console + ontology solution) | Mark 130/111/114 done on it |
 
-### Recent outcomes (2026-10-07)
+## Open owner questions / owner actions
 
-- Merged to master: **#1302** (097), **#1309** (081), **#1346** (099), **#1380** (110, ADR-050 amendment, `36ff14147`).
-- Done on this branch: 007, 008, 009, 024, 079 (uac-r2 review received, #1355), writer-credential I5 fix.
-- Filed: **#1383** (central `ManagedIdentityCredentialFactory` empty `AZURE_TENANT_ID` leaves tenant unpinned — out of scope, reported).
-- Reported to owner, no action needed: D-25 in dev falls back to UTC (dev events fill only `sprk_assignedto`, which
-  `AssignedToDefaults` doesn't read); 008 kept the writer's Read on `sprk_budget`; read-only Platform forms show only Name/Owner.
+- **Checklist page** https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV: r2-r5 (wizards) belong to 111; r6/r7/r8 to deferred 121/122/129.
+- **Housekeeping (owner, by hand):** `C:\wt120d`, `C:\wtr1386`, `C:\wtrv1460`, `C:\wtrv1480*`, `C:\wts-b56`, `C:\wts-135`, `C:\wts-131`; older list in `notes/handoff-history/2026-10.md`.
 
-### Housekeeping for the owner
+## Coordination
 
-Delete by hand (sandbox can't delete under `C:\`): `C:\wt081-base`, `C:\wt097m`, `C:\wtz`, `C:\wt097\TestResults097`,
-`C:\wt081r`, `C:\wt081s`, `C:\wt21m`, `C:\wt21h`, `C:\wt21t`. Registered worktrees removable now: `C:\wt081b`,
-`C:\wt081c`, `C:\wt081m`, `C:\wt081`, `C:\wt092`, `C:\wt094`, `C:\wt095`, `C:\wt096`, `C:\wt097`, `C:\wts-110`;
-`C:\wt098` after #1359.
+uac-r2: post on #1355 **and** SendMessage their session (`spaarke-wt-unified-access-control-r2-*`); they reply by SendMessage.

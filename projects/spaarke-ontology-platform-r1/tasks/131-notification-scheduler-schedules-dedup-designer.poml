@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="131" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>D-100: retire the seven notification playbooks (bell notifications are not wanted); remove their deploy path and alert; propose deletion of now-unused code</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>deferred</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Removes a live scheduled feature (dev data), a deploy script, an Azure alert rule and possibly BFF code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>S1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree off origin/master; own PR.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api,jobs,deletion,separate-pr,dataverse</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Retire the notification playbooks cleanly. The owner decided (D-100, 2026-10-09) that model-driven bell notifications aren't wanted. The Daily Briefing never reads appnotification (DailyBriefingCollector bypasses it), and the ontology worklist and Do lane are where users see overdue and due-soon work.</prompt>
+  <role>SPAARKE engineer. A retirement that leaves no dead path, no misleading doc and no alert that can never fire.</role>
+  <goal>No notification playbook runs or can be redeployed by accident. Nothing in the repo or the docs describes them as a live feature, and every piece of code that only existed for them has been either deleted (with the owner's approval) or recorded as kept, with a reason.</goal>
+
+  <context>
+    <background>Superseded by D-100: the original 131 scope (schedules, dedup, Designer for notifications) and decisions D-76/D-79 (matter scope), D-89 steps 3 and 5 (sync and proof), D-94, D-95, and D-98 items 1-7 and 10 for notifications. In dev, all seven playbooks (Tasks Overdue, Tasks Due Soon, New Work Assignments, Matter/Project Activity Summary, New Documents, New Emails, New Events) are inactive: statecode 1 / statuscode 2 (D-91 + D-100, recorded in notes/deploy-log.md). Evidence: notes/playbook-engine-defect-sweep.md, notes/task-120-iss018-fix.md.</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">D-100: retire, don't fix. Remove the alert rule `notification-playbook-total-failure-dev` in Azure (task 120 deployed it), because it can no longer fire meaningfully. Make `Deploy-NotificationPlaybooks.ps1` and the seven `notification-*.json` definitions unable to redeploy the playbooks: delete them if nothing else uses them (the D-82 rule), or retire them with a guard. Update docs/architecture/SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md and any guide that presents them as live.</constraint>
+    <constraint source="project">Inventory the code that exists only for the notification playbooks: the type-2 path in PlaybookSchedulerJob, the CreateNotification and LookupUserMembership executors, NotificationActionCore usage, the D-78 total-failure handling. For each item, show by grep whether anything else uses it (other playbook types, the Insights playbooks, backend alerts that write appnotification directly). Do NOT delete code yourself. Put the deletion list in the PR body as "proposed, owner approval required", and the main session will ask. Keep the engine itself: the Insights playbooks (task 135) use it.</constraint>
+    <constraint source="project">Do not touch the two non-playbook appnotification writers (task 132) or the Designer protection (task 133). Own worktree off origin/master, own PR, do not merge. Never use --no-verify or bare git stash. You cannot write .claude/; report any skill or ADR text to change, for example ADR-034's notification references. The Azure alert deletion needs the owner's approval: STOP and report the exact az command first.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">All seven notification playbooks are inactive in spaarkedev1 and a scheduler tick runs none of them (evidence recorded).</criterion>
+    <criterion testable="true">No script or workflow in the repo can redeploy them; git grep evidence in the PR body.</criterion>
+    <criterion testable="true">Docs no longer describe them as live; the alert rule is removed (after approval) or explicitly kept with a reason.</criterion>
+    <criterion testable="true">The PR body carries a code-deletion inventory, each item marked used-elsewhere (keep) or unused (proposed delete).</criterion>
+  </acceptance-criteria>
+
+  <notes>Repurposed 2026-10-09 by the main session on D-100. The original scope (schedules/dedup/Designer for notification playbooks) is superseded.</notes>
+
+  <completion>DEFERRED 2026-10-09 by owner decision D-106 (ontology critical path only): not required for ontology functionality. State and open findings are in notes/defer-issues.md (D-106 section) for review after the project.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

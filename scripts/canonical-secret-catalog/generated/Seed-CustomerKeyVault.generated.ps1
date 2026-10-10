@@ -215,15 +215,6 @@ if ($SeedPlaceholders) {
     Write-Host '  SKIP: Compose-Webhook-SigningKey (value_source=generated; supplied downstream)' -ForegroundColor Gray
 }
 
-# ---- ContentSafety-ApiKey (ai) ----
-# Purpose: Azure AI Content Safety API key. Used by PromptShieldService + GroundednessCheckService. Per AiSafety:ContentSafety:ManagedIdentity Enabled=true, the ContentSafetyAuthHandler prefers MI over ApiKey; the KV ref remains for local-dev + fallback.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'ContentSafety-ApiKey' -Value 'placeholder-from-run-parameter' -Description 'Azure AI Content Safety API key. Used by PromptShieldService + GroundednessCheckService. Per AiSafety:ContentSafety:ManagedIdentity Enabled=true, the ContentSafetyAuthHandler prefers MI over ApiKey; the KV ref remains for local-dev + fallback.' -Category 'ai'
-} else {
-    Write-Host '  SKIP: ContentSafety-ApiKey (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
-
 # ---- Dataverse-ClientSecret (auth) ----
 # Purpose: OBO + shared-lib Dataverse client-credentials secret. Consumed by DataverseWebApiService (shared lib) and DataverseServiceClientImpl (via API_CLIENT_SECRET). BINDING never-delete per r3 handoff §4a and spec.md MUST rules — removing this secret CRASHES the BFF at startup. Retirement is gated on the #3b shared-lib ClientSecret->MI migration (code-quality-and-assurance-r3 task 011 / NG1 track).
 # Value source: from-existing-kv
@@ -259,29 +250,6 @@ if ($SeedPlaceholders) {
     Set-VaultSecret -Name 'Email-WebhookSigningKey' -Value 'placeholder-generated' -Description 'HMAC-SHA256 signing key for /api/v1/emails/webhook-trigger (Dataverse Service Endpoint webhooks). Fail-closed filter; rotates on incident or every 90 days. Grandfathered PascalCase per §7.9 R2.' -Category 'email'
 } else {
     Write-Host '  SKIP: Email-WebhookSigningKey (value_source=generated; supplied downstream)' -ForegroundColor Gray
-}
-
-# ---- SPE-CommunicationArchiveContainerId (spe) ----
-# Purpose: SPE communication-archive container ID (archived email / communication payloads).
-# Value source: from-bicep-output
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'SPE-CommunicationArchiveContainerId' -Value 'placeholder-from-bicep-output' -Description 'SPE communication-archive container ID (archived email / communication payloads).' -Category 'spe'
-} else {
-    Write-Host '  SKIP: SPE-CommunicationArchiveContainerId (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
-}
-
-# ---- SPE-ContainerTypeId (spe) ----
-# Purpose: SPE Container Type ID for the customer's tier (Model 1 / Model 2 / Trial 1). Value is TOPOLOGY-SCOPED — one container-type per tier, created ONCE per Spaarke tier by the operator via the one-time SPE topology setup runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Steps 1-3), NOT per-customer. H8 (H8-B semantics as of task 214, 2026-08-30) READS this value from spaarke-constants.yaml per_env_constants.<env>.containerTypeId at run dispatch and passes it to Microsoft Graph as the containerTypeId when creating the per-customer container. H8 no longer writes this slot (H8-A pre-2026-08-30 wrote here after 24-hour SPE container-type replication — that scope is RETIRED per topology doc §R5 empirical verification: `client_credentials` grant returns HTTP 403 accessDenied on container-TYPE creation regardless of credential shape, so container-TYPE creation is now delegated-only operator work, not a handler responsibility). H4 continues to pre-create the KV slot at customer-provisioning time so App Service KV-reference resolution has a target; the value comes from the topology constants, populated when task 213.7 lands.
-# Value source: from-topology-constants
-Write-Host '  SKIP: SPE-ContainerTypeId (value_source=from-topology-constants; written by H4 from the run parameter)' -ForegroundColor Gray
-
-# ---- SPE-DefaultContainerId (spe) ----
-# Purpose: SPE default container ID (per-customer root container for uploaded files).
-# Value source: from-bicep-output
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'SPE-DefaultContainerId' -Value 'placeholder-from-bicep-output' -Description 'SPE default container ID (per-customer root container for uploaded files).' -Category 'spe'
-} else {
-    Write-Host '  SKIP: SPE-DefaultContainerId (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
 }
 
 # ---- TenantId (identity) ----

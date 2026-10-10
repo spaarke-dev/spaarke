@@ -136,7 +136,7 @@ function parseSpeAdminParams(): SpeAdminParams {
 // App Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.0.1";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AppContent — inner component that consumes BuContext for page routing
