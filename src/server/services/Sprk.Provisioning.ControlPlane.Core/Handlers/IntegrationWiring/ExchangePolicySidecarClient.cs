@@ -22,6 +22,11 @@
 //           assignments:[{name, role, scope, inExpectedScope}], conflicts:[..], diagnostic }
 //   POST /read-mailbox-access  { tenantId, organization, appId, scopeGroupId, roles:[..], correlationId }
 //     200 { outcome: Success|Failure, servicePrincipalRegistered, assignments:[..], diagnostic }
+//   POST /ensure-customer-mailbox (H14m, task 263) and POST /read-customer-mailbox (H13, task 263)
+//        { tenantId, organization, appId, scopeGroupId, expectedScopeGroupName, name, displayName,
+//          primarySmtpAddress, roles:[..], correlationId }
+//     200 { outcome: Success|AlreadyCompliant|Drift|Failure (read: Success|Failure), created, verified, exists,
+//           authorization:[{role, inScope}], conflicts:[..], diagnostic }
 //   400 invalid body / missing token · 401 bad shared secret · 404 unknown route
 //   503 sidecar missing a setting · other 5xx server error
 //
@@ -40,9 +45,22 @@ using Microsoft.Extensions.Options;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 
-/// <summary>HTTP client for the H14a Exchange sidecar (apply + read routes).</summary>
-public sealed class ExchangePolicySidecarClient : IExchangePolicyApplier, IExchangePolicyReadClient
+/// <summary>HTTP client for the Exchange sidecar (H14a apply + T4 read; H14m customer-mailbox ensure + H13 read).</summary>
+/// <remarks>
+/// Task 263 adds <see cref="ICustomerMailboxClient"/> on the same transport:
+/// <c>POST /ensure-customer-mailbox</c> and <c>POST /read-customer-mailbox</c>, body
+/// <c>{ tenantId, organization, appId, scopeGroupId, expectedScopeGroupName, name, displayName, primarySmtpAddress,
+/// roles:[..], correlationId }</c>. Neither retries in the client: a failed ensure is Resumable and its re-run is
+/// get-before-set.
+/// </remarks>
+public sealed class ExchangePolicySidecarClient : IExchangePolicyApplier, IExchangePolicyReadClient, ICustomerMailboxClient
 {
+    /// <summary>Customer-mailbox ensure route (H14m, task 263).</summary>
+    public const string EnsureCustomerMailboxPath = "/ensure-customer-mailbox";
+
+    /// <summary>Customer-mailbox read-only route (H13, task 263).</summary>
+    public const string ReadCustomerMailboxPath = "/read-customer-mailbox";
+
     /// <summary>Header carrying the per-boot shared secret.</summary>
     public const string SharedSecretHeaderName = "X-Sidecar-Auth";
 
@@ -216,6 +234,119 @@ public sealed class ExchangePolicySidecarClient : IExchangePolicyApplier, IExcha
         }
         return new ExchangePolicyReadOutcome.Success(parsed.ServicePrincipalRegistered, ToViews(parsed.Assignments));
     }
+
+    /// <inheritdoc/>
+    public async Task<CustomerMailboxEnsureOutcome> EnsureAsync(CustomerMailboxRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var sent = await SendCustomerMailboxAsync(EnsureCustomerMailboxPath, request, cancellationToken).ConfigureAwait(false);
+        if (sent.Failure is not null)
+        {
+            return new CustomerMailboxEnsureOutcome.Failure(sent.Failure);
+        }
+
+        SidecarCustomerMailboxResponse? parsed;
+        try
+        {
+            parsed = JsonSerializer.Deserialize<SidecarCustomerMailboxResponse>(sent.Body, SerializerOptions);
+        }
+        catch (JsonException ex)
+        {
+            return new CustomerMailboxEnsureOutcome.Failure(
+                $"Sidecar ensure returned unparseable JSON (correlationId={request.CorrelationId}): {ex.Message}. Body: {Truncate(sent.Body, 400)}");
+        }
+        var diagnostic = string.IsNullOrEmpty(parsed?.Diagnostic) ? "(no diagnostic)" : parsed!.Diagnostic!;
+        return parsed?.Outcome switch
+        {
+            WireOutcomeSuccess or WireOutcomeAlreadyCompliant => new CustomerMailboxEnsureOutcome.Ensured(
+                parsed.Created, parsed.Verified, ToAuthorization(parsed.Authorization), diagnostic),
+            WireOutcomeDrift => new CustomerMailboxEnsureOutcome.Drift(
+                parsed.Conflicts is { Length: > 0 } c ? c : new[] { diagnostic }),
+            WireOutcomeFailure => new CustomerMailboxEnsureOutcome.Failure(
+                $"Sidecar ensure failed (correlationId={request.CorrelationId}): {diagnostic}"),
+            _ => new CustomerMailboxEnsureOutcome.Failure(
+                $"Sidecar ensure returned unknown outcome '{parsed?.Outcome ?? "(null)"}' (correlationId={request.CorrelationId}); " +
+                $"expected {WireOutcomeSuccess}, {WireOutcomeAlreadyCompliant}, {WireOutcomeDrift} or {WireOutcomeFailure}. Diagnostic: {diagnostic}"),
+        };
+    }
+
+    /// <inheritdoc/>
+    public async Task<CustomerMailboxReadOutcome> ReadAsync(CustomerMailboxRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var sent = await SendCustomerMailboxAsync(ReadCustomerMailboxPath, request, cancellationToken).ConfigureAwait(false);
+        if (sent.Failure is not null)
+        {
+            return new CustomerMailboxReadOutcome.Failure(sent.Failure);
+        }
+
+        SidecarCustomerMailboxResponse? parsed;
+        try
+        {
+            parsed = JsonSerializer.Deserialize<SidecarCustomerMailboxResponse>(sent.Body, SerializerOptions);
+        }
+        catch (JsonException ex)
+        {
+            return new CustomerMailboxReadOutcome.Failure(
+                $"Sidecar mailbox read returned unparseable JSON (correlationId={request.CorrelationId}): {ex.Message}. Body: {Truncate(sent.Body, 400)}");
+        }
+        if (parsed is null || parsed.Outcome != WireOutcomeSuccess)
+        {
+            return new CustomerMailboxReadOutcome.Failure(
+                $"Sidecar mailbox read did not succeed (outcome '{parsed?.Outcome ?? "(null)"}', correlationId={request.CorrelationId}): " +
+                $"{parsed?.Diagnostic ?? Truncate(sent.Body, 400)}");
+        }
+        return new CustomerMailboxReadOutcome.Success(
+            parsed.Exists, parsed.Conflicts ?? Array.Empty<string>(), ToAuthorization(parsed.Authorization), parsed.Diagnostic ?? string.Empty);
+    }
+
+    /// <summary>Validates, resolves the three headers and POSTs; a non-200 is a described Failure. Never an empty header.</summary>
+    private async Task<(string Body, string? Failure)> SendCustomerMailboxAsync(
+        string path, CustomerMailboxRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.TenantId) || string.IsNullOrWhiteSpace(request.AppId)
+            || string.IsNullOrWhiteSpace(request.ScopeGroupId) || string.IsNullOrWhiteSpace(request.ExpectedScopeGroupName)
+            || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.DisplayName)
+            || string.IsNullOrWhiteSpace(request.PrimarySmtpAddress) || string.IsNullOrWhiteSpace(request.CorrelationId)
+            || request.Roles is not { Count: > 0 })
+        {
+            return (string.Empty, "Customer-mailbox request needs TenantId, AppId, ScopeGroupId, ExpectedScopeGroupName, Name, DisplayName, " +
+                "PrimarySmtpAddress, CorrelationId and at least one role.");
+        }
+
+        var headers = await ResolveHeadersAsync(request.TenantId, cancellationToken).ConfigureAwait(false);
+        if (headers.Failure is not null)
+        {
+            return (string.Empty, headers.Failure);
+        }
+
+        var wire = new SidecarCustomerMailboxRequest
+        {
+            TenantId = request.TenantId,
+            Organization = headers.Organization,
+            AppId = request.AppId,
+            ScopeGroupId = request.ScopeGroupId,
+            ExpectedScopeGroupName = request.ExpectedScopeGroupName,
+            Name = request.Name,
+            DisplayName = request.DisplayName,
+            PrimarySmtpAddress = request.PrimarySmtpAddress,
+            Roles = request.Roles.ToArray(),
+            CorrelationId = request.CorrelationId,
+        };
+        var sent = await SendAsync(path, wire, headers, request.CorrelationId, cancellationToken).ConfigureAwait(false);
+        if (sent.Failure is not null)
+        {
+            return (string.Empty, sent.Failure);
+        }
+        return sent.Status == 200
+            ? (sent.Body, null)
+            : (string.Empty, DescribeStatus(path, sent.Status, sent.Body, request.CorrelationId));
+    }
+
+    private static IReadOnlyList<CustomerMailboxAuthorization> ToAuthorization(SidecarAuthorizationView[]? views)
+        => (views ?? Array.Empty<SidecarAuthorizationView>())
+            .Select(v => new CustomerMailboxAuthorization(v.Role ?? string.Empty, v.InScope))
+            .ToArray();
 
     private static string? Validate(ExchangePolicyApplyRequest r)
     {
@@ -422,6 +553,38 @@ public sealed class ExchangePolicySidecarClient : IExchangePolicyApplier, IExcha
         [JsonPropertyName("outcome")] public string? Outcome { get; init; }
         [JsonPropertyName("servicePrincipalRegistered")] public bool ServicePrincipalRegistered { get; init; }
         [JsonPropertyName("assignments")] public SidecarAssignmentView[]? Assignments { get; init; }
+        [JsonPropertyName("diagnostic")] public string? Diagnostic { get; init; }
+    }
+
+    internal sealed class SidecarCustomerMailboxRequest
+    {
+        [JsonPropertyName("tenantId")] public string TenantId { get; init; } = default!;
+        [JsonPropertyName("organization")] public string Organization { get; init; } = default!;
+        [JsonPropertyName("appId")] public string AppId { get; init; } = default!;
+        [JsonPropertyName("scopeGroupId")] public string ScopeGroupId { get; init; } = default!;
+        [JsonPropertyName("expectedScopeGroupName")] public string ExpectedScopeGroupName { get; init; } = default!;
+        [JsonPropertyName("name")] public string Name { get; init; } = default!;
+        [JsonPropertyName("displayName")] public string DisplayName { get; init; } = default!;
+        [JsonPropertyName("primarySmtpAddress")] public string PrimarySmtpAddress { get; init; } = default!;
+        [JsonPropertyName("roles")] public string[] Roles { get; init; } = default!;
+        [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = default!;
+    }
+
+    internal sealed class SidecarAuthorizationView
+    {
+        [JsonPropertyName("role")] public string? Role { get; init; }
+        [JsonPropertyName("inScope")] public bool InScope { get; init; }
+    }
+
+    /// <summary>Both customer-mailbox routes: ensure fills created/verified, read fills exists.</summary>
+    internal sealed class SidecarCustomerMailboxResponse
+    {
+        [JsonPropertyName("outcome")] public string? Outcome { get; init; }
+        [JsonPropertyName("created")] public bool Created { get; init; }
+        [JsonPropertyName("verified")] public bool Verified { get; init; }
+        [JsonPropertyName("exists")] public bool Exists { get; init; }
+        [JsonPropertyName("authorization")] public SidecarAuthorizationView[]? Authorization { get; init; }
+        [JsonPropertyName("conflicts")] public string[]? Conflicts { get; init; }
         [JsonPropertyName("diagnostic")] public string? Diagnostic { get; init; }
     }
 

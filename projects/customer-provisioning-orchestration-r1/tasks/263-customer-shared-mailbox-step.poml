@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="263" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Per-customer Spaarke-tenant shared mailbox: provisioning creates, scopes and verifies it, and writes the stamp's sprk_communicationaccount row (#1562, owner decision 2026-10-10)</title>
+    <phase>Model 1 dedicated-stamp remediation — mail (found by spaarke-auth-system-of-record-r1)</phase>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Exchange permissions, a new handler/sub-step, tenant isolation of mail.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Design decisions on Exchange RBAC and identity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>provisioning, provisioning-handler, exchange, tenant-isolation, security, testing</tags>
+    <deps>none</deps>
+  </metadata>
+
+  <prompt>Implement the owner's mail model for Model 1: one Spaarke-tenant shared mailbox per customer, created and verified by provisioning.</prompt>
+
+  <goal>A provisioned stamp has exactly one Spaarke-tenant shared mailbox for its customer, inside the stamp's Exchange scope group (so H14a's group-scoped Mail.* roles reach it and nothing else), with a verified `sprk_communicationaccount` row in the stamp's Dataverse — no hand steps.</goal>
+
+  <context>
+    <background>
+      Owner decision 2026-10-10 (#1562): one Spaarke-tenant shared mailbox per customer, created and verified by a provisioning
+      step after H14a. Under Model 1 only Spaarke-tenant mailboxes are reachable (customer staff mailboxes live in their home
+      tenant). Today `sprk_communicationaccount` rows are created by hand and no guide says so
+      (`notes/coordination/2026-10-09-from-auth-system-of-record-r1-webhooks.md` §2). H14a grants the stamp identity
+      Exchange-scoped Mail.Read/ReadWrite/Send scoped to the customer's mail-enabled security group (intake
+      `exchangePolicyScopeGroupId`); the Worker reaches Exchange only through the H14a sidecar as `Spaarke Exchange Admin`
+      (narrowed role `Spaarke App RBAC Admin`; widening it is an OWNER decision — `.claude/constraints/provisioning.md`).
+      The BFF's GraphSubscriptionManager subscribes per receive-enabled account; `POST /api/communications/accounts/{id}/verify`
+      verifies an account.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Never add a secret, certificate or Entra role to Spaarke Exchange Admin. If creating a shared mailbox needs a wider Exchange role, STOP that part and escalate with the narrowest Exchange role/scope that works (e.g. a custom management role with New-Mailbox -Shared and group membership only) — do not widen it yourself.</constraint>
+    <constraint source="provisioning.md">The L2 main site runs no shell tool; Exchange only via the H14a sidecar contract. Idempotent read-then-write; one producer per input; validate intake at POST /api/runs with shared code.</constraint>
+    <constraint source="live">No live action. Tests only.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Design note `notes/t263-customer-shared-mailbox.md`: naming (address/alias derived from customerId; display name from intake displayName), where it runs (new H14 sub-step after H14a, or H14a extension), the exact Exchange cmdlets and the minimum role they need (cite Microsoft Learn), membership in the scope group, idempotency, decommission, and the Dataverse `sprk_communicationaccount` row + BFF verify call (which identity, which endpoint). One recommendation; list any owner decision needed.</step>
+    <step order="2">Implement what does not need an owner decision: sidecar contract + Worker sub-step, Dataverse row writer, H13 check that the account exists and is verified; tests incl. negative cases (mailbox exists outside the scope group, foreign mailbox name collision, verify fails).</step>
+    <step order="3">Docs: deployment guide §7.9 mail section (replace the hand-made-rows text), prerequisites if any, defer-issues entry; propose `.claude/` edits verbatim.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A run creates (or adopts) exactly one shared mailbox for the customer, member of the scope group; a second run writes nothing.</criterion>
+    <criterion testable="true">The stamp has one `sprk_communicationaccount` row for it, verified; H13 fails if missing or unverified.</criterion>
+    <criterion testable="true">A same-named mailbox outside the scope group or owned by another customer quarantines the run (no change).</criterion>
+    <criterion testable="true">Build 0/0; ControlPlane tests, ArchTests, LoadTests pass.</criterion>
+  </acceptance-criteria>
+  <notes>
+    <note date="2026-10-10">Code + tests complete (worktree agent). Design note notes/t263-customer-shared-mailbox.md:
+      H14m runs after H14a; mailbox sprk-{customerId}-mail at intake communicationDefaultMailbox (one producer; deviation from
+      "address derived from customerId" recorded in note §2), joined to Spaarke-AppAccess-{customerId} (name now binding,
+      tenant-isolation check), Exchange authorization test, verified sprk_communicationaccount row (BFF app registration,
+      FR-39 chain); H13 step 7c re-checks read-only. L2 does not call the BFF verify endpoint (user endpoint; Graph effect
+      lags 30 min - 2 h). Not done (OWNER): D32 - two custom Exchange roles + one scope for Spaarke Exchange Admin
+      (New-Mailbox -Shared; Add-DistributionGroupMember on Spaarke-AppAccess-* groups), never widened in code; until
+      applied H14m fails Resumable before any write (ISS-024). Live checks M1-M7 owed. No live action taken.</note>
+  </notes>
+</task>

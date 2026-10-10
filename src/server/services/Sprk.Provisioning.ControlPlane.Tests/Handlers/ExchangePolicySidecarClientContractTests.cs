@@ -398,6 +398,142 @@ public sealed class ExchangePolicySidecarClientContractTests
         },
         RunId);
 
+    // ========== Customer mailbox (H14m ensure / H13 read — task 263) ==========
+
+    private static CustomerMailboxRequest MailboxRequest() => new(
+        TenantId, UamiClientId, ScopeGroupId, "Spaarke-AppAccess-acme", "sprk-acme-mail", "Acme Corporation", "acme@contoso.com",
+        new[] { "Application Mail.Read", "Application Mail.Send" }, RunId);
+
+    [Fact]
+    public async Task EnsureMailbox_SendsEveryFieldTheSidecarValidates_WithBothHeaders()
+    {
+        var handler = new CapturingHandler { ResponseFactory = _ => OkJson(WireMailbox("Success", created: true, verified: true)) };
+
+        var result = await NewClient(handler).EnsureAsync(MailboxRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<CustomerMailboxEnsureOutcome.Ensured>().Which.Should().Match<CustomerMailboxEnsureOutcome.Ensured>(e => e.Created && e.Verified);
+        var sent = handler.CapturedRequests.Should().ContainSingle().Subject;
+        sent.RequestUri!.AbsolutePath.Should().Be(ExchangePolicySidecarClient.EnsureCustomerMailboxPath);
+        sent.Headers[ExchangePolicySidecarClient.SharedSecretHeaderName].Should().Be(SharedSecretValue);
+        sent.Headers[ExchangePolicySidecarClient.ExchangeTokenHeaderName].Should().Be(ExchangeToken);
+        using var body = JsonDocument.Parse(sent.BodyJson!);
+        var root = body.RootElement;
+        // Test-CustomerMailboxRequest (SidecarCore.psm1) requires exactly these fields.
+        foreach (var (field, value) in new[]
+        {
+            ("tenantId", TenantId), ("organization", InitialDomain), ("appId", UamiClientId), ("scopeGroupId", ScopeGroupId),
+            ("expectedScopeGroupName", "Spaarke-AppAccess-acme"), ("name", "sprk-acme-mail"), ("displayName", "Acme Corporation"),
+            ("primarySmtpAddress", "acme@contoso.com"), ("correlationId", RunId),
+        })
+        {
+            root.GetProperty(field).GetString().Should().Be(value, field);
+        }
+        root.GetProperty("roles").EnumerateArray().Select(r => r.GetString()).Should().Equal("Application Mail.Read", "Application Mail.Send");
+    }
+
+    [Fact]
+    public async Task EnsureMailbox_AlreadyCompliant_IsEnsuredNotCreated()
+    {
+        var handler = new CapturingHandler { ResponseFactory = _ => OkJson(WireMailbox("AlreadyCompliant", created: false, verified: true)) };
+
+        var result = await NewClient(handler).EnsureAsync(MailboxRequest(), CancellationToken.None);
+
+        var ensured = result.Should().BeOfType<CustomerMailboxEnsureOutcome.Ensured>().Subject;
+        ensured.Created.Should().BeFalse();
+        ensured.Authorization.Should().OnlyContain(a => a.InScope);
+    }
+
+    [Fact]
+    public async Task EnsureMailbox_Drift_CarriesEveryConflict()
+    {
+        var handler = new CapturingHandler
+        {
+            ResponseFactory = _ => OkJson("""{ "outcome": "Drift", "created": false, "verified": false, "authorization": [], "conflicts": ["a", "b"], "diagnostic": "x" }"""),
+        };
+
+        var result = await NewClient(handler).EnsureAsync(MailboxRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<CustomerMailboxEnsureOutcome.Drift>().Which.Conflicts.Should().Equal("a", "b");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound, "does not serve this route")]
+    [InlineData(HttpStatusCode.Unauthorized, "X-Sidecar-Auth")]
+    public async Task EnsureMailbox_NonOkStatus_IsADescribedFailure(HttpStatusCode status, string expected)
+    {
+        var handler = new CapturingHandler { ResponseFactory = _ => new HttpResponseMessage(status) { Content = new StringContent("{}") } };
+
+        var result = await NewClient(handler).EnsureAsync(MailboxRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<CustomerMailboxEnsureOutcome.Failure>().Which.Diagnostic.Should().Contain(expected);
+    }
+
+    [Fact]
+    public async Task EnsureMailbox_WireFailure_IsFailure_NotRetried()
+    {
+        var handler = new CapturingHandler
+        {
+            ResponseFactory = _ => OkJson("""{ "outcome": "Failure", "diagnostic": "Spaarke Exchange Admin cannot run New-Mailbox -Shared — prerequisite PRQ-E-16" }"""),
+        };
+
+        var result = await NewClient(handler).EnsureAsync(MailboxRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<CustomerMailboxEnsureOutcome.Failure>().Which.Diagnostic.Should().Contain("PRQ-E-16");
+        handler.CapturedRequests.Should().ContainSingle("a failed ensure is Resumable; its re-run is get-before-set");
+    }
+
+    [Fact]
+    public async Task EnsureMailbox_IncompleteRequest_FailsWithoutCallingTheSidecar()
+    {
+        var handler = new CapturingHandler { ResponseFactory = _ => OkJson("{}") };
+
+        var result = await NewClient(handler).EnsureAsync(MailboxRequest() with { PrimarySmtpAddress = "" }, CancellationToken.None);
+
+        result.Should().BeOfType<CustomerMailboxEnsureOutcome.Failure>();
+        handler.CapturedRequests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReadMailbox_PostsToTheReadRoute_AndMapsTheState()
+    {
+        var handler = new CapturingHandler
+        {
+            ResponseFactory = _ => OkJson("""{ "outcome": "Success", "exists": true, "conflicts": ["c1"], "authorization": [{ "role": "Application Mail.Send", "inScope": true }], "diagnostic": "d" }"""),
+        };
+
+        var result = await NewClient(handler).ReadAsync(MailboxRequest(), CancellationToken.None);
+
+        handler.CapturedRequests.Should().ContainSingle().Which.RequestUri!.AbsolutePath.Should().Be(ExchangePolicySidecarClient.ReadCustomerMailboxPath);
+        var success = result.Should().BeOfType<CustomerMailboxReadOutcome.Success>().Subject;
+        success.Exists.Should().BeTrue();
+        success.Conflicts.Should().Equal("c1");
+        success.Authorization.Should().ContainSingle().Which.Should().Be(new CustomerMailboxAuthorization("Application Mail.Send", true));
+    }
+
+    [Fact]
+    public async Task ReadMailbox_WireFailure_IsFailure()
+    {
+        var handler = new CapturingHandler { ResponseFactory = _ => OkJson("""{ "outcome": "Failure", "diagnostic": "Scope group not found" }""") };
+
+        var result = await NewClient(handler).ReadAsync(MailboxRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<CustomerMailboxReadOutcome.Failure>().Which.Diagnostic.Should().Contain("Scope group not found");
+    }
+
+    private static string WireMailbox(string outcome, bool created, bool verified) => $$"""
+      {
+        "outcome": "{{outcome}}",
+        "created": {{(created ? "true" : "false")}},
+        "verified": {{(verified ? "true" : "false")}},
+        "authorization": [
+          { "role": "Application Mail.Read", "inScope": {{(verified ? "true" : "false")}} },
+          { "role": "Application Mail.Send", "inScope": {{(verified ? "true" : "false")}} }
+        ],
+        "conflicts": [],
+        "diagnostic": "done"
+      }
+      """;
+
     private static IntegrationWiringOptions NewOptions() => new()
     {
         SidecarBaseUrl = "http://127.0.0.1:8091/",

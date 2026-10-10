@@ -960,6 +960,88 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(H13Rejections.TrapT2Failed);
     }
 
+    // ---------- AC-36..39 (task 263, #1562): the customer mailbox gates Ready ----------
+
+    [Fact]
+    public async Task AC36_MailboxPassed_IsCalledWithTheRunsCoordinates_AndItsGateIsVerified()
+    {
+        var run = BuildRun();
+        run.Parameters.NonSecret["exchangePolicyScopeGroupId"] = "scope-group";
+        run.Parameters.NonSecret["communicationDefaultMailbox"] = "acme@contoso.com";
+        run.Parameters.NonSecret["displayName"] = "Acme Corporation";
+        var repo = new FakeRepository(run, etag: "etag-36");
+        var handler = BuildHandler(repo, out _, configureSeams: s => s.Mailbox = _mailboxVerifier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        _mailboxVerifier.Requests.Should().ContainSingle().Which.Should().Be(new CustomerMailboxVerificationRequest(
+            CustomerId, RunId, TenantId, "uami-client-id", "scope-group", "Acme Corporation", "acme@contoso.com", DataverseUrl, "bff-appreg-id"));
+        repo.LastWrittenRun!.GateStates[H13Gates.CustomerMailboxVerified].Status.Should().Be(GateState.Verified);
+    }
+
+    [Fact]
+    public async Task AC37_MailboxFailed_Quarantines_AndNeverReachesReady()
+    {
+        _mailboxVerifier.Outcome = new CustomerMailboxVerificationOutcome.Failed(new[] { "The stamp has no active sprk_communicationaccount row for 'acme@contoso.com'." });
+        var repo = new FakeRepository(BuildRun(), etag: "etag-37");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => s.Mailbox = _mailboxVerifier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H13Rejections.CustomerMailboxFailed);
+        failure.Diagnostic.Should().Contain("no active sprk_communicationaccount row");
+        seams.Registry.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC38_MailboxInconclusive_IsResumable_AndNeverReachesReady()
+    {
+        _mailboxVerifier.Outcome = new CustomerMailboxVerificationOutcome.Inconclusive("sidecar timeout");
+        var repo = new FakeRepository(BuildRun(), etag: "etag-38");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => s.Mailbox = _mailboxVerifier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H13Rejections.CustomerMailboxInconclusive);
+        seams.Registry.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC39_MailboxCheckThrows_IsResumable_NotAnEscape()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-39");
+        var handler = BuildHandler(repo, out _, configureSeams: s => s.Mailbox = new ThrowingMailboxVerifier());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(H13Rejections.CustomerMailboxInconclusive);
+    }
+
+    private readonly FakeMailboxVerifier _mailboxVerifier = new();
+
+    private sealed class FakeMailboxVerifier : ICustomerMailboxVerifier
+    {
+        public CustomerMailboxVerificationOutcome Outcome { get; set; } = new CustomerMailboxVerificationOutcome.Passed("ok");
+        public List<CustomerMailboxVerificationRequest> Requests { get; } = new();
+
+        public Task<CustomerMailboxVerificationOutcome> VerifyAsync(CustomerMailboxVerificationRequest request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            return Task.FromResult(Outcome);
+        }
+    }
+
+    private sealed class ThrowingMailboxVerifier : ICustomerMailboxVerifier
+    {
+        public Task<CustomerMailboxVerificationOutcome> VerifyAsync(CustomerMailboxVerificationRequest request, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("boom");
+    }
+
     // ---------- helpers ----------
 
     private sealed class Seams
@@ -970,6 +1052,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public IStampKeylessVerifier Keyless { get; set; } = FakeKeyless.Of(new StampKeylessOutcome.Passed(new[] { "acme-search" }));
         public ICostEnvelopeChecker Cost { get; set; } = FakeCostChecker.WithinBudget();
         public IRegistrySetupStatusUpdater Registry { get; set; } = FakeRegistryUpdater.Success();
+        public ICustomerMailboxVerifier Mailbox { get; set; } = new FakeMailboxVerifier();   // task 263 — Passed by default
 
         public FakeValidator ValidatorFake => (FakeValidator)Validator;
         public FakeTrapVerifier TrapsFake => (FakeTrapVerifier)Traps;
@@ -1025,7 +1108,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         return new H13E2EAcceptanceGateHandler(
             repo, seams.Validator, seams.Traps, seams.Invariants, seams.Keyless,
             seams.Cost, seams.Registry,
-            registryClient, Options.Create(options),
+            registryClient, seams.Mailbox, Options.Create(options),
             NullLogger<H13E2EAcceptanceGateHandler>.Instance);
     }
 

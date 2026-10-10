@@ -1,10 +1,17 @@
 # PROVISIONING-PREREQUISITES — canonical prerequisite reference
 
-> **Version**: 9 · **Last Updated**: 2026-10-09
-> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 13)
+> **Version**: 12 · **Last Updated**: 2026-10-10
+> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 14)
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
 >
+>
+> **v12 (2026-10-10, `customer-provisioning-orchestration-r1` T263 — owner decision 2026-10-10, #1562)**: H14m creates
+> each customer's Spaarke-tenant shared mailbox `sprk-{customerId}-mail` at the intake `communicationDefaultMailbox`
+> address and adds it to the `PRQ-C-08` group. `PRQ-C-08`: the group's name **must** be `Spaarke-AppAccess-{customerId}`
+> (H14m refuses another customer's group), and L2 now adds exactly one member, its own mailbox. `PRQ-E-15`: H14m needs
+> two more Exchange roles on `Spaarke Exchange Admin` — **pending owner decision D32** (deployment guide §4.2.1 step 5;
+> H14m diagnostics call them `PRQ-E-16`). Until they are applied, H14m fails Resumable and creates nothing.
 >
 > **v11 (2026-10-09, `customer-provisioning-orchestration-r1` T262 — G36, owner approval 2026-10-09)**: `PRQ-S-06`
 > **added** — the customer's subscription is a direct member of the `spaarke-customers` management group, where the
@@ -211,7 +218,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-E-10 | L2 UAMI KV Secrets User on platform + per-tenant KVs | Spaarke admin (Bicep) | F16 — `@Microsoft.KeyVault(...)` refs silently unresolvable |
 | PRQ-E-11 | L2 UAMI SB Data Sender + Data Receiver | Spaarke admin (Bicep) | Dispatcher DOA — cannot enqueue or dequeue |
 | PRQ-E-12 | Provisioning SB queue with sessions + dedup | Spaarke admin (Bicep + ceremony) | Session receiver throws on `StartProcessingAsync`; §4C retries lost |
-| PRQ-E-15 | Exchange admin app `Spaarke Exchange Admin` (federated credential trusting the L2 Worker UAMI, `Exchange.ManageAsApp`) + narrowed Exchange role `Spaarke App RBAC Admin` (T251) | Spaarke admin — deployment guide §4.2.1 | H14a / H13 T4 fail on first use; the stamp's Mail.* calls 403 (T4) |
+| PRQ-E-15 | Exchange admin app `Spaarke Exchange Admin` (federated credential trusting the L2 Worker UAMI, `Exchange.ManageAsApp`) + narrowed Exchange role `Spaarke App RBAC Admin` (T251) + the T263 shared-mailbox roles (§4.2.1 step 5 — **pending owner decision D32**) | Spaarke admin — deployment guide §4.2.1 | H14a / H13 T4 fail on first use; the stamp's Mail.* calls 403 (T4). Without step 5, H14m fails Resumable (`h14m-mailbox-ensure-failed`, names PRQ-E-16) and creates nothing |
 | PRQ-E-14 | Registry schema current on the admin env — v3.3 columns + `sprk_credentialmode` (T225b) + `sprk_bffappid` / `sprk_copilotauthconfigid` (T257) | Spaarke admin (`Extend-DataverseEnvironmentSchema-v3.3.ps1`, idempotent) | H4 fails `kvsecrets-secret-free-marker-apply-failed` after writing the vault; without `sprk_bffappid` H13's promoted-columns PATCH is rejected (registry stale) |
 
 ### Once-per-customer (10 active + 2 retired, besides the subscription entries above)
@@ -231,7 +238,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-C-12 | Guest access allowed in the environment (`organization.restrictguestuseraccess = false`; new environments default to restricted) (T232) | Spaarke admin (System Administrator of the environment) | H11 `userprov-guest-access-restricted` before any invitation |
 | PRQ-C-13 | The customer's workforce tenant id(s) — the tenant(s) its staff sign in from (Model 1: their HOME tenant, never Spaarke's) — intake `customerWorkforceTenantIds`, every run (T255, INCOMING-141) | Spaarke admin, with the customer's IT | POST /api/runs 400 `workforce-tenants-required` / `-invalid` / `-ciam-tenant` / `-spaarke-tenant`; a wrong but valid tenant → the stamp denies every customer employee's first sign-in (`workforce_tenant_not_customer`) |
 | PRQ-C-14 | **Customer attestation.** The CUSTOMER tenant's cross-tenant access settings (outbound B2B collaboration — default settings, or an organizational setting for Spaarke's tenant id) allow its users to become B2B guests in Spaarke's tenant. Model 1 / every B2BGuest run; the customer's Entra admin does it ([Microsoft Learn: cross-tenant access settings, B2B collaboration](https://learn.microsoft.com/entra/external-id/cross-tenant-access-settings-b2b-collaboration)). Recorded as intake `customerOutboundB2BAttested: true`; the check fails on false/absent and SKIPs (exit 0) for a non-B2BGuest run | The customer's Entra admin (the Spaarke operator records the attestation) | Licence-free staff who self-register via the join link (sign in at the home tenant → auto-approved when that tenant is in `customerWorkforceTenantIds` → invited as guests into Spaarke's tenant) and licensed staff invited by H11 both fail; Spaarke cannot read another tenant's policy, so nothing detects it before the run |
-| PRQ-C-08 | Exchange mail-enabled security group scoping the stamp identity's Exchange mailbox roles (direct members only) — its id is the intake value `exchangePolicyScopeGroupId` (T245c; RBAC for Applications since T251) | Exchange admin of the stamp's tenant | `POST /api/runs` 400 `h14a-missing-policy-scope-group-id`; a wrong id → H14a fails, Mail.* calls 403 (T4) |
+| PRQ-C-08 | Exchange mail-enabled security group **`Spaarke-AppAccess-{customerId}`** scoping the stamp identity's Exchange mailbox roles (direct members only) — its id is the intake value `exchangePolicyScopeGroupId` (T245c; RBAC for Applications since T251). H14m adds the customer's shared mailbox to it (T263) | Exchange admin of the stamp's tenant | `POST /api/runs` 400 `h14a-missing-policy-scope-group-id`; a wrong id → H14a fails, Mail.* calls 403 (T4); another name → H14m Drift `h14m-mailbox-drift` (quarantine, nothing changed) |
 | PRQ-E-05 | L2 UAMI Website Contributor on the customer stamp's BFF App Service (id kept; scope corrected to `once_per_customer` 2026-10-01, T225a — an H2a postcondition: `customer.bicep` emits it — **Model 1** stamps only since T249; a Model 2 stamp is reached through Lighthouse) | Spaarke admin (Bicep) | H4b Kudu docker-log fetcher degraded to generic diagnostic |
 | PRQ-E-13 | `sprk_dataverseenvironment` placeholder record with `sprk_environmentid` (id kept; scope corrected to `once_per_customer` 2026-09-30) | Operator (skill Step 1) | L2 `POST /api/runs` returns 400 |
 
