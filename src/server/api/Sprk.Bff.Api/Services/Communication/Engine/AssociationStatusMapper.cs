@@ -109,6 +109,7 @@ public sealed class AssociationStatusMapper
                 Confidence = Clamp(m.Confidence),
                 Provenance = m.Provenance,
                 Obligations = m.Obligations,
+                TriageCategory = m.TriageCategory,
             })
             .ToList();
 
