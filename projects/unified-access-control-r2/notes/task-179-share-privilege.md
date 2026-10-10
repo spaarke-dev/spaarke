@@ -55,18 +55,47 @@ Dataverse's Share privilege on its table, at a depth that reaches the record, ev
    `DelegationRuleFilter.MayManageAccess` (Write and Share), of the rights its own filter already read. There is no
    second probe and no second copy of the rule.
 
-## Owner questions raised by the review (not changed here)
+## Owner decisions, round 91 (2026-10-10), and what is still open
 
-- **No Access removals (N5).** `/no-access/enforce` and the `NoAccessShareReconciliationJob` remove shares on each
-  covered record when the entry's AUTHOR holds Write on that record (`NoAccessShareEnforcer`). Should the author also
-  need Share there? The covered tables (project, matter, work assignment) do have a Share privilege. Only the ENTRY
-  table lacks one.
-- **Assigned-To is delegation in effect.** A Write-holder without Share who names an internal user in an "Assigned *"
-  column gives that user a Collaborate share, which carries ShareAccess (owner A4: always Collaborate, uncapped). The
-  callers that apply the rule include `/assigned-access/sync` (Write only, deliberately), the field-mapping push
-  (`FieldMappingEndpoints`), the AI create/update record handlers and `UpdateRecordActionCore`, and the 5-minute job.
-  The Share rule does not cover this path. Gating sync would not close it, because the job applies the same rule.
-  Options: keep it as policy (A4), or drop ShareAccess from Assigned-To shares.
+- **Inherited shares on filed secure children carry Share (DONE here).** Verifier F1: a sharee of a secure root (a
+  sibling-BU user, SECURE-PROJECT-ENVIRONMENT-SETUP §6) lost Manage Access on every filed child, because
+  `RecordShareLevels.ChildMirrorableMask` had no ShareAccess (round 11 item 4). The owner chose to mirror it.
+  - `ChildMirrorableMask` gains Share. The mirror is `rootMask & ChildMirrorableMask`, so Share is carried only where
+    the root share holds it: never wider than the root. Assign and Create are still never carried.
+  - **Existing children upgrade by themselves.** Both synchronizer paths rewrite a differing mask: the per-child
+    reconcile modifies whenever its target differs, and the parent mirror raises with `current | mask`. So the
+    scheduled `SecureChildShareReconciliationJob` raises every existing child share on its next pass, with ModifyAccess,
+    and writes nothing on the pass after. No new code was needed; a test pins it.
+  - Unshare and revoke on the root still remove the child shares (the reconcile revokes any principal the roots no
+    longer share).
+  - Accepted trade-off (round 11's reason for "never Share"): a child sharee can share that ONE child with someone the
+    root is not shared with, and the reconcile then removes that share. Share a secure family at the root.
+- **Removing a No Access entry needs Share: NOT implemented. Main session / owner decision needed.** The owner's rule is
+  that removing (deactivating or deleting) an entry loosens access, so the remover must hold Write AND Share on each
+  covered record; adding an entry stays Write. **The BFF has no path that removes or deactivates an entry.** Entries
+  are deactivated or deleted natively in the model-driven app. That is gated only by Dataverse's privileges on the
+  organization-owned `sprk_noaccessentry` table (Spaarke Access Administrator holds Write at Global and no Delete, read 2026-10-10; System
+  Administrator and System Customizer hold both). Deactivating is a Write. The entry form script deliberately lets Deactivate through
+  (`sprk_noaccessentry_postsave.js`, `SaveModeDeactivate`). `NoAccessShareEnforcer` only ENFORCES an active entry (it
+  removes the shares the entry walls off): that is the "adding" side, which stays Write. With no plugins allowed
+  (ADR-002), the BFF cannot see a native deactivation before it happens. The options:
+  1. **Route removal through the BFF.** Add a new `POST /api/v1/external-access/no-access/remove` on the group. It
+     checks `MayManageAccess` on every covered record as the caller, then deactivates app-only. Replace the form's
+     Deactivate/Delete commands (ribbon) and remove `prvWrite`/`prvDelete` on `sprk_noaccessentry` from the
+     human roles, which is an owner role change. *Recommended:* it is the only option that enforces the rule. But it
+     adds a route and a ribbon change, and it removes in-place edits of an entry (edits would go through the BFF too,
+     or Write stays for edits and only the state change and Delete move).
+  2. **Compensate in the reconciliation job.** Re-activate an entry deactivated by someone who lacks Write and Share on
+     a covered record. This leaves a window of up to 5 minutes, and a fight with a legitimate-looking user action.
+     Not recommended.
+  3. **Role-level control only.** Give the entry table's Write/Delete only to roles that also hold Share on project,
+     matter and work assignment. This needs no code. It is coarser than "on each covered record" (a role covers every
+     record its depth reaches), and the agent cannot change roles.
+- **Assigned-To is delegation in effect: filed as #1595** (main session). A Write-holder without Share who names an
+  internal user in an "Assigned *" column gives that user a Collaborate share, Share included. Callers:
+  `/assigned-access/sync`, the field-mapping push, the AI create/update record handlers and the 5-minute job. Not fixed
+  here.
+- **DelegationRuleFilter timing signal: filed as #1596** (main session). Not fixed here.
 - **Outside the record set (for completeness).** Playbook `/share` / `/unshare` (owner-only) and direct-message
   thread shares are not project, matter or work assignment access, so this rule does not apply to them.
 
@@ -104,10 +133,18 @@ Deep). `sprk_noaccessentry` has no Share privilege to show.
 
 ### What this means
 
-- **Nobody the owner relies on is locked out.** Every Spaarke role that grants Write on project, matter or work
-  assignment also grants Share at the same depth (Deep). The only role with Write and no Share is the platform's
-  Service Writer, held only by Microsoft application users, which never call the BFF as the caller. So the code
-  change alone refuses no current human user anything they can do today.
+- **No ROLE loses Manage Access.** Every Spaarke role that grants Write on project, matter or work assignment also
+  grants Share at the same depth (Deep). The only role with Write and no Share is the platform's Service Writer, held
+  only by Microsoft application users, which never call the BFF as the caller.
+- **But Write that comes from a SHARE now counts only with that share's own Share right** (corrected 2026-10-10; the
+  earlier "refuses no current human user anything" was wrong). Where a person reaches a record through a share rather
+  than role depth (a secure record, a user in a sibling business unit, SECURE-PROJECT-ENVIRONMENT-SETUP §6), Dataverse
+  reports ShareAccess only if the share carries it. Two groups lose Manage Access on those records:
+  1. holders of a **legacy Collaborate or Full Access share** written before 2026-09-30 (mask 23 / 65559, no Share):
+     `scripts/Upgrade-LegacyRecordShareMasks.ps1` (operator-run, dry-run by default) upgrades them;
+  2. sharees of a secure root on its **filed children**, whose mirrored shares never carried Share (round 11 item 4).
+     Owner round 91 (2026-10-10) fixed this: the mirror now carries Share where the root share holds it, and the
+     reconcile upgrades existing child shares on its next pass.
 - **The code change alone does NOT hide Manage Access for testuser1.** testuser1 (Test User 1, systemuser
   `8d7bad7a-…`) holds **Spaarke Office Add In User** directly and through both teams, and that role grants Write and
   Share at Deep on all three tables. The round-89 finding ("testuser1, Spaarke Basic User, could open Manage Access")

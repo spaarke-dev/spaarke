@@ -526,8 +526,11 @@ set in `config/secure-record-owner-role.json`) are owned by the memberless `Secu
 root→child relationship has Share, Unshare, Reparent and Assign set to **NoCascade** (read 2026-10-02). The BFF does:
 
 - **The rule.** Every child carries exactly its secure root's internal sharees — users and teams — at the root's rights
-  restricted to Read, Write, Append, AppendTo and Delete. **Never Share** (share the ROOT; the children follow) and
-  never Assign — owner decision, round 11 item 4. A child filed under two secure records gets only the people shared on
+  restricted to Read, Write, Append, AppendTo, Delete and **Share** — each only where the root share holds it — and
+  never Assign. Share is carried since owner round 91 (2026-10-10), replacing round 11 item 4's "never Share": managing
+  access needs the Share privilege (round 89), so a root sharee at Collaborate or Full Access (a sibling-BU user, §6)
+  would otherwise lose Manage Access on every filed child. A child sharee can share that one child onward; the reconcile
+  then removes that share (children follow their root), so share a secure family at the ROOT. A child filed under two secure records gets only the people shared on
   BOTH, at the lower rights (the INTERSECTION, fail closed — owner decision, round 11 item 4). Any other share on a
   child is removed.
 - **The No Access list wins** (task 143). A user on the No Access list of ANY secure record a child is filed under is

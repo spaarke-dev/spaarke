@@ -215,7 +215,7 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
                 $"{table} {id} is an existing child of the record now secure");
             _fixture.SharesOn(id).Should().Equal(
                 new Dictionary<DataversePrincipalRef, int> { [DataversePrincipalRef.User(Creator)] = creatorMirror },
-                "a child's sharees are exactly the record's, at the record's rights without Share");
+                "a child's sharees are exactly the record's, at the record's rights (Share included since round 91)");
         }
 
         AssertDecoysUntouched(family, decoysBefore);
@@ -1163,8 +1163,8 @@ public class SecureChildTransitionTests : IClassFixture<ProvisionProjectTestFixt
         applied.GetProperty("changed").GetInt32().Should().Be(2);
         sweep.World.OwnerOf("sprk_document", c1).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
         sweep.World.OwnerOf("sprk_event", c2).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam));
-        sweep.Shares.MaskOf("sprk_document", c1, DataversePrincipalRef.User(Creator)).Should().Be(23,
-            "the record's sharee is mirrored onto the re-owned child, without Share");
+        sweep.Shares.MaskOf("sprk_document", c1, DataversePrincipalRef.User(Creator)).Should().Be(262167,
+            "the record's sharee is mirrored onto the re-owned child at the record's rights, Share included (round 91)");
         applied.GetProperty("changes").EnumerateArray()
             .Single(c => c.GetProperty("id").GetGuid() == c2)
             .GetProperty("previousOwner").GetString().Should().Be($"teams({GeneralTeam:D})");

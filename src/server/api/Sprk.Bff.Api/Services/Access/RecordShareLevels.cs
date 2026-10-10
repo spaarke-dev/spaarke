@@ -202,19 +202,22 @@ internal static class RecordShareLevels
     // ── Child mirrors (unified-access-control-r2 task 149, C10 part 2) ──────────────────────────────────────────────
 
     /// <summary>
-    /// The rights a share on a secure ROOT may carry onto one of its children: Read, Write, Append, AppendTo and
-    /// Delete. Never Share, never Assign, never Create.
+    /// The rights a share on a secure ROOT may carry onto one of its children: Read, Write, Append, AppendTo, Delete and
+    /// Share. Never Assign, never Create. Each is carried only when the root share holds it (<see cref="ChildMirrorMask"/>).
     /// </summary>
     /// <remarks>
-    /// <para><b>No Share on a child</b> (task 149 escalation trigger 6; owner decision, round 11 item 4, 2026-10-03:
-    /// "ShareAccess is NOT mirrored onto children"). Collaborate and Full Access carry Share on the root (task 139), so a
-    /// sharee can pass the ROOT on. Mirrored onto a child, it would let them share one child with someone the root is not shared with, and
-    /// the reconcile would then revoke that share — a fight with a legitimate-looking user action. Sharing happens at the
-    /// root and fans out. Omitting it is narrower than the root, which "never wider than the parent" allows.</para>
+    /// <para><b>Share is carried since owner round 91 (2026-10-10, task 179)</b>, replacing round 11 item 4 ("ShareAccess is
+    /// NOT mirrored onto children"). Managing access needs the Share privilege (round 89), and Dataverse reports
+    /// <c>ShareAccess</c> on a record only where the caller's share or role gives it. A sharee of a secure root whose own
+    /// share carries Share (Collaborate or Full Access) therefore lost Manage Access on every filed child, the sibling
+    /// business unit case of SECURE-PROJECT-ENVIRONMENT-SETUP §6 included. The owner chose to mirror it. It is never wider
+    /// than the root: a root share without Share mirrors none. The trade-off round 11 named is accepted: a child sharee can
+    /// share that ONE child with someone the root is not shared with, and the reconcile then removes that share (children
+    /// follow their roots); sharing a secure family is still done at the root, which fans out.</para>
     /// <para><b>No Assign</b>: no level carries it, and a child's owner is the Secure team's (task 146). <b>No Create</b>:
     /// it means nothing on a share of an existing row.</para>
     /// </remarks>
-    internal const int ChildMirrorableMask = Read | Write | Append | AppendTo | Delete;
+    internal const int ChildMirrorableMask = Read | Write | Append | AppendTo | Delete | Share;
 
     /// <summary>
     /// What a principal holding <paramref name="rootMask"/> on a secure root holds on each of its children: the root's
@@ -230,7 +233,7 @@ internal static class RecordShareLevels
     internal static RecordShareRights ChildMirrorRights(int mask)
     {
         if ((mask & ~ChildMirrorableMask) != 0)
-            throw new ArgumentOutOfRangeException(nameof(mask), mask, "A child mirror carries only Read, Write, Append, AppendTo and Delete.");
+            throw new ArgumentOutOfRangeException(nameof(mask), mask, "A child mirror carries only Read, Write, Append, AppendTo, Delete and Share.");
 
         var names = LevelRights.Where(r => (mask & r.DataverseBit) != 0).Select(r => r.Name);
         return new RecordShareRights(string.Join(",", names), mask);

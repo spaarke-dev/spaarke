@@ -302,11 +302,13 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         SecureMatter(_fixture, matter);
         SecuredWorkAssignment(workAssignment, matter);
         await ShareAsync("matter", matter, Colleague);
-        _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), ProvisionProjectEndpoint.CreatorAccessRights);
+        // Raised to Full Access: since owner round 91 the inherited share already carries Collaborate's Share, so a raise
+        // must add a right the matter's share does not give (Delete).
+        _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), RecordShareLevels.FullAccessRights);
 
         await UnshareAsync("matter", matter, Colleague);
 
-        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mask(ProvisionProjectEndpoint.CreatorAccessRights), "modified: kept");
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mask(RecordShareLevels.FullAccessRights), "modified: kept");
         Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.KeptModified);
     }
 

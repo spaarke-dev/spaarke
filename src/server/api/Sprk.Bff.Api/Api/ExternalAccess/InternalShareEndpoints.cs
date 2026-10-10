@@ -74,8 +74,8 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///
 /// <para><b>The children of a SECURE record follow its shares</b> (task 149, C10 part 2). Once the root's share is written
 /// and confirmed — or found already right, or found already absent — <see cref="SecureChildShareSynchronizer.SyncRootAsync"/>
-/// brings every child the Secure Record Owners team owns into line with the root's shares: never wider, never Share or
-/// Assign. It runs only AFTER the root write succeeded (a refused or unconfirmed root write fans out nothing) and it is a
+/// brings every child the Secure Record Owners team owns into line with the root's shares: never wider, never Assign
+/// (Share is carried where the root share holds it, owner round 91). It runs only AFTER the root write succeeded (a refused or unconfirmed root write fans out nothing) and it is a
 /// no-op for a record that is not secure. When some children could not be updated the answer is 500
 /// <c>children_incomplete</c> with the counts — never a silent 200 — and the root write STANDS (an unshare is never rolled
 /// back to restore access); the scheduled reconcile completes it, and repeating the request is safe.</para>
