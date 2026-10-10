@@ -212,7 +212,14 @@ public sealed class CommunicationClassificationAi : ICommunicationClassification
             ? guidanceLines
             : names;
 
-        return new TriageTaxonomy(names, lines);
+        // Two rows with the same name would put a duplicate value in the schema enum, which strict structured output
+        // may reject (and then every email would lose rung 5). Keep the first row per name, names and lines aligned.
+        var distinct = names
+            .Select((name, i) => (Name: name, Line: lines[i]))
+            .DistinctBy(p => p.Name, StringComparer.Ordinal)
+            .ToArray();
+
+        return new TriageTaxonomy(distinct.Select(p => p.Name).ToArray(), distinct.Select(p => p.Line).ToArray());
     }
 
     /// <summary>

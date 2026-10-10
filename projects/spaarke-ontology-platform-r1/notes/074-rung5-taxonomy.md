@@ -59,6 +59,11 @@ provenance string and every other field as they are. No consumer needs an email-
   resolver, the same reads TRIAGE-EMAIL already makes. No cross-request cache of this taxonomy exists; adding one
   is document-only (below). The prompt grows by the taxonomy list, at most the 8000-char guidance budget plus the
   names.
+- `triageCategory` is a required non-null enum, like TRIAGE-EMAIL's own `category` enum, and the prompt says
+  "always choose the closest one". This is deliberate: it is a hint, step 2 decides, and the taxonomy has catch-all
+  rows (Administrative, Client instruction). A nullable variant was rejected because it adds a schema shape no
+  other Spaarke schema uses (nullable enum), for a field that is only advisory. Duplicate row names are removed
+  before the enum is built (the first row wins), so a duplicated row cannot get the schema rejected.
 - DI: `TryAddScoped<LookupChoicesResolver>()` next to the facade registration, so the facade still resolves when
   `ToolFramework:Enabled=false` (where `AddToolFramework` skips the resolver).
 
@@ -76,5 +81,21 @@ provenance string and every other field as they are. No consumer needs an email-
 - No cross-request cache for `sprk_triagecategory` reads: each triage run (and now each rung-5 run) reads the rows
   twice. A short-TTL cache would cut that, but it would delay an admin edit by the TTL. Not needed for D-117.
 - The provenance-string format is parsed by both the reader and the UI regex (`types=[...]`). Fragile, pre-existing.
+- The ADR-032 gate-combination constructibility matrix (`GateCombinationConstructibilityTests`) does not vary
+  `ToolFramework:Enabled`; the `TryAddScoped` above is argued from the module order, not covered by that matrix.
+- The 074 live harness (`stream/d-074-run`) records only rung 5's free-form category. Adding
+  `Rung5TriageCategory` to its per-item result would show whether the hint was right; that is the 074 lane's
+  call.
+- On a Dataverse outage, `ChoicesResolutionTelemetry` failures for `sprk_triagecategory` now come from both rung 5 and
+  TRIAGE-EMAIL, roughly double the count of the same outage.
 - `PersistedClassificationSignalReaderTests.BuildProvenance` hand-mirrors the mapper's projection (the new tests
   use the real mapper instead).
+
+## 5. Review and verification
+
+- Adversarial review (one pass, read-only): no F-class finding. The duplicate-name finding (K2) was fixed; the others are recorded above.
+- Golden-utterance evals 156/156; triage/comms seams 242 passed (1 skipped); full BFF unit suite 20017 passed,
+  0 failed, 54 skipped; ArchTests 958/958.
+- Publish size (fresh short-path worktrees; Release, framework-dependent linux-x64, `Compress-Archive Optimal`, PDBs
+  included, 192/192 files): base `1df5a2c56` 38,340,655 B (36.56 MB) → head 38,343,757 B (36.57 MB), +3,102 B.
+- `dotnet list package --vulnerable --include-transitive`: no vulnerable packages, and no package changes.

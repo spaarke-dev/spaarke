@@ -201,6 +201,20 @@ public class CommunicationClassificationAiTaxonomyTests
     }
 
     [Fact]
+    public async Task Classify_WhenTwoRowsShareAName_TheEnumHasNoDuplicate()
+    {
+        Rows(new[] { "Alpha row", "Alpha row", "Beta row" },
+            new Dictionary<string, string> { ["Alpha row"] = "g" });
+
+        await Build().ClassifyAsync("s", "b");
+
+        var (prompt, schema) = _calls.Should().ContainSingle().Subject;
+        Property(schema, "triageCategory").GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("Alpha row", "Beta row");
+        prompt.Split('\n').Count(l => l.StartsWith("- Alpha row", StringComparison.Ordinal)).Should().Be(1);
+    }
+
+    [Fact]
     public async Task Classify_WhenModelReturnsNull_ReturnsNull()
     {
         Rows(new[] { "Alpha row" }, null);
