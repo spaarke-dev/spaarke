@@ -334,11 +334,114 @@ the BFF's owning project.
 **Concrete failure without a fix:** H3 and H10 403 on the first live run (F3); OBO SPE calls on a new stamp may 403
 (F6).
 
+### ISS-022 — Three BFF secrets absent from the canonical catalog: `PowerBi__ClientSecret`, `Rag__ApiKey`, `Notifications__SignalR__ConnectionString`
+
+| Field | Value |
+|---|---|
+| **Status** | Open — recommendations below; owner decides |
+| **Urgency** | soon (a stamp starts without them; nothing is broken at boot) |
+| **Filed** | 2026-10-09 (from the auth-system-of-record-r1 note §3, analysis only) |
+| **Source** | `notes/coordination/2026-10-09-from-auth-system-of-record-r1-webhooks.md` §3; `scripts/canonical-secret-catalog/manifest.yaml` has none of the three keys |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1570 |
+
+**Description and recommendation (stamps are keyless, D13)**
+
+- **`PowerBi__ClientSecret`** — Power BI embed for the Reporting module. `ReportingModule.cs:30-37,57-62` registers
+  `ReportingEmbedService` and maps `/api/reporting/*` only when `PowerBi:TenantId` is set; without it the module is
+  absent (404) and nothing fails at boot. `ReportingEmbedService.cs:80-84` authenticates with MSAL
+  `WithClientSecret(PowerBiOptions.ClientSecret)` (`PowerBiOptions.cs:42-44`, `[Required]`), so setting TenantId without the
+  secret would fail options validation. Keyless: MSAL accepts a client assertion and the BFF already has one for the UAMI
+  (`Infrastructure/Auth/ManagedIdentityAssertionProvider.cs`), so a federated credential on a Power BI service-principal
+  app registration removes the secret. Not available yet: that registration, the Power BI tenant setting allowing it, and
+  a Power BI/Fabric embed capacity and workspace per stamp. **Recommendation: gate the feature off on stamps** (supply
+  nothing; the module self-gates) until a stamp reporting design exists; then use a UAMI-federated registration, not a
+  secret.
+- **`Rag__ApiKey`** — the `RagApiKey` scheme (`AuthorizationModule.cs:81-92`) guards only `POST
+  /api/ai/rag/enqueue-indexing` (`RagEndpoints.cs:147-152`), for non-JWT callers (scripts, bulk jobs, tests). The product
+  indexing path is the Service Bus `RagIndexingJobHandler` and the JWT `send-to-index` endpoint, so no stamp feature uses
+  it. Without the key, `ApiKeyAuthenticationHandler.cs:70-77` fails closed (401). The only in-repo caller is
+  `scripts/Reconcile-DemoEnvironment.ps1:104`, which mints a throwaway value for the demo. **Recommendation: not needed
+  on stamps.** Leave it absent from the catalog (record that decision in the manifest's notes); the endpoint stays closed.
+- **`Notifications__SignalR__ConnectionString`** — Layer-C live push. `NotificationsModule.cs:39-58` registers the real
+  `SignalRDeliveryService` only when `Enabled` and a connection string exist, else the Null-Object (`/negotiate` answers
+  503, clients use the poll endpoint, ADR-032). `customer.bicep:549-560` deploys SignalR only when `signalrEnabled` (default
+  false) and `signalr.bicep:83` sets `disableLocalAuth: true`, so the resource has no access key and a key-bearing string
+  can never work on a stamp. The Management SDK (`SignalRDeliveryService.cs:246-252`, `Microsoft.Azure.SignalR.Management`
+  1.33.1) accepts a keyless managed-identity string:
+  `Endpoint=https://<name>.service.signalr.net;AuthType=azure.msi;ClientId=<uami client id>;Version=1.0;`
+  ([Microsoft Learn](https://learn.microsoft.com/en-us/azure/azure-signalr/signalr-howto-authorize-managed-identity)).
+  The UAMI already holds "SignalR App Server" (`customer.bicep:540-543`). **Recommendation: supply via managed identity,
+  but only when `signalrEnabled`**: H4b writes the string as a plain per-env setting built from the Bicep outputs
+  `signalrHostName` and the UAMI client id (no Key Vault secret). Default stamps (signalrEnabled=false) keep the Null-Object.
+  Needs a live check that the resource accepts the string before the setting is turned on.
+
+**Concrete failure today:** no reporting embed, no live notifications (poll fallback only) and no `enqueue-indexing`
+caller on a stamp; none is a boot failure.
+
 ---
 
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
+
+### ISS-020 — H7b leaves a new stamp unable to read standing grants (and did not check the task-154 role split)
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-09 — H7b `secure-setup-procedure=4`, steps S19–S21 (this branch's commit; tests in `SecureRecordSetupProcedureTests`) |
+| **Urgency** | before T186 |
+| **Filed** | 2026-10-09 |
+| **Source** | `notes/coordination/2026-10-09-from-auth-system-of-record-r1-webhooks.md` §3 (M-17) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1565 |
+
+**Description**
+
+`contact.sprk_standinggrant` is field-secured. Without Read the platform silently strips it from the BFF's app-only
+retrieve, so `SubjectStandingGrantReader.cs:171-183` fails closed: every contact reads as "no standing grant" (a WARNING
+per read, no error). The documented fix (teams-app-r1 `notes/050-standing-grant-field-schema.md` §5.4; UAC-r2
+`spa-external-access-model-briefing.md:182-186`) is membership of the BFF application user in the `Standing Grant
+Administrators` profile, which SpaarkeMaster ships (`Other/FieldSecurityProfiles.xml:675`) with no members. H7b had no step
+for it (`SecureRecordSetupProcedure.cs` ended at S18). The note's claim about "Access Administrator / Core User privilege
+edits" is only half right: both roles' final state ships in SpaarkeMaster (`Roles/Spaarke Access Administrator.xml` holds
+Read/Write/Create/Append/AppendTo on `sprk_noaccessentry` at Global; `Roles/Spaarke Core User.xml` holds none), so a stamp
+imports the right state and nothing needs editing; the script `Set-NoAccessEntryRolePrivileges.ps1` repairs older
+environments.
+
+**Resolution (evidence)**
+
+S19 resolves the profile (exactly one) and verifies the column is secured and the profile grants Read; S20 adds the BFF's
+two application users as members (read first, only the missing ones, dry-run aware, other members never touched); S21
+verifies (never repairs) the role split and refuses `secure_setup.no_access_entry_roles_incomplete` naming the repair
+script; S9 verification re-reads the S20 membership. `ProcedureVersion` 3 to 4 so completed runs re-run. Tests: 11 new
+refusal rows plus 5 facts (profile gains users and keeps a foreign administrator, partial membership, pre-S19 environment
+with dry run, membership that does not stick, role split never repaired). Note: stamp BFF users are System
+Administrator (H10), which may already carry the platform's System Administrator FLS profile; membership is still the
+documented mechanism and is harmless, so it is added regardless. A live check that a stamp reads a `true` standing grant
+remains part of T186.
+
+### ISS-021 — The T7 Spaarke-tenant guard was a silent no-op when `AzureAd__TenantId` was a Key Vault reference
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-09 — `CustomerIdentityT7Probe.CheckWorkforceTenants` fails closed (this branch's commit) |
+| **Urgency** | before T186 |
+| **Filed** | 2026-10-09 |
+| **Source** | coordination note §3 (L-10) |
+| **GitHub Issue** | (none; under #1560-family note) |
+
+**Description**
+
+`CustomerIdentityT7Probe.cs:262-269` guarded a Model 1 workforce list against Spaarke's own tenant only when the slot's
+`AzureAd__TenantId` parsed as a GUID (`Guid.TryParse` false for `@Microsoft.KeyVault(...)`), so a reference, blank, zero
+or missing value skipped the guard and H13 passed.
+
+**Resolution (evidence)**
+
+H4b writes `AzureAd__TenantId` as a plain GUID (the manifest's per-env entry overrides the TenantId secret's reference), and
+ARM app settings cannot resolve a reference without Key Vault data-plane access the probe does not have, so resolving is
+the wrong fix. On Model 1 an unreadable value (reference, blank, all-zero, missing, or case-variant ambiguous) now returns
+`[UNRESOLVABLE ...]` and the probe Fails with an instruction to re-run H4b. Model 2 is unchanged. Tests: 5 new Model 1 cases
+plus a Model 2 reference case in `CustomerIdentityT7ProbeTests`.
 
 ### ISS-014 — H13 cannot run the BFF's secure-record isolation census (no identity can call it)
 

@@ -1323,11 +1323,16 @@ month**. `NativeAccount` (Model 2) still assigns the configured licence SKUs and
 configured (`userprov-license-sku-not-configured`).
 
 **B2B guests are flagged external** (unified-access-control-r2 task 114, owner round 67). A blank
-`systemuser.sprk_isexternal` means NOT external, so every B2B guest (`#EXT#` in its user name) must carry
-`sprk_isexternal = Yes`: `scripts/Set-ExternalFlagForB2BGuests.ps1` (dry run → `-Apply` → `-Verify`, §12.2 Phase 7b).
-A user flagged external is refused a share on a Restricted record and gets no internal-only message. **In an existing
-environment this runs BEFORE the BFF carrying task 114 is deployed** (see Phase 7b) — that BFF reads a blank flag as
-internal.
+`systemuser.sprk_isexternal` means NOT external, so a B2B guest (`#EXT#` in its user name) that is genuinely external
+must carry `sprk_isexternal = Yes`. A user flagged external is refused a share on a Restricted record and gets no
+internal-only message.
+
+> **Do NOT run `scripts/Set-ExternalFlagForB2BGuests.ps1` on a Model 1 stamp** (#1564). Under Model 1 every customer
+> employee is a B2B guest (`#EXT#`) in Spaarke's tenant (§7.7), so the script would mark every customer employee
+> external. The rule for who is external on a Model 1 stamp is undecided and belongs to unified-access-control-r2; do not
+> run the script (dry run included, for its report) until that project records the rule and this guide is updated. The
+> script is unchanged and may still be right for an environment whose B2B guests really are external people (not a Model 1
+> stamp). The older instruction (dry run → `-Apply` → `-Verify`, §12.2 Phase 7b) does not apply to Model 1 stamps.
 
 ### 7.8 Phase 8 — Configuration Seed (H12a, H12b, H12c)
 
@@ -1393,7 +1398,12 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
   `config/secure-record-owner-role.json`, on that team only;
 - the BFF-managed field-security memberships;
 - the contact identity-link memberships;
-- a check that `sprk_noaccessentry` is readable.
+- the BFF's two application users as members of the `Standing Grant Administrators` field-security profile (without
+  it the platform hides `contact.sprk_standinggrant` from the BFF and every standing grant reads as not held; ISS-020 /
+  #1565) — other members of that profile are never touched;
+- a check that `sprk_noaccessentry` is readable, and that the `Spaarke Access Administrator` role holds Read on it at
+  Global while `Spaarke Core User` holds none (unified-access-control-r2 task 154; verified, never repaired — H7b
+  refuses `secure_setup.no_access_entry_roles_incomplete` and names `scripts/Set-NoAccessEntryRolePrivileges.ps1`).
 
 An intake `secureRecordSetupDryRun: true` makes H7b read only. It records its plan in gate `h7b-secure-setup-plan` and
 stops the run.
@@ -1717,8 +1727,9 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 .\scripts\Repair-SpeConfigSecretName.ps1 ... -MintClientSecret -Apply
 .\scripts\Repair-SpeConfigSecretName.ps1 ... -Verify
 # Phase 6 — BFF deploy
-# ⚠️ EXISTING environment receiving the BFF that carries unified-access-control-r2 task 114: run Phase 7b (all three
-# steps, -Verify exit 0) BEFORE this deploy. That BFF reads a BLANK sprk_isexternal as internal, so a B2B guest still
+# ⚠️ Phase 7b (Set-ExternalFlagForB2BGuests.ps1) is NOT run on Model 1 stamps (#1564) — see Phase 7b below.
+# EXISTING non-Model-1 environment receiving the BFF that carries unified-access-control-r2 task 114: run Phase 7b (all
+# three steps, -Verify exit 0) BEFORE this deploy. That BFF reads a BLANK sprk_isexternal as internal, so a B2B guest still
 # blank when it starts is shared with on Restricted records and receives internal-only messages. (A NEW environment has
 # no users yet: Phase 7b follows H11 below, before anyone is given access.)
 .\scripts\Deploy-BffApi.ps1 -CustomerId "acme" -Slot production
@@ -1727,7 +1738,10 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 # Interim: PPAC UI + Graph SDK; see auth-deployment-setup stub for MI-first checklist
 # T2 verification MANDATORY: systemusers?$filter=applicationid eq {uami-app-id} returns 1
 
-# Phase 7b — B2B guests are flagged external (unified-access-control-r2 task 114, owner round 67 — per environment,
+# Phase 7b — 🛑 DO NOT RUN ON A MODEL 1 STAMP (#1564). Under Model 1 every customer employee is a B2B guest (#EXT#) in
+# Spaarke's tenant, so this step would mark every customer employee external. Skip Phase 7b (all three commands, the dry
+# run too) on Model 1 until unified-access-control-r2 decides the rule and this guide is updated.
+# B2B guests are flagged external (unified-access-control-r2 task 114, owner round 67 — per environment,
 # after the users exist, and again whenever B2B guests are added outside the product). A BLANK sprk_isexternal means
 # NOT external: Manage Access "+ User" and the Assigned-To rule share with the user, internal-only messages reach them,
 # and a Restricted record keeps their share. This sets sprk_isexternal = Yes on every systemuser whose user name holds

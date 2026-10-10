@@ -83,6 +83,10 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     internal Guid SystemAdministratorProfileId { get; private set; }
     internal Guid LinkReaderProfileId { get; private set; }
     internal Guid LinkWriterProfileId { get; private set; }
+    internal Guid StandingGrantProfileId { get; private set; }
+    internal Guid AccessAdministratorRoleId { get; private set; }
+    internal Guid CoreUserRoleId { get; private set; }
+    internal Guid NoAccessEntryReadPrivilegeId { get; private set; }
     internal Guid BffAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f1");
     internal Guid MiAppUser { get; } = Guid.Parse("b0000000-0000-0000-0000-0000000000f2");
     internal static readonly string[] LockedTables = ["sprk_invoice", "sprk_matter", "sprk_project", "sprk_workassignment"];
@@ -130,6 +134,22 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             permissions.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, table, 4, 4, 4));
             dv.SecuredColumns[ColumnKey(table, column)] = true;
         }
+
+        // ISS-020: the standing-grant profile as SpaarkeMaster ships it (Read/Create/Update on contact.sprk_standinggrant,
+        // the column secured, no members) ...
+        dv.StandingGrantProfileId = dv.AddProfile(SecureRecordSetupProcedure.StandingGrantProfileName);
+        dv.ColumnPermissions(SecureRecordSetupProcedure.StandingGrantColumn).Add(
+            new SecureSetupFieldPermission(dv.StandingGrantProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 4, 4));
+        dv.SecuredColumns[ColumnKey(SecureRecordSetupProcedure.StandingGrantTable, SecureRecordSetupProcedure.StandingGrantColumn)] = true;
+
+        // ... and task 154's role split as it ships: the Access Administrator holds Read on No Access entries at Global
+        // (root unit), Spaarke Core User holds none.
+        var entryRead = new SecureSetupPrivilege(Guid.NewGuid(), "prvReadsprk_noaccessentry");
+        dv.NoAccessEntryReadPrivilegeId = entryRead.Id;
+        dv.TableReadPrivileges[SecureRecordSetupProcedure.NoAccessEntryTable] = [entryRead];
+        dv.AccessAdministratorRoleId = dv.AddRole(dv.RootUnitId, SecureRecordSetupProcedure.AccessAdministratorRoleName);
+        dv.RolePrivileges[dv.AccessAdministratorRoleId][entryRead.Id] = (entryRead.Name, "Global");
+        dv.CoreUserRoleId = dv.AddRole(dv.RootUnitId, SecureRecordSetupProcedure.CoreUserRoleName);
 
         dv.UserApplicationId[dv.BffAppUser] = Guid.NewGuid();
         dv.UserApplicationId[dv.MiAppUser] = Guid.NewGuid();

@@ -338,6 +338,80 @@ public sealed class SecureRecordSetupProcedureTests
             .Diagnostic.Should().Contain($"are not in '{SecureRecordSetupProcedure.IdentityLinkReaderProfileName}'");
     }
 
+    // ------------------------------------------------------------ S19–S21 (ISS-020 / #1565)
+
+    [Fact]
+    public async Task StandingGrantProfile_GainsTheBffApplicationUsers_AndNobodyElse()
+    {
+        var dv = NewEnv();
+        var administrator = Guid.NewGuid();
+        dv.ProfileUsers[dv.StandingGrantProfileId].Add(administrator);   // a grant-privileged human: an operator decision, kept
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+
+        dv.ProfileUsers[dv.StandingGrantProfileId].Should().BeEquivalentTo(new[] { administrator, dv.BffAppUser, dv.MiAppUser });
+        dv.ProfileTeams[dv.StandingGrantProfileId].Should().BeEmpty();
+        dv.Writes.Where(w => w.Contains(dv.StandingGrantProfileId.ToString(), StringComparison.Ordinal))
+            .Should().OnlyContain(w => w.StartsWith("AssociateProfileUser", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task StandingGrantProfile_WithOneBffUserAlready_GainsOnlyTheOther()
+    {
+        var dv = await ConfiguredEnvAsync();
+        dv.ProfileUsers[dv.StandingGrantProfileId].Remove(dv.MiAppUser);
+
+        var outcome = await RunAsync(dv);
+
+        outcome.Should().BeOfType<SecureRecordSetupOutcome.Applied>().Which.Actions.Should().ContainSingle()
+            .Which.Should().Be($"add BFF application user {dv.MiAppUser} to '{SecureRecordSetupProcedure.StandingGrantProfileName}'");
+        dv.Writes.Should().ContainSingle().Which.Should().Be($"AssociateProfileUser {dv.StandingGrantProfileId} {dv.MiAppUser}");
+    }
+
+    [Fact]
+    public async Task StandingGrantProfile_OnAnEnvironmentConfiguredBeforeS19_IsAddedAlone_AndADryRunPlansItWithoutWriting()
+    {
+        var dv = await ConfiguredEnvAsync();
+        dv.ProfileUsers[dv.StandingGrantProfileId].Clear();
+
+        var plan = (await RunAsync(dv, dryRun: true)).Should().BeOfType<SecureRecordSetupOutcome.Planned>().Subject.Actions;
+
+        dv.Writes.Should().BeEmpty();
+        plan.Should().BeEquivalentTo(new[]
+        {
+            $"add BFF application user {dv.BffAppUser} to '{SecureRecordSetupProcedure.StandingGrantProfileName}'",
+            $"add BFF application user {dv.MiAppUser} to '{SecureRecordSetupProcedure.StandingGrantProfileName}'",
+        });
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+        dv.Writes.Should().OnlyContain(w => w.StartsWith("AssociateProfileUser", StringComparison.Ordinal));
+        dv.ProfileUsers[dv.StandingGrantProfileId].Should().BeEquivalentTo(new[] { dv.BffAppUser, dv.MiAppUser });
+    }
+
+    [Fact]
+    public async Task Verify_RefusesWhenAStandingGrantMembershipDidNotStick()
+    {
+        var dv = NewEnv();
+        dv.ProfileAssociationsIgnored.Add(dv.StandingGrantProfileId);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.VerifyFailed, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain($"are not members of '{SecureRecordSetupProcedure.StandingGrantProfileName}'");
+    }
+
+    [Fact]
+    public async Task NoAccessEntryRoleSplit_IsNeverRepairedHere()
+    {
+        var dv = NewEnv();
+        dv.RolePrivileges[dv.CoreUserRoleId][dv.NoAccessEntryReadPrivilegeId] = ("prvReadsprk_noaccessentry", "Global");
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("Set-NoAccessEntryRolePrivileges.ps1");
+        dv.RolePrivileges[dv.CoreUserRoleId].Should().ContainKey(dv.NoAccessEntryReadPrivilegeId, "a refusal changes nothing");
+        dv.Writes.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task NullSecureFlags_AreSetFalse_OnEveryLockedTable_ThenNothingRemains()
     {
@@ -538,6 +612,44 @@ public sealed class SecureRecordSetupProcedureTests
                     permissions.Add(new SecureSetupFieldPermission(dv.LinkReaderProfileId, "systemuser", 4, 0, 4));
                 },
                 SecureRecordSetupRejectionCodes.IdentityLinkLockOtherWriter, FailureClass.QuarantineRequired },
+
+            // ---- S19–S21: the standing-grant environment (ISS-020 / #1565) ----
+            { "standing-grant profile missing", dv => dv.Profiles.Remove(SecureRecordSetupProcedure.StandingGrantProfileName),
+                SecureRecordSetupRejectionCodes.FieldProfileUnresolved, FailureClass.Resumable },
+            { "two standing-grant profiles", dv => dv.AddProfile(SecureRecordSetupProcedure.StandingGrantProfileName),
+                SecureRecordSetupRejectionCodes.FieldProfileUnresolved, FailureClass.Resumable },
+            { "contact.sprk_standinggrant not secured", dv =>
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_standinggrant")] = false,
+                SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "contact.sprk_standinggrant absent", dv =>
+                    dv.SecuredColumns.Remove(FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_standinggrant")),
+                SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "standing-grant profile grants no Read", dv =>
+                {
+                    var permissions = dv.ColumnPermissions("sprk_standinggrant");
+                    permissions.RemoveAll(p => p.ProfileId == dv.StandingGrantProfileId);
+                    permissions.Add(new SecureSetupFieldPermission(dv.StandingGrantProfileId, "contact", 0, 4, 4));
+                },
+                SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "standing-grant profile grants Read on another table only", dv =>
+                {
+                    var permissions = dv.ColumnPermissions("sprk_standinggrant");
+                    permissions.RemoveAll(p => p.ProfileId == dv.StandingGrantProfileId);
+                    permissions.Add(new SecureSetupFieldPermission(dv.StandingGrantProfileId, "sprk_externalparty", 4, 4, 4));
+                },
+                SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "Access Administrator role missing from the root unit", dv => dv.Roles.RemoveAll(r => r.Id == dv.AccessAdministratorRoleId),
+                SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable },
+            { "Core User role missing from the root unit", dv => dv.Roles.RemoveAll(r => r.Id == dv.CoreUserRoleId),
+                SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable },
+            { "Access Administrator reads entries only at Basic", dv =>
+                    dv.RolePrivileges[dv.AccessAdministratorRoleId][dv.NoAccessEntryReadPrivilegeId] = ("prvReadsprk_noaccessentry", "Basic"),
+                SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable },
+            { "Access Administrator lacks Read on entries", dv => dv.RolePrivileges[dv.AccessAdministratorRoleId].Clear(),
+                SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable },
+            { "Core User still reads entries (task 154 not applied)", dv =>
+                    dv.RolePrivileges[dv.CoreUserRoleId][dv.NoAccessEntryReadPrivilegeId] = ("prvReadsprk_noaccessentry", "Global"),
+                SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable },
         };
         return data;
     }
