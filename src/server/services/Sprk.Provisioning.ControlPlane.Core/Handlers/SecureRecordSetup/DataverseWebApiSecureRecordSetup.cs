@@ -126,6 +126,14 @@ public sealed class DataverseWebApiSecureRecordSetup : ISecureRecordSetupDataver
         => Session(target).FindBusinessUnitsByNameAsync(name, cancellationToken);
 
     /// <inheritdoc/>
+    public Task<SecureSetupBusinessUnit?> GetBusinessUnitAsync(SecureRecordSetupTarget target, Guid businessUnitId, CancellationToken cancellationToken)
+        => Session(target).GetBusinessUnitAsync(businessUnitId, cancellationToken);
+
+    /// <inheritdoc/>
+    public Task<Guid?> GetUserBusinessUnitAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+        => Session(target).GetUserBusinessUnitAsync(systemUserId, cancellationToken);
+
+    /// <inheritdoc/>
     public Task<IReadOnlyList<Guid>> ListBusinessUnitUsersAsync(SecureRecordSetupTarget target, Guid businessUnitId, int top, CancellationToken cancellationToken)
         => Session(target).ListBusinessUnitUsersAsync(businessUnitId, top, cancellationToken);
 
@@ -308,6 +316,32 @@ internal sealed class SecureRecordSetupWebApi
                 $"businessunits?$filter=name eq '{Literal(name)}'&$select=businessunitid,name,_parentbusinessunitid_value&$top=2",
                 $"Reading business unit '{name}'", ct).ConfigureAwait(false))
             .Select(BusinessUnit).ToArray();
+
+    internal async Task<SecureSetupBusinessUnit?> GetBusinessUnitAsync(Guid businessUnitId, CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Get,
+            $"businessunits({businessUnitId})?$select=businessunitid,name,_parentbusinessunitid_value", null, ct).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        EnsureSuccess(response, "Reading the customer's business unit");
+        using var document = await ReadJsonAsync(response, ct).ConfigureAwait(false);
+        return BusinessUnit(document.RootElement);
+    }
+
+    internal async Task<Guid?> GetUserBusinessUnitAsync(Guid systemUserId, CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Get, $"systemusers({systemUserId})?$select=_businessunitid_value", null, ct)
+            .ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        EnsureSuccess(response, "Reading the application user's business unit");
+        using var document = await ReadJsonAsync(response, ct).ConfigureAwait(false);
+        return Id(document.RootElement, "_businessunitid_value");
+    }
 
     internal async Task<IReadOnlyList<Guid>> ListBusinessUnitUsersAsync(Guid businessUnitId, int top, CancellationToken ct)
         => (await GetValuesAsync(

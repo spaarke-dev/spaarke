@@ -21,9 +21,10 @@ public sealed class SecureRecordSetupProcedureTests
     private static readonly SecureRecordOwnerRoleSet Set = SecureRecordOwnerRoleSet.Embedded;
     private static readonly SecureRecordSetupTarget Target = new("https://spaarke-acme.crm.dynamics.com/", "tenant", "bff-app");
 
-    private static Task<SecureRecordSetupOutcome> RunAsync(FakeSecureRecordSetupDataverse dv, bool dryRun = false)
+    private static Task<SecureRecordSetupOutcome> RunAsync(FakeSecureRecordSetupDataverse dv, bool dryRun = false, Guid? customerUnit = null)
         => new SecureRecordSetupProcedure(dv, NullLogger.Instance)
-            .RunAsync(new SecureRecordSetupRequest(Target, Set, [dv.BffAppUser, dv.MiAppUser], dryRun), CancellationToken.None);
+            .RunAsync(new SecureRecordSetupRequest(Target, Set, [dv.BffAppUser, dv.MiAppUser], customerUnit ?? dv.CustomerUnitId, dryRun),
+                CancellationToken.None);
 
     private static FakeSecureRecordSetupDataverse NewEnv() => FakeSecureRecordSetupDataverse.NewEnvironment(Set);
 
@@ -66,9 +67,11 @@ public sealed class SecureRecordSetupProcedureTests
 
         dv.TeamRoles.Where(kv => kv.Value.Contains(role.Id)).Select(kv => kv.Key).Should().Equal(team.Id);
         dv.TeamRoles[dv.DefaultTeamOf(unit.Id).Id].Should().BeEmpty("the new unit's default team arrived with System Administrator (§5.5)");
-        dv.ProfileTeams[dv.ReaderProfileId].Should().BeEquivalentTo(new[] { dv.RootDefaultTeamId, dv.DefaultTeamOf(unit.Id).Id });
+        dv.ProfileTeams[dv.ReaderProfileId].Should().BeEquivalentTo(
+            new[] { dv.RootDefaultTeamId, dv.CustomerDefaultTeamId, dv.DefaultTeamOf(unit.Id).Id });
         dv.ProfileUsers[dv.WriterProfileId].Should().BeEquivalentTo(new[] { dv.BffAppUser, dv.MiAppUser });
-        dv.ProfileTeams[dv.LinkReaderProfileId].Should().BeEquivalentTo(new[] { dv.RootDefaultTeamId, dv.DefaultTeamOf(unit.Id).Id },
+        dv.ProfileTeams[dv.LinkReaderProfileId].Should().BeEquivalentTo(
+            new[] { dv.RootDefaultTeamId, dv.CustomerDefaultTeamId, dv.DefaultTeamOf(unit.Id).Id },
             "S16: every default team reads the identity-binding columns");
         dv.ProfileUsers[dv.LinkReaderProfileId].Should().BeEmpty();
         dv.ProfileUsers[dv.LinkWriterProfileId].Should().BeEquivalentTo(new[] { dv.BffAppUser, dv.MiAppUser },
@@ -105,7 +108,7 @@ public sealed class SecureRecordSetupProcedureTests
 
         var plan = outcome.Should().BeOfType<SecureRecordSetupOutcome.Planned>().Subject.Actions;
         dv.Writes.Should().BeEmpty();
-        dv.Units.Should().ContainSingle("nothing was created");
+        dv.Units.Should().HaveCount(2, "nothing was created (the root and the customer unit only)");
         plan.Should().Contain(a => a.StartsWith("create business unit", StringComparison.Ordinal));
         plan.Should().Contain(a => a.StartsWith("create the Owner team", StringComparison.Ordinal));
         plan.Should().Contain(a => a.StartsWith("create the role", StringComparison.Ordinal));
@@ -403,6 +406,24 @@ public sealed class SecureRecordSetupProcedureTests
                 SecureRecordSetupRejectionCodes.BusinessUnitWrongParent, FailureClass.QuarantineRequired },
             { "user in the unit", dv => dv.UserUnit[Guid.NewGuid()] = SecureUnit(dv),
                 SecureRecordSetupRejectionCodes.BusinessUnitHasUsers, FailureClass.QuarantineRequired },
+
+            // ---- T259 (ISS-010, owner 2026-10-09): §6 T1/T3 — the customer's unit and the BFF's application users ----
+            { "customer unit missing", dv => dv.Units.RemoveAll(u => u.Id == dv.CustomerUnitId),
+                SecureRecordSetupRejectionCodes.CustomerBusinessUnitMissing, FailureClass.QuarantineRequired },
+            { "customer unit under another unit (Deep there could reach a sibling's records)", dv =>
+                {
+                    var other = Guid.NewGuid();
+                    dv.Units.Add(new SecureSetupBusinessUnit(other, "Holding", dv.RootUnitId));
+                    dv.Units.RemoveAll(u => u.Id == dv.CustomerUnitId);
+                    dv.Units.Add(new SecureSetupBusinessUnit(dv.CustomerUnitId, FakeSecureRecordSetupDataverse.CustomerUnitName, other));
+                },
+                SecureRecordSetupRejectionCodes.CustomerBusinessUnitWrongParent, FailureClass.QuarantineRequired },
+            { "BFF application user in the ROOT unit", dv => dv.UserUnit[dv.BffAppUser] = dv.RootUnitId,
+                SecureRecordSetupRejectionCodes.AppUserOutsideCustomerBusinessUnit, FailureClass.QuarantineRequired },
+            { "managed-identity application user in the Secure Record unit", dv => dv.UserUnit[dv.MiAppUser] = SecureUnit(dv),
+                SecureRecordSetupRejectionCodes.AppUserOutsideCustomerBusinessUnit, FailureClass.QuarantineRequired },
+            { "BFF application user does not exist", dv => dv.UserUnit.Remove(dv.BffAppUser),
+                SecureRecordSetupRejectionCodes.AppUserOutsideCustomerBusinessUnit, FailureClass.QuarantineRequired },
             { "two named teams", dv =>
                 {
                     var unit = SecureUnit(dv);
@@ -534,6 +555,31 @@ public sealed class SecureRecordSetupProcedureTests
         refused.Diagnostic.Should().NotBeNullOrWhiteSpace(because);
         refused.Actions.Should().BeEmpty(because);
         dv.Writes.Should().BeEmpty($"{because}: every refusal comes before the first write");
+    }
+
+    [Fact]
+    public async Task CustomerUnit_ThatIsTheRoot_IsRefused_QuarantineRequired_WithoutWriting()
+    {
+        var dv = NewEnv();
+
+        var refused = Refused(await RunAsync(dv, customerUnit: dv.RootUnitId),
+            SecureRecordSetupRejectionCodes.CustomerBusinessUnitWrongParent, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain("it is the root");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CustomerUnit_NamedLikeTheSecureUnit_IsRefused_BecauseItsUsersWouldBeInTheSecureUnit()
+    {
+        // Intake refuses this name; if a unit called "Secure Record" were recorded as the customer's anyway, S1 adopts it as
+        // the Secure Record unit and S2 refuses the BFF's application users found in it.
+        var dv = NewEnv();
+        dv.Units.RemoveAll(u => u.Id == dv.CustomerUnitId);
+        dv.Units.Add(new SecureSetupBusinessUnit(dv.CustomerUnitId, Set.BusinessUnitName, dv.RootUnitId));
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.BusinessUnitHasUsers, FailureClass.QuarantineRequired);
+        dv.Writes.Should().BeEmpty();
     }
 
     [Fact]

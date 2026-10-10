@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="262" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Customer management group + common policy (G36, ADR-027): `spaarke-customers` under `spaarke-environments`, Audit-only built-in policy, PRQ-S-06 membership check</title>
+    <phase>Model 1 dedicated-stamp remediation — G36 (ADR-027 "MUST use Azure Management Groups for common policy across customer subscriptions")</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tenant-level governance IaC (management groups, policy assignments, subscription moves); a wrong effect or scope can block deployments in every customer subscription.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Tenant/management-group scope; policy effect semantics; no live action allowed, so correctness rests on reading the built-in definitions.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>infrastructure, bicep, governance, provisioning</tags>
+    <deps>228</deps>
+  </metadata>
+
+  <prompt>Build G36 (notes/model1-dedicated-remediation-plan.md). Owner approved 2026-10-09: "create the management group + policy".</prompt>
+
+  <goal>Every customer subscription sits in one management group that carries Spaarke's common policy (ADR-027), declared as IaC and applied by one script; the operator's customer pre-flight refuses a customer subscription outside that group. The first policy set reports and never blocks a deployment.</goal>
+
+  <context>
+    <background>
+      ADR-027 (amended 2026-09-28) raised "use Azure Management Groups for common policy across customer subscriptions" to
+      MUST, because one subscription per customer makes hand-applied policy unscalable. Read-only check 2026-10-09: only
+      the Tenant Root Group exists in tenant a221a95e; five subscriptions sit directly under it. PRQ-S-00's remediation
+      names a "customer-subscriptions management group" that nothing defines or checks.
+      AZURE-RESOURCE-NAMING-CONVENTION.md "Azure Subscription Organization" names "Management Group: Spaarke Environments".
+      The owner (2026-10-09) uses the Spaarke Demo Environment subscription as the T186 customer stamp's subscription.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md ("Azure Subscription Organization")</file>
+      <file>infrastructure/bicep/customer.bicep (tags, locations, storage/kv/app-service settings the policy audits)</file>
+      <file>infrastructure/bicep/modules/{storage-account,key-vault,acs-communication}.bicep</file>
+      <file>scripts/provisioning-prereqs/{prereqs.yaml, spaarke-constants.yaml, context-defaults.*.json, validate.ps1}</file>
+      <file>tests/scripts/Prereqs-Recipes.Tests.ps1</file>
+      <file>docs/guides/PROVISIONING-PREREQUISITES.md, docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-027 (main session applies the note), .claude/skills/provision-environment/SKILL.md Step 0.5b/1e-ter (main session applies the token)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">NO live action in this task: no management-group create, no policy assignment, no subscription move. Read-only `az account management-group list/subscription show` and `az policy definition show` are allowed. Never `az account set`.</constraint>
+    <constraint source="dispatch">Built-in policy definitions only. Effects that cannot break an in-flight deployment: Audit, or a Deny-only built-in assigned with enforcementMode DoNotEnforce. Never require a tag customer.bicep does not set. Every assignment has a non-compliance message.</constraint>
+    <constraint source="project">Never delete rg-spaarke-shared-prod or the Syntex account; no resource-group lock.</constraint>
+    <constraint source="CLAUDE.md §3">Sub-agents cannot write .claude/**: return proposed .claude edits verbatim.</constraint>
+    <constraint source="validate.ps1">Recipe contract: decide by exit code, explicit `exit 1`, no parenthesis inside an az argument, compare after `tr -d '\r'`, tokens available at the prereq's scope.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Decide the hierarchy and placement; record the ids in spaarke-constants.yaml and the naming doc's tree.</step>
+    <step order="2">infrastructure/bicep/management-groups.bicep (tenant scope, the two groups) and infrastructure/bicep/customer-policy.bicep (management-group scope, built-in assignments, Audit / DoNotEnforce, non-compliance messages); `az bicep build` both.</step>
+    <step order="3">scripts/provisioning/Deploy-ManagementGroups.ps1: -WhatIf default (read-only plan), -Apply deploys both templates and moves the listed subscriptions; `--subscription`/`--management-group-id` passed explicitly; never `az account set`.</step>
+    <step order="4">PRQ-S-06 (once_per_customer): the customer subscription's parent is spaarke-customers; token documented; PRQ-S-00 remediation names it; Pester cases (member / elsewhere / not found) + mirror tests (bicep defaults == constants).</step>
+    <step order="5">Docs: PROVISIONING-PREREQUISITES.md, deployment guide, naming doc; plan row G36; validate.ps1 OK; Pester green.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">`az bicep build` succeeds with no warning for management-groups.bicep and customer-policy.bicep.</criterion>
+    <criterion testable="true">Every policy assignment references a built-in definition id (`/providers/Microsoft.Authorization/policyDefinitions/{guid}`), uses Audit or enforcementMode DoNotEnforce, and has a non-compliance message (Pester asserts on the compiled JSON).</criterion>
+    <criterion testable="true">PRQ-S-06 exits 0 when the subscription's parent is spaarke-customers; exits 1 when it is under another group, and when az cannot find it under the group.</criterion>
+    <criterion testable="true">validate.ps1 exits 0; tests/scripts/Prereqs-Recipes.Tests.ps1 passes.</criterion>
+    <criterion testable="true">Deploy-ManagementGroups.ps1 without -Apply makes no write call (only read-only az calls; Pester with a fake az asserts no create/add/deployment-create call).</criterion>
+    <criterion testable="false">No live management group, assignment or subscription move was made by this task.</criterion>
+  </acceptance-criteria>
+  <notes>
+    Completed 2026-10-09 (sub-agent worktree, FULL rigor, repo only — NO live action: no group created, no policy
+    assigned, no subscription moved; only read-only `az account management-group list/show/subscription show`,
+    `az policy definition show/list`, `az role assignment list` and the script's plan run).
+
+    HIERARCHY (smallest that satisfies ADR-027): Tenant Root Group → `spaarke-environments` "Spaarke Environments" →
+    `spaarke-customers` "Spaarke Customers"; the common policy is assigned at `spaarke-customers` only.
+    Placement (script's initial placement, used when no list is passed):
+      spaarke-customers    ← Spaarke Demo Environment 2ff9ee48 (T186 customer stamp's subscription, owner 2026-10-09)
+      spaarke-environments ← Spaarke Devlopment Environment 484bc857, Spaarke Shared Production cd95fcec (Spaarke's own
+                             environments, as the naming doc names them; no policy at that level, so the move changes no
+                             effective policy or RBAC — the root stays an ancestor)
+      root (unchanged)     ← SPRK Power Platform 1 e430b9aa, Spaarke Legal Rules Solution a220e9b6 (not Spaarke
+                             environments; moving them only exposes them to future environment-wide policy)
+
+    POLICY (customer-policy.bicep, built-in only, read with `az policy definition show` 2026-10-09):
+      sprk-locations        e56962a6 Allowed locations                 Audit, [westus2, westus3, westus]
+      sprk-rg-locations     e765b5de Allowed locations for RGs          Audit, same list
+      sprk-st-https         404c3081 Storage secure transfer            Audit
+      sprk-st-tls12         fe83a0eb Storage minimum TLS                Audit, TLS1_2
+      sprk-kv-rbac          12d4fa5e Key Vault RBAC permission model    Audit
+      sprk-kv-purgeprotect  0b60c0b2 Key Vault deletion protection      Audit
+      sprk-rgtag-customer / -environment / -managedby  96670d01 Require a tag on resource groups (deny-only built-in)
+                            → enforcementMode DoNotEnforce (reported, never enforced)
+    Why none can break a deployment: Audit never refuses; DoNotEnforce never applies the deny. customer.bicep already
+    complies with every one (regions = its three location defaults; ACS is `global`, exempt; tags = its `tags` param;
+    storage-account.bicep HTTPS + TLS1_2; key-vault.bicep RBAC + soft delete + purge protection).
+    Finding recorded in the template: H2a pre-creates the RG with NO tags (ArmDeploymentRunner RG ensure) — an enforced
+    tag policy would fail H2a on every run; the tag assignments must stay DoNotEnforce until H2a tags its pre-create.
+
+    DEVIATIONS
+    - D1: tags are required on resource GROUPS only (not every resource): Azure-created and child resources do not carry
+      customer.bicep's tags, and the "require a tag" built-ins are deny-only, so the resource-level variant would be noise.
+    - D2: PRQ-S-06's remediation is the least-privilege one-liner (`az account management-group subscription add`), not
+      the script — the script redeploys the tenant-scope template, which needs rights at "/".
+    - D3: the script applies the 2026-10-09 initial placement only when NEITHER list is passed (an empty-array literal
+      cannot be passed through `pwsh -File`).
+    - D4 (found, fixed in scope): validate.ps1's `grep -i -F` lint (T207) was inert — its code sat on one comment line
+      joined by literal `\n`. Split into real lines; the lint now runs (manifest passes; Pester asserts it fires).
+    - D5 (drift fixed at discovery): PROVISIONING-PREREQUISITES.md summary counts and the T-05/T-06 rows (retired
+      2026-10-09 but shown active); AZURE-RESOURCE-NAMING-CONVENTION.md's per-environment subscription tree and the
+      `component` tag no template sets.
+
+    VERIFICATION: `az bicep build` + `az bicep lint` both files, no warning (only the CLI's "new release" notice);
+    validate.ps1 OK (42 prereqs, manifest v11); tests/scripts/Management-Groups.Tests.ps1 24/24 (Pester 3.4; mutation
+    check: an assignment flipped to Deny fails the suite); tests/scripts/Prereqs-Recipes.Tests.ps1 (PRQ-S-06 cases +
+    the re-armed grep lint) 44/44 (slow on this host: ~24 min, Git Bash forks). Plan run of the script against the live tenant
+    (read-only): 2 groups to create, 3 moves, -Apply refused for the caller (User Access Administrator alone at "/").
+
+    LIVE STEP (main session, owner-approved): see the task report — elevate/assign Contributor at "/", run -Apply,
+    verify, remove the temporary Contributor; then the skill token edit must be applied BEFORE the next
+    /provision-environment run (Step 1e-ter HARD STOPs on the unresolved {customerManagementGroupId} otherwise).
+    <note date="2026-10-09">Applied live with owner OK: temporary Contributor at "/" for the operator (role assignment e59bad73, created via ARM REST because `az role assignment create --scope /` fails with MissingSubscription), `Deploy-ManagementGroups.ps1 -Apply` (spaarke-environments → spaarke-customers; 9 assignments at spaarke-customers; demo → spaarke-customers, dev + shared prod → spaarke-environments; all read back), then the grant was deleted and re-verified (only User Access Administrator remains at "/").</note>
+  </notes>
+</task>

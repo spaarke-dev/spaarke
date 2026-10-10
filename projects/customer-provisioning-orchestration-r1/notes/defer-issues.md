@@ -135,49 +135,6 @@ does not name its index. No stamp sets it today. The two docs that advised it we
 Remove `Dedicated` (needed → build, else remove) or have H2b create its index; optionally rename `Shared`.
 `AnalysisOptions.cs` (enum), `KnowledgeDeploymentService.cs:288-320`.
 
-### ISS-010 — Production business-unit topology: the customer's own unit, the BFF application users and guests in it (INCOMING-145 §6 T1/T3/T5)
-
-| Field | Value |
-|---|---|
-| **Status** | Open — needs an owner decision (placement + one new input) |
-| **Urgency** | before T186 (server-side creates of secure children; #1081) |
-| **Filed** | 2026-10-08 (T256) |
-| **Source** | unified-access-control-r2 INCOMING-145 §6 (owner 2026-10-02, binding) |
-| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1486 |
-
-**Description**
-
-§6 makes the production topology binding: users and the BFF's application users sit in the customer's NAMED child
-business unit, never in the root; the Secure Record unit is a sibling of it under the root. T256's H7b enforces the two
-parts it owns — **T2** (it creates the Secure Record unit under the root and refuses, quarantined, one under any other
-parent) and **T4** (it refuses, quarantined, a root default team holding Deep/Global Read on a codified table). Not
-built, because each needs a decision or an input that does not exist:
-- **T1** the customer unit — its name "comes from the run", but no intake key carries a customer display name
-  (`IntakeParameterCatalog` has none; the schema's `displayName` never reaches the run).
-- **T3** `DataverseWebApiAppUserCreator` (H10) creates both application users in the ROOT unit. Server-side creates then
-  fall back to the root default team, which holds no privileges, and Dataverse refuses it as owner (#1081). H10 runs
-  before H6/H7b and its users must keep System Administrator (H6/H7/H7b sign in as the BFF app user), so moving them later
-  (a business-unit change removes a user's roles) is not a safe repair.
-- **T5** H11 makes each guest a Dataverse user — today in the ROOT unit, with `Spaarke Basic User`
-  (`H11UserProvisioningOptions.DefaultGuestSecurityRoleName`), which ships holding `prvReadsprk_Project`,
-  `prvReadsprk_Matter` and `prvReadsprk_WorkAssignment` at **Deep** (`SpaarkeMaster/Roles/Spaarke Basic User.xml`).
-  Deep at the root reaches every child unit, the Secure Record unit included: **on a provisioned environment every
-  guest reads every secure project, matter and work assignment by depth** (NFR-05 clause 1 — exactly §6's "why it
-  matters"). Nothing in the pipeline catches it: H7b runs before H11 (T4 checks only the root default team), and H13
-  does not run the BFF's isolation census (INCOMING-145 §3 leaves that to "H13 or the operator"). A real-path
-  cross-record exposure (F1) on the first live run (T186) unless the operator census (`secure-record-isolation-census`)
-  is run and acted on.
-
-**Suggested fix (one recommendation)**
-
-Add intake `customerDisplayName` (required, validated at POST /api/runs); **H10** creates the customer unit (T1) under the
-root before it creates the two application users IN it with System Administrator (T3), and records the unit id
-(`InterStepState.CustomerBusinessUnitId`, `[ProducedBy(H10)]`); **H11** creates guests in that unit (T5); H7b then also
-checks T1/T3 (unit present, application users' `businessunitid`); and **H13** triggers the BFF's read-only
-`secure-record-isolation-census` and requires `isolated` (INCOMING-145 §3), so no run reaches `Ready` with isolation
-void. Needs the owner's OK on the placement and the new key. Until then, T186's runbook must run the census by hand
-after H11 and treat any human reaching the Secure Record unit as a stop.
-
 ---
 
 ### ISS-008 — L2 CustomerRunGuard (I5 / FR-32) is off in every environment
@@ -301,9 +258,290 @@ run) and either rebuild the callback there or remove the BFF endpoint, `HmacSign
 
 ---
 
+### ISS-017 — `AgentToken:*` / `AgentTokenService` are registered but on no request path; a comment claims token validation that nothing does
+
+| Field | Value |
+|---|---|
+| **Status** | Open (latent; nothing breaks today) |
+| **Urgency** | low. Decide before the first per-customer Copilot agent live test (T257), so nobody configures `AgentToken__*` on a stamp believing it gates the agent |
+| **Filed** | 2026-10-09 (T257) |
+| **Source** | T257 step 2, the alignment check (design note §5.2) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1523 |
+
+**Description**
+
+`AgentModule` registers `AgentTokenService` (a singleton OBO client for "M365 Copilot → Graph/Dataverse") and binds
+`AgentTokenOptions`. No endpoint or handler resolves either of them:
+- `SpaarkeAgentHandler` has `// TODO: Inject AgentTokenService when MCI-014 is implemented`;
+- the `/api/agent/*` endpoints and every endpoint the Copilot agent's OpenAPI calls use the normal OBO path.
+
+`AgentTokenOptions.AgentAppId` is documented as "used to validate that incoming tokens were issued to the expected
+agent", but no code validates `azp`/`appid` against it. It is only logged. `AgentTokenOptionsValidator` requires
+`TenantId`, `ClientId`, `AgentAppId` and `DataverseEnvironmentUrl`. There is no `ValidateOnStart` and no resolver, so
+the validator never runs. The canonical secret catalog still emits `AgentToken__ClientId` / `AgentToken__TenantId` app
+settings.
+
+Concrete risk: an operator or a later task reads the comment, sets `AgentToken__AgentAppId` to the "Spaarke Copilot
+Agent" client, and believes the BFF now only accepts that client. It does not. Per-customer isolation comes from the
+token audience and the stamp's Dataverse roles (T257 design §3), not from this setting.
+
+**Suggested fix**
+
+Needed → build, else remove. T257 does not need an agent-specific token path, so remove these:
+- `AgentTokenService`;
+- `AgentTokenOptions` and its validator;
+- the `AgentToken__*` catalog app settings;
+- the stale `SpaarkeAgentHandler` TODO.
+If MCI-014 is ever revived, it re-adds them with a real consumer. This is BFF work (§10 hygiene, publish-size delta) for
+the BFF's owning project.
+
+---
+
+### ISS-018 — Graph identity grant gaps found by T261: the L2 Worker lacks the roles H3/H10 call with; H3's delegated catalog has a wrong id; app-only SPE search
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | F3 and F6 before T186 (F3 blocks H3 and H10 outright); F2/F4/F5 low |
+| **Filed** | 2026-10-09 (T261) |
+| **Source** | T261 inventory — `notes/t261-stamp-graph-least-privilege.md` §8 (call sites, Learn citations, live reads) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1543 |
+
+**Description**
+
+- **F3 (blocks T186).** The L2 Worker identity (`sprk-controlplane-dev-uami`, read live 2026-10-09) holds neither
+  `AppRoleAssignment.ReadWrite.All` nor `Application.ReadWrite.OwnedBy`. H10 (`POST/DELETE
+  /servicePrincipals/{stamp}/appRoleAssignments`) and H3 (`POST /applications`, FICs, `appRoleAssignedTo`) need them;
+  no prerequisite granted them (`Grant-ControlPlaneIdentity.ps1` granted the BFF stamp catalog). T261 gave the Worker
+  its own catalog (`Handlers/ControlPlaneGraphAppRoles.cs`, PRQ-E-07 manifest 11). Owed: run
+  `Grant-ControlPlaneIdentity.ps1` for `sprk-controlplane-dev-uami` (live, owner OK); then, optionally, remove the
+  Worker roles the note lists as no longer needed (`Directory.ReadWrite.All`, `User.ReadWrite.All`, `Files.*`,
+  `Sites.*`, `FileStorageContainer.Selected`, `Group.Read.All`, `User.Read.All`, `Mail.ReadWrite`, `Mail.Send`,
+  `MailboxSettings.Read`).
+- **F6 (risk for T186, delegated).** `EntraAppReg/EntraAppRegPermissionCatalog.cs` requests delegated
+  `Files.ReadWrite.All` with id `75359482-…` — the APPLICATION role id; the delegated scope is
+  `863451e7-0667-486c-a5d6-d135439485f0` (read live). It also lacks delegated `FileStorageContainer.Selected`
+  (`085ca537-6565-41c2-aca7-db852babc212`), which OBO SPE calls need and the dev BFF registration carries. A stamp's OBO
+  SharePoint Embedded calls may fail. Fix in H3's catalog + `scripts/Register-EntraAppRegistrations.ps1:288` (same id).
+- **F2.** `POST /api/spe/search/items` calls `/search/query` app-only (`SpeAdminGraphService.cs:7432`). Microsoft
+  documents SharePoint Embedded search as delegated-only, so it cannot return container content; the old catalog's
+  `Files.Read.All` would have let it search all of Spaarke's SharePoint instead. Needs OBO or `$filter` enumeration
+  (SPE admin owner — sdap-SPE-admin-app-r2).
+- **F4 (dev).** `mi-bff-api-dev` lacks `Mail.ReadWrite` → inbound mark-as-read 403 (3/3, 2026-10-06); security pages
+  `GET /security/alerts_v2` 403 7/8 (Learn least: `SecurityAlert.Read.All`; dev holds `SecurityEvents.Read.All`).
+- **F5 (dev).** `createLink` 403 app-only and delegated — a sharing setting, not a Graph role; not investigated.
+
+**Concrete failure without a fix:** H3 and H10 403 on the first live run (F3); OBO SPE calls on a new stamp may 403
+(F6).
+
+---
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
+
+### ISS-014 — H13 cannot run the BFF's secure-record isolation census (no identity can call it)
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-09 — task 260 (owner approved the recommended fix 2026-10-09): H13 requires the stamp BFF's census to answer `isolated` |
+| **Urgency** | before T186 Ready (the census is run by hand until then) |
+| **Filed** | 2026-10-09 (T259) |
+| **Source** | T259 step 5 (ISS-010's H13 half) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1527 |
+
+**Description**
+
+The census exists only as a BFF scheduled job: `SecureRecordIsolationCensusJob` (`secure-record-isolation-census`, every
+15 min, read-only; its run's `ResultJson.status` is `isolated` | `findings` | `inert` | `error`). It is reachable only
+through the generic admin routes `POST /api/admin/jobs/{jobId}/trigger` (202, async) and `GET /api/admin/jobs/{jobId}/status`
+(`recentRuns[].resultJson`), both behind `RequireAuthorization("SystemAdmin")` — an `Admin` or `SystemAdmin` app role
+(`AuthorizationModule`). A stamp's BFF app registration (H3) defines exactly one app role, `Provisioning.KeylessProof`,
+assigned to the L2 Worker identity only; it defines no `Admin`/`SystemAdmin` role. So H13, signing in as the L2 Worker,
+gets 403, and no run can prove isolation before Ready — the owner's 2026-10-09 goal ("a run cannot reach Ready unless the
+census says isolated") is unmet. Granting L2 an `Admin` role would be far wider than needed: the same policy guards job
+enable/disable and trigger of every job, RAG index writes/deletes, membership admin and record-matching admin.
+
+**Suggested fix (one recommendation)**
+
+A read-only, synchronous BFF route beside the keyless proof: `POST /api/platform/secure-record-isolation-census`, behind
+the existing `KeylessProofAuthorizationFilter` (app-only token of this tenant for this API holding the L2-only
+`Provisioning.KeylessProof` role — no new role, no H3 change), returning `{status, verdict, findings}` from the SAME code
+the job runs (move the job's census read + `SecureBuRoleDepthAssertion.Evaluate` into one shared method; the job keeps its
+schedule). L2: H13 calls it with the keyless proof's token acquisition and fails unless `status == "isolated"` (new code,
+e.g. `h13-secure-isolation-not-isolated`, carrying the findings). §11: existing = the job + admin routes (async, admin-only;
+widening them to L2 grants every job's controls); cost of doing nothing = H13 cannot gate Ready on isolation. Needs the
+owner's OK (BFF surface + authorization, CLAUDE.md §6/§10) and a BFF publish-size check.
+
+**Resolution (task 260, 2026-10-09)**
+
+Built as recommended — no new app role, no H3 change, no new package.
+- BFF: `POST /api/platform/secure-record-isolation-census` in `Api/Platform/KeylessProofEndpoints.cs`, behind
+  `RequireAuthorization` + the existing `AddKeylessProofAuthorizationFilter` (app-only token of this tenant, this API's
+  audience, `Provisioning.KeylessProof`) + the `job-submission` rate limit. Synchronous, read-only, bounded at 60 s; a read
+  failure or timeout answers 200 `status=error` (no exception text). Body = the job's result: `{status, verdict,
+  findings[{verdict, message}]}`.
+- One census: the job's read + grading moved into `Services/ExternalAccess/SecureRecordIsolationCensus.cs` (static —
+  no DI registration); the job calls it and keeps its schedule, CRITICAL lines, heartbeat, throw-on-read-failure and
+  `ResultJson`. A test pins that the job and the route agree (status, verdict, findings) on isolated / findings / inert.
+- Contract: route + the four statuses in `KeylessProofContract.SecureRecordIsolationCensus` (source-linked into both).
+- L2: `IE2EValidationRunner.RunSecureIsolationCensusAsync` — the keyless proof's call path extracted into
+  `PostAsL2IdentityAsync` and shared (same credential, `api://{BffAppRegId}/.default`, https only, role-less-token
+  diagnostic, one transient retry, 401/403/500 fail, 404 inconclusive). H13 step 7b calls it after the existing checks:
+  `isolated` → gate `h13-secure-isolation` Verified; `findings` → QuarantineRequired `h13-secure-isolation-not-isolated`
+  (findings in the diagnostic, ≤ 20, sanitised); `inert` → QuarantineRequired `h13-secure-isolation-inert`; a failed
+  call or an answer this build cannot read → QuarantineRequired `h13-secure-isolation-census-failed`; `error` /
+  transport / timeout / 404 / a throw → Resumable `h13-secure-isolation-inconclusive`.
+- `inert` on a fresh stamp: the census grades the security TOPOLOGY (role depth into the Secure Record unit, users in it,
+  the owner team and role), not records, so a new environment with no secure record yet is graded in full and can be
+  `isolated`. `inert` means the BFF finds no Secure Record unit at all; H7b creates it before H13 (H13 ← H7b), so inert
+  proves nothing and is a broken stamp (or a BFF `SecureRecord:BusinessUnitName` that differs from H7b's) — it fails.
+- Tests: BFF route contract (401 / 403 ×3 / 200 shape / error without exception text / reads only), job↔route parity;
+  L2 runner (13 census cases) and H13 (AC-28..35). The deployment guide's "run the census by hand" interim text is
+  replaced by the H13 rule (§7.10, §7.11).
+
+**Rollout:** deploy the BFF build carrying task 260 before (or with) the Worker build: a Worker that calls an older BFF
+gets 404 → Resumable `h13-secure-isolation-inconclusive` (redeploy the BFF via H9, then resume). Live proof owed at T186
+(the first H13 run against a real stamp).
+
+---
+
+### ISS-015 — H6, H7 and H7b cannot sign in as the customer BFF app registration under either Worker credential chain
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-09 — H3 keeps a second FIC `spaarke-l2-worker` (subject = L2 Worker UAMI principalId) on every Spaarke-tenant customer BFF registration; branch `worktree-agent-ae886473c4b5b7444` (merged to the work branch by the main session) |
+| **Urgency** | now — blocks T186 at H6 (first live run) |
+| **Filed** | 2026-10-09 (T252; ISS-014 left free for a parallel agent) |
+| **Source** | T252 step 1 inventory of the dev control plane's Worker credential chain |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1524 |
+
+**Description**
+
+H6 (solution import), H7 (environment-variable values) and H7b (Secure Record setup) sign in to the customer's
+Dataverse environment as `InterStepState.BffAppRegId` — the per-customer BFF app registration H3 creates (D-13). The
+Worker builds that credential from the FR-39 chain (`WorkerDataverseCredentialFactory.Create`):
+
+- **Secret-free chain `[ManagedIdentityFederated]`** (T252 makes it the default and dev's setting): the Worker presents
+  its own UAMI (`sprk-controlplane-{env}-uami`) as a federated assertion for that app. But H3 gives the app exactly one
+  federated credential, whose subject is the **stamp BFF's** UAMI (`GraphAppRegistrationProvisioner`, FIC recipe:
+  `Subject = request.UamiPrincipalId`). Nothing trusts the L2 Worker UAMI, so Entra refuses the assertion
+  (AADSTS70021 / 700213: no matching federated identity record) at H6's first token request.
+- **Legacy chain `[ClientSecret]`** (dev until T252): the secret slot holds `BFF-API-ClientSecret` from the platform
+  vault — on dev the sentinel `pending-oob-population`, and in any case the secret of the old shared BFF app
+  (`1e40baad`), not of the per-customer app. It cannot authenticate as the per-customer app (AADSTS7000215), and the
+  binding rule forbids creating a real one.
+
+So no configured chain can complete H6/H7/H7b on a Model 1 run today. Unit tests do not catch it: they stop at
+credential construction, and the boot tests deliberately do not exchange tokens (`WorkerSecretFreeBootTests` header).
+H3's adoption check also refuses an existing app carrying a federated credential it did not create (`foreignFics`), so a
+hand-added Worker FIC would block re-runs.
+
+**Suggested fix**
+
+H3 adds a second federated credential on every per-customer BFF app registration, subject = the L2 Worker UAMI
+(`ControlPlaneIdentityOptions.PrincipalObjectId`, already a validated Worker option), issuer = Spaarke's tenant (Model 1),
+audience `api://AzureADTokenExchange`; triple-idempotent like the first; the adoption check accepts exactly these two
+names. Then H6's first live call (T186) is the exchange proof. Owner check before building: confirm the per-customer
+app should trust L2's identity (it already holds Dataverse System Administrator through H10's app user, and L2 already
+owns the app it created), versus a different sign-in identity for H6/H7/H7b. Needed → build, else remove.
+
+**Entry-points**
+
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/GraphAppRegistrationProvisioner.cs` (FIC recipe ~L1100–1215; adoption check ~L410–440)
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Credentials/WorkerDataverseCredentialFactory.cs`
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/{SolutionImport/H6SolutionImportHandler.cs, EnvVarValues/H7DataverseEnvVarValuesHandler.cs, SecureRecordSetup/H7bSecureRecordSetupHandler.cs}`
+
+**Resolution (2026-10-09)**
+
+Built as suggested — a gap against D-13, not a design change. `GraphAppRegistrationProvisioner`:
+- `BuildRequiredFicSpecs` (pure) plans two credentials before any Graph write: `spaarke-uami-trust` (stamp BFF UAMI,
+  unchanged) and `EntraAppRegOptions:WorkerFicName` = `spaarke-l2-worker` — issuer
+  `https://login.microsoftonline.com/{SpaarkeTenantId}/v2.0`, subject = `ControlPlaneIdentityOptions.PrincipalObjectId`
+  canonicalised (the Worker UAMI's **object id**, the value `WorkerDataverseCredentialFactory`'s MI assertion carries as
+  `sub`; never its clientId), audience `api://AzureADTokenExchange`. Refused before any write
+  (`appreg-worker-fic-identity-missing`) when the Worker principal id is blank / not a GUID / empty, equals the stamp UAMI,
+  or the two names are blank or equal. `customer-owned-model2`: stamp credential only (cross-tenant; Model 2 out of scope).
+- `PlanFederatedCredentials` (pure) reconciles both by triple (SF-7) — create, no-op re-run, delete-then-recreate a
+  drifted or misnamed one (a stamp triple under the worker name is moved, never dropped) — and the re-GET verification
+  runs the same planner. The adoption check accepts exactly the planned names.
+- No new setting: `ControlPlaneIdentity__PrincipalObjectId` (Worker, ValidateOnStart; `platform-controlplane.bicep`
+  passes `uami.outputs.principalId` — the same UAMI whose clientId is the Worker's `ManagedIdentity__ClientId`).
+- Tests: `WorkerFicTrustTests` (24 cases) + `AppRegistrationAdoptionTests` (+3).
+
+**Rollout:** deploy the Worker; then, for a stamp whose H3 already ran (e.g. the T186 run), resume H3 (it adds the
+credential to the adopted registration) before H6. The exchange proof is H6's first token request (T186); a fresh FIC
+flaps with AADSTS70025 for ~2 minutes (auth.md). Both FICs stay for the registration's lifetime (2 of Entra's 20).
+
+---
+
+### ISS-010 — Production business-unit topology: the customer's own unit, the BFF application users and guests in it (INCOMING-145 §6 T1/T3/T5)
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-09 — task 259 (owner decision 2026-10-09): T1/T3/T5 built and H7b checks T1/T3; the H13 census step is split out as **ISS-014** (H13 cannot call the census with the stamp's identity) |
+| **Urgency** | before T186 (server-side creates of secure children; #1081) |
+| **Filed** | 2026-10-08 (T256) |
+| **Source** | unified-access-control-r2 INCOMING-145 §6 (owner 2026-10-02, binding) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1486 |
+
+**Description**
+
+§6 makes the production topology binding: users and the BFF's application users sit in the customer's NAMED child
+business unit, never in the root; the Secure Record unit is a sibling of it under the root. T256's H7b enforces the two
+parts it owns — **T2** (it creates the Secure Record unit under the root and refuses, quarantined, one under any other
+parent) and **T4** (it refuses, quarantined, a root default team holding Deep/Global Read on a codified table). Not
+built, because each needs a decision or an input that does not exist:
+- **T1** the customer unit — its name "comes from the run", but no intake key carries a customer display name
+  (`IntakeParameterCatalog` has none; the schema's `displayName` never reaches the run).
+- **T3** `DataverseWebApiAppUserCreator` (H10) creates both application users in the ROOT unit. Server-side creates then
+  fall back to the root default team, which holds no privileges, and Dataverse refuses it as owner (#1081). H10 runs
+  before H6/H7b and its users must keep System Administrator (H6/H7/H7b sign in as the BFF app user), so moving them later
+  (a business-unit change removes a user's roles) is not a safe repair.
+- **T5** H11 makes each guest a Dataverse user — today in the ROOT unit, with `Spaarke Basic User`
+  (`H11UserProvisioningOptions.DefaultGuestSecurityRoleName`), which ships holding `prvReadsprk_Project`,
+  `prvReadsprk_Matter` and `prvReadsprk_WorkAssignment` at **Deep** (`SpaarkeMaster/Roles/Spaarke Basic User.xml`).
+  Deep at the root reaches every child unit, the Secure Record unit included: **on a provisioned environment every
+  guest reads every secure project, matter and work assignment by depth** (NFR-05 clause 1 — exactly §6's "why it
+  matters"). Nothing in the pipeline catches it: H7b runs before H11 (T4 checks only the root default team), and H13
+  does not run the BFF's isolation census (INCOMING-145 §3 leaves that to "H13 or the operator"). A real-path
+  cross-record exposure (F1) on the first live run (T186) unless the operator census (`secure-record-isolation-census`)
+  is run and acted on.
+
+**Suggested fix (one recommendation)**
+
+Add intake `customerDisplayName` (required, validated at POST /api/runs); **H10** creates the customer unit (T1) under the
+root before it creates the two application users IN it with System Administrator (T3), and records the unit id
+(`InterStepState.CustomerBusinessUnitId`, `[ProducedBy(H10)]`); **H11** creates guests in that unit (T5); H7b then also
+checks T1/T3 (unit present, application users' `businessunitid`); and **H13** triggers the BFF's read-only
+`secure-record-isolation-census` and requires `isolated` (INCOMING-145 §3), so no run reaches `Ready` with isolation
+void. Needs the owner's OK on the placement and the new key. Until then, T186's runbook must run the census by hand
+after H11 and treat any human reaching the Secure Record unit as a stop.
+
+**Resolution (task 259, 2026-10-09)**
+
+Owner decision 2026-10-09 (binding): "for secure records, only users (systemusers, guest systemusers or contact users)
+explicitly granted access should have access; guest users are added to the root customer business unit NOT added to the
+secure business unit (no users are added to the secure business unit)." The "root customer business unit" is the
+customer's own unit directly under the Dataverse root (not the root itself — Deep at the root reaches Secure Record).
+- Intake: the existing `displayName` (T237) is carried into the run — required at POST /api/runs
+  (`CustomerBusinessUnitIntake`: 1–160 chars, no control character, no leading/trailing whitespace, never `Secure Record`;
+  `h10-customer-display-name-required` / `-invalid`). No new key (coordinator correction, §11 reuse).
+- H10 (T1/T3): finds or creates the customer unit directly under the root (`h10-customer-bu-wrong-parent` Quarantine,
+  `h10-customer-bu-ambiguous`), records `InterStepState.CustomerBusinessUnitId` (`[ProducedBy(H10)]`), creates both App
+  Users IN it with the unit's System Administrator copy; an App User elsewhere → Quarantine
+  `h10-app-user-in-foreign-business-unit`, never moved.
+- H11 (T5): resolves the guest roles in the customer unit; moves a guest Dataverse added to the ROOT into the customer
+  unit (PATCH + read-back) before any role; a guest in any other unit → Quarantine `userprov-guest-in-foreign-business-unit`.
+- H7b: `secure_setup.customer_bu_missing` / `secure_setup.customer_bu_wrong_parent` / `secure_setup.app_user_outside_customer_bu`
+  (all Quarantine); S2 already refuses any user in the Secure Record unit. Procedure version 3.
+- H7 (found in review): links the customer unit to H8's container beside the root — records are owned in the customer
+  unit and the BFF resolves a non-secure record's container from its owning unit only.
+- H11 also refuses (Quarantine) a guest holding a role of another unit (`userprov-guest-holds-role-outside-customer-unit`).
+- Not done here: H13 requiring the census → ISS-014, resolved by task 260 (H13 now refuses Ready unless the census is
+  `isolated`; no hand-run census).
+
+---
 
 ### ISS-005 — Deploy-Release Phase 3 imports a 9-solution list that does not exist
 

@@ -23,9 +23,11 @@
 //   B1  Secret-free config (EnvVarValues__ClientSecret ABSENT + FR-39 chain
 //       settings exactly as the Bicep module emits under
 //       requireSecretFreeIdentity=true) → EnvVarValuesOptions +
-//       SolutionImportOptions BOTH resolve + validate; H7/H6 handler graphs
-//       (incl. WorkerDataverseCredentialFactory) resolve from keyed DI.
-//       No boot-loop, no sentinel anywhere in the fixture.
+//       SolutionImportOptions BOTH resolve + validate; H6/H7/H7b handler
+//       graphs (incl. WorkerDataverseCredentialFactory) resolve from keyed DI.
+//       No boot-loop, no sentinel anywhere in the fixture. The fixture's
+//       chain settings are pinned to the compiled template by
+//       ControlPlaneSecretFreeTemplateTests (T252).
 //   B2  Legacy config with the secret ABSENT and NO chain configured →
 //       options resolution FAIL-FASTS (task-142 boot guard preserved for
 //       prong-3 unmigrated envs — the relaxation is chain-scoped, not
@@ -92,7 +94,8 @@ public sealed class WorkerSecretFreeBootTests
     [Theory]
     [InlineData(HandlerIds.H6)]
     [InlineData(HandlerIds.H7)]
-    public void SecretFreeConfig_H6AndH7HandlerGraphs_ResolveFromKeyedDi(string handlerId)
+    [InlineData(HandlerIds.H7b)] // T252: H7b binds EnvVarValues:Credentials too (T256) — same secret-free chain
+    public void SecretFreeConfig_DataverseSignInHandlerGraphs_ResolveFromKeyedDi(string handlerId)
     {
         using var scope = _secretFreeFactory.Services.CreateScope();
 
@@ -136,17 +139,28 @@ public sealed class WorkerSecretFreeBootTests
 /// </summary>
 public sealed class SecretFreeWorkerTestFactory : StartGatedWorkerTestFactory
 {
+    /// <summary>
+    /// A44.5 secret-free contract — the four app settings (App Service <c>__</c> names) the Bicep module's
+    /// <c>secretFreeCredentialAppSettings</c> var emits. <see cref="ControlPlaneSecretFreeTemplateTests"/> asserts the
+    /// compiled template emits exactly these, so this fixture cannot drift from what is deployed (T252).
+    /// </summary>
+    internal static readonly IReadOnlyList<KeyValuePair<string, string>> SecretFreeChainAppSettings =
+    [
+        new("EnvVarValues__Credentials__Order__0", "ManagedIdentityFederated"),
+        new("EnvVarValues__Credentials__RequireSecretFreeIdentity", "true"),
+        new("SolutionImportOptions__Credentials__Order__0", "ManagedIdentityFederated"),
+        new("SolutionImportOptions__Credentials__RequireSecretFreeIdentity", "true"),
+    ];
+
     protected override void ConfigureWorker(IWebHostBuilder builder)
     {
         ApplyCommonWorkerFixtureSettings(builder);
 
-        // A44.5 secret-free contract — the four settings the Bicep module's
-        // secretFreeCredentialAppSettings var emits (and the DELIBERATE
-        // ABSENCE of every *__ClientSecret setting).
-        builder.UseSetting("EnvVarValues:Credentials:Order:0", "ManagedIdentityFederated");
-        builder.UseSetting("EnvVarValues:Credentials:RequireSecretFreeIdentity", "true");
-        builder.UseSetting("SolutionImportOptions:Credentials:Order:0", "ManagedIdentityFederated");
-        builder.UseSetting("SolutionImportOptions:Credentials:RequireSecretFreeIdentity", "true");
+        // The secret-free chain settings (and the DELIBERATE ABSENCE of every *__ClientSecret setting).
+        foreach (var (name, value) in SecretFreeChainAppSettings)
+        {
+            builder.UseSetting(name.Replace("__", ":", StringComparison.Ordinal), value);
+        }
         builder.UseSetting("ManagedIdentity:ClientId", "11111111-aaaa-bbbb-cccc-222222222222");
     }
 

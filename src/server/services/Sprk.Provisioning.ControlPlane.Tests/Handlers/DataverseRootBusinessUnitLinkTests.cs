@@ -15,6 +15,9 @@
 //   L7 a transport fault → typed failure (never an exception).
 //   L8 the PATCH refused (403) → AuthFailure; the read-back GET failing → failure.
 //   L9 an HttpClient timeout → typed failure; the caller's cancellation propagates.
+//   T259 (ISS-010) — the CUSTOMER's business unit (H10) is linked to the same container with the same rules:
+//   C1 empty → PATCH then read back; C2 already this container → nothing written; C3 another container → conflict naming
+//   both, nothing written; C4 the unit absent (404) → CustomerBusinessUnitUnresolved; C5 the PATCH not kept → failure.
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -156,6 +159,79 @@ public sealed class DataverseRootBusinessUnitLinkTests
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
+    // ---------- T259: the customer's business unit ----------
+
+    private static readonly Guid CustomerUnit = Guid.Parse("dddddddd-3333-3333-3333-333333333333");
+
+    [Fact]
+    public async Task C1_EmptyCustomerUnit_IsPatchedAndReadBack()
+    {
+        var dataverse = new ScriptedDataverse()
+            .OnGet($"/businessunits({CustomerUnit})?", Ok(new { sprk_containerid = (string?)null }))
+            .OnPatch($"/businessunits({CustomerUnit})", new HttpResponseMessage(HttpStatusCode.NoContent));
+        var calls = 0;
+        dataverse.Rewrite = (method, path) => method == HttpMethod.Get && path.StartsWith($"/businessunits({CustomerUnit})?") && calls++ > 0
+            ? Ok(new { sprk_containerid = Container })
+            : null;
+
+        (await LinkCustomerAsync(dataverse)).Should().BeNull();
+
+        var patch = dataverse.Requests.Single(r => r.Method == HttpMethod.Patch);
+        patch.Uri.Should().EndWith($"/businessunits({CustomerUnit})");
+        JsonDocument.Parse(patch.Body!).RootElement.GetProperty("sprk_containerid").GetString().Should().Be(Container);
+        dataverse.Requests.Should().HaveCount(3, "read, PATCH, read back");
+    }
+
+    [Fact]
+    public async Task C2_CustomerUnitAlreadyNamesTheContainer_NothingIsWritten()
+    {
+        var dataverse = new ScriptedDataverse().OnGet($"/businessunits({CustomerUnit})?", Ok(new { sprk_containerid = Container }));
+
+        (await LinkCustomerAsync(dataverse)).Should().BeNull();
+        dataverse.Requests.Should().ContainSingle().Which.Method.Should().Be(HttpMethod.Get);
+    }
+
+    [Fact]
+    public async Task C3_CustomerUnitNamesAnotherContainer_IsRefused_NamingBoth_NothingWritten()
+    {
+        var dataverse = new ScriptedDataverse().OnGet($"/businessunits({CustomerUnit})?", Ok(new { sprk_containerid = "b!other" }));
+
+        var failure = await LinkCustomerAsync(dataverse);
+
+        failure!.FailureKind.Should().Be(EnvVarValuesWriteFailureKind.CustomerBusinessUnitContainerConflict);
+        failure!.Diagnostic.Should().Contain("b!other").And.Contain(Container);
+        dataverse.Requests.Should().NotContain(r => r.Method == HttpMethod.Patch);
+    }
+
+    [Fact]
+    public async Task C4_AbsentCustomerUnit_IsUnresolved_NothingWritten()
+    {
+        var dataverse = new ScriptedDataverse()
+            .OnGet($"/businessunits({CustomerUnit})?", new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        (await LinkCustomerAsync(dataverse))!.FailureKind.Should().Be(EnvVarValuesWriteFailureKind.CustomerBusinessUnitUnresolved);
+        dataverse.Requests.Should().NotContain(r => r.Method == HttpMethod.Patch);
+    }
+
+    [Fact]
+    public async Task C5_APatchTheEnvironmentDidNotKeep_IsAFailure()
+    {
+        var dataverse = new ScriptedDataverse()
+            .OnPatch($"/businessunits({CustomerUnit})", new HttpResponseMessage(HttpStatusCode.NoContent));
+        dataverse.Rewrite = (method, path) => method == HttpMethod.Get && path.StartsWith($"/businessunits({CustomerUnit})?")
+            ? Ok(new { sprk_containerid = (string?)null })   // a fresh response each read: the PATCH did not stick
+            : null;
+
+        var failure = await LinkCustomerAsync(dataverse);
+
+        failure!.FailureKind.Should().Be(EnvVarValuesWriteFailureKind.UnknownInvocationFailure);
+        failure!.Diagnostic.Should().Contain("did not keep");
+    }
+
+    private static Task<EnvVarValuesWriteOutcome.Failure?> LinkCustomerAsync(ScriptedDataverse dataverse)
+        => DataverseWebApiEnvVarValuesWriter.LinkCustomerBusinessUnitContainerAsync(
+            new HttpClient(dataverse), EnvUri, "token", CustomerUnit, Container, NullLogger.Instance, CancellationToken.None);
+
     // ---------- helpers ----------
 
     private static Task<RootBusinessUnitLinkResult> LinkAsync(ScriptedDataverse dataverse)
@@ -174,6 +250,9 @@ public sealed class DataverseRootBusinessUnitLinkTests
         private readonly List<(HttpMethod Method, string PathPrefix, HttpResponseMessage Response)> _routes = [];
         public List<(HttpMethod Method, string Uri, string? Body)> Requests { get; } = [];
         public Exception? Fault { get; init; }
+
+        /// <summary>Optional per-request override (method, path after /api/data/v9.2) — null falls through to the routes.</summary>
+        public Func<HttpMethod, string, HttpResponseMessage?>? Rewrite { get; set; }
 
         public ScriptedDataverse OnGet(string pathPrefix, HttpResponseMessage response) => On(HttpMethod.Get, pathPrefix, response);
         public ScriptedDataverse OnPatch(string pathPrefix, HttpResponseMessage response) => On(HttpMethod.Patch, pathPrefix, response);
@@ -195,6 +274,10 @@ public sealed class DataverseRootBusinessUnitLinkTests
             }
 
             var path = uri.Replace("/api/data/v9.2", string.Empty, StringComparison.Ordinal);
+            if (Rewrite?.Invoke(request.Method, path) is { } rewritten)
+            {
+                return rewritten;
+            }
             var route = _routes.FirstOrDefault(r => r.Method == request.Method && path.StartsWith(r.PathPrefix, StringComparison.Ordinal));
             return route.Response ?? new HttpResponseMessage(HttpStatusCode.InternalServerError);
         }

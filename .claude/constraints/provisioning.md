@@ -48,6 +48,11 @@ but the secret path may only be selected for a prong-3 unmigrated environment �
 = `true`, also set explicitly by the Worker Bicep) and H4 omits **both** `BFF-API-ClientSecret` and
 `Dataverse-ClientSecret` on every new stamp. Rule 2's hold protects the EXISTING live `Dataverse-ClientSecret`
 copy from deletion — it never required H4 to write a new one.
+**Since task 252 (2026-10-09) the L2 control plane is secret-free by default too**: `platform-controlplane.bicep`
+`requireSecretFreeIdentity` defaults to `true` (Worker FR-39 chain `[ManagedIdentityFederated]`, no Key Vault reference to
+`BFF-API-ClientSecret`; `false` is a prong-3 opt-in only), and `Seed-PlatformKeyVault.ps1` never seeds
+`BFF-API-ClientSecret` or `Dataverse-ClientSecret` (no sentinel, no real value). Copies already in a platform vault stay
+untouched — never delete them.
 
 **2. NEVER purge or delete the rollback copies before 2026-11-23** (Path A, time-boxed): do not purge the
 soft-deleted `BFF-API-ClientSecret` / `bff-api-client-secret` KV entries, and do not delete the still-live
@@ -147,8 +152,9 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 
 ## Exchange mailbox access — RBAC for Applications, sidecar holds no credential (BINDING, task 251 / owner D24–D26)
 
-- H14a grants the stamp's **managed identity only** the Exchange application roles for the Graph mailbox permissions (`IGraphAppRolesRegistry.GetExchangeScoped()` → `Application Mail.Read`, `Mail.ReadWrite`, `Mail.Send`, `MailboxSettings.Read`), **scoped to the customer's mail-enabled security group** (intake `exchangePolicyScopeGroupId`). Never ApplicationAccessPolicy (Microsoft: legacy; capped per tenant). Never grant the BFF app registration — RBAC for Applications *grants* access, so adding an identity widens what it reaches.
+- H14a grants the stamp's **managed identity only** the Exchange application roles for the Graph mailbox permissions (`IGraphAppRolesRegistry.GetExchangeScoped()` → `Application Mail.Read`, `Mail.ReadWrite`, `Mail.Send`; `MailboxSettings.Read` has no caller since T261 and is no longer granted), **scoped to the customer's mail-enabled security group** (intake `exchangePolicyScopeGroupId`). Never ApplicationAccessPolicy (Microsoft: legacy; capped per tenant). Never grant the BFF app registration — RBAC for Applications *grants* access, so adding an identity widens what it reaches.
 - Exchange adds role assignments to Entra app permissions. **NEVER** grant a mailbox role (`Mail.*`, `MailboxSettings.*`, `Calendars.*`, `Contacts.*`) to a stamp identity in Entra — H10 grants only `GetEntraGranted()`, and H13 T3 fails when a mailbox role is present in Entra. A new mailbox permission goes into `ExchangeScopedValues`, not into H10.
+- **Stamp Graph roles are an evidence-backed closed set (T261 / G31).** A stamp identity holds exactly `FileStorageContainer.Selected` in Entra. H10 grants it and REMOVES every other Microsoft Graph app role (target check: appId = `miClientId`, type `ManagedIdentity`); H13 T3 fails on any other. A role joins `GraphAppRoles.cs` only with a row in `projects/customer-provisioning-orchestration-r1/notes/t261-stamp-graph-least-privilege.md` (call site + Microsoft Learn least-privileged URL) — `StampGraphAppRoleEvidenceTests`. The L2 Worker's roles are `ControlPlaneGraphAppRoles.cs` and the platform BFF's are `PlatformBffGraphAppRoles.cs`; `Grant-GraphAppRoles.ps1` needs `-CatalogPath` and refuses a stamp/non-stamp mismatch. Never grant a catalog to the wrong identity.
 - The sidecar holds **no credential** and reads no Key Vault: the Worker signs in as `Spaarke Exchange Admin` through its UAMI's federated credential (`ExchangeAdminTokenSource` → `WorkerDataverseCredentialFactory.CreateManagedIdentityFederatedCredential`) and sends the Exchange Online token in `X-Exchange-Access-Token`; the sidecar runs `Connect-ExchangeOnline -AccessToken`. Never give that app a secret or a certificate. Never give it an Entra directory role (Exchange Administrator made its Exchange writes fail, 2026-10-04). Its Exchange permission is the narrowed role `Spaarke App RBAC Admin` plus `-Delegating` assignments for exactly the four application roles. Widening it is an owner decision.
 - The sidecar connects with `-Organization` = the tenant's **initial domain** (`contoso.onmicrosoft.com`), which the Worker reads from Graph `GET /organization` and sends as `organization`. **NEVER** the tenant GUID: Exchange then connects and reads, but every write fails with "doesn't have write permission to target DC" (2026-10-04). The sidecar refuses a request without a domain-shaped `organization`.
 - A group-scoped assignment reads back as `RecipientWriteScope = Group` with the group's **Name** in `CustomResourceScope` — there is no `RecipientGroupScope` property. Match scope on those two fields (`Test-AssignmentInScope`).
@@ -185,6 +191,7 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - A guest's Dataverse user is made through the `azureactivedirectoryobjectid` alternate key (on-demand add of a group
   member) as the L2 Worker identity. **MUST NOT** grant L2 a Power Platform admin role or register it as a management
   app for this (force sync) — ask the owner first if a live run shows the alternate key is not enough.
+  Then (T259) H11 moves the user from the root into the customer's business unit (`PATCH systemusers({id})` `businessunitid@odata.bind`, `If-Match: *`, read back) BEFORE any role, and assigns only that unit's role copies.
 - An existing guest is reused — **never re-invite** (it re-sends the email). `restrictguestuseraccess` must be off
   (PRQ-C-12); H11 checks it before inviting. Decisions + known limits: `projects/customer-provisioning-orchestration-r1/notes/t232-guest-access-decisions.md`.
 
@@ -200,8 +207,14 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
   shared client app. A shared client's own sign-in redirects live on that client app, once, never per customer.
 - **`EntraAppRegOptions__SpaarkeTenantId`** (Worker Bicep, the deployment's tenant) is the FIC issuer for Model 1; without
   it every Model 1 run fails at H3.
+- **H3 keeps two federated credentials on every Spaarke-tenant customer BFF registration (ISS-015):** `spaarke-uami-trust`
+  (subject = the stamp BFF UAMI) and `spaarke-l2-worker` (subject = `ControlPlaneIdentity__PrincipalObjectId`, the L2 Worker
+  UAMI's **principalId**, issuer Spaarke's tenant, audience `api://AzureADTokenExchange`). H6/H7/H7b sign in as the
+  registration through the second (D-13, secret-free). Never remove it, never replace it with a secret, never set its
+  subject to the UAMI's clientId (AADSTS700213). A blank/invalid Worker principal refuses H3 before any write
+  (`appreg-worker-fic-identity-missing`). `customer-owned-model2`: stamp credential only (MI-FIC cannot cross tenants).
 - **H3 adopts an existing `spaarke-bff-api-{customerId}` only if nobody but the control plane can act as it** (one match,
-  no secret or certificate, no foreign FIC, no owner but the control plane); otherwise `appreg-adoption-refused`, nothing
+  no secret or certificate, no FIC other than `spaarke-uami-trust` / `spaarke-l2-worker`, no owner but the control plane); otherwise `appreg-adoption-refused`, nothing
   written. Never relax this to "adopt by name".
 - **One environment per customer (D6).** The registration is per customer (D-13) while H3 sets its redirect, FIC and
   pre-authorizations per run, so a second environment for the same customer would overwrite the first's. Per-customer
@@ -237,7 +250,8 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - Field-security profiles, the `sprk_issecure` lock, the contact identity-binding lock (`contact.sprk_externalobjectid`, `systemuser.sprk_primarycontact`) and `sprk_noaccessentry` ship in SpaarkeMaster; H7b verifies them and adds only memberships: every business unit's default team → `Spaarke BFF-Managed Field Readers` and `Spaarke Identity Link Readers`; H10's two BFF application users → `Spaarke BFF-Managed Field Writers` and `Spaarke Identity Link Writers`, nobody else (any other member or team → QuarantineRequired `secure_setup.field_writer_has_other_member` / `secure_setup.identity_link_writer_has_other_member`; another profile — the reader profiles included — that may write a locked column → `…_lock_other_writer`). Never remove a member. H9 waits for H7b: no BFF reaches an environment without `sprk_noaccessentry`.
 - Names: unit and role from the file, team = the BFF's compiled `SecureRecord:OwnerTeamName` default. A `SecureRecord__` manifest key needs ONE run parameter feeding H4b and H7b (`SecureRecordOwnerRoleSetParityTests` fails until then).
 - Dry run: intake `secureRecordSetupDryRun` = `true` | `false` (exact); it stops the run at H7b with `secure_setup.dry_run` and the plan in gate `h7b-secure-setup-plan`.
-- Open (ISS-010 / #1486, before T186): guests created by H11 in the ROOT unit with Spaarke Basic User (Deep read) can read every secure record until the customer business unit (INCOMING-145 §6 T1/T3/T5) is built.
+- Customer business unit (T259 / ISS-010, owner 2026-10-09 — INCOMING-145 §6 T1/T3/T5): **no user of any kind is ever placed in the Secure Record unit.** H10 finds or creates the customer's own unit (intake `displayName`, `CustomerBusinessUnitIntake`) as a DIRECT child of the root and creates both BFF application users IN it (`InterStepState.CustomerBusinessUnitId`, `[ProducedBy(H10)]`); H7 links it to H8's container beside the root; H11 places every guest there (moved from the root before any role; roles = the unit's copies). **MUST NOT** move an application user or re-parent a unit (QuarantineRequired: `h10-customer-bu-wrong-parent`, `h10-app-user-in-foreign-business-unit`, `userprov-guest-in-foreign-business-unit`, `userprov-guest-holds-role-outside-customer-unit`); H7b refuses `secure_setup.customer_bu_missing` / `customer_bu_wrong_parent` / `app_user_outside_customer_bu`. Never place a user in the root: Deep there reaches Secure Record.
+- H13 refuses `Ready` unless the stamp BFF's secure-record isolation census answers `isolated` (T260, ISS-014): it calls `POST /api/platform/secure-record-isolation-census` with the keyless proof's identity and role (`Provisioning.KeylessProof`; no other role, no H3 change). The route runs the same code as the 15-minute `secure-record-isolation-census` job and is read-only. `findings` → QuarantineRequired `h13-secure-isolation-not-isolated`; `inert` (no Secure Record unit found — H7b creates it before H13, so this is a broken stamp) → `h13-secure-isolation-inert`; a refused or failed call → `h13-secure-isolation-census-failed`; `error`/transport/timeout/404 → Resumable `h13-secure-isolation-inconclusive`. Never run the census by hand to get past H13; fix each finding, never by moving a user into `Secure Record`.
 
 ## Cost model — one dedicated stamp per run, both models (BINDING, task 229)
 

@@ -100,6 +100,60 @@ public static class H10Rejections
     /// </summary>
     public const string TrapT3VerificationFailed = "h10-trap-T3-verification-failed";
 
+    // ---- Task 261 (G31, owner 2026-10-09): the stamp identity holds exactly the evidence-backed role set ----
+
+    /// <summary>
+    /// Removing a Microsoft Graph app role outside the stamp set from the stamp identity failed, or the assignments
+    /// could not be read. RetryableWithCleanup — each DELETE is idempotent (404 = already gone); resume re-reads and
+    /// removes only what is still extra. H10 is not marked complete while an extra role remains.
+    /// </summary>
+    public const string GraphRoleRemovalFailed = "h10-graph-role-removal-failed";
+
+    /// <summary>
+    /// T3 post-condition: after removal reported success, an independent re-read still finds a Graph app role outside
+    /// the stamp set on the stamp identity (something re-granted it, or the removal did not land). QuarantineRequired —
+    /// an operator finds who grants it before anything resumes.
+    /// </summary>
+    public const string TrapT3UnexpectedRoles = "h10-trap-T3-unexpected-roles";
+
+    /// <summary>
+    /// The T3 "nothing extra" re-read could not run (token or HTTP failure). Resumable — no verdict was reached and
+    /// nothing was written.
+    /// </summary>
+    public const string GraphRoleExtrasUnverified = "h10-graph-role-extras-unverified";
+
+    // ---- T259 (ISS-010, owner 2026-10-09): the customer's business unit ----
+
+    /// <summary>
+    /// Intake <c>displayName</c> is absent (CustomerBusinessUnitIntake). POST /api/runs refuses it with this code; H10 keeps
+    /// the check as defence in depth (Resumable — nothing was written).
+    /// </summary>
+    public const string CustomerDisplayNameRequired = "h10-customer-display-name-required";
+
+    /// <summary>
+    /// Intake <c>displayName</c> is unusable as the business unit's name: too long, a control character, leading/trailing
+    /// whitespace, or the Secure Record unit's name. POST /api/runs refuses it with this code (Resumable in H10).
+    /// </summary>
+    public const string CustomerDisplayNameInvalid = "h10-customer-display-name-invalid";
+
+    /// <summary>More than one business unit carries the customer's name — H10 never guesses (Resumable).</summary>
+    public const string CustomerBusinessUnitAmbiguous = "h10-customer-bu-ambiguous";
+
+    /// <summary>
+    /// The unit carrying the customer's name is not a DIRECT child of the root (or is the root itself). Under another unit
+    /// its users would reach that unit's records by depth; re-parenting a unit is an owner decision (QuarantineRequired).
+    /// </summary>
+    public const string CustomerBusinessUnitWrongParent = "h10-customer-bu-wrong-parent";
+
+    /// <summary>Reading or creating the customer's business unit failed (Resumable — find-then-create is idempotent).</summary>
+    public const string CustomerBusinessUnitFailed = "h10-customer-bu-failed";
+
+    /// <summary>
+    /// A BFF application user already exists in a business unit other than the customer's. H10 never moves it: a business
+    /// unit change strips every role, and H6/H7/H7b sign in as that user (QuarantineRequired).
+    /// </summary>
+    public const string AppUserInForeignBusinessUnit = "h10-app-user-in-foreign-business-unit";
+
     /// <summary>Race with a concurrent Cosmos writer — reconciler will observe winning state.</summary>
     public const string ConcurrentWriteConflict = "h10-concurrent-write-conflict";
 
@@ -123,9 +177,9 @@ public static class H10Gates
     public const string AppUserCreated = "app-user-created";
 
     /// <summary>
-    /// T3 gate — flips to Verified once all 14 Graph app-role assignments
-    /// are confirmed present on the UAMI service principal via the
-    /// independent post-grant re-query.
+    /// T3 gate — flips to Verified once the Entra-granted Graph app roles are
+    /// confirmed present on the UAMI service principal, and no other Graph app
+    /// role is (task 261), via independent post-grant re-queries.
     /// </summary>
     public const string GraphRoleParity = "graph-role-parity";
 }

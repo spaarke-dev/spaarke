@@ -77,6 +77,16 @@
 // both — intra-Spaarke-tenant) OR the customer's own tenant for
 // customer-owned-model2 (UAMI lives in the customer's subscription).
 //
+// L2 WORKER FIC (ISS-015, 2026-10-09): H6 / H7 / H7b sign in to the customer's Dataverse AS this registration (D-13),
+// secret-free, with an assertion from the L2 Worker's OWN UAMI (WorkerDataverseCredentialFactory, MI-FIC). So every
+// Spaarke-tenant registration carries a SECOND credential, EntraAppRegOptions.WorkerFicName ("spaarke-l2-worker"):
+// subject = ControlPlaneIdentityOptions.PrincipalObjectId (the Worker UAMI's OBJECT id), issuer = Spaarke's tenant,
+// audience api://AzureADTokenExchange. Same triple-idempotency, drift repair and re-GET verification as the first
+// (PlanFederatedCredentials); kept for the registration's lifetime (re-runs and upgrades sign in through it). It grants
+// L2 nothing new: L2 already owns the registration (it could add any credential to it), and D-13 already has the Worker
+// act as it — this only makes that sign-in possible without a secret. Not for customer-owned-model2 (cross-tenant;
+// Model 2 out of scope). Two FICs of Entra's 20 per application.
+//
 // CLIENT ACCESS (T240a, 2026-10-07): H3 sets the app's spa.redirectUris to exactly the customer's Dataverse origin
 // (its code pages sign in through this app with redirectUri = window.location.origin) and its
 // api.preAuthorizedApplications to exactly the platform's shared clients on user_impersonation (Office add-in; the
@@ -176,6 +186,16 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             AssertFicTenancy(request.TenantId, uamiTenantId, request.Profile);
         }
 
+        // ISS-015: plan both federated credentials (stamp BFF UAMI + L2 Worker UAMI) before any Graph write, so a
+        // configuration fault refuses here instead of leaving a registration nothing can sign in as.
+        var requiredFics = BuildRequiredFicSpecs(
+            request.Profile, request.TenantId, _options.SpaarkeTenantId, request.UamiPrincipalId,
+            _identity.PrincipalObjectId, _options);
+        if (requiredFics.Error is not null)
+        {
+            return new EntraAppRegOutcome.Failure(requiredFics.Error);
+        }
+
         var graph = BuildTenantScopedGraphClient(request.TenantId);
         var displayName = $"spaarke-bff-api-{request.CustomerId}";
 
@@ -200,7 +220,8 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             }
             else
             {
-                var refusal = await CheckAdoptionAsync(graph, app, request, cancellationToken).ConfigureAwait(false);
+                var refusal = await CheckAdoptionAsync(graph, app, request, requiredFics.Names, cancellationToken)
+                    .ConfigureAwait(false);
                 if (refusal is not null)
                 {
                     _logger.LogError(
@@ -277,9 +298,10 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                     request.CustomerId, request.Profile);
             }
 
-            // (5) FIC — both models post-task-222 (D-13), auth-v4 §3.1 recipe.
-            var ficFailure = await EnsureFederatedIdentityCredentialAsync(
-                graph, app.Id!, request, cancellationToken).ConfigureAwait(false);
+            // (5) FICs — both models post-task-222 (D-13), auth-v4 §3.1 recipe: the stamp BFF UAMI, plus (ISS-015,
+            //     Spaarke-tenant profiles) the L2 Worker UAMI that H6/H7/H7b sign in through.
+            var ficFailure = await EnsureFederatedIdentityCredentialsAsync(
+                graph, app.Id!, requiredFics.Specs, request, cancellationToken).ConfigureAwait(false);
             if (ficFailure is not null)
             {
                 return ficFailure;
@@ -384,7 +406,8 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     /// the control plane's principal id is a different object.
     /// </summary>
     private async Task<string?> CheckAdoptionAsync(
-        GraphServiceClient graph, Application app, EntraAppRegRequest request, CancellationToken ct)
+        GraphServiceClient graph, Application app, EntraAppRegRequest request, IReadOnlyCollection<string> managedFicNames,
+        CancellationToken ct)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(_options.GraphRequestTimeout);
@@ -400,23 +423,25 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             (owners?.Value ?? []).Select(o => o.Id ?? string.Empty).ToList(),
             (fics?.Value ?? []).Select(f => f.Name ?? string.Empty).ToList(),
             customerOwned ? null : _identity.CanonicalPrincipalObjectId(),
-            _options.FicName,
+            managedFicNames,
             request.RequireSecretFreeIdentity);
     }
 
     /// <summary>
     /// Why an existing <c>spaarke-bff-api-{customerId}</c> registration must not be adopted, or null when it is safe
     /// (T240a review). Safe means nobody but the control plane can act as it, now or later: no client secret or
-    /// certificate (stamps are secret-free), no federated credential other than H3's own (<paramref name="ficName"/>),
-    /// and no owner other than the control plane (an owner could add a credential after H3 finishes). An app with no
-    /// owner at all is safe. <paramref name="controlPlanePrincipalId"/> null skips the owner check (Model 2).
+    /// certificate (stamps are secret-free), no federated credential other than the ones H3 keeps
+    /// (<paramref name="managedFicNames"/> — the stamp UAMI's and, ISS-015, the L2 Worker's; their triples are then
+    /// reconciled by <see cref="PlanFederatedCredentials"/>, so a drifted one is repaired, not adopted as is), and no
+    /// owner other than the control plane (an owner could add a credential after H3 finishes). An app with no owner at
+    /// all is safe. <paramref name="controlPlanePrincipalId"/> null skips the owner check (Model 2).
     /// </summary>
     internal static string? AdoptionRefusal(
         Application existing,
         IReadOnlyCollection<string> ownerIds,
         IReadOnlyCollection<string> ficNames,
         string? controlPlanePrincipalId,
-        string ficName,
+        IReadOnlyCollection<string> managedFicNames,
         bool requireSecretFreeIdentity)
     {
         ArgumentNullException.ThrowIfNull(existing);
@@ -430,7 +455,8 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                         "registration is secret-free");
         }
 
-        var foreignFics = ficNames.Where(n => !string.Equals(n, ficName, StringComparison.Ordinal)).ToList();
+        ArgumentNullException.ThrowIfNull(managedFicNames);
+        var foreignFics = ficNames.Where(n => !managedFicNames.Contains(n, StringComparer.Ordinal)).ToList();
         if (foreignFics.Count > 0)
         {
             reasons.Add($"it carries federated credential(s) H3 did not create: {string.Join(", ", foreignFics)}");
@@ -1081,99 +1107,214 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     // 205b-a42-fic-parity-contract.md
     // ---------------------------------------------------------------------
 
-    /// <summary>
-    /// Ensures the FIC exists with the correct issuer/subject, then performs
-    /// an INDEPENDENT re-GET (never trusting the write call's own echoed
-    /// response) to confirm it persisted exactly as requested — see
-    /// GOTCHA 2 in the file header for why a literal OAuth2 exchange is not
-    /// something L2 can legitimately perform here. Returns null on success
-    /// (the caller reports <see cref="FicVerificationState.PendingPostAppServiceVerification"/>
-    /// — the script exit-2 equivalent, NEVER terminal success per SF-8), or a
-    /// Failure outcome to propagate. Throws
-    /// <see cref="CrossTenantFicRefusedException"/> BEFORE any Graph call when
-    /// the (app-reg tenant, UAMI tenant) pair is cross-tenant — the
-    /// `Assert-SpaarkeFicTenancy` port (SF-5, A42).
-    /// </summary>
-    private async Task<EntraAppRegOutcome?> EnsureFederatedIdentityCredentialAsync(
-        GraphServiceClient graph, string appObjectId, EntraAppRegRequest request, CancellationToken ct)
+    /// <summary>One federated identity credential H3 keeps on the registration: its name and its (issuer, subject, audience) triple.</summary>
+    internal sealed record FicSpec(string Name, string Issuer, string Subject, string Audience, string Description);
+
+    /// <summary>What <see cref="BuildRequiredFicSpecs"/> decided: the credentials H3 keeps, or why it cannot plan them.</summary>
+    internal sealed record RequiredFics(IReadOnlyList<FicSpec> Specs, string? Error)
     {
-        var issuerTenantId = ResolveUamiTenantId(request.Profile, request.TenantId, _options.SpaarkeTenantId);
+        /// <summary>The names H3 keeps — the only federated credentials an adopted registration may carry.</summary>
+        public IReadOnlyList<string> Names => Specs.Select(s => s.Name).ToList();
+    }
+
+    /// <summary>What <see cref="PlanFederatedCredentials"/> decided: credentials to delete first, then specs to create.</summary>
+    internal sealed record FicReconcilePlan(IReadOnlyList<FederatedIdentityCredential> Deletes, IReadOnlyList<FicSpec> Creates)
+    {
+        /// <summary>True when every required credential is already in place and nothing needs writing.</summary>
+        public bool IsSatisfied => Deletes.Count == 0 && Creates.Count == 0;
+    }
+
+    /// <summary>
+    /// The federated credentials H3 keeps on the customer's BFF registration, or why it cannot plan them (pure; no I/O):
+    /// <list type="number">
+    /// <item><paramref name="options"/>.<see cref="EntraAppRegOptions.FicName"/> — subject = the stamp BFF UAMI's
+    /// principalId (auth-v4 §3.1; the BFF's own OBO credential). Issuer tenant per profile
+    /// (<see cref="ResolveUamiTenantId"/>), cross-tenant pairs refused (<see cref="AssertFicTenancy"/> throws).</item>
+    /// <item>ISS-015: <paramref name="options"/>.<see cref="EntraAppRegOptions.WorkerFicName"/> — subject = the L2
+    /// Worker UAMI's principalId (<see cref="ControlPlaneIdentityOptions.PrincipalObjectId"/>, the OBJECT id, never its
+    /// clientId — a clientId subject creates cleanly and fails at exchange with AADSTS700213), issuer = Spaarke's
+    /// tenant, where that UAMI lives. H6 / H7 / H7b sign in as this registration through it
+    /// (<c>WorkerDataverseCredentialFactory</c>, D-13). Spaarke-tenant profiles only: a <c>customer-owned-model2</c>
+    /// registration lives in the customer's tenant and MI-FIC cannot cross tenants (Model 2 is out of scope, owner
+    /// 2026-09-30 — the same gap as the keyless-proof role).</item>
+    /// </list>
+    /// The Worker credential is refused (<see cref="EntraAppRegRejectionCodes.WorkerFicIdentityMissing"/>) when the
+    /// Worker principal id is blank, not a GUID or the empty GUID, when it equals the stamp UAMI (the two triples would
+    /// coincide and the stamp's trust would be the control plane's), or when the two names are blank or equal.
+    /// </summary>
+    internal static RequiredFics BuildRequiredFicSpecs(
+        string profile,
+        string requestTenantId,
+        string? spaarkeTenantId,
+        string stampUamiPrincipalId,
+        string? workerPrincipalObjectId,
+        EntraAppRegOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var issuerTenantId = ResolveUamiTenantId(profile, requestTenantId, spaarkeTenantId);
         if (string.IsNullOrWhiteSpace(issuerTenantId))
         {
-            return new EntraAppRegOutcome.Failure(
-                $"Cannot compute FIC issuer — profile='{request.Profile}' requires " +
-                $"{(string.Equals(request.Profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase) ? "request.TenantId" : "EntraAppRegOptions:SpaarkeTenantId config (Worker setting EntraAppRegOptions__SpaarkeTenantId)")}, " +
+            return new RequiredFics([],
+                $"Cannot compute FIC issuer — profile='{profile}' requires " +
+                $"{(string.Equals(profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase) ? "request.TenantId" : "EntraAppRegOptions:SpaarkeTenantId config (Worker setting EntraAppRegOptions__SpaarkeTenantId)")}, " +
                 $"which is blank. [{EntraAppRegRejectionCodes.FicCreationFailed}]");
         }
 
-        // A42 / SF-5: cross-tenant refusal FIRST, before any Graph FIC call —
-        // the `Assert-SpaarkeFicTenancy` port. A cross-tenant pair would
-        // CREATE successfully and fail only at token exchange, weeks later at
-        // the customer's first OBO (see CrossTenantFicRefusedException header
-        // + notes/decisions/adr-028-a4-integration-conflict-resolution.md
-        // §9.2 contingency). Under §9.2 reading (a) — owner-ratified Q2,
-        // 2026-08-25 — every sanctioned profile derives an intra-tenant pair,
-        // so this guard is inert protection that only fires on genuine
-        // misconfiguration (e.g. a spaarke-hosted profile dispatched with a
-        // customer tenantId).
-        AssertFicTenancy(request.TenantId, issuerTenantId, request.Profile);
-
+        // A42 / SF-5: a cross-tenant (app registration, UAMI) pair is refused before anything is planned.
+        AssertFicTenancy(requestTenantId, issuerTenantId, profile);
         var issuer = $"https://login.microsoftonline.com/{issuerTenantId}/v2.0";
 
+        var stamp = new FicSpec(
+            options.FicName,
+            issuer,
+            // §3.1 documented trap: subject MUST be the UAMI's principalId (object id), NOT its clientId — the
+            // wrong-subject FIC creates cleanly and dies at exchange with AADSTS700213 (auth-v4 §11 invariant 1).
+            stampUamiPrincipalId,
+            options.FicAudience,
+            "Managed-identity trust for the stamp's BFF UAMI (auth-v4 §3.1 recipe; issuer tenant per profile) — created by H3 (task 130; A42 triple-idempotency).");
+
+        if (string.Equals(profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase))
+        {
+            return new RequiredFics([stamp], null);
+        }
+
+        if (!Guid.TryParse(workerPrincipalObjectId?.Trim(), out var worker) || worker == Guid.Empty)
+        {
+            return new RequiredFics([],
+                $"ControlPlaneIdentity:PrincipalObjectId must be the object id (GUID) of the L2 Worker UAMI — H3 gives the " +
+                $"customer's BFF registration a federated credential trusting it so H6/H7/H7b can sign in as that " +
+                $"registration (ISS-015); got '{workerPrincipalObjectId}'. Nothing was written. Set the Worker setting " +
+                $"ControlPlaneIdentity__PrincipalObjectId (platform-controlplane.bicep: uami.outputs.principalId) and resume. " +
+                $"[{EntraAppRegRejectionCodes.WorkerFicIdentityMissing}]");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.WorkerFicName) || string.IsNullOrWhiteSpace(options.FicName)
+            || string.Equals(options.WorkerFicName, options.FicName, StringComparison.Ordinal))
+        {
+            return new RequiredFics([],
+                $"EntraAppRegOptions:FicName ('{options.FicName}') and EntraAppRegOptions:WorkerFicName " +
+                $"('{options.WorkerFicName}') must both be set and differ — H3 keeps two federated credentials on the " +
+                $"registration. Nothing was written. [{EntraAppRegRejectionCodes.WorkerFicIdentityMissing}]");
+        }
+
+        if (Guid.TryParse(stampUamiPrincipalId?.Trim(), out var stampPrincipal) && stampPrincipal == worker)
+        {
+            return new RequiredFics([],
+                $"The stamp's BFF UAMI ({stampUamiPrincipalId}) is the L2 control plane's own identity — a stamp's BFF " +
+                $"must run as its own UAMI (H2a output InterStepState.MiObjectId). Nothing was written. " +
+                $"[{EntraAppRegRejectionCodes.WorkerFicIdentityMissing}]");
+        }
+
+        var workerSpec = new FicSpec(
+            options.WorkerFicName,
+            issuer,
+            worker.ToString("D"),
+            options.FicAudience,
+            "Lets the Spaarke provisioning control plane (L2 Worker UAMI) sign in as this registration for solution import, " +
+            "environment-variable values and Secure Record setup (D-13; ISS-015) — created by H3.");
+
+        return new RequiredFics([stamp, workerSpec], null);
+    }
+
+    /// <summary>
+    /// Plans what makes the registration carry every credential in <paramref name="required"/> (pure; no I/O). A
+    /// credential is in place when one with its (issuer, subject, audience) triple exists under its own name, or under a
+    /// name H3 does not manage (A42 / SF-7: the triple is what Entra matches; a legacy name is a label). Otherwise H3
+    /// deletes, first, (a) a credential carrying the triple under the OTHER managed name (misnamed — Entra keeps
+    /// (issuer, subject) unique per application, so it must go before the triple can be re-created) and (b) whatever
+    /// holds the spec's own name with a different triple (drift: issuer/subject/audience cannot be PATCHed — the
+    /// provisioning-run Force-equivalent, A42 parity contract §4); then creates the spec. A credential that satisfies one
+    /// spec is never deleted for another (two specs never share a triple — <see cref="BuildRequiredFicSpecs"/> refuses it).
+    /// </summary>
+    internal static FicReconcilePlan PlanFederatedCredentials(
+        IEnumerable<FederatedIdentityCredential>? existing, IReadOnlyList<FicSpec> required)
+    {
+        ArgumentNullException.ThrowIfNull(required);
+        var current = existing?.ToList() ?? [];
+        var managedNames = required.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
+        var deletes = new List<FederatedIdentityCredential>();
+        var creates = new List<FicSpec>();
+
+        foreach (var spec in required)
+        {
+            var carriers = current
+                .Where(f => FindEquivalentByTriple([f], spec.Issuer, spec.Subject, spec.Audience) is not null)
+                .ToList();
+            if (carriers.Any(f => string.Equals(f.Name, spec.Name, StringComparison.Ordinal)
+                                  || !managedNames.Contains(f.Name ?? string.Empty)))
+            {
+                continue;
+            }
+
+            deletes.AddRange(carriers);
+            deletes.AddRange(current.Where(f => string.Equals(f.Name, spec.Name, StringComparison.Ordinal)));
+            creates.Add(spec);
+        }
+
+        return new FicReconcilePlan(deletes.Distinct().ToList(), creates);
+    }
+
+    /// <summary>
+    /// Ensures the registration carries every credential in <paramref name="specs"/>
+    /// (<see cref="PlanFederatedCredentials"/>), then performs an INDEPENDENT re-GET (never trusting the write call's own
+    /// echoed response) to confirm they persisted exactly as planned — see GOTCHA 2 in the file header for why a literal
+    /// OAuth2 exchange is not something L2 can perform for the stamp UAMI here (the Worker credential's first exchange is
+    /// H6's first token request). Returns null on success (the caller reports
+    /// <see cref="FicVerificationState.PendingPostAppServiceVerification"/> — the script exit-2 equivalent, NEVER
+    /// terminal success per SF-8), or a Failure outcome to propagate. The cross-tenant guard (SF-5) ran when the specs
+    /// were built, before any Graph call.
+    /// </summary>
+    private async Task<EntraAppRegOutcome?> EnsureFederatedIdentityCredentialsAsync(
+        GraphServiceClient graph, string appObjectId, IReadOnlyList<FicSpec> specs, EntraAppRegRequest request,
+        CancellationToken ct)
+    {
         try
         {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(_options.GraphRequestTimeout);
-
-            var existing = await graph.Applications[appObjectId].FederatedIdentityCredentials
-                .GetAsync(cancellationToken: timeoutCts.Token).ConfigureAwait(false);
-
-            // A42 / SF-7: idempotency is keyed by the (issuer, subject,
-            // audience) TRIPLE — NEVER by name. Entra matches assertions
-            // against the triple and enforces (issuer, subject) uniqueness
-            // per application; a name-only check turns a correct no-op into a
-            // failed run (the PS estate hit exactly this live on its first
-            // run: a differently-named equivalent caused the create to be
-            // rejected with "The combination of issuer and subject must be
-            // unique for the application"). An equivalent triple under ANY
-            // name already satisfies the request.
-            var equivalent = FindEquivalentByTriple(
-                existing?.Value, issuer, request.UamiPrincipalId, _options.FicAudience);
-
-            if (equivalent is null)
+            FederatedIdentityCredentialCollectionResponse? existing;
+            using (var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
-                // No equivalent triple exists. If OUR name is squatted by a
-                // credential with a DIFFERENT triple, that is drift —
-                // delete + recreate (subject/issuer/audience are immutable on
-                // PATCH per Graph's documented FIC contract). This is the
-                // provisioning-run equivalent of the script's explicit
-                // -ForceFederatedCredentialUpdate reconcile path — a
-                // DOCUMENTED divergence from the operator script's
-                // refuse-without-Force default; see the parity contract §4.
-                var nameCollision = existing?.Value?.FirstOrDefault(
-                    f => string.Equals(f.Name, _options.FicName, StringComparison.Ordinal));
-                if (nameCollision is not null)
+                readCts.CancelAfter(_options.GraphRequestTimeout);
+                existing = await graph.Applications[appObjectId].FederatedIdentityCredentials
+                    .GetAsync(cancellationToken: readCts.Token).ConfigureAwait(false);
+            }
+
+            var plan = PlanFederatedCredentials(existing?.Value, specs);
+            foreach (var stale in plan.Deletes)
+            {
+                if (string.IsNullOrWhiteSpace(stale.Id))
                 {
-                    _logger.LogWarning(
-                        "FIC '{FicName}' exists with a NON-matching (issuer, subject, audience) triple — " +
-                        "drift; deleting + recreating (provisioning-run Force-equivalent, A42 parity contract §4). " +
-                        "appObjectId={AppObjectId}", _options.FicName, appObjectId);
-                    await graph.Applications[appObjectId].FederatedIdentityCredentials[nameCollision.Id]
-                        .DeleteAsync(cancellationToken: timeoutCts.Token).ConfigureAwait(false);
+                    return new EntraAppRegOutcome.Failure(
+                        $"Federated credential '{stale.Name}' on app object {appObjectId} must be replaced but Graph " +
+                        $"returned it without an id. [{EntraAppRegRejectionCodes.FicCreationFailed}]");
                 }
 
+                _logger.LogWarning(
+                    "FIC '{FicName}' (subject {Subject}) does not match the credential H3 keeps under its name, or carries " +
+                    "another managed credential's triple — drift; deleting before re-creating (provisioning-run " +
+                    "Force-equivalent, A42 parity contract §4). appObjectId={AppObjectId} customerId={CustomerId}",
+                    stale.Name, stale.Subject, appObjectId, request.CustomerId);
+                using var deleteCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                deleteCts.CancelAfter(_options.GraphRequestTimeout);
+                await graph.Applications[appObjectId].FederatedIdentityCredentials[stale.Id]
+                    .DeleteAsync(cancellationToken: deleteCts.Token).ConfigureAwait(false);
+            }
+
+            foreach (var spec in plan.Creates)
+            {
+                using var createCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                createCts.CancelAfter(_options.GraphRequestTimeout);
                 await graph.Applications[appObjectId].FederatedIdentityCredentials.PostAsync(new FederatedIdentityCredential
                 {
-                    Name = _options.FicName,
-                    Issuer = issuer,
-                    // §3.1 documented trap: subject MUST be the UAMI's
-                    // principalId (object id), NOT its clientId — the
-                    // wrong-subject FIC creates cleanly and dies at exchange
-                    // with AADSTS700213 (auth-v4 §11 invariant 1).
-                    Subject = request.UamiPrincipalId,
-                    Audiences = new List<string> { _options.FicAudience },
-                    Description = "Managed-identity trust for the stamp's BFF UAMI (auth-v4 §3.1 recipe; issuer tenant per profile) — created by H3 (task 130; A42 triple-idempotency).",
-                }, cancellationToken: timeoutCts.Token).ConfigureAwait(false);
+                    Name = spec.Name,
+                    Issuer = spec.Issuer,
+                    Subject = spec.Subject,
+                    Audiences = new List<string> { spec.Audience },
+                    Description = spec.Description,
+                }, cancellationToken: createCts.Token).ConfigureAwait(false);
+                _logger.LogInformation(
+                    "H3 created FIC '{FicName}' (subject {Subject}) on appObjectId={AppObjectId} customerId={CustomerId}",
+                    spec.Name, spec.Subject, appObjectId, request.CustomerId);
             }
         }
         catch (ODataError ex)
@@ -1183,13 +1324,11 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                 $"{ex.Error?.Code} {ex.Error?.Message ?? ex.Message}. [{EntraAppRegRejectionCodes.FicCreationFailed}]");
         }
 
-        // Independent re-GET verification (GOTCHA 2) — retries a few times to
-        // absorb read-after-write propagation lag, NOT AADSTS70025 (there is
-        // no live OAuth2 exchange call here — see file header; the exchange-
-        // side propagation policy lives in FicExchangeOutcomeClassifier for
-        // the exchange-capable hosts). Verification matches by TRIPLE, not
-        // name — a pre-existing equivalent under a different name is a
-        // legitimate satisfied state (SF-7).
+        // Independent re-GET verification (GOTCHA 2) — retries a few times to absorb read-after-write propagation lag,
+        // NOT AADSTS70025 (there is no live OAuth2 exchange call here — see file header; the exchange-side propagation
+        // policy lives in FicExchangeOutcomeClassifier for the exchange-capable hosts). Verified with the same planner
+        // as the write: every required triple in place (SF-7: a legacy-named equivalent is a satisfied state).
+        IReadOnlyList<FicSpec> unconfirmed = specs;
         for (var attempt = 1; attempt <= _options.FicExchangeRetryCount; attempt++)
         {
             ct.ThrowIfCancellationRequested();
@@ -1199,17 +1338,15 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                 verifyTimeoutCts.CancelAfter(_options.GraphRequestTimeout);
                 var reGet = await graph.Applications[appObjectId].FederatedIdentityCredentials
                     .GetAsync(cancellationToken: verifyTimeoutCts.Token).ConfigureAwait(false);
-                var confirmed = FindEquivalentByTriple(
-                    reGet?.Value, issuer, request.UamiPrincipalId, _options.FicAudience);
+                var check = PlanFederatedCredentials(reGet?.Value, specs);
 
-                if (confirmed is not null)
+                if (check.IsSatisfied)
                 {
-                    // Persisted + structurally verified. NOT exchange-verified
-                    // (GOTCHA 2) — the caller reports the exit-2 equivalent
-                    // (PendingPostAppServiceVerification), never terminal
-                    // success (SF-8).
+                    // Persisted + structurally verified. NOT exchange-verified (GOTCHA 2) — the caller reports the
+                    // exit-2 equivalent (PendingPostAppServiceVerification), never terminal success (SF-8).
                     return null;
                 }
+                unconfirmed = check.Creates;
             }
             catch (ODataError ex) when (attempt < _options.FicExchangeRetryCount)
             {
@@ -1225,8 +1362,9 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         }
 
         return new EntraAppRegOutcome.Failure(
-            $"FIC re-GET verification did not confirm the (issuer, subject, audience) triple after " +
-            $"{_options.FicExchangeRetryCount} attempts. [{EntraAppRegRejectionCodes.FicVerificationFailed}]");
+            $"FIC re-GET verification did not confirm the (issuer, subject, audience) triple of " +
+            $"{string.Join(", ", unconfirmed.Select(s => $"'{s.Name}'"))} after {_options.FicExchangeRetryCount} attempts. " +
+            $"[{EntraAppRegRejectionCodes.FicVerificationFailed}]");
     }
 
     /// <summary>

@@ -73,6 +73,11 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
 
     internal Guid RootUnitId { get; private set; }
     internal Guid RootDefaultTeamId { get; private set; }
+
+    /// <summary>T259: the customer's own unit (H10) — a direct child of the root, holding both BFF application users.</summary>
+    internal Guid CustomerUnitId { get; private set; }
+    internal Guid CustomerDefaultTeamId { get; private set; }
+    internal const string CustomerUnitName = "Acme Corporation";
     internal Guid ReaderProfileId { get; private set; }
     internal Guid WriterProfileId { get; private set; }
     internal Guid SystemAdministratorProfileId { get; private set; }
@@ -88,7 +93,8 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     /// permissions on four tables (secured), the two identity-link profiles with their permissions on
     /// contact.sprk_externalobjectid and systemuser.sprk_primarycontact (secured) exactly as SpaarkeMaster ships them, the
     /// platform System Administrator profile (read/create/update on every secured column, as the platform grants it),
-    /// and H10's two application users.
+    /// and H10's two application users IN the customer's own unit (T259 — a direct child of the root, with its default
+    /// team).
     /// </summary>
     internal static FakeSecureRecordSetupDataverse NewEnvironment(SecureRecordOwnerRoleSet roleSet)
     {
@@ -127,8 +133,11 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
 
         dv.UserApplicationId[dv.BffAppUser] = Guid.NewGuid();
         dv.UserApplicationId[dv.MiAppUser] = Guid.NewGuid();
-        dv.UserUnit[dv.BffAppUser] = dv.RootUnitId;
-        dv.UserUnit[dv.MiAppUser] = dv.RootUnitId;
+        dv.CustomerUnitId = Guid.NewGuid();
+        dv.Units.Add(new SecureSetupBusinessUnit(dv.CustomerUnitId, CustomerUnitName, dv.RootUnitId));
+        dv.CustomerDefaultTeamId = dv.AddTeam(dv.CustomerUnitId, CustomerUnitName, isDefault: true);
+        dv.UserUnit[dv.BffAppUser] = dv.CustomerUnitId;
+        dv.UserUnit[dv.MiAppUser] = dv.CustomerUnitId;
         return dv;
     }
 
@@ -233,6 +242,18 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         Read(nameof(FindBusinessUnitsByNameAsync));
         return Task.FromResult<IReadOnlyList<SecureSetupBusinessUnit>>(
             Units.Where(u => string.Equals(u.Name, name, StringComparison.OrdinalIgnoreCase)).Take(2).ToArray());
+    }
+
+    public Task<SecureSetupBusinessUnit?> GetBusinessUnitAsync(SecureRecordSetupTarget target, Guid businessUnitId, CancellationToken cancellationToken)
+    {
+        Read(nameof(GetBusinessUnitAsync));
+        return Task.FromResult(Units.SingleOrDefault(u => u.Id == businessUnitId));
+    }
+
+    public Task<Guid?> GetUserBusinessUnitAsync(SecureRecordSetupTarget target, Guid systemUserId, CancellationToken cancellationToken)
+    {
+        Read(nameof(GetUserBusinessUnitAsync));
+        return Task.FromResult(UserUnit.TryGetValue(systemUserId, out var unit) ? unit : (Guid?)null);
     }
 
     public Task<IReadOnlyList<Guid>> ListBusinessUnitUsersAsync(SecureRecordSetupTarget target, Guid businessUnitId, int top, CancellationToken cancellationToken)

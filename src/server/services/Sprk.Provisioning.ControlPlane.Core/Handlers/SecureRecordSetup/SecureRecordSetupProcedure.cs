@@ -30,6 +30,12 @@
 // and the deny-list table ship in SpaarkeMaster (H6); this procedure verifies them and adds only the memberships,
 // which are data.
 //
+// CUSTOMER UNIT (T259 — ISS-010 / #1486, owner decision 2026-10-09; INCOMING-145 §6 T1/T3). Every user sits in the
+// customer's own business unit (H10 created it and both BFF application users in it); the Secure Record unit is its
+// SIBLING under the root and holds no user of any kind (S2). Phase 1 therefore also refuses, QuarantineRequired, a customer
+// unit that is missing or not a direct child of the root (T1) and a BFF application user outside it (T3). Nothing here
+// moves a user or re-parents a unit.
+//
 // NAMES. The business unit and the role come from config/secure-record-owner-role.json (the ONE file); the owner
 // team's name is the BFF's compiled default (SecureRecordOwnerTeam.DefaultOwnerTeamName). Customer stamps run the BFF
 // on its compiled defaults (scripts/canonical-secret-catalog/manifest.yaml sets neither SecureRecord__ key), and
@@ -42,11 +48,13 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup;
 /// <param name="Target">The environment and the identity that signs in to it.</param>
 /// <param name="RoleSet">The codified set (embedded <c>config/secure-record-owner-role.json</c>).</param>
 /// <param name="BffApplicationUserIds">The BFF's Dataverse application users H10 registered — the only writer-profile members.</param>
+/// <param name="CustomerBusinessUnitId">T259: the customer's business unit H10 created (InterStepState.CustomerBusinessUnitId).</param>
 /// <param name="DryRun">Read everything, write nothing, return the plan.</param>
 public sealed record SecureRecordSetupRequest(
     SecureRecordSetupTarget Target,
     SecureRecordOwnerRoleSet RoleSet,
     IReadOnlyList<Guid> BffApplicationUserIds,
+    Guid CustomerBusinessUnitId,
     bool DryRun);
 
 /// <summary>The configured objects, for the handler's gate evidence.</summary>
@@ -205,6 +213,38 @@ public sealed class SecureRecordSetupProcedure
                 $"The environment reports {roots.Count} root business units (expected exactly one). Nothing was written.");
         }
         var root = roots[0];
+
+        // T259 §6 T1 — the customer's own unit (H10): it exists and is a DIRECT child of the root, a sibling of the Secure
+        // Record unit. Under any other unit (or as the root) Deep depth there could reach the secure unit.
+        var customerUnit = await dv.GetBusinessUnitAsync(t, request.CustomerBusinessUnitId, ct).ConfigureAwait(false);
+        if (customerUnit is null)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.CustomerBusinessUnitMissing,
+                $"The customer's business unit {request.CustomerBusinessUnitId} (recorded by H10) does not exist. H10 created it " +
+                "and the BFF's application users in it; find out what removed it (an owner decision) before anything is " +
+                "configured. Nothing was written.");
+        }
+        if (customerUnit.ParentId != root.Id)
+        {
+            return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.CustomerBusinessUnitWrongParent,
+                $"The customer's business unit '{customerUnit.Name}' ({customerUnit.Id}) has parent " +
+                $"{customerUnit.ParentId?.ToString() ?? "(none — it is the root)"}, not the root unit {root.Id}. It must be a " +
+                "DIRECT child of the root, a sibling of the Secure Record unit (INCOMING-145 §6 T1). Re-parenting a unit is " +
+                "an owner decision. Nothing was written.");
+        }
+
+        // T259 §6 T3 — both BFF application users are in the customer's unit (never the root, never the secure unit).
+        foreach (var appUser in request.BffApplicationUserIds.Distinct())
+        {
+            var appUserUnit = await dv.GetUserBusinessUnitAsync(t, appUser, ct).ConfigureAwait(false);
+            if (appUserUnit != customerUnit.Id)
+            {
+                return Refuse(FailureClass.QuarantineRequired, SecureRecordSetupRejectionCodes.AppUserOutsideCustomerBusinessUnit,
+                    $"BFF application user {appUser} is in business unit {appUserUnit?.ToString() ?? "(no such user)"}, not the " +
+                    $"customer's unit '{customerUnit.Name}' ({customerUnit.Id}) (INCOMING-145 §6 T3). Moving it strips its " +
+                    "roles — an owner decision. Nothing was written.");
+            }
+        }
 
         // S4 (root half) — a role of this name in the ROOT unit is copied into every unit, so a unit created below would
         // already hold a replica beside the one S4 creates, assignable everywhere (T218e: why the role never ships).
