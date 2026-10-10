@@ -250,6 +250,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     [InlineData("revoke")]
     [InlineData("close-project")]
     [InlineData("provision-project")]
+    [InlineData("unsecure-project")]
     [InlineData("set-record-share-expiry")]
     [InlineData("share-user")]
     [InlineData("unshare-user")]
@@ -771,6 +772,7 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
             projectId,
             projectRef = "P-TEST-0001"
         }),
+        "unsecure-project" => ("/api/v1/external-access/unsecure-project", new { projectId }),
         "set-record-share-expiry" => (SetRecordShareExpiryPath, new
         {
             recordType = "project",

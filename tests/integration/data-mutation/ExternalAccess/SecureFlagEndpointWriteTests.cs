@@ -343,6 +343,26 @@ public class SecureFlagEndpointWriteTests : IClassFixture<ProvisionProjectTestFi
         _fixture.IsSecureOf(recordId).Should().BeFalse();
     }
 
+    /// <summary>
+    /// Task 179 (owner round 89): Make Secure is managing access, so Write without the Share privilege is refused the
+    /// same way, before any write: no flag, no owner move, no share, no container.
+    /// </summary>
+    [Theory]
+    [InlineData("project")]
+    [InlineData("workassignment")]
+    public async Task Provision_WhenTheCallerHoldsWriteButNoShare_Is403AndNothingIsWritten(string recordType)
+    {
+        var recordId = Guid.NewGuid();
+        Seed(recordType, recordId, isSecure: false);
+        _fixture.CallerHoldsShare = false;
+
+        var response = await PostAsync(ProvisionRoute, new { recordType, recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyShareRequired);
+        AssertNothingWritten(recordId);
+    }
+
     // ═════════════════════════════════════════════════════════════════════════
     // Provision — owner round 10 item 10: an UNFLAGGED record is secured only for its creator
     // ═════════════════════════════════════════════════════════════════════════

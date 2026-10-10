@@ -37,7 +37,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///      or this BFF's configured shared container is replaced, one another root records is refused, the record's own
 ///      is KEPT — never orphaned); the caller's systemuserid (WhoAmI) — and, for a record NOT yet flagged secure, that
 ///      the caller created it (owner round 10 item 10, task 150: <c>createdby</c> when a person, else
-///      <c>sprk_createdbyperson</c>; an already-flagged record stays on the Write gate) — the record's current owner, the
+///      <c>sprk_createdbyperson</c>; an already-flagged record stays on the delegation gate (Write and Share)) — the record's current owner, the
 ///      OWN owner of each row the owner move cascades to (<see cref="AssignCascadeChildOwners"/> — complete or refused,
 ///      task 133 c1), and the creator's current share (complete read or nothing — a record that keeps its own container
 ///      is refused when it cannot be read, task 133 r1)
@@ -60,9 +60,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <para><b>The one rule this ordering serves</b> (owner, session 27 round 3, S5): a secure record must always keep
 /// at least one person who can open it. A memberless team owns it, so after step 5 the creator's share is the only
 /// way in. Every single failure therefore ends either with the record back in its pre-call ownership (the creator
-/// keeps the access they had, and can retry through the normal Write gate) or with the creator's share in place.
+/// keeps the access they had, and can retry through the normal delegation gate (Write and Share)) or with the creator's share in place.
 /// Only a DOUBLE failure — the share and then the compensating move — can leave a record nobody opens; that state has
-/// its own reason code, a CRITICAL log line, and a recovery an administrator (who holds Write) can run: a provisioning
+/// its own reason code, a CRITICAL log line, and a recovery an administrator (who holds Write and Share) can run: a provisioning
 /// call that resumes it — or, for a record that keeps its own container, a Manage Access share (next paragraph).</para>
 ///
 /// <para><b>A record that KEEPS its own container cannot be resumed</b> (task 133 r1, verifier round 4). Once the team
@@ -87,7 +87,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// round 2 withdrew a round-1 path that completed when another person already held a share, because it changed that
 /// owner-decided contract without the owner). A resume of a record NOT flagged secure is held to the same creator rule
 /// as the forward path (owner round 10 item 10; task 150 verifier c1 item 4) — before any write; a flagged one stays on
-/// the Write gate.</para>
+/// the delegation gate (Write and Share).</para>
 ///
 /// <para><b>RESUME through Make Secure</b> (<c>transition: "make-secure"</c>; task 150, round 40 items 1 and 2). The form's
 /// Make Secure command finishes such a record with the forward Make Secure path's rules, minus the move it no longer
@@ -218,8 +218,8 @@ public static class ProvisionProjectEndpoint
     /// <summary>
     /// The creator's share failed AND the record could not be shown to be back with its pre-call owner — or the owner
     /// move could not be verified and no creator share could be issued. The record may be owned by the memberless
-    /// team with nobody shared: the creator cannot call again (they no longer pass the Write gate). An administrator,
-    /// who holds Write, recovers it: for a record with no container recorded, by calling provisioning again — it resumes
+    /// team with nobody shared: the creator cannot call again (they no longer pass the delegation gate (Write and Share)). An administrator,
+    /// who holds Write and Share, recovers it: for a record with no container recorded, by calling provisioning again — it resumes
     /// and shares it to the person who created the record (<c>createdby</c>, or <c>sprk_createdbyperson</c> for an
     /// app-created row); for a record that KEEPS its own container (<c>containerKept: true</c>), that call answers
     /// <c>already_provisioned</c> instead, so the administrator shares it through Manage Access (task 133 r1). The name
@@ -398,7 +398,7 @@ public static class ProvisionProjectEndpoint
     /// Task 150 (owner round 10 item 10, 2026-10-03): the record is NOT yet marked secure, and the caller is not the person
     /// who created it. An unflagged record is secured through this call only for its creator — <c>createdby</c> when that
     /// is a person, otherwise the server-stamped <c>sprk_createdbyperson</c> (an app-only create). A record already
-    /// flagged (an older client, a row from before task 150) stays on the route's Write gate. Refused before any write
+    /// flagged (an older client, a row from before task 150) stays on the route's delegation gate (Write and Share). Refused before any write
     /// (403), deterministic for that caller: securing an existing record someone else created, with the content already
     /// filed under it, is task 148's transition, not this call.
     /// </summary>
@@ -406,7 +406,7 @@ public static class ProvisionProjectEndpoint
 
     /// <summary>
     /// Task 150 (round 33 item 1): <see cref="ProvisionProjectRequest.Transition"/> for the form's Make Secure command —
-    /// securing an EXISTING record (task 148's surface). That path is held to the route's Write gate only (owner R3b):
+    /// securing an EXISTING record (task 148's surface). That path is held to the route's delegation gate (Write and Share) only (owner R3b):
     /// the creator rule of owner round 10 item 10 (<see cref="ReasonNotRecordCreator"/>) belongs to the wizards'
     /// create-then-secure path, which sends no transition. On it the record's creator is shared to as well
     /// (<see cref="ResolveMakeSecureCreatorAsync"/>), so the confirmation copy's promise holds (owner round 27); and the
@@ -670,7 +670,7 @@ public static class ProvisionProjectEndpoint
             return ProblemDetailsHelper.ValidationError(target.Error ?? "A record to provision is required.");
 
         // Task 150 (round 33 item 1): which surface asks. Omitted = the wizards' create-then-secure path (creator rule);
-        // make-secure = the form's Make Secure command (Write gate). Anything else is refused before any read or write: an
+        // make-secure = the form's Make Secure command (delegation gate (Write and Share)). Anything else is refused before any read or write: an
         // unrecognised value never falls back to either rule, and only the exact token relaxes the creator rule.
         bool makeSecure;
         if (request.Transition is null)
@@ -1029,7 +1029,7 @@ public static class ProvisionProjectEndpoint
             // path's first write and nothing clears it on failure; before task 150 provisioning required it; and the
             // unsecure endpoint moves the owner away before clearing it — so this gate costs that recovery nothing and
             // refuses only anomalous rows (e.g. a manual Assign to the secure team). Before any write; a flagged row stays
-            // on the route's Write gate. (Make Secure — round 33 item 1 — never reaches here: the branch above.)
+            // on the route's delegation gate (Write and Share). (Make Secure — round 33 item 1 — never reaches here: the branch above.)
             // Task 158's inherited provisioning has no caller: the person is the recorded creator by construction.
             if (!alreadyFlagged && !creator.IsRecordedCreator)
             {
@@ -1857,7 +1857,7 @@ public static class ProvisionProjectEndpoint
         //
         // Before any write, like every refusal on this path. A record already flagged true stays on the route's Write
         // gate (rollout constraint: an older client flags at create time, and rows from before task 150 arrive flagged).
-        // Make Secure (round 33 item 1) is the exception: securing an EXISTING record is held to the Write gate (owner R3b).
+        // Make Secure (round 33 item 1) is the exception: securing an EXISTING record is held to the delegation gate (Write and Share) (owner R3b).
         if (row.sprk_issecure != true && !makeSecure)
         {
             var notCreator = await RefuseUnlessRecordCreatorAsync(
@@ -2187,7 +2187,7 @@ public static class ProvisionProjectEndpoint
                     afterText = "A share to the creator was issued but could not be read back, so it is NOT confirmed. If " +
                                 "the creator can open the record they may call again: a record the team now owns is " +
                                 "resumed, and one it does not own is provisioned from the start. If they cannot, an " +
-                                "administrator (who holds Write on it) calls provisioning again: it resumes and ensures " +
+                                "administrator (who holds Write and Share on it) calls provisioning again: it resumes and ensures " +
                                 "the share for the person who created the record.";
                 }
 
@@ -2209,9 +2209,9 @@ public static class ProvisionProjectEndpoint
                 StatusCodes.Status500InternalServerError, "Internal Server Error",
                 "The record's owner could not be read back after the assignment, and no share to its creator could be " +
                 "issued. " + unlinkedNote + "If the record is now owned by the Secure Record owner team, nobody can open " +
-                "it, and its creator no longer passes the Write check this endpoint requires: " + (keepsOwnContainer
+                "it, and its creator no longer passes the Write and Share check this endpoint requires: " + (keepsOwnContainer
                     ? KeptContainerRecovery + " "
-                    : "an administrator (who holds Write on it) calls provisioning again, which resumes and shares the " +
+                    : "an administrator (who holds Write and Share on it) calls provisioning again, which resumes and shares the " +
                       "record to the person who created it. ") +
                 "If the assignment did not take effect, the record is where it was and its creator calls provisioning " +
                 "again.",
@@ -2322,17 +2322,17 @@ public static class ProvisionProjectEndpoint
 
         // What the creator can do now. A share-first grant that was PROVEN before the move has not been removed by this
         // call (compensation removes it only after a verified move back), so — unless the move itself dropped it (live
-        // gate (b)) — the creator still opens the record; otherwise they may not, and may no longer pass the Write gate.
+        // gate (b)) — the creator still opens the record; otherwise they may not, and may no longer pass the delegation gate (Write and Share).
         var creatorText = keepsOwnContainer && creatorShareProven
             ? "The creator's share was confirmed before the move and this call has not removed it, so unless the move " +
               "itself dropped it the creator can still open the record. "
-            : "Its creator may not be able to open it and may no longer pass the Write check this endpoint requires. ";
+            : "Its creator may not be able to open it and may no longer pass the Write and Share check this endpoint requires. ";
 
         // The recovery that works against the marker: a record that keeps its own container is never resumed (task 133
         // r1), so an administrator restores access directly; one with no container is resumed by their call.
         var recoveryText = keepsOwnContainer
             ? "While the team owns it, " + KeptContainerRecovery + " "
-            : "While the team owns it, an administrator (who holds Write on it) calls provisioning again: it resumes and " +
+            : "While the team owns it, an administrator (who holds Write and Share on it) calls provisioning again: it resumes and " +
               "shares the record to the person who created it. ";
 
         // If an UNVERIFIED move back did land, it cascaded like the move out: every child now has the record's pre-call
@@ -2949,7 +2949,7 @@ public static class ProvisionProjectEndpoint
     /// <see cref="ReasonCreatorUnresolved"/> (never read as "the creator"). Then
     /// <see cref="RefuseUnlessRecordCreatorAsync"/> decides, with the same columns and the same fail-closed reads. A
     /// System Administrator who is not the creator and needs to finish such a row sets the flag first (F4: the platform
-    /// lets that role write it) — the row is then on the Write gate like every documented resume.
+    /// lets that role write it) — the row is then on the delegation gate (Write and Share) like every documented resume.
     /// </remarks>
     private static async Task<IResult?> RefuseUnflaggedResumeUnlessCreatorAsync(
         DataverseWebApiClient dataverseClient,

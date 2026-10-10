@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// Manage Access affordance in <c>TrackingFieldTrio</c> gated on a Dataverse TABLE-level privilege —
 /// <c>hasEntityPrivilege('sprk_externalrecordaccess', Create, Global)</c> — which is a different question
 /// from the one this server enforces, with the opposite fail direction. The server asks "do you hold Write
-/// on THIS record" and denies what it cannot evaluate; the client asked "may you create rows in that table
+/// (and, since owner round 89, Share) on THIS record" and denies what it cannot evaluate; the client asked "may you create rows in that table
 /// anywhere" and ALLOWED what it could not evaluate. A caller with the table privilege but no Write on a
 /// confidential matter was offered the button and then refused by the server — the affordance promised an
 /// action the caller could not perform, on exactly the records where that matters most.</para>

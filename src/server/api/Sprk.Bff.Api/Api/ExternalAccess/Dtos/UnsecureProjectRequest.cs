@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <param name="ReassignToSystemUserId">
 /// Optional. The <c>systemuser</c> to hand ownership to. When omitted the owner is taken from
 /// configuration (<c>SecureRecord:UnsecureOwnerUserId</c>), and failing that the calling user — who
-/// has already had to prove Write on the record to reach this route.
+/// has already had to prove Write and Share on the record to reach this route.
 /// </param>
 /// <param name="RecordType">
 /// <c>project</c> | <c>matter</c> | <c>workassignment</c> (task 144). When supplied, <paramref name="RecordId"/> is

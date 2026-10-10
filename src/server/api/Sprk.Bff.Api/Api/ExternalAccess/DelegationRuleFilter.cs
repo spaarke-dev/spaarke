@@ -119,6 +119,14 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
     /// </summary>
     internal const string DenyShareRequired = "sdap.access.deny.delegation_share_required";
 
+    /// <summary>
+    /// The delegation rule over one rights answer (owner B-14 + round 89): Write AND Share. The ONE definition: the filter
+    /// below and the No Access entry list (<see cref="RecordNoAccessEndpoint"/>, which serves Read-only callers too and so
+    /// cannot sit behind this filter) both ask it.
+    /// </summary>
+    internal static bool MayManageAccess(AccessRights rights)
+        => (rights & (AccessRights.Write | AccessRights.Share)) == (AccessRights.Write | AccessRights.Share);
+
     /// <summary>The one user-facing sentence for both record-rights refusals: it names the whole rule.</summary>
     internal const string RightsRequiredDetail =
         "To change who else can access this record you need Write access to it and the Share privilege on its table " +
@@ -236,7 +244,7 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
             return Deny(httpContext, DenyWriteRequired, RightsRequiredDetail);
         }
 
-        if (!target.Value.WriteSuffices && (rights & AccessRights.Share) != AccessRights.Share)
+        if (!target.Value.WriteSuffices && !MayManageAccess(rights))
         {
             _logger.LogWarning(
                 "[DELEGATION] DENIED on {Route} for {Target}: caller holds {Rights}, which includes Write but not " +

@@ -1580,7 +1580,7 @@ internal sealed class NoStandingGrantReader : ISubjectStandingGrantReader
 }
 
 /// <summary>
-/// A caller who holds Write on whatever record the delegation rule asks about — i.e. someone entitled
+/// A caller who holds Write and Share on whatever record the delegation rule asks about — i.e. someone entitled
 /// to manage external access, which is the caller these contract tests are written from the
 /// perspective of (task 008, FR-07).
 /// </summary>

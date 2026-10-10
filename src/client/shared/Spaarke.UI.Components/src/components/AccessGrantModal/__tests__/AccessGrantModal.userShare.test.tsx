@@ -527,6 +527,46 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       expect(shareUserPosts).toHaveLength(1);
     });
 
+    // Task 179 (owner round 89): the Share-required refusal is the same rights banner; a check that could not be made
+    // keeps the designed deny state but never tells an entitled user to change their security role.
+    it.each([
+      [
+        'sdap.access.deny.delegation_share_required',
+        'Write and Share required',
+        'To change who else can access this record you need Write access to it and the Share privilege on its table (set in your security role).',
+      ],
+      [
+        'sdap.access.deny.delegation_check_failed',
+        'Access could not be checked',
+        'Whether you can change who has access to this record could not be checked. Close Manage Access and open it again to retry.',
+      ],
+    ])('a 403 %s on /share-user shows "%s" and disables further actions', async (reasonCode, title, sentence) => {
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const authenticatedFetch = baseAuthenticatedFetch(url =>
+        url.includes('/share-user')
+          ? jsonResponse({ title: 'Forbidden', detail: 'Refused.', reasonCode }, false, 403)
+          : null
+      );
+      const props = makeProps({
+        pickUser,
+        authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Gene Gatekeeper');
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      await screen.findByText('Uma Userton');
+      await pickLevelFor('Uma Userton', 'View Only');
+      fireEvent.click(addButton());
+
+      expect(await screen.findByText(title)).toBeInTheDocument();
+      expect(screen.getByText(sentence)).toBeInTheDocument();
+      if (reasonCode.endsWith('check_failed')) {
+        expect(screen.queryByText(/security role/)).not.toBeInTheDocument();
+      }
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Add user' })).toBeDisabled());
+    });
+
     it('proactively surfaces the deny banner on OPEN when GET /user-shares itself 403s (the read is also delegation-gated), disabling Revoke too', async () => {
       const authenticatedFetch = baseAuthenticatedFetch(url =>
         url.includes('/user-shares')
