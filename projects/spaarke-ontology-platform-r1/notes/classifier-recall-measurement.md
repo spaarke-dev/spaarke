@@ -10,6 +10,10 @@
 > **Update 2026-10-10 (§7):** the owner repaired the corruption, but the pre-run render check found a **second, older
 > blocker**: the Action's example inputs are objects, the JPS contract requires strings, so the prompt still falls back
 > to flat text and the guidance is still absent. **Run 2 was NOT executed** (0 model calls). STOPPED again for an owner decision.
+> **Update 2026-10-10 (§8), CURRENT:** example inputs fixed (mirror PR #1602, dev row written 15:12:08Z). The render is
+> verified on the JPS path with the guidance present. **Run 2: predicate recall 19/55 = 34.5% (Wilson 95% 23.4-47.7%).
+> The gate STILL FAILS.** The binding constraint is now the two-stage design (§8.4): TRIAGE-EMAIL is told to map
+> rung 5's free-form category, and rung 5 has no fee/scope vocabulary. STOPPED: classifier-design decision for the owner.
 
 ## 1. D-49 conflict check with the email project (done BEFORE the column adds)
 
@@ -291,3 +295,97 @@ owner's call, like the first repair.
 
 Rejected alternative: widening `ExampleEntry.Input` to accept objects. That changes the shared renderer and the JPS
 contract for every Action in order to accommodate one non-conformant mirror (ADR-change territory, §6.5 Path B).
+
+## 8. 2026-10-10: example inputs fixed, run 2. 🔴 FAIL at 34.5%
+
+### 8.1 Row write (owner-approved: second fix plus re-run)
+
+| Step | Evidence |
+|---|---|
+| Mirror | `infra/dataverse/actions/triage-email.action.json`: the 4 `examples[*].input` values become the compact JSON string of the same object. **PR #1602 to master** (branch `fix/triage-email-example-inputs-string`, not merged). The parsed document equals `origin/master` apart from those 4 values (checked in code). The repo's pre-commit prettier also collapsed 3 short arrays onto one line each (whitespace only; stated in the PR; hook not bypassed). The 29 triage-related tests pass |
+| Backup | Live row read at 13:33:08Z (ETag `W/"27409480"`) and saved to the scratchpad as `triage-fix-074/row-backup-before-074-input-fix.json` (SHA-256 `2A3AC860...27006F`, 10,642 chars) |
+| New value | Built from the **backup's own text** by replacing only the 4 input spans, so everything else is byte-identical. Cross-checked: it equals the PR #1602 mirror minus every `$comment*` key and exactly the six deploy scalars (`actionCode`, `actionType`, `description`, `modelTier`, `name`, `temperature`), the same rule the 13:33Z repair used |
+| Write | `PATCH sprk_analysisactions(c1fa96bf-...)` `sprk_systemprompt` with `If-Match: W/"27409480"`, which means no blind overwrite. **HTTP 204**, `modifiedon` **2026-10-10T15:12:08Z**. Identity: the operator's az CLI (`ralph.schroeder@spaarke.com`) |
+| Read-back | Byte-identical to the intended text (10,726 chars; SHA-256 `51D9A572...BB1FE6`, saved as `row-readback-after-074-input-fix.json`) |
+| Only-change proof | Against the 13:33Z backup: all **79** leaf values outside `examples[*].input` are identical; all **8,469** characters outside the 4 input spans are byte-identical; top-level key order is unchanged; each new string parses back to its 13:33Z object |
+
+### 8.2 Render check before the run (same path, OpenAI mocked, 0 model calls)
+Real `CommunicationTriageAi` → `ActionResolver` → `ActionRunner` → `LookupChoicesResolver` → `PromptSchemaRenderer`
+against the written row: **no fallback warning**, `## Allowed values for 'category'` present with **both** tie-breaker
+lines (`Fee / rate change — The PRICE of work ...`, `Scope / budget change — The AMOUNT of work ...`), the `## Constraints`
+and `## Examples` sections rendered, and no raw-JSON prompt (`"$schema"` absent).
+
+### 8.3 Run 2 numbers: recall on a synthetic set, same fixture, key and harness as run 1
+
+The harness and fixture are unchanged since run 1's code (`git diff 04a27d9c5 HEAD -- tests/` is empty). Run at
+2026-10-10T15:27Z: **184 model calls**, **0 warnings** (every triage on the JPS path), every item signalled and triaged.
+Full output: `notes/074-run2-results.json`.
+
+| Measure | Run 1 (2026-10-09, flat text, no guidance) | **Run 2 (2026-10-10, JPS + guidance)** | Gate |
+|---|---|---|---|
+| **Predicate recall** (fee-or-scope) | 12/55 = 21.8% (12.9-34.4%) | **19/55 = 34.5% (23.4-47.7%)** | ≥ 80%: **FAIL** |
+| Strict recall, Fee / rate change | 4/27 = 14.8% | **7/27 = 25.9%** | reported |
+| Strict recall, Scope / budget change | 8/28 = 28.6% | **11/28 = 39.3%** | reported |
+| Predicate precision | 12/12 = 100% | 19/20 = 95.0% (one false positive: L018, owner label Scheduling, Claude label Scope, a disputed item) | information |
+| Strict precision, Fee / Scope | 100% / 100% | 100% / 84.6% | information |
+| Exact accuracy (10 categories) | 40/92 = 43.5% | 45/92 = 48.9% | information |
+| Owner-labelled / Claude-labelled positives | 1/10 · 11/45 | 2/10 · 17/45 | |
+| Worst case for the key (missed Claude-labelled positives treated as negatives) | 12/21 = 57.1% | 19/27 = **70.4%** | still FAIL |
+
+Run 2 misses (36): Fee → Invoice / Billing 12, Administrative 4, Client instruction 3; Scope → Client instruction 8,
+Administrative 7, Court / Filing 1, Scheduling 1. Nothing was relabelled.
+
+### 8.4 Why it still fails: the classifier is anchored on rung 5, and rung 5 has no fee/scope vocabulary
+
+Recall by the **upstream** rung-5 free-form category (positives only):
+
+| Rung-5 category | Positives | Run 1 caught | Run 2 caught |
+|---|---|---|---|
+| `general-correspondence` | 31-32 | 5 | **8 / 31 (26%)** |
+| `invoice` | 15 | 1 | **3 / 15 (20%)** |
+| money-specific (`budget-request`, `fee-proposal`, `billing-rate-update`, `budget-approval`, ...) | 8 | 6 / 8 | **8 / 8 (100%)** |
+
+- TRIAGE-EMAIL's first constraint reads: *"Map the classification's freeform category (e.g. 'court-notice', 'invoice',
+  'general-correspondence') onto the CLOSEST matching entry in the allowed category list"*. Its output-schema
+  description says the same. It is designed as a **structuring pass over rung 5's decision** (FR-05, "no second
+  classification").
+- Rung 5 (`CommunicationClassificationAi`, a code-constant prompt with no taxonomy) labels **46 of 55** positives as
+  `general-correspondence` or `invoice`. Its prompt's category examples are court-notice, invoice, esign-completion,
+  scheduling and general-correspondence, with no fee/rate or scope/budget concept.
+- When rung 5 *does* emit a money-specific category, triage catches it: 8/8 in run 2, 6/8 in run 1. When it does not, triage, told to map the
+  rung-5 category, mostly maps `invoice` → Invoice / Billing and `general-correspondence` → Client instruction /
+  Administrative. The 072 guidance raised recall by 12.7 points, but it acts only inside a mapping step told to defer
+  upstream.
+
+This is an observation from one run at temperature 0.2. The mechanism is consistent across both runs and both
+categories.
+
+### 8.5 D-49 values (overwritten with run 2, read back)
+
+| Row | `sprk_measuredrecall` | `sprk_labelledsetsize` | `sprk_recallmeasuredon` |
+|---|---|---|---|
+| Fee / rate change | **25.93** | 92 | 2026-10-10 |
+| Scope / budget change | **39.29** | 92 | 2026-10-10 |
+
+HTTP 204 each; read back at `modifiedon` 15:28:08Z. Same semantics as §6.5: strict per-category recall; the gate figure is in this note.
+
+### 8.6 🔔 Escalation: owner decisions (POML trigger: "improve the classifier ... or re-scope", both owner decisions)
+
+The two runs bracket the problem. Fixing the prompt mechanics (run 1 → run 2) is necessary but worth only about 13
+points. The remaining gap is classifier design. Options, cheapest first. **None has been taken; each changes the email
+project's classifier**:
+
+1. **Let TRIAGE-EMAIL classify from the message, with rung 5 as a hint.** Rewrite constraint 1 and the `category`
+   description so the message text and the Allowed-values definitions decide, with the rung-5 category as advisory
+   only. It is a data-only change to the Action (no code; FR-05's "no second classification CALL" still holds). This
+   targets the 46/55 anchored misses directly.
+2. **Give rung 5 the vocabulary.** Add fee/rate and scope/budget concepts to `CommunicationClassificationAi`'s prompt
+   (code change in `Services/Ai/PublicContracts/`; BFF hygiene applies).
+3. **Model tier.** Both stages run on `gpt-4o-mini` (Fast). A Standard-tier triage may follow the tie-breakers better.
+   This changes cost.
+4. **Re-scope the §0 claim** if none of the above clears 80% within the owner's budget.
+
+Recommendation: **option 1** first (data-only, cheap, targets the measured mechanism), verify the render, then one
+re-measure (~184 calls). Run 2's D-49 values stand until then.
+
+**Model calls, all of task 074:** run 1 185 (incl. aborted attempt 0) + run 2 184 = **369**. Render checks: 0.
