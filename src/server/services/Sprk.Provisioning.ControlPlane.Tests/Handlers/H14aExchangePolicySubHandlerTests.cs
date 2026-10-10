@@ -56,8 +56,7 @@ public sealed class H14aExchangePolicySubHandlerTests
             new ExchangeRoleAssignmentSpec("Spaarke-acme-MailRead", "Application Mail.Read"),
             new ExchangeRoleAssignmentSpec("Spaarke-acme-MailReadWrite", "Application Mail.ReadWrite"),
             new ExchangeRoleAssignmentSpec("Spaarke-acme-MailSend", "Application Mail.Send"),
-            new ExchangeRoleAssignmentSpec("Spaarke-acme-MailboxSettingsRead", "Application MailboxSettings.Read"),
-        });
+        }, "task 261: MailboxSettings.Read has no caller, so H14a no longer grants it");
     }
 
     [Fact]

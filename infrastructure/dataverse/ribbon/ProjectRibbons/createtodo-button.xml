@@ -53,6 +53,7 @@
             </EnableRules>
             <DisplayRules>
               <DisplayRule Id="sprk.Wizard.Project.Form.DisplayRule" />
+              <DisplayRule Id="sprk.CreatePrivilege.sprk_todo.DisplayRule" />
             </DisplayRules>
             <Actions>
               <JavaScriptFunction Library="$webresource:sprk_wizard_commands.js"
@@ -67,6 +68,9 @@
           <DisplayRules>
             <DisplayRule Id="sprk.Wizard.Project.Form.DisplayRule">
               <FormStateRule State="Existing" />
+            </DisplayRule>
+            <DisplayRule Id="sprk.CreatePrivilege.sprk_todo.DisplayRule">
+              <EntityPrivilegeRule EntityName="sprk_todo" PrivilegeType="Create" PrivilegeDepth="Basic" />
             </DisplayRule>
           </DisplayRules>
           <EnableRules>

@@ -80,8 +80,8 @@ public static class HandlerDispatchRegistrationModule
 {
     /// <summary>
     /// Adds one <c>AddKeyedScoped&lt;IProvisioningHandler&gt;</c> factory
-    /// per dispatchable <see cref="HandlerIds"/> constant (H14a/H14b/H14c
-    /// are deliberately absent -- see file header; total count is asserted
+    /// per dispatchable <see cref="HandlerIds"/> constant (H14a
+    /// is deliberately absent -- see file header; total count is asserted
     /// by <c>HandlerRegistrationCompletenessTests</c>). Safe to call
     /// regardless of registration order relative to the concrete handler
     /// types: the factory lambda only executes when the keyed service is

@@ -83,7 +83,9 @@
     </CommandDefinition>
     <CommandDefinition Id="sprk.Event.NewWizard.Grid.Command">
       <EnableRules />
-      <DisplayRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_event.DisplayRule" />
+      </DisplayRules>
       <Actions>
         <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateEventStandalone" Library="$webresource:sprk_wizard_commands" />
       </Actions>
@@ -151,7 +153,11 @@
   </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
-    <DisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_event.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_event" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
+    </DisplayRules>
     <EnableRules>
       <EnableRule Id="sprk.Navigator.Event.Open.EnableRule">
         <CustomRule Library="$webresource:sprk_SidePaneManager" FunctionName="Spaarke.SidePaneManager.initialize" Default="true" />

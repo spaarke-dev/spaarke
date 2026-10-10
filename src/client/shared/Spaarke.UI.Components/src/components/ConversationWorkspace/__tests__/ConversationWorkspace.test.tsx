@@ -17,6 +17,7 @@ import { render, fireEvent, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { ConversationWorkspace } from '../ConversationWorkspace';
 import type { ConversationWorkspaceProps, IConversationRendererProps } from '../ConversationWorkspace';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type { INavigationService } from '../../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
@@ -59,14 +60,15 @@ function makeAuthenticatedFetch(options: IMockFetchOptions = {}) {
   const regardingResult = options.regardingResult ?? REGARDING_RESULT;
   const unreadByThread = options.unreadByThread ?? {};
 
-  return jest.fn(async (url: string, init?: RequestInit) => {
+  // Production shape: `@spaarke/auth`'s authenticatedFetch THROWS an ApiError for a non-2xx.
+  return throwingAuthenticatedFetch(async (url: string, init?: RequestInit) => {
     if (url.includes('/by-regarding/')) {
       return jsonResponse(regardingResult);
     }
     const pinMatch = url.match(/\/threads\/([^/]+)\/pin$/);
     if (pinMatch && init?.method === 'PATCH') {
       if (options.pinShouldFail) {
-        return jsonResponse({ title: 'Server error', detail: 'Write failed' }, 500);
+        return jsonResponse({ title: 'Server error', status: 500, detail: 'Write failed' }, 500);
       }
       const threadId = pinMatch[1];
       const body = JSON.parse((init.body as string) ?? '{}') as { pinned: boolean };
@@ -83,7 +85,7 @@ function makeAuthenticatedFetch(options: IMockFetchOptions = {}) {
       const threads = search ? allThreads.filter(t => t.name.toLowerCase().includes(search.toLowerCase())) : allThreads;
       return jsonResponse({ threads, count: threads.length, nextPageToken: null, hasMore: false });
     }
-    return jsonResponse({ title: 'Not Found' }, 404);
+    return jsonResponse({ title: 'Not Found', status: 404 }, 404);
   });
 }
 
@@ -266,6 +268,20 @@ describe('ConversationWorkspace — empty / loading / error states (NFR-05)', ()
   });
 
   it('renders an error state (and fires onError) when the list fetch fails', async () => {
+    const authenticatedFetch = throwingAuthenticatedFetch(async () =>
+      jsonResponse({ title: 'Boom', status: 500, detail: 'Server error' }, 500)
+    );
+    const onError = jest.fn();
+    renderWorkspace({ authenticatedFetch, onError });
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+    expect(onError).toHaveBeenCalledTimes(1);
+    // The user sees the server's own sentence (the ApiError message), and the host gets the real ApiError.
+    expect(screen.getByRole('alert')).toHaveTextContent('Server error');
+    expect(onError.mock.calls[0][0]).toMatchObject({ status: 500 });
+  });
+
+  it('control: a host whose fetch RETURNS the 500 still gets the error state', async () => {
     const authenticatedFetch = jest.fn(async () => jsonResponse({ title: 'Boom', detail: 'Server error' }, 500));
     const onError = jest.fn();
     renderWorkspace({ authenticatedFetch, onError });

@@ -172,7 +172,7 @@ public sealed class IntakeSchemaProfileParityTests
 
     /// <summary>
     /// The schema states each POST /api/runs operator-intake rule. It may be STRICTER than the API (e.g. it refuses a
-    /// blank optional Graph resource the API ignores), never looser — a value ajv accepts must not be refused by
+    /// blank optional value the API ignores), never looser — a value ajv accepts must not be refused by
     /// POST /api/runs. (Known residue: ECMA and .NET disagree on a few exotic whitespace code points, e.g. U+0085,
     /// for the `\S` non-blank pattern.)
     /// </summary>
@@ -196,7 +196,7 @@ public sealed class IntakeSchemaProfileParityTests
             userFields.GetProperty(field).GetProperty("pattern").GetString().Should().Be(@"\S",
                 $"a blank users[].{field} is refused by POST /api/runs (IsNullOrWhiteSpace), so ajv must refuse it too");
         }
-        foreach (var key in new[] { "exchangePolicyScopeGroupId", "communicationGraphResource", "emailGraphResource" })
+        foreach (var key in new[] { "exchangePolicyScopeGroupId" })
         {
             properties.GetProperty(key).GetProperty("pattern").GetString().Should().Be(@"\S", $"{key} must be non-blank");
         }
@@ -204,7 +204,6 @@ public sealed class IntakeSchemaProfileParityTests
             .Should().Be(IntakeParameterCatalog.MaxMailboxAddressLength);
 
         var allOf = root.GetProperty("allOf").EnumerateArray().ToList();
-        allOf.Any(IsAtLeastOneGraphResourceRule).Should().BeTrue("at least one Graph resource — H14b's rule");
         allOf.Any(r => IsPresetUsersRule(r, UserProvisioningIntake.NativeAccount, ["firstName", "lastName"]))
             .Should().BeTrue("NativeAccount users need both names — H11's rule");
         allOf.Any(r => IsPresetUsersRule(r, UserProvisioningIntake.B2BGuest, ["email"]))
@@ -227,11 +226,6 @@ public sealed class IntakeSchemaProfileParityTests
             "POST /api/runs refuses a group id that is not a GUID (userprov-invalid-security-group-id)");
 
         static IEnumerable<string> Strings(JsonElement array) => array.EnumerateArray().Select(e => e.GetString()!);
-
-        static bool IsAtLeastOneGraphResourceRule(JsonElement rule)
-            => rule.TryGetProperty("anyOf", out var anyOf)
-                && anyOf.EnumerateArray().Select(a => string.Join(",", Strings(a.GetProperty("required")))).Order()
-                    .SequenceEqual(["communicationGraphResource", "emailGraphResource"]);
 
         static bool IsPresetUsersRule(JsonElement rule, string preset, string[] requiredFields)
             => rule.TryGetProperty("if", out var condition)
@@ -268,12 +262,6 @@ public sealed class IntakeSchemaProfileParityTests
                 RunsEndpoints.ValidateOperatorIntake(tenancyModel, without).Should().NotBeNull(
                     "the schema requires '{0}', so POST /api/runs must refuse a run without '{1}'", schemaKey, apiKey);
             }
-
-            var noGraphResource = new Dictionary<string, string>(nonSecret, StringComparer.Ordinal);
-            noGraphResource.Remove("communicationGraphResource");
-            noGraphResource.Remove("emailGraphResource");
-            RunsEndpoints.ValidateOperatorIntake(tenancyModel, noGraphResource).Should().NotBeNull(
-                "the schema requires at least one Graph resource, so POST /api/runs must too");
 
             // T232: the schema requires the group for B2BGuest — so must POST /api/runs.
             if (nonSecret.GetValueOrDefault("identityPreset") == UserProvisioningIntake.B2BGuest)
@@ -417,6 +405,42 @@ public sealed class IntakeSchemaProfileParityTests
         }
     }
 
+    /// <summary>
+    /// T259 (ISS-010): displayName — the customer business unit's name H10 creates — is sent to POST /api/runs under the
+    /// same key and refused there by CustomerBusinessUnitIntake. The schema keeps it optional (the skill defaults it to the
+    /// customerId, which always passes), and is never looser than the endpoint: the same length limit, no leading/trailing
+    /// whitespace or control character, and never the Secure Record unit's name in any case.
+    /// </summary>
+    [Fact]
+    public void T259_DisplayName_SchemaBoundsAreTheEndpointRule()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var property = doc.RootElement.GetProperty("properties").GetProperty(IntakeParameterCatalog.DisplayName);
+
+        property.GetProperty("maxLength").GetInt32()
+            .Should().Be(Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity.CustomerBusinessUnitIntake.MaxLength);
+        var pattern = new System.Text.RegularExpressions.Regex(property.GetProperty("pattern").GetString()!);
+        var secureName = new System.Text.RegularExpressions.Regex(property.GetProperty("not").GetProperty("pattern").GetString()!);
+        var secureUnit = Sprk.Provisioning.ControlPlane.Handlers.SecureRecordSetup.SecureRecordOwnerRoleSet.Embedded.BusinessUnitName;
+
+        foreach (var refused in new[] { " Acme", "Acme ", "Acme\tCorp", "Acme\u0007" })
+        {
+            pattern.IsMatch(System.Text.RegularExpressions.Regex.Unescape(refused)).Should().BeFalse(refused);
+        }
+        pattern.IsMatch("Acme Corporation").Should().BeTrue();
+        pattern.IsMatch("a").Should().BeTrue();
+        secureName.IsMatch(secureUnit).Should().BeTrue();
+        secureName.IsMatch(secureUnit.ToUpperInvariant()).Should().BeTrue();
+        secureName.IsMatch("Secure Records Ltd").Should().BeFalse();
+
+        foreach (var example in doc.RootElement.GetProperty("examples").EnumerateArray())
+        {
+            Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity.CustomerBusinessUnitIntake.Validate(
+                    new Dictionary<string, string> { ["displayName"] = example.GetProperty("displayName").GetString()! }, secureUnit)
+                .Should().BeOfType<Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity.CustomerBusinessUnitIntakeOutcome.Valid>();
+        }
+    }
+
     /// <summary>Schema property → POST /api/runs nonSecretParameters key (the skill sends <c>users</c> as <c>usersJson</c>).</summary>
     private static readonly (string SchemaKey, string ApiKey)[] OperatorKeys =
     [
@@ -424,11 +448,10 @@ public sealed class IntakeSchemaProfileParityTests
         ("users", "usersJson"),
         ("environmentSecurityGroupId", "environmentSecurityGroupId"),   // T232
         ("exchangePolicyScopeGroupId", "exchangePolicyScopeGroupId"),
-        ("communicationGraphResource", "communicationGraphResource"),
-        ("emailGraphResource", "emailGraphResource"),
         ("communicationDefaultMailbox", "communicationDefaultMailbox"),
         ("tier", "tier"),                                   // T229
         ("estimatedMonthlyUsd", "estimatedMonthlyUsd"),
+        ("displayName", "displayName"),                     // T259 (the skill defaults it to customerId when absent)
     ];
 
     private static Dictionary<string, string> ToOperatorNonSecret(JsonElement example)

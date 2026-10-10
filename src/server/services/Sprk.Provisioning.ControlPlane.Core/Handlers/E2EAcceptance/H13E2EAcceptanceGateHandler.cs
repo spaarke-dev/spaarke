@@ -15,6 +15,11 @@
 //   repo files absent from the Worker publish; scripts/naming-conformance-check.ps1
 //   runs once as a blocking CI step. I1 (no hardcoded tenant) likewise left the
 //   runtime set — it is a build-time property owned by the I1 ArchTest.
+//   Task 260 (ISS-014): H13 also asks the stamp BFF to run its secure-record
+//   isolation census (POST /api/platform/secure-record-isolation-census, the
+//   keyless proof's identity and role) and refuses Ready unless it answers
+//   `isolated` — findings / inert / a failed call quarantine; no verdict is
+//   Resumable.
 //
 // SPEC / DESIGN references:
 //   - spec.md FR-18 (H13 acceptance criteria) + SC #5 (extended validate
@@ -114,6 +119,7 @@
 
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
+using Spaarke.Contracts.Provisioning;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 using Sprk.Provisioning.ControlPlane.Models;
@@ -528,15 +534,45 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             }
         }
 
+        // (7b) Secure-record isolation census (task 260, ISS-014): the stamp BFF runs the census its 15-minute job runs
+        //      (same keyless-proof identity and role). After H11 (H13 <- H14 <- H12c <- H12a/b <- H11), so every guest
+        //      already sits in its unit. Only `isolated` passes. It grades the TOPOLOGY (role depth, users in the Secure
+        //      Record unit, owner team and role), not records, so a fresh stamp with no secure record yet is still graded;
+        //      `inert` means the BFF finds no Secure Record unit at all — H7b creates it before H13 — so nothing was
+        //      proved and the run quarantines.
+        var censusRequest = new E2EValidationRequest(
+            CustomerId: envelope.CustomerId,
+            RunId: envelope.RunId,
+            DataverseUrl: dataverseUrl,
+            BffApiUrl: bffApiUrl,
+            TargetSlotName: _options.TargetSlotName,
+            BffAppRegId: bffAppRegId);
+        SecureIsolationCensusOutcome censusOutcome;
+        try
+        {
+            censusOutcome = await _validationRunner.RunSecureIsolationCensusAsync(censusRequest, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H13 secure-isolation census infra fault: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
+            censusOutcome = new SecureIsolationCensusOutcome.Inconclusive(
+                $"The census call threw: {ex.GetType().Name}: {ex.Message}.");
+        }
+
         // (8) DECISION: aggregate every collaborator's outcome + pick failure
         //     with correct §4C classification. Priority order:
         //       (a) Trap/invariant FAILED → QuarantineRequired (silent-fail
         //           actually manifested — CATASTROPHIC).
+        //       (a1) Secure-isolation census not isolated / inert / failed → QuarantineRequired (task 260).
         //       (a2) Stamp accepts keys (ARM, task 230b) → QuarantineRequired.
         //       (b) Live checks FAILED (incl. the keyless proof) → QuarantineRequired.
         //       (c) Cost drift (fail-run mode) → QuarantineRequired.
         //       (d) Trap/invariant/ARM-keyless InfraFault → Resumable (no verdict).
         //       (d2) Live checks Inconclusive → Resumable (task 230b).
+        //       (d3) Secure-isolation census Inconclusive → Resumable (task 260).
         //       (e) Cost query infra fault → Resumable.
         //     Advisory-warn cost drift is NOT a failure branch — it's attached
         //     to the diagnostic + gate-state but the Ready transition still
@@ -556,6 +592,29 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 MapInvariantKindToRejectionCode(invFail.Kind),
                 $"I{(int)invFail.Kind} tenant-isolation invariant VIOLATED (CATASTROPHIC): {invFail.Diagnostic}. " +
                 $"Full invariant catalog: {invariantResult.ToLogSummary()}",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (censusOutcome is SecureIsolationCensusOutcome.NotIsolated notIsolated)
+        {
+            var inert = string.Equals(notIsolated.Status, KeylessProofContract.SecureRecordIsolationCensus.Inert,
+                StringComparison.Ordinal);
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                inert ? H13Rejections.SecureIsolationInert : H13Rejections.SecureIsolationNotIsolated,
+                (inert
+                    ? "The secure-record isolation census is INERT: the BFF finds no Secure Record business unit, so no " +
+                      "isolation was proved. H7b creates it before H13 — check H7b's output and the BFF's " +
+                      "SecureRecord:BusinessUnitName. "
+                    : "The secure-record isolation census is NOT isolated (spec NFR-05): secure records are readable beyond " +
+                      "explicit grants, or the owner role misses a codified table. Fix each finding (never by moving a user " +
+                      "into the Secure Record unit), then resume. ")
+                + $"verdict={notIsolated.Verdict} findings: {string.Join(" | ", notIsolated.Findings)}",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (censusOutcome is SecureIsolationCensusOutcome.Failed censusFailed)
+        {
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                H13Rejections.SecureIsolationCensusFailed,
+                $"The secure-record isolation census call failed (task 260): {censusFailed.Diagnostic}",
                 cancellationToken).ConfigureAwait(false);
         }
         if (keylessOutcome is StampKeylessOutcome.Failed keyed)
@@ -610,6 +669,21 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             return await FailAsync(run, etag, FailureClass.Resumable,
                 H13Rejections.ExtendedValidationInconclusive,
                 $"Live checks reached no verdict for {valInconclusive.ChecksInconclusive.Count} check(s): {valInconclusive.Diagnostic}",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (censusOutcome is SecureIsolationCensusOutcome.Inconclusive censusInconclusive)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                H13Rejections.SecureIsolationInconclusive,
+                $"The secure-record isolation census reached no verdict (task 260): {censusInconclusive.Diagnostic}",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (censusOutcome is not SecureIsolationCensusOutcome.Isolated)
+        {
+            // Defence in depth: an outcome this handler does not know never reaches Ready.
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                H13Rejections.SecureIsolationCensusFailed,
+                $"The secure-record isolation census returned an unhandled outcome '{censusOutcome.GetType().Name}'.",
                 cancellationToken).ConfigureAwait(false);
         }
         if (costTenancyDiag is not null)
@@ -874,6 +948,8 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     ///   sprk_resourcegroupname   ← run.InterStepState.ResourceGroupName (H2a output)
     ///   sprk_appservicename      ← run.InterStepState.AppServiceName (H2a output)
     ///   sprk_keyvaultname        ← run.InterStepState.KeyVaultName (H2a output — the CUSTOMER vault)
+    ///   sprk_bffappid            ← run.InterStepState.BffAppRegId (H3 output — the customer BFF app registration;
+    ///                              T257: the Copilot agent render builds its scope api://{id}/user_impersonation from it)
     ///   sprk_containertypeid     ← run.Parameters.NonSecret["containerTypeId"] (intake — the
     ///                              container type pre-exists per environment; no handler
     ///                              produces it, so InterStepState.ContainerTypeId is NOT read)
@@ -915,6 +991,8 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         AddValueIfPresent(columns, interStep?.ResourceGroupName, "sprk_resourcegroupname");
         AddValueIfPresent(columns, interStep?.AppServiceName, "sprk_appservicename");
         AddValueIfPresent(columns, interStep?.KeyVaultName, "sprk_keyvaultname");
+        // T257: the per-customer Copilot agent package is rendered from the registry row; the BFF app id lives only here.
+        AddValueIfPresent(columns, interStep?.BffAppRegId, "sprk_bffappid");
 
         return columns;
 
@@ -1054,6 +1132,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         };
         run.GateStates[H13Gates.ExtendedValidationVerified] = verified;
         run.GateStates[H13Gates.StampKeylessVerified] = verified;
+        run.GateStates[H13Gates.SecureIsolationVerified] = verified;
         run.GateStates[H13Gates.TrapCatalogVerified] = verified;
         run.GateStates[H13Gates.InvariantCatalogVerified] = verified;
         run.GateStates[H13Gates.CostEnvelopeVerified] = new GateEntry

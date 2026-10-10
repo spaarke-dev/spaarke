@@ -68,7 +68,8 @@ export async function loadNeedsReviewCount(
   try {
     const config = await fetchConfigRecord(client, configId);
     if (!config || config.behavior?.membershipFilter || config.behavior?.parentContextFilter) return null;
-    const source = await resolveSource(client, config, undefined);
+    // The card is an internal-host surface (the reconciliation worklist), never the external SPA.
+    const source = await resolveSource(client, config, undefined, 'internal');
     if (!source?.fetchXml || !source.entityName) return null;
     const countXml = buildCountFetchXml(source.fetchXml);
     if (!countXml) return null;

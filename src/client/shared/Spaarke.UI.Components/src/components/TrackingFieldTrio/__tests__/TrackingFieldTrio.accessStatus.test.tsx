@@ -13,6 +13,7 @@ import * as React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { TrackingFieldTrio } from '../TrackingFieldTrio';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import type { ITrackingFieldTrioProps, IAccessPermissionOption } from '../types';
 import {
   parseAccessStatusResponse,
@@ -130,9 +131,9 @@ describe('readAccessStatus (task 153, the PCF host read — evaluateGrantGate ru
   });
 
   it.each([
-    ['the uniform 404', async () => res({ title: 'Not Found' }, 404)],
-    ['a 403', async () => res({}, 403)],
-    ['a 500', async () => res({}, 500)],
+    ['the uniform 404', async () => res({ title: 'Not Found', status: 404 }, 404)],
+    ['a 403', async () => res({ status: 403 }, 403)],
+    ['a 500', async () => res({ status: 500 }, 500)],
     ['an unparseable body', async () => res(new Error('bad json'))],
     [
       'an answer about another record',
@@ -144,15 +145,36 @@ describe('readAccessStatus (task 153, the PCF host read — evaluateGrantGate ru
         throw new Error('not initialized');
       },
     ],
-    ['no response at all', async () => undefined as unknown as Response],
   ])('%s → unavailable, never doesNotApply', async (_label, impl) => {
+    // Production shape: the PCF injects `@spaarke/auth`'s authenticatedFetch, which THROWS for a non-2xx.
     const status = await readAccessStatus(
-      jest.fn(impl) as unknown as (u: string) => Promise<Response>,
+      throwingAuthenticatedFetch(impl) as unknown as (u: string) => Promise<Response>,
       'matter',
       RECORD_ID
     );
     expect(status).toEqual(ACCESS_STATUS_UNAVAILABLE);
   });
+
+  it('control: a fetch that resolves no response at all (no token) → unavailable', async () => {
+    const status = await readAccessStatus(
+      jest.fn(async () => undefined) as unknown as (u: string) => Promise<Response>,
+      'matter',
+      RECORD_ID
+    );
+    expect(status).toEqual(ACCESS_STATUS_UNAVAILABLE);
+  });
+
+  it.each([404, 403, 500])(
+    'control: a fetch that RETURNS the %s response → unavailable, never doesNotApply',
+    async code => {
+      const status = await readAccessStatus(
+        jest.fn(async () => res({ status: code }, code)) as unknown as (u: string) => Promise<Response>,
+        'matter',
+        RECORD_ID
+      );
+      expect(status).toEqual(ACCESS_STATUS_UNAVAILABLE);
+    }
+  );
 });
 
 describe('readAccessStatus — a hung request (hardening)', () => {

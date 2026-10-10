@@ -50,7 +50,10 @@ name) silently made them a reader of every secure record, and nothing checked. A
 when someone adds a member on purpose. **Why the business unit must hold no users:** a record owned by ANY team in the
 business unit sits in that business unit, so a user placed there whose roles carry Business Unit or Deep depth reads
 every secure record by depth whoever owns it. Provisioning checks both before it moves anything; the read-only
-`secure-record-isolation-census` job re-checks them every 15 minutes and logs CRITICAL on drift.
+`secure-record-isolation-census` job re-checks them every 15 minutes and logs CRITICAL on drift. On a provisioned
+environment the acceptance gate (H13) runs the same census once more, synchronously, through
+`POST /api/platform/secure-record-isolation-census` (L2's identity only), and refuses `Ready` unless it is `isolated`
+(customer-provisioning task 260).
 
 ---
 
@@ -512,7 +515,7 @@ configuration is shaped correctly.
 | 8 | Delete the probe record | no `sprk_issecure=true` rows remain |
 | 9 | **NFR-05 assertion** — `SecureBuRoleDepthAssertionTests` live test with `SPAARKE_NFR05_DATAVERSE_URL` set (and `AZURE_TOKEN_CREDENTIALS=AzureCliCredential` when only `az login` is available) | **passes**: no non-administrator human reaches the BU by depth on project/matter/work assignment, the BU holds no users, the named team resolves with no members, it alone holds the role, and the role holds Read at User depth on every table in `config/secure-record-owner-role.json` (clause 5, task 145 — a gap names the table and means that table's secure rows cannot be owned by the team) |
 | 10 | **Cutover complete**: `scripts\Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl $DvUrl -Verify` | **exit 0** — every secure row owned by the named team, none by the default team and none outside the BU |
-| 11 | The BFF's `secure-record-isolation-census` job (`/api/admin/jobs/secure-record-isolation-census/status`) | last run `isolated`. Each exposure is a CRITICAL log line `[SECURE-CENSUS]` naming the principal; a clause-5 coverage gap is an ERROR line naming the table (fail-closed, not an exposure); it writes nothing |
+| 11 | The BFF's `secure-record-isolation-census` job (`/api/admin/jobs/secure-record-isolation-census/status`) | last run `isolated`. Each exposure is a CRITICAL log line `[SECURE-CENSUS]` naming the principal; a clause-5 coverage gap is an ERROR line naming the table (fail-closed, not an exposure); it writes nothing. A provisioned environment that reached `Ready` passed the same census in H13 (task 260) |
 | 12 | The BFF's `secure-child-share-reconciliation` job (`/api/admin/jobs/secure-child-share-reconciliation/status`, task 149) | **enabled**, last run `Success = true`, heartbeat `[SECURE-CHILD-SHARES] heartbeat status=Completed`. `held > 0` names a child whose secure roots cannot be determined (see §7a); `notUpdated > 0` is retried every two minutes |
 | 13 | **🔴 Sharees see the children, nobody else does** (task 149) — with existing non-admin test users: share a secure project with user A, create a child under it, wait one reconcile tick (≤ 2 min) | A reads the child in MDA; a user NOT shared on the project is DENIED it; unsharing A (Manage Access, or the MDA Share dialog + one tick) removes A from the child. Delete the probes |
 | 14 | The BFF's `secure-child-reconciliation` job (`/api/admin/jobs/secure-child-reconciliation/status`, task 148) | **enabled every 2 minutes** (task 147, owner round 28 item 2): its recent-changes pass WRITES (`recentChanges.mode = write`; only `SecureChild__Reconciliation__RecentChangesWritesEnabled=false` stops it). The sweep stays REPORT-ONLY with `SecureChild__Reconciliation__WritesEnabled` unset — heartbeat `[SECURE-CHILD-RECONCILE] heartbeat mode=ReportOnly`, and `wouldChange` is the backfill still owed (0 once §7c.1 has run); a scheduled tick does not run (or move) the report-only sweep |

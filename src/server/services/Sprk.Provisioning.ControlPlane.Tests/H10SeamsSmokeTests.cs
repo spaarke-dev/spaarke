@@ -160,7 +160,7 @@ public sealed class H10SeamsSmokeTests
 
         // The REAL production catalog H10 consumes — not a fixture. Proves the
         // T3 seam's live REST shape (servicePrincipals filter + appRoleAssignments
-        // GET) against the actual 14-role GraphAppRoles.cs mirror.
+        // GET) against the actual GraphAppRoles.cs mirror (the stamp set, task 261).
         var registry = new L2GraphAppRolesRegistry();
         var expectedRoles = registry.GetAll();
         var logger = new CapturingLogger<GraphRestAppRoleParityVerifier>();

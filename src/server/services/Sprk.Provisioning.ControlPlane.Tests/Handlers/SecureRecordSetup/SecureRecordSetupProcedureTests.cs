@@ -21,9 +21,10 @@ public sealed class SecureRecordSetupProcedureTests
     private static readonly SecureRecordOwnerRoleSet Set = SecureRecordOwnerRoleSet.Embedded;
     private static readonly SecureRecordSetupTarget Target = new("https://spaarke-acme.crm.dynamics.com/", "tenant", "bff-app");
 
-    private static Task<SecureRecordSetupOutcome> RunAsync(FakeSecureRecordSetupDataverse dv, bool dryRun = false)
+    private static Task<SecureRecordSetupOutcome> RunAsync(FakeSecureRecordSetupDataverse dv, bool dryRun = false, Guid? customerUnit = null)
         => new SecureRecordSetupProcedure(dv, NullLogger.Instance)
-            .RunAsync(new SecureRecordSetupRequest(Target, Set, [dv.BffAppUser, dv.MiAppUser], dryRun), CancellationToken.None);
+            .RunAsync(new SecureRecordSetupRequest(Target, Set, [dv.BffAppUser, dv.MiAppUser], customerUnit ?? dv.CustomerUnitId, dryRun),
+                CancellationToken.None);
 
     private static FakeSecureRecordSetupDataverse NewEnv() => FakeSecureRecordSetupDataverse.NewEnvironment(Set);
 
@@ -66,9 +67,11 @@ public sealed class SecureRecordSetupProcedureTests
 
         dv.TeamRoles.Where(kv => kv.Value.Contains(role.Id)).Select(kv => kv.Key).Should().Equal(team.Id);
         dv.TeamRoles[dv.DefaultTeamOf(unit.Id).Id].Should().BeEmpty("the new unit's default team arrived with System Administrator (§5.5)");
-        dv.ProfileTeams[dv.ReaderProfileId].Should().BeEquivalentTo(new[] { dv.RootDefaultTeamId, dv.DefaultTeamOf(unit.Id).Id });
+        dv.ProfileTeams[dv.ReaderProfileId].Should().BeEquivalentTo(
+            new[] { dv.RootDefaultTeamId, dv.CustomerDefaultTeamId, dv.DefaultTeamOf(unit.Id).Id });
         dv.ProfileUsers[dv.WriterProfileId].Should().BeEquivalentTo(new[] { dv.BffAppUser, dv.MiAppUser });
-        dv.ProfileTeams[dv.LinkReaderProfileId].Should().BeEquivalentTo(new[] { dv.RootDefaultTeamId, dv.DefaultTeamOf(unit.Id).Id },
+        dv.ProfileTeams[dv.LinkReaderProfileId].Should().BeEquivalentTo(
+            new[] { dv.RootDefaultTeamId, dv.CustomerDefaultTeamId, dv.DefaultTeamOf(unit.Id).Id },
             "S16: every default team reads the identity-binding columns");
         dv.ProfileUsers[dv.LinkReaderProfileId].Should().BeEmpty();
         dv.ProfileUsers[dv.LinkWriterProfileId].Should().BeEquivalentTo(new[] { dv.BffAppUser, dv.MiAppUser },
@@ -105,7 +108,7 @@ public sealed class SecureRecordSetupProcedureTests
 
         var plan = outcome.Should().BeOfType<SecureRecordSetupOutcome.Planned>().Subject.Actions;
         dv.Writes.Should().BeEmpty();
-        dv.Units.Should().ContainSingle("nothing was created");
+        dv.Units.Should().HaveCount(2, "nothing was created (the root and the customer unit only)");
         plan.Should().Contain(a => a.StartsWith("create business unit", StringComparison.Ordinal));
         plan.Should().Contain(a => a.StartsWith("create the Owner team", StringComparison.Ordinal));
         plan.Should().Contain(a => a.StartsWith("create the role", StringComparison.Ordinal));
@@ -335,6 +338,80 @@ public sealed class SecureRecordSetupProcedureTests
             .Diagnostic.Should().Contain($"are not in '{SecureRecordSetupProcedure.IdentityLinkReaderProfileName}'");
     }
 
+    // ------------------------------------------------------------ S19–S21 (ISS-020 / #1565)
+
+    [Fact]
+    public async Task StandingGrantProfile_GainsTheBffApplicationUsers_AndNobodyElse()
+    {
+        var dv = NewEnv();
+        var administrator = Guid.NewGuid();
+        dv.ProfileUsers[dv.StandingGrantProfileId].Add(administrator);   // a grant-privileged human: an operator decision, kept
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+
+        dv.ProfileUsers[dv.StandingGrantProfileId].Should().BeEquivalentTo(new[] { administrator, dv.BffAppUser, dv.MiAppUser });
+        dv.ProfileTeams[dv.StandingGrantProfileId].Should().BeEmpty();
+        dv.Writes.Where(w => w.Contains(dv.StandingGrantProfileId.ToString(), StringComparison.Ordinal))
+            .Should().OnlyContain(w => w.StartsWith("AssociateProfileUser", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task StandingGrantProfile_WithOneBffUserAlready_GainsOnlyTheOther()
+    {
+        var dv = await ConfiguredEnvAsync();
+        dv.ProfileUsers[dv.StandingGrantProfileId].Remove(dv.MiAppUser);
+
+        var outcome = await RunAsync(dv);
+
+        outcome.Should().BeOfType<SecureRecordSetupOutcome.Applied>().Which.Actions.Should().ContainSingle()
+            .Which.Should().Be($"add BFF application user {dv.MiAppUser} to '{SecureRecordSetupProcedure.StandingGrantProfileName}'");
+        dv.Writes.Should().ContainSingle().Which.Should().Be($"AssociateProfileUser {dv.StandingGrantProfileId} {dv.MiAppUser}");
+    }
+
+    [Fact]
+    public async Task StandingGrantProfile_OnAnEnvironmentConfiguredBeforeS19_IsAddedAlone_AndADryRunPlansItWithoutWriting()
+    {
+        var dv = await ConfiguredEnvAsync();
+        dv.ProfileUsers[dv.StandingGrantProfileId].Clear();
+
+        var plan = (await RunAsync(dv, dryRun: true)).Should().BeOfType<SecureRecordSetupOutcome.Planned>().Subject.Actions;
+
+        dv.Writes.Should().BeEmpty();
+        plan.Should().BeEquivalentTo(new[]
+        {
+            $"add BFF application user {dv.BffAppUser} to '{SecureRecordSetupProcedure.StandingGrantProfileName}'",
+            $"add BFF application user {dv.MiAppUser} to '{SecureRecordSetupProcedure.StandingGrantProfileName}'",
+        });
+
+        (await RunAsync(dv)).Should().BeOfType<SecureRecordSetupOutcome.Applied>();
+        dv.Writes.Should().OnlyContain(w => w.StartsWith("AssociateProfileUser", StringComparison.Ordinal));
+        dv.ProfileUsers[dv.StandingGrantProfileId].Should().BeEquivalentTo(new[] { dv.BffAppUser, dv.MiAppUser });
+    }
+
+    [Fact]
+    public async Task Verify_RefusesWhenAStandingGrantMembershipDidNotStick()
+    {
+        var dv = NewEnv();
+        dv.ProfileAssociationsIgnored.Add(dv.StandingGrantProfileId);
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.VerifyFailed, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain($"are not members of '{SecureRecordSetupProcedure.StandingGrantProfileName}'");
+    }
+
+    [Fact]
+    public async Task NoAccessEntryRoleSplit_IsNeverRepairedHere()
+    {
+        var dv = NewEnv();
+        dv.RolePrivileges[dv.CoreUserRoleId][dv.NoAccessEntryReadPrivilegeId] = ("prvReadsprk_noaccessentry", "Global");
+
+        var refused = Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable);
+
+        refused.Diagnostic.Should().Contain("Set-NoAccessEntryRolePrivileges.ps1");
+        dv.RolePrivileges[dv.CoreUserRoleId].Should().ContainKey(dv.NoAccessEntryReadPrivilegeId, "a refusal changes nothing");
+        dv.Writes.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task NullSecureFlags_AreSetFalse_OnEveryLockedTable_ThenNothingRemains()
     {
@@ -403,6 +480,24 @@ public sealed class SecureRecordSetupProcedureTests
                 SecureRecordSetupRejectionCodes.BusinessUnitWrongParent, FailureClass.QuarantineRequired },
             { "user in the unit", dv => dv.UserUnit[Guid.NewGuid()] = SecureUnit(dv),
                 SecureRecordSetupRejectionCodes.BusinessUnitHasUsers, FailureClass.QuarantineRequired },
+
+            // ---- T259 (ISS-010, owner 2026-10-09): §6 T1/T3 — the customer's unit and the BFF's application users ----
+            { "customer unit missing", dv => dv.Units.RemoveAll(u => u.Id == dv.CustomerUnitId),
+                SecureRecordSetupRejectionCodes.CustomerBusinessUnitMissing, FailureClass.QuarantineRequired },
+            { "customer unit under another unit (Deep there could reach a sibling's records)", dv =>
+                {
+                    var other = Guid.NewGuid();
+                    dv.Units.Add(new SecureSetupBusinessUnit(other, "Holding", dv.RootUnitId));
+                    dv.Units.RemoveAll(u => u.Id == dv.CustomerUnitId);
+                    dv.Units.Add(new SecureSetupBusinessUnit(dv.CustomerUnitId, FakeSecureRecordSetupDataverse.CustomerUnitName, other));
+                },
+                SecureRecordSetupRejectionCodes.CustomerBusinessUnitWrongParent, FailureClass.QuarantineRequired },
+            { "BFF application user in the ROOT unit", dv => dv.UserUnit[dv.BffAppUser] = dv.RootUnitId,
+                SecureRecordSetupRejectionCodes.AppUserOutsideCustomerBusinessUnit, FailureClass.QuarantineRequired },
+            { "managed-identity application user in the Secure Record unit", dv => dv.UserUnit[dv.MiAppUser] = SecureUnit(dv),
+                SecureRecordSetupRejectionCodes.AppUserOutsideCustomerBusinessUnit, FailureClass.QuarantineRequired },
+            { "BFF application user does not exist", dv => dv.UserUnit.Remove(dv.BffAppUser),
+                SecureRecordSetupRejectionCodes.AppUserOutsideCustomerBusinessUnit, FailureClass.QuarantineRequired },
             { "two named teams", dv =>
                 {
                     var unit = SecureUnit(dv);
@@ -517,6 +612,44 @@ public sealed class SecureRecordSetupProcedureTests
                     permissions.Add(new SecureSetupFieldPermission(dv.LinkReaderProfileId, "systemuser", 4, 0, 4));
                 },
                 SecureRecordSetupRejectionCodes.IdentityLinkLockOtherWriter, FailureClass.QuarantineRequired },
+
+            // ---- S19–S21: the standing-grant environment (ISS-020 / #1565) ----
+            { "standing-grant profile missing", dv => dv.Profiles.Remove(SecureRecordSetupProcedure.StandingGrantProfileName),
+                SecureRecordSetupRejectionCodes.FieldProfileUnresolved, FailureClass.Resumable },
+            { "two standing-grant profiles", dv => dv.AddProfile(SecureRecordSetupProcedure.StandingGrantProfileName),
+                SecureRecordSetupRejectionCodes.FieldProfileUnresolved, FailureClass.Resumable },
+            { "contact.sprk_standinggrant not secured", dv =>
+                    dv.SecuredColumns[FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_standinggrant")] = false,
+                SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "contact.sprk_standinggrant absent", dv =>
+                    dv.SecuredColumns.Remove(FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_standinggrant")),
+                SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "standing-grant profile grants no Read", dv =>
+                {
+                    var permissions = dv.ColumnPermissions("sprk_standinggrant");
+                    permissions.RemoveAll(p => p.ProfileId == dv.StandingGrantProfileId);
+                    permissions.Add(new SecureSetupFieldPermission(dv.StandingGrantProfileId, "contact", 0, 4, 4));
+                },
+                SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "standing-grant profile grants Read on another table only", dv =>
+                {
+                    var permissions = dv.ColumnPermissions("sprk_standinggrant");
+                    permissions.RemoveAll(p => p.ProfileId == dv.StandingGrantProfileId);
+                    permissions.Add(new SecureSetupFieldPermission(dv.StandingGrantProfileId, "sprk_externalparty", 4, 4, 4));
+                },
+                SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete, FailureClass.Resumable },
+            { "Access Administrator role missing from the root unit", dv => dv.Roles.RemoveAll(r => r.Id == dv.AccessAdministratorRoleId),
+                SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable },
+            { "Core User role missing from the root unit", dv => dv.Roles.RemoveAll(r => r.Id == dv.CoreUserRoleId),
+                SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable },
+            { "Access Administrator reads entries only at Basic", dv =>
+                    dv.RolePrivileges[dv.AccessAdministratorRoleId][dv.NoAccessEntryReadPrivilegeId] = ("prvReadsprk_noaccessentry", "Basic"),
+                SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable },
+            { "Access Administrator lacks Read on entries", dv => dv.RolePrivileges[dv.AccessAdministratorRoleId].Clear(),
+                SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable },
+            { "Core User still reads entries (task 154 not applied)", dv =>
+                    dv.RolePrivileges[dv.CoreUserRoleId][dv.NoAccessEntryReadPrivilegeId] = ("prvReadsprk_noaccessentry", "Global"),
+                SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete, FailureClass.Resumable },
         };
         return data;
     }
@@ -534,6 +667,31 @@ public sealed class SecureRecordSetupProcedureTests
         refused.Diagnostic.Should().NotBeNullOrWhiteSpace(because);
         refused.Actions.Should().BeEmpty(because);
         dv.Writes.Should().BeEmpty($"{because}: every refusal comes before the first write");
+    }
+
+    [Fact]
+    public async Task CustomerUnit_ThatIsTheRoot_IsRefused_QuarantineRequired_WithoutWriting()
+    {
+        var dv = NewEnv();
+
+        var refused = Refused(await RunAsync(dv, customerUnit: dv.RootUnitId),
+            SecureRecordSetupRejectionCodes.CustomerBusinessUnitWrongParent, FailureClass.QuarantineRequired);
+
+        refused.Diagnostic.Should().Contain("it is the root");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CustomerUnit_NamedLikeTheSecureUnit_IsRefused_BecauseItsUsersWouldBeInTheSecureUnit()
+    {
+        // Intake refuses this name; if a unit called "Secure Record" were recorded as the customer's anyway, S1 adopts it as
+        // the Secure Record unit and S2 refuses the BFF's application users found in it.
+        var dv = NewEnv();
+        dv.Units.RemoveAll(u => u.Id == dv.CustomerUnitId);
+        dv.Units.Add(new SecureSetupBusinessUnit(dv.CustomerUnitId, Set.BusinessUnitName, dv.RootUnitId));
+
+        Refused(await RunAsync(dv), SecureRecordSetupRejectionCodes.BusinessUnitHasUsers, FailureClass.QuarantineRequired);
+        dv.Writes.Should().BeEmpty();
     }
 
     [Fact]

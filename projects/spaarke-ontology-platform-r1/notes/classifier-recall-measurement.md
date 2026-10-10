@@ -2,7 +2,7 @@
 
 > **Dates**: 2026-10-07 (schema, set drafted) · 2026-10-09 (run) · **Env**: `spaarkedev1` · branch `stream/d-074-run`
 > (base `cd470f100` on `docs/ontology-platform-design`)
-> **Status**: 🔴 **GATE FAILED: predicate recall 12/55 = 21.8% against the 80% floor (D-10 / D-64), measured on a synthetic
+> **Status at run 1 (superseded, see the latest update below)**: 🔴 **GATE FAILED: predicate recall 12/55 = 21.8% against the 80% floor (D-10 / D-64), measured on a synthetic
 > set.** STOPPED at the escalation trigger. R1 does not exit on criterion 11 / FR-40 until recall improves or the §0 claim
 > is re-scoped (both owner decisions). **The measurement found a probable root cause upstream of the classifier, §6.3:**
 > the deployed TRIAGE-EMAIL prompt is corrupted, so the task-072 guidance has never reached the model. Read §6 first;
@@ -10,10 +10,14 @@
 > **Update 2026-10-10 (§7):** the owner repaired the corruption, but the pre-run render check found a **second, older
 > blocker**: the Action's example inputs are objects, the JPS contract requires strings, so the prompt still falls back
 > to flat text and the guidance is still absent. **Run 2 was NOT executed** (0 model calls). STOPPED again for an owner decision.
-> **Update 2026-10-10 (§8), CURRENT:** example inputs fixed (mirror PR #1602, dev row written 15:12:08Z). The render is
+> **Update 2026-10-10 (§8):** example inputs fixed (mirror PR #1602, dev row written 15:12:08Z). The render is
 > verified on the JPS path with the guidance present. **Run 2: predicate recall 19/55 = 34.5% (Wilson 95% 23.4-47.7%).
 > The gate STILL FAILS.** The binding constraint is now the two-stage design (§8.4): TRIAGE-EMAIL is told to map
 > rung 5's free-form category, and rung 5 has no fee/scope vocabulary. STOPPED: classifier-design decision for the owner.
+> **Update 2026-10-10 (§10-§11), CURRENT: GATE PASSES.** D-117 is live (TRIAGE-EMAIL row rewrite plus rung 5 reading the
+> editable taxonomy, #1610). **Run 3 was INVALID** (token failures left items without the live taxonomy; not counted). **Run 4,
+> clean: predicate recall 49/55 = 89.1% (Wilson 95% 78.2-94.9%), precision 94.2%, exact accuracy 87.0%.** The pass depends on
+> #1610 and #1602 merging to master (§11.4). §6-§8 above are history.
 
 ## 1. D-49 conflict check with the email project (done BEFORE the column adds)
 
@@ -458,3 +462,101 @@ Not in the repo (mvp-technical-spec §16.3); the coordinator is logging that as 
 ```json
 {"$schema":"http://json-schema.org/draft-07/schema#","type":"object","additionalProperties":false,"required":["summary","obligations","category","priority","reviewOutcome"],"properties":{"summary":{"type":"string","description":"EXACTLY 2 lines (two short sentences) summarizing what this email is and what it requires, for a reviewer scanning a triage queue.","maxLength":320},"obligations":{"type":"array","description":"Concrete, human-readable action-phrase obligations grounded in the classification's obligations/suggestedActions signal and the message text (e.g. 'Respond to court by Friday, Aug 15'). Empty array when none apply — never fabricated.","items":{"type":"string","maxLength":200},"maxItems":8},"category":{"type":"string","description":"The triage category: the ONE entry of the firm's Dataverse-configured taxonomy (sprk_triagecategory) whose definition best fits the email text. The classification's freeform category is a hint only. Never invent a value outside the allowed list.","maxLength":100},"priority":{"type":"string","description":"Triage priority, derived from the classification's urgency signal and the mapped category's severity. One of the firm's configured priority levels (sprk_communication.sprk_triagepriority).","maxLength":20},"reviewOutcome":{"type":"string","description":"Suggested initial review routing for a human reviewer to confirm or override — never a final auto-applied decision. One of the closed review-outcome set (sprk_communication.sprk_reviewoutcome; D-05 — 'review outcome', not 'disposition').","maxLength":20}}}
 ```
+
+## 10. 2026-10-10: run 3 (D-117 live) - INVALID, not counted
+
+**Code under test (D-117, both parts live):** (a) the TRIAGE-EMAIL Action data rewrite of §9 (row live; mirror PR #1602) and
+(b) rung 5 reads the editable triage taxonomy (**PR #1610**, head `066be5c9c`, merged locally into the throwaway branch
+`tmp/074-run3-local` only; nothing of it is in this PR). Fixture, key and harness unchanged since run 1.
+
+Run at 2026-10-10T18:07Z. Output: `notes/074-run3-results.json`. Headline figures, **for the record only**:
+predicate recall 45/55 = 81.8% (Wilson 95% 69.7-89.8%), predicate precision 93.8%, exact accuracy 81.5%.
+
+**The run is INVALID and was not counted.** `Azure.Identity.AuthenticationFailedException` on several token acquisitions
+(15 warnings: `CommunicationTriageAi` could not resolve the Action, `LookupChoicesResolver` failed the `$choices` lookups for
+`category`, `priority` and `reviewOutcome`, `CommunicationClassificationAi` resolved no taxonomy rows). Items hit by those
+failures ran without the live `$choices` taxonomy; 3 items (L002, L004, L007) ended with no category at all. The harness
+validity guard failed the run, as designed. A number measured with part of the live taxonomy missing says nothing about the
+classifier, in either direction, so 81.8% is not evidence and is not used anywhere in the verdict.
+
+Cause: the credential chain, not the code. Re-run with the credential pinned (run 4).
+
+## 11. 2026-10-10: run 4 (D-117 live, clean). GATE PASSES at 89.1%
+
+### 11.1 Setup
+
+Same code as run 3 (D-117 (a) row live + D-117 (b) via #1610 in the throwaway local branch), **unchanged harness and
+fixture**. Only change: `AZURE_TOKEN_CREDENTIALS=AzureCliCredential`, so every token acquisition goes through the operator's
+az CLI session (ADR-028 E-2). Started 16:01 local, about 9.5 minutes, 184 model calls (`notes/074-run4-results.json`).
+
+Validity: **zero authentication failures, the guard-warning list is empty**, and the linear runs report
+"enforced 3 $choices field(s) as output-schema enum from the live Dataverse taxonomy". 92 items: 55 positives, 37 negatives.
+
+### 11.2 Run 4 numbers: recall on a synthetic set, same fixture and key as runs 1 and 2
+
+| Measure | Run 1 (flat text) | Run 2 (JPS + guidance) | **Run 4 (D-117 live)** | Gate |
+|---|---|---|---|---|
+| **Predicate recall** (fee-or-scope) | 12/55 = 21.8% | 19/55 = 34.5% | **49/55 = 89.1% (Wilson 95% 78.2-94.9%)** | >= 80%: **PASS** |
+| Strict recall, Fee / rate change | 4/27 = 14.8% | 7/27 = 25.9% | **24/27 = 88.9%** | reported |
+| Strict recall, Scope / budget change | 8/28 = 28.6% | 11/28 = 39.3% | **25/28 = 89.3%** | reported |
+| Predicate precision | 12/12 = 100% | 19/20 = 95.0% | **49/52 = 94.2%** | information |
+| Exact accuracy (10 categories) | 40/92 = 43.5% | 45/92 = 48.9% | **80/92 = 87.0%** | information |
+| Owner-labelled positives caught | 1/10 | 2/10 | 9/10 | |
+| Claude-labelled positives caught | 11/45 | 17/45 | 40/45 | |
+| Worst case for the key (missed Claude-labelled positives treated as negatives) | 12/21 = 57.1% | 19/27 = 70.4% | 49/50 = 98.0% | |
+
+D-10 gate: recall >= 80% on fee-or-scope, on >= 50 labelled items. **55 positives and 89.1% recall.** The lower Wilson bound
+(78.2%) is just under 80%, so the margin over the floor is real but not wide. The pass holds against the key's weakest point
+too: treating every missed Claude-labelled positive as a negative leaves recall at 49/50. Nothing was relabelled;
+`074-drafting-intent.json` stays sealed.
+
+### 11.3 The 6 predicate misses and 3 false positives (run 4)
+
+Misses (fee-or-scope item not placed in a fee-or-scope category). Pattern: the fee or scope change is real but is **not
+the headline of the email**, or the email reads as a client instruction or a billing notice, so the classifier files it
+under its generic neighbour. Two are buried in a status update, three are client-direction or approval-request shapes, one
+is a billing-terms notice.
+
+| Item | Key (source) | Predicted | Pattern |
+|---|---|---|---|
+| L021 | Scope / budget change (owner; Claude blind label said Fee) | Client instruction | Quarterly programme update; the 5% rate increase is a closing "separately, so it does not get lost" paragraph. Buried in a status update, and the key itself is disputed between Fee and Scope. |
+| L027 | Scope / budget change (Claude) | Client instruction | Weekly status update; the unplanned reciprocal easement (60-80 hours, "agree a budget") is the last paragraph. Buried in a status update. |
+| L030 | Fee / rate change (Claude) | Client instruction | Substituted timekeeper at $650/h against $480/h, phrased "Okay to proceed?". An approval request whose substance is a rate change. |
+| L044 | Fee / rate change (Claude) | Invoice / Billing | Billing currency moves from sterling to USD at a fixed 1.27 rate, sent by the firm's billing team. A billing-terms change that reads as an invoicing notice; hourly rates stay the same, so it is the weakest "fee" positive. |
+| L049 | Scope / budget change (Claude) | Client instruction | Client directs the review be extended to the 2019 and 2020 contracts. A client direction about quantity of work, no money mentioned. |
+| L083 | Fee / rate change (Claude) | Administrative | Revised outside counsel guidelines (3% rate-increase cap, first-year time not billable) with "please acknowledge". Rate rules inside a general guidelines notice. |
+
+False positives (non-fee/scope item placed in a fee-or-scope category). Pattern: two are **scope items by the email's text**
+that the owner filed as Scheduling (label disputes more than classifier errors); one is a rate-vocabulary trap.
+
+| Item | Key (source) | Predicted | Pattern |
+|---|---|---|---|
+| L009 | Scheduling (owner; Claude blind label said Scope) | Scope / budget change | Further interviews, "another two to three weeks ... beyond what we scoped originally". Reads as scope; the owner filed it as Scheduling. |
+| L018 | Scheduling (owner; Claude blind label said Scope) | Scope / budget change | Discovery runs three months longer, "re-baseline the budget". Same dispute as L009; also the false positive in run 2. |
+| L045 | Administrative (Claude) | Fee / rate change | "Please confirm current 2026 hourly rates ... No changes are being requested." Rates are the subject but nothing changes; the classifier keys on the rate vocabulary. |
+
+False positives lower precision, not recall, so counting them does not help the gate.
+
+### 11.4 What the pass depends on
+
+The live environment, not master, carries the pass. Until both PRs merge to master, a fresh deploy does not reproduce it:
+
+- **#1610** (rung 5 reads the editable triage taxonomy): the BFF code. Without it rung 5 keeps its fixed vocabulary and the
+  classifier is back to the run 2 anchoring problem (§8.4). Not merged when this was written.
+- **#1602** (TRIAGE-EMAIL mirror, to master): the dev row already matches it (§9.2), but master's mirror does not until it
+  merges, and a redeploy from master would overwrite the row.
+
+The run 3 / run 4 code is #1610 merged into a throwaway local branch (`tmp/074-run3-local`), so this note proves "this
+fixture and harness, against spaarkedev1, with those two changes live" and no more. Re-run the harness after both merge if
+the gate has to be shown against master.
+
+### 11.5 D-49 persistence
+
+Not updated in this change (docs only; no Dataverse writes). The `sprk_measuredrecall` rows still hold the run 2 values
+(Fee 25.93, Scope 39.29, §8.5). Run 4 strict recall to write: **Fee 88.89, Scope 89.29**, set size 92, measured on 2026-10-10.
+
+### 11.6 Verdict
+
+**GATE PASSES (D-10, FR-40, criterion 11): predicate recall 49/55 = 89.1% (Wilson 95% 78.2-94.9%) on 55 fee-or-scope
+positives, run 4, 2026-10-10, synthetic set and AI-labelled key (D-64, D-116). Run 3 (81.8%) is invalid and not counted. The
+pass depends on #1610 and #1602 merging to master. The 074 POML and TASK-INDEX are not marked complete here.**

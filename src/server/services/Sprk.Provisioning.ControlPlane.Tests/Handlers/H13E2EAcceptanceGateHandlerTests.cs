@@ -33,6 +33,9 @@
 //   AC-22..27 (task 230b) missing BffAppRegId → Resumable; the ARM keyless check Failed → QuarantineRequired
 //          StampKeyAuthEnabled, InfraFault / throw → Resumable StampKeylessInfraFault; an Inconclusive validation →
 //          Resumable ExtendedValidationInconclusive; BffAppRegId and the stamp coordinates reach the collaborators.
+//   AC-28..35 (task 260, ISS-014) the secure-record isolation census: isolated → Ready + gate h13-secure-isolation;
+//          findings / inert / a failed call → QuarantineRequired with distinct codes and never Ready; inconclusive or a
+//          throw → Resumable; a census verdict outranks an inconclusive live check; a trap failure still outranks it.
 //   AC-5a..g Each of 7 T1–T7 trap fail branches → QuarantineRequired + distinct code.
 //   AC-6a..d Each of 4 runtime I2–I5 invariant fail branches → QuarantineRequired + distinct code
 //          (task 230a: I1 is build-time — the I1 ArchTest — not a runtime invariant).
@@ -602,6 +605,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         seams.Invariants.CallCount.Should().Be(0);
         seams.Cost.CallCount.Should().Be(0);
         seams.Registry.CallCount.Should().Be(0);
+        seams.Validator.CensusCallCount.Should().Be(0, "a completed run is a no-op — the census is not re-run");
     }
 
     // ---------- AC-16 idempotency-key format determinism ----------
@@ -820,6 +824,140 @@ public sealed class H13E2EAcceptanceGateHandlerTests
             ResourceGroupName = run.InterStepState.ResourceGroupName,
             AppServiceName = run.InterStepState.AppServiceName,
         }, o => o.ExcludingMissingMembers());
+    }
+
+    // ---------- AC-28..35 (task 260, ISS-014): the secure-record isolation census gates Ready ----------
+
+    [Fact]
+    public async Task AC28_CensusIsolated_IsCalledOnceWithTheStampCoordinates_AndItsGateIsVerified()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-28");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        seams.Validator.CensusCallCount.Should().Be(1);
+        seams.Validator.LastCensusRequest!.BffAppRegId.Should().Be(run.InterStepState.BffAppRegId);
+        seams.Validator.LastCensusRequest.BffApiUrl.Should().Be(BffApiUrl);
+        repo.LastWrittenRun!.GateStates[H13Gates.SecureIsolationVerified].Status.Should().Be(GateState.Verified);
+        seams.Registry.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AC29_CensusFindings_Quarantines_WithTheFindings_AndNeverReachesReady()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-29");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => ((FakeValidator)s.Validator).Census = () =>
+            new SecureIsolationCensusOutcome.NotIsolated("findings", "SecureBusinessUnitHasUsers",
+                new[] { "SecureBusinessUnitHasUsers: 'Moved Attorney' sits in the Secure Record unit." }));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H13Rejections.SecureIsolationNotIsolated);
+        failure.Diagnostic.Should().Contain("Moved Attorney").And.Contain("SecureBusinessUnitHasUsers");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
+        seams.Registry.CallCount.Should().Be(0, "a run whose census is not isolated never reaches Ready");
+    }
+
+    [Fact]
+    public async Task AC30_CensusInert_Quarantines_InertIsNeverAPass()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-30");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => ((FakeValidator)s.Validator).Census = () =>
+            new SecureIsolationCensusOutcome.NotIsolated("inert", "SecureBusinessUnitNotFound",
+                new[] { "SecureBusinessUnitNotFound: Secure Record BU not found" }));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H13Rejections.SecureIsolationInert);
+        failure.Diagnostic.Should().Contain("H7b");
+        seams.Registry.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC31_CensusCallFailed_Quarantines()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-31");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => ((FakeValidator)s.Validator).Census = () =>
+            new SecureIsolationCensusOutcome.Failed("secure-isolation-census: the customer BFF refused the L2 identity (HTTP 403)."));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H13Rejections.SecureIsolationCensusFailed);
+        failure.Diagnostic.Should().Contain("HTTP 403");
+        seams.Registry.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC32_CensusInconclusive_IsResumable_AndNeverReachesReady()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-32");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => ((FakeValidator)s.Validator).Census = () =>
+            new SecureIsolationCensusOutcome.Inconclusive("secure-isolation-census: the BFF could not read the census (status 'error')"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H13Rejections.SecureIsolationInconclusive);
+        seams.Registry.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC33_CensusCallThrows_IsResumable_NeverReady()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-33");
+        var handler = BuildHandler(repo, out var seams, configureSeams: s => ((FakeValidator)s.Validator).Census = () =>
+            throw new HttpRequestException("socket closed"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H13Rejections.SecureIsolationInconclusive);
+        failure.Diagnostic.Should().Contain("socket closed");
+        seams.Registry.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC34_CensusNotIsolated_WinsOverAnInconclusiveLiveCheck()
+    {
+        // A verdict against the stamp outranks a transient fault elsewhere: resuming would not clear it.
+        var repo = new FakeRepository(BuildRun(), etag: "etag-34");
+        var handler = BuildHandler(repo, out _, configureSeams: s =>
+        {
+            s.Validator = FakeValidator.Inconclusive(new[] { "keyless-proof-redis" }, "keyless-proof-redis: unreachable");
+            ((FakeValidator)s.Validator).Census = () =>
+                new SecureIsolationCensusOutcome.NotIsolated("findings", "OwnerTeamHasMembers", new[] { "OwnerTeamHasMembers: x" });
+        });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(H13Rejections.SecureIsolationNotIsolated);
+    }
+
+    [Fact]
+    public async Task AC35_ATrapFailure_StillOutranksTheCensus()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-35");
+        var handler = BuildHandler(repo, out _, configureSeams: s =>
+        {
+            s.Traps = FakeTrapVerifier.WithFailure(TrapKind.T2DataverseAppUser, "missing app user");
+            ((FakeValidator)s.Validator).Census = () =>
+                new SecureIsolationCensusOutcome.NotIsolated("findings", "OwnerTeamHasMembers", new[] { "OwnerTeamHasMembers: x" });
+        });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(H13Rejections.TrapT2Failed);
     }
 
     // ---------- helpers ----------
@@ -1061,6 +1199,18 @@ public sealed class H13E2EAcceptanceGateHandlerTests
             CallCount++;
             LastRequest = request;
             return _run();
+        }
+
+        // Task 260: the secure-record isolation census — `isolated` unless a test says otherwise.
+        public Func<SecureIsolationCensusOutcome> Census { get; set; } = () => new SecureIsolationCensusOutcome.Isolated();
+        public int CensusCallCount { get; private set; }
+        public E2EValidationRequest? LastCensusRequest { get; private set; }
+
+        public Task<SecureIsolationCensusOutcome> RunSecureIsolationCensusAsync(E2EValidationRequest request, CancellationToken ct)
+        {
+            CensusCallCount++;
+            LastCensusRequest = request;
+            return Task.FromResult(Census());
         }
     }
 

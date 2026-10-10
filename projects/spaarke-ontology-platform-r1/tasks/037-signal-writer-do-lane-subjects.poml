@@ -4,7 +4,7 @@
     <title>Signal writer accepts Do-lane subjects: event, To Do, work assignment</title>
     <phase>3 Evaluator, Signal lifecycle and read</phase>
     <gate>007, 008, 024, 039 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Writes secured Dataverse rows for three new subject types; a wrong grouping matter is a data-exposure or worklist-grouping bug that does not error.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -106,6 +106,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-14, FR-30 (amended), FR-45(c); D-13, D-16, D-27, D-29.</notes>
+
+  <completion>COMPLETED 2026-10-10: PR #1603 (head 4b119cac0) merged into docs/ontology-platform-design as c321adf9a after independent review, fix round and re-check. Review F1 fixed: a reconcile whose core record or no-core owner changed is refused, not silently rewritten; 031 owns re-deriving them (031 POML constraint, 506d7abf2).</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

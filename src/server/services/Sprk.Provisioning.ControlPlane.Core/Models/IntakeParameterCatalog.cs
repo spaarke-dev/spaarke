@@ -17,8 +17,8 @@
 // configuration), and the BFF URL / build (H9 outputs) — so POST /api/runs now
 // rejects them. Task 245c made the operator-owned H11 / H14 / Communication
 // values required intake, validated at POST /api/runs with the rules the
-// handlers apply (UserProvisioningIntake for H11; non-blank / at-least-one for
-// H14) — so a payload a handler would refuse is refused before anything is
+// handlers apply (UserProvisioningIntake for H11; non-blank for
+// H14a) — so a payload a handler would refuse is refused before anything is
 // created. No known gaps remain (RunContextContractTests).
 // -----------------------------------------------------------------------------
 
@@ -105,6 +105,15 @@ public static class IntakeParameterCatalog
     /// </summary>
     public const string CustomerWorkforceTenantIds = "customerWorkforceTenantIds";
 
+    /// <summary>
+    /// The customer's full name (T237: the intake file's <c>displayName</c>, recorded once on the registry row as
+    /// <c>sprk_name</c>; the skill defaults it to the customerId). T259 (ISS-010, owner 2026-10-09) carries it into the run:
+    /// REQUIRED at POST /api/runs, rule <c>CustomerBusinessUnitIntake</c> (POST /api/runs and H10). H10 names the customer's
+    /// own business unit with it (created directly under the Dataverse root, a sibling of the Secure Record unit) and creates
+    /// the BFF's application users in that unit; H11 puts every guest there.
+    /// </summary>
+    public const string DisplayName = "displayName";
+
     /// <summary>H11 identity preset — <c>B2BGuest</c> | <c>NativeAccount</c> (design.md D6). Required.</summary>
     public const string IdentityPreset = "identityPreset";
 
@@ -124,12 +133,6 @@ public static class IntakeParameterCatalog
     /// Spaarke's for Model 1) before the run (prereqs.yaml <c>PRQ-C-08</c>; owner decision D14). Required.
     /// </summary>
     public const string ExchangePolicyScopeGroupId = "exchangePolicyScopeGroupId";
-
-    /// <summary>H14b — Graph subscription resource for the Communication module. At least one of this and <see cref="EmailGraphResource"/>.</summary>
-    public const string CommunicationGraphResource = "communicationGraphResource";
-
-    /// <summary>H14b — Graph subscription resource for the Email module. At least one of this and <see cref="CommunicationGraphResource"/>.</summary>
-    public const string EmailGraphResource = "emailGraphResource";
 
     /// <summary>H4 — the Communication module's default mailbox address (KV <c>Communication-DefaultMailbox</c>). Required.</summary>
     public const string CommunicationDefaultMailbox = "communicationDefaultMailbox";
@@ -176,12 +179,11 @@ public static class IntakeParameterCatalog
         new("openAiLocation", "Azure OpenAI region passed to customer.bicep (H2a) and checked by H0's OpenAI quota + pin probes (default westus3)."),
         new(ContainerTypeId, "SPE container-type id for the environment (spaarke-constants.yaml). Required GUID (T228 / G19). H4b (SharePointEmbedded__ContainerTypeId setting), H8, H13; selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners) for H0, H8 and T6."),
         new(CustomerWorkforceTenantIds, "T255 (INCOMING-141): JSON array of the CUSTOMER's Entra tenant id(s) whose employees use the stamp — Model 1: the customer's home tenant, never Spaarke's or the run's tenantId; Model 2: the customer's tenant. Required for every model; 1-10 distinct non-zero GUIDs, never a CIAM tenant (CustomerWorkforceTenantsRule, validated at POST /api/runs and stored canonical). H4b writes WorkforceIdentity__CustomerTenantIds__N on both slots; H13 T7 checks them."),
+        new(DisplayName, "The customer's full name (T237 displayName; also the registry row's sprk_name). T259 (ISS-010): required for every run; 1-160 characters, no control characters, no leading or trailing whitespace, never the Secure Record unit's name (CustomerBusinessUnitIntake, validated at POST /api/runs). H10 creates the customer's business unit with this name directly under the Dataverse root and creates the BFF's application users in it; H11 puts every guest in it."),
         new(IdentityPreset, "H11 identity preset: B2BGuest | NativeAccount (design.md D6); a Model1 run takes only B2BGuest (owner D2, T232). Required; validated at POST /api/runs (UserProvisioningIntake)."),
         new(UsersJson, "H11 users to provision: JSON array of {firstName, lastName, email, companyName} — names required for NativeAccount, email for B2BGuest; 1 to 500 entries. Required; validated at POST /api/runs (UserProvisioningIntake). Stored in the run document (owner decision D15)."),
         new(EnvironmentSecurityGroupId, "H11 (T232): object id of the customer environment's security group sprk-{customerId}-users, created by the operator and set on the environment before the run (prereqs.yaml PRQ-C-10). Required for B2BGuest (every Model 1 run); validated at POST /api/runs (UserProvisioningIntake). H11 adds each guest to it."),
         new(ExchangePolicyScopeGroupId, "H14a: mail-enabled security group scoping the Exchange RBAC for Applications role assignments — created by the Exchange admin of the stamp's tenant before the run (prereqs.yaml PRQ-C-08). Required."),
-        new(CommunicationGraphResource, "H14b: Graph subscription resource for the Communication module. At least one of this and emailGraphResource."),
-        new(EmailGraphResource, "H14b: Graph subscription resource for the Email module. At least one of this and communicationGraphResource."),
         new(CommunicationDefaultMailbox, "H4: Communication module default mailbox address (KV Communication-DefaultMailbox). Required."),
         new("confirmationAcknowledgment", "Operator confirmation phrase (audit; part of the H0 idempotency hash)."),
         new("intakeFileSha256", "Batch intake file hash (audit; part of the H0 idempotency hash)."),

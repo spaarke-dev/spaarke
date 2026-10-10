@@ -90,7 +90,7 @@ the OAuth "auth config". Microsoft offers no app-only or documented REST API for
   - The token comes from the tenant where Copilot runs. For a customer's staff that is their **home** tenant, not their
     guest identity in Spaarke's tenant. That is wrong for our BFFs, which are single-tenant and keyed on the guest `oid`.
 - The scope and base URL belong to the auth config. So **one auth config per customer BFF** is required, because the
-  scope (`api://{customerBffAppId}/access_as_user`) and the host differ.
+  scope (`api://{customerBffAppId}/user_impersonation`; corrected in §5.2) and the host differ.
 
 **Publishing and assignment APIs**
 - Graph `POST /appCatalogs/teamsApps` (publish) and `POST …/{id}/appDefinitions` (update) are **delegated only**.
@@ -151,13 +151,13 @@ Spaarke staff. No customer's agent goes into Spaarke's catalog.
     the add-in on 2026-10-08);
   - DA v1.8 with **no knowledge capabilities**, which keeps it free for Copilot Chat users;
   - plugin v2.4.
-- Four values differ per customer and are all read from the registry row:
+- Four values differ per customer and are all read from the registry row (the BFF app id needed a new column, §5.3):
 
   | Value | Source |
   |---|---|
   | Manifest `id` | Deterministic UUIDv5 of `customerId`, so it is stable across versions |
   | OpenAPI `servers[0].url` | Customer BFF base URL |
-  | OpenAPI scope | `api://{customerBffAppId}/access_as_user` |
+  | OpenAPI scope | `api://{customerBffAppId}/user_impersonation` (corrected from `access_as_user`, §5.2) |
   | Plugin `auth.reference_id` | The customer's auth config id |
 
 - The authorize and token URLs are Spaarke's tenant for all customers (Model 1).
@@ -172,7 +172,7 @@ Spaarke staff. No customer's agent goes into Spaarke's catalog.
 - **One auth config per customer:**
   - OAuth 2.0, PKCE, Any tenant, Any app;
   - base URL = that customer's BFF;
-  - scope = that BFF's `access_as_user offline_access`.
+  - scope = that BFF's `user_impersonation` plus `offline_access` (corrected from `access_as_user`, §5.2).
   - Its token can only carry that BFF's audience, so a package can't reach another customer's BFF.
 - No Entra SSO, because SSO tokens come from the home tenant (§1).
 - Sign-in lands on Spaarke's authority. The guest gets `tid` = Spaarke and `acct` = 1, the same identity the add-ins use.
@@ -220,6 +220,8 @@ id. It goes in the registry as a column, or on the run record if the owner prefe
 5. **Negative test 3:** the token's `aud` is only that BFF's app, which the BFF log shows.
 6. **Update test:** bump the version and re-upload. Ralph gets it with no prompt.
 7. Record which public-client platform worked (SPA or Mobile/desktop) and how long the refresh lasts.
+8. Hardening check: register the auth config restricted to the customer's derived manifest id (`applicableToApps`
+   set to that app, not `AnyApp`). If sign-in and calls still work, make it the default in the gate (§5.2 K4).
 
 ## 4. Questions for the owner (with recommended answers)
 
@@ -241,3 +243,86 @@ id. It goes in the registry as a column, or on the run record if the owner prefe
 7. **MDA side pane.** Do we accept that guests probably can't use the agent in the model-driven app's Copilot pane
    (Spaarke's tenant), and that only internal users can? *Recommended: yes. Document it, and test it once in the live
    test as an optional check.*
+
+## 5. Owner acceptance and alignment check (step 2, 2026-10-09)
+
+### 5.1 Acceptance
+
+On 2026-10-09 the owner accepted the §3 design and all seven §4 recommended answers: *"if these align with Copilot
+use and our access then ok"*. The condition is checked in §5.2. It holds, with one corrected value. The task's
+dependency on T240c is waived for the code: nothing in §3 needs the T240c directory.
+
+### 5.2 Alignment with ADR-028 and `.claude/constraints/auth.md`
+
+| Rule | What §3 does | Result |
+|---|---|---|
+| A4 / project rule: no secret or certificate on a confidential client; none on `bfac7f6e` | The "Spaarke Copilot Agent" client is a **public** client using PKCE, with no secret and no certificate. Nothing is added to `bfac7f6e` or to any customer BFF app. The BFF's own OBO keeps MI-FIC. | Aligned |
+| MUST use a tenant-specific authority, never `common`/`organizations` | The auth config's authorize/token URLs are `login.microsoftonline.com/{Spaarke tenant}/oauth2/v2.0/…`. The renderer refuses any tenant value that isn't a GUID. "Any Microsoft 365 organization" is the Teams token store's setting for which organizations may use the auth config. It is not the Entra authority. | Aligned |
+| auth.md MUST: BFF scope `api://{APP_ID}/user_impersonation`; MUST NOT: friendly scope names | §1/§3 said `access_as_user`, copied from the dev package (dev app `1e40baad`). H3 exposes **only** `user_impersonation` on a customer BFF app (`GraphAppRegistrationProvisioner`). H3 pre-authorizes clients **on that scope** (T240a). The BFF's `/api/config` publishes `api://{id}/user_impersonation`. With `access_as_user` every customer sign-in would fail with an unknown scope. | **Corrected** to `api://{customerBffAppId}/user_impersonation`, with `offline_access` in the auth config. Path C (comply). This changes a value, not any owner decision. |
+| Inbound validation (Microsoft.Identity.Web, `aud`), audit enrichment (`oid`, `appid`/`azp`, `tid`) | The token is issued by Spaarke's tenant to the guest, with `aud` = that customer's BFF app. The BFF is unchanged. The live test reads `azp` from the existing enrichment. | Aligned |
+| Client-side MUSTs (`@spaarke/auth`, `PublicClientApplication` only inside it, D-AUTH-7) | These govern Spaarke client code. The agent has none: Microsoft's token store holds the tokens and Copilot calls the API. The dev agent already works this way. | Not applicable (no deviation) |
+| A1/A3: CIAM external users never reach user-identity Copilot features (E-3 boundary) | The agent serves customer **staff**, who are Model 1 workforce B2B guests (D2). External contacts never get it. | Aligned |
+| "Our access": Model 1 users are guests in `sprk-{customerId}-users`; the BFF is single-tenant (Spaarke) | Sign-in lands on Spaarke's authority (`tid` = Spaarke, `acct` = 1), the same identity as the Word/Outlook add-ins (owner 2026-10-07). Dataverse roles on the stamp decide the data. The UAC-r2 workforce member test (`WorkforceIdentity`, `acct`) belongs to the external-access contact-binding plane. The agent calls only core endpoints (`/api/ai/*`, `/api/v1/documents`, `/api/v1/events`, `/api/workspace/*`, `/api/agent/*`, `/api/me`), so the open cross-project question about that test does not touch the agent. | Aligned |
+| Consent | H3 pre-authorizes the client on `user_impersonation` (the existing `PreAuthorizedClientAppIds`). The operator grants a one-time admin consent for `openid profile offline_access` on the client in Spaarke's tenant. No user sees a prompt. | Aligned |
+
+`AgentToken:*` / `AgentTokenService` are not on this path. No endpoint consumes them, so a stamp needs no `AgentToken`
+settings. Their comment says `AgentAppId` validates incoming tokens, but no code does. That is filed as ISS-017.
+
+**Known limit (K4), with a test step.** An auth config set to "Any Teams app" can be referenced by another app's
+package. Such an app could only send the signed-in guest's own token to that customer's BFF, because the base URL is
+bound in the auth config. The user would also have to install that app, and customer IT controls installs. The live
+test (§3, new step 8) tries restricting the auth config to the customer's derived manifest id. If that works, it
+becomes the registration default.
+
+### 5.3 Facts found while building (2026-10-09)
+
+- **Schema versions re-checked** against `developer.microsoft.com/json-schemas`:
+  - Teams manifest v1.30 exists; v1.31 returns 404.
+  - Plugin v2.4 exists; v2.5 returns 404.
+  - A **DA v1.9 schema file exists** (it adds `agent_skills`), but Learn still documents v1.8 as current
+    (`declarative-agent-manifest` → 1.8, ms.date 2026-09-30). Pinned: **v1.30 / v1.8 / v2.4**. Move to v1.9 when Learn
+    documents it.
+- **The registry had no BFF app id.** The run record (`InterStepState.BffAppRegId`) holds it, but the registry row did
+  not, so "all read from the registry row" was not yet true. **Needed → built**:
+  - a new column `sprk_bffappid`, which H13 promotes from `BffAppRegId` with the other Ready-state columns;
+  - the Q5 column `sprk_copilotauthconfigid`.
+  Both are in `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1`, and PRQ-E-14 checks them.
+  - **Order:** run the script on the admin environment **before** deploying an L2 build that contains this H13.
+    Otherwise H13's promoted-columns PATCH fails and the registry goes stale, although the run still completes.
+  - The BFF base URL comes from `sprk_appservicename` (`https://{name}.azurewebsites.net`, the same URL H9 deploys
+    and records).
+- **What was built** (no new L2 handler):
+  - the template source `src/solutions/CopilotAgent` (tokens in place of per-customer values);
+  - the module `scripts/copilot-agent/CopilotAgentPackage.psm1`;
+  - the template build `New-CopilotAgentTemplate` (module function, called by the workflow) and the script
+    `Render-CopilotAgentPackage.ps1`;
+  - the CI publish workflow `publish-copilot-agent-template.yml`;
+  - the Bicep parameter `copilotAgentClientAppId`;
+  - the two registry columns and the H13 promotion;
+  - tests and docs.
+  `scripts/Deploy-CopilotAgent.ps1` (Spaarke's own environments, Q4) now packages through the same renderer and keeps
+  its catalog id and dev values.
+
+### 5.4 Review (2026-10-09, one adversarial pass)
+
+**Fixed:**
+- **F4: stamps from before T257 have no `sprk_bffappid`.**
+  - Guide §7.12 step 7 now sets it with the auth config id.
+  - `-AllActive` skips an incomplete row, renders the rest and exits non-zero.
+  - Step 6a mirrors the column (proposed `.claude` edit E1).
+- **F2: the guide's step order** now puts the registry columns before the control-plane deploy.
+- **F2: PowerShell version.** `#Requires -Version 7.3` is on the module and both scripts.
+- **F2: a wrong script name** in §5.3.
+- **F2: the render script's SHA-256/version checks and the release-loop filter were untested.**
+  - Both are now tested.
+  - The filter also requires Model 1 (`sprk_tenancymodel eq 0`).
+- **K2: template checks threw on a malformed template.** They now report the problem.
+- **K2: a relative output path** now resolves against PowerShell's location.
+
+**Known limits:**
+- **K2: `Deploy-CopilotAgent.ps1` keeps dev defaults** for the auth config, catalog id and scope.
+  - Pointing it at another environment without overriding them gives a package that fails at sign-in.
+  - It serves only Spaarke's own environments; customer packages never use it.
+- **K1: the template publish can overwrite its rollback pointer.**
+  - On a same-commit re-run after `latest` already moved, `latest.previous` ends up pointing at the new version.
+  - This is inherited unchanged from the SpaarkeMaster workflow. Fix both together if it matters.

@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="261" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Stamp Graph least privilege (G31): H10 grants the stamp identity exactly the evidence-backed Graph app roles and removes the rest</title>
+    <phase>Model 1 dedicated-stamp remediation — G31 (owner approved 2026-10-09: "ensure this is accurately scoped")</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Directory write rights of every customer stamp identity inside Spaarke's own tenant (F1 tenant isolation).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>auth + tenant-isolation; Microsoft Graph permission semantics; two adversarial verifier passes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>auth, tenant-isolation, security, provisioning-handler, bff-api, testing</tags>
+    <deps>251, 259</deps>
+  </metadata>
+
+  <prompt>Build G31 (notes/model1-dedicated-remediation-plan.md row G31). H10 grants every Model 1 stamp's identity the BFF
+  GraphAppRoles catalog, which includes tenant-wide directory WRITE roles (Directory.ReadWrite.All, User.ReadWrite.All,
+  GroupMember.ReadWrite.All, User.Invite.All). Every stamp lives in Spaarke's tenant, so each customer's BFF identity can
+  modify Spaarke's own directory. Owner, 2026-10-09: "ensure this is accurately scoped" — evidence, not guesses.</prompt>
+
+  <goal>A stamp identity holds exactly the Microsoft Graph application roles its app-only calls need, per an
+  evidence table (call site → endpoint → Microsoft Learn least-privileged application permission). H10 grants that set
+  and removes every other Graph app role on the stamp identity (idempotent, each removal logged); H13 T3 fails on any
+  extra role. No feature loses a role it calls with.</goal>
+
+  <context>
+    <background>
+      The catalog `Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles` (mirrored by L2's `L2GraphAppRolesRegistry`) is the
+      list H10 grants on the stamp UAMI (minus the four mailbox roles H14a grants through Exchange, T251). The same file is
+      parsed by `scripts/Grant-GraphAppRoles.ps1`, which `Grant-ControlPlaneIdentity.ps1` uses to grant the L2 control-plane
+      identity, and by prereqs PRQ-E-07 — so the catalog today mixes the stamp's needs with the L2 Worker's own needs
+      (H11 invitations / users / group membership run as the L2 identity).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/DataverseAppUserGraphParity/* (H10, registry, granter, parity verifier)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/GraphAppRoleParityT3Probe.cs</file>
+      <file>scripts/Grant-GraphAppRoles.ps1, scripts/provisioning/Grant-ControlPlaneIdentity.ps1, scripts/provisioning-prereqs/prereqs.yaml (PRQ-E-07)</file>
+      <file>tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/GraphAppRoleParityTest.cs</file>
+      <file>Every BFF Graph caller: Infrastructure/Graph/**, Services/Communication/**, Services/Registration/**, Services/SpeAdmin/**</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Accurately scoped: every kept role has an app-only caller (file:line) and a Microsoft Learn least-privileged citation; every dropped role has no app-only caller on a stamp.</constraint>
+    <constraint source="owner">Do not silently drop functionality: a needed role that is broader than wished is kept and flagged with its residual risk.</constraint>
+    <constraint source="live">No live action: no Graph/Azure writes. Read-only GETs with the operator's own identity only; never `az account set`.</constraint>
+    <constraint source="CLAUDE.md §9 / D16 / D24">No secret or certificate anywhere; never touch app bfac7f6e; nothing added to "Spaarke Exchange Admin"; keep the Graph Explorer grant and group sprk-t251-spike-scope.</constraint>
+    <constraint source="CLAUDE.md §3">Sub-agents cannot write .claude/**: proposed .claude edits are returned verbatim.</constraint>
+    <constraint source="CLAUDE.md §10">BFF-touching: bff-extensions.md obligations incl. publish-size delta.</constraint>
+    <constraint source="review">Do not remove the L2 Worker's old Graph roles until an app-only POST /applications under Application.ReadWrite.OwnedBy is live-verified to leave the Worker as owner (note §10.1 K3).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Inventory every app-only Graph call the stamp BFF can make (and every call the L2 Worker makes AS the stamp identity), with endpoint, method, caller file:line, feature/route, gate; list delegated (OBO) calls separately.</step>
+    <step order="2">Per endpoint, the Microsoft Learn least-privileged application permission (URL per row); resource-scoped alternatives (FileStorageContainer.Selected, Sites.Selected, Exchange RBAC for Applications, OwnedBy permissions).</step>
+    <step order="3">Write notes/t261-stamp-graph-least-privilege.md: the table, verdicts keep/narrow/drop, residual risks, and the live identities affected (read-only).</step>
+    <step order="4">Change the catalog H10 grants to exactly the evidence set; give the L2 control-plane identity its own role list so shrinking the stamp catalog does not strip the L2 Worker; update scripts, prereqs, docs.</step>
+    <step order="5">H10 reconcile: remove every Graph app role on the stamp identity that is not in the set (idempotent, each removal logged); H13 T3 fails on an extra role.</step>
+    <step order="6">Tests: catalog equals the documented set (fails when a role is added without a note row); H10 adds missing / removes extra; existing tests updated. Build Spaarke.sln 0/0; BFF + ControlPlane tests; ArchTests with a build.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every role in GraphAppRoles.All has a row in notes/t261-stamp-graph-least-privilege.md with an app-only caller and a Learn URL; a test fails when the catalog and the note's documented set differ.</criterion>
+    <criterion testable="true">The stamp catalog contains none of Directory.ReadWrite.All, User.ReadWrite.All, GroupMember.ReadWrite.All, User.Invite.All unless the note shows an app-only stamp caller.</criterion>
+    <criterion testable="true">H10 with a stamp identity holding an extra Graph role DELETEs that assignment and logs it; with none extra it deletes nothing; a failed removal fails H10 (RetryableWithCleanup) without marking it complete.</criterion>
+    <criterion testable="true">H13 T3 fails when the stamp identity holds a Graph app role outside the Entra-granted set.</criterion>
+    <criterion testable="true">The L2 control-plane identity's role list no longer derives from the stamp catalog; Grant-ControlPlaneIdentity.ps1 and PRQ-E-07 use it.</criterion>
+    <criterion testable="true">dotnet build Spaarke.sln 0 errors / 0 warnings; ControlPlane tests, relevant BFF tests and Spaarke.ArchTests pass.</criterion>
+  </acceptance-criteria>
+
+  <component-justification>
+    New surface (root CLAUDE.md §11), one sentence per question each — full table: notes/t261-stamp-graph-least-privilege.md §10.3.
+    ControlPlaneGraphAppRoles.cs / PlatformBffGraphAppRoles.cs: overlap GraphAppRoles.cs; cannot be folded in because the three identities need different roles (and L2 cannot reference the BFF, ADR-010); without them shrinking the stamp set strips H11 and the platform loses roles unrecorded.
+    GraphAppRoleRest + Remove/FindUnexpected seams: extend the existing granter/verifier (shared REST code); without them a stamp keeps old roles.
+    Remove-StampGraphExtraRoles.ps1: the reconciler never re-dispatches H10 past its phase; without it pre-T261 stamps keep tenant-wide roles.
+    Demo-registration gate, search 501: extend RegistrationModule / SearchItemsEndpoints; without them stamps register directory writers and crash at start, and search returns a raw 403.
+  </component-justification>
+  <notes>
+    Completed 2026-10-09 (FULL rigor, no live action). Stamp set = FileStorageContainer.Selected (Entra) + Mail.Read/ReadWrite/Send
+    (Exchange, H14a); H10 removes every other Graph role; L2 Worker catalog separate. Evidence: notes/t261-stamp-graph-least-privilege.md.
+    Review round 1 (verifier A) fixed: replication-lag re-read, H10 idempotency fingerprint + Remove-StampGraphExtraRoles.ps1,
+    full-set demo gate, fail-closed REST (no value array, page cap, nextLink host), Grant script stamp guard. Filed ISS-018 / #1543.
+    Publish size: see the final report.
+  </notes>
+</task>

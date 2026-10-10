@@ -45,13 +45,25 @@ export async function fetchConfigRecord(
 }
 
 /**
+ * Which host the resolution runs for. `'external'` is the external SPA (outside counsel): there a grid never
+ * lists the entity's saved queries (unified-access-control-r2 task 157). REQUIRED on {@link resolveSource} so
+ * a caller has to say which it is; it cannot be forgotten.
+ */
+export type GridSourceHost = 'internal' | 'external';
+
+/**
  * Resolve `source` into a `{ entityName, fetchXml, layoutXml }` triple via savedquery
  * lookup, inline literal, or savedquery-set discovery + first match.
+ *
+ * `host === 'external'` refuses a savedquery-set source (returns null WITHOUT listing the entity's saved
+ * queries); the one configured `savedquery` id and an inline source resolve as on the internal host. This
+ * function never takes a caller-chosen view. The internal host's behaviour is unchanged.
  */
 export async function resolveSource(
   dataverseClient: IDataverseClient,
   configRecord: DataGridConfiguration | null,
-  fallbackEntityName: string | undefined
+  fallbackEntityName: string | undefined,
+  host: GridSourceHost
 ): Promise<SavedQueryResult | null> {
   if (!configRecord) {
     // No config record — caller may pass `fallbackEntityName` for synthesized fallback.
@@ -77,6 +89,7 @@ export async function resolveSource(
     };
   }
   if (source.type === 'savedquery-set') {
+    if (host === 'external') return null;
     try {
       const queries = await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName);
       const def = queries.find(q => q.isDefault) ?? queries[0];

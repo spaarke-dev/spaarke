@@ -24,6 +24,14 @@
  */
 
 import { isDataverseOrigin, normalizeTenant } from './tenant';
+import {
+  clearBffClientConfigRequests,
+  fetchBffClientTenant,
+  LOOKUP_FAILURE_BACKOFF_MS,
+  LOOKUP_TIMEOUT_MS,
+  normalizeBffBaseUrl,
+  timeoutSignal,
+} from './bffClientConfig';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,7 +43,7 @@ export interface IRuntimeConfig {
    * BFF API base URL (host only, WITHOUT /api suffix).
    * Example: "https://spe-api-dev-67e2xz.azurewebsites.net"
    *
-   * IMPORTANT: normalizeUrl() strips /api from the environment variable value.
+   * IMPORTANT: normalizeBffBaseUrl() strips /api from the environment variable value.
    * All client-side URL paths MUST include the /api/ prefix themselves.
    * e.g., fetch(`${bffBaseUrl}/api/ai/chat/sessions`)
    */
@@ -85,7 +93,7 @@ export function clearRuntimeConfigCache(): void {
   cacheTimestamp = 0;
   discoveredTenant = '';
   envTenantMissAt = 0;
-  bffTenantRequests.clear();
+  clearBffClientConfigRequests();
 }
 
 // ---------------------------------------------------------------------------
@@ -137,111 +145,11 @@ export function readCachedRuntimeTenant(): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// BFF /api/config/client tenant fallback (cached)
+// BFF /api/config/client (cached) — see bffClientConfig.ts
 // ---------------------------------------------------------------------------
 
-/**
- * `/api/config/client` is anonymous and rate-limited to 10 requests per minute
- * per IP (RateLimitingModule, "anonymous" policy). Staff behind one NAT share
- * that budget, so a successful answer is persisted per BFF host (the BFF's
- * tenant does not change) and concurrent or repeated callers on a page share
- * one request. A failure is remembered briefly so retries cannot hammer it.
- */
-const BFF_TENANT_LS_KEY = '__spaarke_bff_tenant__';
-const BFF_TENANT_TTL_MS = 24 * 60 * 60 * 1000;
-/** How long a failed tenant lookup (BFF or env var) is remembered before it is retried. */
-const TENANT_LOOKUP_FAILURE_BACKOFF_MS = 60 * 1000;
-/**
- * Upper bound for each tenant-discovery request. initAuth() serializes provider
- * selection, so an unreachable BFF or Dataverse endpoint must not stall every
- * later init on the page.
- */
-const TENANT_LOOKUP_TIMEOUT_MS = 8 * 1000;
-
-/** An AbortSignal that fires after `ms`, or undefined where the host has no AbortSignal support. */
-function timeoutSignal(ms: number): AbortSignal | undefined {
-  try {
-    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
-      return AbortSignal.timeout(ms);
-    }
-    if (typeof AbortController !== 'undefined') {
-      const controller = new AbortController();
-      setTimeout(() => controller.abort(), ms);
-      return controller.signal;
-    }
-  } catch {
-    /* fall through — no timeout available */
-  }
-  return undefined;
-}
-
-const bffTenantRequests = new Map<string, { promise: Promise<string>; at: number; ok: boolean }>();
-
-function readPersistedBffTenant(bffBaseUrl: string): string | undefined {
-  try {
-    const raw = localStorage.getItem(BFF_TENANT_LS_KEY);
-    if (!raw) return undefined;
-    const entry = JSON.parse(raw) as { bffBaseUrl?: string; tenantId?: string; _ts?: number };
-    if (entry.bffBaseUrl !== bffBaseUrl || !entry._ts || Date.now() - entry._ts > BFF_TENANT_TTL_MS) return undefined;
-    return normalizeTenant(entry.tenantId);
-  } catch {
-    return undefined;
-  }
-}
-
-function persistBffTenant(bffBaseUrl: string, tenantId: string): void {
-  try {
-    localStorage.setItem(BFF_TENANT_LS_KEY, JSON.stringify({ bffBaseUrl, tenantId, _ts: Date.now() }));
-  } catch {
-    /* localStorage may not be available */
-  }
-}
-
-/**
- * The tenant the BFF is configured for (`AzureAd:TenantId`, via the anonymous
- * `/api/config/client`), validated; `''` when unavailable. Never throws.
- */
-export function fetchBffClientTenant(bffBaseUrl: string | undefined): Promise<string> {
-  const base = typeof bffBaseUrl === 'string' ? normalizeUrl(bffBaseUrl) : '';
-  if (!/^https?:\/\//i.test(base)) return Promise.resolve('');
-
-  const persisted = readPersistedBffTenant(base);
-  if (persisted) return Promise.resolve(persisted);
-
-  const existing = bffTenantRequests.get(base);
-  if (existing && (existing.ok || Date.now() - existing.at < TENANT_LOOKUP_FAILURE_BACKOFF_MS)) {
-    return existing.promise;
-  }
-
-  const entry = { promise: Promise.resolve(''), at: Date.now(), ok: false };
-  entry.promise = (async () => {
-    try {
-      const resp = await fetch(`${base}/api/config/client`, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-        signal: timeoutSignal(TENANT_LOOKUP_TIMEOUT_MS),
-      });
-      if (!resp.ok) {
-        console.warn(`[Spaarke.RuntimeConfig] /api/config/client returned ${resp.status} (non-fatal)`);
-        return '';
-      }
-      const cfg = (await resp.json()) as { tenantId?: string };
-      const tenant = normalizeTenant(cfg.tenantId);
-      if (!tenant) {
-        console.warn('[Spaarke.RuntimeConfig] /api/config/client returned no usable tenantId (non-fatal)');
-        return '';
-      }
-      entry.ok = true;
-      persistBffTenant(base, tenant);
-      return tenant;
-    } catch (err) {
-      console.warn('[Spaarke.RuntimeConfig] /api/config/client tenant fallback failed (non-fatal):', err);
-      return '';
-    }
-  })();
-  bffTenantRequests.set(base, entry);
-  return entry.promise;
-}
+// Re-exported for existing importers of this module.
+export { fetchBffClientTenant };
 
 // ---------------------------------------------------------------------------
 // Xrm context resolution
@@ -504,7 +412,7 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
   let resolvedTenantId = envTenantId ?? xrmTenantId;
   let tenantSource = envTenantId ? 'env-var' : xrmTenantId ? 'xrm-fallback' : 'none';
 
-  const normalizedBffUrl = normalizeUrl(bffBaseUrl);
+  const normalizedBffUrl = normalizeBffBaseUrl(bffBaseUrl);
 
   // 3b. Last-resort tenant fallback: the BFF's anonymous /api/config/client endpoint (backed by the BFF's
   // AzureAd:TenantId app setting). This fires ONLY when neither the sprk_TenantId env var NOR Xrm yielded a
@@ -572,12 +480,12 @@ export async function discoverTenantId(bffBaseUrl?: string): Promise<string> {
   }
   if (!clientUrl && isDataverseOrigin()) clientUrl = window.location.origin;
 
-  if (clientUrl && Date.now() - envTenantMissAt >= TENANT_LOOKUP_FAILURE_BACKOFF_MS) {
+  if (clientUrl && Date.now() - envTenantMissAt >= LOOKUP_FAILURE_BACKOFF_MS) {
     try {
       const envVars = await queryEnvironmentVariables(
         clientUrl,
         [ENV_VAR_NAMES.TENANT_ID],
-        timeoutSignal(TENANT_LOOKUP_TIMEOUT_MS)
+        timeoutSignal(LOOKUP_TIMEOUT_MS)
       );
       const raw = envVars.get(ENV_VAR_NAMES.TENANT_ID);
       const tenant = normalizeTenant(raw);
@@ -600,25 +508,4 @@ export async function discoverTenantId(bffBaseUrl?: string): Promise<string> {
     return (discoveredTenant = bffTenant);
   }
   return '';
-}
-
-/**
- * Normalize a URL: trim whitespace, strip trailing slashes, strip trailing /api.
- *
- * WHY: The Dataverse env var (sprk_BffApiBaseUrl) stores the BFF URL as
- * "https://host/api", but all client-side route constants MUST include the
- * /api prefix (e.g., `${bffBaseUrl}/api/ai/chat/sessions`). Stripping /api
- * here prevents the double /api/api/ bug and establishes a single convention:
- *
- *   bffBaseUrl = host only (e.g., "https://spe-api-dev-67e2xz.azurewebsites.net")
- *   fetch URLs = `${bffBaseUrl}/api/...`
- *
- * If you are adding a new fetch() call, remember: the /api prefix is YOUR
- * responsibility, NOT included in bffBaseUrl.
- */
-function normalizeUrl(raw: string): string {
-  return raw
-    .trim()
-    .replace(/\/+$/, '')
-    .replace(/\/api$/i, '');
 }

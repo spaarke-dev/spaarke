@@ -26,8 +26,9 @@ public sealed class ExchangePolicyCountT4ProbeTests
     private const string UamiClientId = "11111111-2222-3333-4444-555555555555";
     private const string ScopeGroupId = "77777777-8888-9999-0000-111111111111";
 
+    // Task 261: MailboxSettings.Read left the stamp set (no BFF code reads mailbox settings).
     private static readonly string[] MailboxRoles =
-        { "Application Mail.Read", "Application Mail.ReadWrite", "Application Mail.Send", "Application MailboxSettings.Read" };
+        { "Application Mail.Read", "Application Mail.ReadWrite", "Application Mail.Send" };
 
     [Fact]
     public async Task EveryRoleInScope_NothingOutside_Passes_AndReadsTheRightApp()

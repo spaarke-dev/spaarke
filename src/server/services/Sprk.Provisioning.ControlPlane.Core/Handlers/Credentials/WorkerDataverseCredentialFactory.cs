@@ -2,7 +2,7 @@
 // WorkerDataverseCredentialFactory.cs
 //
 // FR-39 ordered-credential factory for the L2 Worker's own Dataverse auth as
-// the shared BFF app registration (punch row A44.5;
+// the customer's own BFF app registration (D-13; punch row A44.5;
 // customer-provisioning-orchestration-r1 task 205i, 2026-08-25). Consumed by
 // BOTH H7's DataverseWebApiEnvVarValuesWriter and H6's
 // DataverseWebApiSolutionImporter / DataverseWebApiSolutionVerifier — the two
@@ -127,7 +127,7 @@ public sealed class WorkerDataverseCredentialFactory
     /// <param name="credentials">The bound ordered-credential sub-options.</param>
     /// <param name="sectionName">Owning configuration section name (for messages), e.g. <c>EnvVarValues</c>.</param>
     /// <param name="tenantId">Entra tenant the client-credentials grant targets (§4D I1 — always explicit).</param>
-    /// <param name="clientId">The shared BFF app registration id (H3 output — InterStepState.BffAppRegId).</param>
+    /// <param name="clientId">The customer's BFF app registration id (H3 output — InterStepState.BffAppRegId; D-13).</param>
     /// <param name="clientSecret">
     /// The resolved secret slot value — <c>null</c>/empty on secret-free
     /// environments (empty is the SIGNAL, §9.1; the KV-ref app setting is

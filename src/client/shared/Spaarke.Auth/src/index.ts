@@ -24,6 +24,10 @@ export { VERSION } from './version';
 export { resolveRuntimeConfig, clearRuntimeConfigCache } from './resolveRuntimeConfig';
 export type { IRuntimeConfig } from './resolveRuntimeConfig';
 
+// Browser telemetry connection string for this environment (#1537) — from the BFF's
+// cached /api/config/client; '' when unavailable. Feed it to AppInsightsService.initializeFromRuntime().
+export { getTelemetryConnectionString } from './bffClientConfig';
+
 // Pluggable auth strategy (v2 — task 010)
 export type { AuthStrategy } from './strategies/AuthStrategy';
 export { BrowserMsalStrategy } from './strategies/BrowserMsalStrategy';

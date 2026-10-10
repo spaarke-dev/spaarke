@@ -12,6 +12,7 @@
  */
 
 import { createMembershipResolver } from '../membership';
+import { throwingAuthenticatedFetch } from '../../__tests__/helpers/authenticatedFetchDouble';
 
 function jsonResponse(status: number, body: unknown): Response {
   return {
@@ -73,7 +74,19 @@ describe('createMembershipResolver', () => {
     await expect(resolver('sprk_event')).resolves.toEqual([]);
   });
 
-  it('fails soft to null on a non-2xx response', async () => {
+  it.each([
+    [500, { status: 500, title: 'boom' }],
+    [403, { status: 403, title: 'Forbidden' }],
+    [401, {}],
+  ])('fails soft to null when fetch throws for a %s (the production shape)', async (status, body) => {
+    // `@spaarke/auth`'s authenticatedFetch THROWS ApiError / AuthError; it never returns a non-2xx.
+    const fetchMock = throwingAuthenticatedFetch(async () => jsonResponse(status, body));
+    const resolver = createMembershipResolver(fetchMock);
+    await expect(resolver('sprk_event')).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('control: fails soft to null on a non-2xx response a host RETURNS', async () => {
     const fetchMock = jest.fn().mockResolvedValue(jsonResponse(500, { error: 'boom' }));
     const resolver = createMembershipResolver(fetchMock);
     await expect(resolver('sprk_event')).resolves.toBeNull();

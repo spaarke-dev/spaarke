@@ -493,6 +493,7 @@
     <RolePrivilege name="prvReadsprk_aimodeldeployment" level="Global" />
     <RolePrivilege name="prvReadsprk_AIOutputType" level="Deep" />
     <RolePrivilege name="prvReadsprk_AIRetrievalMode" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_AISearchIndex" level="Deep" />
     <RolePrivilege name="prvReadsprk_AISearchIndex" level="Deep" />
     <RolePrivilege name="prvReadsprk_AISkillType" level="Deep" />
     <RolePrivilege name="prvReadsprk_AIToolType" level="Deep" />

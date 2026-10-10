@@ -18,7 +18,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..' '..')).Path
 $script:ManifestPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/prereqs.yaml'
 $script:Validate = Join-Path $repoRoot 'scripts/provisioning-prereqs/validate.ps1'
 $script:Catalog = Join-Path $repoRoot 'src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/PinnedModelCatalog.cs'
-$script:GraphRoles = Join-Path $repoRoot 'src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs'
+$script:GraphRoles = Join-Path $repoRoot 'src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/ControlPlaneGraphAppRoles.cs'
 
 if (-not (Get-Module -ListAvailable -Name powershell-yaml)) { Install-Module powershell-yaml -Scope CurrentUser -Force -Confirm:$false | Out-Null }
 Import-Module powershell-yaml
@@ -109,7 +109,7 @@ $script:Common = @{
     containerTypeId = 'fb3817a8-5a55-42ba-8cc9-12cf055168b8'; adminDvUrl = 'https://spaarkedev1.crm.dynamics.com'
     customerId = 'acme'; stampSubscriptionId = '44444444-4444-4444-4444-444444444444'; stampEnvironment = 'prod'
     dvUrl = 'https://spaarke-acme.crm.dynamics.com/'; exchangePolicyScopeGroupId = 'scope@acme.example'
-    environmentSecurityGroupId = '55555555-5555-5555-5555-555555555555'
+    environmentSecurityGroupId = '55555555-5555-5555-5555-555555555555'; customerManagementGroupId = 'spaarke-customers'
 }
 
 Describe 'prereqs.yaml recipes honour the exit-code contract' {
@@ -148,11 +148,39 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
         }
     }
 
+    Context 'PRQ-S-06 customer subscription in the spaarke-customers management group (T262, G36)' {
+        It 'exits 0 when the subscription''s parent is spaarke-customers (any case), naming the stamp subscription' {
+            Set-Rules $script:Dir az @(, @('management-group subscription show', '0', '/providers/Microsoft.Management/managementGroups/Spaarke-Customers\r\n'))
+            (Invoke-Recipe 'PRQ-S-06' $script:Common $script:Dir).Exit | Should Be 0
+            (Get-Content (Join-Path $script:Dir 'calls.log') -Raw) | Should Match '--name spaarke-customers --subscription 44444444-4444-4444-4444-444444444444'
+        }
+        It 'exits 1 when the parent is another group (e.g. spaarke-environments)' {
+            Set-Rules $script:Dir az @(, @('management-group subscription show', '0', '/providers/Microsoft.Management/managementGroups/spaarke-environments\n'))
+            $r = Invoke-Recipe 'PRQ-S-06' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'spaarke-environments'
+        }
+        It 'exits 1 when az cannot find the subscription under the group (NotFound, exit 3)' {
+            Set-Rules $script:Dir az @(, @('management-group subscription show', '3', ''))
+            $r = Invoke-Recipe 'PRQ-S-06' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'not a member'
+        }
+        It 'exits 1 on empty output with exit 0' {
+            Set-Rules $script:Dir az @(, @('management-group subscription show', '0', ''))
+            (Invoke-Recipe 'PRQ-S-06' $script:Common $script:Dir).Exit | Should Be 1
+        }
+        It 'the token resolves to spaarke-constants.yaml management_groups.customers.id' {
+            $mg = (Get-Content -Raw (Join-Path $repoRoot 'scripts/provisioning-prereqs/spaarke-constants.yaml') | ConvertFrom-Yaml).management_groups
+            $script:Common.customerManagementGroupId | Should Be $mg.customers.id
+        }
+    }
+
     Context 'PRQ-E-07 Graph app roles (T207: the old recipe lost its OData query to bash expansion of $filter)' {
         BeforeEach {
             $script:RoleIds = @(Select-String -Path $script:GraphRoles -Pattern '^\s*private const string Id[A-Za-z]+ = "([0-9a-f-]{36})"' | ForEach-Object { $_.Matches[0].Groups[1].Value })
         }
-        It 'parses a non-empty role catalog from GraphAppRoles.cs' { $script:RoleIds.Count | Should BeGreaterThan 10 }
+        It 'parses the L2 Worker role catalog from ControlPlaneGraphAppRoles.cs (task 261)' { $script:RoleIds.Count | Should BeGreaterThan 5 }
         It 'exits 0 when every catalog role is granted to the L2 UAMI on Graph' {
             Set-Rules $script:Dir az @(@('ad sp show', '0', 'graph-sp\n'), @('appRoleAssignments', '0', (($script:RoleIds -join '\r\n') + '\r\n')))
             (Invoke-Recipe 'PRQ-E-07' $script:Common $script:Dir).Exit | Should Be 0
@@ -293,6 +321,22 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
         }
     }
 
+    Context 'PRQ-C-14 customer attestation (outbound B2B collaboration; Spaarke cannot read the customer policy)' {
+        It 'exits 1 when the attestation is false or absent' {
+            foreach ($v in 'false', '') {
+                $r = Invoke-Recipe 'PRQ-C-14' ($script:Common + @{ customerOutboundB2BAttested = $v }) $script:Dir
+                $r.Exit | Should Be 1
+                $r.Output | Should Match 'PRQ-C-14'
+            }
+        }
+        It 'exits 0 when attested true, and 0 (SKIP) for a run that is not B2BGuest' {
+            (Invoke-Recipe 'PRQ-C-14' ($script:Common + @{ customerOutboundB2BAttested = 'true' }) $script:Dir).Exit | Should Be 0
+            $r = Invoke-Recipe 'PRQ-C-14' ($script:Common + @{ customerOutboundB2BAttested = 'notApplicable' }) $script:Dir
+            $r.Exit | Should Be 0
+            $r.Output | Should Match 'SKIP'
+        }
+    }
+
     Context 'PRQ-T-03 Entra app registration (az returns empty output and exit 0 on a miss)' {
         It 'exits 1 on empty output and 0 on a GUID' {
             Set-Rules $script:Dir az @(, @('ad app list', '0', ''))
@@ -364,6 +408,7 @@ Describe 'validate.ps1 (the recipe lints)' {
     check_recipe:
       cli: |
         az ad sp list --display-name "{env}" | Select-String "$undefinedVar"
+        echo x | grep -iF y
       expect: n/a
     remediation: none
 
@@ -378,6 +423,8 @@ Describe 'validate.ps1 (the recipe lints)' {
             $out | Should Match 'PRQ-X-99: recipe references \$undefinedVar'
             $out | Should Match 'PRQ-X-99: recipe has no explicit .exit 1.'
             $out | Should Match "PRQ-X-99: recipe runs under bash -c but uses the PowerShell cmdlet 'Select-String'"
+            # T262: lint e was inert (its code sat on one comment line joined by literal \n) until 2026-10-09.
+            $out | Should Match "PRQ-X-99: recipe uses 'grep' with both -i and -F"
         }
         finally { Remove-Item $bad -ErrorAction SilentlyContinue }
     }

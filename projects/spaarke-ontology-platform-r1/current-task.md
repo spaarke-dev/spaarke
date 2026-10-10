@@ -1,41 +1,35 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-09 late (main session). State only — history is in git log, task `<completion>`
-> blocks and `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (**D-106: ontology critical
-> path only**) and §6 gotchas. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-115; **D-115** = main session merges reviewed, green ontology PRs to master too; **D-107** = merge reviewed ontology PRs into the project branch when green; **D-113** = uac-r2's answers). Issues for after the
-> project: [`notes/defer-issues.md`](notes/defer-issues.md) (D-106 section, F-1..F-49). Sub-agents never edit this file.
+> **Last Updated**: 2026-10-10 (main session). State only — history is in git log, task `<completion>` blocks and
+> `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (**D-106: critical path only**;
+> merges D-107 branch + **D-115 master**) and §6 gotchas. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-118).
+> Issues for after the project: [`notes/defer-issues.md`](notes/defer-issues.md) (F-1..F-56; the 074 and 046 branches add their own F-rows: renumber on merge). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Orchestrating ontology critical-path lanes. 116 tasks: **65 ✅**, 2 🔄 (039, 130: code merged, live gates pending), 36 🔲, 9 ⏸️ deferred (D-106), 4 🚫. |
-| **Branch** | `docs/ontology-platform-design` (draft #1111). **Synced with master 2026-10-09 (`b2fc3fb78`, includes #1390/#1391, NSubstitute gone; Signal-ownership invariant renumbered I-18).** ArchTests: 9 red in `ExternalSpaGridViewSelectorGuardTests` since #1531 (054 moved `resolveSource` to `resolveGridSource.ts`), lane-guard fixing. |
-| **Rule** | **D-106:** fix only what ontology functionality needs; document everything else in `notes/defer-issues.md`. Every sub-agent/reviewer prompt carries it. Merges: D-107 (branch) + D-115 (master), after review + green CI. |
-| **Critical path** | 039 writer PR + live gate (lane-039) → 037 → 031 evaluator → 032/033/034 → 035 deploy BFF → 038/050 → 059 worklist → 055 deploy Console → 064. Decision path: 040 (after 039) + 048 → 046 → 043 commit route → 058 wizard → 045. |
-| **Next Action** | Act on lane notifications: each PR → independent review (carrying D-106) → merge per D-107/D-115. On lane-039's PR message: review the merge delta (code was reviewed 2026-10-08) and merge; on its final report: close 039 (POML + index), then start **037** and **040**. |
+| **Task** | Orchestrating ontology lanes. 116 tasks: **68 ✅**, 1 🔄 (130: live proof in D-112 deploy), 34 🔲, 9 ⏸️, 4 🚫. 037 (#1603) and 040 (#1600) merged 2026-10-10. |
+| **Branch** | `docs/ontology-platform-design` (draft #1111) at `459fc505d`. Synced with master 2026-10-10 (`48742f4d2`). |
+| **Owner prefs (2026-10-10)** | Finish fast but not at a cost premium. Keep 101/102/103/025; **073 lowest priority, last**. Subagent cap 4 (owner may raise to 8). Every Agent call passes `model`. |
+| **Critical path** | **031 (running)** → 032/033/034/025 → 035 deploy BFF → 050/038 → 059 → 055 deploy Console → 064. Decision path: 040 ✅ + 046 → 043 → 058 → 045/049. Exit gate 074. |
+| **Next Action** | Act on lane notifications: PR → independent review → fix round → re-check → merge (`scratchpad/merge-when-green2.sh <pr> <head> <branch|master>`). When 046 merges start **043** (tell uac-r2 when its PR is up). |
 
-## Running now (SendMessage resumes an agent by name)
+## Running now
 
 | Lane | What | Then |
 |---|---|---|
-| **lane-039** | (1) PR of `stream/039-signal-writer` (5 commits, never merged) into the project branch; (2) remaining live gate on dev BFF `ebacd2e15` (uac-r2 deployed it: share/unshare/unsecure, Secure WA case, re-own in ~2 min, load re-measure, cleanup) | Review + merge PR; close 039 |
-| **lane-guard** | Fix `ExternalSpaGridViewSelectorGuardTests` after 054's move (check for a real external-host bypass first); PR to project branch; uac-r2 reviews (their test) | Review → uac-r2 OK → merge |
-| **lane-048** | Mechanical move of `OwnedChildWrite` + helpers to `Services/Dataverse` (off master, `git mv`, one direction ArchTest); PR to **master**, uac-r2 review | Review → uac-r2 OK → merge (D-115) → 046 |
+| **031** (opus, worktree `C:\wts-031`, branch `task/ontology-031-evaluator`) | Evaluator via task-execute | Independent review (adversarial-reviewer, opus) → fix → re-check → merge; mark 031 done |
+| **046 review 2** (adversarial-reviewer, opus) | Second pass on #1609 head d956779c3 (security-tagged: two passes). uac-r2 approved their parts; parity accepted (D-118) | Fix-now findings → lane fix + re-check; then merge; record "Reviewer: owner (D-118)" in parity notes; mark 046 done |
+| **074 run 4** (sonnet) | Clean re-run in `C:\wts-d74r` (`tmp/074-run3-local`, unpushed). Run 3 = 81.8% (Wilson 69.7–89.8%) but INVALID: Azure token failures left some items without the live taxonomy; harness guard failed it | ≥ 80% and guard clean → review/merge #1585 (renumber F-rows) + #1602 (mirror, master); mark 074 done. Else → owner |
+| **#1610 merge** (shell) | Rung-5 taxonomy (D-117 b); office-scope job timed out again (F-49), rerun 38072961261 | Merges into project branch when green |
 
-## Waiting on others
+## Waiting / owner
 
-| What | Waiting for | Then |
-|---|---|---|
-| **046**, **126** | 048 merged (agreed order #1391 ✅ → 048 → 046; #1501 rebases later) | 046 (`OwnedChildWrite.CreateAsync` via `POST /api/v1/child-records/sprk_workassignment`, D-113); 126 (BU-depth AppendTo rule, D-113) |
-| **074** recall exit gate | **D-116:** labeller-074 agent labelling all 92 blind (scratchpad `074-claude/`); owner's 24 saved apart (`074-owner/`) | Compare agreement on the 24 → final key (owner 24 + Claude 68) → resume the 074 agent (`a1bcb0bae3c363ca9`) to build the harness and run once |
-| **130** live proof, **111/114** | The D-112 full E2E dev deploy (035 BFF + 055 Console + ontology solution) | Mark 130/111/114 done on it |
-
-## Open owner questions / owner actions
-
-- **Checklist page** https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV: r2-r5 (wizards) belong to 111; r6/r7/r8 to deferred 121/122/129.
-- **Housekeeping (owner, by hand):** `C:\wt120d`, `C:\wtr1386`, `C:\wtrv1460`, `C:\wtrv1480*`, `C:\wts-b56`, `C:\wts-135`, `C:\wts-131`; older list in `notes/handoff-history/2026-10.md`.
+- **130 / 111 / 114**: run in the D-112 full E2E dev deploy.
+- **Housekeeping (owner, by hand):** many stale `C:\wt*` / `C:\wts-*` worktrees (list: `notes/handoff-history/2026-10.md`). A runaway publish-size loop (`C:\wts-132-out`, unexpanded `$d`) was killed 2026-10-10.
+- **Checklist page** https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV.
 
 ## Coordination
 
-uac-r2: post on #1355 **and** SendMessage their session (`spaarke-wt-unified-access-control-r2-*`); they reply by SendMessage.
+uac-r2: post on #1355 **and** SendMessage their session. They are fixing #1575 (F-52) and F-56 (secure-ness oracle in OwnedChildWrite, branch `fix/uac-r2-pair-appendto`). Email project owns the triage-email Action (#1584).

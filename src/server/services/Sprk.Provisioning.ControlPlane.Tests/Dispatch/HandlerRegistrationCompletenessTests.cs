@@ -70,7 +70,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Dispatch;
 /// Build-time completeness gate over the keyed <see cref="IProvisioningHandler"/>
 /// resolution surface: every <see cref="HandlerIds.Dispatchable"/> id MUST
 /// resolve to a handler whose <see cref="IProvisioningHandler.HandlerId"/>
-/// equals the key, and the three in-process H14 sub-steps (H14a/b/c) MUST
+/// equals the key, and the in-process H14 sub-step (H14a) MUST
 /// NOT be keyed-registered.
 /// </summary>
 public sealed class HandlerRegistrationCompletenessTests : IClassFixture<WorkerTestFactory>
@@ -115,8 +115,6 @@ public sealed class HandlerRegistrationCompletenessTests : IClassFixture<WorkerT
 
     [Theory]
     [InlineData(HandlerIds.H14a)]
-    [InlineData(HandlerIds.H14b)]
-    [InlineData(HandlerIds.H14c)]
     public void H14SubStepId_IsNotKeyedRegistered(string subStepHandlerId)
     {
         using var scope = _factory.Services.CreateScope();

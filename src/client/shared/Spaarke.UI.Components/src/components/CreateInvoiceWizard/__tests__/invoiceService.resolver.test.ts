@@ -34,6 +34,7 @@ import {
   _resetDisplayNameFieldCacheForTests,
 } from '../../../services/PolymorphicResolverService';
 import type { IUploadedFile } from '../../FileUpload/fileUploadTypes';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -196,7 +197,8 @@ function invoicePayload(ds: ReturnType<typeof makeDataService>): Record<string, 
  *   - anything else (the SPE upload PUT) -> the pre-existing success shape.
  */
 function stubAuthenticatedFetch(): jest.Mock {
-  return jest.fn(async (url: string) => {
+  // authenticatedFetch THROWS ApiError for a non-2xx: the double turns the 404 answer into that failure.
+  return throwingAuthenticatedFetch(async (url: string) => {
     if (url.includes('/field-mappings/')) {
       return { ok: false, status: 404, statusText: 'Not Found', text: async () => '' };
     }

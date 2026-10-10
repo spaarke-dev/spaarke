@@ -19,6 +19,8 @@ import type { SearchDomain } from '../../types';
 // ---------------------------------------------------------------------------
 
 jest.mock('@fluentui/react-icons', () => ({
+  // Keep the real exports (bundleIcon, bundled icons used by shared components); override only the stubs below.
+  ...jest.requireActual('@fluentui/react-icons'),
   DocumentMultipleRegular: () => <span data-testid="icon-documents" />,
   BriefcaseRegular: () => <span data-testid="icon-matters" />,
   TaskListSquareAddRegular: () => <span data-testid="icon-projects" />,

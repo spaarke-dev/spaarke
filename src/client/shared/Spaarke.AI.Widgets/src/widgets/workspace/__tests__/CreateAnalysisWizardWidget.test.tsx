@@ -52,6 +52,7 @@ jest.mock('@spaarke/ui-components', () => {
 import CreateAnalysisWizardWidget from '../CreateAnalysisWizardWidget';
 import type { CreateAnalysisWizardData } from '../CreateAnalysisWizardWidget';
 import { useDispatchPaneEvent } from '../../../events/useDispatchPaneEvent';
+import { ApiError } from '../../../../../Spaarke.Auth/src/errors';
 
 jest.mock('../../../events/useDispatchPaneEvent');
 
@@ -457,10 +458,12 @@ describe('CreateAnalysisWizardWidget', () => {
       return jest.fn(async (input: RequestInfo, init?: RequestInit) => {
         const url = String(input);
         if (url.endsWith('/api/ai/chat/sessions') && init?.method === 'POST') {
+          // authenticatedFetch THROWS ApiError for a non-2xx; it never resolves { ok: false }.
+          if (!sessionCreate.ok) throw new ApiError('HTTP 500', 500, null);
           return {
-            ok: sessionCreate.ok,
-            status: sessionCreate.ok ? 201 : 500,
-            json: async () => (sessionCreate.ok ? { sessionId: sessionCreate.sessionId } : {}),
+            ok: true,
+            status: 201,
+            json: async () => ({ sessionId: sessionCreate.sessionId }),
           } as unknown as Response;
         }
         return { ok: true, json: async () => ({}) } as unknown as Response;

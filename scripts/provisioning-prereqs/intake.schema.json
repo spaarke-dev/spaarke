@@ -32,9 +32,10 @@
     "displayName": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 200,
-      "pattern": "\\S",
-      "description": "The customer's full name (e.g. 'Northwind Traders'). Written to sprk_dataverseenvironment.sprk_name next to sprk_customerid, so the id-to-name decision is recorded once on the registry row and never re-derived. Optional; defaults to customerId."
+      "maxLength": 160,
+      "pattern": "^[^\\s\\u0000-\\u001F\\u007F-\\u009F](?:[^\\u0000-\\u001F\\u007F-\\u009F]*[^\\s\\u0000-\\u001F\\u007F-\\u009F])?$",
+      "not": { "pattern": "^[Ss][Ee][Cc][Uu][Rr][Ee] [Rr][Ee][Cc][Oo][Rr][Dd]$" },
+      "description": "The customer's full name (e.g. 'Northwind Traders'). Written to sprk_dataverseenvironment.sprk_name next to sprk_customerid, so the id-to-name decision is recorded once on the registry row and never re-derived. T259 (ISS-010, owner 2026-10-09): also sent to POST /api/runs as nonSecretParameters.displayName, which is REQUIRED there — H10 creates the customer's own Dataverse business unit with this name directly under the root (a sibling of the Secure Record unit) and creates the BFF's application users in it; H11 puts every guest in it. Optional in this file; the skill defaults it to customerId. 1-160 characters (Dataverse businessunit.name), no leading or trailing whitespace, no control character, and never 'Secure Record' in any case — the same rule POST /api/runs applies (CustomerBusinessUnitIntake: h10-customer-display-name-required / -invalid)."
     },
     "tenantId": {
       "type": "string",
@@ -140,6 +141,11 @@
       "default": "failFast",
       "description": "Batch policy for skill Step 0d Dataverse MCP disconnect (BAT-04). `failFast` → exit non-zero with runs/{runId}-mcp-disconnect.json diagnostic. `proceedWithFallback` → use `pac data` + raw Web API PS fallback path (Fallback Matrix F1). Ignored in interactive mode (operator answers yes/no prompt)."
     },
+    "customerOutboundB2BAttested": {
+      "type": "boolean",
+      "default": false,
+      "description": "Customer attestation for prereqs.yaml PRQ-C-14 (skill-local; NOT sent to POST /api/runs). Set true ONLY after the CUSTOMER's Entra admin has confirmed in writing that the customer tenant's cross-tenant access settings (outbound B2B collaboration, default or an organizational setting for Spaarke's tenant id) allow its users to become B2B guests in Spaarke's tenant. Spaarke's operator cannot read another tenant's policy, so this is an attestation, not a probe. Needed for a B2BGuest run (every Model 1 run): false/absent fails the Step 1e-ter customer pass. Ignored for other presets."
+    },
     "acknowledgeUpgradeMode": {
       "type": "boolean",
       "default": false,
@@ -200,16 +206,6 @@
       "pattern": "\\S",
       "description": "T245c — the mail-enabled security group that scopes H14a's Exchange ApplicationAccessPolicy (which mailboxes the BFF app + UAMI may use): its email address or object id. Created by the Exchange admin of the stamp's tenant BEFORE the run (prereqs.yaml PRQ-C-08; owner decision 2026-10-01). Required."
     },
-    "communicationGraphResource": {
-      "type": "string",
-      "pattern": "\\S",
-      "description": "T245c — Graph subscription resource H14b subscribes to for the Communication module (e.g. users/{mailbox}/messages). At least one of this and emailGraphResource (allOf below)."
-    },
-    "emailGraphResource": {
-      "type": "string",
-      "pattern": "\\S",
-      "description": "T245c — Graph subscription resource H14b subscribes to for the Email module. At least one of this and communicationGraphResource (allOf below)."
-    },
     "communicationDefaultMailbox": {
       "type": "string",
       "maxLength": 254,
@@ -253,10 +249,6 @@
           "profile": { "const": "customer-owned-model2" }
         }
       }
-    },
-    {
-      "description": "T245c — H14b needs at least one Graph subscription resource (same rule as POST /api/runs: h14b-no-webhook-targets-configured).",
-      "anyOf": [{ "required": ["communicationGraphResource"] }, { "required": ["emailGraphResource"] }]
     },
     {
       "description": "T245c — a NativeAccount user's UPN and display name are built from the names, so every user needs both (same rule as POST /api/runs / H11: userprov-invalid-user-entry).",
@@ -321,7 +313,6 @@
       ],
       "environmentSecurityGroupId": "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
       "exchangePolicyScopeGroupId": "spaarke-trial1-mail-scope@spaarke.com",
-      "communicationGraphResource": "users/trial1-comms@spaarke.com/messages",
       "communicationDefaultMailbox": "trial1-comms@spaarke.com"
     },
     {
@@ -346,8 +337,6 @@
       "users": [{ "firstName": "Ada", "lastName": "Lovelace", "email": "ada@acme.example", "companyName": "Acme" }],
       "environmentSecurityGroupId": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
       "exchangePolicyScopeGroupId": "spaarke-mail-scope@acme.example",
-      "communicationGraphResource": "users/legal-comms@acme.example/messages",
-      "emailGraphResource": "users/legal-intake@acme.example/messages",
       "communicationDefaultMailbox": "legal-comms@acme.example"
     }
   ]

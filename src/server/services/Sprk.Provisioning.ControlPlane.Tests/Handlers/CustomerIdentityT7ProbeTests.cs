@@ -198,6 +198,44 @@ public sealed class CustomerIdentityT7ProbeTests
         outcome.Should().BeOfType<TrapVerificationOutcome.Passed>();
     }
 
+    [Theory]
+    [InlineData("kv", "[UNRESOLVABLE")]       // ISS-021: a Key Vault reference was a silent pass
+    [InlineData("blank", "[UNRESOLVABLE")]
+    [InlineData("zero", "[UNRESOLVABLE")]
+    [InlineData("missing", "[UNRESOLVABLE")]
+    [InlineData("ambiguous", "[UNRESOLVABLE")]
+    public async Task ProbeAsync_Model1_RegistrationTenantUnreadable_FailsClosed_NotASilentPass(string shape, string expected)
+    {
+        var production = Settings(CustomerId);
+        switch (shape)
+        {
+            case "kv": production["AzureAd__TenantId"] = KeyVaultRef; break;
+            case "blank": production["AzureAd__TenantId"] = " "; break;
+            case "zero": production["AzureAd__TenantId"] = Guid.Empty.ToString(); break;
+            case "missing": production.Remove("AzureAd__TenantId"); break;
+            default: production["azuread__tenantid"] = "22222222-2222-2222-2222-222222222222"; break;
+        }
+        var arm = new FakeSlotSettingsArm(production, Settings(CustomerId));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain($"production {expected}").And.Contain("staging [OK]");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_Model2_RegistrationTenantAKeyVaultReference_StillPasses()
+    {
+        // Model 2: the Spaarke-tenant guard does not apply, so an unreadable AzureAd__TenantId is not a defect here.
+        var production = Settings(CustomerId);
+        production["AzureAd__TenantId"] = KeyVaultRef;
+        var arm = new FakeSlotSettingsArm(production, Settings(CustomerId));
+
+        var outcome = await NewProbe(arm).ProbeAsync(Request() with { TenancyModel = "Model2" }, CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Passed>();
+    }
+
     [Fact]
     public void FindSetting_CaseVariantNamesWithDifferentValues_IsAmbiguous()
     {

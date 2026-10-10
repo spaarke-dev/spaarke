@@ -82,6 +82,13 @@
       "populatedBy": "spaarke-constants.yaml microsoft_constants.graphAppId",
       "note": "Invariant across all Entra tenants — hardcoded as 00000003-0000-0000-c000-000000000000."
     },
+    "customerManagementGroupId": {
+      "availability": "always",
+      "source": "constants",
+      "shape": "Management-group id (name), lowercase-hyphenated: spaarke-customers",
+      "populatedBy": "spaarke-constants.yaml management_groups.customers.id",
+      "note": "Tenant-wide, not per env (T262, G36). PRQ-S-06 checks the customer subscription's parent is this group; infrastructure/bicep/management-groups.bicep creates it (its default mirrors the constant)."
+    },
     "sbNamespace": {
       "availability": "env",
       "source": "constants-template",
@@ -165,6 +172,13 @@
       "shape": "Space-separated Entra tenant ids (GUIDs) — the intake array customerWorkforceTenantIds joined with spaces",
       "populatedBy": "intake.schema.json customerWorkforceTenantIds property (skill Step 1e-bis); the customer's IT gives the tenant id(s) (PRQ-C-13)",
       "note": "PRQ-C-13 is once_per_customer — run by the skill's customer pass (Step 1e-ter). Required for every run (T255, INCOMING-141)."
+    },
+    "customerOutboundB2BAttested": {
+      "availability": "customer",
+      "source": "intake",
+      "shape": "true | notApplicable — `true` only when the customer's Entra admin has confirmed outbound B2B collaboration to Spaarke's tenant; `notApplicable` for a run that is not B2BGuest; anything else (false, absent) fails the check",
+      "populatedBy": "intake.schema.json customerOutboundB2BAttested property (skill Step 1e-bis); the skill maps a non-B2BGuest run to notApplicable (PRQ-C-14)",
+      "note": "PRQ-C-14 is once_per_customer — run by the skill's customer pass (Step 1e-ter). A customer attestation: Spaarke's operator cannot read another tenant's cross-tenant access settings. Skill-local intake field, NOT sent to POST /api/runs."
     }
   }
 }

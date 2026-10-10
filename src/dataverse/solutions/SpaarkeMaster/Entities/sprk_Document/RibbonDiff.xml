@@ -135,7 +135,9 @@
       <EnableRules>
         <EnableRule Id="Spaarke.Document.AddMultiple.EnableRule" />
       </EnableRules>
-      <DisplayRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_document.DisplayRule" />
+      </DisplayRules>
       <Actions>
         <JavaScriptFunction FunctionName="Spaarke_AddMultipleDocuments" Library="$webresource:sprk_subgrid_commands">
           <CrmParameter Value="SelectedControl" />
@@ -209,7 +211,9 @@
     </CommandDefinition>
     <CommandDefinition Id="sprk.Document.NewUpload.Grid.Command">
       <EnableRules />
-      <DisplayRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_document.DisplayRule" />
+      </DisplayRules>
       <Actions>
         <JavaScriptFunction FunctionName="Spaarke_UploadDocumentsStandalone" Library="$webresource:sprk_subgrid_commands" />
       </Actions>
@@ -372,6 +376,9 @@
       </DisplayRule>
       <DisplayRule Id="sprk.SpaarkeAi.Document.Form.DisplayRule">
         <FormStateRule State="Existing" />
+      </DisplayRule>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_document.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_document" PrivilegeType="Create" PrivilegeDepth="Basic" />
       </DisplayRule>
     </DisplayRules>
     <EnableRules>

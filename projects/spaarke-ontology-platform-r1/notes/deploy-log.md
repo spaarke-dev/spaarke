@@ -169,3 +169,17 @@ Spaarke Ontology Service (root copy `b1fb7ee0-bfbe-f111-aaaf-0022482913fc`): 46 
 ## 2026-10-09 - D-109: Read on budget revision (spaarkedev1, main session)
 
 Spaarke Basic User +`prvReadsprk_BudgetRevision` Deep (16:06:59Z, 648 -> 649). Secure Record Owner +`prvReadsprk_BudgetRevision` Basic via `Set-SecureRecordOwnerRolePrivileges.ps1` (-Apply 28 -> 33, SharePoint four stripped -> 29, -Verify PASS), negative control 403 before, positive control 201 x2 after (probes deleted). Details: notes/security-roles.md.
+
+## 2026-10-10 - Repair the triage-email Action prompt (spaarkedev1, main session; owner approved)
+
+- **Why:** task 074's recall run failed at 21.8%. The `sprk_analysisaction` row `triage-email` (`c1fa96bf-2697-f111-b8dc-7ced8ddc4a05`, last modified 2026-09-29T18:07:46Z) had 33 values replaced by PowerShell `ConvertTo-Json` artefacts (`{"Length": N}` / `{"Count": N}`): all 9 `instruction.constraints`, the 5 `metadata.tags`, and fields in the examples. `PromptSchemaRenderer` fell back to flat text, so the task-072 tie-breaker guidance never reached the model (#1584).
+- **What:** PATCH `sprk_systemprompt` = the repo mirror `infra/dataverse/actions/triage-email.action.json` minus the six deploy-row scalars and every `$comment*` key (the original deploy shape). Before writing, every non-corrupt value in the live row was verified byte-identical to the mirror, and every damaged string's `Length` matched the mirror text.
+- **Read-back:** 2026-10-10T13:33:08Z, identical to the repaired document; 9 string constraints; 0 Length/Count objects. A scan of all 79 `sprk_analysisaction` rows found no other row with the artefact.
+- **Backup** of the corrupt row: session scratchpad `triage-fix/live-row-backup.json`.
+- **Owner of the row:** the email project (email-communication-intelligence); told on #1584.
+
+## 2026-10-10 - D-110: AppendTo on AI search index for Spaarke Core User (spaarkedev1, main session)
+
+- **Why:** task 046 live proof (#1609 notes §F.1, issue #1607): ordinary users holding Create on `sprk_workassignment` (Spaarke Core User, Deep) could not create a work assignment when their business unit names an AI search index — the wizard binds `sprk_AI_Search_Index` and the role had Read but not AppendTo on `sprk_aisearchindex` (UserOwned). Same bind in the Matter/Project/Event/Invoice wizards. Needed for Assign Work as a decision next step (043/046).
+- **What:** `AddPrivilegesRole` on the root **Spaarke Core User** (`75e1b627-2ab6-f111-aaad-0022482913fc`): `prvAppendTosprk_AISearchIndex` at **Deep** (matching its Read). Standing approval D-110 (CRUD-class privilege on Core User for users to work).
+- **Read-back:** 743 → 744 privileges; exactly one added (`748d407e-3d88-4ba4-86bc-1245bbe00862`, Deep); none removed or changed. Repo role XML updated to match.

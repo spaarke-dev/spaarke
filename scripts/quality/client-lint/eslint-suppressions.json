@@ -1,0 +1,1417 @@
+{
+  "src/client/code-pages/SemanticSearch/src/App.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/code-pages/SemanticSearch/src/components/DocumentPreviewDialog.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/code-pages/SemanticSearch/src/components/EntityRecordDialog.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/code-pages/SemanticSearch/src/components/SearchResultsGrid.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/code-pages/SemanticSearch/src/hooks/useRecordSearch.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/code-pages/SemanticSearch/src/hooks/useSavedSearches.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/code-pages/SemanticSearch/src/hooks/useSearchViewDefinitions.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/code-pages/SemanticSearch/src/hooks/useSemanticSearch.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/code-pages/SemanticSearch/src/hooks/useTreemapLayout.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/code-pages/SemanticSearch/src/services/DataverseWebApiService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/code-pages/SemanticSearch/src/services/aiSearchIndexService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/code-pages/SemanticSearch/src/utils/groupResults.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 10
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/components/FeedbackButtons.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/components/GroundednessHighlight.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/hooks/useWorkspaceLayouts.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 9
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/providers/AiSessionProvider.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/types/shared.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/context/CitationContextWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/context/ContextWidgetAdapter.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/context/EntityInfoWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/context/ExecutionTraceWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 7
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/context/FilePreviewContextWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 15
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/context/FindingsWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/context/PinnedMemoryListWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 12
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/context/PlaybookGalleryWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/context/executionTraceBuffer.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/context/executionTraceNarration.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/AnalysisHubWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 23
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateMatterWizardWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 6
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateProjectWizardWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DataverseEntityViewWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentUploadWizardWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 7
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/EmailComposeWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/EmailWorkspaceWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/FindSimilarWizardWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 6
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/MeetingScheduleWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/MetricsDashboardWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/ReconciliationWorkspaceWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/RedlineViewerWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 6
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/SearchSelectWizardWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 8
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceWidgetWrapper.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 6
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/components/EmailAssociationsAndTracking/EmailConnectionsReview.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/components/EmailBody/EmailBodyView.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/components/EmailComposeActions/fetchCommunicationPrefill.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 6
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/components/EmailComposeActions/useEmailComposeActions.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingHeader/EmailReadingAttachments.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/components/EmailViewSelector/ensureAssociationColumns.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/components/EmailWorkspace/EmailWorkspace.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/components/EmailWorkspace/useEmailWorkspaceRecord.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/FieldUpdateReconcileTab.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 13
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/TaskReconcileTab.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 6
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationBrowseShell/ReconciliationBrowseShell.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationWorkspace/ReconciliationWorkspace.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 8
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/logic/actions/attachmentsSource.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/logic/actions/composerPrefill.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/logic/attachments/AttachmentApiService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/logic/attachments/CommunicationAttachmentsService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/logic/connections/ConnectionsWriteHandler.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 12
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 8
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/AgreementReviewSummaryPanel.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeBannerStack.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeCommentGutter.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 9
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeReanchorBanner.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 35
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/advisoryNoteFormatting.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/commentAnchorRange.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/composeChangesText.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 10
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/composeCitationResolver.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/composeDraftStore.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/composeIdentity.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/composeNumberAtomExtension.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/redlineProposalBaseline.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/trackChangesDiff.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useAiApplyValidation.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useComposeBroadcastChannel.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useComposeChangeSummary.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useComposeCheckoutLifecycle.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useComposeCommentThreads.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useComposeDocumentStyles.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 19
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/importedComments.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/importedRevisions.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/marks/RedlineCueExtension.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/marks/TrackChangesExtension.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/opaqueAtomNode.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 15
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/useComposeToolbarActivation.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.Compose.Components/src/widgets/useComposeWordShuttle.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.DailyBriefing.Components/src/components/ActivityNotesSection.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 13
+    }
+  },
+  "src/client/shared/Spaarke.DailyBriefing.Components/src/components/TldrSection.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingRender.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 7
+    }
+  },
+  "src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useInlineTodoCreate.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 9
+    }
+  },
+  "src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 17
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 15
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.buildTimeline.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/MessageAttachments.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/ConversationWorkspace/ConversationWorkspace.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/handoffSeedMapping.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/CreateInvoiceStep.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/invoiceService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/CreateMatterWizard.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/handoffSeedMapping.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/handoffSeedMapping.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/provisioningService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateRecordWizard.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/useHandoffFileLeg.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/reportCardService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/todoService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/todoWizardHostSupport.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/SelectWorkStep.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 7
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 16
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGridPageShell.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/HeaderCellContent.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/BoolFilterChip.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/LookupMultiFilterChip.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/OptionSetMultiFilterChip.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/commandBar/CommandBar.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 7
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 8
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/fetchXmlOverlay.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/filterChips/chipDiscovery.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/filterChips/chipFetchXml.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/sidePane/SidePaneFilterChannel.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 7
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/createXrmEmailComposeHandlers.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 21
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AssociationChips.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/BodyEditor.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 9
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/LinearRunProgress/LinearRunProgressList.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/MiniGraph/MiniGraph.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/PaneHeader/PaneHeader.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/Playbook/PlaybookCardGrid.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/Playbook/playbookService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/DocumentSelector.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/PlaybookLibraryShell.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 6
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/PolymorphicPicker/PolymorphicPicker.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/configResolution.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/DateField.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/lookupSearch.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 8
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/RecordNavigationModalShell.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/RichTextEditor/plugins/StreamingInsertPlugin.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/SlashCommandMenu.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/SprkChat/QuickActionChips.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatActionMenu.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatUploadZone.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionHandlers.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionMenuData.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatFileAttachment.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/SprkModal/sidePaneLayering.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeAnalysisStep.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummaryResultsStep.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/summarizeService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/accessStatus.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/hooks/useAiPrefill.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/hooks/useAiSummary.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/hooks/useDocumentHistory.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/hooks/useRecordFieldValues.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/hooks/useRelatedCount.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/AppInsightsService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/BffDataverseClient.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/EventTypeService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/FetchXmlService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/FieldMappingHandler.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/FieldSecurityService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 19
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/PrivilegeService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/RecordContainerResolver.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 6
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/XrmDataverseClient.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 12
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/analysisFileResolution.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/assignedAccessSync.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/communicationThreadListApi.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 8
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/communicationTimelineApi.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/document-upload/FileUploadService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/navigator/navItemRepository.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/navigator/navigatorCaptureService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/surfaceHandoff/handoffStorage.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/surfaceHandoff/launchSurface.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/surfaceHandoff/readHandoff.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 9
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/services/userLookup.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/utils/adapters/bffChildWriteAdapter.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 14
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/utils/adapters/xrmNavigationServiceAdapter.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 6
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/utils/ensureNavigatorSidePane.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/utils/themeStorage.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/utils/useWizardPageBootstrap.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/solutions/LegalWorkspace/src/App.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/LegalWorkspace/src/components/CreateMatter/matterService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/LegalWorkspace/src/components/FilePreview/filePreviewService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/LegalWorkspace/src/components/RecordCards/DocumentCard.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/LegalWorkspace/src/config/publicConfig.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/LegalWorkspace/src/hooks/useDailyDigestAutoPopup.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/LegalWorkspace/src/hooks/useDocumentsList.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/LegalWorkspace/src/hooks/useDocumentsTabList.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/LegalWorkspace/src/hooks/useEvents.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/solutions/LegalWorkspace/src/hooks/useInvoicesList.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/LegalWorkspace/src/hooks/useKanbanColumns.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/LegalWorkspace/src/hooks/useMattersList.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/LegalWorkspace/src/hooks/useProjectsList.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/LegalWorkspace/src/hooks/useSmartToDoBridge.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/LegalWorkspace/src/hooks/useTodoItems.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/LegalWorkspace/src/hooks/useWorkspaceLayouts.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/LegalWorkspace/src/sections/email.registration.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/LegalWorkspace/src/sections/todo.registration.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/LegalWorkspace/src/services/DataverseService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 21
+    }
+  },
+  "src/solutions/LegalWorkspace/src/services/DocumentApiService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/LegalWorkspace/src/services/telemetry.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/LegalWorkspace/src/services/xrmProvider.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/Reporting/src/App.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/Reporting/src/components/ModuleGate.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/Reporting/src/hooks/useReportingPrivilege.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/Reporting/src/hooks/useTokenRefresh.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/Reporting/src/services/reportingApi.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 7
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/assistant/useMyAssistant.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/assistant/userProfileService.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/compose/documentAssociationWrite.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/compose/gateAssociationContract.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/context/ComposeTraceHost.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/context/SemanticSearchCriteriaTool.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 13
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/DocumentUploadedEventStream.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/EmailPerItemCards.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/HistoryOverlay.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/MemoryDialog.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/ReferenceResolver.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/agreementTypeLookupWrite.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/assistantDraftHtml.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/chipPreference.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 4
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/composeDraftRouting.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/useAgreementReviewGate.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/useAttachments.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/useCapabilityDiscovery.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/useCommandRouting.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/useDocQaCitationBridge.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/conversation/useEditSupersession.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/workspace/ComposeDirectWidget.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/workspace/ManageWorkspacesPane.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 6
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 21
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 3
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/workspace/composeRunPersistence.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  },
+  "src/solutions/SpaarkeAi/src/components/workspace/useReviewedDocumentAnalysis.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/SpaarkeAi/src/config/publicConfig.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/SpaarkeAi/src/hooks/useAuthProbe.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/SpaarkeAi/src/hooks/useSessionRestore.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 2
+    }
+  },
+  "src/solutions/SpaarkeAi/src/main.tsx": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 5
+    }
+  },
+  "src/solutions/SpaarkeAi/src/services/pinnedWorkspaces.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 7
+    }
+  },
+  "src/solutions/SpaarkeAi/src/services/workspaceLayoutMutations.ts": {
+    "@typescript-eslint/no-unnecessary-condition": {
+      "count": 1
+    }
+  }
+}

@@ -21,6 +21,13 @@
 // nothing — not even an invitation); EnsureGuestUserAsync runs per redeemed guest
 // with the role ids resolved once.
 //
+// T259 (ISS-010 / #1486, owner decision 2026-10-09 — INCOMING-145 §6 T5): guests belong in the CUSTOMER's business
+// unit (H10's InterStepState.CustomerBusinessUnitId — a direct child of the root, sibling of the Secure Record unit),
+// never the root: Spaarke Basic User holds Deep read on project/matter/work assignment, and Deep at the root reaches the
+// Secure Record unit. Roles are resolved IN the customer unit (its inherited copies); a guest Dataverse added to the root
+// on the alternate-key read is moved to the customer unit BEFORE any role is associated (a business-unit change strips
+// roles), and the move is read back. A guest found in any other unit is never moved (InForeignBusinessUnit).
+//
 // §11 justification — existing: H10's IDataverseAppUserCreator (APPLICATION
 // users by applicationid) and H8's IDataverseRootBusinessUnitReader (root
 // business unit). Extension: the root-unit lookup is REUSED (injected reader);
@@ -43,16 +50,21 @@ public interface IDataverseGuestUserWriter
     Task<GuestAccessOutcome> ReadGuestAccessAsync(string environmentUrl, string tenantId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Resolves each role name to the ONE role of that name in the environment's root business unit. Run before anyone
-    /// is invited: a missing role, or a name that matches more than one role, writes nothing.
+    /// Resolves each role name to the ONE role of that name in <paramref name="businessUnitId"/> — the customer's unit
+    /// (T259; Dataverse copies every root role into each unit, and assigns a user only its own unit's roles). Run before
+    /// anyone is invited: a missing role, or a name that matches more than one role, writes nothing.
     /// </summary>
     Task<GuestRoleResolution> ResolveRolesAsync(
-        string environmentUrl, string tenantId, IReadOnlyList<string> roleNames, CancellationToken cancellationToken);
+        string environmentUrl, string tenantId, Guid businessUnitId, IReadOnlyList<string> roleNames,
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// Reads the systemuser for <see cref="DataverseGuestUserRequest.EntraObjectId"/> — Dataverse adds a member of the
-    /// environment security group on that read (root business unit) — and associates every role in
-    /// <see cref="DataverseGuestUserRequest.RoleIds"/> it does not hold yet.
+    /// environment security group on that read (root business unit) — moves it from the ROOT unit to
+    /// <see cref="DataverseGuestUserRequest.BusinessUnitId"/> (read back), and associates every role in
+    /// <see cref="DataverseGuestUserRequest.RoleIds"/> it does not hold yet. A user in any other unit is not moved:
+    /// <see cref="DataverseGuestUserOutcome.InForeignBusinessUnit"/>, nothing written. A user holding a role of another unit
+    /// is <see cref="DataverseGuestUserOutcome.HoldsRoleOutsideBusinessUnit"/>, nothing written or removed.
     /// </summary>
     Task<DataverseGuestUserOutcome> EnsureGuestUserAsync(DataverseGuestUserRequest request, CancellationToken cancellationToken);
 }
@@ -80,7 +92,7 @@ public abstract record GuestRoleResolution
     /// <summary>Every name resolved, in order.</summary>
     public sealed record Resolved(IReadOnlyList<Guid> RoleIds) : GuestRoleResolution;
 
-    /// <summary>A configured role is not in the environment's root business unit.</summary>
+    /// <summary>A configured role is not in the customer's business unit.</summary>
     public sealed record RoleNotFound(string RoleName) : GuestRoleResolution;
 
     /// <summary>The roles could not be read, or a name is ambiguous.</summary>
@@ -91,9 +103,10 @@ public abstract record GuestRoleResolution
 /// <param name="EnvironmentUrl">The adopted environment (InterStepState.DataverseEnvUrl, H5).</param>
 /// <param name="TenantId">The run's tenant (§4D I1 / I5).</param>
 /// <param name="EntraObjectId">The guest's Entra object id.</param>
-/// <param name="RoleIds">Root-business-unit role ids to hold (<see cref="IDataverseGuestUserWriter.ResolveRolesAsync"/>).</param>
+/// <param name="BusinessUnitId">T259: the customer's business unit (InterStepState.CustomerBusinessUnitId, H10).</param>
+/// <param name="RoleIds">Role ids IN <paramref name="BusinessUnitId"/> to hold (<see cref="IDataverseGuestUserWriter.ResolveRolesAsync"/>).</param>
 public sealed record DataverseGuestUserRequest(
-    string EnvironmentUrl, string TenantId, string EntraObjectId, IReadOnlyList<Guid> RoleIds);
+    string EnvironmentUrl, string TenantId, string EntraObjectId, Guid BusinessUnitId, IReadOnlyList<Guid> RoleIds);
 
 /// <summary>Result of <see cref="IDataverseGuestUserWriter.EnsureGuestUserAsync"/>.</summary>
 public abstract record DataverseGuestUserOutcome
@@ -105,4 +118,16 @@ public abstract record DataverseGuestUserOutcome
 
     /// <summary>The user or a role association could not be written.</summary>
     public sealed record Failure(string Diagnostic) : DataverseGuestUserOutcome;
+
+    /// <summary>
+    /// T259: the guest is a user in <paramref name="BusinessUnitId"/> — neither the customer's unit nor the root. Nothing
+    /// was written: moving a user out of an arbitrary unit (the Secure Record unit included) is an owner decision.
+    /// </summary>
+    public sealed record InForeignBusinessUnit(string SystemUserId, Guid BusinessUnitId) : DataverseGuestUserOutcome;
+
+    /// <summary>
+    /// T259: the guest (in the customer's unit) holds <paramref name="RoleId"/>, a role of another unit
+    /// (<paramref name="BusinessUnitId"/>) — a root role's Deep read would reach the Secure Record unit. Nothing removed.
+    /// </summary>
+    public sealed record HoldsRoleOutsideBusinessUnit(string SystemUserId, Guid RoleId, Guid BusinessUnitId) : DataverseGuestUserOutcome;
 }

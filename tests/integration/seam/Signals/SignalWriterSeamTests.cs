@@ -1,11 +1,13 @@
 using Azure.Core;
 using Azure.Identity;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 
@@ -116,11 +118,222 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
             "sprk_communication.sprk_regardingmatter on the seeded row points at the positive matter");
     }
 
+    /// <summary>
+    /// Task 039 (D-33) live gate, writer half: a Signal whose subject or grouping matter is under a SECURE record is
+    /// created owned by the Secure Record Owners team — set in the create, by the writer principal, through uac-r2's real
+    /// resolver — with the business unit derived from that team. Opt-in on top of the seam's own gate: set
+    /// <see cref="SecureSubjectEnvVar"/> to <c>logicalname:id</c> of a probe subject (prefix <c>zz-039-</c>) on a Secure
+    /// matter, or filed under a Secure record. The row is swept by <see cref="DisposeAsync"/> like every other row here.
+    /// </summary>
+    [Fact]
+    public async Task WriteAsync_SubjectUnderASecureRecord_IsOwnedByTheSecureRecordOwnersTeam_SetInTheCreate()
+    {
+        if (!_dv.IsLive) return;
+        if (Environment.GetEnvironmentVariable(SecureSubjectEnvVar) is not { Length: > 0 } raw) return;
+        var parts = raw.Split(':', 2);
+        var (subjectEntity, subjectId) = (parts[0], Guid.Parse(parts[1]));
+
+        var result = await BuildWriter().WriteAsync(Request(subjectId, subjectEntity, "zz-039 secure probe subject"));
+
+        var team = (await _dv.OperatorClient.RetrieveMultipleAsync(new QueryExpression("team")
+        {
+            ColumnSet = new ColumnSet("teamid", "businessunitid"),
+            Criteria = { Conditions = { new ConditionExpression("name", ConditionOperator.Equal, "Secure Record Owners") } },
+        })).Entities.Should().ContainSingle().Subject;
+        var row = await _dv.OperatorClient.RetrieveAsync("sprk_signal", result.SignalId,
+            new ColumnSet("ownerid", "owningteam", "owninguser", "owningbusinessunit"));
+
+        result.Created.Should().BeTrue();
+        result.SecureOwnerTeamId.Should().Be(team.Id);
+        row.GetAttributeValue<EntityReference>("owningteam")?.Id.Should().Be(team.Id, "the Secure Record Owners team owns it");
+        row.GetAttributeValue<EntityReference>("owninguser").Should().BeNull("never the writer on the secure path");
+        row.GetAttributeValue<EntityReference>("owningbusinessunit").Id
+            .Should().Be(team.GetAttributeValue<EntityReference>("businessunitid").Id, "the business unit derives from the team");
+    }
+
+    // ── Task 037: Do-lane subjects (event, To Do, work assignment) against spaarkedev1 ───────────────────────────
+    // Probe subjects are created by the OPERATOR client with the zz-037- prefix and deleted in DisposeAsync; the Signals
+    // are written by the WRITER principal (impersonated), so Dataverse enforces the writer's own privileges.
+
+    private const string DoTestPolicyCode = "ONTOLOGY-DEV-TEST-037";
+    private readonly List<(string Entity, Guid Id)> _probeRows = new();
+
+    private async Task<Guid> CreateProbeAsync(Entity probe)
+    {
+        var id = await _dv.OperatorClient.CreateAsync(probe);
+        _probeRows.Add((probe.LogicalName, id));
+        return id;
+    }
+
+    private static SignalWriteRequest DoRequest(Guid subjectId, string subjectEntity) => new(
+        PolicyId: PolicyId,
+        PolicyCode: DoTestPolicyCode,
+        PolicyVersionId: PolicyVersionId,
+        SubjectEntityLogicalName: subjectEntity,
+        SubjectId: subjectId,
+        SubjectDisplayName: "zz-037 probe",
+        ShortHeadline: "ONTOLOGY DEV TEST 037 - seam sanity check",
+        Lane: SignalWriter.LaneDo,
+        Severity: SignalWriter.SeverityInfo,
+        MessageTemplate: "ONTOLOGY DEV TEST 037: {{note}}",
+        FactValues: new Dictionary<string, object?> { ["note"] = "seam test row, safe to delete" });
+
+    private async Task<string> CatalogNameAsync(Guid recordTypeRefId) =>
+        (await _dv.OperatorClient.RetrieveAsync("sprk_recordtype_ref", recordTypeRefId, new ColumnSet("sprk_recordlogicalname")))
+            .GetAttributeValue<string>("sprk_recordlogicalname");
+
+    private async Task<Guid> BusinessUnitOfAsync(string entity, Guid id) =>
+        (await _dv.OperatorClient.RetrieveAsync(entity, id, new ColumnSet("owningbusinessunit")))
+            .GetAttributeValue<EntityReference>("owningbusinessunit").Id;
+
+    private static readonly ColumnSet SignalColumns = new(
+        "ownerid", "owningbusinessunit", "sprk_matter", "sprk_corerecordtype", "sprk_corerecordid", "sprk_duedate", "sprk_signalstatus",
+        "sprk_regardingevent", "sprk_regardingtodo", "sprk_regardingworkassignment", "sprk_regardingrecordtype", "sprk_regardingrecordid");
+
+    [Theory]
+    [InlineData("sprk_event")]
+    [InlineData("sprk_todo")]
+    public async Task WriteAsync_EventAndTodoUnderAMatter_GroupUnderTheMatter_CreateAndReconcile_RefreshDueDate(string subjectEntity)
+    {
+        if (!_dv.IsLive) return;
+
+        var probe = new Entity(subjectEntity)
+        {
+            [subjectEntity == "sprk_event" ? "sprk_eventname" : "sprk_name"] = "zz-037-" + subjectEntity,
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", PositiveMatter),
+            ["sprk_duedate"] = new DateTime(2026, 11, 2),
+        };
+        var subjectId = await CreateProbeAsync(probe);
+        var writer = BuildWriter();
+
+        var first = await writer.WriteAsync(DoRequest(subjectId, subjectEntity));
+        var row = await _dv.OperatorClient.RetrieveAsync("sprk_signal", first.SignalId, SignalColumns);
+
+        first.Created.Should().BeTrue();
+        (await CatalogNameAsync(row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id)).Should().Be("sprk_matter");
+        row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(PositiveMatter.ToString("D"));
+        row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(PositiveMatter);
+        row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(await BusinessUnitOfAsync("sprk_matter", PositiveMatter));
+        row.GetAttributeValue<DateTime?>("sprk_duedate")!.Value.Date.Should().Be(new DateTime(2026, 11, 2));
+
+        // The subject's date changes while the Signal is open: reconcile refreshes it.
+        await _dv.OperatorClient.UpdateAsync(new Entity(subjectEntity, subjectId) { ["sprk_duedate"] = new DateTime(2026, 11, 9) });
+        var second = await writer.WriteAsync(DoRequest(subjectId, subjectEntity));
+        second.Created.Should().BeFalse();
+        second.SignalId.Should().Be(first.SignalId);
+        (await _dv.OperatorClient.RetrieveAsync("sprk_signal", first.SignalId, SignalColumns))
+            .GetAttributeValue<DateTime?>("sprk_duedate")!.Value.Date.Should().Be(new DateTime(2026, 11, 9));
+
+        // Resolved: the date the Signal last saw is frozen.
+        await _dv.OperatorClient.UpdateAsync(new Entity("sprk_signal", first.SignalId) { ["sprk_signalstatus"] = new OptionSetValue(100000002) });
+        await _dv.OperatorClient.UpdateAsync(new Entity(subjectEntity, subjectId) { ["sprk_duedate"] = new DateTime(2026, 11, 20) });
+        await writer.WriteAsync(DoRequest(subjectId, subjectEntity));
+        (await _dv.OperatorClient.RetrieveAsync("sprk_signal", first.SignalId, SignalColumns))
+            .GetAttributeValue<DateTime?>("sprk_duedate")!.Value.Date.Should().Be(new DateTime(2026, 11, 9));
+    }
+
+    [Fact]
+    public async Task SignalStatusOptionSet_Pins_OpenAcknowledgedResolved_ValuesTheWriterHardCodes()
+    {
+        if (!_dv.IsLive) return;
+
+        var response = (Microsoft.Xrm.Sdk.Messages.RetrieveAttributeResponse)await _dv.OperatorClient.ExecuteAsync(
+            new Microsoft.Xrm.Sdk.Messages.RetrieveAttributeRequest
+            {
+                EntityLogicalName = "sprk_signal",
+                LogicalName = "sprk_signalstatus",
+                RetrieveAsIfPublished = true,
+            });
+        var options = ((Microsoft.Xrm.Sdk.Metadata.PicklistAttributeMetadata)response.AttributeMetadata).OptionSet.Options;
+        var labels = options.ToDictionary(o => o.Value!.Value, o => o.Label.UserLocalizedLabel.Label);
+
+        // SignalWriter hard-codes Open 100000000, Acknowledged 100000001 (refresh rule) and the freeze on Resolved 100000002.
+        labels.Should().Equal(new Dictionary<int, string>
+        {
+            [100000000] = "Open", [100000001] = "Acknowledged", [100000002] = "Resolved",
+        });
+
+    }
+
+    [Fact]
+    public async Task WriteAsync_WorkAssignmentSubject_IsItsOwnCoreRecord_AndCarriesResponseDueDate()
+    {
+        if (!_dv.IsLive) return;
+
+        var subjectId = await CreateProbeAsync(new Entity("sprk_workassignment")
+        {
+            ["sprk_name"] = "zz-037-workassignment",
+            ["sprk_responseduedate"] = new DateTime(2026, 11, 3),
+        });
+
+        var result = await BuildWriter().WriteAsync(DoRequest(subjectId, "sprk_workassignment"));
+        var row = await _dv.OperatorClient.RetrieveAsync("sprk_signal", result.SignalId, SignalColumns);
+
+        (await CatalogNameAsync(row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id)).Should().Be("sprk_workassignment");
+        row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(subjectId.ToString("D"));
+        row.GetAttributeValue<EntityReference>("sprk_matter").Should().BeNull("a work assignment is its own core record, not its matter (D-36)");
+        row.GetAttributeValue<EntityReference>("sprk_regardingworkassignment").Id.Should().Be(subjectId);
+        row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(await BusinessUnitOfAsync("sprk_workassignment", subjectId));
+        row.GetAttributeValue<DateTime?>("sprk_duedate")!.Value.Date.Should().Be(new DateTime(2026, 11, 3));
+    }
+
+    [Fact]
+    public async Task WriteAsync_TodoWithNoMatterAndNoProject_HasNoCoreRecord_IsOwnedByTheTodosOwner()
+    {
+        if (!_dv.IsLive) return;
+
+        var subjectId = await CreateProbeAsync(new Entity("sprk_todo") { ["sprk_name"] = "zz-037-todo-nocore" });
+        var todoOwner = (await _dv.OperatorClient.RetrieveAsync("sprk_todo", subjectId, new ColumnSet("ownerid")))
+            .GetAttributeValue<EntityReference>("ownerid");
+
+        var first = await BuildWriter().WriteAsync(DoRequest(subjectId, "sprk_todo"));
+        var second = await BuildWriter().WriteAsync(DoRequest(subjectId, "sprk_todo"));
+        var row = await _dv.OperatorClient.RetrieveAsync("sprk_signal", first.SignalId, SignalColumns);
+
+        first.Created.Should().BeTrue();
+        second.Created.Should().BeFalse();
+        row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Should().BeNull();
+        row.GetAttributeValue<string>("sprk_corerecordid").Should().BeNull();
+        row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(todoOwner.Id);
+    }
+
+    [Fact]
+    public async Task WriteAsync_TeamOwnedTodoWithNoCoreRecord_IsOwnedByThatTeam()
+    {
+        if (!_dv.IsLive) return;
+
+        // 12 of the 25 no-core To Dos in dev are owned by a BU default team (BFF-created rows, task 080).
+        var teamId = Guid.Parse("cf15f587-baa0-f111-aaac-000d3a99d1d7"); // Spaarke Business Unit 1 (Owner team)
+        var subjectId = await CreateProbeAsync(new Entity("sprk_todo")
+        {
+            ["sprk_name"] = "zz-037-todo-nocore-team",
+            ["ownerid"] = new EntityReference("team", teamId),
+        });
+
+        var result = await BuildWriter().WriteAsync(DoRequest(subjectId, "sprk_todo"));
+        var row = await _dv.OperatorClient.RetrieveAsync("sprk_signal", result.SignalId, SignalColumns);
+
+        row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(teamId);
+        row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Should().BeNull();
+    }
+
+    /// <summary>Opt-in probe subject for the task 039 live gate, as <c>logicalname:id</c>.</summary>
+    public const string SecureSubjectEnvVar = "ONTOLOGY_039_SECURE_SUBJECT";
+
     private SignalWriter BuildWriter()
     {
         var writerClient = new OntologyWriterDataverseClient(() => _dv.WriterClient, NullLogger<OntologyWriterDataverseClient>.Instance);
         var sysadmin = new SysadminAdapter(_dv.OperatorClient);
-        return new SignalWriter(writerClient, sysadmin, TimeProvider.System, NullLogger<SignalWriter>.Instance);
+        // Task 039: uac-r2's REAL resolver over the same sysadmin seam the BFF gives it (empty config = its defaults).
+        var ownership = new RecordOwnershipResolver(
+            sysadmin, new ConfigurationBuilder().Build(), NullLogger<RecordOwnershipResolver>.Instance);
+        // Task 037: uac-r2's REAL core-ancestor resolver. The probe says every stamp column exists (they do, live).
+        var coreAncestors = new CoreAncestorResolver(
+            sysadmin,
+            (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
+                CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute), StringComparer.OrdinalIgnoreCase)),
+            NullLogger<CoreAncestorResolver>.Instance);
+        return new SignalWriter(writerClient, sysadmin, coreAncestors, ownership, TimeProvider.System, NullLogger<SignalWriter>.Instance);
     }
 
     private static SignalWriteRequest Request(Guid subjectId, string subjectEntity, string displayName) => new(
@@ -153,7 +366,9 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
         if (!_dv.IsLive) return;
 
         var query = new QueryExpression("sprk_signal") { ColumnSet = new ColumnSet("sprk_signalid") };
+        query.Criteria.FilterOperator = LogicalOperator.Or;
         query.Criteria.AddCondition("sprk_policycode", ConditionOperator.Equal, TestPolicyCode);
+        query.Criteria.AddCondition("sprk_policycode", ConditionOperator.Equal, DoTestPolicyCode);
 
         EntityCollection toDelete;
         try
@@ -162,7 +377,7 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
         }
         catch
         {
-            return; // Best-effort: a cleanup failure must not mask the test's own assertion failure.
+            toDelete = new EntityCollection();
         }
 
         foreach (var row in toDelete.Entities)
@@ -176,11 +391,24 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
                 // Best-effort: a cleanup failure must not mask the test's own assertion failure.
             }
         }
+
+        // Task 037: the probe subjects (zz-037- prefix) go after the Signals that point at them.
+        foreach (var (entity, id) in _probeRows)
+        {
+            try
+            {
+                await _dv.OperatorClient.DeleteAsync(entity, id);
+            }
+            catch
+            {
+                // Best-effort; the run's final query by name prefix confirms nothing is left behind.
+            }
+        }
     }
 
     /// <summary>
-    /// The ONE read <see cref="SignalWriter"/> performs through the shared sysadmin seam (the grouping
-    /// matter's <c>owningbusinessunit</c>, F25) — backed here by the NON-impersonated operator connection,
+    /// The reads <see cref="SignalWriter"/> performs through the shared sysadmin seam (the grouping matter's
+    /// <c>owningbusinessunit</c>, F25, and — task 039 — the ownership resolver's) — backed here by the NON-impersonated operator connection,
     /// mirroring <c>SignalsModule</c>'s production split between the writer client and the shared
     /// <c>IGenericEntityService</c>.
     /// </summary>
@@ -201,8 +429,11 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
         public Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<LookupNavigationMetadata> GetLookupNavigationAsync(string childEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<string> GetCollectionNavigationAsync(string parentEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct = default) => throw new NotImplementedException();
+        // Task 039: the ownership resolver's reads (business units, teams, root flags).
+        public Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default) =>
+            _operatorClient.RetrieveMultipleAsync(query, ct);
+        public Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct = default) =>
+            _operatorClient.RetrieveMultipleAsync(fetch, ct);
         public Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default) => throw new NotImplementedException();
         public Task AssociateAsync(string entityLogicalName, Guid entityId, string relationshipName, IEnumerable<EntityReference> relatedEntities, CancellationToken ct = default) => throw new NotImplementedException();
     }

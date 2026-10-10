@@ -12,7 +12,7 @@
 // InterStepState (H2a outputs); containerTypeId from the intake parameter only.
 // Task 245b: sprk_bffversion ← H9's BffBuildId, sprk_solutionversion ← H6's
 // SpaarkeMaster record as "SpaarkeMaster {version} ({type})" (T218b),
-// sprk_clientcachebusttoken ← the run id.
+// sprk_clientcachebusttoken ← the run id. T257: sprk_bffappid ← H3's BffAppRegId (the Copilot agent render reads it).
 // -----------------------------------------------------------------------------
 
 using System;
@@ -71,6 +71,7 @@ public class H13BuildPromotedColumnsTests
         columns.Should().NotContainKey("sprk_solutionversion");
         columns.Should().NotContainKey("sprk_containertypeid");
         columns.Should().NotContainKey("sprk_azuresubscriptionid");
+        columns.Should().NotContainKey("sprk_bffappid");
     }
 
     [Fact]
@@ -93,6 +94,7 @@ public class H13BuildPromotedColumnsTests
                 ResourceGroupName = "rg-spaarke-cust1-prod",
                 AppServiceName = "sprk-cust1-prod-api",
                 KeyVaultName = "kv-sprk-cust1",
+                BffAppRegId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
                 BffBuildId = "2026.09.30-123",
                 ImportedSolutions = Solutions(("SpaarkeMaster", "1.4.2.0", true)),
             },
@@ -112,6 +114,9 @@ public class H13BuildPromotedColumnsTests
         columns.Should().ContainKey("sprk_containertypeid")
             .WhoseValue.Should().Be("e2e-container-type-guid");
         columns.Should().ContainKey("sprk_clientcachebusttoken").WhoseValue.Should().Be("run-1");
+        columns.Should().ContainKey("sprk_bffappid").WhoseValue.Should().Be("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "T257: the Copilot agent package is rendered from the registry row, and the BFF app id lives only in the run");
+        columns.Should().HaveCount(10, "every promoted column is asserted above — a new one needs its registry column too");
     }
 
     [Fact]

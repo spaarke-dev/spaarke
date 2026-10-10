@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="180" project="unified-access-control-r2">
+  <metadata>
+    <title>Custom Create / wizard ribbon buttons hide when the user lacks the Create privilege on the target table (owner round 89 item 2)</title>
+    <phase>Session 28 — UAC (owner round 89, 2026-10-09)</phase>
+    <status>in-progress</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Ribbon XML and declarative rules only; no code. Many ribbons are touched and must be deployed and verified.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Broad, mechanical change across many ribbon files with live deploys; an inventory must be complete.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only the infrastructure/dataverse/ribbon/** Create/wizard buttons, not the Access ribbon (175/179).</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, ribbon, deploy</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <origin>Owner round 89 item 2. The custom Create buttons' only enable rule is FormStateRule Existing (e.g. infrastructure/dataverse/ribbon/AnalysisRibbons/createtodo-button.xml), so a read-only user sees them and fails at save.</origin>
+  </metadata>
+
+  <prompt>Implement round 89 item 2. Every custom Spaarke ribbon button that creates a record or opens a create wizard gets Dataverse's standard privilege rule for the table it creates (EntityPrivilegeRule, PrivilegeType Create, the appropriate depth), so it hides or disables for users who cannot create that record.</prompt>
+
+  <goal>(1) INVENTORY. List every custom create or wizard command across infrastructure/dataverse/ribbon/** and the deployed ribbons (Create Event, Create Project, Create To Do, Create Matter, Create Work Assignment, document upload wizards, Find Similar if it creates, and so on), each with the table it creates, in notes/task-180-create-button-privileges.md. Compare the repo against what is deployed on dev (read-only) and report any drift.
+(2) RULE. Add the EntityPrivilegeRule (Create on the target table; depth Basic, which means "has the Create privilege at any depth") to each command's display or enable rules. A wizard that creates several tables checks its primary table; note any secondary-table gaps.
+(3) DEPLOY SCRIPTS. Each ribbon's existing deploy path, with dry-run, -Apply and -Verify where the scripts support them. Live -Apply is a main-session gate: prepare the commands and do not run them.
+(4) Out-of-the-box New buttons are untouched; Dataverse already hides them.</goal>
+
+  <constraints>
+    <constraint source="ADR-002 / CLAUDE.md §17">Declarative rules only; no new JavaScript. No plugins.</constraint>
+    <constraint source="project">Do not touch the Access ribbon (tasks 175/179 own it).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>infrastructure/dataverse/ribbon/</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Inventory (repo and dev), add the rules, prepare the deploy commands, open a PR.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Every inventoried create or wizard command carries the Create privilege rule for its table. The inventory table in the notes is complete and matches the PR diff.</criterion>
+    <criterion>The deploy commands are listed in order, with a -Verify per ribbon.</criterion>
+    <criterion>After the main session deploys, a read-only test role sees no custom create commands on Matter, Project and Work Assignment forms; that check is recorded as a main-session live gate.</criterion>
+  </acceptance-criteria>
+</task>

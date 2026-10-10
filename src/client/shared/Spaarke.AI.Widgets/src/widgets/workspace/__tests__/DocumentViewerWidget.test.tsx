@@ -73,6 +73,7 @@ jest.mock('../../../providers/AiSessionProvider', () => {
 // Import widget AFTER mock so the mock is wired before module evaluation.
 import DocumentViewerWidget, { type DocumentViewerWidgetData } from '../DocumentViewerWidget';
 import { AiSessionContext } from '../../../providers/AiSessionProvider';
+import { ApiError } from '../../../../../Spaarke.Auth/src/errors';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -395,7 +396,8 @@ describe('DocumentViewerWidget — FR-D restore: re-derive from documentId, neve
   });
 
   it('RESOLVES to null (renderer error state, no infinite spinner) when the re-fetch fails', async () => {
-    const authenticatedFetch = jest.fn(async () => ({ ok: false, status: 404 }) as unknown as Response);
+    // authenticatedFetch THROWS ApiError for a non-2xx; it never resolves { ok: false }.
+    const authenticatedFetch = jest.fn().mockRejectedValue(new ApiError('HTTP 404', 404, null));
 
     renderWithSession(
       {

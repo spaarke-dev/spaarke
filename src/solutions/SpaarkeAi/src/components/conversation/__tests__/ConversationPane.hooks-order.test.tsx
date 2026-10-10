@@ -57,7 +57,9 @@ jest.mock("@spaarke/ai-widgets", () => {
     ...actual,
     useAiSession: () => ({
       isAuthenticated: authState.isAuthenticated,
-      authenticatedFetch: jest.fn(async () => ({ ok: false, status: 404, json: async () => ({}) })),
+      authenticatedFetch: jest.fn(async () => {
+        throw httpError(404);
+      }),
       getAccessToken: jest.fn(async () => "token"),
       bffBaseUrl: "https://test-bff.example.com",
       tenantId: "test-tenant",
@@ -92,6 +94,7 @@ jest.mock("../../shell/ThreePaneShell", () => ({
 
 // Import AFTER the mocks.
 import { ConversationPane } from "../ConversationPane";
+import { httpError } from "../../../__tests__/helpers/httpError";
 
 function renderPane() {
   return render(

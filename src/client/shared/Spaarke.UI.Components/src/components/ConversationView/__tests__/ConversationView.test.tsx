@@ -21,6 +21,7 @@ import type { ConversationViewProps } from '../ConversationView.types';
 import type { TimelineEntry } from '../../CommunicationTimeline/CommunicationTimeline.buildTimeline';
 import type { TimelineMessage } from '../../CommunicationTimeline/CommunicationTimeline.types';
 import type { IThreadMessageDto } from '../../../services/communicationTimelineApi';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 const USER_1 = '11111111-1111-1111-1111-111111111111';
 const USER_2 = '22222222-2222-2222-2222-222222222222';
@@ -66,7 +67,8 @@ function buildFetch(messages: IThreadMessageDto[]): jest.Mock {
 }
 
 function buildFailingFetch(): jest.Mock {
-  return jest.fn(
+  // authenticatedFetch THROWS ApiError for a non-2xx: the double turns this 500 answer into the thrown failure.
+  return throwingAuthenticatedFetch(
     async () =>
       ({
         ok: false,

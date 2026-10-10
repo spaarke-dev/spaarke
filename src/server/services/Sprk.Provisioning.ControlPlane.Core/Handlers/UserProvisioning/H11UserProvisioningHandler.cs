@@ -83,6 +83,9 @@
 //   │                                             │ user is created)          │
 //   │ T232: security group not this customer's / │ Resumable (before any     │
 //   │ unreadable / not a security group           │ invitation)               │
+//   │ T259: CustomerBusinessUnitId absent        │ Resumable (before any     │
+//   │                                             │ invitation)               │
+//   │ T259: guest already in a foreign unit      │ QuarantineRequired        │
 //   │ T232: group membership / Dataverse user /  │ Resumable (each step      │
 //   │ role write failed; role not in environment │ idempotent on re-run)     │
 //   │ Concurrent Cosmos writer conflict          │ Resumable                 │
@@ -114,6 +117,13 @@
 //   invitation email (GraphRestB2BInvitationClient). H11 checks the group's NAME;
 //   that it is the group SET ON the environment is an operator check (skill Step
 //   1e-bis, PRQ-C-10 — the binding is visible only to a Power Platform admin).
+//
+// TASK 259 (ISS-010 / #1486, owner decision 2026-10-09 — INCOMING-145 §6 T5):
+//   "Guest users are added to the root customer business unit, NOT the secure business unit." Each guest becomes a
+//   Dataverse user IN the customer's own business unit (H10's InterStepState.CustomerBusinessUnitId — a direct child of
+//   the root, sibling of the Secure Record unit), holding the unit's copies of GuestSecurityRoleNames. Never the root:
+//   Spaarke Basic User holds Deep read on project/matter/work assignment, and Deep at the root reaches the Secure Record
+//   unit. A guest found in any other unit is QuarantineRequired (userprov-guest-in-foreign-business-unit), never moved.
 //
 // DOWNSTREAM ENQUEUE (Wave C4 note):
 //   H11 does not enqueue a specific successor. Parity with H3/H5/H6/H10: the
@@ -404,6 +414,16 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
+        // T259: the customer's business unit (H10 → H11) — every guest goes there; its absence is a state defect.
+        if (!Guid.TryParse(run.InterStepState.CustomerBusinessUnitId, out var customerUnitId) || customerUnitId == Guid.Empty)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.MissingCustomerBusinessUnit,
+                "InterStepState.CustomerBusinessUnitId (H10) is not a GUID — H11 places every guest in the customer's business " +
+                "unit, never the root. H10 records it; a run whose H10 completed without it (before T259) needs a new run. " +
+                "Nothing was written.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
         // The group keeps other customers' guests out of this environment: refuse one that is not this customer's
         // before anyone is invited (nothing written).
         if (await CheckSecurityGroupAsync(securityGroupId, tenantId, envelope.CustomerId, cancellationToken)
@@ -429,15 +449,15 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
         // Every role resolved once, before anyone is invited: a missing role (the package is T218's) must not send
         // invitations or add anyone to the group first.
         var roleNames = _options.EffectiveGuestSecurityRoleNames;
-        var roles = await _guestUserWriter.ResolveRolesAsync(dataverseEnvUrl, tenantId, roleNames, cancellationToken)
+        var roles = await _guestUserWriter.ResolveRolesAsync(dataverseEnvUrl, tenantId, customerUnitId, roleNames, cancellationToken)
             .ConfigureAwait(false);
         switch (roles)
         {
             case GuestRoleResolution.RoleNotFound missingRole:
                 return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.SecurityRoleNotFound,
                     $"Security role '{missingRole.RoleName}' (H11UserProvisioningOptions:GuestSecurityRoleNames) is not in " +
-                    "the environment's root business unit — it ships in the Spaarke solution (H6). Nothing was written " +
-                    "(no invitation sent).",
+                    $"the customer's business unit {customerUnitId:D} — it ships in the Spaarke solution (H6) and Dataverse " +
+                    "copies it into every unit. Nothing was written (no invitation sent).",
                     cancellationToken).ConfigureAwait(false);
             case GuestRoleResolution.Failure roleFailure:
                 return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.DataverseUserFailed,
@@ -546,8 +566,26 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             }
 
             var dataverseUser = await _guestUserWriter.EnsureGuestUserAsync(
-                new DataverseGuestUserRequest(dataverseEnvUrl, tenantId, guest.UserId, roleIds),
+                new DataverseGuestUserRequest(dataverseEnvUrl, tenantId, guest.UserId, customerUnitId, roleIds),
                 cancellationToken).ConfigureAwait(false);
+            if (dataverseUser is DataverseGuestUserOutcome.HoldsRoleOutsideBusinessUnit foreignRole)
+            {
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H11Rejections.GuestHoldsRoleOutsideCustomerUnit,
+                    $"The guest of usersJson entry {position} (Entra user {guest.UserId}, systemuser {foreignRole.SystemUserId}) " +
+                    $"holds role {foreignRole.RoleId} of business unit {foreignRole.BusinessUnitId}, not of the customer's unit " +
+                    $"{customerUnitId:D}. A root role's Deep read reaches the Secure Record unit; H11 removes no role — an owner " +
+                    "decision; then resume.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+            if (dataverseUser is DataverseGuestUserOutcome.InForeignBusinessUnit elsewhere)
+            {
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H11Rejections.GuestInForeignBusinessUnit,
+                    $"The guest of usersJson entry {position} (Entra user {guest.UserId}, systemuser {elsewhere.SystemUserId}) is " +
+                    $"already a user in business unit {elsewhere.BusinessUnitId}, neither the customer's unit {customerUnitId:D} " +
+                    "nor the root. H11 never moves it (it may be the Secure Record unit, where no user may be): moving it is an " +
+                    "owner decision; then resume.",
+                    cancellationToken).ConfigureAwait(false);
+            }
             if (dataverseUser is DataverseGuestUserOutcome.Failure userFailure)
             {
                 return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.DataverseUserFailed,

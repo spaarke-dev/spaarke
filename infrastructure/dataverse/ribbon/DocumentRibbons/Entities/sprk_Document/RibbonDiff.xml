@@ -112,7 +112,9 @@
       <EnableRules>
         <EnableRule Id="Spaarke.Document.AddMultiple.EnableRule" />
       </EnableRules>
-      <DisplayRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_document.DisplayRule" />
+      </DisplayRules>
       <Actions>
         <JavaScriptFunction FunctionName="Spaarke_AddMultipleDocuments" Library="$webresource:sprk_subgrid_commands">
           <CrmParameter Value="SelectedControl" />
@@ -312,6 +314,9 @@
       <!-- Show buttons only on form (existing records, not new records) -->
       <DisplayRule Id="sprk.Document.Form.DisplayRule">
         <FormStateRule State="Existing" />
+      </DisplayRule>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_document.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_document" PrivilegeType="Create" PrivilegeDepth="Basic" />
       </DisplayRule>
     </DisplayRules>
     <EnableRules>

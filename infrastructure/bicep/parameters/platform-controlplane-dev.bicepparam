@@ -99,6 +99,31 @@ param ciamTenantIds = [
   '7052feba-bfc4-43e0-b09e-65014b429131'
 ]
 
+// ISS-008 (#1484), owner OK 2026-10-09: the CustomerRunGuard (spec §4D I5 / FR-32) is on. The L2 UAMI
+// sprk-controlplane-dev-uami (965a4a01-…) is an Application User on the admin environment (spaarkedev1) with the scoped
+// role 'Spaarke Provisioning Registry' (Grant-ControlPlaneIdentity.ps1, verified 2026-10-09) — the guard needs no more.
+param customerRunGuardEnabled = true
+
+// ============================================================================
+// WORKER CREDENTIAL CHAIN (task 252, owner-approved 2026-10-09)
+// ============================================================================
+// Secret-free: the Worker signs in to customer Dataverse environments (H6, H7, H7b) with the
+// FR-39 chain [ManagedIdentityFederated] only, and carries NO Key Vault reference to
+// BFF-API-ClientSecret. Stated explicitly so dev never depends on the template default. Before
+// task 252 dev ran the legacy [ClientSecret] chain against a SENTINEL value in
+// sprk-controlplane-dev-kv (never a usable secret); that secret is left in the vault, untouched
+// and unreferenced (never delete -- provisioning.md KV credential lifecycle).
+param requireSecretFreeIdentity = true
+
+// ============================================================================
+// COPILOT AGENT CLIENT (T257)
+// ============================================================================
+
+// The shared Copilot agent client for this control plane: "Spaarke Copilot Agent - Dev" (public, PKCE, no secret;
+// created 2026-10-09 with owner OK, SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.12; admin consent openid/profile/
+// offline_access). H3 pre-authorizes it on every customer BFF app it provisions or reconciles.
+param copilotAgentClientAppId = '3a36eac4-10c5-4b90-9a83-913138a466af'
+
 // ============================================================================
 // SIDECAR IMAGE (customer-provisioning-orchestration-r1 Wave H-3, 2026-08-21)
 // ============================================================================

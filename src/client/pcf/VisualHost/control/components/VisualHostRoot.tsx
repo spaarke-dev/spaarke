@@ -36,6 +36,10 @@ import { getXrm } from '../../../../shared/Spaarke.UI.Components/src/utils/xrmCo
 // React 18/19 types-version drift workaround: see CardChrome.tsx for rationale.
 const AiSummaryPopover = RawAiSummaryPopover as unknown as React.ComponentType<IAiSummaryPopoverProps>;
 import { AppInsightsService } from '../../../../shared/Spaarke.UI.Components/src/services/AppInsightsService';
+// #1537 telemetry connection string: the React/MSAL-free @spaarke/auth module (same relative-source precedent)
+// and the shared PCF env-var helper for the BFF URL. VisualHost otherwise has no BFF or auth dependency.
+import { getTelemetryConnectionString } from '../../../../shared/Spaarke.Auth/src/bffClientConfig';
+import { getApiBaseUrl } from '../../../shared/utils/environmentVariables';
 import { IInputs } from '../generated/ManifestTypes';
 import { IChartDefinition, IChartData, DrillInteraction } from '../types';
 import { ChartRenderer } from './ChartRenderer';
@@ -439,16 +443,16 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     }
   }, [chartDefinition, context, contextEntityTypeName, contextRecordId, resolveHostRecordName, dispatchToast]);
 
-  // FR-TEL-01: Initialize App Insights once on mount.
-  // AppInsightsService.initialize() is idempotent — second + subsequent calls are no-ops,
-  // so this is safe even if other PCF surfaces on the same page also initialize.
+  // FR-TEL-01 / #1537: initialize App Insights once on mount with THIS environment's connection string,
+  // read at runtime from the BFF (sprk_BffApiBaseUrl → /api/config/client, both cached) — never from the
+  // form's appInsightsKey property, because shipped forms carried the dev key. Best-effort: never rejects;
+  // with no BFF URL or no connection string, telemetry is off. Idempotent across instances on the page.
   useEffect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const appInsightsKey = ((context.parameters as any).appInsightsKey?.raw as string | null | undefined) ?? '';
-    if (appInsightsKey) {
-      AppInsightsService.initialize(appInsightsKey);
-    }
-  }, []); // empty deps — manifest properties are stable for the control's lifetime
+    const webApi = context.webAPI;
+    void AppInsightsService.initializeFromRuntime(async () =>
+      getTelemetryConnectionString(await getApiBaseUrl(webApi))
+    );
+  }, []); // empty deps — runs once per instance; AppInsightsService shares one lookup
 
   useEffect(() => {
     if (!chartDefinitionId) {
@@ -1018,7 +1022,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
         ))}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.39 • 2026-10-08</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.40 • 2026-10-09</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>

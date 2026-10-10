@@ -259,13 +259,29 @@ public sealed class CustomerIdentityT7Probe : ITrapProbe
             parsed.Add(tenant);
         }
 
-        if (isModel1
-            && Guid.TryParse(FindSetting(settings, AzureAdTenantIdSettingName).Value?.Trim(), out var registrationTenant)
-            && registrationTenant != Guid.Empty
-            && parsed.Contains(registrationTenant))
+        if (isModel1)
         {
-            return $"[SPAARKE TENANT — {Echo(values)} lists the slot's {AzureAdTenantIdSettingName} {registrationTenant:D}: " +
-                   "on a Model 1 stamp that is Spaarke's tenant, and it would bind Spaarke's staff into this customer's environment]";
+            // ISS-021: the guard needs the slot's registration tenant. H4b writes AzureAd__TenantId as a plain GUID (the
+            // manifest's per_env_settings entry overrides the TenantId secret's KV reference); a Key Vault reference,
+            // blank or missing value cannot be read from ARM app settings (resolving it would need Key Vault data-plane
+            // access this probe does not have), so the guard cannot run. Never a silent pass: fail closed.
+            var registration = FindSetting(settings, AzureAdTenantIdSettingName);
+            if (registration.Ambiguous
+                || !Guid.TryParse(registration.Value?.Trim(), out var registrationTenant)
+                || registrationTenant == Guid.Empty)
+            {
+                return $"[UNRESOLVABLE — {AzureAdTenantIdSettingName} is " +
+                       (registration.Ambiguous ? "set under several case-variant names" :
+                        registration.Value is null ? "missing" :
+                        $"not a plain tenant GUID ('{Sanitize(registration.Value)}' — a Key Vault reference?)") +
+                       ", so the Model 1 check that the list does not name Spaarke's own tenant cannot run. H4b writes a plain " +
+                       $"GUID; re-run H4b so the slot carries {AzureAdTenantIdSettingName}=<the run's tenantId>]";
+            }
+            if (parsed.Contains(registrationTenant))
+            {
+                return $"[SPAARKE TENANT — {Echo(values)} lists the slot's {AzureAdTenantIdSettingName} {registrationTenant:D}: " +
+                       "on a Model 1 stamp that is Spaarke's tenant, and it would bind Spaarke's staff into this customer's environment]";
+            }
         }
 
         var expectedIds = expected
