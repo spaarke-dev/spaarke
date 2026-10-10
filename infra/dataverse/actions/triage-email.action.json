@@ -89,27 +89,7 @@
   "$comment-scopes-omitted": "No 'scopes' section — RAG grounding over the matter's own prior correspondence (FR-06) is intentionally deferred to task 023 (which authors the Binding + scopes.$knowledge wiring). This task authors the Action definition only.",
   "examples": [
     {
-      "input": {
-        "classification": {
-          "candidateRecordTypes": [
-            "sprk_matter"
-          ],
-          "category": "court-notice",
-          "urgency": "urgent",
-          "obligations": [
-            "respond-by-deadline"
-          ],
-          "suggestedActions": [
-            "calendar-deadline"
-          ],
-          "privilegeFlagged": false,
-          "rationale": "Message references a court-imposed response deadline for the Smith matter."
-        },
-        "message": {
-          "subject": "URGENT: Response due Friday - Smith v. Acme",
-          "bodyText": "Counsel, please note the court has set a response deadline of this Friday, August 15, for our motion in Smith v. Acme. Please confirm receipt and advise on strategy."
-        }
-      },
+      "input": "{\"classification\":{\"candidateRecordTypes\":[\"sprk_matter\"],\"category\":\"court-notice\",\"urgency\":\"urgent\",\"obligations\":[\"respond-by-deadline\"],\"suggestedActions\":[\"calendar-deadline\"],\"privilegeFlagged\":false,\"rationale\":\"Message references a court-imposed response deadline for the Smith matter.\"},\"message\":{\"subject\":\"URGENT: Response due Friday - Smith v. Acme\",\"bodyText\":\"Counsel, please note the court has set a response deadline of this Friday, August 15, for our motion in Smith v. Acme. Please confirm receipt and advise on strategy.\"}}",
       "output": {
         "category": "Court / Filing",
         "summary": "The court set a response deadline of Friday, August 15 in Smith v. Acme. Counsel requests confirmation of receipt and strategy guidance.",
@@ -123,27 +103,7 @@
       }
     },
     {
-      "input": {
-        "classification": {
-          "candidateRecordTypes": [
-            "sprk_matter"
-          ],
-          "category": "budget-discussion",
-          "urgency": "elevated",
-          "obligations": [
-            "respond-by-deadline"
-          ],
-          "suggestedActions": [
-            "calendar-deadline"
-          ],
-          "privilegeFlagged": false,
-          "rationale": "Counsel proposes additional work beyond the agreed budget for the Acme matter."
-        },
-        "message": {
-          "subject": "MAT-10231 Acme - additional depositions",
-          "bodyText": "Given the two new claims we will need two further depositions, which we estimate at $40-45k beyond the current budget. Please confirm you are comfortable before we schedule them."
-        }
-      },
+      "input": "{\"classification\":{\"candidateRecordTypes\":[\"sprk_matter\"],\"category\":\"budget-discussion\",\"urgency\":\"elevated\",\"obligations\":[\"respond-by-deadline\"],\"suggestedActions\":[\"calendar-deadline\"],\"privilegeFlagged\":false,\"rationale\":\"Counsel proposes additional work beyond the agreed budget for the Acme matter.\"},\"message\":{\"subject\":\"MAT-10231 Acme - additional depositions\",\"bodyText\":\"Given the two new claims we will need two further depositions, which we estimate at $40-45k beyond the current budget. Please confirm you are comfortable before we schedule them.\"}}",
       "output": {
         "category": "Scope / budget change",
         "summary": "Counsel proposes two additional depositions estimated at $40-45k beyond the current budget. Approval is required before the work is scheduled.",
@@ -156,65 +116,21 @@
       }
     },
     {
-      "input": {
-        "classification": {
-          "candidateRecordTypes": [
-            "sprk_matter"
-          ],
-          "category": "invoice",
-          "urgency": "routine",
-          "obligations": [
-            "respond-by-deadline"
-          ],
-          "suggestedActions": [
-            "calendar-deadline"
-          ],
-          "privilegeFlagged": false,
-          "rationale": "Message transmits an invoice for work already performed."
-        },
-        "message": {
-          "subject": "MAT-10231 Acme - invoice 10044725",
-          "bodyText": "Please find attached our invoice 10044725 for work performed in August, totalling $38,420. Payment is due within 30 days per the engagement terms."
-        }
-      },
+      "input": "{\"classification\":{\"candidateRecordTypes\":[\"sprk_matter\"],\"category\":\"invoice\",\"urgency\":\"routine\",\"obligations\":[\"respond-by-deadline\"],\"suggestedActions\":[\"calendar-deadline\"],\"privilegeFlagged\":false,\"rationale\":\"Message transmits an invoice for work already performed.\"},\"message\":{\"subject\":\"MAT-10231 Acme - invoice 10044725\",\"bodyText\":\"Please find attached our invoice 10044725 for work performed in August, totalling $38,420. Payment is due within 30 days per the engagement terms.\"}}",
       "output": {
         "category": "Invoice / Billing",
         "summary": "Counsel transmits invoice 10044725 for $38,420 covering August work. Payment is due within 30 days.",
-        "obligations": [
-          "Review and approve invoice 10044725 for payment"
-        ],
+        "obligations": ["Review and approve invoice 10044725 for payment"],
         "priority": "Low",
         "reviewOutcome": "File"
       }
     },
     {
-      "input": {
-        "classification": {
-          "candidateRecordTypes": [
-            "sprk_matter"
-          ],
-          "category": "rate-change",
-          "urgency": "elevated",
-          "obligations": [
-            "respond-by-deadline"
-          ],
-          "suggestedActions": [
-            "calendar-deadline"
-          ],
-          "privilegeFlagged": false,
-          "rationale": "Firm notifies a change to hourly rates for the coming year."
-        },
-        "message": {
-          "subject": "MAT-10231 Acme - 2027 rate schedule",
-          "bodyText": "Effective January 1 our partner rate moves from $780 to $835 per hour and we are adding a senior associate to the team at $520. Current scope and budget are unchanged."
-        }
-      },
+      "input": "{\"classification\":{\"candidateRecordTypes\":[\"sprk_matter\"],\"category\":\"rate-change\",\"urgency\":\"elevated\",\"obligations\":[\"respond-by-deadline\"],\"suggestedActions\":[\"calendar-deadline\"],\"privilegeFlagged\":false,\"rationale\":\"Firm notifies a change to hourly rates for the coming year.\"},\"message\":{\"subject\":\"MAT-10231 Acme - 2027 rate schedule\",\"bodyText\":\"Effective January 1 our partner rate moves from $780 to $835 per hour and we are adding a senior associate to the team at $520. Current scope and budget are unchanged.\"}}",
       "output": {
         "category": "Fee / rate change",
         "summary": "The firm notifies a 2027 rate increase (partner $780 to $835) and adds a senior associate at $520. Scope and budget are stated to be unchanged.",
-        "obligations": [
-          "Accept or negotiate the 2027 rate schedule"
-        ],
+        "obligations": ["Accept or negotiate the 2027 rate schedule"],
         "priority": "High",
         "reviewOutcome": "Route"
       }
@@ -225,12 +141,6 @@
     "authorLevel": 0,
     "createdAt": "2026-07-29T00:00:00Z",
     "description": "Structures the already-produced AiClassificationRung classification signal into the FR-05 triage output {category, summary, obligations[], priority, reviewOutcome} for sprk_communication — reuses the existing signal, no second full LLM classification pass.",
-    "tags": [
-      "email-triage",
-      "communication",
-      "classification-reuse",
-      "catalog-action",
-      "prompted"
-    ]
+    "tags": ["email-triage", "communication", "classification-reuse", "catalog-action", "prompted"]
   }
 }
