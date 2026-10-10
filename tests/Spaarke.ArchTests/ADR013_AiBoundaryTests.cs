@@ -103,9 +103,10 @@ public class ADR013_AiBoundaryTests
         "Sprk.Bff.Api.Services.Dataverse.DataverseWriteItemMapper",
     };
 
-    /// <summary>The namespace the write core used to live in (it still holds the AI-tool-only helpers). Trailing dot on
-    /// purpose: <c>HaveDependencyOn</c> matches by prefix, and <c>Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler</c>
-    /// (an AI handler, a different namespace) would otherwise match <c>...Handlers.Dataverse</c>.</summary>
+    /// <summary>The namespace the write core used to live in (it still holds the AI-tool-only helpers). The trailing dot is
+    /// for the <c>StartsWith</c> / <see cref="IsInNamespace"/> checks, so <c>...Handlers.DataverseUpdateRecordHandler</c> (an AI
+    /// handler in a different namespace) does not match. NetArchTest's <c>HaveDependencyOn</c> matches whole namespace
+    /// segments and needs the name WITHOUT the dot (<c>TrimEnd('.')</c> at the call sites): with the dot it matches nothing.</summary>
     private const string AiDataverseToolNamespace = "Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.";
 
     private const string AiNamespace = "Sprk.Bff.Api.Services.Ai.";
@@ -124,11 +125,11 @@ public class ADR013_AiBoundaryTests
         }
 
         // 2. The core depends on nothing in Services/Ai (otherwise "moved out" is cosmetic).
-        //    NetArchTest sees signatures, fields and locals; IlCallScan adds the call sites in method bodies (a static
-        //    call such as DataverseRecordCitations.RecordPath is invisible to NetArchTest).
+        //    NetArchTest sees type-level dependencies (fields, signatures, base types); IlCallScan adds the call sites
+        //    in method bodies (a static call such as DataverseRecordCitations.RecordPath is invisible to NetArchTest).
         var coreResult = Types.InAssembly(assembly)
             .That().HaveNameStartingWith("OwnedChildWrite").Or().HaveNameStartingWith("DataverseWriteItemMapper")
-            .ShouldNot().HaveDependencyOn(AiNamespace)
+            .ShouldNot().HaveDependencyOn(AiNamespace.TrimEnd('.'))
             .GetResult();
         var coreViolations = (coreResult.FailingTypeNames ?? new List<string>())
             .Where(n => DataverseWriteCoreTypes.Any(c => n.StartsWith(c, StringComparison.Ordinal)))
@@ -141,7 +142,7 @@ public class ADR013_AiBoundaryTests
         // 3. No non-AI code (Api/*, Services/Dataverse, Services/Signals, Infrastructure/*, ...) reaches into the
         //    AI-tool Dataverse namespace — the route a caller would take to reach a write-core type that moved back.
         var callerResult = Types.InAssembly(assembly)
-            .ShouldNot().HaveDependencyOn(AiDataverseToolNamespace)
+            .ShouldNot().HaveDependencyOn(AiDataverseToolNamespace.TrimEnd('.'))
             .GetResult();
         var callerViolations = (callerResult.FailingTypeNames ?? new List<string>())
             .Where(n => !n.StartsWith(AiNamespace, StringComparison.Ordinal))
