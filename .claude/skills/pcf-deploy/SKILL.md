@@ -244,6 +244,9 @@ If ANY files in `src/client/shared/Spaarke.UI.Components/src/` were modified, co
 3. `src/client/shared/Spaarke.UI.Components` — or let the PCF's `prebuild:prod` hook build it once 1–2 exist.
 4. `src/client/shared/Spaarke.Communication.Components` — `npm install` only, for the Communication* PCFs.
 5. `src/client/shared/Spaarke.Visuals` — `npm install` only, for VisualHost, which bundles its source; without it the build fails with `Can't resolve '@fluentui/react-icons'` (found 2026-10-10, task 127).
+6. `src/client/code-pages/DocumentRelationshipViewer` — `npm install` only, for the DocumentRelationshipViewer PCF, which compiles that code page's `src/`; without it the build fails with `TS2307: Cannot find module '@spaarke/auth'` / `'@xyflow/react'` (found 2026-10-10).
+
+**Is dev behind master? Compare bundles, not versions.** `build:prod` is reproducible: a fresh build of an unchanged control is byte-for-byte the `cc_<Namespace>.<Control>/bundle.js` that dev serves (verified 2026-10-10 on SemanticSearchControl and VisualHost). So a control whose fresh master build differs from dev's published bundle carries undeployed changes, often from a shared library and not its own folder, even when the version numbers match. Such a control needs a version bump and a deploy. Ignore a difference of a few bytes that is only CRLF vs LF in the leading license comment.
 
 **Run `pack.ps1` from inside the `Solution` folder** (`cd Solution; pwsh -File pack.ps1`): several pack scripts build the ZIP path relative to the process's working directory, not the script's, and fail when started from elsewhere.
 

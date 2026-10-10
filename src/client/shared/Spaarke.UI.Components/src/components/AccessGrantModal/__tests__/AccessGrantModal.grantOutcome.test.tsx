@@ -191,7 +191,7 @@ describe('AccessGrantModal — /grant and /invite-and-grant outcomes (task 139)'
         await screen.findByText(new RegExp(detail.slice(0, 40).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
       ).toBeInTheDocument();
       expect(screen.queryByText(/failed\. Please try again/)).not.toBeInTheDocument();
-      expect(screen.queryByText(/You need Write access on this record/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/You need Write access to this record/)).not.toBeInTheDocument();
     });
 
     it('a 409 would_lower_existing from /grant (an internal contact) shows its detail', async () => {

@@ -41,12 +41,17 @@ public record ShareRecordWithUserRequest(
 /// the client's own input, so it is not echoed back; compare it with <paramref name="AccessLevel"/> to show the user
 /// what they actually granted.
 /// </param>
+/// <param name="NotificationFailed">
+/// <c>true</c> when the share gave the user access and they could not be sent the in-app notification (task 181, owner
+/// round 89). The share itself stands. Additive.
+/// </param>
 public record ShareRecordWithUserResponse(
     Guid SystemUserId,
     ExternalAccessLevel? AccessLevel,
     int AccessRightsMask,
     string Outcome,
-    bool Narrowed);
+    bool Narrowed,
+    bool NotificationFailed = false);
 
 /// <summary>Request body for <c>POST /api/v1/external-access/unshare-user</c>.</summary>
 /// <param name="RecordType"><c>project</c> | <c>matter</c> | <c>workassignment</c> (case-insensitive). Required.</param>

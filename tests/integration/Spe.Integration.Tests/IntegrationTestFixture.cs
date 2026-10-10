@@ -560,7 +560,8 @@ internal sealed class ReportingRoleFakeAuthHandler : AuthenticationHandler<Authe
 }
 
 /// <summary>
-/// A caller who holds Write on whatever record the delegation rule asks about — the caller these
+/// A caller who holds Write and Share (the delegation rule since task 179, owner round 89) on whatever record the
+/// delegation rule asks about — the caller these
 /// endpoint contract tests are written from the perspective of (task 008, FR-07).
 /// </summary>
 /// <remarks>
@@ -578,5 +579,5 @@ internal sealed class EntitledCallerProbe : CallerRecordAccessProbe
 
     public override Task<AccessRights> GetCallerRightsAsync(
         string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
-        => Task.FromResult(AccessRights.Read | AccessRights.Write);
+        => Task.FromResult(AccessRights.Read | AccessRights.Write | AccessRights.Share);
 }

@@ -113,7 +113,7 @@ public static class UnsecureProjectEndpoint
     internal const string ReasonCascadeChildrenUnreadable = "sdap.unsecure.cascade_children_unreadable";
 
     /// <summary>
-    /// Task 150 (owner round 3b, F3): the caller holds Write — the route group's delegation filter — but is neither a
+    /// Task 150 (owner round 3b, F3): the caller holds Write and Share — the route group's delegation filter — but is neither a
     /// Full Access holder on the record (Write AND Delete on it, as Dataverse reports the caller's rights) nor the person
     /// who created it. Refused before any write (403); the record stays secure. The code is the ONE F3 rule's
     /// (<see cref="SecureDesignationRemoval.NotPermittedReasonCode"/>, task 146; owner round 13 item 6).

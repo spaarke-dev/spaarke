@@ -779,7 +779,7 @@ public class GrantorCeilingTests
     private Task<IResult> Grant(GrantAccessRequest request, AccessRights? callerRights) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
             request, _dataverse, _participations, DenyList(), new FixedRightsProbe(callerRights),
-            AssignedAccessTestDoubles.InertMaterializer(),
+            AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(),
             Context(), NullLogger<Program>.Instance, new FixedClock(Today),
             CancellationToken.None);
 

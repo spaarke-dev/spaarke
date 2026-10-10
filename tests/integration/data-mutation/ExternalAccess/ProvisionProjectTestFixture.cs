@@ -327,6 +327,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     public bool CallerHoldsWrite { get; set; } = true;
 
     /// <summary>
+    /// Task 179 (owner round 89): when false, the probe reports no Share — a role that grants Write but not the table's
+    /// Share privilege. True by default, because a caller who manages access (Make Secure, Remove Secure) now holds both.
+    /// </summary>
+    public bool CallerHoldsShare { get; set; } = true;
+
+    /// <summary>
     /// When true, the caller's rights include Delete on every record, WHOEVER owns it — a Full Access holder, or an
     /// administrator whose security role grants Delete at business-unit or organization depth (task 150: owner round 3b F3,
     /// who may REMOVE the secure designation). Delete held by a ROLE.
@@ -755,6 +761,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         Queries.Clear();
         CallerSystemUserIdResolves = true;
         CallerHoldsWrite = true;
+        CallerHoldsShare = true;
         CallerHoldsDelete = false;
         CallerDeletesWhatTheyOwn = false;
         FullAccessProbeThrows = false;
@@ -1643,7 +1650,8 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     }
 
     /// <summary>
-    /// The delegation probe: Write unless <see cref="CallerHoldsWrite"/> is off, and a record of every record it was
+    /// The delegation probe: Write unless <see cref="CallerHoldsWrite"/> is off, Share unless <see cref="CallerHoldsShare"/>
+    /// is off (task 179), and a record of every record it was
     /// asked about — so a test can prove the filter authorized the SAME record the handler re-owned (task 144).
     /// </summary>
     private sealed class RecordingCallerRecordAccessProbe : CallerRecordAccessProbe
@@ -1670,6 +1678,8 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             var rights = _fixture.CallerHoldsWrite
                 ? AccessRights.Read | AccessRights.Write
                 : AccessRights.Read;
+            if (_fixture.CallerHoldsShare)
+                rights |= AccessRights.Share;
 
             // Delete by a role (whoever owns the record), or by ownership (only while the caller owns it — read now).
             var deletes = _fixture.CallerHoldsDelete

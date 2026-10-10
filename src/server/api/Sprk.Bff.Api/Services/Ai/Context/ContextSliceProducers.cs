@@ -170,7 +170,7 @@ public static class ConversationContextProducer
     /// Extracts the payload text for the live turn context: string payloads verbatim, everything else as raw
     /// JSON. Capped at <see cref="MaxContextPayloadChars"/>. MOVED VERBATIM from
     /// <c>ChatHistoryManager.BuildPayloadContextText</c>; reuses the shared surrogate-safe truncation
-    /// (<see cref="ChatHistoryManager.TruncateSurrogateSafe"/>) rather than duplicating it.
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.Text.TextTruncation.TruncateSurrogateSafe"/>) rather than duplicating it.
     /// </summary>
     private static string BuildPayloadContextText(JsonElement payload)
     {
@@ -182,7 +182,7 @@ public static class ConversationContextProducer
             _ => payload.GetRawText()
         };
 
-        return ChatHistoryManager.TruncateSurrogateSafe(text.Trim(), MaxContextPayloadChars);
+        return Sprk.Bff.Api.Infrastructure.Text.TextTruncation.TruncateSurrogateSafe(text.Trim(), MaxContextPayloadChars);
     }
 
     /// <summary>

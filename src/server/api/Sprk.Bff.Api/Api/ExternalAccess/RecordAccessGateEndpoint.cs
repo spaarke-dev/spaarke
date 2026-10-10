@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// Manage Access affordance in <c>TrackingFieldTrio</c> gated on a Dataverse TABLE-level privilege —
 /// <c>hasEntityPrivilege('sprk_externalrecordaccess', Create, Global)</c> — which is a different question
 /// from the one this server enforces, with the opposite fail direction. The server asks "do you hold Write
-/// on THIS record" and denies what it cannot evaluate; the client asked "may you create rows in that table
+/// (and, since owner round 89, Share) on THIS record" and denies what it cannot evaluate; the client asked "may you create rows in that table
 /// anywhere" and ALLOWED what it could not evaluate. A caller with the table privilege but no Write on a
 /// confidential matter was offered the button and then refused by the server — the affordance promised an
 /// action the caller could not perform, on exactly the records where that matters most.</para>
@@ -94,7 +94,7 @@ public static class RecordAccessGateEndpoint
             .WithSummary("Whether the caller may change who can access this record")
             .WithDescription(
                 "Answers the delegation question (spec FR-07 / owner decision B-14) for one record: 200 with " +
-                "canManageAccess = true when the caller holds Write on it, 403 with a " +
+                "canManageAccess = true when the caller holds Write on it and the Share privilege on its table (owner round 89), 403 with a " +
                 "sdap.access.deny.delegation_* reason code when they do not, or when it could not be " +
                 "established. Clients gate the Manage Access affordance on this and MUST treat anything other " +
                 "than 200 + canManageAccess = true as a denial. With includeOwner=true the 200 also names the " +
@@ -138,7 +138,7 @@ public static class RecordAccessGateEndpoint
                 });
         }
 
-        // Reaching this line IS the answer: DelegationRuleFilter established Write on this record, as the
+        // Reaching this line IS the answer: DelegationRuleFilter established Write and Share on this record, as the
         // caller, over OBO. Nothing here re-decides it.
         //
         // Task 175 (owner round 87): the floor the record's parents set — the ribbon's Remove Secure rule, the form's and
@@ -222,7 +222,7 @@ public static class RecordAccessGateEndpoint
     /// move, still user-owned), and both from one owned by ANOTHER team inside the Secure Record business unit (the retired
     /// default team before task 144's migration: already isolated — provisioning refuses it 409
     /// <c>owned_by_other_secure_team</c>, and the ribbon hides Make Secure). App-only reads; the caller already passed the
-    /// delegation filter (Write on THIS record).
+    /// delegation filter (Write and Share on THIS record).
     /// </summary>
     /// <remarks>
     /// <para><b>Unknown is never an answer</b> (ADR-003). The record's owner could not be read, it was read with neither
