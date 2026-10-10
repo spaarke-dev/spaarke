@@ -838,6 +838,117 @@ public class ScheduledJobHostTests
             "the refreshed definition still takes effect for the run");
     }
 
+    [Fact]
+    public async Task AdminRefresh_RacingTheLoopsDispatch_DoesNotFireTheSameTickTwice_1575()
+    {
+        // The race the shared next-fire cursor exists for. An admin refresh (request thread) reads the job's
+        // pending next fire (12:02) BEFORE the loop dispatches it and advances the loop's snapshot of the OLD
+        // state to 12:04, then publishes the NEW state AFTER. Had the refresh copied 12:02 into the new state,
+        // the loop's next pass would see 12:02 still due and dispatch it again; sharing the cursor makes the
+        // advance visible to the new state. The gated store pauses the refresh at exactly that point, so the
+        // interleaving is deterministic.
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("racing-refresh");
+        registry.Register(fake);
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(EveryTwoMinutesJob("racing-refresh"));
+        var gated = new GatedRefreshStore(store);
+
+        await using var driver = new StepDriver(registry, store, StepOptions(TimeSpan.FromHours(1)), Noon, gated);
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None); // next fire 12:02
+
+        driver.Time.SetUtcNow(At(12, 2));
+        gated.Arm();
+        var adminRefresh = Task.Run(() => driver.Host.RefreshDefinitionsAsync(CancellationToken.None));
+        gated.WaitUntilPaused(); // the refresh has read 12:02 and not yet published its state
+
+        driver.Tick(); // the loop, on the OLD state: fires 12:02, advances to 12:04
+        await driver.WaitForCompletedRunsAsync("racing-refresh", 1);
+
+        gated.Release();
+        await adminRefresh; // the NEW state is published
+
+        driver.Time.SetUtcNow(At(12, 3));
+        driver.Tick(); // nothing due — 12:02 has already fired
+
+        driver.Time.SetUtcNow(At(12, 4));
+        driver.Tick();
+        await driver.DrainAsync();
+
+        ScheduledFires(store, "racing-refresh").Should().Equal(
+            new DateTimeOffset?[] { At(12, 2), At(12, 4) },
+            "a refresh racing the loop's dispatch MUST NOT bring back the occurrence the loop just fired");
+        store.RunRecords.Should().NotContain(r => r.Result != null && r.Result.Skipped,
+            "a second dispatch of 12:02 would have been recorded as a skipped tick");
+    }
+
+    /// <summary>
+    /// Store wrapper for <c>AdminRefresh_RacingTheLoopsDispatch_DoesNotFireTheSameTickTwice_1575</c>. When armed,
+    /// the next <see cref="LoadJobsAsync"/> returns definitions whose enumeration pauses after the last item — the
+    /// refresh has read every job's prior state but not yet published its new one. Its idempotency probe always
+    /// answers "not run" (as it does across instances, ADR-036 A1 §2) so a duplicate dispatch reaches the lease
+    /// and shows up as a skipped run record instead of being silently deduped.
+    /// </summary>
+    private sealed class GatedRefreshStore(InMemoryBackgroundJobStore inner) : IBackgroundJobStore
+    {
+        private readonly ManualResetEventSlim _paused = new();
+        private readonly ManualResetEventSlim _release = new();
+        private volatile bool _armed;
+
+        public void Arm() => _armed = true;
+
+        public void WaitUntilPaused() =>
+            _paused.Wait(TimeSpan.FromSeconds(30)).Should().BeTrue("the refresh must reach the pause point");
+
+        public void Release() => _release.Set();
+
+        public async Task<IReadOnlyList<BackgroundJobDefinition>> LoadJobsAsync(CancellationToken ct)
+        {
+            var definitions = await inner.LoadJobsAsync(ct);
+            if (!_armed) return definitions;
+            _armed = false;
+            return new PausingList(definitions, _paused, _release);
+        }
+
+        public Task<Guid> RecordRunStartAsync(string jobId, JobRunTrigger trigger, string correlationId, DateTimeOffset? scheduledFireUtc, CancellationToken ct) =>
+            inner.RecordRunStartAsync(jobId, trigger, correlationId, scheduledFireUtc, ct);
+
+        public Task RecordRunCompleteAsync(Guid runId, JobRunResult result, CancellationToken ct) =>
+            inner.RecordRunCompleteAsync(runId, result, ct);
+
+        public Task<IReadOnlyList<BackgroundJobRunRecord>> GetRecentRunsAsync(string jobId, int limit, CancellationToken ct) =>
+            inner.GetRecentRunsAsync(jobId, limit, ct);
+
+        public Task<bool> HasRunForScheduledTimeAsync(string jobId, DateTimeOffset scheduledFireUtc, CancellationToken ct) =>
+            Task.FromResult(false);
+
+        public Task<bool> SetEnabledAsync(string jobId, bool enabled, CancellationToken ct) =>
+            inner.SetEnabledAsync(jobId, enabled, ct);
+
+        private sealed class PausingList(
+            IReadOnlyList<BackgroundJobDefinition> items,
+            ManualResetEventSlim paused,
+            ManualResetEventSlim release) : IReadOnlyList<BackgroundJobDefinition>
+        {
+            public int Count => items.Count;
+
+            public BackgroundJobDefinition this[int index] => items[index];
+
+            public IEnumerator<BackgroundJobDefinition> GetEnumerator()
+            {
+                foreach (var item in items)
+                {
+                    yield return item;
+                }
+
+                paused.Set();
+                release.Wait(TimeSpan.FromSeconds(30));
+            }
+
+            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+        }
+    }
+
     /// <summary>
     /// Drives <see cref="ScheduledJobHost.TickAsync"/> one iteration at a time on a virtual clock, without the
     /// background loop.
@@ -855,15 +966,17 @@ public class ScheduledJobHostTests
         private readonly InMemoryBackgroundJobStore _store;
         private bool _drained;
 
+        /// <param name="hostStore">The store the host reads; <paramref name="store"/> (the run records asserted on) when <c>null</c>.</param>
         public StepDriver(
             ScheduledJobRegistry registry,
             InMemoryBackgroundJobStore store,
             ScheduledJobHostOptions options,
-            DateTimeOffset start)
+            DateTimeOffset start,
+            IBackgroundJobStore? hostStore = null)
         {
             _store = store;
             Time = new FakeTimeProvider(start);
-            Host = new ScheduledJobHost(registry, store, options, NullLogger<ScheduledJobHost>.Instance, Time);
+            Host = new ScheduledJobHost(registry, hostStore ?? store, options, NullLogger<ScheduledJobHost>.Instance, Time);
         }
 
         public ScheduledJobHost Host { get; }
