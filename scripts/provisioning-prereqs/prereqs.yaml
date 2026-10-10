@@ -31,9 +31,14 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 12
+manifest_version: 13
 last_updated: 2026-10-09
 author_task: customer-provisioning-orchestration-r1 / task 202
+# manifest_version 13 (2026-10-09, customer-provisioning-orchestration-r1; owner decision 2026-10-09 relayed by
+# spaarke-SPA-external-access-platform-r3, its design.md section 4.6 item 7 / C7): PRQ-C-14 ADDED - the CUSTOMER tenant's
+# cross-tenant access settings allow its users to become B2B guests in Spaarke's tenant (outbound B2B collaboration).
+# Spaarke cannot read another tenant's policy, so the check is a customer ATTESTATION: new token
+# {customerOutboundB2BAttested} (intake customerOutboundB2BAttested; `notApplicable` for a non-B2BGuest run).
 # manifest_version 12 (2026-10-09, customer-provisioning-orchestration-r1 T261 / G31): PRQ-E-07 checks the L2 Worker
 # identity's OWN catalog (ControlPlaneGraphAppRoles.cs) instead of the BFF stamp catalog (GraphAppRoles.cs), which now
 # holds only the stamp identity's evidence-backed roles. The L2 set adds AppRoleAssignment.ReadWrite.All (H10, H3) and
@@ -991,3 +996,31 @@ prereqs:
       2. A customer with several workforce tenants (e.g. after an acquisition) lists each.
       3. Enter them as the intake array `customerWorkforceTenantIds`.
     related_findings: [T255, INCOMING-141]
+
+  - id: PRQ-C-14
+    name: The customer tenant's cross-tenant access settings allow its users to become B2B guests in Spaarke's tenant (outbound B2B collaboration - customer attestation; Model 1 / every B2BGuest run)
+    scope: once_per_customer
+    frequency: once per customer, BEFORE the run (again if the customer changes its cross-tenant access settings, or after an acquisition adds a workforce tenant - PRQ-C-13)
+    owner: the CUSTOMER's Entra admin (a required customer approval - Spaarke cannot do it for them); the Spaarke operator records the attestation in the intake
+    consequence_of_absence: "A licence-free customer employee who self-registers through the join link signs in at their home tenant, is auto-approved when that tenant is in customerWorkforceTenantIds, and is then invited as a guest into Spaarke's tenant. Licensed staff invited by H11 need the same guest redemption. If the customer's tenant blocks outbound B2B collaboration to Spaarke's tenant, both fail: the join link ends at the home tenant's cross-tenant access error and H11's invitations are never redeemed. Spaarke's operator cannot read another tenant's cross-tenant access policy, so neither the skill nor L2 can detect it before the run - this attestation is the only gate."
+    check_recipe:
+      cli: |
+        case "{customerOutboundB2BAttested}" in
+          true) echo ok ;;
+          notApplicable) echo "SKIP: not a B2BGuest run - guests are not invited into Spaarke's tenant"; exit 0 ;;
+          *) echo "customerOutboundB2BAttested is not true: the customer's Entra admin has not confirmed that outbound B2B collaboration allows its users to become guests in Spaarke's tenant (PRQ-C-14)"; exit 1 ;;
+        esac
+      expect: "`ok` - the intake records customerOutboundB2BAttested = true (the customer's Entra admin confirmed in writing). `SKIP` (exit 0) for a run that is not B2BGuest. NOT asserted here: that the customer's policy really allows it - Spaarke's operator cannot read another tenant's cross-tenant access settings. The first guest redemption (H11) or join-link sign-in exposes a wrong attestation"
+    remediation: |
+      1. Send the customer's Entra admin the requirement: their tenant's cross-tenant access settings must allow OUTBOUND
+         B2B collaboration for their users to Spaarke's tenant (the tenant id the run's `tenantId` names). Either the
+         default outbound settings allow it, or an organizational setting for Spaarke's tenant id does.
+      2. The customer's admin checks / changes it: Entra admin center -> External Identities -> Cross-tenant access
+         settings -> Default settings (or Organizational settings -> Add organization -> Spaarke's tenant id) ->
+         Outbound access -> B2B collaboration -> users and groups AND applications = Allow access. Microsoft Learn: search
+         "cross-tenant access settings B2B collaboration"
+         (https://learn.microsoft.com/entra/external-id/cross-tenant-access-settings-b2b-collaboration).
+      3. When the customer's admin has confirmed in writing, set `customerOutboundB2BAttested: true` in the intake (batch
+         intake file, or answer the Step 1e-bis prompt) and keep the confirmation with the run record. Do NOT set it on
+         the strength of a verbal "should be fine".
+    related_findings: [C7, SPA-external-access-platform-r3 design 4.6 item 7]

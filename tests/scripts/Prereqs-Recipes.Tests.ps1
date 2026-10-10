@@ -321,6 +321,22 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
         }
     }
 
+    Context 'PRQ-C-14 customer attestation (outbound B2B collaboration; Spaarke cannot read the customer policy)' {
+        It 'exits 1 when the attestation is false or absent' {
+            foreach ($v in 'false', '') {
+                $r = Invoke-Recipe 'PRQ-C-14' ($script:Common + @{ customerOutboundB2BAttested = $v }) $script:Dir
+                $r.Exit | Should Be 1
+                $r.Output | Should Match 'PRQ-C-14'
+            }
+        }
+        It 'exits 0 when attested true, and 0 (SKIP) for a run that is not B2BGuest' {
+            (Invoke-Recipe 'PRQ-C-14' ($script:Common + @{ customerOutboundB2BAttested = 'true' }) $script:Dir).Exit | Should Be 0
+            $r = Invoke-Recipe 'PRQ-C-14' ($script:Common + @{ customerOutboundB2BAttested = 'notApplicable' }) $script:Dir
+            $r.Exit | Should Be 0
+            $r.Output | Should Match 'SKIP'
+        }
+    }
+
     Context 'PRQ-T-03 Entra app registration (az returns empty output and exit 0 on a miss)' {
         It 'exits 1 on empty output and 0 on a GUID' {
             Set-Rules $script:Dir az @(, @('ad app list', '0', ''))
