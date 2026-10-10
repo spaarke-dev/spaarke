@@ -1,5 +1,13 @@
 // Types
-export type { IAuthConfig, IProblemDetails, TokenResult, AuthenticatedFetchFn } from './types';
+export type {
+  IAuthConfig,
+  IProblemDetails,
+  TokenResult,
+  AuthenticatedFetchFn,
+  ResponseFetchFn,
+  OkResponse,
+  OkStatus,
+} from './types';
 
 // Errors
 export { AuthError, ApiError } from './errors';
@@ -15,6 +23,10 @@ export { VERSION } from './version';
 // Runtime config (Dataverse environment variable resolution)
 export { resolveRuntimeConfig, clearRuntimeConfigCache } from './resolveRuntimeConfig';
 export type { IRuntimeConfig } from './resolveRuntimeConfig';
+
+// Browser telemetry connection string for this environment (#1537) — from the BFF's
+// cached /api/config/client; '' when unavailable. Feed it to AppInsightsService.initializeFromRuntime().
+export { getTelemetryConnectionString } from './bffClientConfig';
 
 // Pluggable auth strategy (v2 — task 010)
 export type { AuthStrategy } from './strategies/AuthStrategy';

@@ -54,7 +54,7 @@ import {
   buildBffApiUrl,
   isApiError,
   isAuthFailure,
-  type AuthenticatedFetchFn,
+  type ResponseFetchFn,
 } from '@spaarke/auth';
 import type { PaneEventBus } from '@spaarke/ai-widgets/events';
 
@@ -220,8 +220,12 @@ export type OpenLibraryModalFn = () => void;
 export interface ExecutorContext {
   /** BFF base URL — from `useAiSession()` in the host. */
   bffBaseUrl: string;
-  /** Auth-tagged fetch from `useAiSession()` (ADR-028 §H-4). */
-  authenticatedFetch: AuthenticatedFetchFn;
+  /**
+   * Auth-tagged fetch from `useAiSession()` (ADR-028 §H-4). Typed as the either-shape
+   * `ResponseFetchFn`: the host passes `@spaarke/auth`'s throwing fetch, but the executor still
+   * handles a RETURNED non-2xx as well (pinned by its "returned non-2xx" test controls).
+   */
+  authenticatedFetch: ResponseFetchFn;
   /** Current chat session id (null when no session has been created yet). */
   sessionId: string | null;
   /** PaneEventBus instance for dispatching workspace events. */

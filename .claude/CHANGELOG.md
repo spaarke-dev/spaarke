@@ -34,6 +34,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
   secret-free Worker chain (`requireSecretFreeIdentity=true`); `Seed-PlatformKeyVault.ps1` no longer seeds the
   `BFF-API-ClientSecret` / `Dataverse-ClientSecret` sentinels. No secret created, changed or deleted.
 
+###### 2026-10-09 — On-demand AI spend report and dashboard (ai-cost-report-r1)
+
+- **`scripts/ai-cost/spend-report.py`** (new): per-day / project / model / main-vs-sub-agent spend with cost components, a text "Biggest drivers" summary, and `--format json|csv|html`. The HTML dashboard is self-contained, uses Chart.js and has a project filter. `scripts/ai-cost/README.md` documents all three scripts.
+- **`.claude/skills/project-spend-update/SKILL.md`:** Step 4 runs the report and dashboard; new trigger phrases; the description names it.
+
+---
+###### 2026-10-09 — Model choice is deliberate: every agent states its model; no blanket default (model-selection-r1)
+
+Owner direction 2026-10-09: no arbitrary model, and spend what improves the code, nothing more. A session picks the model and effort per piece of work and never asks the user. This replaces the `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` default added earlier the same day (#1538).
+
+- **`.claude/constraints/agent-cost.md`:**
+  - Rule 1 now says every agent states its model and effort.
+  - New section "Choosing a model and effort": a work → model → effort → why table, Anthropic's guidance (overthinking at `max`, lower effort scopes to the ask, Opus 5.5 effort), escalation on evidence, no mid-session switches.
+- **`.claude/agents/`:** new `implementer` (sonnet/high), `adversarial-reviewer` (fable/high, read-only) and `code-mapper` (sonnet/low, read-only).
+- **`scripts/quality/require-agent-model.py`:** new `PreToolUse` hook on `Agent|Task|Workflow`.
+  - It denies a launch with no `model` and no definition `model:` (built-ins included; forks and plugin agents allowed), and a workflow script whose `agent()` calls name no model.
+  - The reason goes to Claude, which re-issues the call; the hook fails open.
+  - Tests: `scripts/quality/tests/test_require_agent_model.py`, 5 must-fire and 7 must-not-fire.
+- **`.claude/settings.json`:** `CLAUDE_CODE_SUBAGENT_MODEL` removed; `PreToolUse` hook added.
+- **Root `CLAUDE.md`:** §8.5 and §16 updated.
+- **`FAILURE-MODES.md`:** G-19's enforcement list updated.
+
+---
 ###### 2026-10-09 — Agent cost controls: Sonnet sub-agents, concurrency caps, earlier compaction (agent-cost-controls-r1)
 
 Owner direction 2026-10-09 after estimated spend rose to $1–2.5k a day. The number of calls had grown about 20×, 65–92% of them from sub-agents (mostly Opus, inherited from `"model": "opus"`). Windows ran out of memory from the parallelism.

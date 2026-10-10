@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="127" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Client telemetry gets its App Insights connection string per environment at runtime (#1537) — no form values, no build-time keys</title>
+    <phase>7 — B2B guest sign-in follow-ups (#1453 / #1537), owner 2026-10-09</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF endpoint change (anonymous route), shared client service, several PCFs and code pages; data-routing defect.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-surface change incl. an anonymous BFF route.</model-tier-reason>
+    <effort>high</effort>
+    <deps>122, 123, 125</deps>
+    <tags>bff-api, frontend, pcf, code-page, telemetry, unit-test</tags>
+  </metadata>
+  <prompt>Read GitHub issue #1537 and `notes/122-guest-signin-review.md`. Browser telemetry has no per-environment App Insights source. PCFs SemanticSearchControl (`SemanticSearchControl.tsx:470`) and VisualHost (`VisualHostRoot.tsx:447`) read a form property, and the Matter main form ships a static DEV key. Code pages DailyBriefing, EmailPage and CommunicationReconciliation (`main.tsx`) read a build-time `VITE_APP_INSIGHTS_KEY`. `sprk_ApplicationInsightsKey` is a Secret, BFF-side env var that browsers can't read. As a result, a customer environment's browser telemetry goes to Spaarke's dev App Insights, or nowhere. Owner (2026-10-09): fix it here.</prompt>
+  <goal>Every client surface that emits telemetry gets the App Insights connection string for ITS environment at runtime from the BFF it already talks to. No form property or build-time value decides it. The Matter main form no longer carries the static dev `appInsightsKey`/`tenantId`.</goal>
+  <constraints>
+    <constraint>Reuse, don't add: extend the BFF's existing anonymous `GET /api/config/client` (`Api/ConfigEndpoints.cs`) with the App Insights CONNECTION STRING for browser telemetry, from the BFF's own configuration (find what the BFF already uses for App Insights, e.g. `APPLICATIONINSIGHTS_CONNECTION_STRING`; do not invent a new secret). Browser connection strings are public by design (the JS SDK ships them to every browser). If the only available value is server-only or contains anything beyond the standard connection string, STOP and escalate. Keep the endpoint's rate limit and response shape backward compatible (additive field).</constraint>
+    <constraint>One client path: `AppInsightsService` (`src/client/shared/Spaarke.UI.Components/src/services/AppInsightsService.ts`) initialises from that runtime value, fetched once and cached. Reuse @spaarke/auth's cached `/api/config/client` fetch (`fetchBffClientTenant` and its cache in `resolveRuntimeConfig.ts`); extend it to keep the whole client config rather than adding a second fetch. Telemetry is best-effort: a failed fetch means no telemetry, never a broken control.</constraint>
+    <constraint>Remove the form-property and VITE paths from the 5 surfaces. Keep manifest properties optional and ignored so existing forms stay valid; say so in descriptions. Bump each changed PCF's version in ALL locations (PCF-DEPLOYMENT-GUIDE; the owner stresses an un-incremented version imports but does not load).</constraint>
+    <constraint>§10 BFF: placement justification, publish-size delta from fresh short-path worktrees you create and remove (never C:/tmp/bffsize, C:/wt097*, C:/wt098*), CVE check, tests. RouteAuthorizationGuard ledger unchanged (no new route).</constraint>
+    <constraint>No deploys and no Dataverse writes in implementation: the BFF deploy, PCF/code-page deploys and the Matter form edit are a separate owner-approved step. Prepare the exact form-edit plan (which parameters to remove from which control binding on which form id) and verify read-only that VisualHost's form bindings also carry static keys.</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step>BFF: add the browser connection string to `/api/config/client` (additive), with unit/contract tests (present when configured, absent/null when not, anonymous, rate limit unchanged).</step>
+    <step>@spaarke/auth: keep the full client config from the cached fetch; export a small getter (e.g. `getClientConfig()` / `getTelemetryConnectionString()`), with tests.</step>
+    <step>Spaarke.UI.Components AppInsightsService: an `initializeFromRuntime()` (or similar) that uses that getter; accepts a connection string (not only an instrumentation key). Tests.</step>
+    <step>SemanticSearchControl, VisualHost, DailyBriefing, EmailPage, CommunicationReconciliation: use the runtime path; drop the form property / VITE reads; version bumps; builds (PCF via scripts/Invoke-PcfBuildProd.ps1) and tests.</step>
+    <step>Read-only: list every form/view binding that carries a static appInsightsKey/tenantId for these controls in spaarkedev1 (systemform formxml) and write the exact edit plan to `notes/127-client-telemetry.md`.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">`GET /api/config/client` returns the browser App Insights connection string from the BFF's configuration; unchanged otherwise; tests cover configured and unconfigured.</criterion>
+    <criterion testable="true">grep: no `appInsightsKey` form-property read and no `VITE_APP_INSIGHTS_KEY` in the 5 surfaces; all initialise via the runtime path.</criterion>
+    <criterion testable="true">A failed config fetch leaves the control working with telemetry off (test).</criterion>
+    <criterion testable="true">Gates green: BFF build 0/0, unit tests, ArchTests; @spaarke/auth jest; UI components jest for AppInsightsService; PCF build:prod PASS; code pages build; office-addins jest/typecheck (they consume @spaarke/auth); publish delta + CVE reported.</criterion>
+    <criterion testable="true">`notes/127-client-telemetry.md` holds the read-only form-binding inventory and the exact form-edit + deploy plan for owner approval.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>`/api/config/client` already serves per-environment client config anonymously; @spaarke/auth already fetches and caches it; AppInsightsService already exists.</existing>
+    <extension>Yes — one additive field, one getter, one init path; no new endpoint, service or package.</extension>
+    <cost-of-doing-nothing>Every customer environment's browser telemetry goes to Spaarke's dev App Insights (leaking customer usage data) or is lost.</cost-of-doing-nothing>
+  </justification>
+  <notes>DONE 2026-10-09 (notes/127-client-telemetry.md). GET /api/config/client returns appInsightsConnectionString from the BFF's APPLICATIONINSIGHTS_CONNECTION_STRING (strict allow-list parse; Key Vault references and non-GUID keys return null; route, rate limit and ledger unchanged). @spaarke/auth: the cached /api/config/client fetch moves to bffClientConfig.ts (whole config, per BFF host; getTelemetryConnectionString(); empty answers expire after 1 h; tenant discovery unchanged). AppInsightsService.initializeFromRuntime (connection string, 50-event buffer, never throws). SemanticSearchControl 1.1.85 and VisualHost 1.4.40, DailyBriefing, EmailPage, CommunicationReconciliation use it; form appInsightsKey kept optional and ignored; VITE key removed. Gates: BFF 0/0, unit 35/35, RouteAuthorizationGuard 86/86; Spaarke.Auth 14 suites/202; AppInsightsService 9/9; SemanticSearchControl build:prod PASS, jest 140; VisualHost build:prod PASS, jest 84, pack guard 5/5 (exit 0 fixed); code pages build; office-addins 105/1357, tsc prod 0/68; publish +758 B (192=192); no CVE. Independent verifier: one F (SemanticSearchControl footer still v1.1.84) fixed. Form inventory: only the Matter main form (4fa382f2…) carries static appInsightsKey + tenantId on the SemanticSearchControl binding (3 form factors). Deploy + form edit need the owner's go. Follow-up #1551 (LegalWorkspace hardcoded dev string, SpaarkeAi VITE key, getAppInsightsKey helper).</notes>
+</task>

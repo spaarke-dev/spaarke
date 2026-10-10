@@ -62,7 +62,7 @@ import {
   type BulkDownloadFailureToast,
 } from './services/bulkDownloadFailure';
 import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilter';
-import { authenticatedFetch } from '@spaarke/auth';
+import { authenticatedFetch, getTelemetryConnectionString } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
 import { getApiBaseUrl, resolveSignInIdentity } from '../../shared/utils/environmentVariables';
 import { FindSimilarViewerDialog } from '@spaarke/ui-components/dist/components/FindSimilarViewer';
@@ -465,13 +465,6 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const manifestTenantId = context.parameters.tenantId?.raw ?? '';
     const manifestClientAppId = context.parameters.clientAppId?.raw ?? '';
     const manifestBffAppId = context.parameters.bffAppId?.raw ?? '';
-    // FR-TEL-01: App Insights instrumentation key (manifest-property env-var pattern).
-    // Initialize is idempotent — safe if the parent control already initialized.
-    const appInsightsKey =
-      (context.parameters as unknown as { appInsightsKey?: { raw?: string } }).appInsightsKey?.raw ?? '';
-    if (appInsightsKey) {
-      AppInsightsService.initialize(appInsightsKey);
-    }
 
     let dataverseUrl: string;
     try {
@@ -486,6 +479,10 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
     const doAuth = async () => {
       const apiBaseUrlResolved = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
+      // FR-TEL-01 / #1537: telemetry goes to THIS environment's App Insights. The connection string comes
+      // from the BFF at runtime (cached by @spaarke/auth) — never from a form property, because shipped forms
+      // carried the dev key. Best-effort: not awaited, never rejects; a failed lookup means telemetry off.
+      void AppInsightsService.initializeFromRuntime(() => getTelemetryConnectionString(apiBaseUrlResolved));
       // Environment variables first, form properties only as a fallback (#1453 — shipped forms carry dev values).
       const { tenantId, clientAppId, bffAppId } = await resolveSignInIdentity(webApi, {
         tenantId: manifestTenantId,
@@ -1855,7 +1852,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.84 • Built 2026-10-09</Text>
+        <Text size={100}>v1.1.85 • Built 2026-10-09</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so

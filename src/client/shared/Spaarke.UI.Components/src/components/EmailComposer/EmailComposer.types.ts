@@ -577,7 +577,27 @@ export interface IEmailComposerProps {
   // — Callbacks (dialog/page mount) —
   onSent?: (result: { communicationId: string }) => void;
   onCancel?: () => void;
+  /**
+   * Notified of EVERY failed send — a server refusal, an expired sign-in, and a request that never
+   * reached the server (normalized to status 0 / code `NETWORK`). It is a notification, not a
+   * hand-off: the engine still shows its "Email not sent" dialog unless the host sets
+   * {@link sendFailureDisplay} to `'host'`. Logging here is fine; it never silences the user.
+   * Not called when the send is refused before the request with an inline message (an unresolved
+   * Spaarke record link) — that message is already on screen.
+   */
   onError?: (err: SendCommunicationError) => void;
+  /**
+   * Who tells the user that a send failed (owner decision 2026-10-09 — a failed send is never silent).
+   * - `'dialog'` (default): the engine shows a descriptive "Email not sent" dialog over the composer
+   *   (`describeSendFailure`); the composer stays open with the draft intact, and closing the dialog
+   *   returns focus to the composer.
+   * - `'host'`: the host shows the failure itself (a toast / MessageBar driven by `onError`, or the
+   *   rejection of an imperative `send()`). Set it ONLY when the host really renders that message —
+   *   an `onError` that just logs leaves the user with nothing.
+   * Governs SEND only: a failed Save Draft always shows its own "Draft not saved" message (there is no
+   * draft `onError` a host could show it from).
+   */
+  sendFailureDisplay?: 'dialog' | 'host';
   onSaveDraft?: (result: { communicationId: string }) => void;
 
   // — View-mode navigation callbacks (host handles the actual mode switch —

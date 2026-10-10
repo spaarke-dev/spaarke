@@ -202,7 +202,9 @@
     </CommandDefinition>
     <CommandDefinition Id="sprk.WorkAssignment.NewWizard.Grid.Command">
       <EnableRules />
-      <DisplayRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_workassignment.DisplayRule" />
+      </DisplayRules>
       <Actions>
         <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateWorkAssignmentStandalone" Library="$webresource:sprk_wizard_commands" />
       </Actions>
@@ -210,7 +212,11 @@
   </CommandDefinitions>
   <RuleDefinitions>
     <TabDisplayRules />
-    <DisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_workassignment.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_workassignment" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
+    </DisplayRules>
     <EnableRules>
       <EnableRule Id="sprk.Access.sprk_workassignment.CanUpdateAccess.EnableRule">
         <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
