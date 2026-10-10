@@ -1,0 +1,582 @@
+{
+  "$comment": "SEALED - task 074 / D-64. The drafter's INTENDED mix, for composition checking only. NOT ground truth: the owner's blind labels are. Do not show to the labeller before labelling is complete.",
+  "drafter": "Claude (task 074 agent), 2026-10-07",
+  "shuffleSeed": 20261007,
+  "composition": {
+    "positive-fee": 28,
+    "positive-scope": 28,
+    "negative-confusable": 18,
+    "negative-other": 18
+  },
+  "items": [
+    {
+      "id": "L001",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Ridgeline production - review staffing"
+    },
+    {
+      "id": "L002",
+      "role": "negative-confusable",
+      "intendedCategory": "Invoice / Billing",
+      "subject": "Invoice 77812 - lines 14-19"
+    },
+    {
+      "id": "L003",
+      "role": "negative-other",
+      "intendedCategory": "Court / Filing",
+      "subject": "Hearing set - Motion to Compel"
+    },
+    {
+      "id": "L004",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Translation fee revision"
+    },
+    {
+      "id": "L005",
+      "role": "negative-confusable",
+      "intendedCategory": "Invoice / Billing",
+      "subject": "Invoice 2026-0912 - September services"
+    },
+    {
+      "id": "L006",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Time recording increments"
+    },
+    {
+      "id": "L007",
+      "role": "negative-other",
+      "intendedCategory": "Court / Filing",
+      "subject": "Notice of Allowance - App. No. 17/552,019"
+    },
+    {
+      "id": "L008",
+      "role": "negative-confusable",
+      "intendedCategory": "Marketing / Noise",
+      "subject": "Cut outside counsel spend by 20%"
+    },
+    {
+      "id": "L009",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Internal investigation - further interviews"
+    },
+    {
+      "id": "L010",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Travel time billing"
+    },
+    {
+      "id": "L011",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Licensing program - Q4"
+    },
+    {
+      "id": "L012",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Panel rates for Q2 onward"
+    },
+    {
+      "id": "L013",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Court appearance billing"
+    },
+    {
+      "id": "L014",
+      "role": "negative-other",
+      "intendedCategory": "Client instruction",
+      "subject": "Settlement authority - Marsh v. Lattimore",
+      "borderline": "money figure, but it is settlement authority"
+    },
+    {
+      "id": "L015",
+      "role": "negative-other",
+      "intendedCategory": "Administrative",
+      "subject": "Automatic reply: Out of office"
+    },
+    {
+      "id": "L016",
+      "role": "negative-confusable",
+      "intendedCategory": "Court / Filing",
+      "subject": "Order on motion for attorneys' fees - Case No. 3:25-cv-01188",
+      "borderline": "fee award by a court"
+    },
+    {
+      "id": "L017",
+      "role": "negative-other",
+      "intendedCategory": "Marketing / Noise",
+      "subject": "Sponsorship opportunities - Legal Ops Summit 2027"
+    },
+    {
+      "id": "L018",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "discovery timeline",
+      "borderline": "court allowed subpoenas; short, no figure"
+    },
+    {
+      "id": "L019",
+      "role": "negative-confusable",
+      "intendedCategory": "Scheduling",
+      "subject": "Ortiz deposition confirmed"
+    },
+    {
+      "id": "L020",
+      "role": "negative-confusable",
+      "intendedCategory": "Invoice / Billing",
+      "subject": "Credit memo CM-0331"
+    },
+    {
+      "id": "L021",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Quarterly update - Brightwater licensing program"
+    },
+    {
+      "id": "L022",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "tom's rate",
+      "borderline": "mentions next bill"
+    },
+    {
+      "id": "L023",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Experts - Delgado v. Pacifica Rail"
+    },
+    {
+      "id": "L024",
+      "role": "negative-confusable",
+      "intendedCategory": "Client instruction",
+      "subject": "Go ahead with the opposition",
+      "borderline": "client instruction that mentions keeping within approved budget"
+    },
+    {
+      "id": "L025",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Portfolio diligence - full review"
+    },
+    {
+      "id": "L026",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "2027 volume discount"
+    },
+    {
+      "id": "L027",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Weekly status - Orchard Lane development"
+    },
+    {
+      "id": "L028",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Phase 2 budget - Aldridge matter"
+    },
+    {
+      "id": "L029",
+      "role": "negative-other",
+      "intendedCategory": "Administrative",
+      "subject": "Data room access request"
+    },
+    {
+      "id": "L030",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Adding Dr. Sato to the antitrust team",
+      "borderline": "new/substituted timekeeper at a different rate (Fee per guidance) vs added resource (Scope)"
+    },
+    {
+      "id": "L031",
+      "role": "negative-other",
+      "intendedCategory": "Opposing counsel",
+      "subject": "Meet and confer - Interrogatories 3-9"
+    },
+    {
+      "id": "L032",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Alternative fee proposal - Halvorsen v. Corridor Energy"
+    },
+    {
+      "id": "L033",
+      "role": "negative-confusable",
+      "intendedCategory": "Invoice / Billing",
+      "subject": "Heads up on October bill",
+      "borderline": "future bill, but for work already within budget"
+    },
+    {
+      "id": "L034",
+      "role": "negative-other",
+      "intendedCategory": "Opposing counsel",
+      "subject": "Protective order - our redlines"
+    },
+    {
+      "id": "L035",
+      "role": "negative-other",
+      "intendedCategory": "Opposing counsel",
+      "subject": "Deficiencies in your responses to Requests for Production"
+    },
+    {
+      "id": "L036",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Rebuttal expert"
+    },
+    {
+      "id": "L037",
+      "role": "negative-other",
+      "intendedCategory": "Court / Filing",
+      "subject": "Docket reminder - Office Action response due"
+    },
+    {
+      "id": "L038",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Document production phase",
+      "borderline": "tribunal ruling could read as Court / Filing; no date stated"
+    },
+    {
+      "id": "L039",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Second opinion on the patent strategy"
+    },
+    {
+      "id": "L040",
+      "role": "negative-confusable",
+      "intendedCategory": "Invoice / Billing",
+      "subject": "Year-end accrual - unbilled work in progress",
+      "borderline": "unbilled WIP estimate; Invoice/Billing vs Administrative"
+    },
+    {
+      "id": "L041",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Project Cedar - timing and budget"
+    },
+    {
+      "id": "L042",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "2027 rate card attached"
+    },
+    {
+      "id": "L043",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Delaware entity too"
+    },
+    {
+      "id": "L044",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Billing currency for Brightline matters"
+    },
+    {
+      "id": "L045",
+      "role": "negative-confusable",
+      "intendedCategory": "Administrative",
+      "subject": "Please confirm current rates - Matter 1123",
+      "borderline": "rates mentioned; explicitly no change"
+    },
+    {
+      "id": "L046",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "paralegal rate"
+    },
+    {
+      "id": "L047",
+      "role": "negative-other",
+      "intendedCategory": "Court / Filing",
+      "subject": "Order granting extension of time"
+    },
+    {
+      "id": "L048",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Translation for the Seoul proceeding",
+      "borderline": "court direction plus vendor estimate"
+    },
+    {
+      "id": "L049",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Contract review - add 2019 and 2020"
+    },
+    {
+      "id": "L050",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Committee formation - monitoring work"
+    },
+    {
+      "id": "L051",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Priya - partner effective Jan 1"
+    },
+    {
+      "id": "L052",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Staffing change on the Kessler arbitration"
+    },
+    {
+      "id": "L053",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Updated payment terms from 1 March"
+    },
+    {
+      "id": "L054",
+      "role": "negative-confusable",
+      "intendedCategory": "Invoice / Billing",
+      "subject": "Invoice rejected - Matter 1123"
+    },
+    {
+      "id": "L055",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Trial preparation - budget approval"
+    },
+    {
+      "id": "L056",
+      "role": "negative-confusable",
+      "intendedCategory": "Invoice / Billing",
+      "subject": "Remittance advice - payment sent"
+    },
+    {
+      "id": "L057",
+      "role": "negative-other",
+      "intendedCategory": "Scheduling",
+      "subject": "Mediation dates - availability"
+    },
+    {
+      "id": "L058",
+      "role": "negative-other",
+      "intendedCategory": "Marketing / Noise",
+      "subject": "Webinar: AI and the future of patent prosecution"
+    },
+    {
+      "id": "L059",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Proposal: monthly retainer for trademark portfolio maintenance"
+    },
+    {
+      "id": "L060",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "IPR petition against Corvex '417"
+    },
+    {
+      "id": "L061",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Subpoena expansion - additional custodians",
+      "borderline": "regulator-driven (SEC) could read as Court / Filing"
+    },
+    {
+      "id": "L062",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Re: FCPA training sessions"
+    },
+    {
+      "id": "L063",
+      "role": "negative-other",
+      "intendedCategory": "Administrative",
+      "subject": "Re: Draft APA"
+    },
+    {
+      "id": "L064",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Houston depositions"
+    },
+    {
+      "id": "L065",
+      "role": "negative-other",
+      "intendedCategory": "Scheduling",
+      "subject": "Move Tuesday's call?"
+    },
+    {
+      "id": "L066",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Project Talon - Brazilian subsidiaries"
+    },
+    {
+      "id": "L067",
+      "role": "negative-confusable",
+      "intendedCategory": "Administrative",
+      "subject": "2027 engagement letter renewal",
+      "borderline": "rates mentioned; explicitly unchanged"
+    },
+    {
+      "id": "L068",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Incident response - notifications scope"
+    },
+    {
+      "id": "L069",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Fixed-fee pricing for FY27"
+    },
+    {
+      "id": "L070",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Lender comments - additional title work"
+    },
+    {
+      "id": "L071",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Hosting fee adjustment - Matter 4471 workspace"
+    },
+    {
+      "id": "L072",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "RE: Request for fee concession"
+    },
+    {
+      "id": "L073",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Hearing phase fee cap - Torvald arbitration",
+      "borderline": "fee arrangement for a phase; text states the work is unchanged"
+    },
+    {
+      "id": "L074",
+      "role": "negative-confusable",
+      "intendedCategory": "Client instruction",
+      "subject": "RE: Phase 2 budget - Aldridge matter",
+      "borderline": "client APPROVES a budget increase already requested; could be read as Scope"
+    },
+    {
+      "id": "L075",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Annuity service fee from 2027"
+    },
+    {
+      "id": "L076",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Administrative charge on invoices"
+    },
+    {
+      "id": "L077",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "2027 hourly rates - Northfield Holdings matters"
+    },
+    {
+      "id": "L078",
+      "role": "negative-confusable",
+      "intendedCategory": "Administrative",
+      "subject": "Monthly budget report - Phase 1",
+      "borderline": "budget figures with no change requested"
+    },
+    {
+      "id": "L079",
+      "role": "negative-other",
+      "intendedCategory": "Client instruction",
+      "subject": "Change of approach on Corvex"
+    },
+    {
+      "id": "L080",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Blended rate proposal for associates"
+    },
+    {
+      "id": "L081",
+      "role": "negative-confusable",
+      "intendedCategory": "Court / Filing",
+      "subject": "Defendant's motion for fees filed - opposition due Nov 3"
+    },
+    {
+      "id": "L082",
+      "role": "negative-confusable",
+      "intendedCategory": "Opposing counsel",
+      "subject": "Settlement demand - Marsh v. Lattimore Foods"
+    },
+    {
+      "id": "L083",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Outside counsel guidelines - 2027 revision"
+    },
+    {
+      "id": "L084",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Clearance searches - additional countries"
+    },
+    {
+      "id": "L085",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Rates following the Linden/Hart combination"
+    },
+    {
+      "id": "L086",
+      "role": "negative-confusable",
+      "intendedCategory": "Administrative",
+      "subject": "W-9 needed for vendor setup"
+    },
+    {
+      "id": "L087",
+      "role": "negative-other",
+      "intendedCategory": "Administrative",
+      "subject": "Our New York office has moved"
+    },
+    {
+      "id": "L088",
+      "role": "negative-other",
+      "intendedCategory": "Client instruction",
+      "subject": "Hold - Rivera matter"
+    },
+    {
+      "id": "L089",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Appeal - budget if we go forward"
+    },
+    {
+      "id": "L090",
+      "role": "positive-fee",
+      "intendedCategory": "Fee / rate change",
+      "subject": "Revised fee schedule for EPO opposition work"
+    },
+    {
+      "id": "L091",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Project Atlas - revised budget needed"
+    },
+    {
+      "id": "L092",
+      "role": "positive-scope",
+      "intendedCategory": "Scope / budget change",
+      "subject": "Divisional filings - '882 family",
+      "borderline": "patent-office trigger could read as Court / Filing; no deadline stated"
+    }
+  ]
+}
