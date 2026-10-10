@@ -47,7 +47,7 @@
    target and parents together as the secure-if-any set, so the answer is the same; the target form also carries the BU for a
    not-secure answer, which is ignored here.
 5. **Non-secure ownership**: "unchanged from the non-secure path" means the writer's own owner and BU; this writer does NOT set
-   `owningbusinessunit` the way `SignalWriter` does (FR-14). See document-only item 1.
+   `owningbusinessunit` the way `SignalWriter` does (FR-14). The consequence is recorded as a known limit in section 6 (visibility of a non-secure record is a 045/038 question).
 6. **Telemetry**: its own reason constants (`DecisionRecordRefusalReason`) and EventIds 50310/50311 live in the new file instead of
    editing the shared `OntologyWriterFailureReason` / `OntologyWriterEvents` (avoids a conflict with lane 037). They feed the existing
    `OntologyWriterTelemetry.RecordFailure`.
@@ -82,3 +82,17 @@ New file in `Services/Signals/` beside `SignalWriter`; a concrete singleton (ADR
 calls only the dedicated writer client and the existing resolver. Existing: `SignalWriter` writes a different table with a different
 lifecycle. Extension: no, this is create-only with a derived class. Cost of doing nothing: no durable answer to why a decision was made
 (suppression and the Report Card have no input).
+
+## 6. Review round 1 (independent review of f3362fb8d): fixes and known limits
+
+Fixed on this branch:
+- **F4 contract**: a failed create is now wrapped as `DecisionRecordRefusedException` (`decision_create_failed`, or `decision_dataverse_access_denied` for 0x80040220/0x80040299, inner exception kept, logged at 50310 and metered). A resolver fault is wrapped too (`decision_owner_resolution_failed`). The writer's one exception type (plus `OperationCanceledException`, never swallowed) is in the `<exception>` doc. The access-denied classifier is a small copy of `SignalWriter`'s private one because lane 037 is editing that file; consolidate afterwards (a candidate for one shared helper).
+- **F2**: memos are serialized and length-checked (fact snapshot 100,000; `sprk_steps` / `sprk_followons` 1,048,576) before ANY I/O, refused as `decision_review_invalid`. `Steps` must be non-empty (`sprk_proposedaction` is required). A gate tier on a review that took nothing, and an outcome or written rows on a skipped step, are refused (section 0.3). A secure resolver answer with no team is refused instead of falling through.
+- **F3 ADR-038 pairing**: `tests/integration/seam/Signals/DecisionRecordWriterSeamTests.cs` (Category Live, opt-in like the Signal seam). Run once on 2026-10-10 against spaarkedev1 as the writer (`SIGNALS_LIVE_*`, `AzureCliCredential`): 3 of 3 pass. It asserts every column, the class and outcome values, the lineage and core columns, the no-core owner (`owninguser` = Test User 1), the dismissal values, and that an update by the writer principal is REFUSED. Rows are swept with the operator client by the `zz-040-` marker in `sprk_reason`; afterwards `COUNT ... WHERE sprk_reason LIKE 'zz-040-%'` = 0 and the table holds 0 rows.
+- **F3 observability**: the mismatch, read-back-throws, refusal and create-failure paths assert the EventId, level, reason and the `ontology.writer.failures` metric (capturing logger plus a scoped `MeterListener`). Mutation proven: changing the mismatch log call's EventId made the mismatch test fail; restored.
+
+Known limits, not fixed:
+- **A secure-owner read-back mismatch returns success** (the id is returned, an Error is logged and metered). The row is append-only, so the writer cannot correct it, and failing would make 043 retry into a duplicate. The claim that uac-r2's reconcile re-owns it is NOT verified for this table (only the 039 live gate on Signals and Decision Records, section 5.2 of the 039 notes, saw re-owning within about 60 s).
+- **Criterion 11** (an update by a user holding a MIRRORED SHARE is refused) is deferred to task 041. The live seam proves the writer principal's update is refused; the mirrored-share user is 041's demonstration.
+- A non-secure Decision Record is owned by the writer's BU/identity, per the POML. A reader can reach it only if a role or share allows; that is for 038/045, not 040.
+- If the create times out the row may exist; the route must check before it retries.

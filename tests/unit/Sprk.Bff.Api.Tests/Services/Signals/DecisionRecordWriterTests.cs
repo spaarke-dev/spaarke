@@ -1,5 +1,7 @@
+using System.Diagnostics.Metrics;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.PowerPlatform.Dataverse.Client;
@@ -9,6 +11,8 @@ using Moq;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
+using Sprk.Bff.Api.Telemetry;
+using Sprk.Bff.Api.Tests.Services.Communication; // CapturingLogger<T> / LogEntry (internal, same assembly)
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Signals;
@@ -49,6 +53,7 @@ public sealed class DecisionRecordWriterTests
         public List<Entity> Created { get; } = [];
         public Guid NewId { get; } = Guid.NewGuid();
         public Guid? ReadBackTeam { get; set; }
+        public CapturingLogger<DecisionRecordWriter> Log { get; } = new();
         public DecisionRecordWriter Writer { get; }
 
         public Harness(RecordOwnerResolution? ownership = null)
@@ -65,7 +70,7 @@ public sealed class DecisionRecordWriterTests
                 .ReturnsAsync(ownership ?? RecordOwnerResolution.Owned(Guid.NewGuid()));
 
             var client = new OntologyWriterDataverseClient(() => Org.Object, NullLogger<OntologyWriterDataverseClient>.Instance);
-            Writer = new DecisionRecordWriter(client, Ownership.Object, new FakeTimeProvider(Now), NullLogger<DecisionRecordWriter>.Instance);
+            Writer = new DecisionRecordWriter(client, Ownership.Object, new FakeTimeProvider(Now), Log);
         }
 
         public Entity Row => Created.Single();
@@ -142,7 +147,8 @@ public sealed class DecisionRecordWriterTests
     {
         var h = new Harness();
         var result = await h.Writer.WriteAsync(Request(
-            steps: [Skipped("mark-complete"), Skipped("reschedule")], reason: "not-mine - someone else's"));
+            steps: [Skipped("mark-complete"), Skipped("reschedule")], reason: "not-mine - someone else's") with
+        { GateTier = null });
 
         result.RecordClass.Should().Be(RecordedDecisionClass.Dismissal);
         Option(h.Row, "sprk_recordclass").Should().Be(100000002);
@@ -155,7 +161,7 @@ public sealed class DecisionRecordWriterTests
     public async Task Dismissal_WithoutAReason_IsRefused_AndNothingIsWritten()
     {
         var h = new Harness();
-        var act = () => h.Writer.WriteAsync(Request(steps: [Skipped("mark-complete")], reason: " "));
+        var act = () => h.Writer.WriteAsync(Request(steps: [Skipped("mark-complete")], reason: " ") with { GateTier = null });
 
         (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason
             .Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
@@ -166,7 +172,7 @@ public sealed class DecisionRecordWriterTests
     public async Task Deny_SavesWithOutcomeDenied_AndANullAction()
     {
         var h = new Harness();
-        await h.Writer.WriteAsync(Request(steps: [Skipped("approve-variance")], reason: "other - too high", denied: true));
+        await h.Writer.WriteAsync(Request(steps: [Skipped("approve-variance")], reason: "other - too high", denied: true) with { GateTier = null });
 
         Option(h.Row, "sprk_decisionoutcome").Should().Be(100000001);
         h.Row.Contains("sprk_action").Should().BeFalse("sprk_action stays null on deny paths");
@@ -454,23 +460,210 @@ public sealed class DecisionRecordWriterTests
         h.Created.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task ASecureOwnerThatReadsBackWrong_StillReturnsTheId_SoTheRouteDoesNotRetryIntoADuplicate()
+    // ── Observability: the refusal / mismatch paths log and meter, and the tests prove it ─────────────────────────
+
+    private static readonly AsyncLocal<Guid> MetricScope = new();
+
+    /// <summary>Failure reasons metered on this async flow only (the Meter is process-global; same pattern as SignalWriterTests).</summary>
+    private static (MeterListener Listener, List<string?> Reasons) ListenReasons(Guid scope)
     {
+        var reasons = new List<string?>();
+        var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, l) =>
+            {
+                if (instrument.Meter.Name == OntologyWriterTelemetry.MeterName && instrument.Name == "ontology.writer.failures")
+                    l.EnableMeasurementEvents(instrument);
+            },
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            if (MetricScope.Value != scope) return;
+            foreach (var tag in tags)
+                if (tag.Key == "reason") lock (reasons) reasons.Add(tag.Value as string);
+        });
+        listener.Start();
+        return (listener, reasons);
+    }
+
+    [Fact]
+    public async Task ASecureOwnerThatReadsBackWrong_StillReturnsTheId_LogsTheMismatch_AndMetersIt()
+    {
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, reasons) = ListenReasons(scope);
+        using var _ = listener;
         var h = new Harness(Secure()) { ReadBackTeam = Guid.NewGuid() };
+
         var result = await h.Writer.WriteAsync(Request());
 
         result.RecordId.Should().Be(h.NewId);
         h.Created.Should().HaveCount(1);
+        h.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.SecureOwnerMismatch && e.Level == LogLevel.Error);
+        reasons.Should().Contain(DecisionRecordRefusalReason.SecureOwnerMismatch);
     }
 
     [Fact]
-    public async Task ACreateFailure_Propagates_SoTheRouteWritesNoRecord()
+    public async Task AReadBackThatThrows_StillReturnsTheId_LogsTheException_AndMetersIt()
     {
-        var h = new Harness();
-        h.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("boom"));
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, reasons) = ListenReasons(scope);
+        using var _ = listener;
+        var h = new Harness(Secure());
+        h.Org.Setup(o => o.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ColumnSet>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("read-back down"));
+
+        var result = await h.Writer.WriteAsync(Request());
+
+        result.RecordId.Should().Be(h.NewId);
+        h.Log.Entries.Should().ContainSingle(e =>
+            e.EventId == DecisionRecordEvents.SecureOwnerMismatch && e.Exception is InvalidOperationException);
+        reasons.Should().Contain(DecisionRecordRefusalReason.SecureOwnerMismatch);
+    }
+
+    [Fact]
+    public async Task ARefusal_LogsTheEventIdAndReason_MetersIt_AndLeaksNoFactValues()
+    {
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, reasons) = ListenReasons(scope);
+        using var _ = listener;
+        var h = new Harness(RecordOwnerResolution.Refused(RecordOwnerRefusal.SecureParentNotIsolated, "x"));
 
         var act = () => h.Writer.WriteAsync(Request());
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        await act.Should().ThrowAsync<DecisionRecordRefusedException>();
+
+        var entry = h.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.WriteRefused).Subject;
+        entry.Level.Should().Be(LogLevel.Error);
+        entry.Fields["Reason"].Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        entry.Message.Should().NotContain("2026-09").And.NotContain("12.5");
+        reasons.Should().Contain(DecisionRecordRefusalReason.OwnerRefused);
+    }
+
+    // ── Create failure is the writer's one exception type ───────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ACreateFailure_IsWrapped_AsCreateFailed_WithTheInnerException_LoggedAndMetered()
+    {
+        var scope = Guid.NewGuid();
+        MetricScope.Value = scope;
+        var (listener, reasons) = ListenReasons(scope);
+        using var _ = listener;
+        var h = new Harness();
+        var boom = new InvalidOperationException("boom");
+        h.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).ThrowsAsync(boom);
+
+        var act = () => h.Writer.WriteAsync(Request());
+
+        var ex = (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.CreateFailed);
+        ex.InnerException.Should().BeSameAs(boom);
+        h.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.WriteRefused);
+        reasons.Should().Contain(DecisionRecordRefusalReason.CreateFailed);
+    }
+
+    [Theory]
+    [InlineData("The user does not have the right: 0x80040299 Read Privilege Check For Owner failed")]
+    [InlineData("access check 0x80040220")]
+    public async Task APrivilegeFault_IsClassifiedAsDataverseAccessDenied(string message)
+    {
+        var h = new Harness();
+        h.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException(message));
+
+        var act = () => h.Writer.WriteAsync(Request());
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason
+            .Should().Be(DecisionRecordRefusalReason.DataverseAccessDenied);
+    }
+
+    [Fact]
+    public async Task AResolverFault_IsWrapped_AndNothingIsWritten()
+    {
+        var h = new Harness();
+        h.Ownership.Setup(r => r.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("throttled"));
+
+        var act = () => h.Writer.WriteAsync(Request());
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason
+            .Should().Be(DecisionRecordRefusalReason.OwnerResolutionFailed);
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Cancellation_IsNotSwallowedOrWrapped()
+    {
+        var h = new Harness();
+        h.Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>())).ThrowsAsync(new OperationCanceledException());
+
+        var act = () => h.Writer.WriteAsync(Request());
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task ASecureAnswerWithNoTeam_IsRefused_NotWrittenAsOrdinary()
+    {
+        var h = new Harness(new RecordOwnerResolution(RecordOwnerOutcome.Unchanged, null, null, "x") { IsSecureOwner = true });
+        var act = () => h.Writer.WriteAsync(Request());
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason
+            .Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        h.Created.Should().BeEmpty();
+    }
+
+    // ── Refused before any I/O: too large, empty, or asserting more than happened ───────────────────────────────
+
+    [Theory]
+    [InlineData("facts")]
+    [InlineData("steps")]
+    public async Task AnOversizeMemo_IsRefusedBeforeAnyIo(string which)
+    {
+        var h = new Harness();
+        var big = new string('x', which == "facts" ? 100_001 : 1_048_577);
+        var req = which == "facts"
+            ? Request(facts: new Dictionary<string, object?> { ["k"] = big })
+            : Request(steps: [new DecisionRecordStep("mark-complete", true, new Dictionary<string, object?> { ["note"] = big }, "Done")]);
+
+        var act = () => h.Writer.WriteAsync(req);
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason
+            .Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+        h.Created.Should().BeEmpty();
+        h.Ownership.Verify(r => r.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AReviewThatOfferedNothing_IsRefused_BecauseProposedActionIsRequired()
+    {
+        var h = new Harness();
+        var act = () => h.Writer.WriteAsync(Request(steps: [], followOns: [new("add-todo", "sprk_todo", TodoId)]));
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason
+            .Should().Be(DecisionRecordRefusalReason.ReviewInvalid);
+    }
+
+    [Fact]
+    public async Task ADismissal_CannotCarryAGateTier()
+    {
+        var h = new Harness();
+        var act = () => h.Writer.WriteAsync(Request(steps: [Skipped("mark-complete")], reason: "not-mine - x"));   // helper default tier-1
+
+        await act.Should().ThrowAsync<DecisionRecordRefusedException>();
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ASkippedAction_CannotCarryAnOutcomeOrWrittenRows()
+    {
+        var h = new Harness();
+        var withOutcome = () => h.Writer.WriteAsync(Request(steps: [Taken("revise-budget"), new("approve-variance", false, null, "Done")]));
+        var withRows = () => h.Writer.WriteAsync(Request(steps: [Taken("revise-budget"),
+            new("approve-variance", false, null, null, [new DecisionRecordRef("sprk_budget", Guid.NewGuid())])]));
+
+        await withOutcome.Should().ThrowAsync<DecisionRecordRefusedException>();
+        await withRows.Should().ThrowAsync<DecisionRecordRefusedException>();
+        h.Created.Should().BeEmpty();
     }
 }

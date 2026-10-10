@@ -100,7 +100,9 @@ public static class DecisionRecordRefusalReason
     public const string CoreUnsupported = "decision_core_unsupported";
     public const string OwnerMissing = "decision_owner_missing";
     public const string OwnerRefused = "decision_owner_refused";
+    public const string OwnerResolutionFailed = "decision_owner_resolution_failed";
     public const string CreateFailed = "decision_create_failed";
+    public const string DataverseAccessDenied = "decision_dataverse_access_denied";
     public const string SecureOwnerMismatch = "decision_secure_owner_mismatch";
 }
 
@@ -123,8 +125,9 @@ public sealed class DecisionRecordRefusedException : Exception
     /// <summary>The ownership resolver's refusal code when <see cref="Reason"/> is owner_refused.</summary>
     public string? OwnerRefusalCode { get; }
 
-    public DecisionRecordRefusedException(string reason, string message, string? ownerRefusalCode = null)
-        : base(message)
+    public DecisionRecordRefusedException(
+        string reason, string message, string? ownerRefusalCode = null, Exception? innerException = null)
+        : base(message, innerException)
     {
         Reason = reason;
         OwnerRefusalCode = ownerRefusalCode;
@@ -169,6 +172,10 @@ public sealed class DecisionRecordWriter
     private const int ActionCodeMaxLength = 100;
     private const int GateTierMaxLength = 100;
     private const int ReasonMaxLength = 2000;
+    // Live MaxLengths (sprk_decisionrecord): the fact snapshot 100000, the two JSON memos 1048576 (task 007). An oversize memo is
+    // refused BEFORE any I/O: by the time a create would fail, 043 has already sent its emails.
+    private const int FactSnapshotMaxLength = 100_000;
+    private const int JsonMemoMaxLength = 1_048_576;
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -205,8 +212,12 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>Writes the review's one Decision Record.</summary>
-    /// <exception cref="DecisionRecordRefusedException">The review is invalid, has no fact snapshot, cannot be typed from the
-    /// catalog, or its owner was refused. Nothing was written.</exception>
+    /// <exception cref="DecisionRecordRefusedException">The ONLY exception this writer throws (other than cancellation): the
+    /// review is invalid or too large for its columns, has no fact snapshot, cannot be typed from the catalog, or its owner was
+    /// refused (nothing was written, no I/O); or the Dataverse create failed (<see cref="DecisionRecordRefusalReason.CreateFailed"/>,
+    /// or <see cref="DecisionRecordRefusalReason.DataverseAccessDenied"/> for a privilege fault; the inner exception is kept, and
+    /// after a timeout the row may exist).</exception>
+    /// <exception cref="OperationCanceledException">The caller cancelled.</exception>
     public async Task<DecisionRecordWriteResult> WriteAsync(DecisionRecordRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -222,14 +233,27 @@ public sealed class DecisionRecordWriter
             {
                 // Task 040 (D-33/D-34): the core record is the resolver's parent. Secure answer -> the team owns the row, set in
                 // the create by uac-r2's own ApplyTo; not secure -> the writer's current ownership stays (SignalWriter's rule).
-                var owner = await _ownership.ResolveOwnerAsync(
-                    new RecordOwnershipContext
-                    {
-                        TargetEntityLogicalName = core.EntityLogicalName,
-                        TargetRecordId = core.RecordId,
-                        Parents = Array.Empty<RecordOwnershipParent>(),
-                    },
-                    ct).ConfigureAwait(false);
+                RecordOwnerResolution owner;
+                try
+                {
+                    owner = await _ownership.ResolveOwnerAsync(
+                        new RecordOwnershipContext
+                        {
+                            TargetEntityLogicalName = core.EntityLogicalName,
+                            TargetRecordId = core.RecordId,
+                            Parents = Array.Empty<RecordOwnershipParent>(),
+                        },
+                        ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // A Dataverse fault in the resolver is not an answer (it propagates there); here it becomes the writer's one
+                    // exception type. Nothing was written.
+                    throw new DecisionRecordRefusedException(
+                        DecisionRecordRefusalReason.OwnerResolutionFailed,
+                        "The ownership resolver failed, so the Decision Record owner is unknown; nothing was written.",
+                        innerException: ex);
+                }
 
                 if (owner.IsRefused)
                 {
@@ -239,8 +263,17 @@ public sealed class DecisionRecordWriter
                         owner.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource);
                 }
 
-                if (owner.IsSecureOwner && owner.IsOwned)
+                if (owner.IsSecureOwner)
                 {
+                    // A secure answer with no team is malformed: falling through would write an ordinary-owned child of a secure root.
+                    if (!owner.IsOwned)
+                    {
+                        throw new DecisionRecordRefusedException(
+                            DecisionRecordRefusalReason.OwnerRefused,
+                            "The ownership resolver marked the record secure but named no owner team; nothing was written.",
+                            RecordOwnerRefusal.NoOwnerSource);
+                    }
+
                     owner.ApplyTo(entity);
                     secureTeamId = owner.OwningTeamId;
                 }
@@ -263,12 +296,17 @@ public sealed class DecisionRecordWriter
             {
                 recordId = await _writerClient.CreateAsync(entity, ct).ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(DecisionRecordEvents.WriteRefused, ex,
-                    "Decision Record create failed (reason={Reason}).", DecisionRecordRefusalReason.CreateFailed);
-                OntologyWriterTelemetry.RecordFailure(DecisionRecordRefusalReason.CreateFailed);
-                throw;
+                // Wrapped, not leaked: the commit route handles ONE exception type from this writer. The inner exception is kept.
+                // A timeout can leave the row created; the route must not assume "failed" means "absent" without a check.
+                var denied = IsDataverseAccessDenied(ex);
+                throw new DecisionRecordRefusedException(
+                    denied ? DecisionRecordRefusalReason.DataverseAccessDenied : DecisionRecordRefusalReason.CreateFailed,
+                    denied
+                        ? "Dataverse refused the Decision Record create for lack of a privilege; no record was written."
+                        : "The Decision Record create failed; the record may not have been written.",
+                    innerException: ex);
             }
 
             if (secureTeamId is { } expectedTeam)
@@ -316,13 +354,41 @@ public sealed class DecisionRecordWriter
                 "Decision Record {RecordId} was created but owningteam is {ActualTeam}, not the Secure Record Owners team {ExpectedTeam}.",
                 recordId, actual, expectedTeam);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(DecisionRecordEvents.SecureOwnerMismatch, ex,
                 "Decision Record {RecordId} was created but its owner could not be read back to verify.", recordId);
         }
 
         OntologyWriterTelemetry.RecordFailure(DecisionRecordRefusalReason.SecureOwnerMismatch);
+    }
+
+    /// <summary>
+    /// True for a Dataverse privilege-denied fault (0x80040220 / 0x80040299), by typed fault code first, message fallback second.
+    /// Same classification as <c>SignalWriter</c>'s private helper; copied rather than made shared because lane 037 is editing
+    /// that file (consolidate afterwards).
+    /// </summary>
+    private static bool IsDataverseAccessDenied(Exception ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is System.ServiceModel.FaultException<OrganizationServiceFault> fault
+                && (fault.Detail?.ErrorCode == unchecked((int)0x80040220) || fault.Detail?.ErrorCode == unchecked((int)0x80040299)))
+            {
+                return true;
+            }
+
+            var m = e.Message;
+            if (!string.IsNullOrEmpty(m) && (
+                m.Contains("0x80040220", StringComparison.OrdinalIgnoreCase) ||
+                m.Contains("0x80040299", StringComparison.OrdinalIgnoreCase) ||
+                m.Contains("Privilege Check", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // ── Validation and typing ───────────────────────────────────────────────────────────────────────────────────
@@ -349,7 +415,8 @@ public sealed class DecisionRecordWriter
         if (r.ReviewId == Guid.Empty) throw Invalid("ReviewId is required.");
         if (r.PolicyVersionId == Guid.Empty) throw Invalid("PolicyVersionId is required.");
         if (r.ConfirmedByUserId == Guid.Empty) throw Invalid("ConfirmedByUserId is required.");
-        if (r.Steps is null) throw Invalid("Steps is required (every offered action, taken or skipped).");
+        // sprk_proposedaction is required and is the offered labels: a review that offered nothing has nothing to record.
+        if (r.Steps is not { Count: > 0 }) throw Invalid("Steps is required (every offered action, taken or skipped).");
         if (r.FollowOns is null) throw Invalid("FollowOns is required (empty when no Next step was created).");
         if (r.ResolvedSignalIds is not { Count: > 0 } || r.ResolvedSignalIds.Any(id => id == Guid.Empty)
             || r.ResolvedSignalIds.Distinct().Count() != r.ResolvedSignalIds.Count)
@@ -384,6 +451,9 @@ public sealed class DecisionRecordWriter
 
             if (!seen.Add(def.Code)) throw Invalid($"Action '{def.Code}' is listed twice.");
             if (step.Taken && string.IsNullOrWhiteSpace(step.Outcome)) throw Invalid($"Taken action '{def.Code}' has no outcome.");
+            // Section 0.3: a skipped action did nothing, so it may not carry an outcome or written rows.
+            if (!step.Taken && (!string.IsNullOrWhiteSpace(step.Outcome) || step.Written is { Count: > 0 }))
+                throw Invalid($"Skipped action '{def.Code}' carries an outcome or written rows.");
             steps.Add((step, def));
         }
 
@@ -411,6 +481,12 @@ public sealed class DecisionRecordWriter
             throw Invalid("A review that took nothing needs a reason.");
         }
 
+        // Section 0.3: the gate tier is "the strictest among taken actions", so nothing taken means there is none to record.
+        if (nothingTaken && !string.IsNullOrWhiteSpace(r.GateTier))
+        {
+            throw Invalid("A review that took nothing cannot carry a gate tier.");
+        }
+
         // The class comes from the catalog (D-17, FR-50): Dismissal when nothing was taken; Judgement when any taken action or any
         // Next step is Judgement (every Next-step creator is); Routine otherwise.
         var recordClass = nothingTaken
@@ -423,6 +499,19 @@ public sealed class DecisionRecordWriter
         var outcome = r.Denied ? 100000001 : nothingTaken ? 100000002 : 100000000;
 
         return new Plan(recordClass, outcome, steps, taken);
+    }
+
+    private static string Memo(string column, int maxLength, object value)
+    {
+        var json = JsonSerializer.Serialize(value, Json);
+        if (json.Length > maxLength)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.ReviewInvalid,
+                $"{column} would be {json.Length} characters; the column holds {maxLength}. Nothing was written.");
+        }
+
+        return json;
     }
 
     // ── Entity ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -459,14 +548,14 @@ public sealed class DecisionRecordWriter
 
         if (!string.IsNullOrWhiteSpace(r.GateTier)) e["sprk_gatetier"] = r.GateTier;
 
-        e["sprk_factsnapshot"] = JsonSerializer.Serialize(new
+        e["sprk_factsnapshot"] = Memo("sprk_factsnapshot", FactSnapshotMaxLength, new
         {
             facts = r.FactValues,
             decidedBy = new { role = r.DeciderRole },
             because = r.Because,
-        }, Json);
+        });
 
-        e["sprk_steps"] = JsonSerializer.Serialize(new
+        e["sprk_steps"] = Memo("sprk_steps", JsonMemoMaxLength, new
         {
             reviewId = r.ReviewId.ToString("D", CultureInfo.InvariantCulture),
             resolvedSignalIds = r.ResolvedSignalIds.Select(id => id.ToString("D", CultureInfo.InvariantCulture)),
@@ -479,10 +568,10 @@ public sealed class DecisionRecordWriter
                 outcome = s.Step.Taken ? s.Step.Outcome : "Skipped",
                 written = (s.Step.Written ?? Array.Empty<DecisionRecordRef>()).Select(w => new { entity = w.Entity, id = w.Id }),
             }),
-        }, Json);
+        });
 
-        e["sprk_followons"] = JsonSerializer.Serialize(
-            r.FollowOns.Select(f => new { actionCode = f.ActionCode, entity = f.Entity, id = f.Id }), Json);
+        e["sprk_followons"] = Memo("sprk_followons", JsonMemoMaxLength,
+            r.FollowOns.Select(f => new { actionCode = f.ActionCode, entity = f.Entity, id = f.Id }));
 
         if (r.Core is { } core)
         {

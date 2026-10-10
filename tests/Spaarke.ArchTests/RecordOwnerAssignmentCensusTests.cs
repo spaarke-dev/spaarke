@@ -477,7 +477,7 @@ public class RecordOwnerAssignmentCensusTests
             "sprk_analysisplaybook — a playbook definition owned by the person who created it, so task 164's OwnerOnly "
             + "(caller systemuserid == _ownerid_value) admits its creator; never a business record's child (dev gate D-G6-2)."),
 
-        // spaarke-ontology-platform-r1 task 040 (owner D-39): needs uac-r2 review (see the task 040 PR).
+        // spaarke-ontology-platform-r1 task 040 (owner D-39): needs uac-r2 review: ontology PR #1600 (listed PerUser; the no-core owner is the item's owner by D-39).
         new OwnerWriteEntry("DecisionRecordWriter.cs", "WriteAsync", 1, OwnerWriteKind.PerUser,
             "sprk_decisionrecord of an item with NO core record: owned by the item's own owner (a user), never by a team. A "
             + "Decision Record WITH a core record takes the resolver's answer through ApplyTo (the censused resolver write)."),
