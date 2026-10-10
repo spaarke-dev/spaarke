@@ -17,14 +17,14 @@
 //   DagAdvancer's dependency map is string-keyed.
 //
 // DISPATCHABLE VS SUB-STEP:
-//   19 of the 22 handler classes are independently enqueued via
+//   21 of the 22 handler ids are independently enqueued via
 //   HandlerEnvelope.HandlerId and therefore need a keyed DI registration --
-//   these are <see cref="Dispatchable"/>. The remaining 3 (H14a/H14b/H14c)
-//   are orchestrated IN-PROCESS by H14IntegrationWiringHandler (ONE
-//   ReplaceRunAsync call per H14IntegrationWiringHandler.cs:45) and are
-//   NEVER independently enqueued -- they are deliberately EXCLUDED from
+//   these are <see cref="Dispatchable"/>. The remaining one (H14a) is
+//   orchestrated IN-PROCESS by H14IntegrationWiringHandler (ONE
+//   ReplaceRunAsync call) and is
+//   NEVER independently enqueued -- it is deliberately EXCLUDED from
 //   Dispatchable and MUST NOT be keyed-registered
-//   (HandlerRegistrationCompletenessTests asserts their absence).
+//   (HandlerRegistrationCompletenessTests asserts its absence).
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers;
@@ -109,7 +109,7 @@ public static class HandlerIds
     /// <summary>H13 -- E2E acceptance gate (final handler).</summary>
     public const string H13 = "H13";
 
-    /// <summary>H14 -- post-deploy integration wiring (parent of H14a/b/c in-process sub-steps).</summary>
+    /// <summary>H14 -- post-deploy integration wiring (parent of the H14a in-process sub-step).</summary>
     public const string H14 = "H14";
 
     /// <summary>
@@ -120,20 +120,8 @@ public static class HandlerIds
     public const string H14a = "H14a";
 
     /// <summary>
-    /// H14b -- Graph webhook-subscription sub-step. In-process only
-    /// (see class remarks) -- NOT in <see cref="Dispatchable"/>.
-    /// </summary>
-    public const string H14b = "H14b";
-
-    /// <summary>
-    /// H14c -- Dataverse service-endpoint webhook sub-step. In-process only
-    /// (see class remarks) -- NOT in <see cref="Dispatchable"/>.
-    /// </summary>
-    public const string H14c = "H14c";
-
-    /// <summary>
     /// The envelope-dispatchable ids (design.md §4.1 handler catalog).
-    /// H14a/H14b/H14c are deliberately EXCLUDED -- orchestrated in-process
+    /// H14a is deliberately EXCLUDED -- orchestrated in-process
     /// by the H14 parent handler, never independently enqueued (DS-2 §3.2).
     /// This is the completeness surface task 102's dispatcher + this
     /// project's HandlerRegistrationCompletenessTests both consume. Count

@@ -334,11 +334,184 @@ the BFF's owning project.
 **Concrete failure without a fix:** H3 and H10 403 on the first live run (F3); OBO SPE calls on a new stamp may 403
 (F6).
 
+### ISS-022 — Three BFF secrets absent from the canonical catalog: `PowerBi__ClientSecret`, `Rag__ApiKey`, `Notifications__SignalR__ConnectionString`
+
+| Field | Value |
+|---|---|
+| **Status** | Open — recommendations below; owner decides |
+| **Urgency** | soon (a stamp starts without them; nothing is broken at boot) |
+| **Filed** | 2026-10-09 (from the auth-system-of-record-r1 note §3, analysis only) |
+| **Source** | `notes/coordination/2026-10-09-from-auth-system-of-record-r1-webhooks.md` §3; `scripts/canonical-secret-catalog/manifest.yaml` has none of the three keys |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1570 |
+
+**Description and recommendation (stamps are keyless, D13)**
+
+- **`PowerBi__ClientSecret`** — Power BI embed for the Reporting module. `ReportingModule.cs:30-37,57-62` registers
+  `ReportingEmbedService` and maps `/api/reporting/*` only when `PowerBi:TenantId` is set; without it the module is
+  absent (404) and nothing fails at boot. `ReportingEmbedService.cs:80-84` authenticates with MSAL
+  `WithClientSecret(PowerBiOptions.ClientSecret)` (`PowerBiOptions.cs:42-44`, `[Required]`), so setting TenantId without the
+  secret would fail options validation. Keyless: MSAL accepts a client assertion and the BFF already has one for the UAMI
+  (`Infrastructure/Auth/ManagedIdentityAssertionProvider.cs`), so a federated credential on a Power BI service-principal
+  app registration removes the secret. Not available yet: that registration, the Power BI tenant setting allowing it, and
+  a Power BI/Fabric embed capacity and workspace per stamp. **Recommendation: gate the feature off on stamps** (supply
+  nothing; the module self-gates) until a stamp reporting design exists; then use a UAMI-federated registration, not a
+  secret.
+- **`Rag__ApiKey`** — the `RagApiKey` scheme (`AuthorizationModule.cs:81-92`) guards only `POST
+  /api/ai/rag/enqueue-indexing` (`RagEndpoints.cs:147-152`), for non-JWT callers (scripts, bulk jobs, tests). The product
+  indexing path is the Service Bus `RagIndexingJobHandler` and the JWT `send-to-index` endpoint, so no stamp feature uses
+  it. Without the key, `ApiKeyAuthenticationHandler.cs:70-77` fails closed (401). The only in-repo caller is
+  `scripts/Reconcile-DemoEnvironment.ps1:104`, which mints a throwaway value for the demo. **Recommendation: not needed
+  on stamps.** Leave it absent from the catalog (record that decision in the manifest's notes); the endpoint stays closed.
+- **`Notifications__SignalR__ConnectionString`** — Layer-C live push. `NotificationsModule.cs:39-58` registers the real
+  `SignalRDeliveryService` only when `Enabled` and a connection string exist, else the Null-Object (`/negotiate` answers
+  503, clients use the poll endpoint, ADR-032). `customer.bicep:549-560` deploys SignalR only when `signalrEnabled` (default
+  false) and `signalr.bicep:83` sets `disableLocalAuth: true`, so the resource has no access key and a key-bearing string
+  can never work on a stamp. The Management SDK (`SignalRDeliveryService.cs:246-252`, `Microsoft.Azure.SignalR.Management`
+  1.33.1) accepts a keyless managed-identity string:
+  `Endpoint=https://<name>.service.signalr.net;AuthType=azure.msi;ClientId=<uami client id>;Version=1.0;`
+  ([Microsoft Learn](https://learn.microsoft.com/en-us/azure/azure-signalr/signalr-howto-authorize-managed-identity)).
+  The UAMI already holds "SignalR App Server" (`customer.bicep:540-543`). **Recommendation: supply via managed identity,
+  but only when `signalrEnabled`**: H4b writes the string as a plain per-env setting built from the Bicep outputs
+  `signalrHostName` and the UAMI client id (no Key Vault secret). Default stamps (signalrEnabled=false) keep the Null-Object.
+  Needs a live check that the resource accepts the string before the setting is turned on.
+
+**Concrete failure today:** no reporting embed, no live notifications (poll fallback only) and no `enqueue-indexing`
+caller on a stamp; none is a boot failure.
+
 ---
+
+### ISS-023 — The skill's customer pass stops a NativeAccount run on PRQ-C-10
+
+| Field | Value |
+|---|---|
+| **Status** | Open — low; Model 2 only (out of scope for r1) |
+| **Filed** | 2026-10-09 (PRQ-C-14 work) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1590 |
+
+`$mustResolveTokens` (Step 1e-ter) includes `environmentSecurityGroupId`, which only B2BGuest fills; a NativeAccount run stops
+with "unresolved placeholder" on PRQ-C-10. Fix when Model 2 returns: resolve to `notApplicable` for non-B2BGuest runs and let
+PRQ-C-10's recipe SKIP (the PRQ-C-14 pattern).
 
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
+
+### ISS-020 — H7b leaves a new stamp unable to read standing grants (and did not check the task-154 role split)
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-09 — H7b `secure-setup-procedure=4`, steps S19–S21 (this branch's commit; tests in `SecureRecordSetupProcedureTests`) |
+| **Urgency** | before T186 |
+| **Filed** | 2026-10-09 |
+| **Source** | `notes/coordination/2026-10-09-from-auth-system-of-record-r1-webhooks.md` §3 (M-17) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1565 |
+
+**Description**
+
+`contact.sprk_standinggrant` is field-secured. Without Read the platform silently strips it from the BFF's app-only
+retrieve, so `SubjectStandingGrantReader.cs:171-183` fails closed: every contact reads as "no standing grant" (a WARNING
+per read, no error). The documented fix (teams-app-r1 `notes/050-standing-grant-field-schema.md` §5.4; UAC-r2
+`spa-external-access-model-briefing.md:182-186`) is membership of the BFF application user in the `Standing Grant
+Administrators` profile, which SpaarkeMaster ships (`Other/FieldSecurityProfiles.xml:675`) with no members. H7b had no step
+for it (`SecureRecordSetupProcedure.cs` ended at S18). The note's claim about "Access Administrator / Core User privilege
+edits" is only half right: both roles' final state ships in SpaarkeMaster (`Roles/Spaarke Access Administrator.xml` holds
+Read/Write/Create/Append/AppendTo on `sprk_noaccessentry` at Global; `Roles/Spaarke Core User.xml` holds none), so a stamp
+imports the right state and nothing needs editing; the script `Set-NoAccessEntryRolePrivileges.ps1` repairs older
+environments.
+
+**Resolution (evidence)**
+
+S19 resolves the profile (exactly one) and verifies the column is secured and the profile grants Read; S20 adds the BFF's
+two application users as members (read first, only the missing ones, dry-run aware, other members never touched); S21
+verifies (never repairs) the role split and refuses `secure_setup.no_access_entry_roles_incomplete` naming the repair
+script; S9 verification re-reads the S20 membership. `ProcedureVersion` 3 to 4 so completed runs re-run. Tests: 11 new
+refusal rows plus 5 facts (profile gains users and keeps a foreign administrator, partial membership, pre-S19 environment
+with dry run, membership that does not stick, role split never repaired). Note: stamp BFF users are System
+Administrator (H10), which may already carry the platform's System Administrator FLS profile; membership is still the
+documented mechanism and is harmless, so it is added regardless. A live check that a stamp reads a `true` standing grant
+remains part of T186.
+
+### ISS-021 — The T7 Spaarke-tenant guard was a silent no-op when `AzureAd__TenantId` was a Key Vault reference
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-09 — `CustomerIdentityT7Probe.CheckWorkforceTenants` fails closed (this branch's commit) |
+| **Urgency** | before T186 |
+| **Filed** | 2026-10-09 |
+| **Source** | coordination note §3 (L-10) |
+| **GitHub Issue** | (none; under #1560-family note) |
+
+**Description**
+
+`CustomerIdentityT7Probe.cs:262-269` guarded a Model 1 workforce list against Spaarke's own tenant only when the slot's
+`AzureAd__TenantId` parsed as a GUID (`Guid.TryParse` false for `@Microsoft.KeyVault(...)`), so a reference, blank, zero
+or missing value skipped the guard and H13 passed.
+
+**Resolution (evidence)**
+
+H4b writes `AzureAd__TenantId` as a plain GUID (the manifest's per-env entry overrides the TenantId secret's reference), and
+ARM app settings cannot resolve a reference without Key Vault data-plane access the probe does not have, so resolving is
+the wrong fix. On Model 1 an unreadable value (reference, blank, all-zero, missing, or case-variant ambiguous) now returns
+`[UNRESOLVABLE ...]` and the probe Fails with an instruction to re-run H4b. Model 2 is unchanged. Tests: 5 new Model 1 cases
+plus a Model 2 reference case in `CustomerIdentityT7ProbeTests`.
+
+---
+
+### ISS-019 — H14b and H14c wire webhooks to routes the BFF does not serve (a run would stop at H14b)
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-09 — H14b and H14c removed from L2 (owner directive "needed -> build, else remove"); H14a kept |
+| **Urgency** | before the first run reaches H14 |
+| **Filed** | 2026-10-09 (incoming note from auth-system-of-record-r1 via external-access-r3, `notes/coordination/2026-10-09-from-auth-system-of-record-r1-webhooks.md` §1) |
+| **Source** | auth-system-of-record-r1 `x09a-mail-and-webhooks.md` Q2-Q3 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1560 |
+
+**Description**
+
+H14b registered Graph subscriptions at `{stamp}/api/webhooks/graph/{module}` and H14c a Dataverse `serviceendpoint` at
+`{stamp}/api/webhooks/dataverse/communication`. Verified in code on this branch (every claim re-checked, none taken from the note):
+
+| Claim | Result | Evidence |
+|---|---|---|
+| H14b notificationUrl is `{base}/api/webhooks/graph/{module}`, `clientState` = the `Communication-Webhook-SigningKey` secret | True | `H14bGraphWebhookSubHandler.cs:55,159-163,196-197` (before this change) |
+| H14c endpoint URL is `{base}/api/webhooks/dataverse/communication` | True | `H14IntegrationWiringHandler.cs:290`, `H14cDataverseWebhookSubHandler.cs:45,135-139` (before this change) |
+| The BFF maps neither route | True | the only webhook routes in `src/server/api/Sprk.Bff.Api` are `POST /api/communications/incoming-webhook` (`Api/CommunicationEndpoints.cs:470`) and `POST /api/compose/webhooks/spe-doc-changed` (`Api/ComposeSyncEndpoints.cs:43`); no `/api/webhooks/*` route exists |
+| H14c registers no `sdkmessageprocessingstep` | True | the registrar wrote only the `serviceendpoints` row (`DataverseWebApiServiceEndpointWebhookRegistrar.cs`, before this change); `sdkmessageprocessingstep` occurs in L2 only as a privilege-name string in `Tests/Handlers/SecureRecordSetup/FakeSecureRecordSetupDataverse.cs:25-26` |
+| The BFF creates/renews its own per-mailbox subscriptions with `customer.bicep`'s URL | True | `Services/Communication/GraphSubscriptionManager.cs:58,431-434` use `CommunicationOptions.WebhookNotificationUrl`; `infrastructure/bicep/customer.bicep:793` sets `Communication-WebhookUrl` = `{bffApi appServiceUrl}/api/communications/incoming-webhook` |
+
+A Graph create handshake to a 404 route fails, H14b turns any failure into `HandlerResult.Failure`, so a run stopped at H14b.
+Mail was never at risk: the BFF subscribes itself and polls every 5 minutes.
+
+**Resolution (2026-10-09)**
+
+Removed, not rewired (nothing needs a provisioning-time subscription; the BFF owns subscribe/renew/self-heal):
+- Deleted `H14bGraphWebhookSubHandler`, `H14cDataverseWebhookSubHandler`, `IGraphSubscriptionCreator` + `GraphRestSubscriptionCreator`,
+  `IServiceEndpointWebhookRegistrar` + `DataverseWebApiServiceEndpointWebhookRegistrar`, their tests and `H14SecretRedactionTests`.
+- `H14IntegrationWiringHandler` now drives H14a only (`ExpectedSubStepCount` 3 -> 1); it no longer requires `BffApiUrl`, the customer
+  `keyVaultName`, `dataverseEnvUrl` or `subscriptionId`. Removed `HandlerIds.H14b/H14c`, the options only they used
+  (`GraphRequestTimeout`, `GraphSubscriptionExpirationMinutes`, `DataverseRequestTimeout`, `ServiceEndpoint*`), the rejection codes
+  (`H14bRejections`, `H14cRejections`, four H14 parent codes) and the gates `GraphWebhooksWired` / `DataverseWebhookWired`.
+- DAG: `H14 <- H12c` (the `H9` edge existed only for the webhook base URL; H9 still precedes H14 transitively via H11 <- H7 <- H9).
+- Intake: removed `communicationGraphResource` / `emailGraphResource` (catalog, `HandlerRunInputs`, POST /api/runs rule
+  `h14b-no-webhook-targets-configured`, `intake.schema.json`, `provisioning-runs/_templates/intake.md`, load-test payloads).
+- The Worker's `Mail.Read` Graph role existed only for H14b: removed from `ControlPlaneGraphAppRoles.cs` and the T261 note. **Live revocation
+  of `Mail.Read` from the Worker identity is an operator step (not done here).**
+- Handler count: the dispatchable count stays **21** (H14b/H14c were never in `HandlerIds.Dispatchable`); the in-process H14 sub-steps
+  went from 3 (H14a/b/c) to 1 (H14a); handler ids in the catalog 24 -> 22. No Bicep or app setting existed only for H14b/H14c.
+- Signing key: a stamp still needs one - the BFF's `Communication:WebhookSigningKey` is `[Required]` and its mapped receiver verifies
+  `X-Hub-Signature-256` with it. The BFF reads config key `Communication:WebhookSigningKey` (app setting `Communication__WebhookSigningKey`),
+  not a Key Vault name; on a stamp that setting is a Key Vault reference to `Communication-Webhook-SigningKey`, which is what
+  `scripts/canonical-secret-catalog/manifest.yaml`, `customer.bicep` and H4 already use, so the manifest needed no change. The other
+  two spellings are outside provisioning: `Communication-WebhookSigningKey` (dev platform, `config/spaarke-resources.yaml:349`) and
+  the BFF's own error-message text (`communication-webhook-signing-key`, `CommunicationOptions.cs:65`).
+- Not fixed here (BFF owner / other issues): #1561 (the mapped receiver 401s without `X-Hub-Signature-256`, which Graph never sends),
+  #1562 (nothing creates the stamp's `sprk_communicationaccount` rows).
+
+**Entry-points**
+
+`src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/IntegrationWiring/H14IntegrationWiringHandler.cs`, `.../Reconciler/DagAdvancer.cs`,
+`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §5, §7.9.
 
 ### ISS-014 — H13 cannot run the BFF's secure-record isolation census (no identity can call it)
 

@@ -95,11 +95,10 @@ All Graph calls the Worker makes as itself (`DefaultAzureCredential(TenantId)`, 
 | `User.Create` | H11 `POST /users` (NativeAccount preset) — `UserProvisioning/GraphRestUserProvisioner.cs:118` | [user-post-users](https://learn.microsoft.com/en-us/graph/api/user-post-users?view=graph-rest-1.0) (least) | Narrower than `User.ReadWrite.All`. |
 | `LicenseAssignment.ReadWrite.All` | H11 `POST /users/{id}/assignLicense` — `GraphRestUserProvisioner.cs:186` | [user-assignlicense](https://learn.microsoft.com/en-us/graph/api/user-assignlicense?view=graph-rest-1.0) (least) | |
 | `GroupMember.ReadWrite.All` | H11 `POST /groups/{id}/members/$ref` — `UserProvisioning/GraphRestEnvironmentSecurityGroupClient.cs:110` | [group-post-members](https://learn.microsoft.com/en-us/graph/api/group-post-members?view=graph-rest-1.0) | No owner-scoped member-write permission exists (the permissions reference has no `Group*.OwnedBy`). Cannot add to role-assignable groups without `RoleManagement.ReadWrite.Directory`. |
-| `Mail.Read` | H14b `GET/PATCH/POST /subscriptions` on mailbox messages — `IntegrationWiring/GraphRestSubscriptionCreator.cs:106,129,146` | [subscription-post-subscriptions](https://learn.microsoft.com/en-us/graph/api/subscription-post-subscriptions?view=graph-rest-1.0), [subscription-list](https://learn.microsoft.com/en-us/graph/api/subscription-list?view=graph-rest-1.0) | Tenant-wide in Entra (the Worker is not Exchange-scoped). Residual §6. |
 
 Not the Worker's: H0/H8/H13-T6 SPE calls sign in as the SPE owning app (`SpeContainer/SpeConfidentialClientGraphFactory.cs`); Exchange cmdlets use the Exchange admin app (`IntegrationWiring/ExchangeAdminTokenSource.cs:44`).
 
-The Worker holds today (live): the old 15. `Grant-ControlPlaneIdentity.ps1` is add-only, so the next grant ADDS `Application.ReadWrite.OwnedBy`, `AppRoleAssignment.ReadWrite.All`, `Directory.Read.All`, `User.Create`, `LicenseAssignment.ReadWrite.All`; removing what it no longer needs (`Directory.ReadWrite.All`, `User.ReadWrite.All`, `Files.*`, `Sites.*`, `FileStorageContainer.Selected`, `Group.Read.All`, `User.Read.All`, `Mail.ReadWrite`, `Mail.Send`, `MailboxSettings.Read`) is an operator step with the owner's OK (§8 F3).
+The Worker holds today (live): the old 15. `Grant-ControlPlaneIdentity.ps1` is add-only, so the next grant ADDS `Application.ReadWrite.OwnedBy`, `AppRoleAssignment.ReadWrite.All`, `Directory.Read.All`, `User.Create`, `LicenseAssignment.ReadWrite.All`; removing what it no longer needs (`Directory.ReadWrite.All`, `User.ReadWrite.All`, `Files.*`, `Sites.*`, `FileStorageContainer.Selected`, `Group.Read.All`, `User.Read.All`, `Mail.ReadWrite`, `Mail.Send`, `MailboxSettings.Read`; and, after ISS-019 removed H14b, `Mail.Read`) is an operator step with the owner's OK (§8 F3).
 
 ## 5. Delegated (OBO) calls — the user's rights, not the stamp's app roles
 
@@ -113,7 +112,6 @@ The Worker holds today (live): the old 15. `Grant-ControlPlaneIdentity.ps1` is a
 | `Mail.Read`, `Mail.ReadWrite`, `Mail.Send` (stamp) | none in Entra | Exchange RBAC for Applications, management scope = the customer's mail-enabled group (H14a); H13 T3 fails on any Entra mailbox grant | Exchange takes 30 min – 2 h to apply a change. |
 | `AppRoleAssignment.ReadWrite.All` (L2) | grant any app role to any principal, itself included | Only the Worker can obtain the token; H10 targets only the stamp managed identity (appId = `miClientId`, type `ManagedIdentity`, checked before any removal) | Effectively tenant-admin-equivalent; Microsoft documents it as self-escalating. Audit `Add app role assignment to service principal` in the Entra audit log. |
 | `User.Invite.All`, `GroupMember.ReadWrite.All`, `User.Create`, `LicenseAssignment.ReadWrite.All` (L2) | tenant-wide | H11 only acts on intake users and the intake environment group (`environmentSecurityGroupId`, PRQ-C-10) | No group-owner-scoped Graph permission exists. |
-| `Mail.Read` (L2) | every mailbox in the tenant | Used only to create change subscriptions (H14b) | Could be Exchange-scoped like the stamp's; not changed here (§8 F3). |
 
 ## 7. Documented sets (machine-read by `StampGraphAppRoleEvidenceTests`)
 
@@ -136,7 +134,6 @@ User.Invite.All | 09850681-111b-4a89-9bed-3f2cae46d706
 User.Create | 4240f680-4f73-4082-a766-aa916a2dc9b3
 LicenseAssignment.ReadWrite.All | 5facf0c1-8979-4e95-abcf-ff3d079771c0
 GroupMember.ReadWrite.All | dbaae8cf-10b5-4b86-a4a1-f871c94c6695
-Mail.Read | 810c84a8-4a9e-49e6-bf7d-12d183f40d01
 ```
 
 Every GUID was re-read live 2026-10-09 from the Microsoft Graph service principal's `appRoles` (tenant `a221a95e-…`).

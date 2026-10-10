@@ -150,7 +150,7 @@ Every write-path invariant has one row. A new invariant is not complete until it
 
 ## 6. Writes outside the product (WP-5, WP-6)
 
-- **Change signal.** Target: one generic channel — a no-code service-endpoint step (async) on invariant-bearing tables → Service Bus → a BFF worker that runs the L1 owners in fill-only mode. Auth per ADR-028 (HMAC/SAS; the managed-identity auth type on `serviceendpoint` exists in the schema but is undocumented — verify before relying on it). Not built yet; `scripts/Register-EmailWebhook.ps1` (retired target) and provisioning H14c (endpoint without step) are the only prior art.
+- **Change signal.** Target: one generic channel — a no-code service-endpoint step (async) on invariant-bearing tables → Service Bus → a BFF worker that runs the L1 owners in fill-only mode. Auth per ADR-028 (HMAC/SAS; the managed-identity auth type on `serviceendpoint` exists in the schema but is undocumented — verify before relying on it). Not built yet; `scripts/Register-EmailWebhook.ps1` (retired target) and provisioning H14c are the only prior art (the latter, a `serviceendpoint` without a step, was removed under ISS-019).
 - **Reconciliation.** ADR-036 scheduled jobs remain the safety net and the backfill mechanism.
 - **Fail closed.** Evaluators and read paths treat an absent stamp / NULL flag as *no grant* / *restricted*. Where a missed write-side rule would *expose* data (I-1 native clear, I-2), the read side must compensate until the write side is fixed.
 - **Customer-built forms/flows (WP-8).** Supported contract = Spaarke BFF endpoints. Customer plugins re-implementing Spaarke invariants are unsupported.

@@ -1273,7 +1273,7 @@ public static class RunsEndpoints
 
     /// <summary>
     /// Task 245c: H11's identity preset + user list (<see cref="UserProvisioningIntake"/> — the code H11 itself
-    /// runs; T232: Model1 takes only B2BGuest, and B2BGuest needs the environment security group), H14's Exchange scope group and "at least one Graph resource" (H14a / H14b's rules and codes), and
+    /// runs; T232: Model1 takes only B2BGuest, and B2BGuest needs the environment security group), H14a's Exchange scope group (its rule and code), and
     /// H4's Communication default mailbox, (task 229) H0's cost tier + estimate (<see cref="CostEnvelopeIntake"/>), and
     /// (T259) the customer's display name H10 names its business unit with (<see cref="CustomerBusinessUnitIntake"/>).
     /// <c>null</c> when the values are usable.
@@ -1297,14 +1297,6 @@ public static class RunsEndpoints
                 "mail-enabled security group that scopes the Exchange RBAC for Applications role assignments H14a creates. The " +
                 "Exchange admin of the stamp's tenant (the customer's for Model 2, Spaarke's for Model 1) creates it " +
                 "before the run (prerequisite PRQ-C-08).");
-        }
-
-        if (IsBlank(parameters, IntakeParameterCatalog.CommunicationGraphResource)
-            && IsBlank(parameters, IntakeParameterCatalog.EmailGraphResource))
-        {
-            return (H14bRejections.NoWebhookTargetsConfigured,
-                $"nonSecretParameters needs at least one of '{IntakeParameterCatalog.CommunicationGraphResource}' " +
-                $"and '{IntakeParameterCatalog.EmailGraphResource}' — the Graph subscription resources H14b subscribes to.");
         }
 
         parameters.TryGetValue(IntakeParameterCatalog.CommunicationDefaultMailbox, out var mailbox);

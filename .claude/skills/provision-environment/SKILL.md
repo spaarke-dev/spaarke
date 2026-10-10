@@ -454,7 +454,7 @@ $results = Invoke-PrereqPass -Scopes $scopesToCheck -Tokens $prereqTokens
   - Interpolated from name_templates: `{sbNamespace}`
   - Loaded from Spaarke constants file: `{graphAppId}` (invariant Microsoft), `{containerTypeId}` (per_env populated by operator), `{adminDvUrl}` (per_env template), `{customerManagementGroupId}` (management_groups.customers.id — tenant-wide, T262)
   - Session/intake variables: `{env}`, `{openAiRegion}`, `{region}` (aliased to openAiRegion)
-  - Intake tokens `{customerId}`, `{stampSubscriptionId}`, `{stampEnvironment}`, `{dvUrl}`, `{exchangePolicyScopeGroupId}`, `{environmentSecurityGroupId}`, `{customerWorkforceTenantIds}` are `availability: customer` in `context-defaults.*.json` and are substituted only by the customer pass (Step 1e-ter, `once_per_customer`).
+  - Intake tokens `{customerId}`, `{stampSubscriptionId}`, `{stampEnvironment}`, `{dvUrl}`, `{exchangePolicyScopeGroupId}`, `{environmentSecurityGroupId}`, `{customerWorkforceTenantIds}`, `{customerOutboundB2BAttested}` (PRQ-C-14; never in `$mustResolveTokens` — `false` is a valid value) are `availability: customer` in `context-defaults.*.json` and are substituted only by the customer pass (Step 1e-ter, `once_per_customer`).
 - **PLX-14 author-time sanity check**: adding a new placeholder to `prereqs.yaml` REQUIRES extending the substitution chain in this section AND (if per_env or invariant) adding to `spaarke-constants.yaml`. If you forget, Step 0.5b emits `[skill-config] unresolved placeholder` and HARD STOPs before invoking bash — targeted diagnostic, no cryptic az CLI parse error.
 
 #### 0.5c. SPE topology verify — HARD STOP on missing owning-app / container-type (added 2026-08-30 task 213.6; BFF-app checks removed by T227a)
@@ -624,8 +624,7 @@ if ($BatchIntakeFile) {
   $users                       = if ($null -ne $intake.users) { @($intake.users) } else { @() }   # sent as nonSecretParameters.usersJson (Step 4.0); never @($null) — its Count is 1
   $exchangePolicyScopeGroupId  = $intake.exchangePolicyScopeGroupId   # created by the stamp tenant's Exchange admin (PRQ-C-08)
   $customerWorkforceTenantIds  = if ($null -ne $intake.customerWorkforceTenantIds) { @($intake.customerWorkforceTenantIds) } else { @() }   # T255 — REQUIRED every model: the CUSTOMER's Entra tenant id(s) (PRQ-C-13); sent as nonSecretParameters.customerWorkforceTenantIds (Step 4.0)
-  $communicationGraphResource  = $intake.communicationGraphResource   # at least one of these two
-  $emailGraphResource          = $intake.emailGraphResource
+  $customerOutboundB2BAttested = [bool]$intake.customerOutboundB2BAttested   # PRQ-C-14 — skill-local customer attestation; NOT sent to L2
   $communicationDefaultMailbox = $intake.communicationDefaultMailbox
   $operatorUpn    = az ad signed-in-user show --query userPrincipalName -o tsv  # NEVER trust an operatorUpn field in the JSON (would risk NFR-11 spoof)
   $script:SkipInteractiveIntake = $true         # gates 1a-1e prompts below
@@ -680,7 +679,6 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
   "environmentSecurityGroupId": "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
   "customerWorkforceTenantIds": ["4b6f2c1e-8d3a-4f5b-9c7e-2a1d0e9f8b7c"],
   "exchangePolicyScopeGroupId": "spaarke-mail-scope@acme.example",
-  "communicationGraphResource": "users/legal-comms@acme.example/messages",
   "communicationDefaultMailbox": "legal-comms@acme.example"
 }
 ```
@@ -987,10 +985,10 @@ registry placeholder (the same "validate everything, then write" order `POST /ap
 | `environmentSecurityGroupId` | H11 | **B2BGuest (every Model 1 run)**: object id (GUID) of the environment's security group `sprk-{customerId}-users`, created by the operator and set on the environment before the run (`PRQ-C-10`). H11 adds each redeemed guest to it, then makes the guest a Dataverse user with the Spaarke role — the group keeps other customers' guests out of this environment. The environment must also allow guests (`PRQ-C-12`) and be linked to a pay-as-you-go billing policy on the stamp subscription (`PRQ-C-11` — Spaarke pays guest access PAYG, owner 2026-10-07; no licences are assigned). This step checks all three as the operator |
 | `users` → `usersJson` | H11 | 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName` (the UPN is built from them); `B2BGuest`: `email` (the invitation goes to it; names optional) |
 | `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (Entra object id or email address; only DIRECT members' mailboxes are reachable). **The Exchange admin of the stamp's tenant creates it before the run — prerequisite `PRQ-C-08`. This skill never creates or edits it** (owner decision 2026-10-01: its membership is the customer's decision about which mailboxes Spaarke may use). |
-| `communicationGraphResource` / `emailGraphResource` | H14b | at least one, e.g. `users/{mailbox}/messages` |
 | `communicationDefaultMailbox` | H4 (KV `Communication-DefaultMailbox`) | `local@domain.tld`, ≤ 254 characters — use a shared/service mailbox |
 | `displayName` | H10 (customer business unit), registry `sprk_name` | **Every run (T259)**: 1–160 characters, no leading/trailing whitespace, no control character, never `Secure Record` (`h10-customer-display-name-required` / `-invalid`); defaults to `customerId` (1a-bis) |
 | `customerWorkforceTenantIds` | H4b → `WorkforceIdentity__CustomerTenantIds__N` (both slots); H13 T7 | **Every run (T255, INCOMING-141)**: the CUSTOMER's Entra tenant id(s), 1–10 distinct lowercase GUIDs. Model 1: the customer's HOME tenant (its staff are B2B guests from there) — never Spaarke's tenant / this run's `tenantId`; Model 2: the customer's tenant. POST /api/runs also refuses the CIAM tenant (`workforce-tenants-required` / `-invalid` / `-ciam-tenant` / `-spaarke-tenant`). Prerequisite `PRQ-C-13` |
+| `customerOutboundB2BAttested` | PRQ-C-14 (skill-local) | B2BGuest: `true` only after the customer's Entra admin confirmed outbound B2B collaboration to Spaarke's tenant; never sent to L2 |
 
 **Personal data.** The user list (names, emails) is stored in the L2 run document, as the owner accepted on
 2026-10-01 (D15). It never goes into git: Step 1.0 refuses a batch intake file git would track, and
@@ -1072,6 +1070,10 @@ if ($identityPreset -ceq 'B2BGuest') {
 # built the stamp — and only the operator (a Power Platform admin) can see which group is SET ON the environment, or
 # its billing. A failed az/pac call is a stop with its own error, never an empty value read as an answer.
 if ($identityPreset -ceq 'B2BGuest') {
+  if (-not $customerOutboundB2BAttested) {
+    Stop-IfBatch "customerOutboundB2BAttested is false/absent: the CUSTOMER's Entra admin must confirm that its cross-tenant access settings allow outbound B2B collaboration to Spaarke's tenant (PRQ-C-14)."
+    $customerOutboundB2BAttested = ((Read-Host "Has the customer's Entra admin confirmed in writing that outbound B2B collaboration to Spaarke's tenant is allowed? (PRQ-C-14) [y/N]") -match '^(y|yes)$')
+  }
   $groupGuid = [guid]::Empty
   while (-not [guid]::TryParseExact([string]$environmentSecurityGroupId, 'D', [ref]$groupGuid) -or $groupGuid -eq [guid]::Empty) {
     Stop-IfBatch 'environmentSecurityGroupId is required for B2BGuest — the object id (GUID) of sprk-{customerId}-users (PRQ-C-10).'
@@ -1158,11 +1160,6 @@ while ($true) {
   $wfIds = @((Read-Host "customerWorkforceTenantIds — the customer's Entra tenant id(s), comma-separated (PRQ-C-13)") -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
-while ([string]::IsNullOrWhiteSpace($communicationGraphResource) -and [string]::IsNullOrWhiteSpace($emailGraphResource)) {
-  Stop-IfBatch 'at least one of communicationGraphResource / emailGraphResource is required.'
-  $communicationGraphResource = Read-Host 'communicationGraphResource (e.g. users/{mailbox}/messages; blank to skip)'
-  $emailGraphResource         = Read-Host 'emailGraphResource (blank to skip)'
-}
 
 while ($communicationDefaultMailbox -cnotmatch '^[^@\s]+@[^@\s]+\.[^@\s]+\z' -or $communicationDefaultMailbox.Length -gt 254) {
   if ($communicationDefaultMailbox -or $script:SkipInteractiveIntake) { Stop-IfBatch "communicationDefaultMailbox '$communicationDefaultMailbox' must be a mailbox address (local@domain.tld, at most 254 characters)." }
@@ -1188,6 +1185,7 @@ if (-not $SkipStep0_5) {
   $customerTokens.exchangePolicyScopeGroupId = $exchangePolicyScopeGroupId     # Step 1e-bis (PRQ-C-08)
   $customerTokens.environmentSecurityGroupId = $environmentSecurityGroupId     # Step 1e-bis (PRQ-C-10; B2BGuest)
   $customerTokens.customerWorkforceTenantIds = ($customerWorkforceTenantIds -join ' ')   # Step 1e-bis (PRQ-C-13; T255) — space-separated for the recipe's for-loop
+  $customerTokens.customerOutboundB2BAttested = if ($identityPreset -ceq 'B2BGuest') { ([string][bool]$customerOutboundB2BAttested).ToLowerInvariant() } else { 'notApplicable' }   # PRQ-C-14
   $customerResults = Invoke-PrereqPass -Scopes @('once_per_customer') -Tokens $customerTokens
   # Report exactly as Step 0.5d: a checklist; any Passed = $false → HARD STOP with id, output, consequence and the
   # remediation link into docs/guides/PROVISIONING-PREREQUISITES.md#<id>. Nothing has been written yet.
@@ -1640,8 +1638,6 @@ $runRequest = @{
     usersJson                   = (ConvertTo-Json -InputObject @($users) -Compress -Depth 4)   # H11 — always a JSON array (do NOT add -AsArray: it double-nests)
     environmentSecurityGroupId  = $environmentSecurityGroupId   # H11 (T232) — required for B2BGuest: userprov-missing/invalid-security-group-id; null for NativeAccount
     exchangePolicyScopeGroupId  = $exchangePolicyScopeGroupId   # H14a — h14a-missing-policy-scope-group-id
-    communicationGraphResource  = $communicationGraphResource   # H14b — at least one of these two,
-    emailGraphResource          = $emailGraphResource           #        else h14b-no-webhook-targets-configured
     communicationDefaultMailbox = $communicationDefaultMailbox  # H4 → KV Communication-DefaultMailbox
     customerWorkforceTenantIds  = (ConvertTo-Json -InputObject @($customerWorkforceTenantIds) -Compress)   # T255 (INCOMING-141) — H4b writes WorkforceIdentity__CustomerTenantIds__N; workforce-tenants-* codes
     displayName                 = $displayName            # T259 (ISS-010) — REQUIRED: H10 names the customer's business unit with it (directly under the root, sibling of Secure Record); h10-customer-display-name-required / -invalid. The full name, never the pac fallback's substitute (Step 1f)
@@ -1652,7 +1648,7 @@ $runRequest = @{
     # means adding it to that catalog AND declaring which handler reads it.
     # environmentName may be omitted (L2 stores 'prod'); dev | staging | prod only.
     # DO NOT include the SKILL-LOCAL batch policy fields (mcpDisconnectPolicy / acknowledgeUpgradeMode /
-    # onFailedPolicy / onQuarantinedPolicy / onManualGatePolicy / postmortemFile) — those are
+    # onFailedPolicy / onQuarantinedPolicy / onManualGatePolicy / postmortemFile), nor customerOutboundB2BAttested (PRQ-C-14) — those are
     # BAT-01..09 control-flow knobs, NOT L2 payload. They control this skill's control flow at
     # Steps 0d/1a/1g/4b/5/7b and would be noise on the L2 audit record.
     # costEnvelopePolicy is GONE (T229): it carried the shared-trial warnAndProceed waiver; L2 now

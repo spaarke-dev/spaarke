@@ -77,8 +77,9 @@ public sealed class H7bSecureRecordSetupHandler : IProvisioningHandler
     /// <remarks>
     /// 2 = T255: S15–S18, the contact identity-binding profiles' memberships (INCOMING-141).
     /// 3 = T259: §6 T1/T3 — the customer's business unit is a direct child of the root and holds both BFF application users.
+    /// 4 = ISS-020 / #1565: S19–S21, the standing-grant profile (BFF application users as members) and the task-154 role split.
     /// </remarks>
-    internal const string ProcedureVersion = "secure-setup-procedure=3";
+    internal const string ProcedureVersion = "secure-setup-procedure=4";
 
     private readonly IProvisioningRunRepository _repository;
     private readonly ISecureRecordSetupDataverse _dataverse;

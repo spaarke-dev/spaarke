@@ -20,12 +20,9 @@
 // message one handler one outcome" in spirit, documented per CLAUDE.md §6.5):
 //   Unlike every other H-series handler, this sub-handler does NOT read or
 //   write ProvisioningRun state itself. H14 (H14IntegrationWiringHandler)
-//   dispatches H14a/H14b/H14c via Task.WhenAll — 3 TRUE-parallel in-process
-//   invocations against the SAME Cosmos document. If each sub independently
-//   did its own read-modify-write with ETag optimistic concurrency (the
-//   pattern every other handler uses), the 3 concurrent writers would race
-//   on the SAME ETag and at least 2 of 3 would observe a Conflict on every
-//   single invocation — not a rare race, a GUARANTEED one. Instead: the
+//   dispatches H14a in-process (H14b/H14c were removed, ISS-019, so H14a is now
+//   the only sub-step; the single-writer design is kept: the parent's one
+//   ETag-checked write is simpler than the sub-handler racing it). The
 //   PARENT reads the run ONCE, builds each sub's typed parameters as an
 //   opaque ParametersJson payload (parity with the HandlerEnvelope's own
 //   "opaque JSON, handler owns the schema" contract), invokes the 3 subs in

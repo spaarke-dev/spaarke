@@ -134,6 +134,19 @@ public static class SecureRecordSetupRejectionCodes
     public const string IdentityLinkLockOtherWriter = "secure_setup.identity_link_lock_other_writer";
 
     /// <summary>
+    /// S19 (ISS-020 / #1565): <c>contact.sprk_standinggrant</c> is not secured, or the "Standing Grant Administrators" profile
+    /// does not grant Read on it (Resumable: import SpaarkeMaster, H6).
+    /// </summary>
+    public const string StandingGrantLockIncomplete = "secure_setup.standing_grant_lock_incomplete";
+
+    /// <summary>
+    /// S21 (ISS-020 / #1565): the task-154 role split is not in place — the Access Administrator or Core User role is missing
+    /// from the root unit, the former lacks Read on <c>sprk_noaccessentry</c> at Global, or the latter holds it (Resumable:
+    /// re-import SpaarkeMaster or run scripts/Set-NoAccessEntryRolePrivileges.ps1).
+    /// </summary>
+    public const string NoAccessEntryRolesIncomplete = "secure_setup.no_access_entry_roles_incomplete";
+
+    /// <summary>
     /// Dry run finished: the plan is in the <see cref="H7bSecureRecordSetupHandler.PlanGateId"/> gate evidence and nothing
     /// was written. The run stops here so no later handler runs against an environment the dry run left unconfigured.
     /// </summary>

@@ -4,7 +4,10 @@
 // T256 (H7b) — the per-environment Secure Record setup, step by step: unified-access-control-r2 INCOMING-145 §2.2
 // (S0–S9), its §4 item 2 (S10–S14, task 150's field security), its §6 topology checks (T2, T4) and the
 // sprk_noaccessentry prerequisite (#1364) — plus S15–S18, the memberships of the contact identity-binding profiles
-// (unified-access-control-r2 INCOMING-141 / task 141; T255), built exactly as S10/S11/S12/S14. Every step READS first
+// (unified-access-control-r2 INCOMING-141 / task 141; T255), built exactly as S10/S11/S12/S14 — plus S19–S21 (ISS-020 / #1565):
+// the standing-grant environment (S19 the Standing Grant Administrators profile and its lock on contact.sprk_standinggrant,
+// S20 the BFF's application users as its members, S21 the sprk_noaccessentry role split unified-access-control-r2 task 154
+// ships). Every step READS first
 // and writes only what is missing, so a second run against a configured environment performs no write at all.
 //
 // THREE PHASES
@@ -121,6 +124,30 @@ public sealed class SecureRecordSetupProcedure
         ("contact", "sprk_externalobjectid"),
         ("systemuser", "sprk_primarycontact"),
     ];
+
+    /// <summary>
+    /// S19/S20 (ISS-020 / #1565): the profile whose membership lets an identity READ the field-secured
+    /// <c>contact.sprk_standinggrant</c>. Without Read the platform silently strips the column from the BFF's app-only
+    /// retrieve and every contact reads as "no standing grant" (teams-app-r1 notes/050-standing-grant-field-schema.md §5.4;
+    /// <c>SubjectStandingGrantReader</c> fails closed with a WARNING). The BFF's application users are members; the
+    /// profile grants Create/Read/Update and its other members (grant-privileged administrators) are an operator decision.
+    /// </summary>
+    public const string StandingGrantProfileName = "Standing Grant Administrators";
+
+    /// <summary>S19: the standing-grant flag's table.</summary>
+    public const string StandingGrantTable = "contact";
+
+    /// <summary>S19: the standing-grant flag's column.</summary>
+    public const string StandingGrantColumn = "sprk_standinggrant";
+
+    /// <summary>S21: the table whose reads task 154 (owner decision O2) restricts to access administrators.</summary>
+    public const string NoAccessEntryTable = "sprk_noaccessentry";
+
+    /// <summary>S21: the role (in the ROOT unit, shipped in SpaarkeMaster) that reads and authors No Access entries.</summary>
+    public const string AccessAdministratorRoleName = "Spaarke Access Administrator";
+
+    /// <summary>S21: the role (in the ROOT unit) that must hold NO Read on <see cref="NoAccessEntryTable"/>.</summary>
+    public const string CoreUserRoleName = "Spaarke Core User";
 
     /// <summary>The depth the codified set grants.</summary>
     public const string BasicDepth = "Basic";
@@ -500,6 +527,58 @@ public sealed class SecureRecordSetupProcedure
             }
         }
 
+        // S19 — the standing-grant profile ships in SpaarkeMaster: exactly one, and the shipped lock on the flag is whole.
+        var standingProfile = await ResolveProfileAsync(dv, t, StandingGrantProfileName, ct).ConfigureAwait(false);
+        if (standingProfile.Refusal is not null)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.FieldProfileUnresolved, standingProfile.Refusal);
+        }
+        var standingProfileId = standingProfile.Id!.Value;
+        var standingSecured = await dv.IsAttributeSecuredAsync(t, StandingGrantTable, StandingGrantColumn, ct).ConfigureAwait(false);
+        var standingGrant = (await dv.ListFieldPermissionsAsync(t, StandingGrantColumn, ct).ConfigureAwait(false))
+            .FirstOrDefault(p => p.ProfileId == standingProfileId && Same(p.EntityName, StandingGrantTable));
+        if (standingSecured != true || standingGrant is null || standingGrant.CanRead != FieldPermissionAllowed)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.StandingGrantLockIncomplete,
+                $"{StandingGrantTable}.{StandingGrantColumn}: IsSecured={standingSecured?.ToString() ?? "(no such column)"}, " +
+                $"'{StandingGrantProfileName}' read={standingGrant?.CanRead.ToString() ?? "(none)"} (expected secured, 4). The " +
+                "package's standing-grant field and profile (teams-app-r1 task 050) are incomplete: import SpaarkeMaster " +
+                "(H6), then resume. Nothing was written.");
+        }
+        var standingUsers = await dv.ListProfileUsersAsync(t, standingProfileId, ct).ConfigureAwait(false);
+
+        // S21 — task 154 (owner decision O2) ships in SpaarkeMaster: the Access Administrator role holds Read on No Access
+        // entries at Global and Spaarke Core User holds none. Verified, never repaired: changing an existing role is an
+        // owner decision (scripts/Set-NoAccessEntryRolePrivileges.ps1 is the operator's repair).
+        var entryReads = await dv.GetReadPrivilegesAsync(t, NoAccessEntryTable, ct).ConfigureAwait(false);
+        if (entryReads.Count != 1)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete,
+                $"Table '{NoAccessEntryTable}': metadata reports {entryReads.Count} Read privileges (expected one). Nothing was written.");
+        }
+        var entryRead = entryReads[0];
+        var accessAdministrators = await dv.FindRolesAsync(t, AccessAdministratorRoleName, root.Id, ct).ConfigureAwait(false);
+        var coreUsers = await dv.FindRolesAsync(t, CoreUserRoleName, root.Id, ct).ConfigureAwait(false);
+        if (accessAdministrators.Count != 1 || coreUsers.Count != 1)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete,
+                $"The root unit holds {accessAdministrators.Count} '{AccessAdministratorRoleName}' and {coreUsers.Count} " +
+                $"'{CoreUserRoleName}' roles (expected one of each). Both ship in SpaarkeMaster (unified-access-control-r2 task 154): " +
+                "import the package (H6), then resume. Nothing was written.");
+        }
+        var accessAdministratorHolding = (await dv.GetRolePrivilegesAsync(t, accessAdministrators[0].Id, ct).ConfigureAwait(false))
+            .FirstOrDefault(h => h.PrivilegeId == entryRead.Id);
+        var coreUserHolding = (await dv.GetRolePrivilegesAsync(t, coreUsers[0].Id, ct).ConfigureAwait(false))
+            .FirstOrDefault(h => h.PrivilegeId == entryRead.Id);
+        if (accessAdministratorHolding is null || !Same(accessAdministratorHolding.Depth, "Global") || coreUserHolding is not null)
+        {
+            return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.NoAccessEntryRolesIncomplete,
+                $"'{AccessAdministratorRoleName}' holds {entryRead.Name} at {accessAdministratorHolding?.Depth ?? "(none)"} " +
+                $"(expected Global); '{CoreUserRoleName}' holds it at {coreUserHolding?.Depth ?? "(none)"} (expected none). " +
+                "Task 154 (owner decision O2) restricts No Access entries to access administrators. Run " +
+                "scripts/Set-NoAccessEntryRolePrivileges.ps1 (dry run, then -Apply) or re-import SpaarkeMaster. Nothing was written.");
+        }
+
         // §6 T4 — the ROOT unit's default team must not reach the secure unit by depth.
         var rootDefaultTeams = await dv.FindDefaultTeamsAsync(t, root.Id, ct).ConfigureAwait(false);
         if (rootDefaultTeams.Count != 1)
@@ -679,6 +758,14 @@ public sealed class SecureRecordSetupProcedure
                 () => dv.AssociateProfileUserAsync(t, linkWriterProfileId, bffUser, ct)).ConfigureAwait(false);
         }
 
+        // S20 — the BFF's application users are standing-grant profile members (Read is what the BFF needs; membership is the
+        // only way to get it). Other members are grant-privileged administrators and are never touched.
+        foreach (var bffUser in bffUsers.Where(u => standingUsers.All(m => m.UserId != u)).ToArray())
+        {
+            await Write($"add BFF application user {bffUser} to '{StandingGrantProfileName}'",
+                () => dv.AssociateProfileUserAsync(t, standingProfileId, bffUser, ct)).ConfigureAwait(false);
+        }
+
         // S13 — no NULL secure flag may remain (a new environment has none; an upgraded one has the pre-column rows). It
         // runs before the BFF deploy because H9 waits for H7b, and a task-150 BFF refuses an EMPTY flag.
         foreach (var table in lockedIdentities)
@@ -700,7 +787,7 @@ public sealed class SecureRecordSetupProcedure
         var problems = await VerifyAsync(dv, t, set, wantedIds, businessUnitId!.Value, teamId!.Value, roleId!.Value,
             defaultTeamId!.Value, [(readerProfileId, ReaderProfileName), (linkReaderProfileId, IdentityLinkReaderProfileName)],
             [(writerProfileId, WriterProfileName), (linkWriterProfileId, IdentityLinkWriterProfileName)],
-            bffUsers, lockedIdentities, ct).ConfigureAwait(false);
+            standingProfileId, bffUsers, lockedIdentities, ct).ConfigureAwait(false);
         if (problems.Count > 0)
         {
             return Refuse(FailureClass.Resumable, SecureRecordSetupRejectionCodes.VerifyFailed,
@@ -749,7 +836,7 @@ public sealed class SecureRecordSetupProcedure
         ISecureRecordSetupDataverse dv, SecureRecordSetupTarget t, SecureRecordOwnerRoleSet set, IReadOnlySet<Guid> wantedIds,
         Guid businessUnitId, Guid teamId, Guid roleId, Guid defaultTeamId,
         IReadOnlyList<(Guid Id, string Name)> readerProfiles, IReadOnlyList<(Guid Id, string Name)> writerProfiles,
-        IReadOnlyList<Guid> bffUsers, IReadOnlyList<SecureSetupTableIdentity> lockedTables, CancellationToken ct)
+        Guid standingProfileId, IReadOnlyList<Guid> bffUsers, IReadOnlyList<SecureSetupTableIdentity> lockedTables, CancellationToken ct)
     {
         var problems = new List<string>();
 
@@ -819,6 +906,15 @@ public sealed class SecureRecordSetupProcedure
                 problems.Add($"'{writerProfileName}' members are users [{Ids(writerUsers)}] and teams [{Ids(writerTeams)}], " +
                              $"expected exactly the BFF's application users [{Ids(bffUsers)}]");
             }
+        }
+
+        // S20: every BFF application user is a standing-grant profile member (other members are allowed).
+        var standingMembers = (await dv.ListProfileUsersAsync(t, standingProfileId, ct).ConfigureAwait(false))
+            .Select(u => u.UserId).ToHashSet();
+        var notStanding = bffUsers.Where(u => !standingMembers.Contains(u)).ToArray();
+        if (notStanding.Length > 0)
+        {
+            problems.Add($"BFF application users [{Ids(notStanding)}] are not members of '{StandingGrantProfileName}'");
         }
 
         foreach (var table in lockedTables)
