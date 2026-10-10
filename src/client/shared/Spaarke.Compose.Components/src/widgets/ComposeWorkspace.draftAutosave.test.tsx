@@ -30,13 +30,7 @@ if (typeof (globalThis as { ResizeObserver?: unknown }).ResizeObserver === 'unde
 const authenticatedFetchMock = jest.fn();
 jest.mock('@spaarke/auth', () => ({
   authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...args),
-  ApiError: class ApiError extends Error {
-    status: number;
-    constructor(message: string, status = 0) {
-      super(message);
-      this.status = status;
-    }
-  },
+  ApiError: jest.requireActual('@spaarke/auth').ApiError,
   useAuth: () => ({
     isAuthenticated: true,
     getAccessToken: async () => 'test-token',
