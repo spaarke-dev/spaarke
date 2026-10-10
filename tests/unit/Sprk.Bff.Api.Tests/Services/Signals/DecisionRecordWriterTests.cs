@@ -566,6 +566,7 @@ public sealed class DecisionRecordWriterTests
     [Theory]
     [InlineData("The user does not have the right: 0x80040299 Read Privilege Check For Owner failed")]
     [InlineData("access check 0x80040220")]
+    [InlineData("The user does not have the Create right on sprk_decisionrecord")]   // no hex code, as SignalWriter classifies it
     public async Task APrivilegeFault_IsClassifiedAsDataverseAccessDenied(string message)
     {
         var h = new Harness();

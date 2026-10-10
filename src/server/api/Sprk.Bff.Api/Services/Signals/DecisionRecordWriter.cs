@@ -382,6 +382,7 @@ public sealed class DecisionRecordWriter
             if (!string.IsNullOrEmpty(m) && (
                 m.Contains("0x80040220", StringComparison.OrdinalIgnoreCase) ||
                 m.Contains("0x80040299", StringComparison.OrdinalIgnoreCase) ||
+                (m.Contains("does not have", StringComparison.OrdinalIgnoreCase) && m.Contains("right", StringComparison.OrdinalIgnoreCase)) ||
                 m.Contains("Privilege Check", StringComparison.OrdinalIgnoreCase)))
             {
                 return true;
