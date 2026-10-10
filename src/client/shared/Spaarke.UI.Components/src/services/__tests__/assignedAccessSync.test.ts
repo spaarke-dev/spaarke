@@ -68,7 +68,7 @@ describe('syncAssignedAccess', () => {
     expect(syncCalls(fetchMock)).toEqual([{ url: SYNC_URL, body: { recordType: 'matter', recordId: CREATED } }]);
   });
 
-  it('never rejects: a server refusal (authenticatedFetch throws ApiError 403) is swallowed and logged', async () => {
+  it('never rejects: a server refusal (authenticatedFetch throws ApiError 403) is returned with its status and reason code, and logged', async () => {
     // authenticatedFetch THROWS ApiError for a non-2xx; it never resolves { ok: false }.
     const fetchMock = jest
       .fn()
@@ -78,10 +78,7 @@ describe('syncAssignedAccess', () => {
 
     const result = await syncAssignedAccess(fetchMock, BFF, 'project', CREATED);
 
-    // KNOWN GAP (reported with the Phase 3 mock sweep): the refusal's status and reasonCode are lost -
-    // the catch reports every thrown failure as reason 'network'. The result is log-only today (no caller
-    // reads it), so only the never-rejects + logged contract is pinned here.
-    expect(result.ok).toBe(false);
+    expect(result).toEqual({ ok: false, status: 403, reason: 'sdap.access.delegation.write_required' });
     expect(console.warn).toHaveBeenCalled();
   });
 
