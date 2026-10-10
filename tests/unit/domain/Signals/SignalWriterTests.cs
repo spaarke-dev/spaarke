@@ -626,6 +626,30 @@ public class SignalWriterTests
         logger.Entries.Should().NotContain(e => e.Level >= LogLevel.Error);
     }
 
+    /// <summary>
+    /// Task 039 review B-1 pin: the secure path above is only safe because uac-r2's mechanism knows <c>sprk_signal</c>.
+    /// Without the lineage entry a Secure-team-owned Signal is mirrored to nobody; without the role's Read the create is
+    /// refused (0x80040299). Both come from master #1390, so this pins them where the writer depends on them: the entry
+    /// lists the typed matter lookup and the regarding lookups the writer fills, and the role set grants the Read.
+    /// </summary>
+    [Fact]
+    public void SecurePath_DependsOn_SignalLineageEntry_AndSecureRecordOwnerRead()
+    {
+        Sprk.Bff.Api.Services.Access.SecureChildLineage.Children.Should().ContainKey("sprk_signal");
+        var columns = Sprk.Bff.Api.Services.Access.SecureChildLineage.Children["sprk_signal"].Lookups.Keys.ToArray();
+        columns.Should().Contain(new[]
+        {
+            "sprk_matter", "sprk_regardingmatter", "sprk_regardingcommunication",
+            "sprk_regardingproject", "sprk_regardingworkassignment",
+        });
+        columns.Should().NotContain("sprk_regardingservicerequest", "a service request is never secure (D-36)");
+
+        Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerRoleSet.Embedded.Tables
+            .Should().ContainSingle(t => t.LogicalName == "sprk_signal")
+            .Which.Should().Match<Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerRoleTable>(
+                t => t.Kind == "child" && t.PrivilegeName == "prvReadsprk_Signal");
+    }
+
     // =====================================================================================
     // Observability (owner directive, task 030 rework, 2026-10-04): "the writer fails closed by design, so
     // a broken credential or a refused write must not look like 'no conditions found'". Every refusal logs
