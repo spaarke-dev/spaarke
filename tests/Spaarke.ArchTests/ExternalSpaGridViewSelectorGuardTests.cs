@@ -47,7 +47,9 @@ namespace Spaarke.ArchTests;
 /// </list>
 /// <para>
 /// <see cref="SharedDataGrid_EnforcesTheExternalHostRule"/> pins the rule's text in the shared library (the host
-/// module verbatim, and the statements and counts in <c>DataGrid.tsx</c>), so removing or rewriting a pinned statement
+/// module verbatim, and the statements and counts in <c>DataGrid.tsx</c> and in <c>resolveGridSource.ts</c>, where
+/// ontology task 054 moved <c>fetchConfigRecord</c> / <c>resolveSource</c> and with them the savedquery-set discovery
+/// call; the view-retrieval calls are counted over the union of the two files), so removing or rewriting a pinned statement
 /// fails this guard in CI. It does NOT see an ADDED statement that shadows the forced value in a nested scope (review
 /// round 8, seed J4: <c>const showViewSelector = true;</c> in the load effect passed this class 194/194); see residual 4.
 /// The behavioural proof is the jest suite
@@ -171,13 +173,15 @@ namespace Spaarke.ArchTests;
 /// grid's module at a copy without the rule.</item>
 /// <item>A NEW picker UI added inside <c>DataGrid.tsx</c> under another component name and gated on something other
 /// than the pinned switch. The pins refuse a third <c>&lt;ViewSelector</c>, any other use of the raw prop, and any
-/// other call of <c>retrieveSavedQueriesForEntity</c>; a differently named picker is a reviewed change to the shared
+/// other DIRECT call of <c>retrieveSavedQueriesForEntity</c> (the call regex misses an alias such as
+/// <c>const f = c.retrieveSavedQueriesForEntity</c>, a <c>.bind</c> and bracket access, as it did before ontology 054
+/// moved the discovery into <c>resolveGridSource.ts</c>); a differently named picker is a reviewed change to the shared
 /// grid.</item>
 /// </list>
 /// <para>Items 1–3 are reviewed changes outside <c>external-spa/src</c>. In every case the BFF allow-list still refuses
 /// every column the picker's views would need, with a 400; it is the data control.</para>
 /// <para><b>Residual 4, reported by CI since fix round c2 (2026-10-03); blocking after the flip.</b> An edit to
-/// <c>DataGrid.tsx</c> that ignores the switch WITHOUT touching a pinned statement. The pin refuses removing or
+/// <c>DataGrid.tsx</c> or <c>resolveGridSource.ts</c> that ignores the switch WITHOUT touching a pinned statement. The pin refuses removing or
 /// rewriting the rule's statements, but not an added statement that shadows the forced value in a nested scope (review
 /// round 8, seed J4: <c>const showViewSelector = true;</c> in the load effect passed this class 194/194, so the grid
 /// would request <c>/savedqueries/{entity}</c> again on the external host). The jest suite
@@ -1316,6 +1320,13 @@ public class ExternalSpaGridViewSelectorGuardTests
     /// <summary>The shared grid itself, which applies the rule.</summary>
     internal const string SharedGridFile = "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx";
 
+    /// <summary>
+    /// The shared library's grid-source resolver. Ontology task 054 (commit f60c36688) moved <c>fetchConfigRecord</c> and
+    /// <c>resolveSource</c> here VERBATIM out of <see cref="SharedGridFile"/>, so the savedquery-set discovery call
+    /// (<c>retrieveSavedQueriesForEntity</c>) and the configured-view fetch (<c>retrieveSavedQuery</c>) now live in this file.
+    /// </summary>
+    internal const string GridSourceFile = "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/resolveGridSource.ts";
+
     private const string HostProvider = "DataGridExternalHostProvider";
 
     private const string HostConstant = "__SPAARKE_DATAGRID_EXTERNAL_HOST__";
@@ -1607,10 +1618,28 @@ public class ExternalSpaGridViewSelectorGuardTests
         "const externalHost = useDataGridExternalHost();",
         "const showViewSelector = !externalHost && showViewSelectorProp;",
         "if (externalHost && configRecord?.source?.type === 'savedquery-set') {",
+        "import { fetchConfigRecord, resolveSource } from './resolveGridSource';",
+        ": await resolveSource(dataverseClient, configRecord, undefined, externalHost ? 'external' : 'internal');",
         "const pickedViewId = externalHost ? undefined : activeSavedQueryId;",
         "showViewSelector ? dataverseClient.retrieveSavedQueriesForEntity(entityName)",
         "{showViewSelector && externalViews && externalViews.views.length > 0 ? (",
         ": showViewSelector && selectorViews.length > 0 ? (",
+    ];
+
+    /// <summary>
+    /// The statements of <see cref="GridSourceFile"/> that hold the savedquery-set discovery: the REQUIRED <c>host</c>
+    /// parameter, and the branch that returns null for <c>'external'</c> before its <c>try</c>. That refusal is why
+    /// <c>resolveSource</c>, exported from the package for ontology 054's card, cannot list saved views for an external caller
+    /// that passes its host; the card passes <c>'internal'</c> explicitly. These are presence and count pins, not scope pins:
+    /// hoisting the discovery line above the branch passes the scan (it would run for every source type, but only on an
+    /// internal host once the refusal is in place); <c>DataGrid.externalHost.test.tsx</c> and
+    /// <c>resolveGridSource.host.test.ts</c> catch behaviour, and the jest gate runs them in Tier 1.
+    /// </summary>
+    private static readonly string[] RequiredResolverStatements =
+    [
+        "fallbackEntityName: string | undefined, host: GridSourceHost",
+        "if (source.type === 'savedquery-set') { if (host === 'external') return null; try {",
+        "const queries = await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName);",
     ];
 
     /// <summary>
@@ -1620,7 +1649,7 @@ public class ExternalSpaGridViewSelectorGuardTests
     /// <c>const showViewSelector = true;</c> in the load effect) passes it. That is residual 4 in the class remarks,
     /// reported by the CI run of the jest suite, advisory until its flip (<see cref="SharedDataGrid_ExternalHostJestSuiteRunsAsATier1Gate"/>).
     /// </summary>
-    internal static IReadOnlyList<string> ScanSharedGridRule(string gridSource, string hostSource)
+    internal static IReadOnlyList<string> ScanSharedGridRule(string gridSource, string hostSource, string gridSourceResolver)
     {
         var violations = new List<string>();
         if (Squash(hostSource) != Squash(PinnedHostSource))
@@ -1647,8 +1676,35 @@ public class ExternalSpaGridViewSelectorGuardTests
                                + "the external-host rule; route it through the pinned statements.");
             }
         }
+        // Ontology 054 moved the grid-source resolution into GridSourceFile. The two view-retrieval calls are counted over
+        // the UNION of the two files (an exact total, not a glob), and the resolver's host parameter and its external
+        // refusal are pinned (presence, not scope). The grid refuses a savedquery-set source before it calls resolveSource,
+        // ignores any picked view on the external host, and passes its host (statements above); resolveSource itself
+        // returns null for 'external' before it lists.
+        void ExpectUnionCount(string pattern, int expected, string what)
+        {
+            var count = Regex.Matches(gridSource, pattern).Count + Regex.Matches(gridSourceResolver, pattern).Count;
+            if (count != expected)
+            {
+                violations.Add($"{SharedGridFile} + {GridSourceFile}: {what} occurs {count} times across the two files, expected "
+                               + $"{expected}. Another use could bypass the external-host rule; route it through the pinned statements.");
+            }
+        }
+        var squashedResolver = Squash(gridSourceResolver);
+        foreach (var statement in RequiredResolverStatements)
+        {
+            if (!squashedResolver.Contains(Squash(statement), StringComparison.Ordinal))
+            {
+                violations.Add($"{GridSourceFile}: missing `{statement}`. The grid refuses a savedquery-set source on the external "
+                               + "host before it reaches this branch, and resolveSource refuses 'external' itself; the pinned text keeps both.");
+            }
+        }
         ExpectCount(@"(?<![\w$])showViewSelectorProp(?![\w$])", 2, "the raw showViewSelector prop (showViewSelectorProp)");
-        ExpectCount(@"(?<![\w$])retrieveSavedQueriesForEntity\s*\(", 2, "a retrieveSavedQueriesForEntity( call");
+        ExpectUnionCount(@"(?<![\w$])retrieveSavedQueriesForEntity\s*\(", 2, "a retrieveSavedQueriesForEntity( call");
+        ExpectCount(@"(?<![\w$])retrieveSavedQueriesForEntity\s*\(", 1, "a retrieveSavedQueriesForEntity( call (the sibling list)");
+        ExpectUnionCount(@"(?<![\w$])retrieveSavedQuery\s*\(", 3, "a retrieveSavedQuery( call");
+        ExpectCount(@"(?<![\w$])resolveSource\s*\(", 1, "a resolveSource( call");
+        ExpectCount(@"(?<![\w$])fetchConfigRecord\s*\(", 1, "a fetchConfigRecord( call");
         ExpectCount(@"<\s*ViewSelector(?![\w$])", 2, "a <ViewSelector element");
         ExpectCount(@"(?<![\w$])useDataGridExternalHost(?![\w$])", 2, "useDataGridExternalHost");
         ExpectCount(@"(?<![\w$])props\s*(?:\??\.|\[)", 0, "a direct props member access (props.x / props[...])");
@@ -1690,7 +1746,10 @@ public class ExternalSpaGridViewSelectorGuardTests
         Assert.True(File.Exists(grid), $"the shared grid must exist at {SharedGridFile}");
         Assert.True(File.Exists(host), $"the host module must exist at {HostModuleFile}");
 
-        var violations = ScanSharedGridRule(File.ReadAllText(grid), File.ReadAllText(host));
+        var resolver = Path.Combine(SourceScan.RepoRoot, GridSourceFile.Replace('/', Path.DirectorySeparatorChar));
+        Assert.True(File.Exists(resolver), $"the grid-source resolver must exist at {GridSourceFile}");
+
+        var violations = ScanSharedGridRule(File.ReadAllText(grid), File.ReadAllText(host), File.ReadAllText(resolver));
 
         Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations));
     }
@@ -2939,6 +2998,22 @@ public class ExternalSpaGridViewSelectorGuardTests
         { "raw-prop-read-again", "    externalViews,\n    className,\n  } = props;", "    externalViews,\n    className,\n  } = props;\n  const rawPicker = props.showViewSelector;" },
         { "third-picker", "            ) : (\n              <span aria-hidden=\"true\" />", "            ) : (\n              <ViewSelector views={[]} activeViewId=\"\" onViewChange={() => undefined} />" },
         { "third-list-call", "const entityName =", "void dataverseClient.retrieveSavedQueriesForEntity('x');\n        const entityName =" },
+        { "second-resolve-source-call", "const entityName =", "void resolveSource(dataverseClient, configRecord, undefined);\n        const entityName =" },
+        { "resolve-source-always-internal", "undefined, externalHost ? 'external' : 'internal');", "undefined, 'internal');" },
+        { "second-config-read", "const entityName =", "void fetchConfigRecord(dataverseClient, configId);\n        const entityName =" },
+        { "picked-view-fetched-again", "const entityName =", "void dataverseClient.retrieveSavedQuery(configId);\n        const entityName =" },
+    };
+
+    /// <summary>Breaks inside <see cref="GridSourceFile"/>, where ontology 054 moved the savedquery-set discovery.</summary>
+    public static TheoryData<string, string, string> GridSourceResolverBreaks => new()
+    {
+        { "external-refusal-removed", "if (host === 'external') return null;", "" },
+        { "external-refusal-inverted", "if (host === 'external') return null;", "if (host === 'internal') return null;" },
+        { "host-argument-made-optional", "host: GridSourceHost", "host?: GridSourceHost" },
+        { "discovery-call-removed", "await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName)", "[] as { id: string; isDefault?: boolean }[]" },
+        { "discovery-condition-rewritten", "if (source.type === 'savedquery-set') {", "if (source.type === 'savedquery-set' || true) {" },
+        { "second-discovery-call", "const def = queries.find", "void dataverseClient.retrieveSavedQueriesForEntity('x');\n      const def = queries.find" },
+        { "second-view-fetch", "const def = queries.find", "void dataverseClient.retrieveSavedQuery('x');\n      const def = queries.find" },
     };
 
     [Theory(DisplayName = "Control (c1): each break of the shared grid's external-host rule is reported")]
@@ -2947,11 +3022,26 @@ public class ExternalSpaGridViewSelectorGuardTests
     {
         var grid = RepoFileText(SharedGridFile);
         var host = RepoFileText(HostModuleFile);
-        Assert.Empty(ScanSharedGridRule(grid, host)); // the real files pass, so the row below is the break
+        var resolver = RepoFileText(GridSourceFile);
+        Assert.Empty(ScanSharedGridRule(grid, host, resolver)); // the real files pass, so the row below is the break
         var broken = grid.Replace(find, replace, StringComparison.Ordinal);
         Assert.True(broken != grid, $"{shape}: the seed text was not found in {SharedGridFile}");
 
-        Assert.True(ScanSharedGridRule(broken, host).Count > 0, $"{shape}: expected a violation");
+        Assert.True(ScanSharedGridRule(broken, host, resolver).Count > 0, $"{shape}: expected a violation");
+    }
+
+    [Theory(DisplayName = "Control (c1): each break of the grid-source resolver's savedquery-set discovery is reported")]
+    [MemberData(nameof(GridSourceResolverBreaks))]
+    public void ScanSharedGridRule_WhenTheResolverStopsHoldingTheDiscovery_ReportsIt(string shape, string find, string replace)
+    {
+        var grid = RepoFileText(SharedGridFile);
+        var host = RepoFileText(HostModuleFile);
+        var resolver = RepoFileText(GridSourceFile);
+        Assert.Empty(ScanSharedGridRule(grid, host, resolver));
+        var broken = resolver.Replace(find, replace, StringComparison.Ordinal);
+        Assert.True(broken != resolver, $"{shape}: the seed text was not found in {GridSourceFile}");
+
+        Assert.True(ScanSharedGridRule(grid, host, broken).Count > 0, $"{shape}: expected a violation");
     }
 
     [Theory(DisplayName = "Control (c1): each break of the host module is reported")]
@@ -2963,10 +3053,11 @@ public class ExternalSpaGridViewSelectorGuardTests
     {
         var grid = RepoFileText(SharedGridFile);
         var host = RepoFileText(HostModuleFile);
+        var resolver = RepoFileText(GridSourceFile);
         var broken = host.Replace(find, replace, StringComparison.Ordinal);
         Assert.True(broken != host, $"{shape}: the seed text was not found in {HostModuleFile}");
 
-        Assert.True(ScanSharedGridRule(grid, broken).Count > 0, $"{shape}: expected a violation");
+        Assert.True(ScanSharedGridRule(grid, broken, resolver).Count > 0, $"{shape}: expected a violation");
     }
 
     /// <summary>A virtual file tree for the round-7 controls (repo-relative paths): files, the directories above them, and the scanned subset.</summary>
