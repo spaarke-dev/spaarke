@@ -486,11 +486,32 @@ Cause: the credential chain, not the code. Re-run with the credential pinned (ru
 ### 11.1 Setup
 
 Same code as run 3 (D-117 (a) row live + D-117 (b) via #1610 in the throwaway local branch), **unchanged harness and
-fixture**. Only change: `AZURE_TOKEN_CREDENTIALS=AzureCliCredential`, so every token acquisition goes through the operator's
-az CLI session (ADR-028 E-2). Started 16:01 local, about 9.5 minutes, 184 model calls (`notes/074-run4-results.json`).
+fixture**. Run 3's failures were transient az CLI token failures (the harness injects an explicit `AzureCliCredential`, so
+no environment variable selects the credential; an earlier version of this note credited `AZURE_TOKEN_CREDENTIALS`, which
+cannot matter). Run 4's validity rests on its empty warning list, not on any setting. Started 16:01 local, about 9.5
+minutes, 184 model calls (`notes/074-run4-results.json`).
 
-Validity: **zero authentication failures, the guard-warning list is empty**, and the linear runs report
-"enforced 3 $choices field(s) as output-schema enum from the live Dataverse taxonomy". 92 items: 55 positives, 37 negatives.
+Validity: **zero authentication failures, the guard-warning list is empty** (`warnings: []` in the results file), and the
+linear runs report "enforced 3 $choices field(s) as output-schema enum from the live Dataverse taxonomy". 92 items: 55
+positives, 37 negatives.
+
+**Independent review of this result (accepted):**
+
+- No leakage found: a 6-word overlap check between the fixture and the category guidance, the guidance unchanged since the
+  labelled set was captured, and the key finalised before run 1.
+- Robust to the key: 89.3% against the sealed drafting intent (`074-drafting-intent.json`), and 9/10 on the owner-labelled
+  positives.
+- Run-to-run noise is about 1-2 items, so 49/55 should be read as roughly 47-51.
+- Known limit: there is no held-out set (the guidance and the fixture were developed against the same 92 items), and the
+  Wilson lower bound is 78.2%, just under the 80% floor.
+
+**Harness hardening after the review (this change):** the validity guard now fails on every captured log entry at Warning
+or higher (it previously missed the renderer's "Failed to parse JPS schema; falling back to flat text" warning and rung 5's
+"triage taxonomy ... resolved no rows" warning) and on any item with a classification signal but no rung-5
+`TriageCategory` (a base without the rung-5 taxonomy code). The scorer's predicate hit now also requires the triage review
+outcome not to be `Dismiss`, as POL-COMMIT-BUDGET does (`notes/004-seed-policy-rows.md:33`). Run 4's 52 predicted positives
+carry review outcomes Route, File and Update only (no Dismiss; `074-run4-results.json`), so the recorded numbers do not
+change: 49/55 = 89.1%, precision 49/52. The run itself is not repeated (no model calls).
 
 ### 11.2 Run 4 numbers: recall on a synthetic set, same fixture and key as runs 1 and 2
 
@@ -552,8 +573,20 @@ the gate has to be shown against master.
 
 ### 11.5 D-49 persistence
 
-Not updated in this change (docs only; no Dataverse writes). The `sprk_measuredrecall` rows still hold the run 2 values
-(Fee 25.93, Scope 39.29, §8.5). Run 4 strict recall to write: **Fee 88.89, Scope 89.29**, set size 92, measured on 2026-10-10.
+Written 2026-10-10T21:18Z to spaarkedev1 `sprk_triagecategory` with the operator's identity (HTTP 204 each), nothing else on
+the rows touched (guidance unchanged). `sprk_recallmeasuredon` is a DateOnly column (`Format` and `DateTimeBehavior` both
+`DateOnly`), so the plain date `2026-10-10` is the right value. Run 4 strict recall (§11.2), set size 92.
+
+| Row | Field | Before (read back, `modifiedon` 15:28:08Z) | After (read back, `modifiedon` 21:18:20Z / 21:18:21Z) |
+|---|---|---|---|
+| Fee / rate change (`8b62dd84-...`) | `sprk_measuredrecall` | 25.93 | **88.89** |
+| Fee / rate change | `sprk_labelledsetsize` | 92 | 92 |
+| Fee / rate change | `sprk_recallmeasuredon` | 2026-10-10 | 2026-10-10 |
+| Scope / budget change (`8d62dd84-...`) | `sprk_measuredrecall` | 39.29 | **89.29** |
+| Scope / budget change | `sprk_labelledsetsize` | 92 | 92 |
+| Scope / budget change | `sprk_recallmeasuredon` | 2026-10-10 | 2026-10-10 |
+
+Same semantics as §6.5: strict per-category recall (24/27 and 25/28); the gate figure (predicate 89.1%) is in this note.
 
 ### 11.6 Verdict
 
