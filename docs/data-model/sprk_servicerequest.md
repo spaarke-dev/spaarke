@@ -19,6 +19,8 @@ Prior to R4 the entity existed in Dataverse but had **zero repo footprint** — 
 | `sprk_servicerequestid` | GUID | Primary key (`sprk_documentid`-style PK). |
 | `sprk_name` | NVARCHAR(850), **required** | **Primary name** column. Used by `IncomingAssociationResolver.GetPrimaryNameField` → `sprk_name`. |
 | `statecode` / `statuscode` | State / Status | Active (0) / Inactive (1); status Active (1) / Inactive (2). |
+| `sprk_requesttype` | Choice (local), not required | Which Legal Front Door intake wizard produced the request: NDA Assessment `100000000`, Invention Submission `100000001`, Policy Question `100000002`, Trademark Search `100000003`. Written by the BFF at intake submit (R3 task 020, FR-05). |
+| `sprk_intakedata` | Multiline text, max 1,048,576 chars | The submitter's wizard answers as a JSON document. Written by the BFF at intake submit; **not** a human summary (that is `sprk_recordsummary`). Not field-secured. (R3 task 020, FR-05.) |
 
 ### Regarding lookups on `sprk_servicerequest` (this entity as a child)
 

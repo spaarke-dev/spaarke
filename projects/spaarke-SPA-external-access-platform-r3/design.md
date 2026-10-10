@@ -256,9 +256,8 @@ execution does not inadvertently regress dev. (Client work may proceed on the cu
    - **Invite: a shared Spaarke service** (recommended: the T240c directory). It invites the B2B guest into
      Spaarke's tenant (no licence) and adds it to `sprk-{customerId}-users`. Stamps cannot invite: since
      T261 a stamp identity holds only `FileStorageContainer.Selected`, and `User.Invite.All` sits with L2.
-   - **Contact.** The stamp creates the contact bound to the guest `oid`. A pre-bound guest already resolves
-     today ("everyone else resolves only through an existing oid binding", `ContactIdentityBinder`), so the
-     member-test change in #1563 becomes optional.
+   - **Contact.** The stamp creates the contact bound to the guest `oid`. *(Superseded 2026-10-09 by spec
+     FR-15: the contact is created on first sign-in through the member-test branch (#1563), which is required.)*
    - **Spike first.** Use Entra's built-in B2B self-service sign-up user flow if it covers this more simply.
    - **Customer prerequisite.** The customer's cross-tenant access settings must allow B2B collaboration with
      Spaarke's tenant. This is a new required customer approval (PRQ-C-14, requested from provisioning).

@@ -8,13 +8,13 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 
 | ID | Title | Phase | Status | Deps | Tier/Eff | Rigor | Parallel |
 |----|-------|-------|--------|------|----------|-------|----------|
-| 001 | ADR-028 amendment for R3 (A2, A3 :124, A1 :55) | P0 | 🔲 [open] | none | O/h | FULL | — (.claude/, main session; owner approval) |
+| 001 | ADR-028 amendment for R3 (A2, A3 :124, A1 :55) | P0 | 🔄 [wip] | none | O/h | FULL | — (.claude/, main session; owner approval) |
 | 002 | Grid columns per owner list (FR-09) | P0 | 🔲 [open] | none (owner list) | S/h | STANDARD | Wave 1 when the list arrives |
-| 003 | Spike: Entra B2B self-service sign-up vs custom join (FR-12) | P0 | 🔲 [open] | none | O/h | STANDARD | Wave 1 |
-| 010 | Ciam audience forms + default-scheme CIAM guard (FR-22, FR-23) | P1 | 🔲 [open] | none | O/h | FULL | Wave 1 |
+| 003 | Spike: Entra B2B self-service sign-up vs custom join (FR-12) | P0 | ⏸️ [blocked] owner choice (spike done) | none | O/h | STANDARD | Wave 1 |
+| 010 | Ciam audience forms + default-scheme CIAM guard (FR-22, FR-23) | P1 | 🔄 [wip] | none | O/h | FULL | Wave 1 |
 | 011 | Modules by user type + partner service-request switch (FR-19, FR-06) | P1 | 🔲 [open] | 001 | O/h | FULL | Wave 2 |
 | 012 | Member-test branch for registered guests (FR-15) | P1 | 🔲 [open] | 001 | O/h | FULL | Wave 2 |
-| 020 | R3 schema: sprk_createdbycontact + intake columns (FR-25, FR-05) | P2 | 🔲 [open] | none | S/h | FULL | Wave 1 (owner-gated import) |
+| 020 | R3 schema: sprk_createdbycontact + intake columns (FR-25, FR-05) | P2 | ⏸️ [blocked] owner dev import (source done, reviewed) | none | S/h | FULL | Wave 1 (owner-gated import) |
 | 030 | Creator stamping on every external create (FR-25) | P3 | 🔲 [open] | 020 | O/h | FULL | Wave 2 |
 | 031 | Document routes for Matter/WA/Invoice/Service Request (FR-24) | P3 | 🔲 [open] | 030 | O/h | FULL | Wave 3 |
 | 032 | DELETE own documents/to-dos/events/service requests (FR-26) | P3 | 🔲 [open] | 031 | O/h | FULL | Wave 4 |
@@ -29,7 +29,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 041 | Run-time backend selection (FR-17) | P4 | 🔲 [open] | 040 | O/h | FULL | Wave 3 |
 | 042 | Out-of-plane pages + no production mock (FR-18) | P4 | 🔲 [open] | 041 | O/h | FULL | Wave 4 |
 | 043 | Production build + Teams package in CI (FR-20) | P4 | 🔲 [open] | 040 | S/h | STANDARD | Wave 3 |
-| 050 | Record detail view: fields, docs/invoices, events/tasks (FR-01–03) | P5 | 🔲 [open] | none | S/h | FULL | Wave 1 |
+| 050 | Record detail view: fields, docs/invoices, events/tasks (FR-01–03) | P5 | 🔄 [wip] | none | S/h | FULL | Wave 1 |
 | 051 | Detail messages section: read + send (FR-04/FR-11 client) | P5 | 🔲 [open] | 050, 034 | S/h | FULL | Wave 5 |
 | 052 | Intake wizards: wiring + NDA + Policy Question (FR-05) | P5 | 🔲 [open] | 035 | S/h | FULL | Wave 6 |
 | 053 | Intake wizards: Invention + Trademark (FR-05) | P5 | 🔲 [open] | 052 | S/h | FULL | Wave 7 |
