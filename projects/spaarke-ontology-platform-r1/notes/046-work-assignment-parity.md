@@ -57,9 +57,9 @@ spaarkedev1 2026-10-10 (§C).
 | 22 | files, documents, indexing, follow-on event, email | later wizard steps | unchanged | ✅ | n/a |
 | 23 | UI | — | unchanged; a server warning (secure create not finished) is shown as a "partial" result like any other warning | ✅ | jest |
 
-**Area-owner review: PENDING.** Rows 14–17 and 19 are the differences the owner has to accept (they are uac-r2's G5 rule,
-mandated by D-113). If the work-assignment area owner rejects any of them, the POML's escalation trigger fires — stop.
-Reviewer: _(name, date, decision — to be recorded here by the main session)_.
+**Area-owner review: DONE.** Rows 14–17 and 19 are the differences the owner had to accept (they are uac-r2's G5 rule,
+mandated by D-113).
+Reviewer: owner (D-118, 2026-10-10) — accepted rows 14-17 and 19.
 
 ## C. Live proof — spaarkedev1, 2026-10-10 15:5x UTC (`WorkAssignmentCreateLiveTests`, opt-in)
 

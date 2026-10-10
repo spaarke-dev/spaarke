@@ -672,9 +672,10 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               assignedLawFirmAttorneyName: '',
               notifyResources: false,
             };
-            // authFetch / bffBaseUrl are only consumed for SPE file upload, which
-            // we never trigger here (empty uploadedFiles array). Provide safe
-            // fallbacks so optional props don't break the call.
+            // authFetch / bffBaseUrl carry the work assignment's create: it POSTs to the BFF
+            // (/api/v1/child-records/sprk_workassignment). They are also used for SPE file upload,
+            // which we never trigger here (empty uploadedFiles array). Optional props fall back to
+            // window.fetch / '' so the call is well-formed when they are absent.
             const waService = new WorkAssignmentService(dataService, authFetch ?? fetch.bind(window), bffBaseUrl ?? '');
             const waResult = await waService.createWorkAssignment(waForm, [], [], waAssignWork);
             if (waResult.status === 'error') {

@@ -199,6 +199,44 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     /// <summary>
+    /// Review round 2 (High, security): the pair may agree ONLY with the work assignment's typed regarding lookups
+    /// (<c>sprk_regardingmatter</c> / <c>sprk_regardingproject</c>) by table AND id. A caller who creates a contact whose id
+    /// equals a secure matter's, binds it in a NON-regarding lookup (<c>sprk_assignedto</c>), and names the matter in the pair
+    /// with no typed matter lookup used to pass the route guard (the id matched a lookup) and reach a core that skips the
+    /// AppendTo check on the matter. Now the same 400 as any pair-only parent, and nothing is asked or created.
+    /// </summary>
+    [Fact]
+    public async Task WorkAssignmentCreate_APairWhoseIdOnlyMatchesANonRegardingLookup_Is400_AndNothingIsCreated()
+    {
+        var payload = WizardWorkAssignment(SecureMatter);
+        payload.Remove("sprk_RegardingMatter@odata.bind");
+        payload["sprk_AssignedTo@odata.bind"] = $"/contacts({SecureMatter:D})"; // same GUID, different table
+
+        var result = await CreateChild("sprk_workassignment", payload);
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.InvalidPayloadCode);
+        _appCreates.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The wizard's shape stays accepted: the pair agrees with the typed matter lookup — even when another (contact) lookup
+    /// happens to carry the same id, because agreement is decided by the regarding lookup alone.
+    /// </summary>
+    [Fact]
+    public async Task WorkAssignmentCreate_APairAgreeingWithTheTypedMatterLookup_IsStillAccepted()
+    {
+        var payload = WizardWorkAssignment(OrdinaryMatter);
+        payload["sprk_AssignedTo@odata.bind"] = $"/contacts({OrdinaryMatter:D})";
+
+        var result = await CreateChild("sprk_workassignment", payload);
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        _appCreates.Should().ContainSingle();
+    }
+
+    /// <summary>
     /// Defence in depth: the plan's own AppendTo refusal on a secure parent (<c>AccessDenied</c>) is answered with the
     /// route's uniform not-found — byte-identical to a create filed under a record that does not exist.
     /// </summary>

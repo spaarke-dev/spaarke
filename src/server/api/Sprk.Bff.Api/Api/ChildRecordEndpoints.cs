@@ -258,11 +258,12 @@ public static class ChildRecordEndpoints
         // record no typed lookup names would answer "exists and is secure" (404) differently from "missing or ordinary"
         // (201). On this route a root's pair must name a record its typed regarding lookup also names (the wizard always
         // sends both), so every parent is AppendTo-checked as the caller and no answer depends on whether it is secure.
-        if (isRoot && PairNamesAnUntypedRecord(mapped.Item!))
+        if (isRoot && PairNamesAnUntypedRecord(entity, mapped.Item!))
         {
             return Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode,
-                $"'{SecureRootInheritance.PairIdColumn}' must name the same record as the {Noun(entity)}'s regarding lookup " +
-                "(send both). Nothing was saved.");
+                $"The {Noun(entity)} could not be filed under the selected record, so nothing was saved. Try again, or contact your " +
+                $"administrator if it keeps happening. (Technical detail: '{SecureRootInheritance.PairIdColumn}' must name the same " +
+                $"record as the {Noun(entity)}'s regarding lookup — send both.)");
         }
 
         // The secure-create plan is passed for every table; it decides only for a root (work assignment / project) and costs
@@ -417,16 +418,30 @@ public static class ChildRecordEndpoints
 
     /// <summary>
     /// Task 046 review F1: true when the row's ADR-024 pair id (<c>sprk_regardingrecordid</c>) is set and is not the id of a
-    /// record one of its typed lookups binds — including a value that is not a record id at all.
+    /// record one of the row's TYPED REGARDING/FILING lookups binds — including a value that is not a record id at all.
+    /// Round 2 (security): an id equal to ANY other lookup's id (a contact, law firm, record type…) does not count — the
+    /// pair must agree with <see cref="SecureRootInheritance.TypedFilingColumns"/> (the set the secure-create plan's
+    /// <c>NameParentsAsync</c> treats as agreeing), compared by table AND id, so a same-id record in another table cannot
+    /// stand in for the parent the core would AppendTo-check.
     /// </summary>
-    internal static bool PairNamesAnUntypedRecord(DataverseWriteItemMapper.MappedItem item)
+    internal static bool PairNamesAnUntypedRecord(string entity, DataverseWriteItemMapper.MappedItem item)
     {
         var pair = OwnedChildWrite.WritesOf(item)
             .FirstOrDefault(w => string.Equals(w.Key, SecureRootInheritance.PairIdColumn, StringComparison.OrdinalIgnoreCase));
         if (pair.Key is null || pair.Value is not string text || string.IsNullOrWhiteSpace(text))
             return false;
 
-        return !Guid.TryParse(text.Trim().Trim('{', '}'), out var id) || item.Lookups.All(l => l.RecordId != id);
+        if (!Guid.TryParse(text.Trim().Trim('{', '}'), out var id))
+            return true;
+
+        if (!SecureRootInheritance.TypedFilingColumns.TryGetValue(entity, out var typed))
+            return true;
+
+        return !item.Lookups.Any(l =>
+            l.RecordId == id
+            && typed.Any(t =>
+                string.Equals(t.Column, l.Column, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(t.ParentTable, l.RelatedTable, StringComparison.OrdinalIgnoreCase)));
     }
 
     /// <summary>
