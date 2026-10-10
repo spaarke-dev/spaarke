@@ -325,7 +325,7 @@ Amendment source: auth record §12b + `notes/r3-auth-path.md`. The amendment is 
 - **T240c directory service** (workforce lookup + CIAM lookup) — required for production routing (FR-17). Dev runs without it.
 - **T240d CIAM on stamps** (provisioning; spike S1 first) — required for partner features on provisioned customers. Includes the production CIAM SPA client (redirect `https://external.spaarke.com`), the `Ciam` audience forms, and the default-scheme CIAM-token guard.
 - **H3 pre-authorization** of the new workforce client on every customer BFF app (provisioning platform list).
-- **PRQ-C-14** — customer tenant allows outbound B2B collaboration (provisioning is adding it).
+- **PRQ-C-14** — customer tenant allows outbound B2B collaboration. **Added** by provisioning (PR #1589): a customer attestation `customerOutboundB2BAttested`, required for every B2BGuest (Model 1) run.
 - **Production SWA** `swa-spaarke-external-spa-prod` / `external.spaarke.com` (exists; DNS by the owner).
 
 ## Owner Clarifications
