@@ -17,8 +17,8 @@
 // configuration), and the BFF URL / build (H9 outputs) — so POST /api/runs now
 // rejects them. Task 245c made the operator-owned H11 / H14 / Communication
 // values required intake, validated at POST /api/runs with the rules the
-// handlers apply (UserProvisioningIntake for H11; non-blank / at-least-one for
-// H14) — so a payload a handler would refuse is refused before anything is
+// handlers apply (UserProvisioningIntake for H11; non-blank for
+// H14a) — so a payload a handler would refuse is refused before anything is
 // created. No known gaps remain (RunContextContractTests).
 // -----------------------------------------------------------------------------
 
@@ -134,12 +134,6 @@ public static class IntakeParameterCatalog
     /// </summary>
     public const string ExchangePolicyScopeGroupId = "exchangePolicyScopeGroupId";
 
-    /// <summary>H14b — Graph subscription resource for the Communication module. At least one of this and <see cref="EmailGraphResource"/>.</summary>
-    public const string CommunicationGraphResource = "communicationGraphResource";
-
-    /// <summary>H14b — Graph subscription resource for the Email module. At least one of this and <see cref="CommunicationGraphResource"/>.</summary>
-    public const string EmailGraphResource = "emailGraphResource";
-
     /// <summary>H4 — the Communication module's default mailbox address (KV <c>Communication-DefaultMailbox</c>). Required.</summary>
     public const string CommunicationDefaultMailbox = "communicationDefaultMailbox";
 
@@ -190,8 +184,6 @@ public static class IntakeParameterCatalog
         new(UsersJson, "H11 users to provision: JSON array of {firstName, lastName, email, companyName} — names required for NativeAccount, email for B2BGuest; 1 to 500 entries. Required; validated at POST /api/runs (UserProvisioningIntake). Stored in the run document (owner decision D15)."),
         new(EnvironmentSecurityGroupId, "H11 (T232): object id of the customer environment's security group sprk-{customerId}-users, created by the operator and set on the environment before the run (prereqs.yaml PRQ-C-10). Required for B2BGuest (every Model 1 run); validated at POST /api/runs (UserProvisioningIntake). H11 adds each guest to it."),
         new(ExchangePolicyScopeGroupId, "H14a: mail-enabled security group scoping the Exchange RBAC for Applications role assignments — created by the Exchange admin of the stamp's tenant before the run (prereqs.yaml PRQ-C-08). Required."),
-        new(CommunicationGraphResource, "H14b: Graph subscription resource for the Communication module. At least one of this and emailGraphResource."),
-        new(EmailGraphResource, "H14b: Graph subscription resource for the Email module. At least one of this and communicationGraphResource."),
         new(CommunicationDefaultMailbox, "H4: Communication module default mailbox address (KV Communication-DefaultMailbox). Required."),
         new("confirmationAcknowledgment", "Operator confirmation phrase (audit; part of the H0 idempotency hash)."),
         new("intakeFileSha256", "Batch intake file hash (audit; part of the H0 idempotency hash)."),

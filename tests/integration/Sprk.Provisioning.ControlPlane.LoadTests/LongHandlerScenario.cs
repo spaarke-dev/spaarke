@@ -261,7 +261,6 @@ public sealed class LongHandlerScenario
                     ["identityPreset"] = "NativeAccount",
                     ["usersJson"] = "[{\"firstName\":\"Load\",\"lastName\":\"Test\"}]",
                     ["exchangePolicyScopeGroupId"] = "load-scope@contoso.example",
-                    ["communicationGraphResource"] = "users/load@contoso.example/messages",
                     ["communicationDefaultMailbox"] = "load@contoso.example",
                     // T255: the customer's workforce tenant(s) — required for every model.
                     ["customerWorkforceTenantIds"] = "[\"d0e0c0a0-0000-4000-8000-000000000003\"]",

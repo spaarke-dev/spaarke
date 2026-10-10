@@ -67,7 +67,7 @@ Historically Spaarke has three generations of provisioning assets (Gen 1 manual 
    |
    |  fires 19 idempotent handlers via IJobHandler
    v
-[L1 Handlers]  H0, H0.5, H1, H2a, H2b, H3, H4, H5, H6, H7, H7b, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14
+[L1 Handlers]  H0, H0.5, H1, H2a, H2b, H3, H4, H4b, H5, H6, H7, H7b, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14
    |
    v
 [sprk_dataverseenvironment.Setup Status = Ready]
@@ -388,7 +388,7 @@ resource in the per-customer subscription. I1 and I5 are unaffected.
 
 ### 4.1 L1 handlers — the deterministic layer
 
-19 idempotent handlers (H0–H14) implementing `IJobHandler` per **ADR-004**. Each is a self-contained coarse-grained operation (deploy infra, import solutions, deploy BFF) with:
+21 idempotent handlers (H0–H14; H14 runs its one sub-step, H14a, in-process) implementing `IJobHandler` per **ADR-004**. Each is a self-contained coarse-grained operation (deploy infra, import solutions, deploy BFF) with:
 
 - **3-level idempotency** (NFR-10): Service Bus MessageId dedup + Redis `IdempotencyService` check/lock + Dataverse alternate-key upsert
 - **Deterministic idempotency key** using content hashes / semantic versions (not run-attempt counters)
@@ -458,7 +458,6 @@ same rules for batch mode.
 | `environmentSecurityGroupId` | H11 | **B2BGuest (every Model 1 run)**: object id (GUID) of the environment's security group `sprk-{customerId}-users`, created by the operator and set on the environment (`PRQ-C-10`) — `userprov-missing-security-group-id` / `userprov-invalid-security-group-id` (T232) |
 | `usersJson` | H11 | JSON array, 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName`; `B2BGuest`: `email` (`userprov-missing-users` / `userprov-malformed-users-payload` / `userprov-invalid-user-entry` / `userprov-too-many-users`). Personal data: stored in the L2 run document (owner decision D15); never in git; diagnostics and logs identify users by position / Entra object id. |
 | `exchangePolicyScopeGroupId` | H14a | non-blank (`h14a-missing-policy-scope-group-id`). The mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (only its **direct** members' mailboxes are reachable) — **created by the Exchange admin of the stamp's tenant before the run** (prerequisite `PRQ-C-08`; L2 never creates it — its membership is the customer's access decision). |
-| `communicationGraphResource` / `emailGraphResource` | H14b | at least one non-blank (`h14b-no-webhook-targets-configured`) |
 | `communicationDefaultMailbox` | H4 → KV `Communication-DefaultMailbox` | `local@domain.tld` (`intake-communication-default-mailbox-invalid`) |
 
 **API surface** (per FR-21):
@@ -575,7 +574,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H12b** | App-config seed | DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions (DAG-parallel with H12a) | Config records seeded per manifest | `configseed-{customerId}-{configSeedVer}` |
 | **H12c** | Runtime references | `sprk_aimodeldeployment` rows point at the customer's **own dedicated** OpenAI deployment — both models (D-12 §3) | Endpoint resolves via env-var + join | `runtimerefs-{customerId}-{modelVer}` |
 | **H13** | E2E acceptance gate | Pure C# in the Worker (ARM, Graph, Dataverse, AI Search, Cost Management calls — no script) — verifies `/health`, `/ping`, the Dataverse CORS origin, **the keyless proof** (one managed-identity call per stamp service, made by the BFF — any refusal fails; T230b) and **ARM keyless** (key auth off, no key setting on any slot), **all 7 T1–T7 traps cleared**, **I2–I5 invariants sample-verified on the stamp** (I1 + naming are CI gates — T230a), cost envelope (one $400/month envelope for both models, §3.2), **the BFF's secure-record isolation census answers `isolated`** (T260) | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` — `buildId` = the build H9 deployed |
-| **H14** | Post-deploy integrations | (a) Exchange mailbox access: the stamp UAMI gets the 4 `Application Mail.*` roles scoped to the customer's group (RBAC for Applications — **T4**); (b) Graph webhook subscriptions per Communication/Email module; (c) Dataverse service-endpoint webhooks. Sub-steps DAG-parallel | H13 T4: every role held in scope, none outside | `integrations-{customerId}-{integrationVer}` |
+| **H14** | Post-deploy integrations | (a) Exchange mailbox access: the stamp UAMI gets the 4 `Application Mail.*` roles scoped to the customer's group (RBAC for Applications — **T4**). One sub-step (H14b Graph webhook subscriptions and H14c Dataverse service-endpoint webhooks were removed — §7.9) | H13 T4: every role held in scope, none outside | `integrations-{customerId}-{integrationVer}` |
 
 ### 5.1 Handler dependency DAG
 
@@ -593,7 +592,7 @@ H4   <- H2a                H5   <- H2a                H3   <- H4
 H4b  <- H4, H3, H5, H8     H6   <- H5, H3, H10        H8   <- H3, H5
 H7b  <- H6                 H9   <- H3, H4b, H6, H7b   H7   <- H6, H8, H9
 H10  <- H3, H5             H11  <- H10, H7            H12a <- H11
-H12b <- H11                H12c <- H12a, H12b, H2a    H14  <- H12c, H9
+H12b <- H11                H12c <- H12a, H12b, H2a    H14  <- H12c
 H13  <- H14, H7b
 ```
 
@@ -1348,11 +1347,20 @@ Both consume the **declarative seed manifest** (resolves the `scripts/seed-data`
 
 ### 7.9 Phase 9 — Post-Deploy Integrations (H14)
 
-Three DAG-parallel sub-steps:
+One sub-step:
 
 - **(a) Exchange mailbox access (RBAC for Applications, task 251)** — the stamp UAMI only (the BFF app registration does no app-only mail; granting it would widen its reach). Through the Worker's sidecar: register the UAMI in Exchange (`New-ServicePrincipal`), then one assignment per mailbox role, named `{prefix}-{customerId}-{Role}`, scoped to the intake group. Get-before-set: any existing assignment that differs → Drift, nothing changed (**T4**). Grants take effect in 30 min – 2 h (Microsoft).
-- **(b) Graph webhook subscriptions** — per Communication/Email module; HMAC signing keys from H4.
-- **(c) Dataverse service-endpoint webhooks** — fire with correct HMAC.
+
+**Removed (ISS-019 / #1560): H14b (Graph webhook subscriptions) and H14c (Dataverse service-endpoint webhook).** They registered
+receivers at `{stamp}/api/webhooks/graph/{module}` and `{stamp}/api/webhooks/dataverse/communication`; the stamp BFF maps neither
+route (its mail receiver is `POST /api/communications/incoming-webhook`), so the Graph create handshake would 404 and a run would
+stop at H14b. Mail needs no provisioning-time subscription: the BFF's `GraphSubscriptionManager` creates and renews its own
+Graph subscription for each receive-enabled mailbox, using the `Communication-WebhookUrl` that `customer.bicep` sets
+(`{stamp}/api/communications/incoming-webhook`); `InboundPollingBackupService` (5 min) and delta reconciliation (15 min)
+run regardless. The mailbox records themselves (`sprk_communicationaccount`, verified with
+`POST /api/communications/accounts/{id}/verify`) are not created by any provisioning step — an operator creates them by hand
+(tracked as #1562). Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. The stamp's
+`Communication__WebhookSigningKey` setting still resolves to Key Vault secret `Communication-Webhook-SigningKey` (H4 generates it; the BFF requires it for the receiver's HMAC check).
 
 **Explicitly NOT included** (per r3 task 060): S2S consent flows — the S2S Dataverse app-reg was dropped.
 

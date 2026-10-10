@@ -60,9 +60,6 @@ public static class ControlPlaneGraphAppRoles
     /// <summary>H11 — add each user to the environment security group.</summary>
     public const string GroupMemberReadWriteAll = "GroupMember.ReadWrite.All";
 
-    /// <summary>H14b — mailbox change subscriptions created as the Worker.</summary>
-    public const string MailRead = "Mail.Read";
-
     // ── Application-permission IDs (live, 2026-10-09) ─────────────────────────────────────────
 
     private const string IdApplicationReadWriteOwnedBy = "18a4783c-866b-4cc7-a460-3d5e5662c884";
@@ -72,7 +69,6 @@ public static class ControlPlaneGraphAppRoles
     private const string IdUserCreate = "4240f680-4f73-4082-a766-aa916a2dc9b3";
     private const string IdLicenseAssignmentReadWriteAll = "5facf0c1-8979-4e95-abcf-ff3d079771c0";
     private const string IdGroupMemberReadWriteAll = "dbaae8cf-10b5-4b86-a4a1-f871c94c6695";
-    private const string IdMailRead = "810c84a8-4a9e-49e6-bf7d-12d183f40d01";
 
     /// <summary>Well-known Microsoft Graph resource service principal appId (constant across every tenant).</summary>
     public const string GraphResourceAppId = "00000003-0000-0000-c000-000000000000";
@@ -97,7 +93,5 @@ public static class ControlPlaneGraphAppRoles
             "H11", "POST /users/{id}/assignLicense (GraphRestUserProvisioner)."),
         new GraphAppRole(GroupMemberReadWriteAll, "Read and write all group memberships", IdGroupMemberReadWriteAll,
             "H11", "POST /groups/{id}/members/$ref (GraphRestEnvironmentSecurityGroupClient)."),
-        new GraphAppRole(MailRead, "Read mail in all mailboxes", IdMailRead,
-            "H14b", "POST/PATCH/GET /subscriptions on users/{mailbox}/mailFolders/.../messages (GraphRestSubscriptionCreator)."),
     };
 }

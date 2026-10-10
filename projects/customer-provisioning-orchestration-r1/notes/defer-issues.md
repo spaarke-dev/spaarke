@@ -443,6 +443,64 @@ the wrong fix. On Model 1 an unreadable value (reference, blank, all-zero, missi
 `[UNRESOLVABLE ...]` and the probe Fails with an instruction to re-run H4b. Model 2 is unchanged. Tests: 5 new Model 1 cases
 plus a Model 2 reference case in `CustomerIdentityT7ProbeTests`.
 
+---
+
+### ISS-019 — H14b and H14c wire webhooks to routes the BFF does not serve (a run would stop at H14b)
+
+| Field | Value |
+|---|---|
+| **Status** | Resolved 2026-10-09 — H14b and H14c removed from L2 (owner directive "needed -> build, else remove"); H14a kept |
+| **Urgency** | before the first run reaches H14 |
+| **Filed** | 2026-10-09 (incoming note from auth-system-of-record-r1 via external-access-r3, `notes/coordination/2026-10-09-from-auth-system-of-record-r1-webhooks.md` §1) |
+| **Source** | auth-system-of-record-r1 `x09a-mail-and-webhooks.md` Q2-Q3 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1560 |
+
+**Description**
+
+H14b registered Graph subscriptions at `{stamp}/api/webhooks/graph/{module}` and H14c a Dataverse `serviceendpoint` at
+`{stamp}/api/webhooks/dataverse/communication`. Verified in code on this branch (every claim re-checked, none taken from the note):
+
+| Claim | Result | Evidence |
+|---|---|---|
+| H14b notificationUrl is `{base}/api/webhooks/graph/{module}`, `clientState` = the `Communication-Webhook-SigningKey` secret | True | `H14bGraphWebhookSubHandler.cs:55,159-163,196-197` (before this change) |
+| H14c endpoint URL is `{base}/api/webhooks/dataverse/communication` | True | `H14IntegrationWiringHandler.cs:290`, `H14cDataverseWebhookSubHandler.cs:45,135-139` (before this change) |
+| The BFF maps neither route | True | the only webhook routes in `src/server/api/Sprk.Bff.Api` are `POST /api/communications/incoming-webhook` (`Api/CommunicationEndpoints.cs:470`) and `POST /api/compose/webhooks/spe-doc-changed` (`Api/ComposeSyncEndpoints.cs:43`); no `/api/webhooks/*` route exists |
+| H14c registers no `sdkmessageprocessingstep` | True | the registrar wrote only the `serviceendpoints` row (`DataverseWebApiServiceEndpointWebhookRegistrar.cs`, before this change); `sdkmessageprocessingstep` occurs in L2 only as a privilege-name string in `Tests/Handlers/SecureRecordSetup/FakeSecureRecordSetupDataverse.cs:25-26` |
+| The BFF creates/renews its own per-mailbox subscriptions with `customer.bicep`'s URL | True | `Services/Communication/GraphSubscriptionManager.cs:58,431-434` use `CommunicationOptions.WebhookNotificationUrl`; `infrastructure/bicep/customer.bicep:793` sets `Communication-WebhookUrl` = `{bffApi appServiceUrl}/api/communications/incoming-webhook` |
+
+A Graph create handshake to a 404 route fails, H14b turns any failure into `HandlerResult.Failure`, so a run stopped at H14b.
+Mail was never at risk: the BFF subscribes itself and polls every 5 minutes.
+
+**Resolution (2026-10-09)**
+
+Removed, not rewired (nothing needs a provisioning-time subscription; the BFF owns subscribe/renew/self-heal):
+- Deleted `H14bGraphWebhookSubHandler`, `H14cDataverseWebhookSubHandler`, `IGraphSubscriptionCreator` + `GraphRestSubscriptionCreator`,
+  `IServiceEndpointWebhookRegistrar` + `DataverseWebApiServiceEndpointWebhookRegistrar`, their tests and `H14SecretRedactionTests`.
+- `H14IntegrationWiringHandler` now drives H14a only (`ExpectedSubStepCount` 3 -> 1); it no longer requires `BffApiUrl`, the customer
+  `keyVaultName`, `dataverseEnvUrl` or `subscriptionId`. Removed `HandlerIds.H14b/H14c`, the options only they used
+  (`GraphRequestTimeout`, `GraphSubscriptionExpirationMinutes`, `DataverseRequestTimeout`, `ServiceEndpoint*`), the rejection codes
+  (`H14bRejections`, `H14cRejections`, four H14 parent codes) and the gates `GraphWebhooksWired` / `DataverseWebhookWired`.
+- DAG: `H14 <- H12c` (the `H9` edge existed only for the webhook base URL; H9 still precedes H14 transitively via H11 <- H7 <- H9).
+- Intake: removed `communicationGraphResource` / `emailGraphResource` (catalog, `HandlerRunInputs`, POST /api/runs rule
+  `h14b-no-webhook-targets-configured`, `intake.schema.json`, `provisioning-runs/_templates/intake.md`, load-test payloads).
+- The Worker's `Mail.Read` Graph role existed only for H14b: removed from `ControlPlaneGraphAppRoles.cs` and the T261 note. **Live revocation
+  of `Mail.Read` from the Worker identity is an operator step (not done here).**
+- Handler count: the dispatchable count stays **21** (H14b/H14c were never in `HandlerIds.Dispatchable`); the in-process H14 sub-steps
+  went from 3 (H14a/b/c) to 1 (H14a); handler ids in the catalog 24 -> 22. No Bicep or app setting existed only for H14b/H14c.
+- Signing key: a stamp still needs one - the BFF's `Communication:WebhookSigningKey` is `[Required]` and its mapped receiver verifies
+  `X-Hub-Signature-256` with it. The BFF reads config key `Communication:WebhookSigningKey` (app setting `Communication__WebhookSigningKey`),
+  not a Key Vault name; on a stamp that setting is a Key Vault reference to `Communication-Webhook-SigningKey`, which is what
+  `scripts/canonical-secret-catalog/manifest.yaml`, `customer.bicep` and H4 already use, so the manifest needed no change. The other
+  two spellings are outside provisioning: `Communication-WebhookSigningKey` (dev platform, `config/spaarke-resources.yaml:349`) and
+  the BFF's own error-message text (`communication-webhook-signing-key`, `CommunicationOptions.cs:65`).
+- Not fixed here (BFF owner / other issues): #1561 (the mapped receiver 401s without `X-Hub-Signature-256`, which Graph never sends),
+  #1562 (nothing creates the stamp's `sprk_communicationaccount` rows).
+
+**Entry-points**
+
+`src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/IntegrationWiring/H14IntegrationWiringHandler.cs`, `.../Reconciler/DagAdvancer.cs`,
+`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §5, §7.9.
+
 ### ISS-014 — H13 cannot run the BFF's secure-record isolation census (no identity can call it)
 
 | Field | Value |

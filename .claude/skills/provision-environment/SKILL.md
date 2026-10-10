@@ -624,8 +624,6 @@ if ($BatchIntakeFile) {
   $users                       = if ($null -ne $intake.users) { @($intake.users) } else { @() }   # sent as nonSecretParameters.usersJson (Step 4.0); never @($null) — its Count is 1
   $exchangePolicyScopeGroupId  = $intake.exchangePolicyScopeGroupId   # created by the stamp tenant's Exchange admin (PRQ-C-08)
   $customerWorkforceTenantIds  = if ($null -ne $intake.customerWorkforceTenantIds) { @($intake.customerWorkforceTenantIds) } else { @() }   # T255 — REQUIRED every model: the CUSTOMER's Entra tenant id(s) (PRQ-C-13); sent as nonSecretParameters.customerWorkforceTenantIds (Step 4.0)
-  $communicationGraphResource  = $intake.communicationGraphResource   # at least one of these two
-  $emailGraphResource          = $intake.emailGraphResource
   $communicationDefaultMailbox = $intake.communicationDefaultMailbox
   $operatorUpn    = az ad signed-in-user show --query userPrincipalName -o tsv  # NEVER trust an operatorUpn field in the JSON (would risk NFR-11 spoof)
   $script:SkipInteractiveIntake = $true         # gates 1a-1e prompts below
@@ -680,7 +678,6 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
   "environmentSecurityGroupId": "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
   "customerWorkforceTenantIds": ["4b6f2c1e-8d3a-4f5b-9c7e-2a1d0e9f8b7c"],
   "exchangePolicyScopeGroupId": "spaarke-mail-scope@acme.example",
-  "communicationGraphResource": "users/legal-comms@acme.example/messages",
   "communicationDefaultMailbox": "legal-comms@acme.example"
 }
 ```
@@ -987,7 +984,6 @@ registry placeholder (the same "validate everything, then write" order `POST /ap
 | `environmentSecurityGroupId` | H11 | **B2BGuest (every Model 1 run)**: object id (GUID) of the environment's security group `sprk-{customerId}-users`, created by the operator and set on the environment before the run (`PRQ-C-10`). H11 adds each redeemed guest to it, then makes the guest a Dataverse user with the Spaarke role — the group keeps other customers' guests out of this environment. The environment must also allow guests (`PRQ-C-12`) and be linked to a pay-as-you-go billing policy on the stamp subscription (`PRQ-C-11` — Spaarke pays guest access PAYG, owner 2026-10-07; no licences are assigned). This step checks all three as the operator |
 | `users` → `usersJson` | H11 | 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName` (the UPN is built from them); `B2BGuest`: `email` (the invitation goes to it; names optional) |
 | `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (Entra object id or email address; only DIRECT members' mailboxes are reachable). **The Exchange admin of the stamp's tenant creates it before the run — prerequisite `PRQ-C-08`. This skill never creates or edits it** (owner decision 2026-10-01: its membership is the customer's decision about which mailboxes Spaarke may use). |
-| `communicationGraphResource` / `emailGraphResource` | H14b | at least one, e.g. `users/{mailbox}/messages` |
 | `communicationDefaultMailbox` | H4 (KV `Communication-DefaultMailbox`) | `local@domain.tld`, ≤ 254 characters — use a shared/service mailbox |
 | `displayName` | H10 (customer business unit), registry `sprk_name` | **Every run (T259)**: 1–160 characters, no leading/trailing whitespace, no control character, never `Secure Record` (`h10-customer-display-name-required` / `-invalid`); defaults to `customerId` (1a-bis) |
 | `customerWorkforceTenantIds` | H4b → `WorkforceIdentity__CustomerTenantIds__N` (both slots); H13 T7 | **Every run (T255, INCOMING-141)**: the CUSTOMER's Entra tenant id(s), 1–10 distinct lowercase GUIDs. Model 1: the customer's HOME tenant (its staff are B2B guests from there) — never Spaarke's tenant / this run's `tenantId`; Model 2: the customer's tenant. POST /api/runs also refuses the CIAM tenant (`workforce-tenants-required` / `-invalid` / `-ciam-tenant` / `-spaarke-tenant`). Prerequisite `PRQ-C-13` |
@@ -1158,11 +1154,6 @@ while ($true) {
   $wfIds = @((Read-Host "customerWorkforceTenantIds — the customer's Entra tenant id(s), comma-separated (PRQ-C-13)") -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
-while ([string]::IsNullOrWhiteSpace($communicationGraphResource) -and [string]::IsNullOrWhiteSpace($emailGraphResource)) {
-  Stop-IfBatch 'at least one of communicationGraphResource / emailGraphResource is required.'
-  $communicationGraphResource = Read-Host 'communicationGraphResource (e.g. users/{mailbox}/messages; blank to skip)'
-  $emailGraphResource         = Read-Host 'emailGraphResource (blank to skip)'
-}
 
 while ($communicationDefaultMailbox -cnotmatch '^[^@\s]+@[^@\s]+\.[^@\s]+\z' -or $communicationDefaultMailbox.Length -gt 254) {
   if ($communicationDefaultMailbox -or $script:SkipInteractiveIntake) { Stop-IfBatch "communicationDefaultMailbox '$communicationDefaultMailbox' must be a mailbox address (local@domain.tld, at most 254 characters)." }
@@ -1640,8 +1631,6 @@ $runRequest = @{
     usersJson                   = (ConvertTo-Json -InputObject @($users) -Compress -Depth 4)   # H11 — always a JSON array (do NOT add -AsArray: it double-nests)
     environmentSecurityGroupId  = $environmentSecurityGroupId   # H11 (T232) — required for B2BGuest: userprov-missing/invalid-security-group-id; null for NativeAccount
     exchangePolicyScopeGroupId  = $exchangePolicyScopeGroupId   # H14a — h14a-missing-policy-scope-group-id
-    communicationGraphResource  = $communicationGraphResource   # H14b — at least one of these two,
-    emailGraphResource          = $emailGraphResource           #        else h14b-no-webhook-targets-configured
     communicationDefaultMailbox = $communicationDefaultMailbox  # H4 → KV Communication-DefaultMailbox
     customerWorkforceTenantIds  = (ConvertTo-Json -InputObject @($customerWorkforceTenantIds) -Compress)   # T255 (INCOMING-141) — H4b writes WorkforceIdentity__CustomerTenantIds__N; workforce-tenants-* codes
     displayName                 = $displayName            # T259 (ISS-010) — REQUIRED: H10 names the customer's business unit with it (directly under the root, sibling of Secure Record); h10-customer-display-name-required / -invalid. The full name, never the pac fallback's substitute (Step 1f)

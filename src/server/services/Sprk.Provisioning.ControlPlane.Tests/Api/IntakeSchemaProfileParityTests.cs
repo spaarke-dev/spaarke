@@ -172,7 +172,7 @@ public sealed class IntakeSchemaProfileParityTests
 
     /// <summary>
     /// The schema states each POST /api/runs operator-intake rule. It may be STRICTER than the API (e.g. it refuses a
-    /// blank optional Graph resource the API ignores), never looser — a value ajv accepts must not be refused by
+    /// blank optional value the API ignores), never looser — a value ajv accepts must not be refused by
     /// POST /api/runs. (Known residue: ECMA and .NET disagree on a few exotic whitespace code points, e.g. U+0085,
     /// for the `\S` non-blank pattern.)
     /// </summary>
@@ -196,7 +196,7 @@ public sealed class IntakeSchemaProfileParityTests
             userFields.GetProperty(field).GetProperty("pattern").GetString().Should().Be(@"\S",
                 $"a blank users[].{field} is refused by POST /api/runs (IsNullOrWhiteSpace), so ajv must refuse it too");
         }
-        foreach (var key in new[] { "exchangePolicyScopeGroupId", "communicationGraphResource", "emailGraphResource" })
+        foreach (var key in new[] { "exchangePolicyScopeGroupId" })
         {
             properties.GetProperty(key).GetProperty("pattern").GetString().Should().Be(@"\S", $"{key} must be non-blank");
         }
@@ -204,7 +204,6 @@ public sealed class IntakeSchemaProfileParityTests
             .Should().Be(IntakeParameterCatalog.MaxMailboxAddressLength);
 
         var allOf = root.GetProperty("allOf").EnumerateArray().ToList();
-        allOf.Any(IsAtLeastOneGraphResourceRule).Should().BeTrue("at least one Graph resource — H14b's rule");
         allOf.Any(r => IsPresetUsersRule(r, UserProvisioningIntake.NativeAccount, ["firstName", "lastName"]))
             .Should().BeTrue("NativeAccount users need both names — H11's rule");
         allOf.Any(r => IsPresetUsersRule(r, UserProvisioningIntake.B2BGuest, ["email"]))
@@ -227,11 +226,6 @@ public sealed class IntakeSchemaProfileParityTests
             "POST /api/runs refuses a group id that is not a GUID (userprov-invalid-security-group-id)");
 
         static IEnumerable<string> Strings(JsonElement array) => array.EnumerateArray().Select(e => e.GetString()!);
-
-        static bool IsAtLeastOneGraphResourceRule(JsonElement rule)
-            => rule.TryGetProperty("anyOf", out var anyOf)
-                && anyOf.EnumerateArray().Select(a => string.Join(",", Strings(a.GetProperty("required")))).Order()
-                    .SequenceEqual(["communicationGraphResource", "emailGraphResource"]);
 
         static bool IsPresetUsersRule(JsonElement rule, string preset, string[] requiredFields)
             => rule.TryGetProperty("if", out var condition)
@@ -268,12 +262,6 @@ public sealed class IntakeSchemaProfileParityTests
                 RunsEndpoints.ValidateOperatorIntake(tenancyModel, without).Should().NotBeNull(
                     "the schema requires '{0}', so POST /api/runs must refuse a run without '{1}'", schemaKey, apiKey);
             }
-
-            var noGraphResource = new Dictionary<string, string>(nonSecret, StringComparer.Ordinal);
-            noGraphResource.Remove("communicationGraphResource");
-            noGraphResource.Remove("emailGraphResource");
-            RunsEndpoints.ValidateOperatorIntake(tenancyModel, noGraphResource).Should().NotBeNull(
-                "the schema requires at least one Graph resource, so POST /api/runs must too");
 
             // T232: the schema requires the group for B2BGuest — so must POST /api/runs.
             if (nonSecret.GetValueOrDefault("identityPreset") == UserProvisioningIntake.B2BGuest)
@@ -460,8 +448,6 @@ public sealed class IntakeSchemaProfileParityTests
         ("users", "usersJson"),
         ("environmentSecurityGroupId", "environmentSecurityGroupId"),   // T232
         ("exchangePolicyScopeGroupId", "exchangePolicyScopeGroupId"),
-        ("communicationGraphResource", "communicationGraphResource"),
-        ("emailGraphResource", "emailGraphResource"),
         ("communicationDefaultMailbox", "communicationDefaultMailbox"),
         ("tier", "tier"),                                   // T229
         ("estimatedMonthlyUsd", "estimatedMonthlyUsd"),

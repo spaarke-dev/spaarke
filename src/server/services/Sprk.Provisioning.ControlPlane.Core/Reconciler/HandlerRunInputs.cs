@@ -283,15 +283,9 @@ public static class HandlerRunInputs
             ],
             [HandlerIds.H14] =
             [
-                Tenant, Subscription,
-                RunInput.Output(nameof(InterStepState.BffApiUrl)),   // T245b: webhook receiver base (H9)
-                // T245c: required intake (scope group created by the customer's Exchange admin, PRQ-C-08); the two
-                // Graph resources are each optional, but POST /api/runs requires at least one (H14b's rule).
+                Tenant,
+                // T245c: required intake (scope group created by the customer's Exchange admin, PRQ-C-08).
                 RunInput.Intake(IntakeParameterCatalog.ExchangePolicyScopeGroupId),
-                RunInput.Intake(IntakeParameterCatalog.CommunicationGraphResource, required: false),
-                RunInput.Intake(IntakeParameterCatalog.EmailGraphResource, required: false),
-                RunInput.Output(nameof(InterStepState.KeyVaultName)),
-                RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.MiObjectId)),   // T251: H14a registers the identity in Exchange
             ],

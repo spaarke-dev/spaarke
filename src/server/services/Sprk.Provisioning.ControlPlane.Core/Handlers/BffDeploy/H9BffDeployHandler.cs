@@ -37,7 +37,7 @@
 //     read from NonSecret, where nothing ever wrote them.
 //   - Outputs (task 245b), written on success: InterStepState.BffApiUrl (the
 //     production slot URL it health-probed) and InterStepState.BffBuildId (the
-//     build it deployed) — read by H7, H13 and H14.
+//     build it deployed) — read by H7 and H13.
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-12 (H9

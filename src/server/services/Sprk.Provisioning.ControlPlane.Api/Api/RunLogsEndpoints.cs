@@ -28,7 +28,7 @@
 //   Implementation reads the ProvisioningRun.CompletedPhases collection from
 //   Cosmos and returns the CompletedPhase record for the given phase id
 //   (H0, H0.5, H1, H2a, H2b, H3, H4, H5, H6, H7, H8, H10, H11, H12a, H12b,
-//   H12c, H13, H14, H14a, H14b, H14c per design.md §4.1 catalog). A phase in
+//   H12c, H13, H14, H14a per design.md §4.1 catalog). A phase in
 //   flight OR not yet reached returns 404. Rich per-handler execution logs
 //   (stdout / stderr from the Bicep runner, Package Deployer output, etc.)
 //   live in App Insights `traces` and are queryable by RunId + Phase; this
