@@ -1,6 +1,6 @@
 # Current Task State - spaarke-auth-system-of-record-r1
 
-> **Last Updated**: 2026-10-09 (architecture trace-checked and corrected; awaiting owner review)
+> **Last Updated**: 2026-10-10 (by context-handoff)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,53 +9,49 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Write the canonical auth architecture document (no POML; owner-directed) |
-| **Step** | 3 of 4: owner review of the architecture doc (draft + trace-check fixes committed) |
-| **Status** | waiting on owner |
-| **Next Action** | Owner reviews `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md` (and §8.2 open decisions). Apply review changes; then, with owner approval, step 4 (supersede old docs; amend ADR-028 / patterns / constraints / CLAUDE.md §17 pointer) |
+| **Task** | Next phase: **remediation** of the issues no other project owns (owner 2026-10-10: "the work needs to get done … whatever is most efficient") |
+| **Step** | Not started. The architecture doc is done and reviewed (owner: "from an Auth perspective all is correct") |
+| **Status** | queued behind the R3 `/project-pipeline` run (R3 worktree) |
+| **Next Action** | Write a short remediation `spec.md` in this project covering the unowned issues below, then `/project-pipeline` here; start with the broken buttons (#1556–#1558) |
 
-### Files Modified This Session
-All committed and pushed on `work/spaarke-auth-system-of-record-r1` (HEAD `589b2f0ce` + this checkpoint commit). No uncommitted work.
-- `auth-system-of-record.md` — the verified record (§13a = live batch A results)
-- `live/live-test-plan.md` — 41 tests; run log at top
-- `live/entra-readonly-checks.sh`, `live/batch-a-readonly-tests.sh` — read-only live scripts (default-deny masking)
-- `working/a01…a09`, `x01…x07` — evidence (area traces, contradictions, docs verdicts, matrix/ADR, live read-outs)
-- `notes/coordination/2026-10-09-to-provisioning-webhook-routes.md` — drafted note, NOT yet sent (owner relays)
+### State of the work (all committed and pushed on `work/spaarke-auth-system-of-record-r1`)
+- `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md` — the canonical architecture. Trace-checked (x08); owner-reviewed 2026-10-10 with no holes found.
+- `auth-system-of-record.md` — the verified record.
+- `working/x09a`–`x09d` — owner Q&A research (mail + webhooks, Model 1 client config, membership + guests, broken buttons + triage).
+- `notes/defer-issues.md` — 20 ISS + 2 DEF with GitHub links (#1556–#1571, #1573–#1574, #1576–#1579; #1572 is a closed duplicate). All are on the Spaarke Core board with Type set.
+- `notes/coordination/2026-10-09-to-provisioning-webhook-routes.md` — delivered to provisioning, which acted on it: H14b/H14c removed (#1560 fixed on their branch, PR #1535).
 
-### Critical Context
-Owner wants a **canonical auth architecture** that becomes the source for ADRs and patterns. The record (`auth-system-of-record.md`) is an audit/verification record, not that document: it mixes provenance tags, ~30 checker markers, defects, dev live values. The architecture doc is derived from it, clean, in `docs/architecture/`, with the record as its verification companion.
+## Remediation scope (no other owner)
 
----
+| Issue | What |
+|---|---|
+| #1556 | Email "Archive Email" posts to a removed route |
+| #1557 | Matter form OnLoad: insight relative URL + no bearer; KPI/rollup packaged copies with no bearer + `/api/api` (see also #1489) |
+| #1558 | Registration Approve/Reject runs the legacy packaged script (packaging fix) |
+| #1559 | Remove orphan web resources |
+| #1573 | SpaarkeMaster env-var defaults are dev values; template lacks extra audiences |
+| #1574 | BFF pipeline hardening (agent filter, Admin role, token logger, CORS echo, RAG tenant) |
+| #1577 | Outbound credential hygiene |
+| #1578 | Dev identity posture (owner decisions; dev only; not critical path) |
+| #1579 | Hygiene umbrella |
 
-## Active Task
+## Owned elsewhere (track, don't do)
 
-**Canonical auth architecture doc** — `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md`. Drafted, trace-checked (`working/x08-architecture-trace-check.md`: 236 statements; 6 wrong, 2 unsupported, 9 overstated, 9 citation fixes — all applied; 7 statements left undecided, listed in x08 §3). Record §5.3/§5.4 corrected to match (AcctUnrecognized outcome; 38 endpoint filters).
+- **Provisioning:** #1560 (fixed), #1562 (per-customer shared mailbox approved), #1565, #1570.
+- **Email-comms:** #1561.
+- **UAC-r2:** #1564, #1567, #1576.
+- **Add-in:** #1571 and #1464 (guest mail).
+- **R3:** #1563, #1566, #1568.
 
-## Next Actions
+## Later (owner approval each)
 
-1. **Draft the architecture doc** (owner-agreed outline, 2026-10-09):
-   1. System context — diagram (mermaid): clients, identity planes (workforce Spaarke tenant, CIAM `spaarkeextid`), BFF, Dataverse / SPE / Graph / AI services, provisioning control plane.
-   2. Identity model — user types U1–U6 and service identities, per tenant and plane.
-   3. Component catalogue — each auth component in code (`@spaarke/auth` strategies + config; external-spa standalone MSAL; Office `OfficeNaaStrategy`; BFF schemes/`AuthorizationModule`, `CallerPrincipalResolver`, `WorkforcePrincipalResolver`/member test, filters/policies; `OrderedCredentialClientProvider`, `GraphClientFactory`, Dataverse clients, impersonation; `AccessibleRecordSetService`, membership, grants, effective flags, SPE container membership; provisioning H3/H4b/H7/H7b/H11/H13): purpose, location, responsibilities, dependencies, configuration.
-   4. Flows — sequence diagrams: sign-in per surface; inbound validation + plane selection; each outbound credential path (OBO, MI-FIC, app-only, impersonation).
-   5. Authorization model — per-record checks, membership/accessible sets, grants, user classification.
-   6. Configuration and environment model — what is set where per environment and per stamp (no dev-only values).
-   7. Design rationale + governing ADRs (state where ADR-028 is stale; the record §10/§12b list the rules).
-   8. Known gaps — link to the record §11, do not copy.
-   - Sources: `auth-system-of-record.md` §2–§8, §12; `working/a01…a09` for line-level detail; `x01` truth overrides area files; `x04–x07` live facts (dev only — keep out of the canonical model except as "verified on dev").
-   - Rule: describe current behaviour at `8a9ecaac1` (master moved since; check drift first — `git fetch` + diff the auth paths, refresh affected statements).
-2. **Independent check** of the draft: every statement traces to the record/evidence or code (`path:line`); flag anything that doesn't.
-3. Owner review of the doc.
-4. Later, each with owner approval: supersede the old auth docs (x02: 6 keep / 162 update / 33 supersede / 9 delete-candidate); update `.claude/adr/ADR-028` (amendment from record §12b), `.claude/patterns/auth/*`, `.claude/constraints/auth.md`, and the CLAUDE.md §17 "Touch auth" pointer to the new doc.
+Step 4 of the original plan:
+- supersede the old auth docs (x02);
+- amend ADR-028 — record §12b, **plus the R3 decisions**: A2 single-tenant client, A3 modules by user type, the A1 guest-scope clarification, `user_impersonation` everywhere, self-registration;
+- update `.claude/patterns/auth/*`, `.claude/constraints/auth.md` and the CLAUDE.md §17 pointer.
 
-## Open Owner Questions / Blockers
+Also update the architecture doc §5.3/§5.8/§8.2 once R3 lands its decisions in code.
 
-- **File defects as GitHub issues?** (CLAUDE.md §8.5: fix in scope or file + report.) Proposed via `/project-defer-issue-tracking`, routed per owner project (provisioning, UAC-r2, add-in, R3, BFF). Awaiting go-ahead — outward-facing.
-- **Guest test account** (work account guest from another Entra tenant) — needed for the 8 P1 guest tests that decide Model 1 client sign-in.
-- **Owner actions (live changes, owner's call):** rotate `Compose__Webhook__ClientState` (printed in clear by the first live script run; also a plain app setting) and the other three plain-setting secrets (`PowerBi__ClientSecret`, `Rag__ApiKey`, `Notifications__SignalR__ConnectionString`); decide on BFF identities holding System Administrator in dev, the prod BFF app (`92ecc702…`) as System Administrator in dev, and unconsumed/expired app secrets.
-- **Send** the provisioning webhook note (drafted, committed).
-- Owner is reviewing `auth-system-of-record.md`.
+## Open Owner Items
 
-## Consumer on hold
-
-`spaarke-SPA-external-access-platform-r3` (worktree `c:\code_files\spaarke-wt-SPA-external-access-platform-r3`): spec conversion HELD until the auth record/architecture exists; its Model 1 client decisions are marked PROVISIONAL in its `design.md` §4.6. Record §12a states what code + live config show for those decisions.
+- Live security actions (not critical path): rotate the four plain-setting secrets; the dev BFF app's secret; Azure CLI pre-authorization; the production BFF app as System Administrator in dev (#1578).
