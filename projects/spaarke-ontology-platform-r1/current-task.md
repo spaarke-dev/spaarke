@@ -10,23 +10,24 @@
 | Field | Value |
 |---|---|
 | **Task** | Orchestrating ontology critical-path lanes. 116 tasks: **65 ✅**, 2 🔄 (039, 130: code merged, live gates pending), 36 🔲, 9 ⏸️ deferred (D-106), 4 🚫. |
-| **Branch** | `docs/ontology-platform-design` (draft #1111). Last master sync `217b8f3c6`; **master now has #1390 (039, `c45cb4719`) and dropped NSubstitute** (`1ef69821eb`) → sync master into the project branch only AFTER #1549 merges. |
-| **Rule** | **D-106:** fix only what ontology functionality needs; document everything else in `notes/defer-issues.md`. Every sub-agent/reviewer prompt carries it. |
-| **Critical path** | 039 live gate (D-67) → 037 → 031 evaluator → 032/033/034 → 035 deploy BFF → 038/050 → 059 worklist → 055 deploy Console → 064. Decision path: 040 (after 039 gate) + 046 (after 048) → 043 commit route → 058 wizard → 045. |
-| **Next Action** | (1) On #1549 merge: pull the branch, then merge `origin/master` into `docs/ontology-platform-design` (brings 039 + Moq conversions), build + Signals tests, push. (2) On uac-r2's "deployed" message (SHA + healthz): run the **039 live gate** (POML step 5; expect the reconcile to re-own existing Signals/DRs under Secure roots within ~2 min). (3) On #1391 merged: start **048** (mechanical move, off master, own PR, uac-r2 review; merge per D-115). |
+| **Branch** | `docs/ontology-platform-design` (draft #1111). **Synced with master 2026-10-09 (`b2fc3fb78`, includes #1390/#1391, NSubstitute gone; Signal-ownership invariant renumbered I-18).** ArchTests: 9 red in `ExternalSpaGridViewSelectorGuardTests` since #1531 (054 moved `resolveSource` to `resolveGridSource.ts`), lane-guard fixing. |
+| **Rule** | **D-106:** fix only what ontology functionality needs; document everything else in `notes/defer-issues.md`. Every sub-agent/reviewer prompt carries it. Merges: D-107 (branch) + D-115 (master), after review + green CI. |
+| **Critical path** | 039 writer PR + live gate (lane-039) → 037 → 031 evaluator → 032/033/034 → 035 deploy BFF → 038/050 → 059 worklist → 055 deploy Console → 064. Decision path: 040 (after 039) + 048 → 046 → 043 commit route → 058 wizard → 045. |
+| **Next Action** | Act on lane notifications: each PR → independent review (carrying D-106) → merge per D-107/D-115. On lane-039's PR message: review the merge delta (code was reviewed 2026-10-08) and merge; on its final report: close 039 (POML + index), then start **037** and **040**. |
 
-## Running now
+## Running now (SendMessage resumes an agent by name)
 
-| What | State | Then |
+| Lane | What | Then |
 |---|---|---|
-| **#1549** NSubstitute → Moq for 3 Signals tests (base project branch; head `149fcde87`, review APPROVE) | Merge job `bfzxx644i` (`merge-when-green.sh`) waiting on CI | Master sync (Next Action 1); remove worktree `C:\wts-nsub` |
-| **#1391** (uac-r2 org-owned AppendTo fix, master) | uac-r2 merging on green, then deploys **master HEAD** BFF to dev (includes `c45cb4719`) — this is our D-67 deploy too | uac-r2 SendMessages SHA + healthz → 039 live gate; 048 starts |
+| **lane-039** | (1) PR of `stream/039-signal-writer` (5 commits, never merged) into the project branch; (2) remaining live gate on dev BFF `ebacd2e15` (uac-r2 deployed it: share/unshare/unsecure, Secure WA case, re-own in ~2 min, load re-measure, cleanup) | Review + merge PR; close 039 |
+| **lane-guard** | Fix `ExternalSpaGridViewSelectorGuardTests` after 054's move (check for a real external-host bypass first); PR to project branch; uac-r2 reviews (their test) | Review → uac-r2 OK → merge |
+| **lane-048** | Mechanical move of `OwnedChildWrite` + helpers to `Services/Dataverse` (off master, `git mv`, one direction ArchTest); PR to **master**, uac-r2 review | Review → uac-r2 OK → merge (D-115) → 046 |
 
 ## Waiting on others
 
 | What | Waiting for | Then |
 |---|---|---|
-| **048** (write core → `Services/Dataverse`) | #1391 merged (uac-r2 agreed order: #1391 → 048 → 046; #1501 rebases later) | 046 (`OwnedChildWrite.CreateAsync` via `POST /api/v1/child-records/sprk_workassignment`, D-113) → 126 (BU-depth AppendTo rule, D-113) |
+| **046**, **126** | 048 merged (agreed order #1391 ✅ → 048 → 046; #1501 rebases later) | 046 (`OwnedChildWrite.CreateAsync` via `POST /api/v1/child-records/sprk_workassignment`, D-113); 126 (BU-depth AppendTo rule, D-113) |
 | **074** recall exit gate | Owner's labelling page https://claude.ai/artifact/VVoBr33LckyjoUGeWit3aU (24/92) | Finish → `status/final.complete` → resume the 074 agent |
 | **130** live proof, **111/114** | The D-112 full E2E dev deploy (035 BFF + 055 Console + ontology solution) | Mark 130/111/114 done on it |
 
