@@ -87,7 +87,12 @@ public sealed class WorkAssignmentCreateLiveTests
         if (string.IsNullOrWhiteSpace(dataverseUrl))
             return; // not opted in
 
-        var matterId = Guid.Parse(Environment.GetEnvironmentVariable("SPAARKE_LIVE_WA_MATTER_ID")!);
+        if (!Guid.TryParse(Environment.GetEnvironmentVariable("SPAARKE_LIVE_WA_MATTER_ID"), out var matterId))
+        {
+            _out.WriteLine("SPAARKE_LIVE_WA_MATTER_ID is not set to a matter id; skipped");
+            return;
+        }
+
         var secondUser = Guid.TryParse(Environment.GetEnvironmentVariable("SPAARKE_LIVE_WA_SECOND_USER_ID"), out var su) ? su : (Guid?)null;
         var deniedUser = Guid.TryParse(Environment.GetEnvironmentVariable("SPAARKE_LIVE_WA_DENIED_USER_ID"), out var du) ? du : (Guid?)null;
         var deniedMatter = Guid.TryParse(Environment.GetEnvironmentVariable("SPAARKE_LIVE_WA_DENIED_MATTER_ID"), out var dm) ? dm : (Guid?)null;

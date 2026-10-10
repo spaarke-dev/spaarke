@@ -75,14 +75,18 @@ public static class ChildRecordEndpoints
     };
 
     /// <summary>
-    /// Ontology task 046: the columns of a work assignment that provisioning owns — its own SPE container and the secure
-    /// business unit it is isolated in (<c>SecureRecordRoot</c>). Neither is field-secured (live, spaarkedev1 2026-10-10),
-    /// so the G5 check would let an app-only create carry a caller's value: refused here. The secure flag and the access
+    /// Ontology task 046: the columns of a work assignment the server owns — its own SPE container and the secure business
+    /// unit it is isolated in (provisioning, <c>SecureRecordRoot</c>) and its Access Permission (the cascade, task 175).
+    /// None is field-secured (live, spaarkedev1 2026-10-10), so the G5 check would let an app-only create carry a caller's
+    /// value: refused here. The secure flag and the access
     /// record are field-secured and refused by the G5 check and the secure-create plan (task 175).
     /// </summary>
     internal static readonly IReadOnlySet<string> RootServerOwnedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "sprk_containerid", "sprk_securitybu",
+        // D-113 / task 175: a filed work assignment takes its Access Permission from its parent; the column is form-locked
+        // but NOT field-secured, and nothing on the create path sets it from the parent, so a caller's value is refused.
+        "sprk_accesspermission",
     };
 
     /// <summary>
@@ -246,7 +250,19 @@ public static class ChildRecordEndpoints
         if (isRoot && mapped.Item!.Columns.FirstOrDefault(RootServerOwnedColumns.Contains) is { } rootColumn)
         {
             return Problem(StatusCodes.Status403Forbidden, DeniedCode,
-                $"Column '{rootColumn}' of a {Noun(entity)} is set by Spaarke when it is provisioned — omit it.");
+                $"Column '{rootColumn}' of a {Noun(entity)} is set by Spaarke — omit it.");
+        }
+
+        // Task 046 review F1: the ADR-024 pair (sprk_regardingrecordid) is text, so the G5 check asks AppendTo only on typed
+        // lookups, and the secure-create plan asks it on a pair-only parent ONLY when that parent is secure — a pair naming a
+        // record no typed lookup names would answer "exists and is secure" (404) differently from "missing or ordinary"
+        // (201). On this route a root's pair must name a record its typed regarding lookup also names (the wizard always
+        // sends both), so every parent is AppendTo-checked as the caller and no answer depends on whether it is secure.
+        if (isRoot && PairNamesAnUntypedRecord(mapped.Item!))
+        {
+            return Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode,
+                $"'{SecureRootInheritance.PairIdColumn}' must name the same record as the {Noun(entity)}'s regarding lookup " +
+                "(send both). Nothing was saved.");
         }
 
         // The secure-create plan is passed for every table; it decides only for a root (work assignment / project) and costs
@@ -379,11 +395,12 @@ public static class ChildRecordEndpoints
     /// <summary>
     /// Ontology task 046: the secure-create plan's refusal (task 158 r1), in this route's contract. No AppendTo on a secure
     /// parent named only by the polymorphic pair is the uniform not-found (a typed lookup's is, too — the plan must not tell
-    /// a caller which record is secure); a caller walled off a secure parent is 403; a check that could not be made or a
+    /// a caller which record is secure; on this route a root's pair-only parent is already refused as a 400 above, so this
+    /// arm is defence in depth); a caller walled off a secure parent is 403; a check that could not be made or a
     /// named team that could not be resolved is 500; a server-only column is 403; anything else (an unreadable parent flag)
     /// is the owner refusal, 409 — never "not secure". The split is <c>RecordCreationService.KindFor</c>'s.
     /// </summary>
-    private static IResult PlanRefused(RecordOwnerResolution plan, string entity, string traceId) => plan.RefusalCode switch
+    internal static IResult PlanRefused(RecordOwnerResolution plan, string entity, string traceId) => plan.RefusalCode switch
     {
         DataverseUserClientErrorCodes.AccessDenied => ParentNotFound(entity),
         Sprk.Bff.Api.Api.ExternalAccess.ProvisionProjectEndpoint.ReasonCreatorNoAccess
@@ -397,6 +414,20 @@ public static class ChildRecordEndpoints
                 $"The {Noun(entity)} was not created: {plan.Reason ?? "whether it may be filed there could not be decided"}."),
         _ => ProblemDetailsHelper.RecordOwnerRefused(plan, Noun(entity), traceId),
     };
+
+    /// <summary>
+    /// Task 046 review F1: true when the row's ADR-024 pair id (<c>sprk_regardingrecordid</c>) is set and is not the id of a
+    /// record one of its typed lookups binds — including a value that is not a record id at all.
+    /// </summary>
+    internal static bool PairNamesAnUntypedRecord(DataverseWriteItemMapper.MappedItem item)
+    {
+        var pair = OwnedChildWrite.WritesOf(item)
+            .FirstOrDefault(w => string.Equals(w.Key, SecureRootInheritance.PairIdColumn, StringComparison.OrdinalIgnoreCase));
+        if (pair.Key is null || pair.Value is not string text || string.IsNullOrWhiteSpace(text))
+            return false;
+
+        return !Guid.TryParse(text.Trim().Trim('{', '}'), out var id) || item.Lookups.All(l => l.RecordId != id);
+    }
 
     /// <summary>
     /// A WhoAmI failure that means the caller has no Dataverse identity — Dataverse refusing them, no user context on the

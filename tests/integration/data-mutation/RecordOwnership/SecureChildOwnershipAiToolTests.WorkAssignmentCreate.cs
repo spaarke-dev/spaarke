@@ -118,6 +118,7 @@ public sealed partial class SecureChildOwnershipAiToolTests
     [InlineData("sprk_containerid", "b!container-of-someone-else", ChildRecordEndpoints.DeniedCode)]
     [InlineData("sprk_issecure", true, AccessFollowsParent.SecureFlagReasonCode)]
     [InlineData("sprk_accessinheritance", "{}", AccessInheritance.ServerOnlyReasonCode)]
+    [InlineData("sprk_accesspermission", 100000000, ChildRecordEndpoints.DeniedCode)]
     public async Task WorkAssignmentCreate_NamingAColumnSpaarkeOwnsOnAWorkAssignment_Is403_AndNothingIsCreated(
         string column, object value, string reasonCode)
     {
@@ -151,6 +152,71 @@ public sealed partial class SecureChildOwnershipAiToolTests
         ReasonCode(result).Should().Be(RecordOwnerRefusal.ParentUndetermined);
         _appCreates.Should().BeEmpty();
         _user.Posts.Should().BeEmpty();
+    }
+
+    // ── Review F1: the ADR-024 pair must not become a secure-ness oracle ──────────────────────────────────────────
+
+    /// <summary>
+    /// A work assignment whose pair (<c>sprk_regardingrecordid</c>) names a record no typed lookup binds is refused BEFORE
+    /// anything is asked about that record — the SAME 400 whether it is a secure matter the caller cannot append to, an
+    /// ordinary one, one they can append to, or nothing at all. (Without this, the plan asked AppendTo on a pair-only parent
+    /// only when it was secure: secure + no AppendTo → 404, missing or ordinary → 201 — an oracle for "exists and is secure".)
+    /// </summary>
+    [Fact]
+    public async Task WorkAssignmentCreate_APairNamingARecordNoTypedLookupNames_IsTheSame400_WhateverThatRecordIs_AndNothingIsCreated()
+    {
+        var missing = Guid.Parse("a0460000-0000-4000-8000-0000000000f3");
+        _user.NoAppendTo.Add(SecureMatter);
+        _user.Missing.Add(missing);
+
+        Dictionary<string, object?> PairOnly(Guid parent)
+        {
+            var payload = WizardWorkAssignment(parent);
+            payload.Remove("sprk_RegardingMatter@odata.bind");
+            return payload;
+        }
+
+        var answers = new List<IResult>
+        {
+            await CreateChild("sprk_workassignment", PairOnly(SecureMatter)),
+            await CreateChild("sprk_workassignment", PairOnly(missing)),
+            await CreateChild("sprk_workassignment", PairOnly(OrdinaryMatter)),
+        };
+        // A typed lookup to one record and a pair naming another: the same refusal.
+        var mismatched = WizardWorkAssignment(OrdinaryMatter);
+        mismatched["sprk_regardingrecordid"] = SecureMatter.ToString("D");
+        answers.Add(await CreateChild("sprk_workassignment", mismatched));
+
+        foreach (var answer in answers)
+        {
+            Status(answer).Should().Be(StatusCodes.Status400BadRequest, Detail(answer));
+            ReasonCode(answer).Should().Be(ChildRecordEndpoints.InvalidPayloadCode);
+            ProblemJson(answer).Should().Be(ProblemJson(answers[0]), "no answer depends on what the pair names");
+        }
+
+        _appCreates.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Defence in depth: the plan's own AppendTo refusal on a secure parent (<c>AccessDenied</c>) is answered with the
+    /// route's uniform not-found — byte-identical to a create filed under a record that does not exist.
+    /// </summary>
+    [Fact]
+    public async Task PlanRefusal_AccessDenied_IsByteIdenticalToTheMissingParent404()
+    {
+        var missing = Guid.Parse("a0460000-0000-4000-8000-0000000000f4");
+        _user.Missing.Add(missing);
+        var missingParent = await CreateChild("sprk_workassignment", WizardWorkAssignment(missing));
+
+        var planRefusal = ChildRecordEndpoints.PlanRefused(
+            RecordOwnerResolution.Refused(DataverseUserClientErrorCodes.AccessDenied, "no AppendTo on the secure matter"),
+            "sprk_workassignment", "trace-1");
+
+        Status(missingParent).Should().Be(StatusCodes.Status404NotFound);
+        ProblemJson(planRefusal).Should().Be(ProblemJson(missingParent),
+            "a caller without AppendTo on a secure parent learns nothing a missing parent would not tell them");
+        _appCreates.Should().BeEmpty();
     }
 
     /// <summary>
@@ -271,6 +337,10 @@ public sealed partial class SecureChildOwnershipAiToolTests
         public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
             TState state, Exception? exception, Func<TState, Exception?, string> formatter) => Lines.Enqueue(formatter(state, exception));
     }
+
+    /// <summary>The ProblemDetails as the client receives it (status, title, detail, reasonCode).</summary>
+    private static string ProblemJson(IResult result) =>
+        JsonSerializer.Serialize(((Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult)result).ProblemDetails);
 
     private static JsonElement CreatedBody(IResult result) =>
         JsonSerializer.SerializeToElement(((IValueHttpResult)result).Value);

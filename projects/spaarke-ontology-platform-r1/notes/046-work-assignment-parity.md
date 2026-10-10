@@ -45,7 +45,7 @@ spaarkedev1 2026-10-10 (§C).
 | 10 | field mapping `{parent → sprk_workassignment}` (live: `sprk_assignedattorney1`) | `applyFieldMappings` | as sent | ✅ | ✅ |
 | 11 | `sprk_mattertype`, `sprk_practicearea` | form | as sent | ✅ | ✅ |
 | 12 | Assign Work lookups (`…attorney1`, `…paralegal1`, `…lawfirm1`, `…lawfirmattorney1`) | `bindLookup` | as sent | ✅ | (not in the live payload; unit-tested) |
-| 13 | `sprk_issecure`, `sprk_accesspermission`, `sprk_accessinheritance` (D-113) | not sent | not sent; `sprk_issecure`/`sprk_accessinheritance` refused if sent (403, field-secured + plan) | ✅ | ✅ equal (accesspermission 100000000; access record identical once the job ran) |
+| 13 | `sprk_issecure`, `sprk_accesspermission`, `sprk_accessinheritance` (D-113) | not sent | not sent; all three refused if sent (403: field-secured + plan; `sprk_accesspermission` by the route) | ✅ | ✅ equal (accesspermission 100000000; access record identical once the job ran) |
 | 14 | **`ownerid`** | **the user** | **the regarding record's BU default team** (I-6), or the named Secure Record Owners team under a secure parent | ❌ **intended (D-113 / G5)** | ✅ as stated |
 | 15 | **`owningbusinessunit`** | the user's BU | derived from the owner team (record first) | ✅ when the user's BU = the record's BU; ❌ intended otherwise | ✅ equal for the BU1 user; root-BU operator → BU1 (intended) |
 | 16 | `sprk_createdbyperson` | not set | the caller | ❌ intended (task 133) | ✅ |
@@ -85,7 +85,9 @@ both (243 s).
 - `Api/ChildRecordEndpoints.cs` (uac-r2's): `sprk_workassignment` in `CreateTables`; the secure-create plan passed for
   every create (decides only for a root); `CompleteRootCreateAsync` after a root create (isolated completion — removed
   again → 500 and nothing created; stranded/incomplete → 201 with `warnings`; then the I-12 materializer); provisioning's
-  columns refused for a root; plan refusals mapped (`AccessDenied` → uniform 404, No Access / server-only column → 403,
+  columns (`sprk_containerid`, `sprk_securitybu`, `sprk_accesspermission`) refused for a root; **a root whose ADR-024 pair
+  names a record no typed lookup binds is refused 400 before anything is asked** (review F1, no secure-ness oracle); plan
+  refusals mapped (`AccessDenied` → uniform 404, No Access / server-only column → 403,
   unverifiable / no secure team → 500, else 409); **a caller WhoAmI cannot name → the single 403
   `sdap.access.deny.caller_unresolved`** (NFR-10, D-29) on this create route for every table; the share mirror only for
   secure children; `Noun` "work assignment".
@@ -123,6 +125,27 @@ both (243 s).
    route now refuses them; the chat tool does not). uac-r2's core.
 4. The opt-in live harness cannot authorise the inline Assigned-To step's secure-flag read
    (`ExternalParticipationService` → 401 in-process); production uses the managed identity. Harness limitation.
+
+5. **Pre-existing secure-ness oracle in the chat create tool** (review F1, uac-r2's core; the coordinator tells uac-r2): a
+   work-assignment/project create whose ADR-024 pair (`sprk_regardingrecordid`) names a record no typed lookup binds is
+   AppendTo-checked only when that record is SECURE (`OwnedChildWrite.CreateAsync` → plan's `callerMayFileUnder`), so
+   `dataverse.create_record` answers "refused" for a secure record the caller cannot see and "created" for a missing or
+   ordinary one. The child-records route now refuses such a payload with one 400 before anything is asked (§D);
+   `OwnedChildWrite` is unchanged for the chat tool.
+6. The plan's No Access refusal text (`CreateWallRefusal`, uac-r2's design) names "the No Access list of the secure matter
+   it would be filed under" — passed through by the route as a 403 detail. Recorded, not changed.
+7. K: a create on the child-records route makes two WhoAmI calls (the unresolved-caller pre-check, then the core's own).
+   Threading the id into `OwnedChildWrite.CreateAsync` would change uac-r2's security core for one round-trip; left as is.
+
+### Checks for the first dev deploy of this change (not provable in-process)
+
+- The live proof ran the app-only create with the **operator's (System Administrator) credential**, not the BFF's managed
+  identity: confirm on the deployed BFF that a wizard create lands owned by the BU team with `createdby` = the BFF
+  identity and `sprk_createdbyperson` = the user.
+- The **secure-parent leg** was not run live (it provisions an SPE container; the only secure parent in dev is uac-r2's
+  test project): on dev, create one work assignment under a secure matter through the wizard and confirm it is created
+  isolated (named team, `sprk_issecure`, own container, creator share) — and list the container id for cleanup.
+- The inline Assigned-To step (401 in the harness) works with the managed identity.
 
 ## G. Gates and measurements (this pass)
 
