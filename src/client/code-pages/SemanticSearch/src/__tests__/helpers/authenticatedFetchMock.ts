@@ -11,7 +11,7 @@
  *   return { ...createAuthenticatedFetchMock(() => mockGetAuthHeader()), resolveRuntimeConfig: ... };
  */
 export function createAuthenticatedFetchMock(getAuthHeader: () => Promise<string>) {
-  const { isApiError, problemOf, isAuthFailure, ApiError } = jest.requireActual('@spaarke/auth');
+  const { isApiError, problemOf, isAuthFailure, ApiError, AuthError } = jest.requireActual('@spaarke/auth');
   return {
     authenticatedFetch: async (url: string, init?: RequestInit) => {
       const authorization = await getAuthHeader();
@@ -20,17 +20,22 @@ export function createAuthenticatedFetchMock(getAuthHeader: () => Promise<string
         headers: { ...(init?.headers as Record<string, string>), Authorization: authorization },
       });
       if (!response.ok) {
+        // Mirrors authenticatedFetch.ts: exhausted 401 retries throw AuthError (no status); anything else
+        // throws ApiError(detail ?? title ?? 'HTTP n', status, problemDetails) where problemDetails is set
+        // only when the JSON body carries `title` or `status`.
+        if (response.status === 401) {
+          throw new AuthError('Authentication failed after all retry attempts', 'auth_exhausted');
+        }
         let problem = null;
         try {
-          problem = await response.json();
+          const body = await response.json();
+          if (body && typeof body === 'object' && ('title' in body || 'status' in body)) {
+            problem = body;
+          }
         } catch {
           /* not ProblemDetails */
         }
-        throw new ApiError(
-          problem?.detail ?? problem?.title ?? (response.statusText || `HTTP ${response.status}`),
-          response.status,
-          problem
-        );
+        throw new ApiError(problem?.detail ?? problem?.title ?? `HTTP ${response.status}`, response.status, problem);
       }
       return response;
     },

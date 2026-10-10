@@ -331,13 +331,13 @@ describe('SemanticSearchApiService', () => {
         });
       });
 
-      it('should throw ApiError with status 401 on unauthorized', async () => {
+      it('should throw AuthError (auth_exhausted, no status) on 401 like authenticatedFetch', async () => {
         mockFetch.mockResolvedValue(createErrorResponse(401, { title: 'Unauthorized' }, 'Unauthorized'));
 
-        await expect(search(sampleRequest)).rejects.toMatchObject({
-          status: 401,
-          problemDetails: { title: 'Unauthorized' },
-        });
+        const thrown = await search(sampleRequest).catch((e: unknown) => e);
+
+        expect(thrown).toMatchObject({ name: 'AuthError', code: 'auth_exhausted' });
+        expect(thrown).not.toHaveProperty('status');
       });
 
       it('should throw ApiError with status 403 on forbidden', async () => {
@@ -378,13 +378,13 @@ describe('SemanticSearchApiService', () => {
         });
       });
 
-      it('should throw ApiError carrying statusText (no problemDetails) when body is not JSON', async () => {
+      it('should throw ApiError with an HTTP-n message (no problemDetails) when body is not JSON', async () => {
         mockFetch.mockResolvedValue(createNetworkErrorResponse(503, 'Service Unavailable'));
 
         await expect(search(sampleRequest)).rejects.toMatchObject({
           status: 503,
           problemDetails: null,
-          message: 'Service Unavailable',
+          message: 'HTTP 503',
         });
       });
     });
