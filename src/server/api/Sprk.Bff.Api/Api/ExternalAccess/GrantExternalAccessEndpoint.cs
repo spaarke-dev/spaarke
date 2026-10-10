@@ -82,6 +82,7 @@ public static class GrantExternalAccessEndpoint
         IAccessibleRecordSetService accessibleRecords,
         CallerRecordAccessProbe callerAccessProbe,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
+        GrantAccessNotifier accessNotifier,
         HttpContext httpContext,
         ILogger<Program> logger,
         TimeProvider timeProvider,
@@ -195,13 +196,21 @@ public static class GrantExternalAccessEndpoint
             root.Type, root.Id, grantedKey.ContactId, grantedKey.IsOrganizationGrant ? grantedKey.OrganizationId : null,
             outcome.AccessRecordId, CancellationToken.None);
 
+        // Task 181 (owner round 89 item 3): a contact that represents an internal user is told, in-app, with a link to the
+        // record — only when the grant GAVE access, never for an organization-wide grant. Best effort, after the write: a
+        // failure is logged and reported in the response, and never undoes the grant.
+        var notification = !grantedKey.IsOrganizationGrant && grantedKey.ContactId is { } grantedContactId && outcome.AccessGained
+            ? await accessNotifier.NotifyContactGrantAsync(root.Type, root.Id, grantedContactId, outcome.GrantedLevel, httpContext.User)
+            : GrantNotificationOutcome.NotApplicable;
+
         // Broker-only: no synthetic SPE container membership is granted on the external path. Task 139: the level
         // actually written, and whether the grantor's ceiling narrowed the request.
         return TypedResults.Ok(new GrantAccessResponse(
             outcome.AccessRecordId,
             SpeContainerMembershipGranted: false,
             GrantedAccessLevel: outcome.GrantedLevel,
-            Narrowed: outcome.Narrowed));
+            Narrowed: outcome.Narrowed,
+            NotificationFailed: notification == GrantNotificationOutcome.Failed));
     }
 
     /// <summary>
@@ -584,6 +593,9 @@ public static class GrantExternalAccessEndpoint
                 Narrowed = check.Narrowed,
                 GrantedExpiry = effectiveExpiry,
                 ExpiryNarrowed = expiryNarrowed,
+                // Task 181: a lapsed key restored, or a level raised, gives the grantee access they did not hold. A no-op
+                // re-grant, an expiry-only change or a lower level does not.
+                AccessGained = !survivorConfers || requestedLevel > (survivor.AccessLevel ?? 0),
             };
         }
 
@@ -662,6 +674,7 @@ public static class GrantExternalAccessEndpoint
             Narrowed = check.Narrowed,
             GrantedExpiry = createRequest.ExpiryDate,
             ExpiryNarrowed = expiryNarrowed,
+            AccessGained = true, // task 181: no active row existed on the key
         };
     }
 
@@ -832,6 +845,13 @@ public static class GrantExternalAccessEndpoint
 
         /// <summary>The grantor's ceiling lowered the request (task 139).</summary>
         public bool Narrowed { get; init; }
+
+        /// <summary>
+        /// Task 181: the grantee holds access after this write that they did not hold before — a new grant, a lapsed key
+        /// restored, or a higher level. False for a no-op re-grant, an expiry-only change or a lower level. Only a gain is
+        /// worth telling the grantee about.
+        /// </summary>
+        public bool AccessGained { get; init; }
 
         /// <summary>
         /// The expiry the surviving row carries after the write (task 140 reports it to a contact grantor). Null on a

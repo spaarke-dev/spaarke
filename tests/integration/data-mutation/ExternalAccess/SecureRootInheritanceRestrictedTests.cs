@@ -99,7 +99,7 @@ public class SecureRootInheritanceRestrictedTests : IClassFixture<ProvisionProje
                 | AccessRights.Share),
             scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(), SecureChildShareWorld.NobodyWalled(),
             scope.ServiceProvider.GetRequiredService<SecureRootInheritance>(),
-            new AssignedAccessTestDoubles.Harness(_fixture.InheritedLedger).Materializer,
+            new AssignedAccessTestDoubles.Harness(_fixture.InheritedLedger).Materializer, AssignedAccessTestDoubles.InertNotifier(),
             Caller(), NullLogger<Program>.Instance, CancellationToken.None);
     }
 

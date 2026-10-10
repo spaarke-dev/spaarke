@@ -15,8 +15,13 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <c>true</c> when the caller's own level was below the requested one, so the grant was written at
 /// <paramref name="GrantedAccessLevel"/> instead (task 139). Additive.
 /// </param>
+/// <param name="NotificationFailed">
+/// <c>true</c> when the grant gave access to a contact that represents an internal user and that user could not be sent
+/// the in-app notification (task 181, owner round 89). The grant itself stands. Additive.
+/// </param>
 public record GrantAccessResponse(
     Guid AccessRecordId,
     bool SpeContainerMembershipGranted,
     ExternalAccessLevel? GrantedAccessLevel = null,
-    bool Narrowed = false);
+    bool Narrowed = false,
+    bool NotificationFailed = false);

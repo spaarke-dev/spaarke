@@ -511,7 +511,7 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 15
+      "count": 13
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx": {

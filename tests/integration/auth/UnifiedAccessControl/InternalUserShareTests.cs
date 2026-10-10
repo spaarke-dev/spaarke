@@ -509,7 +509,7 @@ public class InternalUserShareTests
             new ShareRecordWithUserRequest("matter", MatterId, UserId, ExternalAccessLevel.ViewOnly),
             _shares, _users.Client, _flags, _cache.Object, new ThrowingCallerRightsProbe(), _children.Synchronizer(_shares), _guard,
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccessTestDoubles.InertMaterializer(),
-            AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+            AssignedAccessTestDoubles.InertNotifier(), AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
         ProblemOf(result).Should().Be((500, InternalShareEndpoints.ReadFailedReasonCode));
         _shares.Writes.Should().BeEmpty();
@@ -765,7 +765,7 @@ public class InternalUserShareTests
             _shares, _users.Client, flags, _cache.Object, new StubCallerRightsProbe(FullWorkingRights),
             _children.Synchronizer(_shares), guard,
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccess,
-            AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+            AssignedAccessTestDoubles.InertNotifier(), AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
         ProblemOf(result).Should().Be((422, InternalShareEndpoints.UserNotInternalReasonCode));
         _shares.Writes.Should().BeEmpty();
@@ -799,7 +799,7 @@ public class InternalUserShareTests
             _shares, _users.Client, flags, _cache.Object, new StubCallerRightsProbe(FullWorkingRights),
             _children.Synchronizer(_shares), guard,
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccess,
-            AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+            AssignedAccessTestDoubles.InertNotifier(), AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
         ProblemOf(result).Should().Be((422, InternalShareEndpoints.UserNotInternalReasonCode));
         _shares.Writes.Should().BeEmpty();
@@ -1378,7 +1378,7 @@ public class InternalUserShareTests
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest(recordType, MatterId, systemUserId, level),
             _shares, _users.Client, _flags, _cache.Object, new StubCallerRightsProbe(callerRights ?? FullWorkingRights),
-            _children.Synchronizer(_shares), _guard, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccess, AuthenticatedContext(),
+            _children.Synchronizer(_shares), _guard, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccess, AssignedAccessTestDoubles.InertNotifier(), AuthenticatedContext(),
             NullLogger<Program>.Instance,
             CancellationToken.None);
 

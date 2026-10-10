@@ -284,6 +284,7 @@ public static class InternalShareEndpoints
         SecureShareNoAccessGuard noAccessGuard,
         SecureRootInheritance relatedRoots,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
+        GrantAccessNotifier accessNotifier,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -563,13 +564,20 @@ public static class InternalShareEndpoints
             "{Granted} ({Outcome}; was {Previous}; narrowed={Narrowed}).",
             callerOid, root.Type, root.Id, systemUserId, level, granted.AccessRightsMask, outcome, current, narrowed);
 
+        // ── Task 181 (owner round 89 item 3): the user is told, in-app with a link, when the share GAVE them rights they
+        // did not hold. Best effort, after the confirmed write; a failure is reported, never undoes the share ──
+        var notificationFailed = (granted.AccessRightsMask & ~current) != 0
+            && await accessNotifier.NotifyUserShareAsync(
+                   root.Type, root.Id, systemUserId, RecordShareLevels.LevelForMask(granted.AccessRightsMask), httpContext.User)
+               == GrantNotificationOutcome.Failed;
+
         // ── Task 149: the root write is confirmed; now its secure children (a no-op for an ordinary record) ──
         return await ChildrenIncompleteAfterShareAsync(
                    secureChildShares, relatedRoots, root, systemUserId, outcome, granted.AccessRightsMask, httpContext, logger,
-                   callerOid, ct)
+                   callerOid, ct, notificationFailed)
                ?? TypedResults.Ok(new ShareRecordWithUserResponse(
                    systemUserId, RecordShareLevels.LevelForMask(granted.AccessRightsMask), granted.AccessRightsMask,
-                   outcome, narrowed));
+                   outcome, narrowed, notificationFailed));
     }
 
     // =========================================================================
@@ -803,7 +811,8 @@ public static class InternalShareEndpoints
         HttpContext httpContext,
         ILogger logger,
         string? callerOid,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool notificationFailed = false)
     {
         var children = await secureChildShares.SyncRootAsync(ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, ct);
 
@@ -829,7 +838,7 @@ public static class InternalShareEndpoints
                 $"The record was shared, but {filedLeft} of the secure work assignments and projects filed under it could not " +
                 "be given this person yet. They are updated automatically within a few minutes, or you can try again.",
                 systemUserId, children, ("outcome", rootOutcome), ("accessRightsMask", rootMask),
-                ("filedRecordsNotUpdated", filedLeft));
+                ("filedRecordsNotUpdated", filedLeft), ("notificationFailed", notificationFailed));
         }
 
         logger.LogWarning(
@@ -847,7 +856,8 @@ public static class InternalShareEndpoints
               "within a few minutes, or you can try again." + HeldSentence(children);
 
         return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail, systemUserId, children,
-            ("outcome", rootOutcome), ("accessRightsMask", rootMask), ("filedRecordsNotUpdated", filedLeft));
+            ("outcome", rootOutcome), ("accessRightsMask", rootMask), ("filedRecordsNotUpdated", filedLeft),
+            ("notificationFailed", notificationFailed));
     }
 
     /// <summary>

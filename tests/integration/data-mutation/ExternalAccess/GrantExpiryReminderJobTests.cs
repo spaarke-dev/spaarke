@@ -340,6 +340,13 @@ public class GrantExpiryReminderJobTests
         BodyOf(_notifications[0]).Should().StartWith($"Access for Jane Doe to the {label} \"Harbor Tower\" ends after ");
         _notifications[0].GetAttributeValue<string>("data").Should()
             .Contain($"/main.aspx?etn={rootEntity}\\u0026id={rootId}\\u0026pagetype=entityrecord");
+
+        // Task 181: the bell shows a link only for a platform action; before it, this reminder was not clickable.
+        using var data = JsonDocument.Parse(_notifications[0].GetAttributeValue<string>("data"));
+        var action = data.RootElement.GetProperty("actions").EnumerateArray().Single();
+        action.GetProperty("title").GetString().Should().Be($"Open {label}");
+        action.GetProperty("data").GetProperty("url").GetString().Should()
+            .Be($"/main.aspx?etn={rootEntity}&id={rootId}&pagetype=entityrecord");
     }
 
     // ── What it says ────────────────────────────────────────────────────────────────────────────

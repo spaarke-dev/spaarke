@@ -48,6 +48,12 @@ public sealed class NotificationService
     /// <param name="actionUrl">Optional deep-link URL for the notification action.</param>
     /// <param name="regardingId">Optional ID of the related record.</param>
     /// <param name="aiMetadata">Optional AI-generated metadata (stored as JSON in custom field).</param>
+    /// <param name="actionTitle">
+    /// Optional label of a clickable link on the notification card (task 181). With <paramref name="actionUrl"/>, the
+    /// <c>data</c> JSON also carries the platform's <c>actions</c> array — the only part of <c>data</c> the model-driven
+    /// app's notification bell turns into a link. Omitted, the card has no link (the earlier behaviour, kept for every
+    /// caller that does not pass it); <c>actionUrl</c> itself is read only by Spaarke surfaces such as the Daily Briefing.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The ID of the created appnotification record.</returns>
     /// <exception cref="ArgumentNullException">Thrown when userId is empty or title is null/empty.</exception>
@@ -61,6 +67,7 @@ public sealed class NotificationService
         string? actionUrl = null,
         Guid? regardingId = null,
         Dictionary<string, object?>? aiMetadata = null,
+        string? actionTitle = null,
         CancellationToken cancellationToken = default)
     {
         if (userId == Guid.Empty)
@@ -98,7 +105,7 @@ public sealed class NotificationService
             // Action data with deep link
             if (!string.IsNullOrWhiteSpace(actionUrl) || regardingId.HasValue || aiMetadata is not null)
             {
-                var actionData = BuildActionData(actionUrl, regardingId, category, aiMetadata);
+                var actionData = BuildActionData(actionUrl, regardingId, category, aiMetadata, actionTitle);
                 entity["data"] = JsonSerializer.Serialize(actionData, JsonOptions);
             }
 
@@ -155,13 +162,34 @@ public sealed class NotificationService
         string? actionUrl,
         Guid? regardingId,
         string? category,
-        Dictionary<string, object?>? aiMetadata)
+        Dictionary<string, object?>? aiMetadata,
+        string? actionTitle)
     {
         var data = new Dictionary<string, object?>();
 
         if (!string.IsNullOrWhiteSpace(actionUrl))
         {
             data["actionUrl"] = actionUrl;
+
+            // The documented in-app notification URL action (Microsoft Learn, "Send in-app notifications within
+            // model-driven apps" → Notification actions): { title, data: { url, navigationTarget } }. The URL must be an
+            // allowed form — a same-origin path beginning with "/" is; anything else still shows the card but the link
+            // does not open.
+            if (!string.IsNullOrWhiteSpace(actionTitle))
+            {
+                data["actions"] = new[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["title"] = actionTitle,
+                        ["data"] = new Dictionary<string, object?>
+                        {
+                            ["url"] = actionUrl,
+                            ["navigationTarget"] = "inline",
+                        },
+                    },
+                };
+            }
         }
 
         if (regardingId.HasValue)

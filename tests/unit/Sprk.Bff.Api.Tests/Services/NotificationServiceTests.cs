@@ -293,6 +293,32 @@ public class NotificationServiceTests
         capturedEntity!.Contains("data").Should().BeTrue();
         var dataJson = (string)capturedEntity["data"];
         dataJson.Should().Contain("actionUrl");
+        // Task 181: no action title → no platform action, exactly as before for every existing caller.
+        dataJson.Should().NotContain("\"actions\"");
+    }
+
+    /// <summary>
+    /// Task 181: with an action title the data JSON carries the platform's URL action — the only part of <c>data</c> the
+    /// model-driven app's bell turns into a link — keeping <c>actionUrl</c> for Spaarke's own readers.
+    /// </summary>
+    [Fact]
+    public async Task CreateNotificationAsync_WithActionTitle_AddsTheBellsUrlAction()
+    {
+        var actionUrl = "/main.aspx?etn=sprk_matter&id=abc&pagetype=entityrecord";
+        Entity? capturedEntity = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        await _sut.CreateNotificationAsync(Guid.NewGuid(), "Title", actionUrl: actionUrl, actionTitle: "Open matter");
+
+        using var data = System.Text.Json.JsonDocument.Parse((string)capturedEntity!["data"]);
+        data.RootElement.GetProperty("actionUrl").GetString().Should().Be(actionUrl);
+        var action = data.RootElement.GetProperty("actions").EnumerateArray().Should().ContainSingle().Subject;
+        action.GetProperty("title").GetString().Should().Be("Open matter");
+        action.GetProperty("data").GetProperty("url").GetString().Should().Be(actionUrl);
+        action.GetProperty("data").GetProperty("navigationTarget").GetString().Should().Be("inline");
     }
 
     [Fact]

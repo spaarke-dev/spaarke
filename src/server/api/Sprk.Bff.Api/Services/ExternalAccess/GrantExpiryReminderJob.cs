@@ -122,9 +122,13 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
     /// <summary>The three grantable roots, in <see cref="ExternalGrantLifecycle.DeriveKey"/>'s order.</summary>
     private static readonly RootSpec[] Roots =
     {
-        new("sprk_project", "sprk_projectid", "sprk_projectname", "pr", "project"),
-        new("sprk_matter", "sprk_matterid", "sprk_mattername", "mt", "matter"),
-        new("sprk_workassignment", "sprk_workassignmentid", "sprk_name", "wa", "work assignment"),
+        // Display-name column and label shared with the task-181 grant notification (ExternalGrantRoot).
+        new("sprk_project", "sprk_projectid", ExternalGrantRoot.NameColumnFor(ExternalGrantRootType.Project), "pr",
+            ExternalGrantRoot.LabelFor(ExternalGrantRootType.Project)),
+        new("sprk_matter", "sprk_matterid", ExternalGrantRoot.NameColumnFor(ExternalGrantRootType.Matter), "mt",
+            ExternalGrantRoot.LabelFor(ExternalGrantRootType.Matter)),
+        new("sprk_workassignment", "sprk_workassignmentid", ExternalGrantRoot.NameColumnFor(ExternalGrantRootType.WorkAssignment), "wa",
+            ExternalGrantRoot.LabelFor(ExternalGrantRootType.WorkAssignment)),
     };
 
     private readonly IServiceScopeFactory _scopeFactory;
@@ -453,7 +457,9 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
                     priority: grant.DaysLeft <= 1 ? PriorityCritical : grant.DaysLeft <= 7 ? PriorityWarning : PriorityInformational,
                     actionUrl: $"/main.aspx?etn={grant.Root.EntityName}&id={grant.RootId}&pagetype=entityrecord",
                     regardingId: grant.RootId,
-                    cancellationToken: ct).ConfigureAwait(false);
+                    cancellationToken: ct,
+                    // Task 181: the bell renders a link only from an action; without it the reminder was not clickable.
+                    actionTitle: $"Open {grant.Root.Label}").ConfigureAwait(false);
             }
             catch (Exception ex) when (ct.IsCancellationRequested)
             {
