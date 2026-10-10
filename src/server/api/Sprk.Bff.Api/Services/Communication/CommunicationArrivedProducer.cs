@@ -73,7 +73,7 @@ public sealed class CommunicationArrivedProducer
     // Q2 app-notification mirror. Category is load-bearing for idempotency (recipient + category + regarding=thread).
     private const string CommunicationNotificationCategory = "communication";
     // appnotification.toasttype: Timed (200000000) — emits the clickable "Open" data.actions[]; Hidden suppresses it.
-    private const int ToastTypeTimed = 200_000_000;
+    private const int ToastTypeTimed = Sprk.Bff.Api.Services.AppNotificationOptions.ToastType.Timed;
 
     /// <summary>
     /// Columns re-read off the persisted <c>sprk_communication</c> row — exactly what the task-013 envelope +

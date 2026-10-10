@@ -108,6 +108,13 @@
     <Compile Include="..\..\integration\auth\**\*.cs" LinkBase="AuthTests" />
   </ItemGroup>
 
+  <!-- appnotification option-set snapshot (live metadata) compared with AppNotificationOptions by AppNotificationOptionsTests. -->
+  <ItemGroup>
+    <Content Include="Services\Fixtures\appnotification-options.snapshot.json" Link="Services\Fixtures\appnotification-options.snapshot.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <!-- Golden-utterance eval suite seed data (spaarke-ai-architecture-redesign-r1
        task 011 / FR-P0-09). The harness (ContractTests\Eval\GoldenUtteranceEvalSuiteTests.cs,
        compiled via the contract glob above) resolves the case file via
