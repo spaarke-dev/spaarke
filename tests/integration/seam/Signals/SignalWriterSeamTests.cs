@@ -1,11 +1,13 @@
 using Azure.Core;
 using Azure.Identity;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Xunit;
 
@@ -116,11 +118,50 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
             "sprk_communication.sprk_regardingmatter on the seeded row points at the positive matter");
     }
 
+    /// <summary>
+    /// Task 039 (D-33) live gate, writer half: a Signal whose subject or grouping matter is under a SECURE record is
+    /// created owned by the Secure Record Owners team — set in the create, by the writer principal, through uac-r2's real
+    /// resolver — with the business unit derived from that team. Opt-in on top of the seam's own gate: set
+    /// <see cref="SecureSubjectEnvVar"/> to <c>logicalname:id</c> of a probe subject (prefix <c>zz-039-</c>) on a Secure
+    /// matter, or filed under a Secure record. The row is swept by <see cref="DisposeAsync"/> like every other row here.
+    /// </summary>
+    [Fact]
+    public async Task WriteAsync_SubjectUnderASecureRecord_IsOwnedByTheSecureRecordOwnersTeam_SetInTheCreate()
+    {
+        if (!_dv.IsLive) return;
+        if (Environment.GetEnvironmentVariable(SecureSubjectEnvVar) is not { Length: > 0 } raw) return;
+        var parts = raw.Split(':', 2);
+        var (subjectEntity, subjectId) = (parts[0], Guid.Parse(parts[1]));
+
+        var result = await BuildWriter().WriteAsync(Request(subjectId, subjectEntity, "zz-039 secure probe subject"));
+
+        var team = (await _dv.OperatorClient.RetrieveMultipleAsync(new QueryExpression("team")
+        {
+            ColumnSet = new ColumnSet("teamid", "businessunitid"),
+            Criteria = { Conditions = { new ConditionExpression("name", ConditionOperator.Equal, "Secure Record Owners") } },
+        })).Entities.Should().ContainSingle().Subject;
+        var row = await _dv.OperatorClient.RetrieveAsync("sprk_signal", result.SignalId,
+            new ColumnSet("ownerid", "owningteam", "owninguser", "owningbusinessunit"));
+
+        result.Created.Should().BeTrue();
+        result.SecureOwnerTeamId.Should().Be(team.Id);
+        row.GetAttributeValue<EntityReference>("owningteam")?.Id.Should().Be(team.Id, "the Secure Record Owners team owns it");
+        row.GetAttributeValue<EntityReference>("owninguser").Should().BeNull("never the writer on the secure path");
+        row.GetAttributeValue<EntityReference>("owningbusinessunit").Id
+            .Should().Be(team.GetAttributeValue<EntityReference>("businessunitid").Id, "the business unit derives from the team");
+    }
+
+    /// <summary>Opt-in probe subject for the task 039 live gate, as <c>logicalname:id</c>.</summary>
+    public const string SecureSubjectEnvVar = "ONTOLOGY_039_SECURE_SUBJECT";
+
     private SignalWriter BuildWriter()
     {
         var writerClient = new OntologyWriterDataverseClient(() => _dv.WriterClient, NullLogger<OntologyWriterDataverseClient>.Instance);
         var sysadmin = new SysadminAdapter(_dv.OperatorClient);
-        return new SignalWriter(writerClient, sysadmin, TimeProvider.System, NullLogger<SignalWriter>.Instance);
+        // Task 039: uac-r2's REAL resolver over the same sysadmin seam the BFF gives it (empty config = its defaults).
+        var ownership = new RecordOwnershipResolver(
+            sysadmin, new ConfigurationBuilder().Build(), NullLogger<RecordOwnershipResolver>.Instance);
+        return new SignalWriter(writerClient, sysadmin, ownership, TimeProvider.System, NullLogger<SignalWriter>.Instance);
     }
 
     private static SignalWriteRequest Request(Guid subjectId, string subjectEntity, string displayName) => new(
@@ -179,8 +220,8 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
     }
 
     /// <summary>
-    /// The ONE read <see cref="SignalWriter"/> performs through the shared sysadmin seam (the grouping
-    /// matter's <c>owningbusinessunit</c>, F25) — backed here by the NON-impersonated operator connection,
+    /// The reads <see cref="SignalWriter"/> performs through the shared sysadmin seam (the grouping matter's
+    /// <c>owningbusinessunit</c>, F25, and — task 039 — the ownership resolver's) — backed here by the NON-impersonated operator connection,
     /// mirroring <c>SignalsModule</c>'s production split between the writer client and the shared
     /// <c>IGenericEntityService</c>.
     /// </summary>
@@ -201,8 +242,11 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
         public Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<LookupNavigationMetadata> GetLookupNavigationAsync(string childEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<string> GetCollectionNavigationAsync(string parentEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct = default) => throw new NotImplementedException();
+        // Task 039: the ownership resolver's reads (business units, teams, root flags).
+        public Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default) =>
+            _operatorClient.RetrieveMultipleAsync(query, ct);
+        public Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct = default) =>
+            _operatorClient.RetrieveMultipleAsync(fetch, ct);
         public Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default) => throw new NotImplementedException();
         public Task AssociateAsync(string entityLogicalName, Guid entityId, string relationshipName, IEnumerable<EntityReference> relatedEntities, CancellationToken ct = default) => throw new NotImplementedException();
     }

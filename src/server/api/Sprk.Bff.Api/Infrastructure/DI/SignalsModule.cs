@@ -52,7 +52,8 @@ public static class SignalsModule
         // plus the SHARED sysadmin IGenericEntityService (GraphModule.AddGraphModule) for the one read that is
         // metadata, not a Signal write — the grouping matter's owningbusinessunit (F25). Two DIFFERENT
         // Dataverse connections, injected as two DIFFERENT types, so neither can be swapped for the other by
-        // accident.
+        // accident. Task 039 (D-33): also uac-r2's IRecordOwnershipResolver (singleton, registered unconditionally by
+        // AddRecordOwnershipResolver) — the one owner of invariant I-6, reused, never re-derived here.
         services.AddSingleton<SignalWriter>();
 
         // Decision plan read (task 036, FR-49/FR-50): the Signal-level access decision (as the caller, through the

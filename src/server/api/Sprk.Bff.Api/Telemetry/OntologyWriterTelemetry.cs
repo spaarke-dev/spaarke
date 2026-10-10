@@ -173,6 +173,16 @@ public static class OntologyWriterFailureReason
     /// metered WITHOUT the rendered content (R2 removed the rendered string from the exception message).</summary>
     public const string SentenceTemplateInvalid = "sentence_template_invalid";
 
+    /// <summary>Task 039 (D-33): uac-r2's <c>RecordOwnershipResolver</c> refused an owner for the Signal (for
+    /// example a root flagged Secure but not isolated, or the Secure Record Owners team unresolved). The write is
+    /// SKIPPED — nothing is written — and logged at Warning on
+    /// <see cref="Sprk.Bff.Api.Services.Signals.OntologyWriterEvents.WriteSkippedOwnerRefused"/>.</summary>
+    public const string OwnerRefused = "owner_refused";
+
+    /// <summary>Task 039 (D-33): a Signal the resolver gave to the Secure Record Owners team does not read back
+    /// with that team as its <c>owningteam</c> — after the create, or on a re-evaluation (reconcile) read.</summary>
+    public const string SecureOwnerMismatch = "secure_owner_mismatch";
+
     // ── sprk_policyversion validation sub-reasons (task 022 rework, review finding #7) ─────────────────────
     // Replaces the single bucket "policy_version_rule_body_invalid" with bounded, mutually-exclusive
     // sub-reasons so an alert/dashboard can distinguish "nobody has authored a Threshold policy's schema yet"

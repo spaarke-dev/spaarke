@@ -82,8 +82,21 @@ public sealed record SignalWriteRequest(
 /// row's dedupe key and only <c>sprk_lastevaluated</c> was refreshed (CM-9's create-then-reconcile contract).</param>
 /// <param name="GroupingMatterId">The resolved <c>sprk_matter</c> — always populated (D-3).</param>
 /// <param name="OwningBusinessUnitId">The business unit <c>sprk_signal.owningbusinessunit</c> was set to at
-/// create (FR-14). <c>Guid.Empty</c> on a re-evaluation update, where ownership is not touched.</param>
-public sealed record SignalWriteResult(Guid SignalId, bool Created, Guid GroupingMatterId, Guid OwningBusinessUnitId);
+/// create (FR-14), or, for a Secure-team-owned create, the business unit read back from the row (it derives from
+/// the team). <c>Guid.Empty</c> on a re-evaluation update, where ownership is not touched, and on a skip.</param>
+public sealed record SignalWriteResult(Guid SignalId, bool Created, Guid GroupingMatterId, Guid OwningBusinessUnitId)
+{
+    /// <summary>Task 039 (D-33): the Secure Record Owners team that owns the row when the create set it as owner;
+    /// <c>null</c> on the FR-14 path, on a re-evaluation update and on a skip.</summary>
+    public Guid? SecureOwnerTeamId { get; init; }
+
+    /// <summary>Task 039 (D-33): the <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal"/> code when the
+    /// ownership resolver refused and NOTHING was written; <c>null</c> otherwise.</summary>
+    public string? SkippedRefusalCode { get; init; }
+
+    /// <summary>True when the resolver refused and nothing was written (<see cref="SkippedRefusalCode"/>).</summary>
+    public bool IsSkipped => SkippedRefusalCode is not null;
+}
 
 /// <summary>
 /// Thrown when the writer's binding escalation trigger fires: a subject whose grouping matter (or that
@@ -194,6 +207,27 @@ public sealed class SignalSentenceTemplateException : Exception
 /// validated, not at the first evaluation that happens to exercise it.</para>
 /// <para><b>Ids.</b> Every id written to a text resolver field is <c>Guid.ToString("D").ToLowerInvariant()</c> —
 /// lowercase, no braces (the audit's §8.3 U1 finding: two divergent regexes were in circulation).</para>
+/// <para><b>Secure records (task 039, owner D-33).</b> After the grouping matter is resolved, the uac-r2 ownership
+/// resolver (<see cref="Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver"/>, invariant I-6) is asked with the
+/// matter AND the subject as parents — task 146's shape for the spend-signal writer. A <b>Secure</b> answer (a parent
+/// is owned in the Secure Record business unit) puts <c>ownerid</c> = the Secure Record Owners team in the create
+/// itself, sends no <c>owningbusinessunit</c> (it derives from the team) and reads <c>owningteam</c> back. A <b>not
+/// secure</b> answer keeps the FR-14 path above unchanged: a full I-6 switch to default-team ownership hits F3. A
+/// <b>refusal</b> (for example a root flagged Secure but not isolated) writes nothing: it is logged at Warning
+/// (<see cref="OntologyWriterEvents.WriteSkippedOwnerRefused"/>), metered as
+/// <see cref="OntologyWriterFailureReason.OwnerRefused"/> and returned as a skipped result. The writer grants no
+/// shares: uac-r2's 2-minute secure-child reconcile mirrors the root's sharees onto the row, but only once
+/// <c>SecureChildLineage</c> lists <c>sprk_signal</c>. That entry, and the <c>prvReadsprk_Signal</c> entry in
+/// <c>config/secure-record-owner-role.json</c>, are added by master PR #1390 (task 039), NOT by this branch.
+/// <b>Whether the create itself succeeds does not depend on #1390</b>: it depends on the LIVE Secure Record Owner
+/// role holding Read on <c>sprk_signal</c> in that environment (applied in dev directly by task 008; elsewhere by
+/// <c>Set-SecureRecordOwnerRolePrivileges.ps1</c>, once #1390's config entry is present). Where the role lacks it, Dataverse refuses the
+/// create with 403 <c>0x80040299</c> ("Read Privilege Check For Owner failed" — the refusal recorded for
+/// <c>sprk_signal</c> by task 079, by Assign rather than create, and for <c>sprk_spendsignal</c> by uac-r2 task 146),
+/// and this writer surfaces it as <see cref="OntologyWriterFailureReason.DataverseAccessDenied"/>. Where the role
+/// holds it (spaarkedev1 since task 008; the create was proven live there on 2026-10-08) but #1390 is not deployed,
+/// the row is Secure-team-owned and its sharees are never mirrored, so only the BFF can read it. Ship this writer
+/// only after #1390 and the role edit are in the target environment.</para>
 /// </remarks>
 public sealed partial class SignalWriter
 {
@@ -251,17 +285,20 @@ public sealed partial class SignalWriter
 
     private readonly OntologyWriterDataverseClient _writerClient;
     private readonly IGenericEntityService _sysadminClient;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SignalWriter> _logger;
 
     public SignalWriter(
         OntologyWriterDataverseClient writerClient,
         IGenericEntityService sysadminClient,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         TimeProvider timeProvider,
         ILogger<SignalWriter> logger)
     {
         _writerClient = writerClient ?? throw new ArgumentNullException(nameof(writerClient));
         _sysadminClient = sysadminClient ?? throw new ArgumentNullException(nameof(sysadminClient));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -318,11 +355,42 @@ public sealed partial class SignalWriter
             }
 
             var matterId = await ResolveGroupingMatterIdAsync(subjectEntity, request.SubjectId, ct).ConfigureAwait(false);
-            var owningBusinessUnitId = await ResolveOwningBusinessUnitIdAsync(matterId, ct).ConfigureAwait(false);
+
+            // Task 039 (D-33): the uac-r2 resolver decides whether the Signal is a secure child — the matter AND the
+            // subject are its parents (secure-if-any). A refusal writes nothing at all, not even a re-evaluation touch.
+            var owner = await _ownership.ResolveOwnerAsync(
+                new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+                {
+                    TargetEntityLogicalName = "sprk_matter",
+                    TargetRecordId = matterId,
+                    Parents = subjectEntity == "sprk_matter"
+                        ? Array.Empty<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent>()
+                        : new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(subjectEntity, request.SubjectId) },
+                },
+                ct).ConfigureAwait(false);
+            if (owner.IsRefused)
+            {
+                _logger.LogWarning(OntologyWriterEvents.WriteSkippedOwnerRefused,
+                    "Signal write SKIPPED for policy {PolicyCode}, subject {SubjectEntity} {SubjectId}, matter {MatterId}: " +
+                    "no owner (reason={Reason}, code={RefusalCode}). Nothing was written.",
+                    request.PolicyCode, subjectEntity, cleanSubjectId, matterId,
+                    OntologyWriterFailureReason.OwnerRefused, owner.RefusalCode);
+                OntologyWriterTelemetry.RecordFailure(OntologyWriterFailureReason.OwnerRefused);
+                return new SignalWriteResult(Guid.Empty, false, matterId, Guid.Empty)
+                {
+                    SkippedRefusalCode = owner.RefusalCode ?? Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoOwnerSource,
+                };
+            }
+
+            Guid? secureTeamId = owner.IsSecureOwner && owner.IsOwned ? owner.OwningTeamId : null;
+            // FR-14 path only: a Secure-team-owned row's business unit derives from the team and is never sent.
+            var owningBusinessUnitId = secureTeamId is null
+                ? await ResolveOwningBusinessUnitIdAsync(matterId, ct).ConfigureAwait(false)
+                : Guid.Empty;
 
             var nowUtc = _timeProvider.GetUtcNow();
             var dedupeKey = BuildDedupeKey(request.PolicyCode, subjectEntity, cleanSubjectId);
-            var entity = BuildEntity(request, subjectEntity, cleanSubjectId, matterId, owningBusinessUnitId, sentence, nowUtc);
+            var entity = BuildEntity(request, subjectEntity, cleanSubjectId, matterId, owningBusinessUnitId, secureTeamId is null ? null : owner, sentence, nowUtc);
             entity["sprk_dedupekey"] = dedupeKey;
 
             Guid signalId;
@@ -352,7 +420,7 @@ public sealed partial class SignalWriter
                     // reconcile (only on the original create). A Signal's BU can drift after its first create
                     // (e.g. the matter itself was reassigned to a different business unit).
                     existing = await _writerClient
-                        .RetrieveByAlternateKeyAsync("sprk_signal", keyAttributes, new[] { "sprk_signalid", "owningbusinessunit" }, ct)
+                        .RetrieveByAlternateKeyAsync("sprk_signal", keyAttributes, new[] { "sprk_signalid", "owningbusinessunit", "owningteam" }, ct)
                         .ConfigureAwait(false);
                 }
                 catch (Exception readEx)
@@ -364,7 +432,7 @@ public sealed partial class SignalWriter
                 }
 
                 signalId = existing.Id;
-                EnsureOwningBusinessUnitMatches(existing, owningBusinessUnitId, signalId);
+                EnsureOwnershipMatches(existing, secureTeamId, owningBusinessUnitId, signalId);
 
                 await _writerClient.UpdateAsync(
                     "sprk_signal",
@@ -385,7 +453,7 @@ public sealed partial class SignalWriter
                 try
                 {
                     verifyRow = await _writerClient
-                        .RetrieveAsync("sprk_signal", signalId, new[] { "owningbusinessunit" }, ct)
+                        .RetrieveAsync("sprk_signal", signalId, new[] { "owningbusinessunit", "owningteam" }, ct)
                         .ConfigureAwait(false);
                 }
                 catch (Exception readEx)
@@ -398,7 +466,11 @@ public sealed partial class SignalWriter
                         OntologyWriterFailureReason.OwningBusinessUnitReadBackFailed, readEx);
                 }
 
-                EnsureOwningBusinessUnitMatches(verifyRow, owningBusinessUnitId, signalId);
+                EnsureOwnershipMatches(verifyRow, secureTeamId, owningBusinessUnitId, signalId);
+                if (secureTeamId is not null)
+                {
+                    resultOwningBu = verifyRow.GetAttributeValue<EntityReference>("owningbusinessunit")?.Id ?? Guid.Empty;
+                }
             }
             else
             {
@@ -411,7 +483,10 @@ public sealed partial class SignalWriter
                 "Signal {SignalId} {Action} for policy {PolicyCode}, subject {SubjectEntity} {SubjectId}, matter {MatterId}.",
                 signalId, created ? "created" : "reconciled (re-evaluation)", request.PolicyCode, subjectEntity, cleanSubjectId, matterId);
 
-            return new SignalWriteResult(signalId, created, matterId, resultOwningBu);
+            return new SignalWriteResult(signalId, created, matterId, resultOwningBu)
+            {
+                SecureOwnerTeamId = created ? secureTeamId : null,
+            };
         }
         catch (SignalWriterEscalationException ex)
         {
@@ -581,12 +656,39 @@ public sealed partial class SignalWriter
         }
     }
 
+    /// <summary>
+    /// Task 039 (D-33): the ONE ownership check for both the post-create verify and the reconcile path. A row the
+    /// resolver gave to the Secure Record Owners team is checked by <c>owningteam</c> (its business unit derives from
+    /// the team, and the grouping matter may be ordinary while the subject is secure); every other row keeps the FR-14
+    /// business-unit check (<see cref="EnsureOwningBusinessUnitMatches"/>). A row the reconciler has not yet moved into
+    /// isolation (≤ 2 minutes after a root is made secure) escalates here, loudly, rather than being touched.
+    /// </summary>
+    private static void EnsureOwnershipMatches(Entity signalRow, Guid? secureTeamId, Guid expectedBuId, Guid signalId)
+    {
+        if (secureTeamId is not { } teamId)
+        {
+            EnsureOwningBusinessUnitMatches(signalRow, expectedBuId, signalId);
+            return;
+        }
+
+        var actualTeamId = signalRow.GetAttributeValue<EntityReference>("owningteam")?.Id;
+        if (actualTeamId != teamId)
+        {
+            throw new SignalWriterEscalationException(
+                $"Signal {signalId:D}'s owningteam ({(actualTeamId is { } id ? id.ToString("D") : "null")}) is not " +
+                $"the Secure Record Owners team ({teamId:D}) the ownership resolver chose. Refusing to leave a secure " +
+                "record's Signal with another owner (D-33).",
+                OntologyWriterFailureReason.SecureOwnerMismatch);
+        }
+    }
+
     private static Entity BuildEntity(
         SignalWriteRequest request,
         string subjectEntity,
         string cleanSubjectId,
         Guid matterId,
         Guid owningBusinessUnitId,
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? secureOwner,
         string sentence,
         DateTimeOffset nowUtc)
     {
@@ -633,8 +735,17 @@ public sealed partial class SignalWriter
         entity["sprk_firstdetected"] = nowUtc.UtcDateTime;
         entity["sprk_lastevaluated"] = nowUtc.UtcDateTime;
 
+        if (secureOwner is not null)
+        {
+            // Task 039 (D-33): a secure child — owned by the Secure Record Owners team IN the create, written by uac-r2's
+            // own ApplyTo (the one censused owner write; the writer holds Assign, the team's role holds Read on
+            // sprk_signal). owningbusinessunit is NOT sent: it derives from the team.
+            secureOwner.ApplyTo(entity);
+            return entity;
+        }
+
         // FR-14 (F3/F22): owner is left as the writer (the default — NOT set here); owningbusinessunit is set
-        // to the grouping matter's BU. Never ownerid=team — confirmed unworkable live (403 0x80040299).
+        // to the grouping matter's BU. Never ownerid=<a BU default team> — confirmed unworkable live (403 0x80040299).
         entity["owningbusinessunit"] = new EntityReference("businessunit", owningBusinessUnitId);
 
         return entity;
