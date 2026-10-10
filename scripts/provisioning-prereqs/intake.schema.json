@@ -141,6 +141,11 @@
       "default": "failFast",
       "description": "Batch policy for skill Step 0d Dataverse MCP disconnect (BAT-04). `failFast` → exit non-zero with runs/{runId}-mcp-disconnect.json diagnostic. `proceedWithFallback` → use `pac data` + raw Web API PS fallback path (Fallback Matrix F1). Ignored in interactive mode (operator answers yes/no prompt)."
     },
+    "customerOutboundB2BAttested": {
+      "type": "boolean",
+      "default": false,
+      "description": "Customer attestation for prereqs.yaml PRQ-C-14 (skill-local; NOT sent to POST /api/runs). Set true ONLY after the CUSTOMER's Entra admin has confirmed in writing that the customer tenant's cross-tenant access settings (outbound B2B collaboration, default or an organizational setting for Spaarke's tenant id) allow its users to become B2B guests in Spaarke's tenant. Spaarke's operator cannot read another tenant's policy, so this is an attestation, not a probe. Needed for a B2BGuest run (every Model 1 run): false/absent fails the Step 1e-ter customer pass. Ignored for other presets."
+    },
     "acknowledgeUpgradeMode": {
       "type": "boolean",
       "default": false,
