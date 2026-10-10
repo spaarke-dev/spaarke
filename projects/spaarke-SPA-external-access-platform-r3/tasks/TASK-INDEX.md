@@ -11,7 +11,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 001 | ADR-028 amendment for R3 (A2, A3 :124, A1 :55) | P0 | 🔄 [wip] | none | O/h | FULL | — (.claude/, main session; owner approval) |
 | 002 | Grid columns per owner list (FR-09) | P0 | 🔲 [open] | none (owner list) | S/h | STANDARD | Wave 1 when the list arrives |
 | 003 | Spike: Entra B2B self-service sign-up vs custom join (FR-12) | P0 | 🔄 [wip] spike done, awaiting owner choice | none | O/h | STANDARD | Wave 1 |
-| 010 | Ciam audience forms + default-scheme CIAM guard (FR-22, FR-23) | P1 | 🔄 [wip] | none | O/h | FULL | Wave 1 |
+| 010 | Ciam audience forms + default-scheme CIAM guard (FR-22, FR-23) | P1 | ✅ [done] | none | O/h | FULL | Wave 1 |
 | 011 | Modules by user type + partner service-request switch (FR-19, FR-06) | P1 | 🔲 [open] | 001 | O/h | FULL | Wave 2 |
 | 012 | Member-test branch for registered guests (FR-15) | P1 | 🔲 [open] | 001 | O/h | FULL | Wave 2 |
 | 020 | R3 schema: sprk_createdbycontact + intake columns (FR-25, FR-05) | P2 | 🔄 [wip] source done + reviewed, awaiting owner dev import | none | S/h | FULL | Wave 1 (owner-gated import) |
