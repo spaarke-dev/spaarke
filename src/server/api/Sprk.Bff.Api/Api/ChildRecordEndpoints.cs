@@ -209,6 +209,7 @@ public static class ChildRecordEndpoints
             return owned switch
             {
                 { ClientFailure: { } failure } => CallerFailure(failure, entity),
+                { Invalid: { } pairInvalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode, pairInvalid),
                 { ParentUnavailable: true } => ParentNotFound(entity),
                 { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
                 { OwnerRefusal: { } refusal } => ProblemDetailsHelper.RecordOwnerRefused(refusal, Noun(entity), httpContext.TraceIdentifier),
@@ -340,6 +341,7 @@ public static class ChildRecordEndpoints
             return outcome switch
             {
                 { ClientFailure: { } failure } => CallerFailure(failure, entity),
+                { Invalid: { } pairInvalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode, pairInvalid),
                 { ParentUnavailable: true } => ParentNotFound(entity),
                 { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
                 { Forbidden: { } forbidden } => ProblemDetailsHelper.RecordOwnerRefused(forbidden, Noun(entity), httpContext.TraceIdentifier),

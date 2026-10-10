@@ -414,6 +414,11 @@ public sealed class EmailDraftToolHandler : IToolHandler
                     return LogOutcome(context, args, Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt), stopwatch);
                 }
 
+                if (owned.Invalid is { } invalid)
+                {
+                    return LogOutcome(context, args, Error(tool, invalid, ToolErrorCodes.ValidationFailed, startedAt), stopwatch);
+                }
+
                 if (owned.CreatedId is not { } ownedId)
                 {
                     var refusal = owned.OwnerRefusal;

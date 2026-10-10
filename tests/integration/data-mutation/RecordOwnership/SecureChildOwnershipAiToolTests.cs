@@ -802,6 +802,7 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             // Task 147 r1 E2 (the secure-record ribbon's "New Budget"): sprk_Matter_Budget_1n, live 2026-10-04.
             ["sprk_budget"] = new[]
@@ -845,6 +846,15 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         /// <summary>Task 147 r1: the owning team a row read as the caller reports (<c>_owningteam_value</c>).</summary>
         public Dictionary<Guid, Guid> OwningTeamOf { get; } = new();
+
+        /// <summary>The ADR-024 record-type catalog as the caller reads it: a <c>sprk_recordtype_ref</c> row → the table it names.</summary>
+        public Dictionary<Guid, string> RecordTypes { get; } = new();
+
+        /// <summary>A catalog kept elsewhere (a fixture's own Dataverse), asked for a row <see cref="RecordTypes"/> lacks.</summary>
+        public Func<Guid, string?>? RecordTypeOf { get; set; }
+
+        /// <summary>Further columns a row read as the caller reports (e.g. its pair: <c>sprk_regardingrecordid</c>).</summary>
+        public Dictionary<Guid, Dictionary<string, object?>> RowValues { get; } = new();
         public int PatchStatus { get; set; } = 204;
         public List<(string Path, string Body)> Posts { get; } = new();
         public List<(string Path, string Body)> Patches { get; } = new();
@@ -1012,6 +1022,14 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             var rowBody = new Dictionary<string, object?> { ["id"] = rowId };
             if (OwningTeamOf.TryGetValue(rowId, out var owningTeam))
                 rowBody["_owningteam_value"] = owningTeam.ToString("D");
+            if (path.StartsWith("sprk_recordtype_refs(", StringComparison.Ordinal)
+                && (RecordTypes.TryGetValue(rowId, out var recordTypeTable) ? recordTypeTable : RecordTypeOf?.Invoke(rowId)) is { } named)
+                rowBody["sprk_recordlogicalname"] = named;
+            if (RowValues.TryGetValue(rowId, out var values))
+            {
+                foreach (var (column, value) in values)
+                    rowBody[column] = value;
+            }
             return Ok(rowBody);
         }
 

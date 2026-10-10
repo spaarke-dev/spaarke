@@ -156,13 +156,29 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
             [("sprk_regardingevent", "sprk_event", Event), ("sprk_regardingmatter", "sprk_matter", MatterA)],
             pairId: Event.ToString());
 
-    private void SetupEventMetadata() =>
+    private void SetupEventMetadata()
+    {
         _dataverse
             .Setup(d => d.GetAsync(
                 It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_event')?$select=EntitySetName")),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(
                 """{ "EntitySetName": "sprk_events", "PrimaryIdAttribute": "sprk_eventid" }""")));
+
+        // The event as the caller reads it before an update that sets its pair (the pair rule: a pair id moved onto a
+        // regarding lookup the row keeps names a record already bound — here the invoice).
+        _dataverse
+            .Setup(d => d.GetAsync($"sprk_events({Event:D})", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""
+                {
+                  "sprk_eventid": "{{Event:D}}",
+                  "sprk_regardingrecordid": "{{Communication:D}}",
+                  "_sprk_regardingcommunication_value": "{{Communication:D}}",
+                  "_sprk_regardinginvoice_value": "{{Invoice:D}}",
+                  "_sprk_regardingmatter_value": "{{MatterA:D}}"
+                }
+                """)));
+    }
 
     private static string MoveThePairToTheInvoice() => $$$"""
         {"tablename":"sprk_event","recordId":"{{{Event:D}}}","item":{"sprk_regardingrecordid":"{{{Invoice:D}}}"}}

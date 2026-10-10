@@ -227,6 +227,18 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId, MapClientError(tool, mapped.ClientFailure, startedAt), stopwatch);
             }
 
+            // AppendTo AS THE CALLER on every record a work assignment or project is moved under — its typed regarding
+            // lookups and the record its ADR-024 pair names — BEFORE the secure-root gate below reads anything about them:
+            // the gate reads app-only, so a refusal of its own (an unreadable flag, a walled creator) would otherwise tell a
+            // caller who may not file under the record that it exists and is secure.
+            if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(tablename)
+                && await OwnedChildWrite.CheckCallerMayFileRootUnderAsync(
+                        _dataverse, tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
+                    .ConfigureAwait(false) is { } filingRefusal)
+            {
+                return LogOutcome(context, tablename, recordId, RefileRefusal(tool, tablename, filingRefusal, startedAt), stopwatch);
+            }
+
             // Task 158 (owner round 6): re-filing a work assignment or project — whether the record it will be filed under
             // is secure must be readable, or nothing is written (an unreadable flag is never "not secure").
             if (await _rootFiling.CheckAsync(tablename, recordId, OwnedChildWrite.WritesOf(mapped.Item!), cancellationToken)
@@ -398,23 +410,32 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
         {
             { NotARefile: true } => default,
             { Written: true } => new RefileStep(null, true),
-            { ClientFailure: { } failure } => new RefileStep(MapClientError(tool, failure, startedAt), false),
-            { Denied: { } denied } => new RefileStep(Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt), false),
-            { SecureFilingRefused: { } owner } => new RefileStep(Error(tool,
-                $"A '{tablename}' record cannot be filed under a secure record from chat; the update was NOT written" +
-                (owner.IsRefused ? $" ({owner.RefusalCode})." : ".") + " Change it from the record itself.",
-                owner.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false),
-            // F3 (owner round 10 item 7): the caller may not move the row out of a secure root — the unsecure endpoint's
-            // message and reason code, not an owner refusal.
-            { Forbidden: { } forbidden } => new RefileStep(Error(tool,
-                $"The update was NOT written. {forbidden.Reason}",
-                forbidden.RefusalCode ?? DataverseUserClientErrorCodes.AccessDenied, startedAt), false),
-            { OwnerRefusal: { } refused } => new RefileStep(Error(tool,
-                $"The update was NOT written: the record's owner could not be decided — {refused.Reason} ({refused.RefusalCode}).",
-                refused.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false),
-            _ => throw new InvalidOperationException("A re-file outcome with no decision."),
+            _ => new RefileStep(RefileRefusal(tool, tablename, outcome, startedAt), false),
         };
     }
+
+    /// <summary>The tool result for a re-file the core refused (nothing was written).</summary>
+    private ToolResult RefileRefusal(
+        AnalysisTool tool, string tablename, OwnedChildWrite.RefileOutcome outcome, DateTimeOffset startedAt) =>
+        outcome switch
+        {
+            { ClientFailure: { } failure } => MapClientError(tool, failure, startedAt),
+            { Invalid: { } invalid } => Error(tool, $"The update was NOT written: {invalid}", ToolErrorCodes.ValidationFailed, startedAt),
+            { Denied: { } denied } => Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt),
+            { SecureFilingRefused: { } owner } => Error(tool,
+                $"A '{tablename}' record cannot be filed under a secure record from chat; the update was NOT written" +
+                (owner.IsRefused ? $" ({owner.RefusalCode})." : ".") + " Change it from the record itself.",
+                owner.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
+            // F3 (owner round 10 item 7): the caller may not move the row out of a secure root — the unsecure endpoint's
+            // message and reason code, not an owner refusal.
+            { Forbidden: { } forbidden } => Error(tool,
+                $"The update was NOT written. {forbidden.Reason}",
+                forbidden.RefusalCode ?? DataverseUserClientErrorCodes.AccessDenied, startedAt),
+            { OwnerRefusal: { } refused } => Error(tool,
+                $"The update was NOT written: the record's owner could not be decided — {refused.Reason} ({refused.RefusalCode}).",
+                refused.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt),
+            _ => throw new InvalidOperationException("A re-file outcome with no decision."),
+        };
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
