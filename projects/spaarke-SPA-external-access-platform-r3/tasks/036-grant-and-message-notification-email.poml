@@ -9,7 +9,7 @@
     <rigor-reason>BFF change on the grant write path (tags bff-api)</rigor-reason>
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Extends an existing notifier with a well-specified branch; reference implementation exists</model-tier-reason>
-    <effort>xhigh</effort>
+    <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>modifies GrantAccessNotifier/GrantExternalAccessEndpoint, also changed by UAC-r2 PR #1583</parallel-reason>

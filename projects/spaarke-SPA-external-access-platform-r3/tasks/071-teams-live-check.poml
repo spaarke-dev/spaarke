@@ -9,7 +9,7 @@
     <rigor-reason>Live verification with a written result</rigor-reason>
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Guided live check with explicit pass/fail</model-tier-reason>
-    <effort>medium</effort>
+    <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>live, owner-driven</parallel-reason>

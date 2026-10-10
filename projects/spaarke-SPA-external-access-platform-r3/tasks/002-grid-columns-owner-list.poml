@@ -9,7 +9,7 @@
     <rigor-reason>Data-only configuration change with explicit acceptance; no code</rigor-reason>
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Mechanical configuration update from an explicit owner list</model-tier-reason>
-    <effort>medium</effort>
+    <effort>high</effort>
     <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
     <deps>none</deps>
