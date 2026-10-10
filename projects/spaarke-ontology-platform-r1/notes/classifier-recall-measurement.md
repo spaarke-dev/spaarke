@@ -440,3 +440,21 @@ plus the live `$choices` enum.
 
 **Not re-measured yet** (dispatch): run 3 waits for lane-rung5's rung-5 change, applied to this harness worktree only
 for the run.
+
+### 9.4 `sprk_outputschemajson` before/after (NOT version-controlled, so recorded here verbatim for reproducibility)
+
+Row `sprk_analysisactions(c1fa96bf-2697-f111-b8dc-7ced8ddc4a05)`, spaarkedev1. **One** leaf changed:
+`properties.category.description`. Reversing it on the after-text reproduces the before-text byte-for-byte (§9.2).
+Not in the repo (mvp-technical-spec §16.3); the coordinator is logging that as a separate issue.
+
+**Before** (as of 15:12:08Z; SHA-256 `BA10900FF37948BFA14B4115BB4A94ED89C660C2406F0510D2BF2E249F25983E`):
+
+```json
+{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","additionalProperties":false,"required":["summary","obligations","category","priority","reviewOutcome"],"properties":{"summary":{"type":"string","description":"EXACTLY 2 lines (two short sentences) summarizing what this email is and what it requires, for a reviewer scanning a triage queue.","maxLength":320},"obligations":{"type":"array","description":"Concrete, human-readable action-phrase obligations grounded in the classification's obligations/suggestedActions signal and the message text (e.g. 'Respond to court by Friday, Aug 15'). Empty array when none apply — never fabricated.","items":{"type":"string","maxLength":200},"maxItems":8},"category":{"type":"string","description":"The triage category, mapped from the classification's freeform category onto ONE entry of the firm's Dataverse-configured taxonomy (sprk_triagecategory). Never invent a value outside the allowed list.","maxLength":100},"priority":{"type":"string","description":"Triage priority, derived from the classification's urgency signal and the mapped category's severity. One of the firm's configured priority levels (sprk_communication.sprk_triagepriority).","maxLength":20},"reviewOutcome":{"type":"string","description":"Suggested initial review routing for a human reviewer to confirm or override — never a final auto-applied decision. One of the closed review-outcome set (sprk_communication.sprk_reviewoutcome; D-05 — 'review outcome', not 'disposition').","maxLength":20}}}
+```
+
+**After** (written 15:47:57Z, read back byte-identical; SHA-256 `8986E76AFF66CD0F5EA99DACE39C42AADAF23AA1883C61F15835B68166EC8304`):
+
+```json
+{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","additionalProperties":false,"required":["summary","obligations","category","priority","reviewOutcome"],"properties":{"summary":{"type":"string","description":"EXACTLY 2 lines (two short sentences) summarizing what this email is and what it requires, for a reviewer scanning a triage queue.","maxLength":320},"obligations":{"type":"array","description":"Concrete, human-readable action-phrase obligations grounded in the classification's obligations/suggestedActions signal and the message text (e.g. 'Respond to court by Friday, Aug 15'). Empty array when none apply — never fabricated.","items":{"type":"string","maxLength":200},"maxItems":8},"category":{"type":"string","description":"The triage category: the ONE entry of the firm's Dataverse-configured taxonomy (sprk_triagecategory) whose definition best fits the email text. The classification's freeform category is a hint only. Never invent a value outside the allowed list.","maxLength":100},"priority":{"type":"string","description":"Triage priority, derived from the classification's urgency signal and the mapped category's severity. One of the firm's configured priority levels (sprk_communication.sprk_triagepriority).","maxLength":20},"reviewOutcome":{"type":"string","description":"Suggested initial review routing for a human reviewer to confirm or override — never a final auto-applied decision. One of the closed review-outcome set (sprk_communication.sprk_reviewoutcome; D-05 — 'review outcome', not 'disposition').","maxLength":20}}}
+```
