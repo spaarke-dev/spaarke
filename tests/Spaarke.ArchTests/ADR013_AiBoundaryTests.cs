@@ -91,4 +91,77 @@ public class ADR013_AiBoundaryTests
             "grandfathered list in this test. " +
             $"Violating types: {string.Join(", ", violations)}");
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // D-66 (spaarke-ontology-platform-r1 task 048): the shared Dataverse write core is NOT an AI type.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>The shared write core, by full name. Nested and compiler-generated types match by prefix.</summary>
+    private static readonly string[] DataverseWriteCoreTypes =
+    {
+        "Sprk.Bff.Api.Services.Dataverse.OwnedChildWrite",
+        "Sprk.Bff.Api.Services.Dataverse.DataverseWriteItemMapper",
+    };
+
+    /// <summary>The namespace the write core used to live in (it still holds the AI-tool-only helpers). Trailing dot on
+    /// purpose: <c>HaveDependencyOn</c> matches by prefix, and <c>Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler</c>
+    /// (an AI handler, a different namespace) would otherwise match <c>...Handlers.Dataverse</c>.</summary>
+    private const string AiDataverseToolNamespace = "Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.";
+
+    private const string AiNamespace = "Sprk.Bff.Api.Services.Ai.";
+
+    [Fact(DisplayName = "D-66: the Dataverse write core (OwnedChildWrite, DataverseWriteItemMapper) lives in Services/Dataverse and non-AI code never reaches into Services/Ai for it")]
+    public void DataverseWriteCoreIsNotAnAiType()
+    {
+        var assembly = typeof(Program).Assembly;
+
+        // 1. The core sits where the direction says it must (AI -> core, never core -> AI).
+        foreach (var fullName in DataverseWriteCoreTypes)
+        {
+            Assert.True(
+                assembly.GetType(fullName) is not null,
+                $"D-66: {fullName} is missing. The shared Dataverse write core belongs in Sprk.Bff.Api.Services.Dataverse, not under Services/Ai.");
+        }
+
+        // 2. The core depends on nothing in Services/Ai (otherwise "moved out" is cosmetic).
+        //    NetArchTest sees signatures, fields and locals; IlCallScan adds the call sites in method bodies (a static
+        //    call such as DataverseRecordCitations.RecordPath is invisible to NetArchTest).
+        var coreResult = Types.InAssembly(assembly)
+            .That().HaveNameStartingWith("OwnedChildWrite").Or().HaveNameStartingWith("DataverseWriteItemMapper")
+            .ShouldNot().HaveDependencyOn(AiNamespace)
+            .GetResult();
+        var coreViolations = (coreResult.FailingTypeNames ?? new List<string>())
+            .Where(n => DataverseWriteCoreTypes.Any(c => n.StartsWith(c, StringComparison.Ordinal)))
+            .ToList();
+        coreViolations.AddRange(
+            IlCallScan.MethodReferences(DataverseWriteCoreTypes.SelectMany(n => IlCallScan.WithNested(assembly.GetType(n)!)))
+                .Where(r => IsInNamespace(r.Target.DeclaringType, AiNamespace))
+                .Select(r => $"{IlCallScan.Describe(r.CallerMethod)} -> {r.Target.DeclaringType!.FullName}.{r.Target.Name}"));
+
+        // 3. No non-AI code (Api/*, Services/Dataverse, Services/Signals, Infrastructure/*, ...) reaches into the
+        //    AI-tool Dataverse namespace — the route a caller would take to reach a write-core type that moved back.
+        var callerResult = Types.InAssembly(assembly)
+            .ShouldNot().HaveDependencyOn(AiDataverseToolNamespace)
+            .GetResult();
+        var callerViolations = (callerResult.FailingTypeNames ?? new List<string>())
+            .Where(n => !n.StartsWith(AiNamespace, StringComparison.Ordinal))
+            .ToList();
+        callerViolations.AddRange(
+            IlCallScan.MethodReferences(assembly.GetTypes().Where(t => !IsInNamespace(IlCallScan.Outermost(t), AiNamespace)))
+                .Where(r => IsInNamespace(r.Target.DeclaringType, AiDataverseToolNamespace))
+                .Select(r => $"{IlCallScan.Describe(r.CallerMethod)} -> {r.Target.DeclaringType!.FullName}.{r.Target.Name}"));
+        coreViolations.Sort(StringComparer.Ordinal);
+        callerViolations.Sort(StringComparer.Ordinal);
+
+        Assert.True(
+            coreViolations.Count == 0 && callerViolations.Count == 0,
+            "D-66 violation: the Dataverse write core must not depend on Sprk.Bff.Api.Services.Ai.*, and non-AI code must not " +
+            "depend on Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.*. Move the shared type to Services/Dataverse. " +
+            $"Write-core types depending on Services/Ai: [{string.Join(", ", coreViolations)}]. " +
+            $"Non-AI types depending on Ai.Handlers.Dataverse: [{string.Join(", ", callerViolations)}]");
+    }
+
+    private static bool IsInNamespace(Type? type, string namespacePrefixWithTrailingDot) =>
+        type?.Namespace is { } ns
+        && (ns + ".").StartsWith(namespacePrefixWithTrailingDot, StringComparison.Ordinal);
 }
