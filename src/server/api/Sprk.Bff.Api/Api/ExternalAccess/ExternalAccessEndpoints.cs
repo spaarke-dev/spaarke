@@ -122,8 +122,9 @@ public static class ExternalAccessEndpoints
         // Until this filter landed, every write on this group — mint a grant, revoke one, onboard a
         // CIAM identity, cascade-close a project, provision a business unit — was reachable by ANY
         // authenticated caller and then executed app-only. AddDelegationRuleFilter enforces owner
-        // decision B-14: you may change who can access a record only if YOU hold Write on it,
-        // evaluated as the caller (OBO), before the handler runs.
+        // decision B-14 + round 89 (task 179): you may change who can access a record only if YOU hold
+        // Write on it and the Share privilege on its table, evaluated as the caller (OBO), before the
+        // handler runs.
         //
         // Group-level, not per-route, deliberately: DelegationRuleFilter denies any request whose
         // target record it cannot identify, so a route added to this group later is gated from its
@@ -156,7 +157,7 @@ public static class ExternalAccessEndpoints
 
         // POST /share-user · POST /unshare-user · GET /user-shares — internal system-user shares on a record
         // (spec FR-29, task 063): the server half of the Manage Access "+ User" picker (task 065). On this group so
-        // they inherit the same Write-on-the-record delegation gate as every route above.
+        // they inherit the same delegation gate (Write and Share on the record) as every route above.
         adminGroup.MapInternalShareEndpoints();
 
         // POST /api/v1/external-access/no-access/enforce — enforce one No Access entry now (task 143, owner Q4 + R3:
@@ -165,7 +166,7 @@ public static class ExternalAccessEndpoints
 
         // POST /assigned-access/sync · GET /assigned-access · POST /assigned-access/dismiss — the Assigned-To auto-grants
         // (task 142, owner Q5 + R3: the form save, the wizards and "Update Access" call the BFF; owner A3: suggestions on
-        // secure records). On this group so the delegation filter gates each on Write on the RECORD.
+        // secure records). On this group so the delegation filter gates each on the RECORD (sync: Write; list and dismiss: Write and Share).
         adminGroup.MapAssignedAccessEndpoints();
 
         // POST /api/v1/external-access/invite — Onboard an external user via CIAM (idempotent)

@@ -73,7 +73,7 @@ public sealed class SecureChildShareReconciliationJob : IScheduledJob
     /// <inheritdoc />
     public string Description =>
         "Shares every child of a secure project, matter or work assignment with exactly the internal users and teams its " +
-        "root is shared with (never Share or Assign, never wider), and removes every other share on it. Catches new and " +
+        "root is shared with (never Assign, never wider; Share only where the root share holds it), and removes every other share on it. Catches new and " +
         "re-filed children and model-driven-app Share/Unshare of a secure root (task 149).";
 
     /// <inheritdoc />

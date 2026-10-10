@@ -577,6 +577,14 @@ The "Spaarke Office Add In User" role provides access to Office add-in-specific 
 | `sprk_contact` | Organization | Read | Associate documents with contacts |
 | `sprk_account` | Organization | Read | Associate documents with accounts |
 
+> **Share on project, matter and work assignment decides who can manage access.** Since owner round 89 (task 179),
+> Manage Access, Update Access, Make Secure and Remove Secure, and every grant, share and revoke, need Write on the
+> record AND the Share privilege on its table. The add-in needs no Share privilege on `sprk_project`, `sprk_matter` or
+> `sprk_workassignment`, so leave Share off those tables in this role, unless every holder should manage access. On
+> `spaarkedev1` (read 2026-10-09) this role holds Create, Read, Write and **Share at Deep** on all three, and the
+> `Spaarke` and `Spaarke Business Unit 1` teams hold the role. Every member of those teams can therefore manage access
+> until the owner removes that Share. See `docs/architecture/uac-access-control.md` § The Grant Model.
+
 **Setup Instructions**:
 
 1. Navigate to Power Platform Admin Center > Your environment > Settings > Users + permissions > Security roles
