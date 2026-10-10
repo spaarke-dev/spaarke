@@ -346,7 +346,7 @@ public sealed class InterStepState
     /// <summary>
     /// The stamp's own BFF base URL — the production slot H9 deployed to and health-probed
     /// (<c>https://{appServiceName}.azurewebsites.net</c>, no <c>/api</c> suffix). Task 245b: H7 writes it
-    /// as <c>sprk_BffApiBaseUrl</c>, H13 probes it, H14 derives its webhook receiver URLs from it.
+    /// as <c>sprk_BffApiBaseUrl</c>, H13 probes it.
     /// Before T245b those read run parameters nothing wrote, and H7 fell back to the PLATFORM BFF.
     /// </summary>
     [JsonPropertyName("bffApiUrl")]
