@@ -177,3 +177,9 @@ Spaarke Basic User +`prvReadsprk_BudgetRevision` Deep (16:06:59Z, 648 -> 649). S
 - **Read-back:** 2026-10-10T13:33:08Z, identical to the repaired document; 9 string constraints; 0 Length/Count objects. A scan of all 79 `sprk_analysisaction` rows found no other row with the artefact.
 - **Backup** of the corrupt row: session scratchpad `triage-fix/live-row-backup.json`.
 - **Owner of the row:** the email project (email-communication-intelligence); told on #1584.
+
+## 2026-10-10 - D-110: AppendTo on AI search index for Spaarke Core User (spaarkedev1, main session)
+
+- **Why:** task 046 live proof (#1609 notes §F.1, issue #1607): ordinary users holding Create on `sprk_workassignment` (Spaarke Core User, Deep) could not create a work assignment when their business unit names an AI search index — the wizard binds `sprk_AI_Search_Index` and the role had Read but not AppendTo on `sprk_aisearchindex` (UserOwned). Same bind in the Matter/Project/Event/Invoice wizards. Needed for Assign Work as a decision next step (043/046).
+- **What:** `AddPrivilegesRole` on the root **Spaarke Core User** (`75e1b627-2ab6-f111-aaad-0022482913fc`): `prvAppendTosprk_AISearchIndex` at **Deep** (matching its Read). Standing approval D-110 (CRUD-class privilege on Core User for users to work).
+- **Read-back:** 743 → 744 privileges; exactly one added (`748d407e-3d88-4ba4-86bc-1245bbe00862`, Deep); none removed or changed. Repo role XML updated to match.
