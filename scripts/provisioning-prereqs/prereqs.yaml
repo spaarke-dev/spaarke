@@ -31,9 +31,15 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 13
-last_updated: 2026-10-09
+manifest_version: 14
+last_updated: 2026-10-10
 author_task: customer-provisioning-orchestration-r1 / task 202
+# manifest_version 14 (2026-10-10, customer-provisioning-orchestration-r1 T263, owner decision 2026-10-10 #1562): H14m
+# creates the customer's Spaarke-tenant shared mailbox sprk-{customerId}-mail at the intake communicationDefaultMailbox
+# address and adds it to the PRQ-C-08 group. PRQ-C-08: the group's Name MUST be Spaarke-AppAccess-{customerId} (H14m
+# refuses another customer's group), and L2 now adds exactly one member (its own mailbox). PRQ-E-15: H14m needs two
+# more Exchange roles on the admin app (New-Mailbox -Shared; Add-DistributionGroupMember on Spaarke-AppAccess-* groups)
+# - PENDING OWNER DECISION D32; deployment guide section 4.2.1 step 5. Not asserted by the recipe (needs Exchange).
 # manifest_version 13 (2026-10-09, customer-provisioning-orchestration-r1; owner decision 2026-10-09 relayed by
 # spaarke-SPA-external-access-platform-r3, its design.md section 4.6 item 7 / C7): PRQ-C-14 ADDED - the CUSTOMER tenant's
 # cross-tenant access settings allow its users to become B2B guests in Spaarke's tenant (outbound B2B collaboration).
@@ -650,7 +656,7 @@ prereqs:
     scope: once_per_env
     frequency: once per tenant L2 provisions into (Spaarke's, for Model 1); the platform parameter exchangeAdminAppId names it
     owner: Spaarke platform admin (Entra Global Admin + Exchange Organization Management) — SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1
-    consequence_of_absence: H14a and H13 T4 fail on first use ("ExchangeAdminAppId is not configured", or the sign-in / Exchange call is refused); the stamp identity never receives its group-scoped mailbox roles, so its Mail.* calls 403 (trap T4).
+    consequence_of_absence: H14a and H13 T4 fail on first use ("ExchangeAdminAppId is not configured", or the sign-in / Exchange call is refused); the stamp identity never receives its group-scoped mailbox roles, so its Mail.* calls 403 (trap T4). Without the T263 roles (guide section 4.2.1 step 5, pending owner decision D32) H14m fails Resumable h14m-mailbox-ensure-failed naming PRQ-E-16 and creates nothing - no run reaches Ready.
     check_recipe:
       cli: |
         set -o pipefail
@@ -662,8 +668,8 @@ prereqs:
         [ -z "$keys" ] || { echo "app $appid holds a secret or certificate - it must hold none (D24/D25)"; exit 1; }
         echo ok
       expect: '`ok` - the app `Spaarke Exchange Admin` exists, a federated credential names the L2 Worker UAMI principal id, and the app holds NO secret or certificate. NOT asserted here (needs an interactive Exchange Online session, which Step 0.5b must not open): `Exchange.ManageAsApp` consent and, in Exchange, `Get-ManagementRoleAssignment -RoleAssignee <its service-principal object id>` listing `Spaarke App RBAC Admin`, `View-Only Recipients` and the four DelegatingOrgWide `Application Mail.*` / `MailboxSettings.Read` assignments - H14a / H13 T4 fail loudly on first use if they are missing'
-    remediation: 'Follow SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1 (Enable-OrganizationCustomization once per tenant — irreversible, ~1 h to apply). Never give the app a secret, a certificate or an Entra directory role.'
-    related_findings: [T251-G30, D24, D25, D26]
+    remediation: 'Follow SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1 (Enable-OrganizationCustomization once per tenant — irreversible, ~1 h to apply). Never give the app a secret, a certificate or an Entra directory role. Step 5 of §4.2.1 (T263 shared-mailbox roles, called PRQ-E-16 in H14m diagnostics) is applied ONLY after the owner approves decision D32.'
+    related_findings: [T251-G30, D24, D25, D26, T263-D32]
 
   - id: PRQ-E-14
     name: Registry schema current on the admin env — `sprk_dataverseenvironment` carries the v3.3 columns + `sprk_credentialmode` (T225b) + `sprk_bffappid` / `sprk_copilotauthconfigid` (T257)
@@ -860,7 +866,7 @@ prereqs:
     related_findings: [F13, T253]
 
   - id: PRQ-C-08
-    name: Exchange mail-enabled security group scoping the stamp identity's Exchange mailbox roles (H14a)
+    name: Exchange mail-enabled security group `Spaarke-AppAccess-{customerId}` scoping the stamp identity's Exchange mailbox roles (H14a) — H14m adds the customer's shared mailbox to it (T263)
     scope: once_per_customer
     frequency: once per customer, BEFORE the run (its id is an intake value — exchangePolicyScopeGroupId)
     owner: Exchange Online admin of the stamp's tenant (the customer's for Model 2; Spaarke's for Model 1)
@@ -871,9 +877,9 @@ prereqs:
         t=$(pwsh -NoProfile -Command "Connect-ExchangeOnline -ShowBanner:\$false -ErrorAction Stop; (Get-DistributionGroup -Identity '{exchangePolicyScopeGroupId}' -ErrorAction Stop).RecipientTypeDetails" | tr -d '\r' | sed -n '$p') || { echo "Exchange Online query for '{exchangePolicyScopeGroupId}' failed"; exit 1; }
         [ "$t" = "MailUniversalSecurityGroup" ] || { echo "group '{exchangePolicyScopeGroupId}' is '$t', not MailUniversalSecurityGroup"; exit 1; }
         echo ok
-      expect: "`ok` - RecipientTypeDetails is `MailUniversalSecurityGroup`. Its members being exactly the mailboxes Spaarke may read and send from (including communicationDefaultMailbox) is the Exchange admin's decision and is not asserted"
-    remediation: '`New-DistributionGroup -Name "Spaarke-AppAccess-{customerId}" -Type Security -Members <mailboxes>` in Exchange Online PowerShell, then enter its email address or object id as `exchangePolicyScopeGroupId` at intake. Membership is the customer''s access decision — which mailboxes the app may use — so L2 never creates or edits it (owner decision 2026-10-01, T245c).'
-    related_findings: [T245c, T4]
+      expect: "`ok` - RecipientTypeDetails is `MailUniversalSecurityGroup`. Its Name must be `Spaarke-AppAccess-{customerId}` (H14m refuses any other name - another customer's group - with Drift, nothing changed; T263). Which OTHER mailboxes are members is the customer's decision and is not asserted"
+    remediation: '`New-DistributionGroup -Name "Spaarke-AppAccess-{customerId}" -Type Security` in Exchange Online PowerShell (members optional), then enter its email address or object id as `exchangePolicyScopeGroupId` at intake. The name is binding since T263. H14m adds exactly one member - the customer''s shared mailbox `sprk-{customerId}-mail` at the intake communicationDefaultMailbox address (owner decision 2026-10-10, #1562); L2 never adds any other member and never removes one. Any other mailbox Spaarke may use is still the customer''s decision (owner decision 2026-10-01, T245c).'
+    related_findings: [T245c, T4, T263]
 
   - id: PRQ-C-09
     name: The customer's Dataverse environment exists (the operator creates it) and the L2 Worker identity is its System Administrator application user

@@ -457,8 +457,8 @@ same rules for batch mode.
 | `identityPreset` | H11 | `B2BGuest` \| `NativeAccount`, exact case (`userprov-missing-identity-preset` / `userprov-invalid-identity-preset`); **a `Model1` run takes only `B2BGuest`** (owner D2, T232 — `userprov-model1-requires-b2b-guest`) |
 | `environmentSecurityGroupId` | H11 | **B2BGuest (every Model 1 run)**: object id (GUID) of the environment's security group `sprk-{customerId}-users`, created by the operator and set on the environment (`PRQ-C-10`) — `userprov-missing-security-group-id` / `userprov-invalid-security-group-id` (T232) |
 | `usersJson` | H11 | JSON array, 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName`; `B2BGuest`: `email` (`userprov-missing-users` / `userprov-malformed-users-payload` / `userprov-invalid-user-entry` / `userprov-too-many-users`). Personal data: stored in the L2 run document (owner decision D15); never in git; diagnostics and logs identify users by position / Entra object id. |
-| `exchangePolicyScopeGroupId` | H14a | non-blank (`h14a-missing-policy-scope-group-id`). The mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (only its **direct** members' mailboxes are reachable) — **created by the Exchange admin of the stamp's tenant before the run** (prerequisite `PRQ-C-08`; L2 never creates it — its membership is the customer's access decision). |
-| `communicationDefaultMailbox` | H4 → KV `Communication-DefaultMailbox` | `local@domain.tld` (`intake-communication-default-mailbox-invalid`) |
+| `exchangePolicyScopeGroupId` | H14a, H14m | non-blank (`h14a-missing-policy-scope-group-id`). The mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (only its **direct** members' mailboxes are reachable) — **created by the Exchange admin of the stamp's tenant before the run**, named **`Spaarke-AppAccess-{customerId}`** (prerequisite `PRQ-C-08`; L2 never creates it). H14m adds exactly one member — the customer's shared mailbox (T263); every other member is the customer's access decision. |
+| `communicationDefaultMailbox` | H4 → KV `Communication-DefaultMailbox`; H14m | `local@domain.tld` (`intake-communication-default-mailbox-invalid`). **The address of the customer's Spaarke-tenant shared mailbox that H14m creates** (T263): an address in an accepted domain of Spaarke's tenant (e.g. `acme@spaarke.onmicrosoft.com`) that is **not** in use — an existing mailbox there that is not this customer's `sprk-{customerId}-mail` quarantines the run. |
 
 **API surface** (per FR-21):
 
@@ -506,10 +506,32 @@ legacy and caps at a few hundred policies per tenant). L2 does that through its 
    Worker reads the tenant's initial domain (`contoso.onmicrosoft.com`) there and the sidecar connects with
    `-Organization <initial domain>` — the only value Microsoft documents for app-only sign-in. With the tenant id, Exchange
    connects and reads but refuses every write with "doesn't have write permission to target DC" (2026-10-04).
+5. **Shared-mailbox roles for H14m (task 263) — PENDING OWNER DECISION D32. Do not apply before the owner approves.**
+   H14m creates each customer's shared mailbox and adds it to the customer's scope group. `Spaarke App RBAC Admin` cannot
+   (it holds no `New-Mailbox` or `Add-DistributionGroupMember`), and widening it is an owner decision. The narrowest set
+   found is two custom roles plus one scope, assigned with `-App` (non-delegating). Run as an Organization Management
+   admin; first confirm the parents with `Get-ManagementRoleEntry '*\New-Mailbox' -Parameters Shared` and
+   `Get-ManagementRoleEntry '*\Add-DistributionGroupMember' -Parameters BypassSecurityGroupManagerCheck`:
+   ```powershell
+   New-ManagementRole -Name 'Spaarke Shared Mailbox Create' -Parent 'Mail Recipient Creation' -EnabledCmdlets New-Mailbox
+   Set-ManagementRoleEntry 'Spaarke Shared Mailbox Create\New-Mailbox' -Parameters Shared,Name,Alias,DisplayName,PrimarySmtpAddress
+   New-ManagementRole -Name 'Spaarke Scope Group Membership' -Parent 'Security Group Creation and Membership' -EnabledCmdlets Add-DistributionGroupMember
+   Set-ManagementRoleEntry 'Spaarke Scope Group Membership\Add-DistributionGroupMember' -Parameters Identity,Member,BypassSecurityGroupManagerCheck
+   New-ManagementScope -Name 'Spaarke Customer Scope Groups' -RecipientRestrictionFilter "RecipientTypeDetails -eq 'MailUniversalSecurityGroup' -and Name -like 'Spaarke-AppAccess-*'"
+   New-ManagementRoleAssignment -Name 'sprk-exoadmin-sharedmbx-create' -App <app id> -Role 'Spaarke Shared Mailbox Create'
+   New-ManagementRoleAssignment -Name 'sprk-exoadmin-scopegroup-member' -App <app id> -Role 'Spaarke Scope Group Membership' -CustomResourceScope 'Spaarke Customer Scope Groups'
+   ```
+   Then run live checks M1–M7 (`projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md`
+   §5). Without these roles H14m fails Resumable (`h14m-mailbox-ensure-failed`, naming PRQ-E-16) **before** creating
+   anything — Exchange Online only loads the cmdlets a caller's roles allow, and the sidecar checks for both first.
+   Not requested: `Remove-Mailbox` / `Remove-DistributionGroupMember` (decommission is manual in r1 — §7.9) and
+   `Set-Mailbox`.
 
 Residual risk, stated plainly: an identity that can create application role assignments can grant any app — itself
-included — the four mailbox roles organization-wide (the scope is optional). Only the L2 Worker can obtain its token;
-audit `New-ManagementRoleAssignment` in the unified audit log.
+included — the four mailbox roles organization-wide (the scope is optional). With step 5 it can also create any
+shared mailbox and add any recipient to any `Spaarke-AppAccess-*` group, which would let that customer's stamp reach it;
+the code only ever adds `sprk-{customerId}-mail` to its own customer's group. Only the L2 Worker can obtain its token;
+audit `New-ManagementRoleAssignment`, `New-Mailbox` and `Add-DistributionGroupMember` in the unified audit log.
 
 > **Verified live (2026-10-04)**: sign-in, connect with the initial domain, app-only writes (`New-ServicePrincipal`,
 > `New-ManagementRoleAssignment -RecipientGroupScope`), the escalation refusals, and `Test-ServicePrincipalAuthorization`
@@ -1347,9 +1369,34 @@ Both consume the **declarative seed manifest** (resolves the `scripts/seed-data`
 
 ### 7.9 Phase 9 — Post-Deploy Integrations (H14)
 
-One sub-step:
+Two sub-steps, in order (H14m is not attempted when H14a fails — its authorization test needs H14a's assignments):
 
 - **(a) Exchange mailbox access (RBAC for Applications, task 251)** — the stamp UAMI only (the BFF app registration does no app-only mail; granting it would widen its reach). Through the Worker's sidecar: register the UAMI in Exchange (`New-ServicePrincipal`), then one assignment per mailbox role, named `{prefix}-{customerId}-{Role}`, scoped to the intake group. Get-before-set: any existing assignment that differs → Drift, nothing changed (**T4**). Grants take effect in 30 min – 2 h (Microsoft).
+- **(m) The customer's shared mailbox (H14m, task 263 — owner decision 2026-10-10, #1562)** — Model 1 reaches only
+  Spaarke-tenant mailboxes (customer staff mailboxes live in their home tenant), so each customer gets **one Spaarke-tenant
+  shared mailbox**:
+  1. Through the sidecar (`POST /ensure-customer-mailbox`), get-before-set: Exchange name/alias `sprk-{customerId}-mail`,
+     address = intake `communicationDefaultMailbox` (the same value H4 writes to `Communication-DefaultMailbox`, so the
+     BFF's default sender is this mailbox), display name = intake `displayName`; created with `New-Mailbox -Shared` and
+     added to the scope group `Spaarke-AppAccess-{customerId}` (`Add-DistributionGroupMember`), then
+     `Test-ServicePrincipalAuthorization` must report every stamp mail role (`Application Mail.Read/ReadWrite/Send`) in scope.
+  2. In the stamp's Dataverse, as the BFF app registration (the H7/H7b identity): exactly one `sprk_communicationaccount`
+     row for that address — Shared Account, App-Only, send- and receive-enabled, default sender, `sprk_securitygroupid` =
+     the scope group, **Verified** (the message says it is Exchange's configuration-level authorization; Graph calls can lag a
+     new grant by 30 min – 2 h, and a user can re-run `POST /api/communications/accounts/{id}/verify` any time). L2 does not
+     call that endpoint: it is a user endpoint (Write on the account), and right after H14a its Graph test would fail.
+  - **A second run writes nothing** (mailbox `AlreadyCompliant`, row already Verified).
+  - **Quarantine, nothing changed** (`h14m-mailbox-drift`): a recipient with that name, alias or address that is not a
+    shared mailbox, has another name/address (another customer's or a person's), sits outside the scope group or in any
+    other group; or the scope group is not named `Spaarke-AppAccess-{customerId}`. `h14m-account-row-conflict`: the stamp
+    has several rows for the address, an inactive one, or one of another type.
+  - **Resumable**: `h14m-mailbox-ensure-failed` (sidecar / Exchange / **the T263 Exchange roles not applied — §4.2.1 step 5,
+    pending owner decision D32**; nothing is created), `h14m-mailbox-unverified` (a role not yet in scope; no row written),
+    `h14m-account-verification-failed` (the row says the BFF's own verification FAILED — never overwritten; re-verify in the
+    app, then resume), `h14m-account-row-failed`.
+  - **Decommission (manual in r1)**: `Remove-DistributionGroupMember -Identity 'Spaarke-AppAccess-{customerId}' -Member
+    'sprk-{customerId}-mail' -BypassSecurityGroupManagerCheck`, `Remove-Mailbox 'sprk-{customerId}-mail'` (soft-deleted 30
+    days), then **deactivate** (never delete) the account row. Design: `projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md`.
 
 **Removed (ISS-019 / #1560): H14b (Graph webhook subscriptions) and H14c (Dataverse service-endpoint webhook).** They registered
 receivers at `{stamp}/api/webhooks/graph/{module}` and `{stamp}/api/webhooks/dataverse/communication`; the stamp BFF maps neither
@@ -1357,9 +1404,8 @@ route (its mail receiver is `POST /api/communications/incoming-webhook`), so the
 stop at H14b. Mail needs no provisioning-time subscription: the BFF's `GraphSubscriptionManager` creates and renews its own
 Graph subscription for each receive-enabled mailbox, using the `Communication-WebhookUrl` that `customer.bicep` sets
 (`{stamp}/api/communications/incoming-webhook`); `InboundPollingBackupService` (5 min) and delta reconciliation (15 min)
-run regardless. The mailbox records themselves (`sprk_communicationaccount`, verified with
-`POST /api/communications/accounts/{id}/verify`) are not created by any provisioning step — an operator creates them by hand
-(tracked as #1562). Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. The stamp's
+run regardless. The mailbox record (`sprk_communicationaccount`) is created and verified by H14m (above) — no hand step.
+Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. The stamp's
 `Communication__WebhookSigningKey` setting still resolves to Key Vault secret `Communication-Webhook-SigningKey` (H4 generates it; the BFF requires it for the receiver's HMAC check).
 
 **Explicitly NOT included** (per r3 task 060): S2S consent flows — the S2S Dataverse app-reg was dropped.
@@ -1374,6 +1420,11 @@ run regardless. The mailbox records themselves (`sprk_communicationaccount`, ver
 - Workspace-layout render succeeds
 - Wizard field-map succeeds
 - **All 7 §4B T1–T7 silent-fail traps cleared** (see §9)
+- **The customer mailbox (T263)**: read-only, the shared mailbox `sprk-{customerId}-mail` exists at the intake address,
+  in the scope group and no other group, every stamp mail role in scope (`Test-ServicePrincipalAuthorization`), and the
+  stamp has exactly one active, shared, **Verified** `sprk_communicationaccount` row for it. Missing, foreign or
+  unverified → QuarantineRequired `h13-customer-mailbox-failed`; no verdict (sidecar or Dataverse unreachable, missing
+  input) → Resumable `h13-customer-mailbox-inconclusive`
 - **The §4D I2–I5 tenant-isolation invariants sample-verified on the deployed stamp** (see §8; I1 is a build gate —
   T230a), with I3 checking the Cosmos account holds exactly `cosmos-db.bicep`'s containers and partition keys
 - (Naming conformance is a blocking CI gate — `scripts/naming-conformance-check.ps1` in `sdap-ci.yml` — not a per-run

@@ -678,8 +678,8 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
   "users": [{ "firstName": "Ada", "lastName": "Lovelace", "email": "ada@acme.example", "companyName": "Acme" }],
   "environmentSecurityGroupId": "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
   "customerWorkforceTenantIds": ["4b6f2c1e-8d3a-4f5b-9c7e-2a1d0e9f8b7c"],
-  "exchangePolicyScopeGroupId": "spaarke-mail-scope@acme.example",
-  "communicationDefaultMailbox": "legal-comms@acme.example"
+  "exchangePolicyScopeGroupId": "Spaarke-AppAccess-acme@spaarke.onmicrosoft.com",
+  "communicationDefaultMailbox": "acme@spaarke.onmicrosoft.com"
 }
 ```
 
@@ -984,8 +984,8 @@ registry placeholder (the same "validate everything, then write" order `POST /ap
 | `identityPreset` | H11 | `B2BGuest` (invite guests; consent gate) or `NativeAccount` (create users in the stamp's tenant) — exact case. **`Model1` takes only `B2BGuest`** (owner D2, T232 — `userprov-model1-requires-b2b-guest`); this step sets it for a Model 1 run |
 | `environmentSecurityGroupId` | H11 | **B2BGuest (every Model 1 run)**: object id (GUID) of the environment's security group `sprk-{customerId}-users`, created by the operator and set on the environment before the run (`PRQ-C-10`). H11 adds each redeemed guest to it, then makes the guest a Dataverse user with the Spaarke role — the group keeps other customers' guests out of this environment. The environment must also allow guests (`PRQ-C-12`) and be linked to a pay-as-you-go billing policy on the stamp subscription (`PRQ-C-11` — Spaarke pays guest access PAYG, owner 2026-10-07; no licences are assigned). This step checks all three as the operator |
 | `users` → `usersJson` | H11 | 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName` (the UPN is built from them); `B2BGuest`: `email` (the invitation goes to it; names optional) |
-| `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (Entra object id or email address; only DIRECT members' mailboxes are reachable). **The Exchange admin of the stamp's tenant creates it before the run — prerequisite `PRQ-C-08`. This skill never creates or edits it** (owner decision 2026-10-01: its membership is the customer's decision about which mailboxes Spaarke may use). |
-| `communicationDefaultMailbox` | H4 (KV `Communication-DefaultMailbox`) | `local@domain.tld`, ≤ 254 characters — use a shared/service mailbox |
+| `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (Entra object id or email address; only DIRECT members' mailboxes are reachable). **The Exchange admin of the stamp's tenant creates it before the run, named `Spaarke-AppAccess-{customerId}` — prerequisite `PRQ-C-08`.** H14m adds exactly one member, the customer's shared mailbox (T263); every other member is the customer's decision. |
+| `communicationDefaultMailbox` | H4 (KV `Communication-DefaultMailbox`); H14m | `local@domain.tld`, ≤ 254 characters — the address of the Spaarke-tenant shared mailbox H14m CREATES (T263): an accepted domain of Spaarke's tenant (e.g. `acme@spaarke.onmicrosoft.com`), not in use by any other mailbox (that quarantines the run) |
 | `displayName` | H10 (customer business unit), registry `sprk_name` | **Every run (T259)**: 1–160 characters, no leading/trailing whitespace, no control character, never `Secure Record` (`h10-customer-display-name-required` / `-invalid`); defaults to `customerId` (1a-bis) |
 | `customerWorkforceTenantIds` | H4b → `WorkforceIdentity__CustomerTenantIds__N` (both slots); H13 T7 | **Every run (T255, INCOMING-141)**: the CUSTOMER's Entra tenant id(s), 1–10 distinct lowercase GUIDs. Model 1: the customer's HOME tenant (its staff are B2B guests from there) — never Spaarke's tenant / this run's `tenantId`; Model 2: the customer's tenant. POST /api/runs also refuses the CIAM tenant (`workforce-tenants-required` / `-invalid` / `-ciam-tenant` / `-spaarke-tenant`). Prerequisite `PRQ-C-13` |
 | `customerOutboundB2BAttested` | PRQ-C-14 (skill-local) | B2BGuest: `true` only after the customer's Entra admin confirmed outbound B2B collaboration to Spaarke's tenant; never sent to L2 |
@@ -1312,9 +1312,8 @@ INTAKE SUMMARY
   identityPreset:  B2BGuest
   users:           3 entries          (names/emails are NOT printed or written to intake.md)
   env group:       6f1c2b3a-...  sprk-acme-users  (PRQ-C-10; guest access PRQ-C-12 ✓; PAYG PRQ-C-11 confirmed)
-  exchange group:  spaarke-mail-scope@acme.example  (PRQ-C-08)
-  graph resources: communication=users/legal-comms@acme.example/messages  email=(none)
-  default mailbox: legal-comms@acme.example
+  exchange group:  Spaarke-AppAccess-acme@spaarke.onmicrosoft.com  (PRQ-C-08)
+  default mailbox: acme@spaarke.onmicrosoft.com  (H14m creates it as sprk-acme-mail)
   L2 API:          https://spaarke-provisioning-controlplane-dev.azurewebsites.net
 
 Proceed to preflight (H0)? (yes/no)

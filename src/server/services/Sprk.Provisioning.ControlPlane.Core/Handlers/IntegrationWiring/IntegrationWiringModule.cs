@@ -2,7 +2,8 @@
 // IntegrationWiringModule.cs
 //
 // L2 CONTROL-PLANE DI composition for the H14 post-deploy integration wiring
-// handler + its H14a sub-handler (task 073; H14b/H14c removed, ISS-019).
+// handler + its H14a sub-handler (task 073; H14b/H14c removed, ISS-019) + its
+// H14m customer-mailbox sub-handler (task 263).
 //
 // SCOPE:
 //   - Bind IntegrationWiring:{ExchangeAdminAppId, ExchangeAssignmentNamePrefix,
@@ -114,6 +115,13 @@ public static class IntegrationWiringModule
         services.AddHttpClient<ExchangePolicySidecarClient>();
         services.AddTransient<IExchangePolicyApplier>(sp => sp.GetRequiredService<ExchangePolicySidecarClient>());
         services.AddTransient<IExchangePolicyReadClient>(sp => sp.GetRequiredService<ExchangePolicySidecarClient>());
+        // Task 263: the same client serves H14m's customer-mailbox ensure and H13's read (one transport, one token).
+        services.AddTransient<ICustomerMailboxClient>(sp => sp.GetRequiredService<ExchangePolicySidecarClient>());
+
+        // Task 263: the stamp's sprk_communicationaccount row (H14m writes, H13 reads) — H7b's identity and options
+        // (EnvVarValuesOptions + the Worker's WorkerDataverseCredentialFactory), its own named HttpClient.
+        services.AddHttpClient(DataverseWebApiCommunicationAccountStore.HttpClientName);
+        services.AddScoped<ICommunicationAccountStore, DataverseWebApiCommunicationAccountStore>();
 
         // Task 160: SecretClientKvReader needs the shared UAMI-pinned
         // TokenCredential singleton (AddCosmosModule, ADR-028 MI-outbound) —
@@ -134,8 +142,9 @@ public static class IntegrationWiringModule
         // fan-out). Each is ALSO independently resolvable/testable per the
         // POML acceptance criterion ("each sub-handler... registers in L2 DI").
         services.AddScoped<H14aExchangePolicySubHandler>();
+        services.AddScoped<H14mCustomerMailboxSubHandler>();   // task 263
 
-        // Parent handler — the ONLY one of the 2 a reconciler dispatches off the
+        // Parent handler — the ONLY one of the 3 a reconciler dispatches off the
         // Service Bus queue (HandlerId "H14"); it resolves H14a via constructor
         // injection (see H14IntegrationWiringHandler.cs file header for the
         // single-writer rationale).

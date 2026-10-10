@@ -51,4 +51,14 @@
     <criterion testable="true">A same-named mailbox outside the scope group or owned by another customer quarantines the run (no change).</criterion>
     <criterion testable="true">Build 0/0; ControlPlane tests, ArchTests, LoadTests pass.</criterion>
   </acceptance-criteria>
+  <notes>
+    <note date="2026-10-10">Code + tests complete (worktree agent). Design note notes/t263-customer-shared-mailbox.md:
+      H14m runs after H14a; mailbox sprk-{customerId}-mail at intake communicationDefaultMailbox (one producer; deviation from
+      "address derived from customerId" recorded in note §2), joined to Spaarke-AppAccess-{customerId} (name now binding,
+      tenant-isolation check), Exchange authorization test, verified sprk_communicationaccount row (BFF app registration,
+      FR-39 chain); H13 step 7c re-checks read-only. L2 does not call the BFF verify endpoint (user endpoint; Graph effect
+      lags 30 min - 2 h). Not done (OWNER): D32 - two custom Exchange roles + one scope for Spaarke Exchange Admin
+      (New-Mailbox -Shared; Add-DistributionGroupMember on Spaarke-AppAccess-* groups), never widened in code; until
+      applied H14m fails Resumable before any write (ISS-024). Live checks M1-M7 owed. No live action taken.</note>
+  </notes>
 </task>

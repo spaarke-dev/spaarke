@@ -392,6 +392,31 @@ caller on a stamp; none is a boot failure.
 with "unresolved placeholder" on PRQ-C-10. Fix when Model 2 returns: resolve to `notApplicable` for non-B2BGuest runs and let
 PRQ-C-10's recipe SKIP (the PRQ-C-14 pattern).
 
+### ISS-024 — H14m (customer shared mailbox) needs two Exchange roles the owner has not approved yet
+
+| Field | Value |
+|---|---|
+| **Status** | Open — **blocks T186 reaching Ready** once T263 merges; owner decision D32 (proposed) |
+| **Filed** | 2026-10-10 (T263; number provisional — the main session assigns ISS numbers) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1562 (the mail-model issue; T263 implements it) |
+
+T263 built H14m: `sprk-{customerId}-mail` is created as a shared mailbox, added to `Spaarke-AppAccess-{customerId}`,
+authorization-tested, and recorded as the stamp's verified `sprk_communicationaccount` row. H13 re-checks all of it.
+`Spaarke Exchange Admin` holds only `Spaarke App RBAC Admin` plus `View-Only Recipients`, so it cannot run `New-Mailbox`
+or `Add-DistributionGroupMember`. Widening it is an owner decision (D25; `provisioning.md`).
+
+The sidecar detects the missing cmdlets before any write, so every run fails Resumable at H14m with
+`h14m-mailbox-ensure-failed` ("PRQ-E-16 … not applied") and creates nothing.
+
+**Needs**:
+1. The owner approves D32: the two custom roles plus one scope in `notes/t263-customer-shared-mailbox.md` §5, with
+   the exact cmdlets and parameters.
+2. An Organization Management admin applies them (deployment guide §4.2.1 step 5).
+3. Run live checks M1–M7, notably M5: whether `Get-Recipient -Filter "Members -eq '<DN>'"` works. If it does not, use
+   the one-line fallback in the note.
+
+Until then, merge T263 only together with the approval, or accept that T186 stops at H14m.
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->

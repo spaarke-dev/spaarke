@@ -2,8 +2,11 @@
 // H14IntegrationWiringHandler.cs
 //
 // L2 CONTROL-PLANE H14 post-deploy integration wiring handler (task 073, wave
-// C4 Batch 3F). Parent of ONE in-process sub-handler: H14a Exchange RBAC for
-// Applications (T4 silent-fail trap owner). H14b (Graph webhook subscriptions)
+// C4 Batch 3F). Parent of TWO in-process sub-handlers, run in order: H14a Exchange
+// RBAC for Applications (T4 silent-fail trap owner), then H14m — the customer's
+// Spaarke-tenant shared mailbox and its verified sprk_communicationaccount row
+// (task 263, owner decision 2026-10-10 #1562). H14m needs H14a's grants for its
+// authorization test, so it is not attempted when H14a fails. H14b (Graph webhook subscriptions)
 // and H14c (Dataverse service-endpoint webhook) were REMOVED under ISS-019 /
 // #1560: they registered webhooks at /api/webhooks/graph/{module} and
 // /api/webhooks/dataverse/communication, routes the BFF never mapped, and the
@@ -13,7 +16,8 @@
 // PURPOSE:
 //   Wires the customer environment's mail access per spec.md FR-19 (a): the
 //   stamp UAMI's group-scoped "Application Mail.*" roles (RBAC for
-//   Applications, task 251; T4 action-and-verify). S2S consent sub-step (d) is
+//   Applications, task 251; T4 action-and-verify) and the customer mailbox those
+//   roles reach (H14m, task 263). S2S consent sub-step (d) is
 //   explicitly NOT included per r3 task 060 -- see
 //   <see cref="AssertNoS2SSubStep"/>.
 //
@@ -26,8 +30,8 @@
 //        upstream field fails the whole H14 invocation Resumable.
 //     3. Computes H14a's deterministic expected idempotency key and checks
 //        run.CompletedPhases for a match (level-3 idempotency).
-//     4. Dispatches H14a (or reuses the recorded completion).
-//     5. Persists the sub-step's CompletedPhase on success and classifies a
+//     4. Dispatches H14a, then H14m (or reuses a recorded completion).
+//     5. Persists each sub-step's CompletedPhase on success and classifies a
 //        failure per §4C.
 //     6. Performs ONE ReplaceRunAsync call with the etag from step 1.
 //
@@ -46,11 +50,14 @@
 //   │ Failure mode                               │ §4C class                 │
 //   ├────────────────────────────────────────────┼───────────────────────────┤
 //   │ Missing tenantId/exchangePolicyScopeGroupId │ Resumable                 │
+//   │ /displayName/communicationDefaultMailbox    │                           │
 //   │ (run params)                                │                           │
 //   │ Missing miClientId/miObjectId               │ Resumable (upstream       │
 //   │ (InterStepState)                            │ handler hasn't run yet)   │
 //   │ Run not found in Cosmos partition           │ Resumable                 │
 //   │ T4 drift (H14a)                             │ QuarantineRequired        │
+//   │ Foreign / out-of-scope mailbox, row conflict│ QuarantineRequired        │
+//   │ (H14m)                                      │                           │
 //   │ Concurrent Cosmos writer conflict           │ Resumable                 │
 //   │ Run row deleted mid-flight                  │ Resumable                 │
 //   └────────────────────────────────────────────┴───────────────────────────┘
@@ -79,14 +86,15 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
     public const string ExchangePolicyScopeGroupIdParameterKey = "exchangePolicyScopeGroupId";
 
     /// <summary>
-    /// Exactly 1 in-process sub-step -- H14a Exchange. H14b (Graph webhooks) and H14c
-    /// (Dataverse webhooks) were removed (ISS-019); S2S consent (d) is explicitly NOT a
+    /// Exactly 2 in-process sub-steps -- H14a Exchange roles, then H14m the customer mailbox (task 263). H14b
+    /// (Graph webhooks) and H14c (Dataverse webhooks) were removed (ISS-019); S2S consent (d) is explicitly NOT a
     /// sub-step (r3 task 060 dropped it).
     /// </summary>
-    public const int ExpectedSubStepCount = 1;
+    public const int ExpectedSubStepCount = 2;
 
     private readonly IProvisioningRunRepository _repository;
     private readonly H14aExchangePolicySubHandler _h14a;
+    private readonly H14mCustomerMailboxSubHandler _h14m;
     private readonly IntegrationWiringOptions _options;
     private readonly ILogger<H14IntegrationWiringHandler> _logger;
 
@@ -96,16 +104,19 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
     public H14IntegrationWiringHandler(
         IProvisioningRunRepository repository,
         H14aExchangePolicySubHandler h14a,
+        H14mCustomerMailboxSubHandler h14m,
         IOptions<IntegrationWiringOptions> options,
         ILogger<H14IntegrationWiringHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(h14a);
+        ArgumentNullException.ThrowIfNull(h14m);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
         _h14a = h14a;
+        _h14m = h14m;
         _options = options.Value;
         _logger = logger;
 
@@ -114,19 +125,19 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
 
     /// <summary>
     /// Startup verification (POML step 5 / acceptance criterion 7): H14 has
-    /// EXACTLY 1 sub-step. r3 task 060 dropped the S2S consent sub-step (d)
+    /// EXACTLY 2 sub-steps (H14a, H14m). r3 task 060 dropped the S2S consent sub-step (d)
     /// — this assertion is a forcing-function that fires loudly (not a
     /// silent no-op) if a future edit ever grows a 4th sub-handler field
     /// without updating <see cref="ExpectedSubStepCount"/> in lockstep.
     /// </summary>
     internal static void AssertNoS2SSubStep()
     {
-        if (ExpectedSubStepCount != 1)
+        if (ExpectedSubStepCount != 2)
         {
             throw new InvalidOperationException(
-                $"H14 sub-step count invariant violated: expected exactly 1 (Exchange), " +
-                $"got {ExpectedSubStepCount}. S2S consent (d) is explicitly NOT a 4th sub-step per r3 task 060 — " +
-                "if a 4th sub-handler was intentionally added, this assertion + its doc comment must be updated " +
+                $"H14 sub-step count invariant violated: expected exactly 2 (H14a Exchange roles, H14m customer mailbox), " +
+                $"got {ExpectedSubStepCount}. S2S consent (d) is explicitly NOT a sub-step per r3 task 060 — " +
+                "if another sub-handler was intentionally added, this assertion + its doc comment must be updated " +
                 "together, and the addition must NOT be the S2S consent step.");
         }
     }
@@ -206,13 +217,43 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
                 "InterStepState.miObjectId is not populated — the UAMI (H2a/uami.bicep) must complete before H14.",
                 cancellationToken).ConfigureAwait(false);
         }
+        // H14m (task 263): the shared mailbox's display name + address (intake, one producer each) and the stamp
+        // Dataverse + identity its sprk_communicationaccount row is written with (the H7/H7b identity).
+        if (!TryGetNonEmpty(parameters, IntakeParameterCatalog.DisplayName, out var displayName))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingDisplayName,
+                "Run parameter 'displayName' is required by H14m (the customer mailbox's display name).", cancellationToken)
+                .ConfigureAwait(false);
+        }
+        if (!TryGetNonEmpty(parameters, IntakeParameterCatalog.CommunicationDefaultMailbox, out var mailboxAddress))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingMailboxAddress,
+                "Run parameter 'communicationDefaultMailbox' is required by H14m (the customer mailbox's address).", cancellationToken)
+                .ConfigureAwait(false);
+        }
+        if (string.IsNullOrWhiteSpace(interStep.DataverseEnvUrl))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingDataverseEnvUrl,
+                "InterStepState.dataverseEnvUrl is not populated — H5 must complete before H14 (H14m writes the account row there).",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (string.IsNullOrWhiteSpace(interStep.BffAppRegId))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingBffAppRegId,
+                "InterStepState.bffAppRegId is not populated — H3 must complete before H14 (H14m signs in to Dataverse as it).",
+                cancellationToken).ConfigureAwait(false);
+        }
         var uamiClientId = interStep.MiClientId!;
         var uamiObjectId = interStep.MiObjectId!;
+        var dataverseUrl = interStep.DataverseEnvUrl!;
+        var bffAppRegId = interStep.BffAppRegId!;
 
-        // (4) Compute the sub-step's deterministic expected key + build its
+        // (4) Compute each sub-step's deterministic expected key + build its
         // dispatch task (pre-completed Success if already recorded, else a
         // real invocation).
         var h14aKey = _h14a.ExpectedIdempotencyKey(envelope.CustomerId, uamiClientId, policyScopeGroupId, _options.ExchangeAssignmentNamePrefix);
+        var h14mKey = H14mCustomerMailboxSubHandler.ExpectedIdempotencyKey(
+            envelope.CustomerId, uamiClientId, policyScopeGroupId, mailboxAddress, dataverseUrl);
 
         var h14aTask = BuildSubStepTask(
             run, H14aExchangePolicySubHandler.HandlerIdentifier, h14aKey,
@@ -228,14 +269,32 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
                 },
                 cancellationToken));
 
-        // (5) Dispatch (pre-completed reuse resolves instantly).
-        await h14aTask.ConfigureAwait(false);
+        // (5) Dispatch in order (pre-completed reuse resolves instantly). H14m only after H14a succeeded: its
+        // authorization test needs H14a's group-scoped assignments.
+        var h14aResult = await h14aTask.ConfigureAwait(false);
+        var h14mResult = h14aResult is HandlerResult.Success
+            ? await BuildSubStepTask(
+                run, H14mCustomerMailboxSubHandler.HandlerIdentifier, h14mKey,
+                () => _h14m.HandleAsync(
+                    new HandlerEnvelope
+                    {
+                        HandlerId = H14mCustomerMailboxSubHandler.HandlerIdentifier,
+                        RunId = envelope.RunId,
+                        CustomerId = envelope.CustomerId,
+                        ParametersJson = H14mCustomerMailboxSubHandler.BuildParametersJson(
+                            tenantId, uamiClientId, policyScopeGroupId, displayName, mailboxAddress, dataverseUrl, bffAppRegId),
+                        EnqueuedAt = DateTimeOffset.UtcNow,
+                    },
+                    cancellationToken)).ConfigureAwait(false)
+            : new HandlerResult.Failure(FailureClass.Resumable, H14Rejections.SubStepFailed,
+                "Not attempted: H14a did not succeed, and H14m's authorization test needs H14a's assignments.");
 
         var subResults = new (string PhaseId, HandlerResult Result)[]
         {
-            (H14aExchangePolicySubHandler.HandlerIdentifier, h14aTask.Result),
+            (H14aExchangePolicySubHandler.HandlerIdentifier, h14aResult),
+            (H14mCustomerMailboxSubHandler.HandlerIdentifier, h14mResult),
         };
-        Debug.Assert(subResults.Length == ExpectedSubStepCount, "H14 must always aggregate exactly 1 sub-step result.");
+        Debug.Assert(subResults.Length == ExpectedSubStepCount, "H14 must always aggregate exactly 2 sub-step results.");
 
         // (6) Persist partial success: any substep that succeeded THIS
         // invocation (or was already-completed) gets its CompletedPhase
@@ -299,7 +358,7 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
         }
 
         // (7) All sub-steps succeeded — record the parent "H14" completion.
-        var parentKey = BuildParentIdempotencyKey(envelope.CustomerId, h14aKey);
+        var parentKey = BuildParentIdempotencyKey(envelope.CustomerId, h14aKey, h14mKey);
         run.Status = RunStatus.Running;
         run.CurrentPhase = HandlerIdentifier;
         run.CompletedPhases.Add(new CompletedPhase
@@ -363,6 +422,7 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
     private static string GateForPhase(string phaseId) => phaseId switch
     {
         H14aExchangePolicySubHandler.HandlerIdentifier => H14Gates.ExchangePolicyApplied,
+        H14mCustomerMailboxSubHandler.HandlerIdentifier => H14Gates.CustomerMailboxVerified,
         _ => throw new InvalidOperationException($"Unknown H14 sub-step phase id '{phaseId}'."),
     };
 
@@ -377,13 +437,13 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
     /// <summary>
     /// Computes the deterministic H14 (parent) idempotency key:
     /// <c>h14-{customerId}-{combinedHash}</c> where combinedHash is SHA-256
-    /// over the sub-step key. Exposed internal so unit tests can
+    /// over the sub-step keys in order. Exposed internal so unit tests can
     /// construct the expected key.
     /// </summary>
-    internal static string BuildParentIdempotencyKey(string customerId, string h14aKey)
+    internal static string BuildParentIdempotencyKey(string customerId, string h14aKey, string h14mKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(customerId);
-        var payload = h14aKey;
+        var payload = h14aKey + "|" + h14mKey;
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
         return $"h14-{customerId}-{hash}";
     }

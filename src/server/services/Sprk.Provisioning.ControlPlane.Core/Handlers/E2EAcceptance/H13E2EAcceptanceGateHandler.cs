@@ -155,6 +155,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     private readonly ICostEnvelopeChecker _costChecker;
     private readonly IRegistrySetupStatusUpdater _registryUpdater;
     private readonly IDataverseEnvironmentRegistryClient _registryClient;
+    private readonly ICustomerMailboxVerifier _mailboxVerifier;
     private readonly H13AcceptanceOptions _options;
     private readonly ILogger<H13E2EAcceptanceGateHandler> _logger;
 
@@ -170,6 +171,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         ICostEnvelopeChecker costChecker,
         IRegistrySetupStatusUpdater registryUpdater,
         IDataverseEnvironmentRegistryClient registryClient,
+        ICustomerMailboxVerifier mailboxVerifier,
         IOptions<H13AcceptanceOptions> options,
         ILogger<H13E2EAcceptanceGateHandler> logger)
     {
@@ -181,6 +183,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(costChecker);
         ArgumentNullException.ThrowIfNull(registryUpdater);
         ArgumentNullException.ThrowIfNull(registryClient);
+        ArgumentNullException.ThrowIfNull(mailboxVerifier);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -192,6 +195,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         _costChecker = costChecker;
         _registryUpdater = registryUpdater;
         _registryClient = registryClient;
+        _mailboxVerifier = mailboxVerifier;
         _options = options.Value;
         _logger = logger;
     }
@@ -562,17 +566,44 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 $"The census call threw: {ex.GetType().Name}: {ex.Message}.");
         }
 
+        // (7c) Customer mailbox (task 263, #1562): the shared mailbox H14m created is in the scope group, Exchange
+        //      authorizes the stamp identity's mail roles on it, and the stamp has exactly one verified account row.
+        //      Read-only. Failed -> QuarantineRequired; no verdict -> Resumable.
+        CustomerMailboxVerificationOutcome mailboxOutcome;
+        try
+        {
+            mailboxOutcome = await _mailboxVerifier.VerifyAsync(
+                new CustomerMailboxVerificationRequest(
+                    CustomerId: envelope.CustomerId,
+                    RunId: envelope.RunId,
+                    TenantId: tenantId,
+                    UamiClientId: uamiClientId,
+                    ScopeGroupId: parameters.TryGetValue(IntakeParameterCatalog.ExchangePolicyScopeGroupId, out var mailboxScopeGroup) ? mailboxScopeGroup : string.Empty,
+                    DisplayName: parameters.TryGetValue(IntakeParameterCatalog.DisplayName, out var mailboxDisplayName) ? mailboxDisplayName : string.Empty,
+                    MailboxAddress: parameters.TryGetValue(IntakeParameterCatalog.CommunicationDefaultMailbox, out var mailboxAddress) ? mailboxAddress : string.Empty,
+                    DataverseUrl: dataverseUrl,
+                    BffAppRegId: bffAppRegId),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "H13 customer mailbox check infra fault: runId={RunId} customerId={CustomerId}", envelope.RunId, envelope.CustomerId);
+            mailboxOutcome = new CustomerMailboxVerificationOutcome.Inconclusive($"The customer mailbox check threw: {ex.GetType().Name}: {ex.Message}.");
+        }
+
         // (8) DECISION: aggregate every collaborator's outcome + pick failure
         //     with correct §4C classification. Priority order:
         //       (a) Trap/invariant FAILED → QuarantineRequired (silent-fail
         //           actually manifested — CATASTROPHIC).
         //       (a1) Secure-isolation census not isolated / inert / failed → QuarantineRequired (task 260).
         //       (a2) Stamp accepts keys (ARM, task 230b) → QuarantineRequired.
+        //       (a3) Customer mailbox missing / foreign / unverified (task 263) → QuarantineRequired.
         //       (b) Live checks FAILED (incl. the keyless proof) → QuarantineRequired.
         //       (c) Cost drift (fail-run mode) → QuarantineRequired.
         //       (d) Trap/invariant/ARM-keyless InfraFault → Resumable (no verdict).
         //       (d2) Live checks Inconclusive → Resumable (task 230b).
         //       (d3) Secure-isolation census Inconclusive → Resumable (task 260).
+        //       (d4) Customer mailbox check Inconclusive → Resumable (task 263).
         //       (e) Cost query infra fault → Resumable.
         //     Advisory-warn cost drift is NOT a failure branch — it's attached
         //     to the diagnostic + gate-state but the Ready transition still
@@ -623,6 +654,14 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 H13Rejections.StampKeyAuthEnabled,
                 $"The stamp is not keyless (owner D13): {string.Join(" | ", keyed.Violations)}. Disable key auth in the " +
                 "module / remove the setting, redeploy (H2a / H4b), then resume.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (mailboxOutcome is CustomerMailboxVerificationOutcome.Failed mailboxFailed)
+        {
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                H13Rejections.CustomerMailboxFailed,
+                "The customer's shared mailbox is not in place (task 263, #1562): " + string.Join(" | ", mailboxFailed.Problems) +
+                " Fix the cause (H14m's diagnostic, the scope group, the account row), then resume.",
                 cancellationToken).ConfigureAwait(false);
         }
         if (validationOutcome is E2EValidationOutcome.Failure valFail)
@@ -676,6 +715,21 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             return await FailAsync(run, etag, FailureClass.Resumable,
                 H13Rejections.SecureIsolationInconclusive,
                 $"The secure-record isolation census reached no verdict (task 260): {censusInconclusive.Diagnostic}",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (mailboxOutcome is CustomerMailboxVerificationOutcome.Inconclusive mailboxInconclusive)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                H13Rejections.CustomerMailboxInconclusive,
+                $"The customer mailbox check reached no verdict (task 263): {mailboxInconclusive.Diagnostic}",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (mailboxOutcome is not CustomerMailboxVerificationOutcome.Passed)
+        {
+            // Defence in depth: an outcome this handler does not know never reaches Ready.
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                H13Rejections.CustomerMailboxFailed,
+                $"The customer mailbox check returned an unhandled outcome '{mailboxOutcome.GetType().Name}'.",
                 cancellationToken).ConfigureAwait(false);
         }
         if (censusOutcome is not SecureIsolationCensusOutcome.Isolated)
@@ -1133,6 +1187,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         run.GateStates[H13Gates.ExtendedValidationVerified] = verified;
         run.GateStates[H13Gates.StampKeylessVerified] = verified;
         run.GateStates[H13Gates.SecureIsolationVerified] = verified;
+        run.GateStates[H13Gates.CustomerMailboxVerified] = verified;   // task 263
         run.GateStates[H13Gates.TrapCatalogVerified] = verified;
         run.GateStates[H13Gates.InvariantCatalogVerified] = verified;
         run.GateStates[H13Gates.CostEnvelopeVerified] = new GateEntry
