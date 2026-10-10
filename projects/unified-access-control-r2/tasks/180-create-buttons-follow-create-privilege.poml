@@ -3,7 +3,7 @@
   <metadata>
     <title>Custom Create / wizard ribbon buttons hide when the user lacks the Create privilege on the target table (owner round 89 item 2)</title>
     <phase>Session 28 — UAC (owner round 89, 2026-10-09)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Ribbon XML and declarative rules only; no code. Many ribbons are touched and must be deployed and verified.</rigor-reason>
     <model-tier>opus</model-tier>

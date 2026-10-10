@@ -133,3 +133,9 @@ The server side passed its live gate (2026-10-09). These are the browser checks 
 3. **Your example.** Under an ordinary matter, Make Secure on the work assignment itself, then secure and unsecure the matter. **PASS:** the work assignment stays secure.
 4. **PASS for all three:** no console errors, and the form is readable in dark mode.
 
+## 10. Create buttons follow the Create privilege (task 180, on dev since 2026-10-10)
+
+Server side: `Set-CreatePrivilegeRibbon.ps1 -Verify` PASSED on 2026-10-10. 14 custom create and wizard commands on 7 tables carry the Create rule, and the modern "New Document" command is hidden.
+1. **A read-only user (G180-2).** Give a test user a role with Read and no Create, for example Spaarke Basic User only, with no Office Add In User. Open a matter, a project and the Documents grid. **PASS:** no Create To Do, Create Event, Create Project, Upload Documents, New Matter, New Analysis or Save the email as documents buttons.
+2. **A Core User.** **PASS:** every one of those buttons is still shown.
+
