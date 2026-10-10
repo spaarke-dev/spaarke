@@ -18,6 +18,7 @@
       <DisplayRules>
         <DisplayRule Id="sprk.Email.ArchiveEmail.DisplayRule.Web" />
         <DisplayRule Id="sprk.Email.ArchiveEmail.DisplayRule.NotArchived" />
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_document.DisplayRule" />
       </DisplayRules>
       <Actions>
         <JavaScriptFunction Library="$webresource:sprk_emailactions.js" FunctionName="Spaarke.Email.saveToDocument">
@@ -36,6 +37,9 @@
       </DisplayRule>
       <DisplayRule Id="sprk.Email.ArchiveEmail.DisplayRule.Web">
         <CrmClientTypeRule Type="Web" />
+      </DisplayRule>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_document.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_document" PrivilegeType="Create" PrivilegeDepth="Basic" />
       </DisplayRule>
     </DisplayRules>
     <EnableRules>

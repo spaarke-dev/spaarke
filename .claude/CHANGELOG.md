@@ -7,6 +7,12 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-09 — On-demand AI spend report and dashboard (ai-cost-report-r1)
+
+- **`scripts/ai-cost/spend-report.py`** (new): per-day / project / model / main-vs-sub-agent spend with cost components, a text "Biggest drivers" summary, and `--format json|csv|html`. The HTML dashboard is self-contained, uses Chart.js and has a project filter. `scripts/ai-cost/README.md` documents all three scripts.
+- **`.claude/skills/project-spend-update/SKILL.md`:** Step 4 runs the report and dashboard; new trigger phrases; the description names it.
+
+---
 ###### 2026-10-09 — Model choice is deliberate: every agent states its model; no blanket default (model-selection-r1)
 
 Owner direction 2026-10-09: no arbitrary model, and spend what improves the code, nothing more. A session picks the model and effort per piece of work and never asks the user. This replaces the `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` default added earlier the same day (#1538).
