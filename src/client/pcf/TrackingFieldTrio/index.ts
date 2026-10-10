@@ -123,6 +123,11 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.47 (task 179, unified-access-control-r2 — owner round 89; merged over task 181's v1.0.46): no change in this
+ *   file's logic. The bundled `AccessGrantModal` names the rule when Manage Access is refused — Write on the record AND
+ *   the Share privilege on its table ("Write and Share required") — and says "Access could not be checked" when the
+ *   server could not evaluate it, instead of the old "Write access required". Carries task 181's notification change.
+ *
  * v1.0.46 (task 181, unified-access-control-r2 — owner round 89 item 3): the bundled `AccessGrantModal` no longer
  *   shows the dev "Internal notify (deep-link) is not yet available … (escalated; see project notes)" notice. The BFF
  *   now notifies an internal user in-app (a link to the record) when `/grant` or `/share-user` gives them access; the
@@ -1489,7 +1494,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.46 • Built 2026-10-09',
+      versionText: 'v1.0.47 • Built 2026-10-10',
       // Task 175 (owner round 87): only the options at or above the parent's floor.
       accessPermissionOptions: accessPermissionPill.options,
       // Labels pulled from each bound field's Dataverse metadata so they
