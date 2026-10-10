@@ -201,14 +201,15 @@ R3 turns the external SPA from a read-only portal into a working destination for
 - **FR-25: creator attribution on every SPA create.**
   - Every create through `/api/v1/external/**` stamps who created it:
     - a systemuser principal → `sprk_createdbyperson` (existing; FLS-secured lookup to systemuser);
-    - a contact principal (workforce contact or partner) → a **new contact-creator lookup**.
+    - a contact principal (workforce contact or partner) → **`sprk_createdbycontact`** (new lookup to contact; owner-named 2026-10-10).
   - Covers documents, to-dos, events, communications and service requests (service requests already carry `sprk_requestedby`).
   - Server-side only, never from client input.
   - This closes auth record L-5 (no creator attribution): today SPA creates are app-only, so Dataverse `createdby` is always the BFF application user.
   - Acceptance: each create records the calling principal; a client-supplied creator is ignored.
 - **FR-26: delete your own records.**
   - New DELETE routes for documents (Dataverse row + SPE file, app-only through the guard), to-dos, events and service requests.
-  - A delete is allowed only when the FR-25 stamp equals the caller **and** the caller still holds Read on the parent.
+  - A delete is allowed only when the FR-25 stamp equals the caller **and** the caller still holds Read on the parent. One check handles both stamps: `sprk_createdbyperson` for a systemuser caller, `sprk_createdbycontact` for a contact caller.
+  - General delete is a Dataverse role, not an SPA feature. `Spaarke Core User` already holds Delete at Deep level on Document, To-do, Event, Matter, Project, Work Assignment, Invoice, Service Request and Communication (`Roles/Spaarke Core User.xml`), so those users delete in the model-driven app. The SPA stays creator-only (owner 2026-10-10).
   - Nobody can delete another person's record, whatever their level.
   - Records created before FR-25 have no stamp, so they are not deletable from the SPA.
   - Acceptance:
@@ -337,7 +338,7 @@ R3 turns the external SPA from a read-only portal into a working destination for
 | Default modules by type (FR-19) | `ModuleEntitlementResolver` | Yes: modify | Workforce users see no Front Door / Policy Library modules |
 | Join page (FR-13) | none in `external-spa` | No existing page | Licence-free staff have no way to get access |
 | Shared registration service (FR-14) | None in the repo. H11 (L2) invites guests at provisioning time, but only for a known list, and owner direction says provisioning does not own new components | Possibly co-hosted with the T240c directory; to be decided | Self-registration (owner requirement) is impossible without a Spaarke-tenant invite identity |
-| Contact-creator lookup column (FR-25) on document, to-do, event, communication | `sprk_createdbyperson` exists but targets systemuser only (FLS-secured) | No: a systemuser lookup cannot hold a contact. A polymorphic retype of `sprk_createdbyperson` would break existing readers | Contacts can never delete their own mistaken records; SPA creates carry no author (L-5) |
+| `sprk_createdbycontact` lookup (FR-25) on document, to-do, event, communication, service request | `sprk_createdbyperson` exists but targets systemuser only (FLS-secured) | No: a systemuser lookup cannot hold a contact. A polymorphic retype of `sprk_createdbyperson` would break existing readers | Contacts can never delete their own mistaken records; SPA creates carry no author (L-5) |
 | Document routes for Matter / WA / Invoice / Service Request (FR-24) | Project document routes in `ExternalProjectDataEndpoints.cs:193` | Yes: generalize the project routes over record type | Users cannot attach documents to most records (owner requirement) |
 | DELETE routes (FR-26) | none on the external surface | New. Gated on the creator stamp + parent Read | Users cannot remove records they created in error |
 | Partner service-request switch (FR-06) | Service Requests module descriptor (`ExternalAccessModule.cs:444`) | Yes: a configuration branch in the existing descriptor | (Optional) partners cannot submit requests where a customer wants it |
@@ -420,8 +421,8 @@ Amendment source: auth record §12b + `notes/r3-auth-path.md`. The amendment is 
 
 - **Notification copy**: drafted in the C3 task; the owner approves the wording.
 - **Feed retention**: the feed shows the last 30 days of grants/messages. *Affects FR-08 query cost; confirm in the task.*
-- **Messages are not deletable**: sent messages notify the record's members, so FR-26 excludes communications. Owner to confirm.
-- **Delete is a hard delete** of the user's own row (and SPE file for documents), not a deactivate. Owner to confirm.
+- **Messages are not deletable** in the SPA (owner confirmed 2026-10-10).
+- **Delete is a hard delete** of the user's own row (and SPE file for documents) (owner confirmed 2026-10-10).
 - **Picker storage**: known customer keys are kept in `localStorage`; a new device re-uses the invite or join link (T240d §4).
 
 ## Unresolved Questions
