@@ -117,7 +117,8 @@ for NDA (deferred). 5A first-assignment CIAM invite email works (R2). 5B Partner
   (a manifest can name only one audience). A **dedicated single-tenant Spaarke client app** (in Spaarke's
   tenant) is the NAA/MSAL client, decoupled from any backend (today `1e40baad` the backend doubles as the
   client). The manifest declares **no `webApplicationInfo`** (same as add-in package 1.1.2). Workforce
-  authority = **Spaarke's tenant** (Model 1), not `/organizations`.
+  authority = **Spaarke's tenant** (Model 1), not `/organizations`. Scope = `user_impersonation` (§4.6 item 6).
+  Built under C8.
 - **Not in scope**: external-contact Teams parity (CIAM can't sign into Teams — §4.6).
 
 ### C6 — Communication message send (G6) — owner decision 2026-10-08, option (b)
@@ -141,6 +142,41 @@ for NDA (deferred). 5A first-assignment CIAM invite email works (R2). 5B Partner
 - **Gates**: **BFF-touching** → §8 Placement Justification + net10 (§4.5). For **external contacts** on a
   provisioned customer, the write lands on that customer's stamp → **gated on 240d** (§4.6), same as C1/C3.
   Buildable + testable on **dev now** (dev BFF serves both planes).
+
+### C7 — Workforce-contact self-registration (join link) — owner decision 2026-10-09 (§4.6 item 7)
+- **What.**
+  - The customer shares one link (`https://external.spaarke.com/join?customer={key}`).
+  - A licence-free employee signs in with their **home company account**.
+  - Registration is **approved automatically** if their tenant is on the customer's `CustomerTenantIds` list
+    and they are a member there (`acct = 0`).
+  - They become a B2B guest in Spaarke's tenant (no licence), are added to `sprk-{customerId}-users`, and
+    get a contact in the customer's Dataverse bound to the guest `oid`.
+  - They then land in the SPA, signed in through the normal workforce flow (Spaarke-tenant authority).
+- **R3 owns** the join page and the hand-off into the normal sign-in.
+- **Depends on** a **shared Spaarke registration service** that holds `User.Invite.All` + group write in
+  Spaarke's tenant. Recommended: the T240c directory, owned by provisioning; the owner assigns it. The stamp
+  writes the contact, reusing the existing contact-binding code.
+- **Spike first:** Entra's built-in B2B self-service sign-up user flow. Adopt it if it covers this more simply.
+- **Customer prerequisite:** cross-tenant access settings allow B2B collaboration with Spaarke's tenant
+  (new PRQ-C-14).
+- **Gates:** the spike; the shared service; PRQ-C-14. Tracked in #1563.
+
+### C8 — Auth alignment (owner decisions 2026-10-09; `notes/r3-auth-path.md`)
+- **Workforce client.**
+  - A dedicated single-tenant Spaarke client with a Spaarke-tenant authority and scope `user_impersonation`.
+  - Teams: NAA + MSAL popup, no `webApplicationInfo`, no SSO fallback.
+  - The browser uses the same client (§4.6 items 2, 5, 6; actions A2/A3).
+- **Runtime backend selection on both planes.**
+  - Workforce: from the T240c directory.
+  - CIAM: from the invite key via the directory's CIAM lookup (T240d).
+  - No baked BFF URL or scope; dev keeps one configured backend until 240c ships.
+- **Fix the out-of-plane SPA pages** (#1566): the upload page's OBO route, the playbook page's unmapped
+  route, SemanticSearch's default-scheme route, and the production mock identity on 401/403.
+- **Default modules by user type** (#1568, BFF `ModuleEntitlementResolver`, §4.6 item 8).
+- **With T240d** (if the owner assigns them to R3):
+  - the `Ciam` scheme accepts `{appId}` and `api://{appId}`;
+  - an explicit default-scheme guard rejecting CIAM tokens (iss ∋ `ciamlogin.com` or `tid == Ciam:TenantId`).
+- **Gates:** BFF-touching → §8 + net10 (§4.5); production depends on 240c/240d.
 
 ## 4.5 Build-environment prerequisite — .NET 10 (BINDING for any BFF build/deploy)
 
@@ -176,11 +212,13 @@ execution does not inadvertently regress dev. (Client work may proceed on the cu
 > Source: `projects/customer-provisioning-orchestration-r1/notes/t240-plan.md`; R3 reply in
 > [`notes/t240-auth-coordination-response.md`](notes/t240-auth-coordination-response.md).
 
-> ⚠️ **AUTH ITEMS PROVISIONAL — R3 ON HOLD (owner, 2026-10-08).** Items 2 and 5 below (Teams client shape:
-> single-tenant client, no `webApplicationInfo`, NAA + MSAL popup fallback; workforce authority = Spaarke's
-> tenant) and actions A2/A3 are **not verified** against server-side token validation, OBO, or managed-identity
-> paths. They wait on the code-level auth system of record being built in **`spaarke-auth-system-of-record-r1`**.
-> R3's spec conversion is **held** until that record exists; the spec will cite it directly.
+> ✅ **AUTH ITEMS CONFIRMED — HOLD LIFTED (owner, 2026-10-09).** Items 2 and 5 and actions A2/A3 were
+> verified against the code-level auth system of record (`spaarke-auth-system-of-record-r1`:
+> `auth-system-of-record.md`, `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md`, research `working/x09a`–`x09d`).
+> A Model 1 guest signing in against Spaarke's tenant gets `tid` = Spaarke, `acct = 1`, `idp` = home tenant
+> (live, add-in Diagnostics, 2026-10-08), which matches the guest's `systemuser` key. The definitive path,
+> its dependencies and the owner decisions are in [`notes/r3-auth-path.md`](notes/r3-auth-path.md); items 6–8
+> below add the 2026-10-09 decisions. The spec cites the record directly.
 
 ### Confirmed decisions
 1. **Production origin — `https://external.spaarke.com`** (one shared site `swa-spaarke-external-spa-prod`,
@@ -205,6 +243,29 @@ execution does not inadvertently regress dev. (Client work may proceed on the cu
    **Spaarke's tenant** — same as the Office add-in. Implemented via the existing optional `authority`
    override (`workforceAuthorityConfig({authority})` / `TeamsWorkforceAuthConfig.authority`) → **config, not
    code**.
+6. **Scope — `user_impersonation` everywhere** (owner 2026-10-09). Teams tab, browser work account, Copilot
+   and the CIAM plane all request `api://{customerBffAppId}/user_impersonation`. It is already exposed and
+   pre-authorized on every stamp app (H3). The BFF never checks the scope value (`CallerIdentity.cs:113,248`).
+   `access_as_user` is retired; the dev app's hand-made Teams/broker pre-authorizations move to
+   `user_impersonation`.
+7. **Workforce contacts (licence-free customer staff) self-register** (owner 2026-10-09):
+   - **Link.** The customer shares a join link (`https://external.spaarke.com/join?customer={key}`); any
+     employee can register, and nobody is created in advance.
+   - **Approval: automatic.** The employee's home tenant must be on the customer's `CustomerTenantIds`
+     allow-list, and they must be a member there (`acct = 0`). No per-request approval.
+   - **Invite: a shared Spaarke service** (recommended: the T240c directory). It invites the B2B guest into
+     Spaarke's tenant (no licence) and adds it to `sprk-{customerId}-users`. Stamps cannot invite: since
+     T261 a stamp identity holds only `FileStorageContainer.Selected`, and `User.Invite.All` sits with L2.
+   - **Contact.** The stamp creates the contact bound to the guest `oid`. A pre-bound guest already resolves
+     today ("everyone else resolves only through an existing oid binding", `ContactIdentityBinder`), so the
+     member-test change in #1563 becomes optional.
+   - **Spike first.** Use Entra's built-in B2B self-service sign-up user flow if it covers this more simply.
+   - **Customer prerequisite.** The customer's cross-tenant access settings must allow B2B collaboration with
+     Spaarke's tenant. This is a new required customer approval (PRQ-C-14, requested from provisioning).
+8. **Modules by user type** (owner 2026-10-09, option b): workforce users (licensed staff and workforce
+   contacts) get `legal-front-door` + `policy-library`; CIAM partners keep `assigned-work`. No Entra app
+   roles and no per-user setup; `sprk_approlemodulemap` stays for optional extras. A small
+   `ModuleEntitlementResolver` change, owned by R3 (#1568). Requires an ADR-028 A3 `:124` amendment.
 
 ### Two populations — do not conflate
 | Population | Identity | Teams? | Backend routing |
@@ -248,9 +309,9 @@ C3 in-portal notify, C6 send) on provisioned customers.** (C2 is workforce-only,
   lookup, never from the link. The C3 notification mechanism still **converges with** contact→backend routing.
   Cold-landing: customer picker from keys already seen (localStorage); new device → re-use the invite link.
   R3 review + requests: `notes/coordination/2026-10-09-to-provisioning-t240d-review.md`.
-- **Provisioner → keyless federated credential** from the stamp's managed identity (not a Key Vault cert).
-  Note this is **cross-tenant workload-identity federation** (stamp MI → CIAM app in `spaarkeextid`) — confirm
-  support before committing.
+- **Provisioner → keyless.** ~~stamp MI → CIAM app in `spaarkeextid`~~ **Superseded by T240d:** the stamp MI
+  federates into the customer's own multitenant BFF app (Spaarke tenant), whose service principal is
+  provisioned into `spaarkeextid` with Graph `User.Create`. Spike S1 gates this.
 
 ### Sequencing implication for the spec
 - **C4 (grid columns)** and the **non-auth UI of C1/C2/C5** are independent of the platform work — can proceed.
@@ -260,7 +321,13 @@ C3 in-portal notify, C6 send) on provisioned customers.** (C2 is workforce-only,
   stamps serve CIAM. This split is a natural wave boundary for the plan.
 
 ## 5. ADR touchpoints (anticipated)
-- ADR-028 (auth planes — unchanged; reuse), ADR-024 (polymorphic regarding — service requests),
+- **ADR-028 — amendment needed (CLAUDE.md §6.5 path B, owner-approved direction 2026-10-09):**
+  - **A2:** "Teams via SSO/NAA against a **multitenant** app" becomes a single-tenant Spaarke client,
+    Spaarke-tenant authority, NAA + popup, no SSO fallback, scope `user_impersonation`.
+  - **A3 `:124`:** "MUST NOT infer Tier-1 from the plane" becomes default modules by user type.
+  - **Add** the workforce-contact self-registration flow.
+  - Source of the amendment text: the auth record §12b and `notes/r3-auth-path.md`.
+- ADR-024 (polymorphic regarding — service requests),
   ADR-050 / MODAL-DECISION-CRITERIA (record-detail modal), ADR-009 (cache/invalidate for notify),
   ADR-007 (SPE facade for any doc access in detail view), §10 BFF hygiene (C3 notification).
 
