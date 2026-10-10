@@ -738,6 +738,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_workassignment"] = new[]
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                // Task 046 r3: the other typed regarding lookups the wizard binds (docs/data-model/sprk_workassignment.md).
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),

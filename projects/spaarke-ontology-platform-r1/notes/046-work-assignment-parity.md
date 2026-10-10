@@ -86,7 +86,7 @@ both (243 s).
   every create (decides only for a root); `CompleteRootCreateAsync` after a root create (isolated completion — removed
   again → 500 and nothing created; stranded/incomplete → 201 with `warnings`; then the I-12 materializer); provisioning's
   columns (`sprk_containerid`, `sprk_securitybu`, `sprk_accesspermission`) refused for a root; **a root whose ADR-024 pair
-  names a record no typed lookup binds is refused 400 before anything is asked** (review F1, no secure-ness oracle); plan
+  names a record no typed regarding lookup binds is refused 400 before anything is asked** (review F1, no secure-ness oracle); plan
   refusals mapped (`AccessDenied` → uniform 404, No Access / server-only column → 403,
   unverifiable / no secure team → 500, else 409); **a caller WhoAmI cannot name → the single 403
   `sdap.access.deny.caller_unresolved`** (NFR-10, D-29) on this create route for every table; the share mirror only for
@@ -127,7 +127,7 @@ both (243 s).
    (`ExternalParticipationService` → 401 in-process); production uses the managed identity. Harness limitation.
 
 5. **Pre-existing secure-ness oracle in the chat create tool** (review F1, uac-r2's core; the coordinator tells uac-r2): a
-   work-assignment/project create whose ADR-024 pair (`sprk_regardingrecordid`) names a record no typed lookup binds is
+   work-assignment/project create whose ADR-024 pair (`sprk_regardingrecordid`) names a record no typed regarding lookup binds is
    AppendTo-checked only when that record is SECURE (`OwnedChildWrite.CreateAsync` → plan's `callerMayFileUnder`), so
    `dataverse.create_record` answers "refused" for a secure record the caller cannot see and "created" for a missing or
    ordinary one. The child-records route now refuses such a payload with one 400 before anything is asked (§D);

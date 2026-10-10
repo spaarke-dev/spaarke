@@ -237,6 +237,68 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     /// <summary>
+    /// Review round 3 (F-A): the wizard also offers an invoice and an event. For those <c>applyResolverFields</c> binds the
+    /// work assignment's <c>sprk_RegardingInvoice</c> / <c>sprk_RegardingEvent</c> and sets the pair to the same id (no matter
+    /// lookup) — the pair agrees with that typed regarding lookup, so the create is accepted (the core AppendTo-checks it).
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_RegardingInvoice", "sprk_invoices", "sprk_invoice")]
+    [InlineData("sprk_RegardingEvent", "sprk_events", "sprk_event")]
+    public async Task WorkAssignmentCreate_TheWizardsInvoiceOrEventShape_PairAgreeingWithTheTypedLookup_Is201(
+        string navigation, string entitySet, string table)
+    {
+        var record = Guid.Parse("a0460000-0000-4000-8000-0000000000a1");
+        var recordType = Guid.Parse("a0460000-0000-4000-8000-0000000000a3");
+        _world.WithRecord(table, record, Directory.ChildBu, owningTeam: Directory.ChildTeam); // record-first owner (I-6)
+        var payload = WizardWorkAssignment(OrdinaryMatter);
+        payload.Remove("sprk_RegardingMatter@odata.bind");
+        payload["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({recordType:D})";
+        payload[$"{navigation}@odata.bind"] = $"/{entitySet}({record:D})";
+        payload["sprk_regardingrecordid"] = record.ToString("D");
+        payload["sprk_regardingrecordurl"] = $"https://org/main.aspx?etn={table}&id={record:D}";
+
+        // The plan reads the pair's type (the wizard binds the invoice's / event's catalog row) and, finding a table that is
+        // not an access parent, names nothing to check.
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken _) =>
+                q.EntityName == "sprk_recordtype_ref"
+                    ? new EntityCollection(new List<Entity> { new("sprk_recordtype_ref", recordType) { ["sprk_recordlogicalname"] = table } })
+                    : new EntityCollection());
+
+        var result = await CreateChild("sprk_workassignment", payload, SecureRootFilingGateFixtures.Over(entities.Object));
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        var fields = _appCreates.Should().ContainSingle().Subject.Fields;
+        Bind(fields, $"{navigation}@odata.bind").Should().Be($"/{entitySet}({record:D})");
+        Owner(fields).Should().Be(Directory.ChildTeam, "record-first (I-6): the regarding record's business-unit team");
+        fields.Should().NotContainKey("sprk_RegardingMatter@odata.bind");
+        fields.Should().ContainKey("sprk_regardingrecordid");
+    }
+
+    /// <summary>
+    /// Control for the above: the same id carried only by a NON-regarding lookup (a contact) while the pair names an invoice
+    /// is still the 400 — the invoice/event allowance matches by column and table, not by id alone.
+    /// </summary>
+    [Fact]
+    public async Task WorkAssignmentCreate_APairWhoseIdOnlyMatchesAContactLookup_NotTheInvoiceLookup_Is400()
+    {
+        var invoice = Guid.Parse("a0460000-0000-4000-8000-0000000000a2");
+        var payload = WizardWorkAssignment(OrdinaryMatter);
+        payload.Remove("sprk_RegardingMatter@odata.bind");
+        payload["sprk_AssignedTo@odata.bind"] = $"/contacts({invoice:D})"; // same GUID, a non-regarding column
+        payload["sprk_regardingrecordid"] = invoice.ToString("D");
+
+        var result = await CreateChild("sprk_workassignment", payload);
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.InvalidPayloadCode);
+        _appCreates.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// Defence in depth: the plan's own AppendTo refusal on a secure parent (<c>AccessDenied</c>) is answered with the
     /// route's uniform not-found — byte-identical to a create filed under a record that does not exist.
     /// </summary>

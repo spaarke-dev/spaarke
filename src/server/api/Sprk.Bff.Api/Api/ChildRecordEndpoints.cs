@@ -418,11 +418,12 @@ public static class ChildRecordEndpoints
 
     /// <summary>
     /// Task 046 review F1: true when the row's ADR-024 pair id (<c>sprk_regardingrecordid</c>) is set and is not the id of a
-    /// record one of the row's TYPED REGARDING/FILING lookups binds — including a value that is not a record id at all.
+    /// record one of the row's TYPED REGARDING lookups binds — including a value that is not a record id at all.
     /// Round 2 (security): an id equal to ANY other lookup's id (a contact, law firm, record type…) does not count — the
-    /// pair must agree with <see cref="SecureRootInheritance.TypedFilingColumns"/> (the set the secure-create plan's
-    /// <c>NameParentsAsync</c> treats as agreeing), compared by table AND id, so a same-id record in another table cannot
-    /// stand in for the parent the core would AppendTo-check.
+    /// pair must agree with <see cref="SecureRootInheritance.TypedFilingColumns"/> (the parents the secure-create plan's
+    /// <c>NameParentsAsync</c> treats as agreeing) or with <see cref="NonParentRegardingLookups"/> (round 3), compared by
+    /// column AND table AND id, so a same-id record in another table or column cannot stand in for the record the core
+    /// would AppendTo-check.
     /// </summary>
     internal static bool PairNamesAnUntypedRecord(string entity, DataverseWriteItemMapper.MappedItem item)
     {
@@ -437,12 +438,31 @@ public static class ChildRecordEndpoints
         if (!SecureRootInheritance.TypedFilingColumns.TryGetValue(entity, out var typed))
             return true;
 
+        NonParentRegardingLookups.TryGetValue(entity, out var nonParent);
+
         return !item.Lookups.Any(l =>
             l.RecordId == id
-            && typed.Any(t =>
+            && typed.Concat(nonParent ?? Array.Empty<(string Column, string ParentTable)>()).Any(t =>
                 string.Equals(t.Column, l.Column, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(t.ParentTable, l.RelatedTable, StringComparison.OrdinalIgnoreCase)));
     }
+
+    /// <summary>
+    /// Task 046 review round 3 (F-A): the root's typed regarding lookups that are NOT access parents, so the pair may also
+    /// agree with them. The Create Work Assignment wizard offers matter, project, invoice and event
+    /// (<c>SelectWorkStep.tsx</c>); for an invoice or event <c>applyResolverFields</c> binds the lookup it finds for that
+    /// table (<c>findNavProp</c> by target entity) and sets the pair to the same id — on <c>sprk_workassignment</c> that is
+    /// <c>sprk_RegardingInvoice</c> / <c>sprk_RegardingEvent</c> (<c>docs/data-model/sprk_workassignment.md</c>; the
+    /// remaining regarding lookup, <c>sprk_regardingcommunication</c>, is not offered by the wizard and is left out).
+    /// Safe: the secure-create plan ignores a pair naming a non-parent (<c>NameParentsAsync</c> adds nothing for it), and
+    /// the core AppendTo-checks the bound invoice/event lookup as the caller. Matching stays by column, table and id, so a
+    /// same-id record in any other column (contact, law firm, AI index, record type) is still refused.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<(string Column, string ParentTable)>> NonParentRegardingLookups =
+        new Dictionary<string, IReadOnlyList<(string Column, string ParentTable)>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [SecureRootInheritance.WorkAssignment] = new[] { ("sprk_regardinginvoice", "sprk_invoice"), ("sprk_regardingevent", "sprk_event") },
+        };
 
     /// <summary>
     /// A WhoAmI failure that means the caller has no Dataverse identity — Dataverse refusing them, no user context on the
