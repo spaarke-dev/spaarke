@@ -31,11 +31,10 @@ public class RetryAndIdempotencyTests
     /// <summary>
     /// <see cref="FastOptions"/> with a LONG refresh interval, for tests driven by the virtual clock.
     ///
-    /// <para>The 200 ms refresh in <see cref="FastOptions"/> is actively harmful under virtual time.
-    /// <c>TickAsync</c> refreshes BEFORE the due-check and recomputes <c>NextFireUtc</c> from
-    /// <c>now</c> EXCLUSIVE, so a refresh interval that divides the 1 s cron period lands on every
-    /// tick that could dispatch and starves dispatch forever. Real time escapes this only via sleep
-    /// jitter. 30 s is far from any divisor of the cron period.</para>
+    /// <para>Before #1575 the 200 ms refresh in <see cref="FastOptions"/> starved dispatch under
+    /// virtual time (a refresh recomputed <c>NextFireUtc</c> from <c>now</c> exclusive and landed on
+    /// every due instant). A refresh now keeps an unchanged job's next fire; the long interval stays
+    /// so these tests see no refresh noise.</para>
     /// </summary>
     private static ScheduledJobHostOptions VirtualClockOptions(JobRetryPolicy? retryPolicy = null)
     {
@@ -238,10 +237,8 @@ public class RetryAndIdempotencyTests
 
         var options = new ScheduledJobHostOptions
         {
-            // RefreshInterval MUST exceed the 1s cron period under a virtual clock: TickAsync
-            // refreshes first and recomputes NextFireUtc from `now` exclusive, so a 200ms refresh
-            // stepped by an exactly periodic 200ms virtual advance starves the job forever. Real
-            // time only escapes that by sleep jitter. See VirtualClockOptions in ScheduledJobHostTests.
+            // Long refresh interval: no refresh noise in a retry test (historically required under a
+            // virtual clock — see VirtualClockOptions in ScheduledJobHostTests, #1575).
             RefreshInterval = TimeSpan.FromSeconds(30),
             ShutdownDrainTimeout = TimeSpan.FromSeconds(3),
             MaxLoopSleep = TimeSpan.FromMilliseconds(200),
@@ -355,10 +352,8 @@ public class RetryAndIdempotencyTests
         var store = new InMemoryBackgroundJobStore();
         store.AddOrReplaceJob(EverySecond("multi-tick"));
 
-        // RefreshInterval MUST NOT stay at 200 ms here. Under virtual time a refresh interval that
-        // divides the 1 s cron period lands on every tick that could dispatch and starves dispatch
-        // forever, because TickAsync refreshes before the due-check and recomputes NextFireUtc from
-        // `now` exclusive. 30 s is nowhere near a divisor.
+        // Long refresh interval: no refresh noise (before #1575 a 200 ms refresh starved dispatch
+        // under virtual time — see VirtualClockOptions).
         var (host, time) = HostWithVirtualClock(registry, store, new ScheduledJobHostOptions
         {
             RefreshInterval = TimeSpan.FromSeconds(30),
