@@ -7,26 +7,20 @@
 # (run `node scripts/quality/client-lint/client-lint.mjs prune` and commit).
 #
 # Standalone on purpose: it changes no file of the CI router/tier1/tier2 set, so the CI shadow window's
-# verdict comparison is untouched. It is not (yet) a required check — owner decision 2026-10-09 is
-# "block new violations only"; make it required in the master ruleset once it has run green and the
-# shadow window has closed.
+# verdict comparison is untouched. It runs on every PR (no path filter) so that it can be a required
+# check: owner approved 2026-10-10 adding "Client lint (type-aware ratchet)" to the master ruleset once
+# the CI shadow window has closed.
 #
 # Config, runner, controls: scripts/quality/client-lint/. Docs: docs/procedures/testing-and-code-quality.md.
 
 name: Client lint
 
 on:
+  # Every PR, no `paths:` filter: this is meant to be a required check, and a path-filtered workflow
+  # never reports on an unrelated PR, which would leave that PR waiting on it forever. The job always
+  # runs; its `Decide whether to lint` step skips the lint steps when no client-lint path changed, and the check
+  # then reports success. Keep the filter list below and the push `paths:` list identical.
   pull_request:
-    paths:
-      - 'src/client/shared/**'
-      - 'src/solutions/DocumentUploadWizard/**'
-      - 'tsconfig.base.json'
-      - 'src/solutions/SpaarkeAi/**'
-      - 'src/solutions/LegalWorkspace/**'
-      - 'src/solutions/Reporting/**'
-      - 'src/client/code-pages/SemanticSearch/**'
-      - 'scripts/quality/client-lint/**'
-      - '.github/workflows/client-lint.yml'
   push:
     branches: [master]
     paths:
@@ -43,6 +37,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read   # dorny/paths-filter lists the PR's files
 
 concurrency:
   group: client-lint-${{ github.ref }}
@@ -57,12 +52,47 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Classify changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            client:
+              - 'src/client/shared/**'
+              - 'src/solutions/DocumentUploadWizard/**'
+              - 'tsconfig.base.json'
+              - 'src/solutions/SpaarkeAi/**'
+              - 'src/solutions/LegalWorkspace/**'
+              - 'src/solutions/Reporting/**'
+              - 'src/client/code-pages/SemanticSearch/**'
+              - 'scripts/quality/client-lint/**'
+              - '.github/workflows/client-lint.yml'
+
+      - name: Decide whether to lint
+        id: gate
+        # Fail closed: lint unless this is a PR whose changed files are all outside the client-lint paths.
+        # A PR over 3,000 files is linted regardless, because `pulls.listFiles` (what paths-filter reads
+        # on a PR) stops at 3,000 files, so a client file beyond the cap would be invisible (as ci-router).
+        shell: bash
+        run: |
+          client='${{ steps.filter.outputs.client }}'
+          changed_files='${{ github.event.pull_request.changed_files }}'
+          if [[ "${{ github.event_name }}" != "pull_request" || "$client" == "true" || "${changed_files:-0}" -gt 3000 ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No client-lint path changed; lint skipped and the check passes."
+          fi
+
       - name: Setup Node.js
+        if: steps.gate.outputs.run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Cache npm
+        if: steps.gate.outputs.run == 'true'
         uses: actions/cache@v6
         continue-on-error: true
         with:
@@ -72,14 +102,17 @@ jobs:
             ${{ runner.os }}-npm-client-lint-
 
       - name: Install lint toolchain
+        if: steps.gate.outputs.run == 'true'
         working-directory: scripts/quality/client-lint
         run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
 
       - name: Install package deps (types)
+        if: steps.gate.outputs.run == 'true'
         # Same `--legacy-peer-deps` rule as every other client install (repo lockfiles drift).
         run: node scripts/quality/client-lint/client-lint.mjs install
 
       - name: Lockfiles must be current
+        if: steps.gate.outputs.run == 'true'
         run: |
           git diff --exit-code --stat -- '**/package-lock.json' || {
             echo 'stale lockfile: run `npm install --package-lock-only --legacy-peer-deps` in <dir> and commit'
@@ -87,7 +120,9 @@ jobs:
           }
 
       - name: Controls (must-fire / must-not-fire)
+        if: steps.gate.outputs.run == 'true'
         run: node scripts/quality/client-lint/client-lint.mjs controls
 
       - name: Ratchet (fails on a new violation or an unpruned suppression)
+        if: steps.gate.outputs.run == 'true'
         run: node scripts/quality/client-lint/client-lint.mjs check
