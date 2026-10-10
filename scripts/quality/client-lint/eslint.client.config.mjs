@@ -4,10 +4,10 @@
  * ONE toolchain (this directory's package.json) lints every covered package against that package's
  * own tsconfig. Packages do NOT get their own ESLint setups.
  *
- * Rules (P2 of the client error-handling cleanup): ONLY `@typescript-eslint/no-unnecessary-condition`
- * (NUC) at `error`, scoped to non-test `src/**`. It is what flags a dead `if (!res.ok)` after
- * `AuthenticatedFetchFn` (which resolves to `OkResponse`: `ok: true`, 2xx). Existing violations are
- * recorded in `eslint-suppressions.json` (ESLint bulk suppressions); only NEW ones fail.
+ * Rules, all at `error`, scoped to non-test `src/**`: `@typescript-eslint/no-unnecessary-condition` (NUC, P2 of
+ * the client error-handling cleanup), which flags a dead `if (!res.ok)` after `AuthenticatedFetchFn` (resolves to
+ * `OkResponse`: `ok: true`, 2xx); and the catch policy (P5, `CATCH` below). Existing violations are recorded in
+ * `eslint-suppressions.json` (ESLint bulk suppressions); only NEW ones fail.
  *
  * Run through `scripts/quality/client-lint/client-lint.mjs`, not directly. cwd must be the repo root.
  *
@@ -177,7 +177,8 @@ const NUC = {
  */
 const CATCH_MESSAGE =
   "Do not swallow errors in catch: handle it, surface it to the user, or rethrow. " +
-  "If swallowing is deliberate, add `// eslint-disable-next-line no-restricted-syntax -- <reason>`.";
+  "If swallowing is deliberate, add `// eslint-disable-next-line no-restricted-syntax -- <reason>` directly above " +
+  "the reported line (the `} catch {` line for an empty catch, otherwise the lone statement's line).";
 const ONLY_STMT = "CatchClause > BlockStatement[body.length=1] > ExpressionStatement > CallExpression";
 const TELEMETRY_FNS = "/^(logTelemetryError|reportClientError|trackException)$/";
 const LOGGER_METHODS = "/^(logError|logWarn|error|warn)$/";
@@ -185,7 +186,14 @@ const LOGGER_METHODS = "/^(logError|logWarn|error|warn)$/";
 const SPAARKE_CLIENT = {
   rules: {
     "catch-disable-needs-reason": {
-      meta: { type: "problem", schema: [], messages: { noReason: "Disabling `no-restricted-syntax` needs a reason: `// eslint-disable-next-line no-restricted-syntax -- <why>`." } },
+      meta: {
+        type: "problem",
+        schema: [],
+        messages: {
+          noReason: "Disabling `no-restricted-syntax` needs a reason: `// eslint-disable-next-line no-restricted-syntax -- <why>`.",
+          bare: "A disable directive with no rule list silences every rule, including the catch policy. Name the rule(s) and, for `no-restricted-syntax`, give a reason.",
+        },
+      },
       create(context) {
         const DIRECTIVE = /^\s*eslint-disable(?:-next-line|-line)?(?=\s|$)([\s\S]*)$/;
         return {
@@ -194,7 +202,12 @@ const SPAARKE_CLIENT = {
               const m = DIRECTIVE.exec(c.value);
               if (!m) continue;
               const sep = m[1].search(/\s--(?:\s|$)/);
-              const names = (sep >= 0 ? m[1].slice(0, sep) : m[1]).split(",").map((n) => n.trim());
+              const names = (sep >= 0 ? m[1].slice(0, sep) : m[1]).split(",").map((n) => n.trim()).filter(Boolean);
+              // An empty rule list means "every rule", which would silence the catch policy undetected.
+              if (names.length === 0) {
+                context.report({ loc: c.loc, messageId: "bare" });
+                continue;
+              }
               if (!names.includes("no-restricted-syntax")) continue;
               const reason = sep >= 0 ? m[1].slice(sep).replace(/^\s--/, "").trim() : "";
               if (!reason) context.report({ loc: c.loc, messageId: "noReason" });

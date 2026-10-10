@@ -679,14 +679,25 @@ Besides `no-unnecessary-condition`, the same ratchet enforces that a `catch` han
 
 **A flagged catch:** (1) handle it (fall back, retry, return an error result); (2) surface it (error state, toast, message bar) in addition to logging; or (3) rethrow / return a failure the caller checks. Logging plus real handling (e.g. `console.error(...)` then `return null`) is fine: only a catch that does nothing else is flagged.
 
-**A deliberate swallow** (best-effort cache warm, optional telemetry, cleanup) needs a reasoned disable on the line above:
+**A deliberate swallow** (best-effort cache warm, optional telemetry, cleanup) needs a reasoned disable directly above the line ESLint reports: the `} catch {` line for an empty or comment-only catch, otherwise the catch's lone statement. Above `try {` it does nothing (unused-directive reporting is off, so nothing tells you):
 
 ```ts
-// eslint-disable-next-line no-restricted-syntax -- best-effort cache warm; failure is harmless
-try { await warmCache(); } catch { /* intentionally ignored */ }
+try {
+  await warmCache();
+  // eslint-disable-next-line no-restricted-syntax -- best-effort cache warm; failure is harmless
+} catch {
+  /* intentionally ignored */
+}
+
+try {
+  persistDraft();
+} catch (e) {
+  // eslint-disable-next-line no-restricted-syntax -- quota errors are expected; the draft also lives in state
+  console.warn("draft not persisted", e);
+}
 ```
 
-A disable without ` -- <reason>` fails `catch-disable-needs-reason`. Existing violations are baselined in `eslint-suppressions.json`; fixing one means `prune`. `controls` asserts exact must-fire counts per rule (`EXPECTED_FIRE` in `client-lint.mjs`), so adding or removing a catch-policy fixture means updating that table. If `controls` fails, the toolchain or the `@spaarke/auth` types regressed and a green `check` means nothing.
+A disable without ` -- <reason>` fails `catch-disable-needs-reason`, and so does a bare `// eslint-disable-next-line` with no rule list (it would silence every rule). Existing violations are baselined in `eslint-suppressions.json`; fixing one means `prune`. `controls` asserts exact must-fire counts per rule (`EXPECTED_FIRE` in `client-lint.mjs`), so adding or removing a catch-policy fixture means updating that table. If `controls` fails, the toolchain or the `@spaarke/auth` types regressed and a green `check` means nothing.
 
 ### Pre-commit
 

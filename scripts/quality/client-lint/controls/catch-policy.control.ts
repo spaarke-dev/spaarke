@@ -33,6 +33,20 @@ export function loggerOnlyCatch(): void {
   try { work(); } catch (e) { logger.logError("x", "failed", e); }
 }
 
+export class ThisLoggerOnly {
+  private readonly logger = logger;
+  run(): void {
+    // @control must-fire no-restricted-syntax
+    try { work(); } catch (e) { this.logger.logError("x", "failed", e); }
+  }
+}
+
+export function bareDisable(): void {
+  // @control must-fire spaarke-client/catch-disable-needs-reason
+  // eslint-disable-next-line
+  try { work(); } catch (e) {}
+}
+
 export function disableWithoutReason(): void {
   // @control must-fire spaarke-client/catch-disable-needs-reason
   // eslint-disable-next-line no-restricted-syntax
@@ -43,6 +57,11 @@ export function blockDisableWithoutReason(): void {
   // @control must-fire spaarke-client/catch-disable-needs-reason
   /* eslint-disable-next-line no-restricted-syntax */
   try { work(); } catch (e) {}
+}
+
+export function emptyFinallyIsNotACatch(): void {
+  // @control must-not-fire
+  try { work(); } finally {}
 }
 
 export function rethrowingCatch(): void {

@@ -43,7 +43,7 @@ const MARK_QUIET = /^\s*\/\/ @control must-not-fire\b/;
 
 const NUC_RULE = "@typescript-eslint/no-unnecessary-condition";
 // Exact number of must-fire controls per rule: deleting or silently skipping a fixture fails the run.
-const EXPECTED_FIRE = { [NUC_RULE]: 2, "no-restricted-syntax": 5, "spaarke-client/catch-disable-needs-reason": 2 };
+const EXPECTED_FIRE = { [NUC_RULE]: 2, "no-restricted-syntax": 6, "spaarke-client/catch-disable-needs-reason": 3 };
 
 // Rules whose existing violations are recorded in eslint-suppressions.json by `baseline`.
 const SUPPRESSED_RULES = [NUC_RULE, "no-restricted-syntax", "spaarke-client/catch-disable-needs-reason"];
