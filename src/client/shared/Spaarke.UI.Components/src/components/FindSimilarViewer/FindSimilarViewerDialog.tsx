@@ -65,6 +65,7 @@ import { ArrowExpandRegular } from '@fluentui/react-icons';
 
 import { SprkModal, getSurfaceStyle } from '../SprkModal';
 import type { IDataService } from '../../types/serviceInterfaces';
+import type { AuthenticatedFetchFn } from '../../utils/fetchTypes';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -88,7 +89,7 @@ export interface IFindSimilarViewerDialogProps {
    * Optional authenticated fetch function for forward compatibility
    * with service-injection patterns. Not used by the iframe shell itself.
    */
-  authenticatedFetch?: (url: string, init?: RequestInit) => Promise<Response>;
+  authenticatedFetch?: AuthenticatedFetchFn;
   /**
    * Optional BFF API base URL for forward compatibility with
    * service-injection patterns. Not used by the iframe shell itself.

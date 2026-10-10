@@ -1580,7 +1580,7 @@ internal sealed class NoStandingGrantReader : ISubjectStandingGrantReader
 }
 
 /// <summary>
-/// A caller who holds Write on whatever record the delegation rule asks about — i.e. someone entitled
+/// A caller who holds Write and Share on whatever record the delegation rule asks about — i.e. someone entitled
 /// to manage external access, which is the caller these contract tests are written from the
 /// perspective of (task 008, FR-07).
 /// </summary>
@@ -1597,7 +1597,7 @@ public sealed class EntitledCallerRecordAccessProbe : CallerRecordAccessProbe
 
     public override Task<AccessRights> GetCallerRightsAsync(
         string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
-        // Write is all the delegation gate needs. The rest matter since task 063 made a share the INTERSECTION of the
+        // Write and Share are what the delegation gate needs (Share since task 179, owner round 89). The rest matter since task 063 made a share the INTERSECTION of the
         // requested level with the caller's OWN rights (owner 2026-09-16): an entitled caller must hold a full working
         // set, or these contract tests would silently be exercising the narrowing path instead of the contract. The
         // narrowing itself is owned by InternalUserShareTests. Share joined the working set with task 139 (Collaborate and

@@ -32,6 +32,7 @@ import {
   type IPolymorphicWebApi,
   type ITodoRegardingTargetCatalogEntry,
 } from '@spaarke/ui-components';
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
 
 // `sprk_associationstatus` = Resolved (task 002 verified integer).
 const ASSOCIATION_STATUS_RESOLVED = 100000000;
@@ -86,7 +87,7 @@ export interface IResolverWriteContext {
  * may be `''` for a fetch that resolves relative `/api` paths).
  */
 export function bffRefile(
-  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
+  authenticatedFetch: AuthenticatedFetchFn,
   bffBaseUrl: string
 ): (hostEntity: string, hostRecordId: string, payload: Record<string, unknown>) => Promise<void> {
   return (hostEntity, hostRecordId, payload) =>

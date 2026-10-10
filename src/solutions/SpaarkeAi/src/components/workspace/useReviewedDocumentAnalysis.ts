@@ -35,16 +35,12 @@ export function useReviewedDocumentAnalysis(
       const name = `${documentName?.trim() || "Document"} — Review`;
       try {
         const url = buildBffApiUrl(bffBaseUrl, "/api/ai/analysis/promote");
-        const response = await authenticatedFetch(url, {
+        // A non-2xx THROWS (ApiError): 400 = already bound OR no resolvable anchor — benign (the review persists on the session).
+        await authenticatedFetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sessionId, name }),
         });
-        if (!response.ok) {
-          // 400 = already bound OR no resolvable anchor — benign (the review persists on the session).
-          // eslint-disable-next-line no-console
-          console.debug("[SpaarkeAi] reviewed-document Analysis promote skipped:", response.status);
-        }
       } catch (err) {
         // eslint-disable-next-line no-console
         console.debug("[SpaarkeAi] reviewed-document Analysis promote failed (non-fatal):", err);

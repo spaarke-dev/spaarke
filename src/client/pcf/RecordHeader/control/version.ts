@@ -229,6 +229,10 @@
  *   "+ New". The first three each need data we do not currently fetch; "+ New"
  *   is excluded by owner decision and stays excluded.
  *
+ * 1.1.12 (2026-10-10) - redeploy from master, no change to this control's behaviour: picks up
+ *   what merged since 1.1.11 (the build baseline repair #1123 and the shared-library updates). Dev was
+ *   still serving the August build.
+ *
  * 1.1.11 (2026-08-27) - two UAT fixes, both in the SHARED component so every
  *   consumer gets them.
  *     DEF-6 "the screen jumps when a value is selected." All three transient
@@ -262,4 +266,4 @@
  *   DISPLAY-NAME group header are dropped for good - "not critical, cleaner
  *   without it". Do not add them back.
  */
-export const CONTROL_VERSION = '1.1.11';
+export const CONTROL_VERSION = '1.1.12';

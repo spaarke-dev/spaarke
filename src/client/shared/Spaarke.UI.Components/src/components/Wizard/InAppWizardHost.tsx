@@ -66,7 +66,7 @@ import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import { getXrm } from '../../utils/xrmContext';
 import { cleanGuid } from '../../utils/guid';
 import { EntityCreationService, type IUserBuCascadeDefaults } from '../../services/EntityCreationService';
-import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import type { AuthenticatedFetchFn } from '../../utils/fetchTypes';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import { completeHandoff, handoffSeed, readHandoffFromUrl } from '../../services/surfaceHandoff/readHandoff';
 

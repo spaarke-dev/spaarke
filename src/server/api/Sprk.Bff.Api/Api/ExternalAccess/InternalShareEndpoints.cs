@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// </summary>
 /// <remarks>
 /// <para><b>Route placement.</b> These routes join the existing <c>/api/v1/external-access</c> management group
-/// rather than a sibling group. That group already carries <see cref="DelegationRuleFilter"/> — Write on the record,
+/// rather than a sibling group. That group already carries <see cref="DelegationRuleFilter"/> — Write and Share on the record (Share since round 89),
 /// evaluated as the CALLER over OBO (owner decision B-14) — and the filter denies any request whose record it cannot
 /// identify, so the routes are gated from their first request. A sibling group would repeat that wiring, and a
 /// repeat is a second place to forget it. "External" in the path names the surface (Manage Access), not the
@@ -74,8 +74,8 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///
 /// <para><b>The children of a SECURE record follow its shares</b> (task 149, C10 part 2). Once the root's share is written
 /// and confirmed — or found already right, or found already absent — <see cref="SecureChildShareSynchronizer.SyncRootAsync"/>
-/// brings every child the Secure Record Owners team owns into line with the root's shares: never wider, never Share or
-/// Assign. It runs only AFTER the root write succeeded (a refused or unconfirmed root write fans out nothing) and it is a
+/// brings every child the Secure Record Owners team owns into line with the root's shares: never wider, never Assign
+/// (Share is carried where the root share holds it, owner round 91). It runs only AFTER the root write succeeded (a refused or unconfirmed root write fans out nothing) and it is a
 /// no-op for a record that is not secure. When some children could not be updated the answer is 500
 /// <c>children_incomplete</c> with the counts — never a silent 200 — and the root write STANDS (an unshare is never rolled
 /// back to restore access); the scheduled reconcile completes it, and repeating the request is safe.</para>
@@ -221,7 +221,7 @@ public static class InternalShareEndpoints
             .WithSummary("Share a record with an internal user at one access level")
             .WithDescription(
                 "Creates or changes a system user's POA share on the record so it carries exactly the level's rights " +
-                "(View Only, Collaborate or Full Access), then reads the stored rights back. Requires Write on the record.")
+                "(View Only, Collaborate or Full Access), then reads the stored rights back. Requires Write and Share on the record.")
             .Produces<ShareRecordWithUserResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -237,7 +237,7 @@ public static class InternalShareEndpoints
             .WithSummary("Remove an internal user's share on a record")
             .WithDescription(
                 "Revokes a system user's POA share on the record and confirms it is gone. A user with no share is " +
-                "answered removed = false without a write, so repeating the call is safe. Requires Write on the record.")
+                "answered removed = false without a write, so repeating the call is safe. Requires Write and Share on the record.")
             .Produces<UnshareRecordWithUserResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -252,7 +252,7 @@ public static class InternalShareEndpoints
             .WithSummary("List the internal users holding a share on a record")
             .WithDescription(
                 "Returns every system user with a direct POA share on the record, with the stored rights mask and the " +
-                "matching level (null when the rights match no level). Requires Write on the record.")
+                "matching level (null when the rights match no level). Requires Write and Share on the record.")
             .Produces<RecordUserSharesResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -284,6 +284,7 @@ public static class InternalShareEndpoints
         SecureShareNoAccessGuard noAccessGuard,
         SecureRootInheritance relatedRoots,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
+        GrantAccessNotifier accessNotifier,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -563,13 +564,20 @@ public static class InternalShareEndpoints
             "{Granted} ({Outcome}; was {Previous}; narrowed={Narrowed}).",
             callerOid, root.Type, root.Id, systemUserId, level, granted.AccessRightsMask, outcome, current, narrowed);
 
+        // ── Task 181 (owner round 89 item 3): the user is told, in-app with a link, when the share GAVE them rights they
+        // did not hold. Best effort, after the confirmed write; a failure is reported, never undoes the share ──
+        var notificationFailed = (granted.AccessRightsMask & ~current) != 0
+            && await accessNotifier.NotifyUserShareAsync(
+                   root.Type, root.Id, systemUserId, RecordShareLevels.LevelForMask(granted.AccessRightsMask), httpContext.User)
+               == GrantNotificationOutcome.Failed;
+
         // ── Task 149: the root write is confirmed; now its secure children (a no-op for an ordinary record) ──
         return await ChildrenIncompleteAfterShareAsync(
                    secureChildShares, relatedRoots, root, systemUserId, outcome, granted.AccessRightsMask, httpContext, logger,
-                   callerOid, ct)
+                   callerOid, ct, notificationFailed)
                ?? TypedResults.Ok(new ShareRecordWithUserResponse(
                    systemUserId, RecordShareLevels.LevelForMask(granted.AccessRightsMask), granted.AccessRightsMask,
-                   outcome, narrowed));
+                   outcome, narrowed, notificationFailed));
     }
 
     // =========================================================================
@@ -803,7 +811,8 @@ public static class InternalShareEndpoints
         HttpContext httpContext,
         ILogger logger,
         string? callerOid,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool notificationFailed = false)
     {
         var children = await secureChildShares.SyncRootAsync(ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, ct);
 
@@ -829,7 +838,7 @@ public static class InternalShareEndpoints
                 $"The record was shared, but {filedLeft} of the secure work assignments and projects filed under it could not " +
                 "be given this person yet. They are updated automatically within a few minutes, or you can try again.",
                 systemUserId, children, ("outcome", rootOutcome), ("accessRightsMask", rootMask),
-                ("filedRecordsNotUpdated", filedLeft));
+                ("filedRecordsNotUpdated", filedLeft), ("notificationFailed", notificationFailed));
         }
 
         logger.LogWarning(
@@ -847,7 +856,8 @@ public static class InternalShareEndpoints
               "within a few minutes, or you can try again." + HeldSentence(children);
 
         return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail, systemUserId, children,
-            ("outcome", rootOutcome), ("accessRightsMask", rootMask), ("filedRecordsNotUpdated", filedLeft));
+            ("outcome", rootOutcome), ("accessRightsMask", rootMask), ("filedRecordsNotUpdated", filedLeft),
+            ("notificationFailed", notificationFailed));
     }
 
     /// <summary>

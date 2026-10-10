@@ -189,7 +189,7 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         foreach (var filed in new[] { workAssignment, project })
         {
             _fixture.ShareMaskOf(filed, Colleague).Should().Be(MirrorOf(ProvisionProjectEndpoint.CollaboratorAccessRights),
-                "the matter's sharee sees it — the matter's rights without Share (task 149's mirror)");
+                "the matter's sharee sees it — the matter's rights, Share included since owner round 91 (task 149's mirror)");
         }
 
         ShouldBeUntouched(underOrdinary, "filed under an ORDINARY matter");
@@ -464,6 +464,7 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
             scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(), SecureChildShareWorld.NobodyWalled(),
             scope.ServiceProvider.GetRequiredService<SecureRootInheritance>(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
+            Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertNotifier(),
             new DefaultHttpContext
             {
                 User = new ClaimsPrincipal(new ClaimsIdentity(new[]
