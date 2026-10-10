@@ -95,6 +95,7 @@ jest.mock('./ComposeEditor', () => {
 
 // eslint-disable-next-line import/first
 import { ComposeWorkspace } from './ComposeWorkspace';
+import { httpError } from '../__tests__/helpers/httpError';
 
 function renderWorkspace(props: Partial<React.ComponentProps<typeof ComposeWorkspace>> = {}) {
   return render(
@@ -114,7 +115,7 @@ beforeEach(() => {
   window.localStorage.clear();
   authenticatedFetchMock.mockReset();
   // Born-in-editor mounts arm a harmless read-only compose-outputs GET probe — resolve it benignly.
-  authenticatedFetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => [] });
+  authenticatedFetchMock.mockRejectedValue(httpError(404));
   editorProps.initialHtml = undefined;
 });
 
