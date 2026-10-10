@@ -57,6 +57,7 @@ internal sealed class GrantAccessNotifier
     private readonly IContactIdentityStore _identities;
     private readonly AssignedAccessStore _links;
     private readonly SecureShareNoAccessGuard _noAccessGuard;
+    private readonly ExternalParticipationService _participations;
     private readonly ILogger<GrantAccessNotifier> _logger;
 
     public GrantAccessNotifier(
@@ -65,6 +66,7 @@ internal sealed class GrantAccessNotifier
         IContactIdentityStore identities,
         AssignedAccessStore links,
         SecureShareNoAccessGuard noAccessGuard,
+        ExternalParticipationService participations,
         ILogger<GrantAccessNotifier> logger)
     {
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
@@ -72,6 +74,7 @@ internal sealed class GrantAccessNotifier
         _identities = identities ?? throw new ArgumentNullException(nameof(identities));
         _links = links ?? throw new ArgumentNullException(nameof(links));
         _noAccessGuard = noAccessGuard ?? throw new ArgumentNullException(nameof(noAccessGuard));
+        _participations = participations ?? throw new ArgumentNullException(nameof(participations));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -104,7 +107,24 @@ internal sealed class GrantAccessNotifier
                 var raw = row.RawOid?.Trim();
                 boundOid = Guid.TryParse(raw, out var oid) && oid != Guid.Empty ? oid : null;
             }
-            else if (contact.Status != LookupStatus.ColumnMissing)
+            else if (contact.Status == LookupStatus.ColumnMissing)
+            {
+                // No binding column here, so no oid — but the contact must still be active. Read its state the read
+                // path's way (statecode only): inactive tells nobody; unreadable is a failure (could not tell).
+                switch (await _participations.ReadContactStateAsync(contactId, CancellationToken.None))
+                {
+                    case ContactRecordState.Active:
+                        break;
+                    case ContactRecordState.Inactive:
+                        _logger.LogInformation(
+                            "[GRANT-NOTIFY] Contact {ContactId} is not active; nobody is told about the grant on {RootType} {RootId}.",
+                            contactId, rootType, rootId);
+                        return GrantNotificationOutcome.NotApplicable;
+                    default:
+                        throw new InvalidOperationException($"Contact {contactId}'s state could not be read.");
+                }
+            }
+            else
             {
                 throw new InvalidOperationException($"Contact {contactId}'s binding could not be read ({contact.Status}).");
             }
@@ -282,9 +302,7 @@ internal sealed class GrantAccessNotifier
             {
                 var name = value.GetString()?.Trim();
                 if (!string.IsNullOrEmpty(name))
-                    // The shared surrogate-safe cut (a pure string helper, not an AI capability; ADR-013 is about
-                    // AI-capability types, and its ArchTest forbids only those).
-                    return Sprk.Bff.Api.Services.Ai.Chat.ChatHistoryManager.TruncateSurrogateSafe(name, MaxNameLength);
+                    return Sprk.Bff.Api.Infrastructure.Text.TextTruncation.TruncateSurrogateSafe(name, MaxNameLength);
             }
         }
         catch (Exception ex)

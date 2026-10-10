@@ -897,7 +897,7 @@ internal static class AssignedAccessTestDoubles
                     });
                 return new Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier(
                     new Sprk.Bff.Api.Services.NotificationService(entities.Object, NullLogger<Sprk.Bff.Api.Services.NotificationService>.Instance),
-                    Grants, Identities, Store, Guard, NullLogger<Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier>.Instance);
+                    Grants, Identities, Store, Guard, Participations, NullLogger<Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier>.Instance);
             }
         }
 

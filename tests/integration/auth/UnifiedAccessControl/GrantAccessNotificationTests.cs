@@ -251,6 +251,34 @@ public class GrantAccessNotificationTests
         _h.SentNotifications.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Where a binding column is not provisioned (the contact read answers ColumnMissing), the contact's state is still
+    /// read the read path's way: an inactive contact's linked user is not told.
+    /// </summary>
+    [Fact]
+    public async Task Grant_WhenTheBindingColumnIsMissing_AndTheLinkedContactIsInactive_TellsNobody()
+    {
+        var (contact, _) = _h.LinkedContact();
+        _h.Identities.GetContactStatus = LookupStatus.ColumnMissing;
+        _h.Participations.ContactStates[contact] = ContactRecordState.Inactive;
+
+        await Grant(contact);
+
+        _h.SentNotifications.Should().BeEmpty();
+    }
+
+    /// <summary>The positive twin, so the case above is not vacuous: an active contact's linked user is told.</summary>
+    [Fact]
+    public async Task Grant_WhenTheBindingColumnIsMissing_AndTheLinkedContactIsActive_TellsTheUser()
+    {
+        var (contact, user) = _h.LinkedContact();
+        _h.Identities.GetContactStatus = LookupStatus.ColumnMissing;
+
+        await Grant(contact);
+
+        OwnerOf(_h.SentNotifications.Should().ContainSingle().Subject).Should().Be(user);
+    }
+
     /// <summary>A leak path: the user's link names ANOTHER contact, so this contact's grant is not theirs, whatever the oid.</summary>
     [Fact]
     public async Task Grant_ToAContactCarryingTheOidOfAUserLinkedToAnotherContact_TellsNobody()

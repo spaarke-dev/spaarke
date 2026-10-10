@@ -107,9 +107,14 @@ inactive one, resolve to no contact there, so nobody is told (not a failure). An
 A user whose link names ANOTHER contact is never this contact's (`AssignedLinkCandidate.Represents`). A failed binding
 read is reported as a failure (could not tell).
 
-**Name truncation** reuses `ChatHistoryManager.TruncateSurrogateSafe` (surrogate-safe cut + ellipsis). It is a pure
-string helper in `Services/Ai/Chat`; ADR-013's facade rule concerns AI-capability types, and its ArchTest forbids only
-those, so the call is not a CRUD→AI dependency in the ADR's sense. **CA1068:** `actionTitle` sits before the
+**Name truncation** uses the surrogate-safe cut that lived in `ChatHistoryManager`. Calling it from
+`Api/ExternalAccess` would be a CRUD→AI dependency (ADR-013; `bff-extensions.md` §A.4; D-66 precedent), so the pure
+helper moved to `Infrastructure/Text/TextTruncation.cs` and `ChatHistoryManager` and `ContextSliceProducers` call it from
+there (one copy).
+
+**Inactive contact where the binding column is missing.** When `GetContactAsync` answers `ColumnMissing`, the contact's
+state is read the read path's way (`ExternalParticipationService.ReadContactStateAsync`, statecode only): Active
+continues, Inactive tells nobody, Unreadable is a failure. **CA1068:** `actionTitle` sits before the
 `CancellationToken`; every caller passes named arguments, so the order change compiled without call-site edits.
 
 ## 5. Placement Justification (root CLAUDE.md §10, `.claude/constraints/bff-extensions.md`)
