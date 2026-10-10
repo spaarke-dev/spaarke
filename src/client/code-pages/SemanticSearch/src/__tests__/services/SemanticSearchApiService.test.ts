@@ -10,7 +10,8 @@
  * @see SemanticSearchApiService.ts
  */
 
-import type { DocumentSearchRequest, DocumentSearchResponse, ApiError } from '../../types';
+import type { ApiError } from '@spaarke/auth';
+import type { DocumentSearchRequest, DocumentSearchResponse } from '../../types';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -22,13 +23,18 @@ jest.mock('../../services/authInit', () => ({
   getAuthHeader: mockGetAuthHeader,
 }));
 
-jest.mock('@spaarke/auth', () => ({
-  resolveRuntimeConfig: jest.fn().mockResolvedValue({
-    bffBaseUrl: 'https://test-bff-api.example.com',
-    bffOAuthScope: 'api://test-app-id/user_impersonation',
-    msalClientId: 'test-client-id',
-  }),
-}));
+jest.mock('@spaarke/auth', () => {
+  // authenticatedFetch throws ApiError on non-2xx, exactly like the real helper (see helpers/authenticatedFetchMock).
+  const { createAuthenticatedFetchMock } = jest.requireActual('../helpers/authenticatedFetchMock');
+  return {
+    ...createAuthenticatedFetchMock(() => mockGetAuthHeader()),
+    resolveRuntimeConfig: jest.fn().mockResolvedValue({
+      bffBaseUrl: 'https://test-bff-api.example.com',
+      bffOAuthScope: 'api://test-app-id/user_impersonation',
+      msalClientId: 'test-client-id',
+    }),
+  };
+});
 
 // Mock global fetch
 const mockFetch = jest.fn<Promise<Response>, [RequestInfo | URL, RequestInit?]>();
@@ -318,9 +324,9 @@ describe('SemanticSearchApiService', () => {
 
         expect(thrownError).toBeDefined();
         expect(thrownError!.status).toBe(400);
-        expect(thrownError!.title).toBe('Validation Error');
-        expect(thrownError!.detail).toBe('Query exceeds maximum length.');
-        expect(thrownError!.errors).toEqual({
+        expect(thrownError!.problemDetails?.title).toBe('Validation Error');
+        expect(thrownError!.problemDetails?.detail).toBe('Query exceeds maximum length.');
+        expect(thrownError!.problemDetails?.errors).toEqual({
           query: ['Max length is 1000 characters.'],
         });
       });
@@ -330,7 +336,7 @@ describe('SemanticSearchApiService', () => {
 
         await expect(search(sampleRequest)).rejects.toMatchObject({
           status: 401,
-          title: 'Unauthorized',
+          problemDetails: { title: 'Unauthorized' },
         });
       });
 
@@ -339,7 +345,7 @@ describe('SemanticSearchApiService', () => {
 
         await expect(search(sampleRequest)).rejects.toMatchObject({
           status: 403,
-          title: 'Forbidden',
+          problemDetails: { title: 'Forbidden' },
         });
       });
 
@@ -350,7 +356,7 @@ describe('SemanticSearchApiService', () => {
 
         await expect(search(sampleRequest)).rejects.toMatchObject({
           status: 429,
-          title: 'Too Many Requests',
+          problemDetails: { title: 'Too Many Requests' },
         });
       });
 
@@ -368,16 +374,17 @@ describe('SemanticSearchApiService', () => {
 
         await expect(search(sampleRequest)).rejects.toMatchObject({
           status: 500,
-          title: 'Internal Server Error',
+          problemDetails: { title: 'Internal Server Error' },
         });
       });
 
-      it('should throw ApiError with statusText when body is not JSON', async () => {
+      it('should throw ApiError carrying statusText (no problemDetails) when body is not JSON', async () => {
         mockFetch.mockResolvedValue(createNetworkErrorResponse(503, 'Service Unavailable'));
 
         await expect(search(sampleRequest)).rejects.toMatchObject({
           status: 503,
-          title: 'Service Unavailable',
+          problemDetails: null,
+          message: 'Service Unavailable',
         });
       });
     });
