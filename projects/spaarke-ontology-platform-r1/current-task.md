@@ -28,7 +28,7 @@
 | What | Waiting for | Then |
 |---|---|---|
 | **046**, **126** | 048 merged (agreed order #1391 ✅ → 048 → 046; #1501 rebases later) | 046 (`OwnedChildWrite.CreateAsync` via `POST /api/v1/child-records/sprk_workassignment`, D-113); 126 (BU-depth AppendTo rule, D-113) |
-| **074** recall exit gate | Owner's labelling page https://claude.ai/artifact/VVoBr33LckyjoUGeWit3aU (24/92) | Finish → `status/final.complete` → resume the 074 agent |
+| **074** recall exit gate | **D-116:** labeller-074 agent labelling all 92 blind (scratchpad `074-claude/`); owner's 24 saved apart (`074-owner/`) | Compare agreement on the 24 → final key (owner 24 + Claude 68) → resume the 074 agent (`a1bcb0bae3c363ca9`) to build the harness and run once |
 | **130** live proof, **111/114** | The D-112 full E2E dev deploy (035 BFF + 055 Console + ontology solution) | Mark 130/111/114 done on it |
 
 ## Open owner questions / owner actions
