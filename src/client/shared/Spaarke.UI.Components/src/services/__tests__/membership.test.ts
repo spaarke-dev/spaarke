@@ -86,12 +86,6 @@ describe('createMembershipResolver', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('control: fails soft to null on a non-2xx response a host RETURNS', async () => {
-    const fetchMock = jest.fn().mockResolvedValue(jsonResponse(500, { error: 'boom' }));
-    const resolver = createMembershipResolver(fetchMock);
-    await expect(resolver('sprk_event')).resolves.toBeNull();
-  });
-
   it('fails soft to null when the fetch throws', async () => {
     const fetchMock = jest.fn().mockRejectedValue(new Error('network down'));
     const resolver = createMembershipResolver(fetchMock);

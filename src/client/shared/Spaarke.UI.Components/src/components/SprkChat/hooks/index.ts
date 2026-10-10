@@ -14,9 +14,6 @@ export { useChatSession } from './useChatSession';
 export { useChatPlaybooks } from './useChatPlaybooks';
 export type { IUseChatPlaybooksResult } from './useChatPlaybooks';
 
-export { useActionMenuData } from './useActionMenuData';
-export type { UseActionMenuDataOptions, IUseActionMenuDataResult } from './useActionMenuData';
-
 export {
   useActionHandlers,
   openCodePageDialog,

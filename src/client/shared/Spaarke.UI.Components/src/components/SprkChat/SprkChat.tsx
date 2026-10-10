@@ -2071,18 +2071,6 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           }),
         });
 
-        if (!response.ok) {
-          let errorMsg = `Save failed (${response.status})`;
-          try {
-            const errorBody = await response.json();
-            if (errorBody?.detail) errorMsg = errorBody.detail;
-            else if (errorBody?.title) errorMsg = errorBody.title;
-          } catch {
-            // Use default message
-          }
-          throw new Error(errorMsg);
-        }
-
         // Parse response -- BFF returns SpeFilePersistResponse: { speFileId, filename, url, sizeBytes, uploadedAt }
         const result = (await response.json()) as {
           speFileId: string;

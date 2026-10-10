@@ -264,16 +264,6 @@ export function useDynamicSlashCommands(options: UseDynamicSlashCommandsOptions)
           headers: { 'Content-Type': 'application/json' },
         });
 
-        if (!response.ok) {
-          // On error, fall back to system commands only — don't break the input
-          console.warn(
-            `[useDynamicSlashCommands] Failed to fetch commands (${response.status}). Falling back to system commands.`
-          );
-          setPlaybookCommands([]);
-          // Preserve existing scope commands on playbook-only failures
-          return;
-        }
-
         const data: ICommandsResponse = await response.json();
 
         // Convert dynamic commands to SlashCommand[], deduplicating against system defaults

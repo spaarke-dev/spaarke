@@ -169,11 +169,6 @@
       "count": 7
     }
   },
-  "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    }
-  },
   "src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/EmailComposeWidget.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 4
@@ -834,11 +829,6 @@
       "count": 1
     }
   },
-  "src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionMenuData.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 1
-    }
-  },
   "src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatFileAttachment.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 4
@@ -867,11 +857,6 @@
   "src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 3
-    }
-  },
-  "src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/accessStatus.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx": {
@@ -1271,7 +1256,7 @@
   },
   "src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 13
+      "count": 7
     }
   },
   "src/solutions/SpaarkeAi/src/components/conversation/DocumentUploadedEventStream.ts": {
@@ -1336,7 +1321,7 @@
   },
   "src/solutions/SpaarkeAi/src/components/conversation/useCommandRouting.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
+      "count": 1
     }
   },
   "src/solutions/SpaarkeAi/src/components/conversation/useDocQaCitationBridge.ts": {
@@ -1366,7 +1351,7 @@
   },
   "src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 21
+      "count": 19
     }
   },
   "src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts": {
@@ -1381,7 +1366,7 @@
   },
   "src/solutions/SpaarkeAi/src/components/workspace/useReviewedDocumentAnalysis.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
+      "count": 1
     }
   },
   "src/solutions/SpaarkeAi/src/config/publicConfig.ts": {
@@ -1396,7 +1381,7 @@
   },
   "src/solutions/SpaarkeAi/src/hooks/useSessionRestore.ts": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 2
+      "count": 1
     }
   },
   "src/solutions/SpaarkeAi/src/main.tsx": {
