@@ -112,7 +112,12 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
             if (!SecureRootInheritance.FilingColumnsOf(table).Contains(column))
                 continue;
 
-            var value = raw is JsonElement { ValueKind: JsonValueKind.String } json ? json.GetString() : raw;
+            var value = raw switch
+            {
+                JsonElement { ValueKind: JsonValueKind.String } json => json.GetString(),
+                JsonElement { ValueKind: JsonValueKind.Null } => null,
+                _ => raw,
+            };
             if (column == SecureRootInheritance.PairIdColumn)
             {
                 World.Set(table, id, column, value?.ToString());
@@ -935,10 +940,15 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
     // ── (2) RE-FILE: dataverse.update_record ────────────────────────────────────────────────────────────────────────
 
     /// <summary>The caller's Dataverse, scripted, whose PATCH lands in the fixture's Dataverse.</summary>
-    private sealed class PatchingUserClient(IDataverseUserClient inner, Action<string, string> onPatch) : IDataverseUserClient
+    private sealed class PatchingUserClient(
+        IDataverseUserClient inner, Action<string, string> onPatch, Action<string>? afterGet = null) : IDataverseUserClient
     {
-        public Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken) =>
-            inner.GetAsync(relativePath, cancellationToken);
+        public async Task<DataverseUserResponse> GetAsync(string relativePath, CancellationToken cancellationToken)
+        {
+            var response = await inner.GetAsync(relativePath, cancellationToken);
+            afterGet?.Invoke(relativePath);
+            return response;
+        }
 
         public Task<DataverseUserResponse> PostAsync(string absoluteApiPath, string jsonBody, CancellationToken cancellationToken) =>
             inner.PostAsync(absoluteApiPath, jsonBody, cancellationToken);
@@ -973,7 +983,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
     /// BFF-managed pair of a project); <c>null</c> builds the tool without a scope, as before.</param>
     private Task<ToolResult> ChatUpdateWith(
         string table, Guid recordId, SecureChildOwnershipAiToolTests.ScriptedUserClient scripted, Dictionary<string, object> item,
-        Action? afterPatch = null, IFieldMappingDataverseService? appOnly = null)
+        Action? afterPatch = null, IFieldMappingDataverseService? appOnly = null, Action<string>? afterGet = null)
     {
         var user = new PatchingUserClient(scripted, (path, body) =>
         {
@@ -981,7 +991,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
             ApplyFiling(table, recordId,
                 doc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => (object?)p.Value.Clone()));
             afterPatch?.Invoke();
-        });
+        }, afterGet);
         var scopes = appOnly is null
             ? null
             : new ServiceCollection().AddSingleton(appOnly).BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
@@ -1119,7 +1129,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
     /// record whose flag reads EMPTY — it would be secured (secure-if-any), but its creator cannot be checked against the
     /// unreadable project's No Access list: refused before the PATCH (<c>creator_no_access_unverifiable</c>). (#1616 fix
     /// round: on a typed filing — a pair no typed lookup repeats names nothing the walls are asked about, see
-    /// <see cref="ChatUpdate_ReFilingByTheTypedLookupUnderASecureMatter_WhileThePairStillNamesTheOldMatter_SecuresIt"/>.)
+    /// <see cref="ChatUpdate_ReFilingByTheTypedLookupWhileThePairStillNamesTheOldMatter_StillHonoursTheSecureMattersNoAccessList"/>.)
     /// </summary>
     [Fact]
     public async Task ChatUpdate_UnderASecureMatterWhileItsTypedProjectsFlagCannotBeRead_IsRefusedBeforeThePatch()
@@ -1500,30 +1510,98 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
                 BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
 
     /// <summary>
-    /// F-C, the stale pair after a typed re-file: a work assignment filed under an ordinary matter by its typed lookup AND the
-    /// same pair is re-filed (typed lookup only) under a SECURE matter — the pair still names the old matter. It is written and
-    /// secured under the secure matter (the creator's walls are decided over it); only the sharee mirror is held (fail
-    /// closed), reported as incomplete. Before the fix round the unrepeated pair made the creator check "unverifiable" and
-    /// the re-file was refused, nothing written (master writes and secures it).
+    /// The work assignment's row as the scripted caller reads it: its pair and its typed filing lookups, from the world.
+    /// </summary>
+    private void CallerReadsTheRow(SecureChildOwnershipAiToolTests.ScriptedUserClient user, Guid workAssignment)
+    {
+        static string? IdOf(object? value) => value is EntityReference r ? r.Id.ToString("D") : value?.ToString();
+        var values = new Dictionary<string, object?>
+        {
+            [SecureRootInheritance.PairIdColumn] = World.ValueOf<object>("sprk_workassignment", workAssignment, SecureRootInheritance.PairIdColumn)?.ToString(),
+            [$"_{SecureRootInheritance.PairTypeColumn}_value"] = IdOf(World.ValueOf<object>("sprk_workassignment", workAssignment, SecureRootInheritance.PairTypeColumn)),
+        };
+        foreach (var column in new[] { "sprk_regardingmatter", "sprk_regardingproject" })
+            values[$"_{column}_value"] = IdOf(World.ValueOf<object>("sprk_workassignment", workAssignment, column));
+        user.RowValues[workAssignment] = values;
+    }
+
+    /// <summary>
+    /// Fix round 2, F-1: a wizard-made work assignment (typed matter A AND the same pair) re-filed by the BFF through the
+    /// typed lookup ONLY, to a secure matter B, has its pair moved to B in the same caller PATCH — so it is secured with
+    /// B's sharees and nothing is held (no <c>parent_unverifiable</c>). Before the fix the pair kept naming A: the record was
+    /// secured but stuck (sharees held, flags unreadable, every loosening refused) until a repair.
     /// </summary>
     [Fact]
-    public async Task ChatUpdate_ReFilingByTheTypedLookupUnderASecureMatter_WhileThePairStillNamesTheOldMatter_SecuresIt()
+    public async Task ChatUpdate_ATypedOnlyReFile_MovesTheInStepPairWithIt_AndSecuresItWithItsSharees()
     {
-        var (secure, ordinary) = Matters();
+        var (secure, ordinary) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, secure, null, Colleague);
+        _fixture.SeedMatter(ordinary, isSecure: false);
+        var matterType = RecordTypeRef(_fixture, "sprk_matter");
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+        SecureRootInheritanceTests.FilePair(_fixture, "sprk_workassignment", workAssignment, ordinary, matterType);
+        var user = Scripted();
+        CallerReadsTheRow(user, workAssignment);
+
+        var result = await ChatRefileWith(workAssignment, user,
+            new() { ["sprk_regardingmatter"] = new { relatedTable = "sprk_matter", recordId = secure } });
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        World.ValueOf<object>("sprk_workassignment", workAssignment, SecureRootInheritance.PairIdColumn)?.ToString()
+            .Should().Be(secure.ToString("D"), "the pair moves with the typed lookup it repeated");
+        World.ValueOf<EntityReference>("sprk_workassignment", workAssignment, SecureRootInheritance.PairTypeColumn)!.Id
+            .Should().Be(matterType);
+        ShouldBeSecure(workAssignment, "re-filed under a secure matter");
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(
+            RecordShareLevels.ChildMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)),
+            "the secure matter's sharee is mirrored — nothing is held");
+    }
+
+    /// <summary>Fix round 2, F-1: clearing the typed lookup the pair was in step with clears the pair (and its display
+    /// columns) in the same caller PATCH. Before the fix the pair kept naming the old matter.</summary>
+    [Fact]
+    public async Task ChatUpdate_ClearingTheTypedLookup_ClearsTheInStepPair()
+    {
+        var (_, ordinary) = Matters();
         var workAssignment = Guid.NewGuid();
         FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
         SecureRootInheritanceTests.FilePair(_fixture, "sprk_workassignment", workAssignment, ordinary, RecordTypeRef(_fixture, "sprk_matter"));
+        var user = Scripted();
+        CallerReadsTheRow(user, workAssignment);
 
-        var result = await ChatRefile(workAssignment, secure);
+        var result = await ChatRefileWith(workAssignment, user, new() { ["sprk_regardingmatter"] = null! });
 
-        _writes.Should().NotBeEmpty("the re-file is written (master writes it too)");
-        ShouldBeSecure(workAssignment, "re-filed by its typed lookup under a secure matter; the stale pair files it under nothing");
-        result.ErrorCode.Should().Be(SecureRootInheritance.ReasonParentUnverifiable,
-            "the secure matter's sharees are held while the unrepeated pair stands (the repair clears it)");
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        World.ValueOf<object>("sprk_workassignment", workAssignment, SecureRootInheritance.PairIdColumn).Should().BeNull();
+        World.ValueOf<object>("sprk_workassignment", workAssignment, SecureRootInheritance.PairTypeColumn).Should().BeNull();
+        user.Patches.Should().ContainSingle().Which.Body.Should().Contain("sprk_regardingrecordname");
     }
 
-    /// <summary>F-C, the walls still decide: the same stale-pair re-file with the creator walled off the secure matter is
-    /// <c>creator_no_access</c> (never "unverifiable"), before the PATCH.</summary>
+    /// <summary>Fix round 2, F-1 guard: a pair that was NOT in step with the moved lookup (it names another matter) is left
+    /// alone — this server moves only a pair it can tell repeated that lookup.</summary>
+    [Fact]
+    public async Task ChatUpdate_ATypedReFile_LeavesAPairThatWasNotInStepAlone()
+    {
+        var (secure, ordinary) = Matters();
+        var elsewhere = Guid.NewGuid();
+        _fixture.SeedMatter(elsewhere, isSecure: false);
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+        SecureRootInheritanceTests.FilePair(_fixture, "sprk_workassignment", workAssignment, elsewhere, RecordTypeRef(_fixture, "sprk_matter"));
+        var user = Scripted();
+        CallerReadsTheRow(user, workAssignment);
+
+        await ChatRefileWith(workAssignment, user,
+            new() { ["sprk_regardingmatter"] = new { relatedTable = "sprk_matter", recordId = secure } });
+
+        user.Patches.Should().ContainSingle().Which.Body.Should().NotContain(SecureRootInheritance.PairIdColumn);
+        World.ValueOf<object>("sprk_workassignment", workAssignment, SecureRootInheritance.PairIdColumn)?.ToString()
+            .Should().Be(elsewhere.ToString("D"));
+    }
+
+    /// <summary>F-C, the walls still decide: a re-file under a secure matter while an unrepeated pair names the old matter,
+    /// with the creator walled off the secure matter, is <c>creator_no_access</c> (never "unverifiable"), before the PATCH.</summary>
     [Fact]
     public async Task ChatUpdate_ReFilingByTheTypedLookupWhileThePairStillNamesTheOldMatter_StillHonoursTheSecureMattersNoAccessList()
     {
@@ -1623,6 +1701,47 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
                                    && f[k]!.ToString()!.Contains(matterType.ToString("D")))),
             It.IsAny<CancellationToken>()), Times.Once);
         ShouldBeSecure(project, "re-filed by its pair id under a secure matter, its type kept");
+    }
+
+    /// <summary>
+    /// Fix round 2, K-2: the type the application writes is the one the pair rule CHECKED — taken from the row once, before
+    /// any check — never one a later read returns. Here the row's type changes after its first read; the written pair still
+    /// carries the first. Before the fix the write took the type from a second read.
+    /// </summary>
+    [Fact]
+    public async Task ChatUpdate_AProjectsPairIdAlone_WritesTheTypeThatWasChecked_NotALaterRead()
+    {
+        var (secure, ordinary) = Matters();
+        var project = Guid.NewGuid();
+        var matterType = RecordTypeRef(_fixture, "sprk_matter");
+        var laterType = RecordTypeRef(_fixture, "sprk_matter");
+        _fixture.SeedProject(project, isSecure: false);
+        SecureRootInheritanceTests.FilePair(_fixture, "sprk_project", project, ordinary, matterType);
+        var user = Scripted();
+        user.SecuredColumns.Add(SecureRootInheritance.PairIdColumn);
+        user.SecuredColumns.Add(SecureRootInheritance.PairTypeColumn);
+        user.RowValues[project] = new()
+        {
+            [SecureRootInheritance.PairIdColumn] = ordinary.ToString("D"),
+            [$"_{SecureRootInheritance.PairTypeColumn}_value"] = matterType.ToString("D"),
+        };
+        var appOnly = AppUpdatesTheWorld();
+
+        var result = await ChatUpdateWith("sprk_project", project, user, new()
+        {
+            ["sprk_regardingrecordid"] = secure.ToString("D"),
+        }, appOnly: appOnly.Object, afterGet: path =>
+        {
+            if (path.StartsWith($"sprk_projects({project:D})", StringComparison.OrdinalIgnoreCase))
+                user.RowValues[project][$"_{SecureRootInheritance.PairTypeColumn}_value"] = laterType.ToString("D");
+        });
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        appOnly.Verify(s => s.UpdateExistingRecordFieldsAsync("sprk_project", project,
+            It.Is<Dictionary<string, object?>>(f => f.Keys.Any(k =>
+                SecureRootInheritance.NormalizeColumn(k) == SecureRootInheritance.PairTypeColumn
+                && f[k]!.ToString()!.Contains(matterType.ToString("D")))),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── Verifier round on #1612 (F1/F2): a lookup with the same id in ANOTHER table never stands in for the pair's record ──

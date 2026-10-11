@@ -680,12 +680,17 @@ internal static class OwnedChildWrite
             };
         }
 
-        // The FULL pair the rule checked (CheckCallerMayRefileByPairAsync): the half this write leaves is completed from the
-        // row as the caller reads it — the same read the rule made — so the application writes both halves, never one half
-        // beside whatever the other holds by then.
-        if (await CompletePairFromTheRowAsync(user, table, entitySetName, recordId, PairOf(item), pairFields, ct)
-                .ConfigureAwait(false) is { } completion)
-            return completion;
+        // The FULL pair the rule checked: the update tool completes a half-pair write from the row BEFORE anything is
+        // checked (KeepPairInStepAsync), so the item carries both halves, the rule (CheckCallerMayRefileByPairAsync) and the
+        // gate decided exactly them, and exactly them is what the application writes. An item that still sets one half was
+        // not prepared that way: refused (fail closed), never completed from a second read.
+        if (PairOf(item) is not { SetsId: true, SetsType: true })
+        {
+            return new RefileOutcome
+            {
+                Invalid = $"What this {table} is filed under is written as a whole (its record and its record type), so nothing was written.",
+            };
+        }
 
         if (callerBody is not null)
         {
@@ -700,62 +705,144 @@ internal static class OwnedChildWrite
     }
 
     /// <summary>
-    /// #1616: adds to <paramref name="pairFields"/> the pair half <paramref name="pair"/> does not set, as the row holds it
-    /// when the caller reads it (the read <see cref="CheckCallerMayRefileByPairAsync"/> completes the pair from): the id as
-    /// text, the type as its navigation property's bind (or null bind), mapped through the table's metadata as the caller.
-    /// <c>null</c> when the pair is complete; otherwise the failure, before anything is written.
+    /// #1616: prepares an update's ADR-024 pair BEFORE anything is checked or written, AS THE CALLER (one read of the row,
+    /// only when it applies), so the checks and the write see one and the same pair:
+    /// <list type="bullet">
+    /// <item><b>A BFF-managed pair</b> (a project, <see cref="BffManagedPairColumnsOf"/>) written by one half: the other half is
+    /// added as the row holds it, so the pair rule, the secure-root gate and the application's write
+    /// (<see cref="PatchWithBffManagedPairAsync"/>) all act on exactly the same (record, type).</item>
+    /// <item><b>A work assignment</b> (its pair is not BFF-managed) whose update changes or clears a typed filing lookup
+    /// (<see cref="SecureRootInheritance.TypedFilingColumns"/>) the pair was IN STEP with — same id, a type naming that
+    /// lookup's table — and does not write the pair itself: the pair is kept in step in the same caller PATCH (moved to the
+    /// lookup's new record, or cleared with its display columns when the lookup is cleared). Otherwise a BFF re-file would
+    /// leave a pair no typed lookup repeats, which holds the record's sharees and every loosening until a repair. The pair
+    /// rule then asks AppendTo on the new record exactly as for any pair write. A pair that was not in step is left alone.</item>
+    /// </list>
     /// </summary>
-    private static async Task<RefileOutcome?> CompletePairFromTheRowAsync(
-        IDataverseUserClient user, string table, string entitySetName, Guid recordId, PairWrite pair,
-        Dictionary<string, object?> pairFields, CancellationToken ct)
+    /// <returns>The item to check and write (unchanged when nothing applies), or the caller's own failure — nothing written.</returns>
+    internal static async Task<(DataverseWriteItemMapper.MappedItem Item, RefileOutcome? Refusal)> KeepPairInStepAsync(
+        IDataverseUserClient user, string table, string entitySetName, Guid recordId, DataverseWriteItemMapper.MappedItem item,
+        CancellationToken ct)
     {
-        if (pair.SetsId && pair.SetsType)
-            return null;
+        var pair = PairOf(item);
+        var managed = BffManagedPairColumnsOf(table).Count > 0;
+        var filing = SecureRootInheritance.TypedFilingColumns.TryGetValue(table.Trim().ToLowerInvariant(), out var typed)
+            ? typed
+            : Array.Empty<(string Column, string ParentTable)>();
+        var changedFiling = filing
+            .Where(f => item.Lookups.Any(l => string.Equals(l.Column, f.Column, StringComparison.OrdinalIgnoreCase))
+                        || item.ClearedColumns.Contains(f.Column, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+        var completes = managed && pair.SetsEither && !(pair.SetsId && pair.SetsType);
+        var follows = !managed && SecureRootInheritance.Inherits(table) && !pair.SetsEither && changedFiling.Length > 0;
+        if (!completes && !follows)
+            return (item, null);
 
         var row = await user.GetAsync($"{entitySetName}({recordId:D})", ct).ConfigureAwait(false);
         if (!row.IsSuccess)
-            return new RefileOutcome { ClientFailure = row };
+            return (item, new RefileOutcome { ClientFailure = row });
         if (row.Body is not { ValueKind: JsonValueKind.Object } body)
         {
-            return new RefileOutcome
+            return (item, new RefileOutcome
             {
                 ClientFailure = DataverseUserResponse.Fail(row.StatusCode, DataverseUserClientErrorCodes.BadRequest,
                     "The record could not be read, so what it is filed under cannot be checked."),
-            };
-        }
-
-        if (!pair.SetsId)
-        {
-            pairFields[SecureRootInheritance.PairIdColumn] =
-                body.TryGetProperty(SecureRootInheritance.PairIdColumn, out var id) && id.ValueKind == JsonValueKind.String
-                    ? id.GetString()
-                    : null;
-        }
-
-        if (!pair.SetsType)
-        {
-            Guid? type = body.TryGetProperty($"_{SecureRootInheritance.PairTypeColumn}_value", out var t)
-                         && t.ValueKind == JsonValueKind.String && Guid.TryParse(t.GetString(), out var parsed)
-                ? parsed
-                : null;
-            var typeItem = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
-            {
-                [SecureRootInheritance.PairTypeColumn] = type is { } typeId
-                    ? new { relatedTable = RecordTypeTable, recordId = typeId }
-                    : null,
             });
-            var mapped = await DataverseWriteItemMapper.MapAsync(user, table, typeItem, ct).ConfigureAwait(false);
-            if (mapped.ClientFailure is { } mapFailure)
-                return new RefileOutcome { ClientFailure = mapFailure };
-            if (mapped.Item is not { } typeBind)
-                return new RefileOutcome { Invalid = mapped.ValidationError ?? $"The record type of this {table} could not be written." };
-
-            using var bind = JsonDocument.Parse(typeBind.JsonBody);
-            foreach (var property in bind.RootElement.EnumerateObject())
-                pairFields[property.Name] = property.Value.Clone();
         }
 
-        return null;
+        var rowId = body.TryGetProperty(SecureRootInheritance.PairIdColumn, out var idValue) && idValue.ValueKind == JsonValueKind.String
+            ? idValue.GetString()
+            : null;
+        Guid? rowType = body.TryGetProperty($"_{SecureRootInheritance.PairTypeColumn}_value", out var typeValue)
+                        && typeValue.ValueKind == JsonValueKind.String && Guid.TryParse(typeValue.GetString(), out var parsedType)
+            ? parsedType
+            : null;
+
+        var extra = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (completes)
+        {
+            if (!pair.SetsId)
+                extra[SecureRootInheritance.PairIdColumn] = rowId;
+            if (!pair.SetsType)
+                extra[SecureRootInheritance.PairTypeColumn] = rowType is { } t ? new { relatedTable = RecordTypeTable, recordId = t } : null;
+        }
+        else
+        {
+            if (!Guid.TryParse(rowId?.Trim(), out var pairId) || pairId == Guid.Empty || rowType is not { } pairType)
+                return (item, null); // no typed pair to keep in step
+
+            // The typed lookup the pair was in step with: same id on the row, and the pair's type names its table.
+            (string Column, string ParentTable)? inStep = null;
+            foreach (var f in changedFiling)
+            {
+                if (body.TryGetProperty($"_{f.Column}_value", out var current) && current.ValueKind == JsonValueKind.String
+                    && Guid.TryParse(current.GetString(), out var currentId) && currentId == pairId)
+                {
+                    inStep = f;
+                    break;
+                }
+            }
+
+            if (inStep is not { } step)
+                return (item, null);
+
+            var typeRow = await user.GetAsync($"{RecordTypeEntitySet}({pairType:D})?$select={RecordTypeLogicalNameColumn}", ct)
+                .ConfigureAwait(false);
+            if (!typeRow.IsSuccess)
+                return (item, new RefileOutcome { ClientFailure = typeRow });
+            var pairTable = typeRow.Body is { } typeBody && typeBody.TryGetProperty(RecordTypeLogicalNameColumn, out var logical)
+                                                         && logical.ValueKind == JsonValueKind.String
+                ? logical.GetString()?.Trim()
+                : null;
+            if (!string.Equals(pairTable, step.ParentTable, StringComparison.OrdinalIgnoreCase))
+                return (item, null);
+
+            var moved = item.Lookups.FirstOrDefault(l => string.Equals(l.Column, step.Column, StringComparison.OrdinalIgnoreCase));
+            if (moved is not null)
+            {
+                extra[SecureRootInheritance.PairIdColumn] = moved.RecordId.ToString("D");
+                extra[SecureRootInheritance.PairTypeColumn] = new { relatedTable = RecordTypeTable, recordId = pairType };
+            }
+            else
+            {
+                extra[SecureRootInheritance.PairIdColumn] = null;
+                extra[SecureRootInheritance.PairTypeColumn] = null;
+                foreach (var display in PairDisplayColumns)
+                    extra[display] = null;
+            }
+        }
+
+        var mapped = await DataverseWriteItemMapper.MapAsync(user, table, JsonSerializer.SerializeToElement(extra), ct)
+            .ConfigureAwait(false);
+        if (mapped.ClientFailure is { } mapFailure)
+            return (item, new RefileOutcome { ClientFailure = mapFailure });
+        if (mapped.Item is not { } added)
+            return (item, new RefileOutcome { Invalid = mapped.ValidationError ?? $"What this {table} is filed under could not be written." });
+
+        return (Merge(item, added), null);
+    }
+
+    /// <summary>The pair's display columns (a work assignment's; cleared with the pair).</summary>
+    private static readonly string[] PairDisplayColumns = ["sprk_regardingrecordname", "sprk_regardingrecordnumber", "sprk_regardingrecordurl"];
+
+    /// <summary>One mapped item carrying <paramref name="item"/>'s writes and <paramref name="added"/>'s (which win).</summary>
+    private static DataverseWriteItemMapper.MappedItem Merge(DataverseWriteItemMapper.MappedItem item, DataverseWriteItemMapper.MappedItem added)
+    {
+        var body = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var json in new[] { item.JsonBody, added.JsonBody })
+        {
+            using var doc = JsonDocument.Parse(json);
+            foreach (var property in doc.RootElement.EnumerateObject())
+                body[property.Name] = property.Value.Clone();
+        }
+
+        return new DataverseWriteItemMapper.MappedItem(
+            JsonSerializer.Serialize(body),
+            item.Columns.Concat(added.Columns).Distinct(StringComparer.OrdinalIgnoreCase).ToArray())
+        {
+            Lookups = item.Lookups.Concat(added.Lookups).ToArray(),
+            ClearedColumns = item.ClearedColumns.Concat(added.ClearedColumns).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+        };
     }
 
     private const string RecordTypeTable = "sprk_recordtype_ref";

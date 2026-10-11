@@ -18,7 +18,7 @@
 
     CANDIDATES (a root is sprk_matter, sprk_project or sprk_workassignment; ids compared as GUIDs, never as text)
       W  a sprk_workassignment whose pair names a root that no typed lookup names (a work assignment has no typed lookup
-         to another work assignment, so a pair naming one is always a candidate);
+         to another work assignment, so a pair naming one — itself included — is always a candidate);
       P  a sprk_project whose pair names a root.
 
     WHO SET THE PAIR — the latest audited change of sprk_regardingrecordid to its current value
@@ -39,6 +39,9 @@
       REVIEW instead of CLEAR when the row is secure (sprk_issecure) and the record its pair names exists and is secure:
         the row may be secured THROUGH that pair, and clearing it could let the access job loosen it. Nothing is
         written for a REVIEW row; the operator decides it by hand (set the typed lookup, or clear the pair and re-secure).
+        KNOWN LIMIT: the rule reads only the TARGET's own sprk_issecure. A target secure only through ITS filing (a project
+        whose own flag is not yet set, under a secure matter) is not detected, so such a row is CLEARed, not REVIEWed — the
+        access job then decides the row from what it is still filed under. Check the dry run's CLEAR rows on secure records.
     The access job (SecureRootInheritanceJob) re-decides every changed row on its next cycle. Documents already stored in
     a container a cleared pair led to stay where they are; the dry run lists the rows so they can be checked.
 
@@ -213,7 +216,7 @@ foreach ($table in @('sprk_workassignment', 'sprk_project')) {
             if (-not $row."_$($column)_value") { $action = 'SET' }
         }
         # A secure row whose pair names a secure record may be secured THROUGH that pair: never cleared unattended.
-        if ($action -eq 'CLEAR' -and $row.sprk_issecure -eq $true -and $exists -and $target.sprk_issecure -eq $true) { $action = 'REVIEW' }
+        if ($action -eq 'CLEAR' -and $parsed -ne $id -and $row.sprk_issecure -eq $true -and $exists -and $target.sprk_issecure -eq $true) { $action = 'REVIEW' }
         $decisions.Add([pscustomobject]@{ Table = $table; Id = $id; PairTable = $pairTable; Pair = $parsed; Trust = $trust; Action = $action; Column = $column })
     }
 }
@@ -226,7 +229,8 @@ foreach ($d in $decisions) {
         'REVIEW' { 'REVIEW by hand: the row is secure and its pair names a secure record (nothing written)' }
         default { 'clear the pair' }
     }
-    Write-Host ("  {0,-5} {1} {2} → {3} {4} [{5}] : {6}" -f $d.Action, $d.Table, $d.Id, $d.PairTable, $d.Pair, $d.Trust, $what)
+    $self = if ($d.Pair -eq $d.Id) { ' (ITSELF)' } else { '' }
+    Write-Host ("  {0,-5} {1} {2} → {3} {4}{5} [{6}] : {7}" -f $d.Action, $d.Table, $d.Id, $d.PairTable, $d.Pair, $self, $d.Trust, $what)
 }
 $toChange = @($decisions | Where-Object { $_.Action -in @('SET', 'CLEAR') })
 $toReview = @($decisions | Where-Object Action -eq 'REVIEW')
