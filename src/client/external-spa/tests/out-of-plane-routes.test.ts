@@ -4,10 +4,10 @@
 // Out-of-plane routes and production mock mode (spaarke-SPA-external-access-platform-r3 task 042, FR-18, #1566).
 //
 // 1. A source scan of src/: no BFF route outside /api/v1/external/**, no shared adapter that builds one, no page-built
-//    token-acquiring fetch, no direct read of the mock flag. The allow-list is EMPTY. Two files are held in
-//    PENDING_OWNER_DECISION — the task-042 escalation (no external playbook read / search route; task-042 notes, owner
-//    questions 1 and 2). That list is a ratchet: a new violation anywhere else fails, and an entry that no longer
-//    violates fails until it is removed.
+//    token-acquiring fetch, no direct read of the mock flag, and no playbook / search / AI surface. The allow-list is
+//    EMPTY and there is no pending list: the owner chose (a) on 2026-10-11 — the playbook page and SemanticSearch are
+//    removed from the external SPA (the external plane has no playbook read, analysis-create or search route), so any
+//    file that calls one is a violation wherever it sits.
 // 2. EVERY build (any --mode, any NODE_ENV) refuses VITE_DEV_MOCK=true and pins it to "false" (vite.config.ts
 //    `refuseDevMockInBuild`, `devMockBuildDefine`).
 import * as fs from 'node:fs';
@@ -15,13 +15,6 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const SRC = path.resolve(__dirname, '../src');
-
-/** Files whose violations wait on the owner's escalation answer (hide the feature vs open a BFF task). */
-const PENDING_OWNER_DECISION: Readonly<Record<string, string>> = {
-  'pages/PlaybookLibraryPage.tsx':
-    'sprk_analysisplaybook has no external module (no scoped read) and analysis create has no external route',
-  'components/SemanticSearch.tsx': 'no external search route exists (POST /api/ai/search is default-scheme)',
-};
 
 /** Deliberate exceptions — none (POML step 6). */
 const ALLOWED: Readonly<Record<string, string>> = {};
@@ -66,6 +59,16 @@ function scanSource(rel: string, source: string): Violation[] {
       )
     )
       hit('shared adapter with non-external routes');
+    // The playbook / search / AI surface is not part of the external SPA (owner decision (a), task 042): the external
+    // plane maps no `/api/v1/external/{ai,search,playbook}` route, so a call to one is dead and a re-added page that
+    // reaches the shared playbook / search UI would call the workforce routes.
+    if (/\/api\/v1\/external\/(ai|search|playbooks?)(?![\w-])/.test(text)) hit('playbook / search / AI route');
+    if (
+      /from\s+['"][^'"]*(ui-components[^'"]*\/(Playbook|SemanticSearch)[^'"]*|\/(PlaybookLibraryPage|SemanticSearch|AiToolbar|usePlaybookExecution))['"]/.test(
+        text
+      )
+    )
+      hit('playbook / search / AI module');
     if (
       !TOKEN_FETCH_OWNERS(rel) &&
       /\b(acquireBffToken|acquireActiveBffToken)\b|(?<![\w.])fetch\(|window\.fetch\(/.test(text)
@@ -93,8 +96,8 @@ function scanSrc(): Violation[] {
 }
 
 describe('source scan: every BFF call from src/ is on the external plane', () => {
-  it('no violation outside the (empty) allow-list and the pending owner decision', () => {
-    const unexpected = scanSrc().filter(v => !(v.file in ALLOWED) && !(v.file in PENDING_OWNER_DECISION));
+  it('no violation outside the (empty) allow-list', () => {
+    const unexpected = scanSrc().filter(v => !(v.file in ALLOWED));
     expect(unexpected.map(v => `${v.file}:${v.line} [${v.rule}] ${v.text}`)).toEqual([]);
   });
 
@@ -102,9 +105,9 @@ describe('source scan: every BFF call from src/ is on the external plane', () =>
     expect(Object.keys(ALLOWED)).toEqual([]);
   });
 
-  it('each pending entry still violates — remove it once the owner decision is implemented', () => {
-    const files = new Set(scanSrc().map(v => v.file));
-    for (const pending of Object.keys(PENDING_OWNER_DECISION)) expect(files.has(pending), pending).toBe(true);
+  it('the scan walks the source tree (a vacuous pass would hide everything)', () => {
+    const files = sourceFiles(SRC).map(f => path.relative(SRC, f).replace(/\\/g, '/'));
+    expect(files).toEqual(expect.arrayContaining(['App.tsx', 'auth/bff-client.ts', 'pages/DocumentUploadPage.tsx']));
   });
 
   it('DocumentUploadPage is clean (external upload route via bffApiCall)', () => {
@@ -126,6 +129,16 @@ describe('source scan: every BFF call from src/ is on the external plane', () =>
         'shared adapter with non-external routes',
       ],
       ['const token = await acquireBffToken();', 'page-built token / fetch'],
+      ["bffApiCall('/api/v1/external/ai/playbook', { method: 'POST' })", 'playbook / search / AI route'],
+      ["bffApiCall('/api/v1/external/search', { method: 'POST' })", 'playbook / search / AI route'],
+      ["bffApiCall('/api/v1/external/playbooks')", 'playbook / search / AI route'],
+      [
+        "import { PlaybookLibraryShell } from '@spaarke/ui-components/components/PlaybookLibraryShell';",
+        'playbook / search / AI module',
+      ],
+      ["import { SemanticSearch } from '../components/SemanticSearch';", 'playbook / search / AI module'],
+      ["import { PlaybookLibraryPage } from './pages/PlaybookLibraryPage';", 'playbook / search / AI module'],
+      ["import { usePlaybookExecution } from '../hooks/usePlaybookExecution';", 'playbook / search / AI module'],
       ['return fetch(url, init);', 'page-built token / fetch'],
       ["if (import.meta.env.VITE_DEV_MOCK === 'true') {", 'direct mock-flag read'],
     ])('fires on %s', (line, rule) => {
@@ -134,6 +147,8 @@ describe('source scan: every BFF call from src/ is on the external plane', () =>
 
     it.each([
       "bffApiCall('/api/v1/external/me')",
+      "bffApiCall('/api/v1/external/airline-notes')",
+      "import { SettingsPage } from './pages/SettingsPage';",
       'bffApiCall(`/api/v1/external/${root.segment}/${id}/documents`)',
       'return `${backend.bffBaseUrl}/api/v1/external`;',
       "const EXTERNAL_DATA_PATH = '/api/v1/external/api/dataverse';",

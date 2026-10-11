@@ -4,7 +4,7 @@
     <title>Route upload, playbook and search pages through the external plane; remove production mock identity (FR-18, #1566)</title>
     <phase>4 SPA auth and platform</phase>
     <gate>after 041</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Client auth/route changes (tags auth, frontend)</rigor-reason>
     <model-tier>opus</model-tier>

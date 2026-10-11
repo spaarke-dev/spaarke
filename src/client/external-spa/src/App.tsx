@@ -19,7 +19,6 @@ import { AuthGuard } from './components/AuthGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { WorkspaceHomePage } from './pages/WorkspaceHomePage';
 import { ProjectPage } from './pages/ProjectPage';
-import { PlaybookLibraryPage } from './pages/PlaybookLibraryPage';
 import { DocumentUploadPage } from './pages/DocumentUploadPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TeamsHostProvider } from './components/auth/TeamsHostContext';
@@ -147,7 +146,6 @@ const AppShell: React.FC<{
             <Routes>
               <Route path="/" element={<WorkspaceHomePage teamsHost={teamsHost} />} />
               <Route path="/project/:id" element={<ProjectPage />} />
-              <Route path="/playbooks/:entityType/:entityId" element={<PlaybookLibraryPage />} />
               <Route path="/upload" element={<DocumentUploadPage teamsHost={teamsHost} />} />
               <Route
                 path="/settings"

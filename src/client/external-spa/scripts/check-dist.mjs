@@ -11,9 +11,9 @@
  *      src/api/me-client.ts personas). Any occurrence fails. The only tolerated mention of VITE_DEV_MOCK is the
  *      pinned build constant `VITE_DEV_MOCK:"false"` that Vite writes into its `import.meta.env` object.
  *   2. OUT-OF-PLANE ROUTES - every "/api/..." path string must be under /api/v1/external. Anything else is a call
- *      to a route the external plane does not own. A RATCHET BASELINE lists the strings that are known and waiting
- *      on the owner decision (task-042 notes, owner questions 1 and 2): a NEW string fails, and a baseline entry
- *      that no longer appears (or appears fewer times) fails too, so the baseline shrinks when the decision lands.
+ *      to a route the external plane does not own. The RATCHET BASELINE lists only the shared
+ *      BffDataverseClient path suffixes (they resolve under /api/v1/external at run time, see OUT_OF_PLANE_BASELINE): any
+ *      other such string fails, and an entry that no longer appears (or appears fewer times) fails too.
  *
  * `scanDistText` / `evaluateScan` are pure (tests/check-dist.test.ts feeds them fixture strings); only `main` and
  * `checkDist` touch the file system. Exit code 0 = clean, 1 = findings, 2 = nothing to scan (no dist, or no .js in it).
@@ -43,14 +43,16 @@ const TOLERATED_MARKER_MENTIONS = { VITE_DEV_MOCK: 'VITE_DEV_MOCK:"false"' };
 const EXTERNAL_PREFIX = /^\/api\/v1\/external(?:[/?]|$)/;
 
 /**
- * Known out-of-plane "/api/" strings in the current bundle, with how many times each appears. These are the two
- * features waiting on the owner decision (task 042 notes): PlaybookLibraryShell's `POST /api/ai/analysis/create`
- * and the shared `bffDataServiceAdapter`'s `/api/dataverse/...` family. Remove an entry when its feature is
- * removed or given an external route - the check fails until you do.
+ * "/api/" strings that are allowed in the bundle, with how many times each appears. Since the owner decision (a) of
+ * 2026-10-11 (task 042) removed the playbook page and SemanticSearch, the playbook-create route
+ * (`/api/ai/analysis/create`) and the `bffDataServiceAdapter` proxy (`/api/dataverse/${entity}`) are GONE from the
+ * bundle. What remains are the path SUFFIXES of the shared `BffDataverseClient`: it appends `/api/dataverse/...` to
+ * its `bffBaseUrl`, and the only instance in this SPA (`services/gridDataverseClient.ts`, task 041) is built with
+ * `{backend.bffBaseUrl}/api/v1/external`, so every request resolves to `/api/v1/external/api/dataverse/...`. A scan of
+ * the minified bundle sees only the suffix half. Anything else - a NEW string, or one of these appearing more often -
+ * fails; an entry that stops appearing fails too, so the baseline can only shrink.
  */
 export const OUT_OF_PLANE_BASELINE = {
-  '/api/ai/analysis/create': 1,
-  '/api/dataverse/': 1,
   '/api/dataverse/fetch': 1,
   '/api/dataverse/metadata/': 1,
   '/api/dataverse/record/': 1,

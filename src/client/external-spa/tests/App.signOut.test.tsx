@@ -19,7 +19,6 @@ vi.mock('../src/components/AuthGuard', () => ({
 }));
 vi.mock('../src/pages/WorkspaceHomePage', () => ({ WorkspaceHomePage: () => null }));
 vi.mock('../src/pages/ProjectPage', () => ({ ProjectPage: () => null }));
-vi.mock('../src/pages/PlaybookLibraryPage', () => ({ PlaybookLibraryPage: () => null }));
 vi.mock('../src/pages/DocumentUploadPage', () => ({ DocumentUploadPage: () => null }));
 vi.mock('../src/pages/SettingsPage', () => ({ SettingsPage: () => null }));
 

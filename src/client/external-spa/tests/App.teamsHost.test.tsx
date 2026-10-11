@@ -18,7 +18,6 @@ vi.mock('../src/pages/WorkspaceHomePage', async () => {
   return { WorkspaceHomePage: () => React.createElement(BffAccessState, { failure: 'signin' }) };
 });
 vi.mock('../src/pages/ProjectPage', () => ({ ProjectPage: () => null }));
-vi.mock('../src/pages/PlaybookLibraryPage', () => ({ PlaybookLibraryPage: () => null }));
 vi.mock('../src/pages/DocumentUploadPage', () => ({ DocumentUploadPage: () => null }));
 vi.mock('../src/pages/SettingsPage', () => ({ SettingsPage: () => null }));
 

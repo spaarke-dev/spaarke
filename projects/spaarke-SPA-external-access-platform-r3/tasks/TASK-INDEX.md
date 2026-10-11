@@ -27,7 +27,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 039 | Event reads for Matter and Work Assignment (FR-03 server) | P3 | 🔲 [open] | 032, 037 | S/h | FULL | Wave 7 |
 | 040 | Workforce client switch (FR-16) | P4 | 🔄 [wip] | 001 (+ owner client registration) | O/h | FULL | Wave 2 |
 | 041 | Run-time backend selection (FR-17) | P4 | ✅ [done] | 040 | O/h | FULL | Wave 3 |
-| 042 | Out-of-plane pages + no production mock (FR-18) | P4 | 🔄 [wip] | 041 | O/h | FULL | Wave 4 |
+| 042 | Out-of-plane pages + no production mock (FR-18) | P4 | ✅ [done] | 041 | O/h | FULL | Wave 4 |
 | 043 | Production build + Teams package in CI (FR-20) | P4 | 🔄 [wip] code done, awaiting owner GitHub environments + prod Teams app id | 040 | S/h | STANDARD | Wave 3 |
 | 050 | Record detail view: fields, docs/invoices, events/tasks (FR-01–03) | P5 | ✅ [done] | none | S/h | FULL | Wave 1 |
 | 051 | Detail messages section: read + send (FR-04/FR-11 client) | P5 | ✅ [done] | 050, 034 | S/h | FULL | Wave 5 |

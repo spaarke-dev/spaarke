@@ -119,10 +119,25 @@ describe('check-dist: the ratchet baseline', () => {
   });
 });
 
-describe('check-dist: the shipped baseline lists only the two pending features', () => {
-  it('is the playbook create route and the shared dataverse adapter family, nothing else', () => {
+describe('check-dist: the shipped baseline (owner decision (a): no playbook / search surface)', () => {
+  it('is only the shared BffDataverseClient suffixes - no playbook, analysis, search or adapter route', () => {
     const keys = Object.keys(OUT_OF_PLANE_BASELINE).sort();
-    expect(keys[0]).toBe('/api/ai/analysis/create');
-    expect(keys.slice(1).every(k => k.startsWith('/api/dataverse/'))).toBe(true);
+    expect(keys).toEqual([
+      '/api/dataverse/fetch',
+      '/api/dataverse/metadata/',
+      '/api/dataverse/record/',
+      '/api/dataverse/savedqueries/',
+      '/api/dataverse/savedquery/',
+    ]);
+  });
+
+  it('a playbook-create, search, or adapter-proxy string in a bundle fails against the shipped baseline', () => {
+    const all = Object.keys(OUT_OF_PLANE_BASELINE)
+      .map(k => `"${k}";`)
+      .join('');
+    expect(evaluateScan(scanDistText(all))).toEqual([]);
+    for (const extra of ['x=`${t}/api/ai/analysis/create`;', 'x="/api/ai/search";', 'x=`${b}/api/dataverse/${e}`;']) {
+      expect(evaluateScan(scanDistText(all + extra)), extra).toHaveLength(1);
+    }
   });
 });

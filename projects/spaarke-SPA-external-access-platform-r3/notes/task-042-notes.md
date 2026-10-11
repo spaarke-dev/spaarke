@@ -164,3 +164,73 @@ Notes for the next reader:
 - K3: a forced retry (`forceRefresh: true`) after a 401 can reach a silent iframe when the refresh token is dead. On CIAM that costs up to about 10 s before the login redirect.
 - K4: forced NAA calls are not deduplicated. A failed forced NAA call falls to the popup without a user gesture, which is likely blocked and maps to the sign-in state. A transient token-endpoint error on the forced refresh replaces the original 401.
 - K5 remainder: `gridDataverseClient`'s single 401 retry is now covered (one retry, `forceRefresh: true`, no second retry). Still untested: the `TeamsHostAdapter` options passthrough and the popup-fallback forced path. `PlaybookLibraryPage.tsx:76` still retries without force; that page waits on the owner's playbook decision.
+
+## Owner decision (a) applied (2026-10-11)
+
+The owner chose (a) for both questions in §1: hide the playbook page and SemanticSearch on the external plane, and open no BFF task. This supersedes the "pending" statements in §1, §6 item 1, and the 'Known limits NOT fixed' items 2, 3 and 5. All paths are under `src/client/external-spa`.
+
+### Removed (deleted, nothing else used them)
+
+| File | Why |
+|---|---|
+| `src/pages/PlaybookLibraryPage.tsx` | Out-of-plane routes (`/api/dataverse/{entity}`, `POST /api/ai/analysis/create`) and its own `acquireBffToken()` fetch. Its un-forced 401 retry (`:76`) goes with it. |
+| `src/components/SemanticSearch.tsx` | `POST /api/ai/search`; rendered nowhere. |
+| `src/components/AiToolbar.tsx`, `src/hooks/usePlaybookExecution.ts` | **Beyond the literal ask; flagged as a deviation.** `usePlaybookExecution` posted to `/api/v1/external/ai/playbook`, which no BFF route maps (known limit 3). Its only consumer, `AiToolbar`, is rendered nowhere. They are the last playbook call in the SPA, and the scan rule below would fail on them. |
+
+Shared components that other hosts use were kept (`PlaybookLibraryShell`, `bffDataServiceAdapter`, `bffUploadServiceAdapter` stay in `Spaarke.UI.Components`).
+
+### Changed
+
+| File | Change |
+|---|---|
+| `src/App.tsx` | Removed the `PlaybookLibraryPage` import and the `/playbooks/:entityType/:entityId` route. A visit now falls to `path="*"` and renders `NotFoundView` ("Page not found"). |
+| `src/components/index.ts` | Removed the `SemanticSearch` and `AiToolbar` barrel exports. |
+| `scripts/check-dist.mjs` | Baseline shrunk (below). |
+| `tests/App.signOut.test.tsx`, `tests/App.teamsHost.test.tsx` | Dropped the `vi.mock` of the deleted page. |
+| `tests/out-of-plane-routes.test.ts` | Removed `PENDING_OWNER_DECISION` (and its ratchet test); added the playbook/search/AI rules and a vacuity guard (below). |
+| `tests/check-dist.test.ts` | The shipped-baseline test now pins the new baseline. |
+| `tests/App.removedRoutes.test.tsx` (new, 10 tests) | See below. |
+
+Nothing else reached the pages: no nav link, button, quick-start action, widget-registry entry, module descriptor or deep link named `/playbooks` or a search page (grepped all of `src`; the Quick Start "Trademark Search Request" is a legal-front-door request, unrelated, left alone). `canUseAi` in `useAccessLevel.ts` is kept (its doc comment still mentions the toolbar; not changed).
+
+### Scan rules (`tests/out-of-plane-routes.test.ts`, allow-list still empty)
+
+1. Existing: any `/api/` path outside `/api/v1/external`; shared adapters that build non-external routes; page-built token / `fetch(` outside `auth/**` and `services/gridDataverseClient.ts`; direct `VITE_DEV_MOCK` reads.
+2. **New, route:** `/api/v1/external/(ai|search|playbook|playbooks)` fails (hit 'playbook / search / AI route'). These are external-looking paths the BFF does not map, so rule 1 cannot see them.
+3. **New, module:** an import of `@spaarke/ui-components/**/Playbook*` or `**/SemanticSearch*`, or of `PlaybookLibraryPage`, `SemanticSearch`, `AiToolbar` or `usePlaybookExecution` fails (hit 'playbook / search / AI module'). Re-adding the page or the shared shell therefore fails the scan.
+4. Controls: 7 new must-fire cases (the ai/playbook, search and playbooks routes; the shell, SemanticSearch, page and hook imports) and 2 new must-not-fire cases (`/api/v1/external/airline-notes`, a normal page import). A vacuity guard checks the walker still sees `App.tsx`, `auth/bff-client.ts` and `pages/DocumentUploadPage.tsx`.
+
+### check-dist baseline (the bundle scan)
+
+`OUT_OF_PLANE_BASELINE` lost `/api/ai/analysis/create` and `/api/dataverse/` (the shell and the data-service adapter are out of the bundle). It keeps five entries, one each: `/api/dataverse/fetch`, `metadata/`, `record/`, `savedqueries/`, `savedquery/`. **These are the allowed exception**: they are the suffixes of the shared `BffDataverseClient`, which appends them to its `bffBaseUrl`; the only instance (`services/gridDataverseClient.ts`, task 041) is built on `{backend.bffBaseUrl}/api/v1/external`, so each request is `/api/v1/external/api/dataverse/...`. (§5 of this file records the same fact; the earlier baseline text wrongly attributed them to the adapter.) The scan sees only the suffix half of the minified string, so it cannot be made empty. Any other `/api/` string, such as a playbook-create, search or adapter-proxy route, fails (tested).
+
+### Tests
+
+| File | Tests | Covers |
+|---|---|---|
+| `tests/App.removedRoutes.test.tsx` (new) | 10 | The real `App` router, with MSAL and the pages stubbed. `/playbooks/:type/:id`, the same with `?intent=`, `/playbooks`, `/search`, `/semantic-search` and `/project/:id/search` each render "Page not found" and the Back button, none of the other page stubs, and no fetch to a `/api/` URL. `/upload` still renders its page. The four deleted files are gone. No `WIDGET_DEFINITIONS` entry mentions a playbook or search surface. No source file names `/playbooks`, a search route, or `navigate(...playbooks|search)`. |
+| `tests/out-of-plane-routes.test.ts` | 51 (was 43 after the review rounds) | The rules above, with the controls. |
+| `tests/check-dist.test.ts` | | The shipped baseline is exactly the five suffixes; playbook-create / search / adapter-proxy strings fail against it. |
+
+**Fail-before** (HEAD `App.tsx`, `components/index.ts` and the four deleted files restored, the new/changed tests and the new `check-dist.mjs` kept): **5 failed**, 94 passed, in the three affected files.
+- The two `/playbooks/...` route tests render the real playbook page instead of not-found.
+- "the page and component files are gone" fails.
+- "no source names `/playbooks`" fails.
+- The source scan reports its violations: 16 in `PlaybookLibraryPage`, `SemanticSearch`, `AiToolbar` and `usePlaybookExecution`, plus the new module/route rules.
+- The `/search`, `/semantic-search` and `/playbooks` (bare) route tests pass at HEAD because those paths never existed (they pin the 404 and guard against a re-add).
+- The sources were then restored and verified (`git status` shows exactly the intended set).
+
+### Command results (2026-10-11)
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npx vitest run` | **21 files, 491 passed** (was 17 files / 397 at the end of the review rounds) |
+| `npm run build` | exit 0 (only the > 500 kB chunk warning) |
+| `npm run check:dist` | exit 0: 1 file clean, baseline matches. `dist` has 0 occurrences of `PlaybookLibrary`, `SemanticSearch`, `analysis/create`, `api/ai/`. |
+| `prettier --check` | clean on every changed file (`tests/OutsideCounselDashboard.projectName.test.tsx` was already unformatted and is not touched) |
+
+Notes: `tests/BffAccessState.signIn.test.tsx` has two tests that time out (about 24 s) when the full suite loads the machine and pass alone (5/5); they passed in the final full run. The 'Known limits NOT fixed' item 1 (`/upload` has no link in the app) is unchanged. No dotnet command was run, and nothing was committed.
+
+**Known limit (main session, 2026-10-11):** nothing in the SPA links to `/upload`; this was already so before task 042. Partners upload through the project page's document library dialog (`DocumentLibrary.tsx`), so the page is reachable only by a direct link. Adding an entry point is outside 042.
