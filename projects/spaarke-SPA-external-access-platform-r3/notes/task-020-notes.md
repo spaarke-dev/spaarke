@@ -158,6 +158,7 @@ git add -A src\dataverse\solutions\SpaarkeMaster          # staging only; owner 
 & .\scripts\solution-authoring\Export-SpaarkeMasterSource.ps1
 git diff -- src\dataverse\solutions\SpaarkeMaster         # export vs the staged hand-written version
 git restore -- src\dataverse\solutions\SpaarkeMaster      # UNDO: back to the staged hand-written version
+git clean -fd -- src\dataverse\solutions\SpaarkeMaster   # UNDO, second half: removes files the export ADDED (restore does not touch untracked files)
 ```
 
 Fallback (old step 3): `pac solution pack` plus `pac solution import` of the whole solution. Use it only after 5c shows no drift; it is not part of this sequence.
@@ -192,14 +193,25 @@ Optional UI check of the consequence: open a service request as an internal user
 **Changes:** deletes the six columns from dev. The data in them is lost. Dataverse is expected to drop the four relationships, the local option set and the field-permission rows with the columns (the earlier notes' assumption, not yet seen live); the script also removes any relationship or field-permission row that survives, then publishes. The two profiles (shared with tasks 133/146), their members and the XML in git are **not** touched. Nothing reads these columns until tasks 030, 032 and 034 ship. **Time:** about 3 to 10 minutes. **Undo of the rollback:** run steps 3 and 4 again (data is not restored).
 
 ```powershell
-# 7a. Read-only listing: what exists, how many rows hold a value. Deletes NOTHING.
+# 7a. Read-only listing: what exists, how many rows hold a value. Deletes NOTHING. The header line prints
+#     "Environment : <url> (org '<name>')" - copy that organisation name.
 & .\scripts\Set-ChildRecordCreatorContactSchema.ps1 -EnvironmentUrl $dv -Rollback
+$org = '<the organisation name printed in 7a>'
 
-# 7b. Delete. Refuses any column that holds data (or whose row count cannot be read) unless -AcceptDataLoss is also given.
-& .\scripts\Set-ChildRecordCreatorContactSchema.ps1 -EnvironmentUrl $dv -Rollback -ConfirmRollback
+# 7b. Delete. -ConfirmRollback takes the organisation name (exactly as printed, case-sensitive); anything else - a typo,
+#     another environment's name, or a bare -Confirm (which PowerShell reads as an abbreviation of -ConfirmRollback and
+#     which then needs a value) - refuses and deletes nothing. It also refuses any column that holds data (or whose row
+#     count cannot be read) unless -AcceptDataLoss is also given.
+& .\scripts\Set-ChildRecordCreatorContactSchema.ps1 -EnvironmentUrl $dv -Rollback -ConfirmRollback $org
 # 7c. Only if 7b refused for data you are willing to lose:
-& .\scripts\Set-ChildRecordCreatorContactSchema.ps1 -EnvironmentUrl $dv -Rollback -ConfirmRollback -AcceptDataLoss
+& .\scripts\Set-ChildRecordCreatorContactSchema.ps1 -EnvironmentUrl $dv -Rollback -ConfirmRollback $org -AcceptDataLoss
 ```
+
+What the rollback will and will not do (all of it is visible in the 7a/7b output):
+- **Only what the script created.** A column with the same name but a different type, shape or target (drift) is reported `FAIL refusing to delete ...` and left alone: no column delete, no relationship delete, no field-permission delete. The run exits 1 when anything is refused, so check the exit code (`$LASTEXITCODE`) as well as the screen.
+- **"Row count could not be read".** Any column can show this instead of a number when the count query itself fails (a timeout, a throttle, or a filter the server rejects for that column type). The script treats an unreadable count as "may hold data": it refuses without `-AcceptDataLoss`. That is the safe direction - it can block a rollback of an empty column, never delete a full one by mistake. Re-run 7a to retry the count; use `-AcceptDataLoss` only when you accept losing whatever is there.
+- **A refused lookup delete.** If Dataverse refuses to delete a lookup column, the script deletes its relationship by id (which drops the lookup), re-reads the column and says what happened; it is a `FAIL` only if the column is still there.
+- **Stale reads.** A relationship or field-permission row that a 404 says is already gone is reported `OK ... already gone`; the rest of the rollback and the publish still run.
 
 Then revert the source with git (the XML files from this task: `Entities/sprk_Document`, `sprk_Todo`, `sprk_Event`, `sprk_Communication`, `sprk_ServiceRequest/Entity.xml`, `Other/FieldSecurityProfiles.xml`, `Other/Relationships.xml`, `Other/Relationships/Contact.xml`) so source and dev agree again.
 
@@ -228,4 +240,5 @@ foreach ($x in 'sprk_document:sprk_createdbycontact','sprk_todo:sprk_createdbyco
 
 ## Open
 - Owner approval of the columns, the field-security posture (now including `sprk_intakedata`) and the rollback (acceptance criterion 6).
+- **DEPLOY ORDER (live now):** task 030's code in this branch already writes `sprk_CreatedByContact@odata.bind` on external creates (`ExternalDataService.cs:~528,~570`), so a BFF built from this branch must **not** be deployed to dev before step 3 (`-Apply`) has run and `-Verify` exits 0; until then those creates fail.
 - Live criteria 1–3 wait for the import.

@@ -46,10 +46,16 @@
     DEPLOY ORDER. A BFF build that writes these columns fails its creates until -Apply has run (Dataverse refuses a
     column that does not exist). Apply this script - and see -Verify exit 0 - before deploying such a BFF.
 
-    ROLLBACK. -Rollback lists what it would delete (read-only) and deletes NOTHING unless -ConfirmRollback is also given.
-    It deletes the six columns (Dataverse drops the relationships, the local option set and the field-permission rows with
-    them; any leftover relationship or field-permission row is removed too), then publishes. It refuses a column that holds
-    data unless -AcceptDataLoss is also given. The two profiles are shared with tasks 133/146 and are never deleted.
+    ROLLBACK. -Rollback lists what it would delete (read-only) and deletes NOTHING unless -ConfirmRollback <organisation
+    name> is also given, where the value is the organisation name the listing prints for the target environment (a
+    mismatch, or a bare -Confirm, refuses and deletes nothing). It deletes the six columns (Dataverse drops the
+    relationships, the local option set and the field-permission rows with them; any leftover relationship or
+    field-permission row is removed too - a 404 there means "already gone"), then publishes. If Dataverse refuses to
+    delete a lookup column, its relationship is deleted by id instead (which drops the lookup) and the column is
+    re-checked. It refuses a column that is not what this script creates (drift) - the column, its relationship and its
+    field permissions are left alone - and a column that holds data (or whose row count could not be read) unless
+    -AcceptDataLoss is also given. Anything refused makes the run exit 1. The two profiles are shared with tasks 133/146
+    and are never deleted.
 
 .PARAMETER EnvironmentUrl
     e.g. https://spaarkedev1.crm.dynamics.com
@@ -72,10 +78,12 @@
     Rollback mode. Read-only listing unless -ConfirmRollback is also given. Cannot be combined with -Apply or -Verify.
 
 .PARAMETER ConfirmRollback
-    With -Rollback: actually delete the six columns. Without it nothing is deleted.
+    With -Rollback: actually delete the six columns. The value must be the organisation name of the target environment,
+    exactly as the listing prints it ("org '<name>'"); anything else refuses and deletes nothing. Without it nothing is
+    deleted.
 
 .PARAMETER AcceptDataLoss
-    With -Rollback -ConfirmRollback: allow deleting a column that holds data (or whose row count could not be read).
+    With -Rollback -ConfirmRollback <org>: allow deleting a column that holds data (or whose row count could not be read).
 
 .EXAMPLE
     .\Set-ChildRecordCreatorContactSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com `
@@ -95,7 +103,7 @@
     Lists what a rollback would delete. Deletes nothing.
 
 .EXAMPLE
-    .\Set-ChildRecordCreatorContactSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Rollback -ConfirmRollback
+    .\Set-ChildRecordCreatorContactSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Rollback -ConfirmRollback <organisation name printed by the listing>
 
 .NOTES
     Run it inside PowerShell (`& ./scripts/Set-ChildRecordCreatorContactSchema.ps1 ...`): `pwsh -File` passes the comma
@@ -111,15 +119,15 @@ param(
     [switch]$Apply,
     [switch]$Verify,
     [switch]$Rollback,
-    [switch]$ConfirmRollback,
+    [string]$ConfirmRollback = '',
     [switch]$AcceptDataLoss
 )
 
 $ErrorActionPreference = 'Stop'
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 if (@($Apply.IsPresent, $Verify.IsPresent, $Rollback.IsPresent | Where-Object { $_ }).Count -gt 1) { throw '-Apply, -Verify and -Rollback are separate modes; run one at a time.' }
-if (($ConfirmRollback -or $AcceptDataLoss) -and -not $Rollback) { throw '-ConfirmRollback and -AcceptDataLoss are only meaningful with -Rollback.' }
-if ($AcceptDataLoss -and -not $ConfirmRollback) { throw '-AcceptDataLoss needs -ConfirmRollback.' }
+if ((-not [string]::IsNullOrEmpty($ConfirmRollback) -or $AcceptDataLoss) -and -not $Rollback) { throw '-ConfirmRollback and -AcceptDataLoss are only meaningful with -Rollback.' }
+if ($AcceptDataLoss -and [string]::IsNullOrEmpty($ConfirmRollback)) { throw '-AcceptDataLoss needs -ConfirmRollback <organisation name>.' }
 if (($Apply -or $Verify) -and $BffApplicationIds.Count -eq 0) {
     throw '-BffApplicationIds is required for -Apply and -Verify: the writer profile must name the BFF application user(s) explicitly.'
 }
@@ -231,7 +239,14 @@ function Report([string]$State, [string]$What) {
 
 $org = (Invoke-DvGet 'organizations?$select=name').value[0].name
 Write-Host "Environment : $EnvironmentUrl (org '$org')"
-Write-Host ("Mode        : {0}" -f $(if ($Verify) { 'VERIFY (read-only)' } elseif ($Rollback) { $(if ($ConfirmRollback) { 'ROLLBACK (DELETES the six columns)' } else { 'ROLLBACK listing (read-only; add -ConfirmRollback to delete)' }) } elseif ($IsDryRun) { 'DRY RUN (no writes)' } else { 'APPLY' }))
+# A rollback deletes only when -ConfirmRollback names THIS environment's organisation (the value printed above), exactly.
+# A bare -Confirm is a prefix of -ConfirmRollback: it binds here, needs a value, and so can never delete by itself.
+$DoDelete = $false
+if ($Rollback -and -not [string]::IsNullOrEmpty($ConfirmRollback)) {
+    if ($ConfirmRollback -cne $org) { throw "-ConfirmRollback must be the organisation name of the target environment, exactly as printed above ('$org'); got '$ConfirmRollback'. Nothing was deleted." }
+    $DoDelete = $true
+}
+Write-Host ("Mode        : {0}" -f $(if ($Verify) { 'VERIFY (read-only)' } elseif ($Rollback) { $(if ($DoDelete) { 'ROLLBACK (DELETES the six columns)' } else { "ROLLBACK listing (read-only; add -ConfirmRollback '$org' to delete)" }) } elseif ($IsDryRun) { 'DRY RUN (no writes)' } else { 'APPLY' }))
 Write-Host "Solution    : $SolutionUniqueName"
 Write-Host "Columns     : $(($Specs | ForEach-Object { SpecKey $_ }) -join ', ')"
 
@@ -280,6 +295,19 @@ function Get-FieldPermissions([string]$Table, [string]$Column) {
     @((Invoke-DvGet "fieldpermissions?`$select=fieldpermissionid,canread,cancreate,canupdate&`$expand=fieldsecurityprofileid(`$select=name)&`$filter=entityname eq '$Table' and attributelogicalname eq '$Column'").value)
 }
 
+# DELETE that treats a 404 as "already gone" (a stale metadata read can list a relationship or row that a column delete
+# already removed). Returns 'deleted' or 'gone'; any other failure throws.
+function Invoke-DvDeleteTolerant([string]$Path) {
+    try { Invoke-RestMethod -Uri "$Api/$Path" -Headers $headers -Method Delete | Out-Null; return 'deleted' }
+    catch {
+        $err = $_
+        $code = $null
+        try { $code = [int]$err.Exception.Response.StatusCode } catch { $code = $null }
+        if ($code -eq 404) { return 'gone' }
+        throw "DELETE $Path failed: $(Get-DvErrorText $err)"
+    }
+}
+
 # =====================================================================================================================
 # ROLLBACK
 # =====================================================================================================================
@@ -289,6 +317,9 @@ if ($Rollback) {
         $key = SpecKey $s
         $col = Get-Column $s
         if (-not $col.Exists) { Report 'OK' "$key does not exist - nothing to delete"; continue }
+        # Only ever delete what this script creates: a same-named column that drifted (another type, shape or target) was
+        # made by someone else and is never touched - not the column, not its relationship, not its field permissions.
+        if ($col.Problems.Count -gt 0) { Report 'FAIL' "refusing to delete ${key}: it is not what this script creates ($($col.Problems -join '; ')). Nothing was changed for this column."; continue }
         $set = (Invoke-DvGet "EntityDefinitions(LogicalName='$($s.Table)')?`$select=EntitySetName").EntitySetName
         $rows = -1
         try {
@@ -296,32 +327,55 @@ if ($Rollback) {
             $rows = Measure-DvRows "$set`?`$select=$($s.Table)id&`$filter=$filter"
         } catch { $rows = -1 }
         $rowText = if ($rows -lt 0) { 'row count could not be read' } else { "$rows row(s) hold a value" }
-        if (-not $ConfirmRollback) { Report 'WOULD' "delete $key ($rowText)$(if ($s.Kind -eq 'Lookup') { "; relationship $(RelationshipSchemaName $s.Table)" })"; continue }
+        if (-not $DoDelete) { Report 'WOULD' "delete $key ($rowText)$(if ($s.Kind -eq 'Lookup') { "; relationship $(RelationshipSchemaName $s.Table)" })"; continue }
         if ($rows -ne 0 -and -not $AcceptDataLoss) { Report 'FAIL' "refusing to delete ${key}: $rowText. Re-run with -AcceptDataLoss if that data may be lost."; continue }
         try {
             Invoke-DvWrite DELETE (AttrBase $s) $null | Out-Null
             Report 'DONE' "deleted $key ($rowText)"
-        } catch { Report 'FAIL' "could not delete ${key}: $($_.Exception.Message)"; continue }
+        } catch {
+            $attrError = $_.Exception.Message
+            if ($s.Kind -ne 'Lookup') { Report 'FAIL' "could not delete ${key}: $attrError"; continue }
+            # Dataverse can refuse a lookup column delete and want its relationship deleted instead; deleting the
+            # relationship (by MetadataId) drops the lookup. Then re-check the column.
+            $relPath = Get-RelationshipPath $s.Table
+            $relToDrop = Try-DvGetAny $relPath
+            if (-not $relToDrop -or $relToDrop.ReferencingAttribute -ne $s.Column) {
+                Report 'FAIL' "could not delete ${key}: $attrError (and relationship $(RelationshipSchemaName $s.Table) was not found to delete instead)"; continue
+            }
+            try {
+                $how = Invoke-DvDeleteTolerant "RelationshipDefinitions($($relToDrop.MetadataId))"
+                Report 'INFO' "the column delete for $key was refused ($attrError); $how relationship $(RelationshipSchemaName $s.Table) instead, which drops the lookup"
+            } catch { Report 'FAIL' "could not delete ${key}: column delete refused ($attrError) and the relationship delete failed: $($_.Exception.Message)"; continue }
+            $again = Get-Column $s
+            if ($again.Exists) { Report 'FAIL' "$key still exists after its relationship $(RelationshipSchemaName $s.Table) was deleted; delete it by hand"; continue }
+            Report 'DONE' "deleted $key by deleting its relationship ($rowText)"
+        }
         if ($s.Kind -eq 'Lookup') {
             $rel = Try-DvGetAny (Get-RelationshipPath $s.Table)
             if ($rel) {
-                Invoke-DvWrite DELETE "RelationshipDefinitions($($rel.MetadataId))" $null | Out-Null
-                Report 'DONE' "deleted leftover relationship $(RelationshipSchemaName $s.Table)"
+                $how = Invoke-DvDeleteTolerant "RelationshipDefinitions($($rel.MetadataId))"
+                if ($how -eq 'gone') { Report 'OK' "relationship $(RelationshipSchemaName $s.Table) is already gone (stale read)" }
+                else { Report 'DONE' "deleted leftover relationship $(RelationshipSchemaName $s.Table)" }
             } else { Report 'OK' "relationship $(RelationshipSchemaName $s.Table) is gone" }
         }
         foreach ($p in Get-FieldPermissions $s.Table $s.Column) {
-            Invoke-DvWrite DELETE "fieldpermissions($($p.fieldpermissionid))" $null | Out-Null
-            Report 'DONE' "deleted leftover field permission row for $key ($($p.fieldsecurityprofileid.name))"
+            $how = Invoke-DvDeleteTolerant "fieldpermissions($($p.fieldpermissionid))"
+            if ($how -eq 'gone') { Report 'OK' "field permission row for $key ($($p.fieldsecurityprofileid.name)) is already gone" }
+            else { Report 'DONE' "deleted leftover field permission row for $key ($($p.fieldsecurityprofileid.name))" }
         }
     }
-    if ($ConfirmRollback) {
+    if ($DoDelete) {
         $entities = ($AllTables | ForEach-Object { "<entity>$_</entity>" }) -join ''
         Invoke-DvWrite POST 'PublishXml' @{ ParameterXml = "<importexportxml><entities>$entities</entities></importexportxml>" } | Out-Null
         Write-Host "`nPublished $($AllTables -join ', ')." -ForegroundColor Green
     } else {
-        Write-Host "`nROLLBACK LISTING complete - nothing was deleted. Add -ConfirmRollback to delete." -ForegroundColor Cyan
+        Write-Host "`nROLLBACK LISTING complete - nothing was deleted. To delete, add -ConfirmRollback '$org'." -ForegroundColor Cyan
     }
-    if ($fails.Count -gt 0) { exit 1 }
+    if ($fails.Count -gt 0) {
+        Write-Host "`n$($fails.Count) item(s) refused or failed:" -ForegroundColor Red
+        $fails | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
+        exit 1
+    }
     exit 0
 }
 
@@ -551,7 +605,7 @@ else {
     foreach ($s in $Specs) {
         $key = SpecKey $s
         if ($attrs[$key]) { $components.Add(@{ Id = $attrs[$key].MetadataId; Type = 2; Label = $key; TableId = $tableIds[$s.Table] }) }
-        if ($s.Kind -eq 'Lookup') {
+        if ($s.Kind -eq 'Lookup' -and -not $blocked[$key]) {
             $rel = Try-DvGet "RelationshipDefinitions(SchemaName='$(RelationshipSchemaName $s.Table)')?`$select=MetadataId"
             if ($rel) { $components.Add(@{ Id = $rel.MetadataId; Type = 10; Label = "relationship $(RelationshipSchemaName $s.Table)"; TableId = $tableIds[$s.Table] }) }
         }
@@ -590,3 +644,4 @@ if ($fails.Count -gt 0) {
 }
 if ($IsDryRun) { Write-Host "`nDRY RUN complete - nothing was written. Re-run with -Apply." -ForegroundColor Cyan }
 if ($fails.Count -gt 0) { exit 1 }
+exit 0
