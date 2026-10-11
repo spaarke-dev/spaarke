@@ -90,7 +90,11 @@ public sealed class WorkforceIdentityOptionsValidator : IValidateOptions<Workfor
 /// <summary>The member test's answer for a workforce token.</summary>
 public enum WorkforceMembership
 {
-    /// <summary>A user token from a configured customer tenant with <c>acct = 0</c>.</summary>
+    /// <summary>
+    /// A user token from a configured customer tenant with <c>acct = 0</c> — or (R3 FR-15) a registered
+    /// workforce-contact guest: <c>acct = 1</c> in the stamp's own tenant whose home tenant (<c>idp</c>) is a
+    /// configured customer tenant.
+    /// </summary>
     Member,
 
     /// <summary>Not positively a user-delegated token (app-only, or a shape we do not model).</summary>
@@ -120,10 +124,20 @@ public sealed record WorkforceCallerClaims(
     string? Email,
     string? GivenName,
     string? FamilyName,
-    string? DisplayName)
+    string? DisplayName,
+    string? Idp)
 {
     /// <summary>The <c>acct</c> optional claim (member = 0, guest = 1).</summary>
     public const string AcctClaim = "acct";
+
+    /// <summary>
+    /// The <c>idp</c> claim: the identity provider that authenticated the subject. For a B2B guest it is the
+    /// guest's HOME tenant issuer (<c>https://sts.windows.net/{home tid}/</c>), not the tenant signed in to.
+    /// </summary>
+    public const string IdpClaim = "idp";
+
+    /// <summary>The WS-Federation form <c>idp</c> takes when inbound claim mapping is on.</summary>
+    public const string IdpClaimUri = "http://schemas.microsoft.com/identity/claims/identityprovider";
 
     /// <summary>
     /// Reads the claims from a validated workforce principal. The caller kind comes from
@@ -142,7 +156,24 @@ public sealed record WorkforceCallerClaims(
             TokenEmail(user),
             First(user, "given_name", ClaimTypes.GivenName),
             First(user, "family_name", ClaimTypes.Surname),
-            First(user, "name"));
+            First(user, "name"),
+            Single(user, IdpClaim, IdpClaimUri));
+    }
+
+    /// <summary>
+    /// The one distinct non-blank value carried under <paramref name="types"/>, or null when there is none or
+    /// more than one — an ambiguous identity-provider claim is never resolved by picking one (fail closed).
+    /// </summary>
+    private static string? Single(ClaimsPrincipal user, params string[] types)
+    {
+        var values = types
+            .SelectMany(user.FindAll)
+            .Select(c => c.Value?.Trim())
+            .Where(v => !string.IsNullOrEmpty(v))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        return values.Count == 1 ? values[0] : null;
     }
 
     /// <summary>
@@ -196,8 +227,21 @@ public static class WorkforceMembershipTest
     /// everyone), then the tenant, then <c>acct</c>. Membership is never inferred from an email domain or a
     /// <c>#EXT#</c> UPN.
     /// </summary>
+    /// <remarks>
+    /// R3 FR-15 (#1563) adds ONE branch, the registered workforce-contact guest: an exact conjunction of a user
+    /// token, <c>acct = 1</c>, <c>tid</c> = <paramref name="stampTenantId"/> (the stamp's own tenant,
+    /// <c>AzureAd:TenantId</c>) and the home tenant parsed from <paramref name="idp"/> ∈
+    /// <paramref name="customerTenantIds"/>. It yields <see cref="WorkforceMembership.Member"/>; when any part
+    /// fails the result is exactly what it was before the branch existed (and so is its deny code). With no
+    /// stamp tenant or no <c>idp</c> supplied the branch never applies — a guest is never admitted by default.
+    /// </remarks>
     public static WorkforceMembership Evaluate(
-        CallerKind kind, string? tenantId, string? acct, IReadOnlySet<Guid> customerTenantIds)
+        CallerKind kind,
+        string? tenantId,
+        string? acct,
+        IReadOnlySet<Guid> customerTenantIds,
+        string? stampTenantId = null,
+        string? idp = null)
     {
         ArgumentNullException.ThrowIfNull(customerTenantIds);
 
@@ -211,9 +255,18 @@ public static class WorkforceMembershipTest
             return WorkforceMembership.TenantListEmpty;
         }
 
-        if (!Guid.TryParse(tenantId?.Trim(), out var tid) || !customerTenantIds.Contains(tid))
+        if (!Guid.TryParse(tenantId?.Trim(), out var tid))
         {
             return WorkforceMembership.ForeignTenant;
+        }
+
+        // Model 1 stamp: the guest's tid is the stamp tenant, which the customer list never holds — so without the
+        // branch it is ForeignTenant here. (Dev, which lists its own tenant — NFR-07 — reaches the acct switch.)
+        var registeredGuest = IsRegisteredGuest(tid, acct, stampTenantId, idp, customerTenantIds);
+
+        if (!customerTenantIds.Contains(tid))
+        {
+            return registeredGuest ? WorkforceMembership.Member : WorkforceMembership.ForeignTenant;
         }
 
         if (string.IsNullOrWhiteSpace(acct))
@@ -224,9 +277,86 @@ public static class WorkforceMembershipTest
         return acct.Trim() switch
         {
             "0" => WorkforceMembership.Member,
-            "1" => WorkforceMembership.Guest,
+            "1" => registeredGuest ? WorkforceMembership.Member : WorkforceMembership.Guest,
             _ => WorkforceMembership.AcctUnrecognized,
         };
+    }
+
+    /// <summary>
+    /// The FR-15 conjunction. Every part must hold: <c>acct</c> is exactly <c>1</c>; the stamp tenant is a
+    /// non-zero GUID and equals the token's <c>tid</c>; and <c>idp</c> names exactly one home tenant that is a
+    /// configured customer tenant.
+    /// </summary>
+    private static bool IsRegisteredGuest(
+        Guid tid, string? acct, string? stampTenantId, string? idp, IReadOnlySet<Guid> customerTenantIds)
+        => acct?.Trim() == "1"
+            && Guid.TryParse(stampTenantId?.Trim(), out var stamp) && stamp != Guid.Empty
+            && tid == stamp
+            && TryParseHomeTenant(idp, out var home)
+            && customerTenantIds.Contains(home);
+
+    private const string V1IssuerHost = "sts.windows.net";
+    private const string V2IssuerHost = "login.microsoftonline.com";
+
+    /// <summary>
+    /// The home tenant named by an <c>idp</c> claim. Accepted shapes, and only these: a bare tenant GUID; the v1
+    /// Entra issuer <c>https://sts.windows.net/{tid}/</c>; the v2 Entra issuer
+    /// <c>https://login.microsoftonline.com/{tid}/v2.0</c>. Anything else — another host (a social or federated
+    /// IdP, <c>live.com</c>, <c>mail</c>), another scheme, a port, a query, user info, extra path segments, a
+    /// non-<c>D</c>-format or all-zero GUID — is refused (fail closed).
+    /// </summary>
+    internal static bool TryParseHomeTenant(string? idp, out Guid homeTenant)
+    {
+        homeTenant = Guid.Empty;
+        var value = idp?.Trim();
+        if (string.IsNullOrEmpty(value))
+        {
+            return false;
+        }
+
+        if (Guid.TryParseExact(value, "D", out var bare))
+        {
+            homeTenant = bare;
+            return bare != Guid.Empty;
+        }
+
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || uri.Scheme != Uri.UriSchemeHttps
+            || !uri.IsDefaultPort
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment))
+        {
+            return false;
+        }
+
+        // "/{tid}/" or "/{tid}/v2.0": one leading slash, at most one trailing slash, no empty segment.
+        var path = uri.AbsolutePath;
+        if (path.EndsWith('/'))
+        {
+            path = path[..^1];
+        }
+
+        var segments = path.Length > 1 ? path[1..].Split('/') : Array.Empty<string>();
+        if (segments.Length == 0 || segments.Any(string.IsNullOrEmpty))
+        {
+            return false;
+        }
+
+        var host = uri.Host;
+
+        var shapeMatches =
+            (string.Equals(host, V1IssuerHost, StringComparison.OrdinalIgnoreCase) && segments.Length == 1)
+            || (string.Equals(host, V2IssuerHost, StringComparison.OrdinalIgnoreCase) && segments.Length == 2
+                && segments[1] == "v2.0");
+
+        if (!shapeMatches || !Guid.TryParseExact(segments[0], "D", out var tenant) || tenant == Guid.Empty)
+        {
+            return false;
+        }
+
+        homeTenant = tenant;
+        return true;
     }
 
     /// <summary>The deny code for a non-member, or null for a member.</summary>

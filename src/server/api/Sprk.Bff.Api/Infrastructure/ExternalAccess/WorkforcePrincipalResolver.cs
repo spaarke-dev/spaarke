@@ -14,7 +14,9 @@
 //                               gated on the job's rollout switch (IdentityLink:Reconciliation:WritesEnabled).
 //   (b) AAD oid → contact     : ContactIdentityBinder.ResolveWorkforceCallerAsync — the contact BOUND to the
 //                               caller's oid (contact.sprk_externalobjectid). A first sign-in by a MEMBER of a
-//                               configured customer workforce tenant (acct = 0) may bind by email (exactly one
+//                               configured customer workforce tenant (acct = 0) — or a registered workforce-contact
+//                               guest (R3 FR-15: acct = 1, tid = AzureAd:TenantId, idp home tenant on the customer
+//                               list) — may bind by email (exactly one
 //                               active, unbound match) or create a contact keyed by the oid. Everyone else
 //                               resolves only through an existing oid binding. Collisions are refused AND flagged.
 //   (c) neither                : explicit DENY with the binding decision's own deny code — never a silent fallback
@@ -60,6 +62,12 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
     // Deny codes (auth.md format: {domain}.{area}.{action}.{reason}).
     internal const string DenyMissingIdentityClaims = "sdap.access.deny.missing_identity_claims";
     internal const string DenyPrincipalNotResolved = "sdap.access.deny.principal_not_resolved";
+
+    /// <summary>
+    /// The stamp's own tenant (the workforce JwtBearer scheme's tenant): a registered workforce-contact guest's
+    /// <c>tid</c> must equal it (R3 FR-15). Absent or unparseable = the guest branch never applies.
+    /// </summary>
+    internal const string StampTenantConfigKey = "AzureAd:TenantId";
 
     /// <summary>
     /// Cache resource for the "a link was attempted and could not be made" marker. Cached DATA, not an
@@ -173,7 +181,10 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
         ContactBindingResult binding;
         try
         {
-            binding = await _binder.ResolveWorkforceCallerAsync(user, callerOid, ct).ConfigureAwait(false);
+            // The stamp tenant comes from this deployment's own configuration, never from the token (R3 FR-15).
+            binding = await _binder.ResolveWorkforceCallerAsync(
+                    user, callerOid, _configuration[StampTenantConfigKey], ct)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
