@@ -40,7 +40,66 @@ public static class DecisionPlanEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+
+        // Task 034 (FR-17, reconciliation B.2 row 034): the suppression count the wizard's dismissal step and admin show.
+        group.MapGet("/{signalId:guid}/suppression", GetSuppressionAsync)
+            .WithName("GetSignalSuppression")
+            .WithSummary("Get the (policy, core record) dismissal count and suppression date for a Signal")
+            .WithDescription("Returns the counted and recorded dismissals in the trailing 30 days for the Signal's policy on the Signal's "
+                + "core record (or on the item itself when it has none) and the current sprk_suppresseduntil. 404 when the Signal or its "
+                + "core record is not readable by the caller; 403 when the caller cannot be resolved.")
+            .Produces<SuppressionResponse>(200)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
     }
+
+    internal static async Task<IResult> GetSuppressionAsync(
+        Guid signalId,
+        HttpContext httpContext,
+        SignalCoreRecordAccess signalAccess,
+        SignalSuppressionService suppression,
+        ILogger<SignalSuppressionService> logger,
+        CancellationToken ct)
+    {
+        var decision = await signalAccess.AuthorizeAsync(signalId, ct);
+        if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
+        {
+            return CallerUnresolved(httpContext);
+        }
+
+        if (decision.Outcome != SignalAccessOutcome.Allowed)
+        {
+            return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
+        }
+
+        // The caller may read this Signal and its core record, so the count is theirs to see. The count itself is read with the BFF's
+        // own reader (Decision Records are not readable to Console users), and only the numbers and the date are returned.
+        SuppressionStatus? status;
+        try
+        {
+            status = await suppression.GetStatusForSignalAsync(signalId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError("Suppression count failed for a Signal ({ExceptionType}); answering not found.", ex.GetType().Name);
+            status = null;
+        }
+
+        return status is null
+            ? ProblemDetailsHelper.UniformRecordNotFound(httpContext)
+            : Results.Ok(SuppressionResponse.From(signalId, status));
+    }
+
+    private static IResult CallerUnresolved(HttpContext httpContext) =>
+        Results.Problem(
+            title: "Forbidden",
+            detail: "The caller could not be resolved to a Dataverse user.",
+            statusCode: StatusCodes.Status403Forbidden,
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = CallerUnresolvedReasonCode,
+                ["correlationId"] = httpContext.TraceIdentifier,
+            });
 
     internal static async Task<IResult> GetDecisionPlanAsync(
         Guid signalId,
@@ -53,15 +112,7 @@ public static class DecisionPlanEndpoints
         var decision = await signalAccess.AuthorizeAsync(signalId, ct);
         if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
         {
-            return Results.Problem(
-                title: "Forbidden",
-                detail: "The caller could not be resolved to a Dataverse user.",
-                statusCode: StatusCodes.Status403Forbidden,
-                extensions: new Dictionary<string, object?>
-                {
-                    ["reasonCode"] = CallerUnresolvedReasonCode,
-                    ["correlationId"] = httpContext.TraceIdentifier,
-                });
+            return CallerUnresolved(httpContext);
         }
 
         if (decision.Outcome != SignalAccessOutcome.Allowed || decision.Lane is not { } lane || decision.PolicyVersionId is not { } versionId)
@@ -143,3 +194,18 @@ public sealed record DecisionParameterDto(
 public sealed record DecisionOptionDto(string Value, string Label);
 
 public sealed record DismissalReasonDto(string Code, string Label, bool CountsTowardSuppression, bool RequiresDetail);
+
+/// <summary>The suppression state of a Signal's (policy, core record) grain (task 034).</summary>
+/// <param name="DismissalCount">Dismissals that count toward the threshold, in the trailing window.</param>
+/// <param name="DismissalsRecorded">Every dismissal in the window, counted or not.</param>
+/// <param name="Threshold">Counted dismissals that suppress the pairing.</param>
+/// <param name="WindowDays">The counting window and the length of the suppression.</param>
+/// <param name="SuppressedUntil">The current <c>sprk_suppresseduntil</c> (UTC), null when the pairing is not suppressed.</param>
+/// <param name="CountsTowardSuppression">False when the policy's dismissals never count (<c>sprk_countstowardsuppression</c> No).</param>
+public sealed record SuppressionResponse(
+    Guid SignalId, int DismissalCount, int DismissalsRecorded, int Threshold, int WindowDays, DateTime? SuppressedUntil,
+    bool CountsTowardSuppression)
+{
+    public static SuppressionResponse From(Guid signalId, SuppressionStatus s) =>
+        new(signalId, s.DismissalsCounted, s.DismissalsRecorded, s.Threshold, s.WindowDays, s.SuppressedUntil, s.PolicyCountsTowardSuppression);
+}

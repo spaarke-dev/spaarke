@@ -95,6 +95,10 @@ public static class SignalsModule
         // shared Spaarke.Scheduling host (no timer BackgroundService, ADR-052: BFF placement), registered unconditionally
         // (bff-extensions.md F.1). The diagnostic staleness check is a /healthz/catalog check (catalog tag), never liveness.
         services.AddSingleton<SignalEvaluator>();
+
+        // Task 034 (FR-17, D-11): the dismissal counter and the sprk_suppresseduntil stamp the job above reads, shared with the
+        // suppression read route (DecisionPlanEndpoints). Singleton: its dependencies are the shared sysadmin reader and the writer client.
+        services.AddSingleton<SignalSuppressionService>();
         services.AddScheduledJob<SignalReevaluationJob>(SignalReevaluationJob.DefaultCronSchedule);
         services.AddSingleton<SignalEvaluatorHealthCheck>();
         services.AddHealthChecks()

@@ -1031,7 +1031,7 @@ public class SignalReevaluationJobTests
             var schema = new RuleBodySchemaValidator();
             var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, Clock), Logger<PolicyVersionValidator>());
             Evaluator = new SignalEvaluator(validator, Sysadmin, Writer, Logger<SignalEvaluator>());
-            Job = new SignalReevaluationJob(Evaluator, Writer, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
+            Job = new SignalReevaluationJob(Evaluator, Writer, new SignalSuppressionService(Sysadmin, writerClient, Clock, Logger<SignalSuppressionService>()), Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
             Sysadmin.Stub(new Entity("sprk_matter", MatterId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
             Sysadmin.Stub(new Entity("sprk_project", ProjectId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
         }

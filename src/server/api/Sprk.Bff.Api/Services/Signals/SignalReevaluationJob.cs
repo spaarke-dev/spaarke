@@ -45,6 +45,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
     private readonly SignalEvaluator _evaluator;
     private readonly SignalWriter _writer;
+    private readonly SignalSuppressionService _suppression;
     private readonly IGenericEntityService _entities;
     private readonly IDistributedCache _cache;
     private readonly TimeProvider _timeProvider;
@@ -53,6 +54,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     public SignalReevaluationJob(
         SignalEvaluator evaluator,
         SignalWriter writer,
+        SignalSuppressionService suppression,
         IGenericEntityService entities,
         IDistributedCache cache,
         TimeProvider timeProvider,
@@ -60,6 +62,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     {
         _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
+        _suppression = suppression ?? throw new ArgumentNullException(nameof(suppression));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
@@ -166,7 +169,10 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }
 
             counts.Hits += evaluation.Hits.Count;
-            var existing = await ReadPolicySignalsAsync(policy.Code, counts, ct).ConfigureAwait(false);
+            var read = await ReadPolicySignalsAsync(policy.Code, counts, ct).ConfigureAwait(false);
+            // Task 034 (FR-17): stamp a grain found at the dismissal threshold with no live stamp, so the planner below sees it.
+            var (existing, suppressionFailures) = await _suppression.ReconcileAsync(policy.Id, policy.Code, read, ct).ConfigureAwait(false);
+            counts.PolicyFailures += suppressionFailures;
             var plan = SignalEpisodePlanner.Plan(lane, evaluation.QuietWindowDays, _timeProvider.GetUtcNow(), evaluation.Hits, existing);
             counts.Add(plan);
             LogRefusedCores(policy, plan);
