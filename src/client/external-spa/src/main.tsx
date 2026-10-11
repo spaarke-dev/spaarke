@@ -8,7 +8,16 @@ import { extractAuthDiagnostics } from './auth/auth-diagnostics';
 import { detectTeamsHost, createTeamsHostAdapter, type ITeamsHostAdapter } from './host/TeamsHostAdapter';
 import { getStoredRealm, setStoredRealm, clearStoredRealm, type Realm } from './auth/realm';
 import { resolveStandalonePlane, applyStandalonePlane, type StandalonePlane } from './auth/standalone-plane';
+import {
+  activateBackend,
+  chooseBackend,
+  clearActiveBackend,
+  resolveBackendSelection,
+  type Backend,
+  type BackendPlane,
+} from './auth/backend-selection';
 import { RealmChooser } from './components/auth/RealmChooser';
+import { CustomerPicker } from './components/auth/CustomerPicker';
 import { TeamsAuthError } from './components/auth/TeamsAuthError';
 import { App } from './App';
 
@@ -54,7 +63,10 @@ async function bootstrapStandalone(root: Root): Promise<void> {
   if (import.meta.env.VITE_DEV_MOCK === 'true') {
     // Dev mock: existing behavior — CIAM instance, no chooser, no MSAL initialize (AuthGuard
     // short-circuits in mock mode). Kept as a separate branch so StandaloneBootstrap's hooks stay
-    // unconditional (rules of hooks).
+    // unconditional (rules of hooks). The configured CIAM backend is activated when it resolves to exactly one
+    // (task 041), so pages that read the active backend do not throw; otherwise mock mode runs without one.
+    const selection = await resolveBackendSelection('ciam');
+    if (selection.kind === 'selected') activateBackend('ciam', selection.backend);
     root.render(
       <React.StrictMode>
         <MsalProvider instance={msalInstance}>
@@ -91,6 +103,9 @@ const bootstrapCenterStyle: React.CSSProperties = {
  *
  * State machine (all pre-auth screens are Fluent v9 semantic tokens only — ADR-021):
  *   - no stored realm            → <RealmChooser> ("My organization" | "Partner")
+ *   - realm chosen               → run-time backend selection for that plane (task 041, FR-17): one backend (or a
+ *                                  valid `?customer=` / stored key) is activated; several and none active →
+ *                                  <CustomerPicker>; none → fail closed (the error screen below; no request is made)
  *   - realm chosen, initializing → spinner
  *   - realm chosen, init failed  → fail-loud error + "choose a different sign-in" (criterion 4)
  *   - plane ready                → <MsalProvider instance={plane}><App/></MsalProvider>
@@ -102,12 +117,26 @@ const StandaloneBootstrap: React.FC = () => {
   const [realm, setRealm] = React.useState<Realm | null>(() => getStoredRealm());
   const [plane, setPlane] = React.useState<StandalonePlane | null>(null);
   const [error, setError] = React.useState<unknown>(null);
+  // Customer picker options (several backends known, none active), and the key the user picked from them.
+  const [pickOptions, setPickOptions] = React.useState<Backend[] | null>(null);
+  const [pickedKey, setPickedKey] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!realm) return;
     let cancelled = false;
     void (async () => {
       try {
+        if (!pickedKey) {
+          // Backend first (task 041): the plane's scope and every request URL come from the active backend.
+          const selection = await resolveBackendSelection(realm);
+          if (cancelled) return;
+          if (selection.kind === 'pick') {
+            setPickOptions(selection.options);
+            return;
+          }
+          if (selection.kind === 'none') throw new Error(selection.reason);
+          activateBackend(realm, selection.backend);
+        }
         const resolved = resolveStandalonePlane(realm);
         applyStandalonePlane(resolved);
         // MSAL requires explicit initialize() before any token op / render; also processes the
@@ -121,17 +150,34 @@ const StandaloneBootstrap: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [realm]);
+  }, [realm, pickedKey]);
 
   const handleChoose = React.useCallback((chosen: Realm) => {
     setStoredRealm(chosen);
     setRealm(chosen);
   }, []);
 
+  const handlePickCustomer = React.useCallback(
+    (key: string) => {
+      if (!realm || !pickOptions) return;
+      try {
+        chooseBackend(realm, pickOptions, key);
+        setPickOptions(null);
+        setPickedKey(key);
+      } catch (err) {
+        setError(err);
+      }
+    },
+    [realm, pickOptions]
+  );
+
   const handleResetRealm = React.useCallback(() => {
     clearStoredRealm();
+    clearActiveBackend();
     setError(null);
     setPlane(null);
+    setPickOptions(null);
+    setPickedKey(null);
     setRealm(null);
   }, []);
 
@@ -164,6 +210,15 @@ const StandaloneBootstrap: React.FC = () => {
     );
   }
 
+  // Several customer backends are known and none is active → the customer picker (FR-17).
+  if (pickOptions) {
+    return (
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <CustomerPicker options={pickOptions} onChoose={handlePickCustomer} />
+      </FluentProvider>
+    );
+  }
+
   // Plane chosen, authority resolving / MSAL initializing.
   if (!plane) {
     return (
@@ -190,6 +245,62 @@ const StandaloneBootstrap: React.FC = () => {
  * "initialize, then render the SAME App" and handles the fail-loud error path.
  */
 async function bootstrapTeams(root: Root): Promise<void> {
+  // Backend first (task 041, FR-17): the Teams token scope is the active workforce backend's.
+  const selection = await resolveBackendSelection('workforce');
+  if (selection.kind === 'none') {
+    renderBackendUnavailable(root, selection.reason);
+    return;
+  }
+  if (selection.kind === 'pick') {
+    renderTeamsCustomerPicker(root, 'workforce', selection.options);
+    return;
+  }
+  activateBackend('workforce', selection.backend);
+  await bootstrapTeamsAuth(root);
+}
+
+/** Teams: the customer picker (several workforce backends, none active); the choice continues the bootstrap. */
+function renderTeamsCustomerPicker(root: Root, plane: BackendPlane, options: Backend[]): void {
+  root.render(
+    <React.StrictMode>
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <CustomerPicker
+          options={options}
+          onChoose={key => {
+            try {
+              chooseBackend(plane, options, key);
+            } catch (err) {
+              renderBackendUnavailable(root, err instanceof Error ? err.message : String(err));
+              return;
+            }
+            void bootstrapTeamsAuth(root);
+          }}
+        />
+      </FluentProvider>
+    </React.StrictMode>
+  );
+}
+
+/** Teams: no backend could be resolved — fail closed with an explicit screen (no token is requested). */
+function renderBackendUnavailable(root: Root, reason: string): void {
+  root.render(
+    <React.StrictMode>
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <div style={bootstrapCenterStyle}>
+          <Text size={500} weight="semibold">
+            No organization available
+          </Text>
+          <Text size={300} style={{ color: tokens.colorNeutralForeground3, maxWidth: '32rem' }}>
+            {reason}
+          </Text>
+        </div>
+      </FluentProvider>
+    </React.StrictMode>
+  );
+}
+
+/** Teams auth bootstrap once a backend is active: adapter initialize (NAA, then popup) → the SAME App. */
+async function bootstrapTeamsAuth(root: Root): Promise<void> {
   const adapter = createTeamsHostAdapter();
 
   try {

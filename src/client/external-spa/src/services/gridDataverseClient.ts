@@ -29,25 +29,38 @@
  * `/api/dataverse/*` group. D-015-2 (task-015 notes) flagged this wiring as task 016's concern.
  */
 
-import { BFF_API_URL } from '../config';
 import { acquireActiveBffToken } from '../auth/msal-auth';
+import { getActiveBackend, type ActiveBackend } from '../auth/backend-selection';
 import { BffDataverseClient, type AuthenticatedFetchFn } from '@spaarke/ui-components/services/BffDataverseClient';
+import type { IDataverseClient } from '@spaarke/ui-components/services/IDataverseClient';
+
+/*
+ * RUN-TIME BACKEND (task 041 — FR-17, NFR-02). The grid's base URL is the ACTIVE backend's
+ * (`backend-selection.ts`), resolved when a grid call is made — not at module load, which runs before the bootstrap
+ * selects a backend. The token is acquired for the SAME backend's scope, and a URL that is not on that backend's
+ * origin is refused before any token is acquired (fail closed): a token for one customer's BFF never goes elsewhere.
+ */
 
 /**
  * `authenticatedFetch`-shaped adapter over this SPA's own MSAL token acquisition. Mirrors
  * `auth/bff-client.ts`'s `bffApiCall` token-acquire + single 401-retry behavior, but returns the
  * raw `Response` (not parsed JSON) so `BffDataverseClient` can do its own ProblemDetails unwrap.
  */
-const gridAuthenticatedFetch: AuthenticatedFetchFn = async (url, init) => {
-  const token = await acquireActiveBffToken();
-  const response = await executeWithToken(url, init, token);
-  if (response.status !== 401) {
-    return response;
-  }
-  // Single retry with a freshly-acquired token — same contract as bff-client.ts's bffApiCall.
-  const freshToken = await acquireActiveBffToken();
-  return executeWithToken(url, init, freshToken);
-};
+function gridAuthenticatedFetchFor(backend: ActiveBackend): AuthenticatedFetchFn {
+  return async (url, init) => {
+    if (new URL(url).origin !== backend.bffBaseUrl) {
+      throw new Error('[gridDataverseClient] The request URL is not on the active backend; the request was not sent.');
+    }
+    const token = await acquireActiveBffToken(backend.bffScope);
+    const response = await executeWithToken(url, init, token);
+    if (response.status !== 401) {
+      return response;
+    }
+    // Single retry with a freshly-acquired token — same contract as bff-client.ts's bffApiCall.
+    const freshToken = await acquireActiveBffToken(backend.bffScope);
+    return executeWithToken(url, init, freshToken);
+  };
+}
 
 function executeWithToken(url: string, init: RequestInit | undefined, token: string): Promise<Response> {
   const headers: Record<string, string> = {
@@ -60,14 +73,50 @@ function executeWithToken(url: string, init: RequestInit | undefined, token: str
   return fetch(url, { ...init, headers });
 }
 
-/** The BFF base URL for the task-015 module read seam (`/api/v1/external/api/dataverse/*`). */
-const GRID_BFF_BASE_URL = `${BFF_API_URL}/api/v1/external`;
+/** One `BffDataverseClient` per active backend (`{bffBaseUrl}/api/v1/external`, the task-015 module read seam). */
+let cached: { key: string; client: BffDataverseClient } | null = null;
+
+function clientForActiveBackend(): BffDataverseClient {
+  const backend = getActiveBackend();
+  const key = `${backend.plane}|${backend.customerKey}|${backend.bffBaseUrl}|${backend.bffScope}`;
+  if (!cached || cached.key !== key) {
+    cached = {
+      key,
+      client: new BffDataverseClient({
+        authenticatedFetch: gridAuthenticatedFetchFor(backend),
+        bffBaseUrl: `${backend.bffBaseUrl}/api/v1/external`,
+      }),
+    };
+  }
+  return cached.client;
+}
 
 /**
  * Shared singleton — every widget's `<DataGrid dataverseClient={gridDataverseClient} />` passes
- * this same instance. Stateless aside from its constructor options, so sharing is safe.
+ * this same instance. Each call is delegated to the `BffDataverseClient` of the backend active at that moment, so
+ * the object identity is stable while the base URL follows the run-time selection. With no active backend a call
+ * rejects (never a render-time throw).
  */
-export const gridDataverseClient = new BffDataverseClient({
-  authenticatedFetch: gridAuthenticatedFetch,
-  bffBaseUrl: GRID_BFF_BASE_URL,
-});
+class ActiveBackendDataverseClient implements IDataverseClient {
+  async retrieveSavedQuery(savedQueryId: string) {
+    return clientForActiveBackend().retrieveSavedQuery(savedQueryId);
+  }
+
+  async retrieveSavedQueriesForEntity(entityName: string) {
+    return clientForActiveBackend().retrieveSavedQueriesForEntity(entityName);
+  }
+
+  async retrieveEntityMetadata(entityName: string) {
+    return clientForActiveBackend().retrieveEntityMetadata(entityName);
+  }
+
+  async retrieveMultipleRecords<T = Record<string, unknown>>(entityName: string, fetchXml: string) {
+    return clientForActiveBackend().retrieveMultipleRecords<T>(entityName, fetchXml);
+  }
+
+  async retrieveRecord<T = Record<string, unknown>>(entityName: string, id: string, select?: string[]) {
+    return clientForActiveBackend().retrieveRecord<T>(entityName, id, select);
+  }
+}
+
+export const gridDataverseClient: IDataverseClient = new ActiveBackendDataverseClient();

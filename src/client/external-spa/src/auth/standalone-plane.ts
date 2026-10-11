@@ -26,7 +26,8 @@
 
 import type { IPublicClientApplication } from '@azure/msal-browser';
 import type { Realm } from './realm';
-import { MSAL_BFF_SCOPE, getWorkforceEnvConfig } from '../config';
+import { getWorkforceClientConfig } from '../config';
+import { activeBffScope } from './backend-selection';
 import { msalInstance, createStandaloneMsalInstance, workforceAuthorityConfig, popupRedirectUri } from './msal-config';
 import {
   acquireStandaloneBffToken,
@@ -54,6 +55,10 @@ export interface StandalonePlane {
 /**
  * Resolve the standalone MSAL instance + BFF scope for a chosen realm.
  *
+ * The scope is the active backend's `api://{customer BFF app id}/user_impersonation` for this plane (task 041,
+ * `backend-selection.ts`), so the bootstrap selects the backend first. It throws (fail closed) when no backend for
+ * the plane can be resolved.
+ *
  * CIAM returns the shared singleton unchanged; workforce builds a fresh standalone instance against
  * the Spaarke-tenant workforce authority. Throws (fail-loud) if the workforce env values are missing
  * or non-conforming (a non-GUID tenant, a scope other than `…/user_impersonation`) —
@@ -62,11 +67,12 @@ export interface StandalonePlane {
  */
 export function resolveStandalonePlane(realm: Realm): StandalonePlane {
   if (realm === 'ciam') {
-    return { realm, instance: msalInstance, bffScope: MSAL_BFF_SCOPE };
+    return { realm, instance: msalInstance, bffScope: activeBffScope('ciam') };
   }
 
   // 'workforce' — standalone browser redirect flow against the Spaarke-tenant workforce authority (A7).
-  const { clientId, tenantId, bffScope } = getWorkforceEnvConfig();
+  const { clientId, tenantId } = getWorkforceClientConfig();
+  const bffScope = activeBffScope('workforce');
   const instance = createStandaloneMsalInstance(workforceAuthorityConfig({ clientId, tenantId, bffScope }));
   return { realm, instance, bffScope, acquireOptions: { tenantId, silentRedirectUri: popupRedirectUri() } };
 }
@@ -81,7 +87,11 @@ export function resolveStandalonePlane(realm: Realm): StandalonePlane {
  * across the login redirect (main() re-resolves from the stored realm on every load).
  */
 export function applyStandalonePlane(plane: StandalonePlane): void {
-  setActiveBffTokenAcquirer(() => acquireStandaloneBffToken(plane.instance, plane.bffScope, plane.acquireOptions));
+  // `scope` is the active backend's scope passed by bff-client.ts (the same record as the request URL); the plane's
+  // scope is the fallback for callers that pass none.
+  setActiveBffTokenAcquirer(scope =>
+    acquireStandaloneBffToken(plane.instance, scope ?? plane.bffScope, plane.acquireOptions)
+  );
   setActiveLoginScope(plane.bffScope);
   // MSAL's account list is not client-scoped (both browser instances share the tab's sessionStorage), so the
   // workforce plane only counts accounts of Spaarke's tenant; CIAM keeps every account (null = no filter).

@@ -11,7 +11,7 @@
  * iframe, so there is nothing to guard and `onBeforeNavigate` is not wired.
  *
  * DATA (no new server read). Every call goes through the external plane via `bffApiCall` (token from the active
- * acquirer; the URL is this build's `BFF_API_URL` — never a link or query string):
+ * acquirer; the URL is the active backend's (task 041) — never a link or query string):
  *   - fields:   the id-filtered module fetch (POST …/fetch, `<idAttribute> = {id}`) for ALL six entities — one read path,
  *               which also carries `@formattedValues` (option-set labels); see RecordDetailFields.tsx for why.
  *   - rollup:   POST /api/v1/external/api/dataverse/fetch on sprk_document / sprk_invoice filtered by this record's
@@ -156,7 +156,9 @@ function useRecord(cfg: RecordDetailEntity | undefined, id: string | undefined, 
 }
 
 type ListState =
-  { status: 'loading' } | { status: 'ready'; rows: DetailRecord[]; truncated: boolean } | { status: 'error' };
+  | { status: 'loading' }
+  | { status: 'ready'; rows: DetailRecord[]; truncated: boolean }
+  | { status: 'error' };
 
 /** The Tier-2-scoped module read the matching tab runs, narrowed to the rows tied to this record. */
 function useRelatedRows(

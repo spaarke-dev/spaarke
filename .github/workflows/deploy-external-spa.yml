@@ -44,7 +44,12 @@ jobs:
           VITE_MSAL_AUTHORITY: https://spaarkeextid.ciamlogin.com/7052feba-bfc4-43e0-b09e-65014b429131
           VITE_MSAL_CLIENT_ID: bd57e54e-b339-4500-b55c-e451009fd907
           VITE_MSAL_TENANT_ID: 7052feba-bfc4-43e0-b09e-65014b429131
-          VITE_MSAL_BFF_SCOPE: api://4a4d5126-91b0-4865-8e3a-134b7209013e/SDAP.Access
+          # Run-time backend selection (task 041, FR-17): VITE_BFF_API_URL + the two *_BFF_SCOPE values form dev's
+          # one-entry backend list (VITE_BACKENDS unset). Both planes request api://{app id}/user_impersonation
+          # (ADR-028 A7); the SPA refuses any other CIAM scope. OWNER STEP before deploying: expose user_impersonation
+          # on the CIAM BFF API app 4a4d5126 and consent it for the CIAM SPA client - see
+          # projects/spaarke-SPA-external-access-platform-r3/notes/task-041-notes.md.
+          VITE_MSAL_BFF_SCOPE: api://4a4d5126-91b0-4865-8e3a-134b7209013e/user_impersonation
           # Workforce plane (Teams host + browser "My organization") - ADR-028 Amendment A7 (task 040):
           # ONE single-tenant Spaarke public client, authority pinned to Spaarke's tenant, scope
           # api://{customer BFF app id}/user_impersonation. Non-secret identifiers (tenant ids are not secrets);

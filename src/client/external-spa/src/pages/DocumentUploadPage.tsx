@@ -38,7 +38,7 @@ import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components
 import { createBffUploadService } from '@spaarke/ui-components/utils/adapters/bffUploadServiceAdapter';
 import type { AuthenticatedFetch } from '@spaarke/ui-components/utils/adapters/bffDataServiceAdapter';
 
-import { BFF_API_URL } from '../config';
+import { getActiveBackend } from '../auth/backend-selection';
 import { acquireBffToken } from '../auth/msal-auth';
 import { PageContainer, NavigationBar } from '../components';
 
@@ -184,7 +184,7 @@ export const DocumentUploadPage: React.FC = () => {
   const authenticatedFetch = React.useMemo(() => createAuthenticatedFetch(), []);
 
   const uploadService = React.useMemo(
-    () => createBffUploadService(authenticatedFetch, BFF_API_URL, acquireBffToken),
+    () => createBffUploadService(authenticatedFetch, getActiveBackend().bffBaseUrl, acquireBffToken),
     [authenticatedFetch]
   );
 

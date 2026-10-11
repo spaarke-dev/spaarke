@@ -25,7 +25,7 @@ import {
 } from '@azure/msal-browser';
 import { app as teamsApp, nestedAppAuth } from '@microsoft/teams-js';
 import { msalInstance, workforceAuthorityConfig, buildMsalConfiguration, popupRedirectUri } from './msal-config';
-import { MSAL_BFF_SCOPE } from '../config';
+import { activeBffScope } from './backend-selection';
 
 /**
  * Deep-link preservation through the MSAL login/token redirect (task 012).
@@ -256,15 +256,24 @@ function isInteractionNeeded(err: unknown): boolean {
 /**
  * Acquire an access token for the BFF API — external SPA (CIAM) path.
  *
- * Unchanged public API for bff-client.ts: delegates to `acquireStandaloneBffToken` with the
- * CIAM `msalInstance` singleton and the CIAM BFF scope, preserving the prior request shape
- * (FR-15 — no CIAM regression: the silent request is unchanged; the one deliberate routing change is
- * that a `timed_out` silent renewal now falls back to the redirect). See `acquireStandaloneBffToken`.
+ * Delegates to `acquireStandaloneBffToken` with the CIAM `msalInstance` singleton, preserving the prior request
+ * shape (FR-15 — no CIAM regression: the silent request is unchanged; the one deliberate routing change is that a
+ * `timed_out` silent renewal now falls back to the redirect). See `acquireStandaloneBffToken`.
+ *
+ * Scope (task 041, FR-17; ADR-028 A7): the active CIAM backend's `api://{customer BFF app id}/user_impersonation`
+ * (`activeBffScope('ciam')`, which throws — no token — when the active backend belongs to the workforce plane or none
+ * can be resolved). Deliberately argument-free: pages hand this function to libraries as a token callback, so no
+ * caller-supplied argument can become a scope.
  *
  * @returns Access token string, ready for `Authorization: Bearer {token}` header.
  */
 export async function acquireBffToken(): Promise<string> {
-  return acquireStandaloneBffToken(msalInstance, MSAL_BFF_SCOPE);
+  return acquireCiamBffToken();
+}
+
+/** The default (CIAM) acquirer: `scope` is the active backend's, passed by bff-client.ts; else the active CIAM scope. */
+function acquireCiamBffToken(scope?: string): Promise<string> {
+  return acquireStandaloneBffToken(msalInstance, scope ?? activeBffScope('ciam'));
 }
 
 /**
@@ -278,18 +287,22 @@ export async function acquireBffToken(): Promise<string> {
  * `acquireTeamsWorkforceBffToken` — no acquisition LOGIC lives outside this file (ADR-028 A2: "the
  * adapter selects the strategy; it must NOT implement its own auth logic").
  */
-export type BffTokenAcquirer = () => Promise<string>;
+export type BffTokenAcquirer = (scope?: string) => Promise<string>;
 
-let activeBffTokenAcquirer: BffTokenAcquirer = acquireBffToken;
+let activeBffTokenAcquirer: BffTokenAcquirer = acquireCiamBffToken;
 
 /** Host adapter seam: select which strategy `acquireActiveBffToken` delegates to. */
 export function setActiveBffTokenAcquirer(acquirer: BffTokenAcquirer): void {
   activeBffTokenAcquirer = acquirer;
 }
 
-/** Acquire a BFF token via whichever strategy is currently active (CIAM by default). */
-export function acquireActiveBffToken(): Promise<string> {
-  return activeBffTokenAcquirer();
+/**
+ * Acquire a BFF token via whichever strategy is currently active (CIAM by default). `scope` is the active backend's
+ * scope, passed by bff-client.ts from the SAME backend record whose URL the request goes to (task 041), so the token
+ * and the host always belong to one backend; without it each strategy uses its plane's active backend scope.
+ */
+export function acquireActiveBffToken(scope?: string): Promise<string> {
+  return activeBffTokenAcquirer(scope);
 }
 
 /**
@@ -304,16 +317,19 @@ export function acquireActiveBffToken(): Promise<string> {
  * mirroring how `setActiveBffTokenAcquirer` re-points the acquirer. The Teams host never uses this
  * (it authenticates during bootstrap; AuthGuard's redirect branch is never reached inside Teams).
  */
-let activeLoginScope: string = MSAL_BFF_SCOPE;
+let activeLoginScope: string | null = null;
 
 /** Bootstrap seam: select which BFF scope `AuthGuard` requests on the sign-in redirect. */
 export function setActiveLoginScope(scope: string): void {
   activeLoginScope = scope;
 }
 
-/** The BFF scope for the currently-selected browser plane's authority (CIAM by default). */
+/**
+ * The BFF scope for the currently-selected browser plane's authority. Defaults to the active CIAM backend's scope
+ * (task 041: the run-time backend selection, never a link).
+ */
 export function getActiveLoginScope(): string {
-  return activeLoginScope;
+  return activeLoginScope ?? activeBffScope('ciam');
 }
 
 /**

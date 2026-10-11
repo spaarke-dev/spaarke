@@ -44,7 +44,8 @@ import {
   TeamsWorkforceAuthError,
   type TeamsWorkforceAuthConfig,
 } from '../auth/msal-auth';
-import { getTeamsWorkforceEnvConfig } from '../config';
+import { getWorkforceClientConfig } from '../config';
+import { activeBffScope } from '../auth/backend-selection';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -168,7 +169,7 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
   }
 
   async signInWithPopup(): Promise<void> {
-    const cfg: TeamsWorkforceAuthConfig = getTeamsWorkforceEnvConfig();
+    const cfg: TeamsWorkforceAuthConfig = teamsWorkforceAuthConfig();
     try {
       await signInTeamsWorkforceViaPopup(cfg);
     } catch (popupError) {
@@ -247,7 +248,7 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
    * msal-auth.ts is never touched by the Teams path.
    */
   private async selectAuthStrategy(): Promise<void> {
-    const cfg: TeamsWorkforceAuthConfig = getTeamsWorkforceEnvConfig();
+    const cfg: TeamsWorkforceAuthConfig = teamsWorkforceAuthConfig();
 
     try {
       await acquireTeamsWorkforceBffToken(cfg);
@@ -268,11 +269,24 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
 
   /** Re-point bff-client.ts at the Teams strategy and pick the instance that holds the signed-in account. */
   private async completeAuthSetup(cfg: TeamsWorkforceAuthConfig): Promise<void> {
-    setActiveBffTokenAcquirer(() => acquireTeamsWorkforceBffToken(cfg));
+    // `scope` is the active backend's scope passed by bff-client.ts (the same record as the request URL, task 041);
+    // without one, the active workforce backend's scope at call time.
+    setActiveBffTokenAcquirer(scope =>
+      acquireTeamsWorkforceBffToken({ ...cfg, bffScope: scope ?? activeBffScope('workforce') })
+    );
     // The instance that holds the signed-in account: the NAA instance, or the popup fallback's
     // instance when NAA failed (ADR-028 A7) — so useMsal() reflects the user either way.
     this.msalInstance = getTeamsWorkforceSignedInInstance() ?? (await getTeamsWorkforceMsalInstance(cfg));
   }
+}
+
+/**
+ * The Teams workforce auth config: the single-tenant client and Spaarke's tenant from config, and the BFF scope of
+ * the active workforce backend (task 041, `backend-selection.ts`; main.tsx selects it before `initialize()`). Throws
+ * (fail loud) when the client config is missing or no workforce backend can be resolved.
+ */
+function teamsWorkforceAuthConfig(): TeamsWorkforceAuthConfig {
+  return { ...getWorkforceClientConfig(), bffScope: activeBffScope('workforce') };
 }
 
 /** Factory mirroring the Office add-ins' `HostAdapterFactory.create()` convention. */

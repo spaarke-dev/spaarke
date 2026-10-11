@@ -24,7 +24,7 @@ import { PlaybookLibraryShell } from '@spaarke/ui-components/components/Playbook
 import { createBffDataService } from '@spaarke/ui-components/utils/adapters/bffDataServiceAdapter';
 import type { AuthenticatedFetch } from '@spaarke/ui-components/utils/adapters/bffDataServiceAdapter';
 import { acquireBffToken } from '../auth/msal-auth';
-import { BFF_API_URL } from '../config';
+import { getActiveBackend } from '../auth/backend-selection';
 import { PageContainer, NavigationBar } from '../components';
 import type { BreadcrumbNavItem } from '../components';
 
@@ -110,7 +110,10 @@ export const PlaybookLibraryPage: React.FC = () => {
   // across re-renders (no dependency on changing values).
   const authenticatedFetch = React.useMemo(() => createAuthenticatedFetch(), []);
 
-  const dataService = React.useMemo(() => createBffDataService(authenticatedFetch, BFF_API_URL), [authenticatedFetch]);
+  const dataService = React.useMemo(
+    () => createBffDataService(authenticatedFetch, getActiveBackend().bffBaseUrl),
+    [authenticatedFetch]
+  );
 
   // Determine display mode based on intent query param
   const mode: 'browse' | 'intent' = intent ? 'intent' : 'browse';
@@ -174,7 +177,7 @@ export const PlaybookLibraryPage: React.FC = () => {
           intent={intent}
           dataService={dataService}
           authenticatedFetch={authenticatedFetch}
-          bffBaseUrl={BFF_API_URL}
+          bffBaseUrl={getActiveBackend().bffBaseUrl}
           onClose={handleClose}
           onComplete={handleComplete}
           title={intent ? `Run: ${intent}` : 'Playbook Library'}

@@ -30,7 +30,7 @@
  */
 
 import { PublicClientApplication, type Configuration } from '@azure/msal-browser';
-import { MSAL_CLIENT_ID, MSAL_AUTHORITY, MSAL_BFF_SCOPE, isTenantId, isUserImpersonationScope } from '../config';
+import { MSAL_CLIENT_ID, MSAL_AUTHORITY, isTenantId, isUserImpersonationScope, readOptionalEnv } from '../config';
 
 /**
  * Which Entra authority plane a standalone-MSAL instance targets.
@@ -113,7 +113,12 @@ export interface StandaloneMsalConfig {
    * `https://login.microsoftonline.com/{Spaarke tenant id}` (workforce, A7).
    */
   authority: string;
-  /** BFF API OAuth scope acquired against this authority (broker-only — used only to call the BFF). */
+  /**
+   * BFF API OAuth scope acquired against this authority (broker-only — used only to call the BFF). Required and
+   * checked for the workforce kind. Since task 041 the scope actually requested comes from the active backend
+   * (`backend-selection.ts`); for CIAM this field is informational and may be empty (the MSAL instance does not
+   * depend on it).
+   */
   bffScope: string;
 }
 
@@ -151,10 +156,10 @@ export function buildMsalConfiguration(
     );
   }
 
-  if (!config.clientId || !config.authority || !config.bffScope) {
+  if (!config.clientId || !config.authority || (config.kind === 'workforce' && !config.bffScope)) {
     throw new Error(
       `[CollabAuth] Incomplete standalone-MSAL config for kind '${config.kind}': ` +
-        'clientId, authority and bffScope are all required.'
+        'clientId and authority are required (and bffScope for the workforce kind).'
     );
   }
 
@@ -210,12 +215,16 @@ export function createStandaloneMsalInstance(
  * The external SPA's CIAM authority descriptor, sourced from config.ts (Amendment A1).
  * This is the DEFAULT collaboration authority; the SPA entry point (main.tsx) consumes the
  * `msalInstance` singleton built from it, so existing behavior is unchanged (FR-15).
+ *
+ * `bffScope` is informational (task 041): the CIAM scope a request asks for comes from the active backend
+ * (`backend-selection.ts`, `api://{customer BFF app id}/user_impersonation`). It mirrors the dev fallback's
+ * `VITE_MSAL_BFF_SCOPE` and is empty when that is unset (a `VITE_BACKENDS` build).
  */
 export const ciamAuthorityConfig: StandaloneMsalConfig = {
   kind: 'ciam',
   clientId: MSAL_CLIENT_ID,
   authority: MSAL_AUTHORITY,
-  bffScope: MSAL_BFF_SCOPE,
+  bffScope: readOptionalEnv('VITE_MSAL_BFF_SCOPE') ?? '',
 };
 
 /**
