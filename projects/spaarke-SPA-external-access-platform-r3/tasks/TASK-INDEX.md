@@ -16,9 +16,9 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 012 | Member-test branch for registered guests (FR-15) | P1 | 🔄 [wip] | 001 | O/h | FULL | Wave 2 |
 | 020 | R3 schema: sprk_createdbycontact + intake columns (FR-25, FR-05) | P2 | 🔄 [wip] source done + reviewed, awaiting owner dev import | none | S/h | FULL | Wave 1 (owner-gated import) |
 | 030 | Creator stamping on every external create (FR-25) | P3 | ✅ [done] | 020 | O/h | FULL | Wave 2 |
-| 031 | Document routes for Matter/WA/Invoice/Service Request (FR-24) | P3 | 🔲 [open] | 030 | O/h | FULL | Wave 3 |
+| 031 | Document routes for Matter/WA/Invoice/Service Request (FR-24) | P3 | 🔄 [wip] | 030 | O/h | FULL | Wave 3 |
 | 032 | DELETE own documents/to-dos/events/service requests (FR-26) | P3 | 🔲 [open] | 031 | O/h | FULL | Wave 4 |
-| 033 | External message read endpoint (FR-04) | P3 | 🔲 [open] | 011 | O/h | FULL | Wave 3 |
+| 033 | External message read endpoint (FR-04) | P3 | 🔄 [wip] | 011 | O/h | FULL | Wave 3 |
 | 034 | External message send endpoint (FR-11) | P3 | 🔲 [open] | 030, 033 | O/h | FULL | Wave 4 |
 | 035 | Intake submit endpoint (FR-05, FR-06) | P3 | 🔲 [open] | 011, 020, 033 | O/h | FULL | Wave 5 |
 | 036 | Email on subsequent grant + message notify (FR-07) | P3 | 🔲 [open] | 034 (UAC-r2 PR #1583 merged 2026-10-10, in branch) | S/h | FULL | Wave 5 |
@@ -26,7 +26,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 038 | Deploy R3 BFF to dev + live probes | P3 | 🔲 [open] | 010, 011, 012, 032, 035, 036, 037, 039 + **020 columns live in dev first** (task 030 stamps sprk_createdbycontact; without it a contact create returns 400, after the upload bytes are already in SPE) | S/h | STANDARD | — (live deploy, owner-gated) |
 | 039 | Event reads for Matter and Work Assignment (FR-03 server) | P3 | 🔲 [open] | 032, 037 | S/h | FULL | Wave 7 |
 | 040 | Workforce client switch (FR-16) | P4 | 🔄 [wip] | 001 (+ owner client registration) | O/h | FULL | Wave 2 |
-| 041 | Run-time backend selection (FR-17) | P4 | 🔲 [open] | 040 | O/h | FULL | Wave 3 |
+| 041 | Run-time backend selection (FR-17) | P4 | 🔄 [wip] | 040 | O/h | FULL | Wave 3 |
 | 042 | Out-of-plane pages + no production mock (FR-18) | P4 | 🔲 [open] | 041 | O/h | FULL | Wave 4 |
 | 043 | Production build + Teams package in CI (FR-20) | P4 | 🔲 [open] | 040 | S/h | STANDARD | Wave 3 |
 | 050 | Record detail view: fields, docs/invoices, events/tasks (FR-01–03) | P5 | ✅ [done] | none | S/h | FULL | Wave 1 |

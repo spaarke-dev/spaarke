@@ -4,7 +4,7 @@
     <title>Document routes for Matter, Work Assignment, Invoice and Service Request (FR-24)</title>
     <phase>3 BFF features</phase>
     <gate>after 030</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New external routes with SPE access (tags bff-api, auth)</rigor-reason>
     <model-tier>opus</model-tier>

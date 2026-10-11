@@ -4,7 +4,7 @@
     <title>Run-time backend selection on both planes (FR-17)</title>
     <phase>4 SPA auth and platform</phase>
     <gate>after 040</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Token-routing logic (tags auth, frontend)</rigor-reason>
     <model-tier>opus</model-tier>
