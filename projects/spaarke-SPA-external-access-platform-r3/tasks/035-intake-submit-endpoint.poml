@@ -42,6 +42,7 @@
     <constraint source="project">CIAM callers are refused (403) unless ExternalAccess:PartnerServiceRequestsEnabled is true.</constraint>
     <constraint source="project">sprk_requestedby is the caller's contact from the resolved principal; a caller with no contact gets 403 with a clear reason. Request fields that name a requester, owner or creator are ignored.</constraint>
     <constraint source="project">sprk_intakedata stores the validated answers as JSON (max 100 KB); unknown request types return 400.</constraint>
+    <constraint source="review 011 K2">Gate partner (CIAM) submits with ONE shared entitlement check on ModuleEntitlementResolver (e.g. IsEntitled(principal, "legal-front-door")) reading the same ExternalAccessOptions value as /me/entitlements and the service-requests descriptor, so Tier-1 cannot drift between /me, the descriptor and this route. Switch off → CIAM caller gets 403 on the intake route (not 200 with nothing). Stamp sprk_requestedby from the resolved principal (task 030 strips it from client input).</constraint>
   </constraints>
 
   <knowledge>

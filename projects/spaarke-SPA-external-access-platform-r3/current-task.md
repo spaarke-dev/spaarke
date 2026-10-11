@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-10 (Wave 1 agent work complete; waiting on the owner)
+> **Last Updated**: 2026-10-10 (Wave 2 in progress; by context-handoff)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,61 +9,64 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave 1. 010 and 050 are done. 001, 003 and 020 wait on the owner |
-| **Step** | Owner gates |
-| **Status** | Waiting on the owner. The worktree is clean and pushed (HEAD `a5e1dfbb0`) |
-| **Next Action** | **On A7 approval:** write `notes/drafts/adr-028-a7-draft.md` into `.claude/adr/ADR-028-spaarke-auth-architecture.md` (main session, task 001 steps 4–7), then start Wave 2 (011, 012, 040; 030 after the 020 import). **On import approval:** run the 020 live steps in `notes/task-020-notes.md` |
+| **Task** | Wave 2: 011, 012, 030, 040. Wave 1 is done, except 003 and 020, which wait on the owner |
+| **Step** | Review fix rounds and merges |
+| **Status** | Agents are running. Branch HEAD is `209ee27e0` (A7). 040 is uncommitted in this worktree |
+| **Next Action** | As each agent reports: (1) merge the 011 worktree branch `worktree-agent-af42f82984fd95554` and the 030 worktree branch `worktree-agent-a19a81dfa2b1dbd0f` into this branch, then build, run targeted tests and ArchTests, mark both done and push; (2) commit 040 by explicit path once its fix round is green; (3) run two adversarial passes on 012, fix, merge, then add the app-only-token hardening |
 
 ### Critical Context
-- The adversarial review policy is applied per task. The results are in each `notes/task-0NN-notes.md`.
-- Parallel agents share this worktree and are told not to commit or touch the state files. The main session commits each task by explicit path.
-- ISS-001 (#1623) was filed: the pre-existing once-per-process flag in `AuthorizationModule`.
+- **Parallel pattern:**
+  - BFF tasks run in isolated worktrees under `C:\code_files\spaarke\.claude\worktrees\`, commit there, and the main session merges.
+  - SPA tasks run in this worktree, uncommitted; the main session commits by explicit path.
+  - Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
+- **Review policy:** two adversarial passes (fable) for auth tasks; fix rounds use sonnet; at most 4 agents at once.
+- **ADR-028 A7** was applied and owner-approved on 2026-10-10 (`209ee27e0`). Quote: `notes/task-001-notes.md`.
 
 ---
 
-## Wave 1 status
+## Wave 2 lanes
 
 | Task | State |
 |---|---|
-| 001 ADR-028 A7 | Draft at `notes/drafts/adr-028-a7-draft.md`. **Needs owner approval** of four parts: A2 client, A3 modules, A1 scope, the self-registration rule. Also needs the split agreed: A7 carries R3's items, and the auth project's amendment carries §12b |
-| 003 FR-12 spike | Done: `notes/spikes/fr-12-self-registration-decision.md`. Recommends the custom join flow (option B). **Owner choice pending**, plus four sub-questions (§ Questions). After the decision: record it in the doc §10 and in `notes/decisions.md`, then mark 003 done |
-| 010 CIAM guard | ✅ `a5e1dfbb0` |
-| 020 Schema | Source done and reviewed (`6e5984449`). **Owner-gated dev import**, and the owner's call on securing `sprk_intakedata`. Steps and rollback are in `notes/task-020-notes.md` (needs a new `scripts/Set-ChildRecordCreatorContactSchema.ps1`) |
-| 050 Detail view | ✅ `72325f91e` |
+| 011 Modules by user type and partner switch | Commit `3499109c4` in its worktree. Both passes found no F-class defects. Fix round running: tests that "" and "yes" fail startup, and stale comments in 8 files. Then merge |
+| 012 Member-test guest branch | Implementer (opus) running in an isolated worktree. Next: two adversarial passes |
+| 030 Creator stamping | Commit `633cce424` in its worktree. Both passes found no F-class defects. Fix round running: an attributable-principal check before the SPE write, the to-do stamp decided before any network call, principal pins in the integration fixtures, a seam-level strip test, live-test readback, the census entry, and notes |
+| 040 Workforce client switch | Uncommitted in this worktree; 128/128 vitest. Review fix round running: no redirectUri on silent calls, a split workforce silent call, account filter by tenant, NAA gating, no fallback on `user_cancelled`, a Sign-in button, manifest 1.2.0, stale text. **Live criteria wait on the owner's client registration** |
+| 001, 010, 050 | ✅ done |
 
 ## Next Actions
 
-1. **Owner approves A7** → apply it in the main session:
-   - add the pointer markers at ADR-028 :36, :52/:56, :71 and :125;
-   - write `notes/coordination/2026-10-10-adr-028-amendment.md` (the split with the auth project);
-   - write `notes/task-001-notes.md` with the owner's quote;
-   - mark 001 done.
-2. **Wave 2:** 011, 012 and 040 as agents (opus). 040 also needs the owner's workforce client registration. 030 starts once the 020 columns are live in dev.
-3. **002** starts when the owner sends the per-tab column list.
+1. Merge 011 and 030 when their fix rounds report: `git merge --no-ff`, then `dotnet build src/server/api/Sprk.Bff.Api/`, the targeted External filter, ArchTests, and the full suite once. Set TASK-INDEX and POML to done, then push.
+2. Commit 040. Keep it `[wip]`: its live criteria wait on the client registration.
+3. Run 012's reviews and fixes, then merge.
+4. App-only-token hardening (011 review K1) after 012 merges: deny when `CallerIdentity.FromPrincipal(user).Kind != UserDelegated` in `WorkforcePrincipalStrategy` / `CallerPrincipalAuthorizationFilter`.
+5. Wave 3: 031, 033, 041, 043. Run `/conflict-check` before the BFF PR (`AuthorizationModule.cs` is shared with UAC-r2).
 
 ## Open Owner Questions / Blockers
 
-- **A7 approval** (001). It blocks 011, 012 and 040.
 - **020:**
-  - approval of the dev import;
-  - whether `sprk_intakedata` is field-secured (it is unsecured as drafted).
+  - approval of the dev import (steps and rollback in `notes/task-020-notes.md`);
+  - whether `sprk_intakedata` is field-secured. **This blocks 038 deploy order.**
 - **003:**
-  - option B?
-  - consent to "Spaarke Registration" as a customer prerequisite;
-  - which group contacts join (`sprk-{customerId}-users` or a separate group);
-  - who registers `CustomerTenantIds` in the shared registry (T240c or 060);
-  - where the service is hosted.
-- **060:** the registration-service host, and whether it is R3 or R4.
+  - option B (custom join flow)?
+  - consent prerequisite;
+  - which group contacts join;
+  - who registers `CustomerTenantIds`;
+  - hosting.
+- **040:**
+  - create the "Spaarke Workspace" single-tenant client registration and its pre-authorizations (`notes/task-040-notes.md` §5);
+  - add `/auth-callback.html` redirect URIs on the CIAM client `bd57e54e…`.
+- **032:** delete-own option (a) strict or (b) widened, which is recommended.
 - **002:** the grid column list.
-- **040:** creation of the new single-tenant workforce client registration.
+- **060:** the host, and R3 or R4.
 - **Portfolio:** R3 is not on the GitHub board.
 
 ## Dependencies tracked elsewhere
 
 - **Provisioning:**
   - T240c directory;
-  - T240d S1 (iv) token shapes. When they arrive, swap the `AssumedS1Shape` tests in `AuthorizationModuleCiamTests`;
-  - H3 pre-authorization of the new workforce client;
+  - T240d S1 (iv) token shapes. When they arrive, swap the `AssumedS1Shape` tests;
+  - H3 pre-authorization;
   - #1562 mailbox.
-- **UAC-r2 PRs #1583 and #1586:** merged and in this branch.
-- **`/conflict-check`** before the BFF PR: `AuthorizationModule.cs` is shared with UAC-r2.
+- **ISS-001** (#1623): the once-per-process flag in `AuthorizationModule`, pre-existing.
+- **The Copilot agent** still uses `access_as_user` (`scripts/Deploy-CopilotAgent.ps1:69`). Do not remove that scope from the interim client `1e40baad`.

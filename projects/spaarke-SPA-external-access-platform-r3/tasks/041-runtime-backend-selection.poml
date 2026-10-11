@@ -43,6 +43,7 @@
     <constraint source="NFR-02">No token is ever sent to a host, and no scope is ever requested, that came from a URL or query string; the URL may carry only a customer key, which must match an entry returned by Spaarke-owned data (directory or dev config), else it is ignored.</constraint>
     <constraint source="project">One build serves every backend: no BFF URL or scope is baked at build time except the dev fallback list (VITE_BACKENDS JSON or the existing single VITE_BFF_API_URL as a one-entry list).</constraint>
     <constraint source="project">localStorage holds only customer keys (no URLs, scopes or tokens); every access is wrapped in try/catch.</constraint>
+    <constraint source="review 040 K3 / ADR-028 A7">A7 requires api://{customer BFF app}/user_impersonation on BOTH planes. Task 040 left the CIAM plane requesting SDAP.Access (POML said CIAM unchanged). When the run-time selection supplies the CIAM scope (T240c/T240d), it MUST be user_impersonation; remove the SDAP.Access default and test it.</constraint>
   </constraints>
 
   <knowledge>

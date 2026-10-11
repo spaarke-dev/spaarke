@@ -41,6 +41,7 @@
     <constraint source="project">No grant level (including FullAccess) and no Dataverse role lets a caller delete another person's row through these routes.</constraint>
     <constraint source="ADR-007">The SPE file is deleted app-only through SpeFileStore after SpeContainerOwnershipGuard confirms the container; if the SPE delete fails the Dataverse row is kept and the route returns an error (no orphan row pointing at a deleted file is created by a later step).</constraint>
     <constraint source="project">Communications are not deletable: no DELETE route for messages.</constraint>
+    <constraint source="review 030 K3 — OWNER DECISION before implementing">Task 030 stamps by principal KIND: a systemuser caller → sprk_createdbyperson; a contact caller → sprk_createdbycontact. A workforce contact who is later licensed (resolves as systemuser with linked contact X) no longer matches their earlier sprk_createdbycontact = X rows, and the reverse when a licence is removed. Ask the owner: (a) strict — match only the stamp of the caller's current kind (FR-26 as written), or (b) widened — contact caller matches sprk_createdbycontact; systemuser caller matches sprk_createdbyperson OR sprk_createdbycontact = its linked contact. Recommendation: (b) — same person, same intent; the linked contact is server-resolved, never client input. Record the answer in notes/decisions.md before writing the check.</constraint>
   </constraints>
 
   <knowledge>

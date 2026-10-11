@@ -43,6 +43,7 @@
     <constraint source="ADR-050">Wizards render through WizardShell/InAppWizardHost (the canonical modal/wizard shell); no hand-rolled dialog.</constraint>
     <constraint source="project">Wizard fields per type are drafted in the task notes for owner approval before build: NDA Assessment (counterparty, purpose, mutual or one-way, deadline, upload of the NDA draft optional later via task 054), Policy Question (topic, question, urgency).</constraint>
     <constraint source="project">Cards stay entitlement-gated (QuickStartPane isEntitled :132); the server enforces it too (task 035).</constraint>
+    <constraint source="review 011 K3">With ExternalAccess:PartnerServiceRequestsEnabled on, a CIAM partner must see the Service Requests widget and the intake entry points: src/client/external-spa/src/registry/widgetRegistry.ts marks every legal-front-door widget planes: ['workforce'] (:109,:122,:134,:150,:161). Drive visibility from /me/entitlements (legal-front-door present), not from the plane, and test both switch states.</constraint>
   </constraints>
 
   <knowledge>

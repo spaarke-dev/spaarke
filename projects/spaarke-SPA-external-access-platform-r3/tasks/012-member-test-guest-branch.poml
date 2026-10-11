@@ -4,7 +4,7 @@
     <title>Member-test branch for registered workforce-contact guests (FR-15, #1563)</title>
     <phase>1 BFF auth and entitlement</phase>
     <gate>after 001 (A1 clarification approved)</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Identity resolution change (tags auth, bff-api)</rigor-reason>
     <model-tier>opus</model-tier>

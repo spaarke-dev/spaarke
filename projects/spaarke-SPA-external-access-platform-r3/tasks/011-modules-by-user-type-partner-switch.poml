@@ -4,7 +4,7 @@
     <title>Default modules by user type + partner service-request switch (FR-19, FR-06 module half, #1568)</title>
     <phase>1 BFF auth and entitlement</phase>
     <gate>after 001 (A3 amendment approved)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tier-1 entitlement + Tier-2 record-set predicate (tags auth, bff-api)</rigor-reason>
     <model-tier>opus</model-tier>
