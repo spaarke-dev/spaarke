@@ -79,4 +79,8 @@ public static class OntologyWriterEvents
 
     /// <summary>Task 031 (D-35): a no-core Signal was reassigned to its item's current owner.</summary>
     public static readonly EventId NoCoreSignalReassigned = new(50308, nameof(NoCoreSignalReassigned));
+
+    /// <summary>Task 033: a policy's CURRENT version has a passed <c>sprk_inforceto</c> (no version is in force). Nothing is
+    /// evaluated, closed or raised for it; the run is failed. Structured properties: <c>policyCode</c>, <c>versionId</c>, <c>inForceTo</c>.</summary>
+    public static readonly EventId PolicyVersionNotInForce = new(50309, nameof(PolicyVersionNotInForce));
 }
