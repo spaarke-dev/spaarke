@@ -478,12 +478,14 @@ public static class ExternalProjectDataEndpoints
 
         // Task 152 (#1044 split): the calling contact is the triggering person — it becomes Assigned To. A workforce
         // systemuser with no linked contact carries Guid.Empty here; the to-do is then created unassigned (logged).
+        // Task 030 (FR-25): the resolved principal is also the creator stamp — never anything from the request body.
         var created = await dataService.CreateTodoAsync(
             rootKind,
             rootId,
             request,
             owningTeamId,
             callerContext.ContactId == Guid.Empty ? null : callerContext.ContactId,
+            callerContext,
             ct);
         return Results.Created($"/api/v1/external/todos/{created.SprkTodoid}", created);
     }
@@ -665,6 +667,18 @@ public static class ExternalProjectDataEndpoints
                 });
         }
 
+        // FR-25 (task 030): the document row is stamped with its creator AFTER the SPE write, and the stamp fails closed
+        // for an unattributable principal. Refuse here, before the bytes land, so that failure cannot leave an orphaned
+        // file in the container (same rule StampCreator enforces).
+        if (!ExternalDataService.CanStampCreator(callerContext))
+        {
+            logger.LogWarning(
+                "[EXT-UPLOAD] Refused upload to project {ProjectId}: the caller resolves to neither a systemuser nor a contact",
+                id);
+            return Results.Problem(statusCode: 403, title: "Forbidden",
+                detail: "Your identity could not be attributed, so the document cannot be uploaded");
+        }
+
         if (file is null || file.Length == 0)
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "A non-empty file is required");
@@ -748,6 +762,7 @@ public static class ExternalProjectDataEndpoints
                 FileSizeBytes: uploaded.Size,
                 WebUrl: uploaded.WebUrl),
             owningTeamId,
+            callerContext, // task 030 (FR-25): the creator stamp comes from the resolved principal
             ct);
 
         logger.LogInformation(
@@ -925,7 +940,8 @@ public static class ExternalProjectDataEndpoints
         if (ownerRefusal is not null)
             return ownerRefusal;
 
-        var created = await dataService.CreateEventAsync(id, request, owningTeamId, ct);
+        // Task 030 (FR-25): the creator stamp comes from the resolved principal.
+        var created = await dataService.CreateEventAsync(id, request, owningTeamId, callerContext, ct);
         return Results.Created($"/api/v1/external/projects/{id}/events/{created.SprkEventid}", created);
     }
 

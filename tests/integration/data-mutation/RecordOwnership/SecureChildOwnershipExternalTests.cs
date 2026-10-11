@@ -61,6 +61,8 @@ public sealed class SecureChildOwnershipExternalTests : IClassFixture<ExternalCh
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         _fixture.Data.TodoOwners.Should().Equal(Directory.SecureNamedTeam);
+        _fixture.Data.TodoCreators.Should().ContainSingle().Which.Should().BeSameAs(_fixture.Principal,
+            "the creator stamp comes from the principal the route resolved, not one rebuilt downstream (FR-25)");
     }
 
     [Fact]
@@ -91,6 +93,8 @@ public sealed class SecureChildOwnershipExternalTests : IClassFixture<ExternalCh
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         _fixture.Data.EventOwners.Should().Equal(Directory.SecureNamedTeam);
+        _fixture.Data.EventCreators.Should().ContainSingle().Which.Should().BeSameAs(_fixture.Principal,
+            "the creator stamp comes from the principal the route resolved (FR-25)");
     }
 
     [Fact]
@@ -121,6 +125,32 @@ public sealed class SecureChildOwnershipExternalTests : IClassFixture<ExternalCh
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         _fixture.Data.DocumentOwners.Should().Equal(Directory.SecureNamedTeam);
         _fixture.Uploads.Should().Be(1);
+        _fixture.Data.DocumentCreators.Should().ContainSingle().Which.Should().BeSameAs(_fixture.Principal,
+            "the creator stamp comes from the principal the route resolved (FR-25)");
+    }
+
+    // Task 030 review: the document row's creator stamp fails closed, but only AFTER the SPE write. An unattributable
+    // principal (no systemuser, no contact) is refused before the bytes land, so no orphaned file is left behind.
+    [Fact]
+    public async Task ExternalDocumentUpload_ByAnUnattributablePrincipal_Is403_AndNeverReachesSpe_AndCreatesNoRow()
+    {
+        _fixture.Reset();
+        var project = ExternalChildOwnershipTestFixture.SecureProject;
+        _fixture.Principal = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = Guid.Empty, // neither a contact nor a systemuser
+            Email = "nobody@example.test",
+            ProjectAccess = new[] { CallerProjectAccess.FromLevel(project, ExternalAccessLevel.FullAccess) },
+        };
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsync($"/api/v1/external/projects/{project}/documents", FileForm());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Uploads.Should().Be(0, "an unattributable caller is refused BEFORE the bytes go to SPE");
+        _fixture.Data.DocumentCreators.Should().BeEmpty();
+        _fixture.Data.DocumentOwners.Should().BeEmpty();
     }
 
     [Fact]
@@ -284,11 +314,19 @@ public sealed class ExternalChildOwnershipTestFixture : ExternalCollaborationTes
         public List<Guid> EventOwners { get; } = new();
         public List<Guid> DocumentOwners { get; } = new();
 
+        /// <summary>The creator principal each seam was handed (task 030 review): pins the route to seam handoff.</summary>
+        public List<CallerPrincipal> TodoCreators { get; } = new();
+        public List<CallerPrincipal> EventCreators { get; } = new();
+        public List<CallerPrincipal> DocumentCreators { get; } = new();
+
         public void Reset()
         {
             TodoOwners.Clear();
             EventOwners.Clear();
             DocumentOwners.Clear();
+            TodoCreators.Clear();
+            EventCreators.Clear();
+            DocumentCreators.Clear();
         }
 
         // Task 146 r2 (verifier item 3): each override records the owner the REAL payload builder bound — the very
@@ -297,8 +335,9 @@ public sealed class ExternalChildOwnershipTestFixture : ExternalCollaborationTes
 
         public override Task<ExternalTodoDto> CreateTodoAsync(
             TodoRootKind rootKind, Guid rootId, CreateExternalTodoRequest request, Guid owningTeamId,
-            Guid? callerContactId, CancellationToken ct = default)
+            Guid? callerContactId, CallerPrincipal creator, CancellationToken ct = default)
         {
+            TodoCreators.Add(creator);
             TodoOwners.Add(BoundOwner(
                 BuildTodoCreatePayload(
                     request, TryGetRootBinding(rootKind)!, rootId, "root", null, owningTeamId, callerContactId)));
@@ -306,15 +345,19 @@ public sealed class ExternalChildOwnershipTestFixture : ExternalCollaborationTes
         }
 
         public override Task<ExternalEventDto> CreateEventAsync(
-            Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CancellationToken ct = default)
+            Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
+            CancellationToken ct = default)
         {
+            EventCreators.Add(creator);
             EventOwners.Add(BoundOwner(BuildEventCreatePayload(projectId, request, owningTeamId)));
             return Task.FromResult(new ExternalEventDto { SprkEventid = Guid.NewGuid().ToString(), SprkName = request.SprkName });
         }
 
         public override Task<ExternalDocumentDto> CreateDocumentAsync(
-            Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId, CancellationToken ct = default)
+            Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId, CallerPrincipal creator,
+            CancellationToken ct = default)
         {
+            DocumentCreators.Add(creator);
             DocumentOwners.Add(BoundOwner(BuildDocumentCreatePayload(projectId, pointers, owningTeamId)));
             return Task.FromResult(new ExternalDocumentDto { SprkDocumentid = Guid.NewGuid().ToString(), SprkName = pointers.FileName });
         }

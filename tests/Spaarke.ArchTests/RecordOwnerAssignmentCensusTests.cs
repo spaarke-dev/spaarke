@@ -1828,6 +1828,8 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisAsync", "seam: writes createdByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisOutputAsync", "seam: writes CreatedByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateEmailArtifactAsync", "seam: maps CreatedByPersonId"),
+        // R3 task 030 (FR-25): the external portal stamps its resolved principal (systemuser -> sprk_createdbyperson, contact -> sprk_createdbycontact).
+        new PersonBearingWriter("ExternalDataService.cs", "StampCreator", "the resolved external principal"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", "seam: maps CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "BuildCreateEventPayload", "seam: binds CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "CreateEventLogAsync", "seam: binds createdByPersonId"),
@@ -1849,7 +1851,6 @@ public class RecordOwnerAssignmentCensusTests
         ["SpendSnapshotService.cs"] = "scheduled spend snapshots: system work",
         ["DataverseObservationMirror.cs"] = "insight observation mirror: system work",
         ["AppOnlyAnalysisService.cs"] = "background document profile: system work",
-        ["ExternalDataService.cs"] = "external portal: the person is a CONTACT, and sprk_createdbyperson names a systemuser",
         ["DirectThreadAccessService.cs"] = "Direct thread (E2): owned by the caller themselves, never filed under a record",
         ["DataverseUpdateHandler.cs"] = "playbook output mapping re-files (no create); acts for no person, so F3 refuses a move out",
     };

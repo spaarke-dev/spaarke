@@ -346,9 +346,11 @@ public class ExternalDataService
     /// visible in the SPA's own list.</para>
     /// </remarks>
     public virtual async Task<ExternalDocumentDto> CreateDocumentAsync(
-        Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId, CancellationToken ct = default)
+        Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId, CallerPrincipal creator,
+        CancellationToken ct = default)
     {
         var body = BuildDocumentCreatePayload(projectId, pointers, owningTeamId);
+        StampCreator(body, creator); // FR-25 (task 030)
 
         var token = await GetAppOnlyTokenAsync(ct);
 
@@ -434,6 +436,103 @@ public class ExternalDataService
             throw new InvalidOperationException(
                 $"A {entityLogicalName} create on the external surface must carry its owning team, resolved through "
                 + "IRecordOwnershipResolver from the record it is filed to; refusing to create it app-owned (task 146).");
+    }
+
+    // ---------------------------------------------------------------------------
+    // FR-25 creator stamp (spaarke-SPA-external-access-platform-r3 task 030)
+    // ---------------------------------------------------------------------------
+
+    /// <summary>The <c>sprk_createdbyperson</c> (→ systemuser) bind key: the internal plane's column (task 146 c1-r1),
+    /// spelled once in <see cref="RecordCreatorPersonColumn"/>.</summary>
+    internal const string CreatedByPersonBindKey = RecordCreatorPersonColumn.NavigationProperty + "@odata.bind";
+
+    /// <summary>The <c>sprk_createdbycontact</c> (→ contact) bind key. Navigation property <c>sprk_CreatedByContact</c>, as the
+    /// task 020 schema source declares it (<c>Other/Relationships/Contact.xml</c>, <c>sprk_contact_*_createdbycontact</c>).</summary>
+    internal const string CreatedByContactBindKey = "sprk_CreatedByContact@odata.bind";
+
+    /// <summary>Columns that name who created or requested a row. The server alone writes them (FR-11, FR-25).</summary>
+    private static readonly string[] CreatorColumns =
+    {
+        RecordCreatorPersonColumn.LogicalName, "sprk_createdbycontact", "sprk_requestedby", "createdby", "createdonbehalfby",
+    };
+
+    /// <summary>
+    /// THE creator stamp for every create on <c>/api/v1/external/**</c> (FR-25; closes auth record L-5 for the external
+    /// plane). Writes exactly one of <c>sprk_createdbyperson</c> (a systemuser principal) or <c>sprk_createdbycontact</c> (a
+    /// contact principal: a workforce contact or a CIAM partner) onto <paramref name="body"/>, from the RESOLVED principal.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The kind decides, not the plane.</b> A principal carrying <see cref="CallerPrincipal.SystemUserId"/> is a
+    /// systemuser, even when it also carries a linked contact (task 141's user↔contact link) — the same rule as
+    /// <see cref="CallerPrincipal.IsContactPrincipal"/>. Every create is app-only, so Dataverse <c>createdby</c> is the
+    /// BFF application user; this stamp is the only record of who created the row, and the delete-own check (FR-26,
+    /// task 032) reads it.</para>
+    /// <para><b>Client input never lands.</b> Any key in the payload that names a creator column (any casing, its
+    /// <c>@odata.bind</c> or <c>_x_value</c> form) is removed before the stamp is written. The request DTOs are closed, so
+    /// nothing should be there; this keeps it so if a DTO or builder ever passes fields through.</para>
+    /// <para><b>Fails closed.</b> A principal that is neither kind (or carries an empty systemuser id) throws before
+    /// anything is posted: the surface never writes an unattributed row.</para>
+    /// <para>Sender stamps on message send (task 034) and the service-request requester (task 035) call this too.</para>
+    /// </remarks>
+    internal static void StampCreator(IDictionary<string, object?> body, CallerPrincipal creator)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        ArgumentNullException.ThrowIfNull(creator);
+
+        // Decide first, so a refusal leaves the payload untouched.
+        EnsureCanStampCreator(creator);
+        Guid? systemUserId = creator.SystemUserId;
+        Guid? contactId = systemUserId is null ? creator.ContactId : null;
+
+        foreach (var key in body.Keys.Where(NamesCreatorColumn).ToList())
+            body.Remove(key);
+
+        if (systemUserId is { } person)
+            RecordCreatorPersonColumn.BindIfKnown(body, person);
+        else
+            body[CreatedByContactBindKey] = $"/contacts({contactId!.Value:D})";
+    }
+
+    /// <summary>Whether <paramref name="creator"/> is attributable: a systemuser (non-empty id) or a contact principal.
+    /// The one rule <see cref="StampCreator"/> enforces; routes call it to refuse an unattributable caller BEFORE any
+    /// side effect (the upload route's SPE write) rather than after.</summary>
+    internal static bool CanStampCreator(CallerPrincipal creator)
+    {
+        ArgumentNullException.ThrowIfNull(creator);
+        return creator.SystemUserId is { } su ? su != Guid.Empty : creator.IsContactPrincipal;
+    }
+
+    /// <summary>Throws (the <see cref="StampCreator"/> refusal) when <paramref name="creator"/> is not attributable.
+    /// Called at the top of each create seam so the decision precedes every token, lookup and request.</summary>
+    internal static void EnsureCanStampCreator(CallerPrincipal creator)
+    {
+        ArgumentNullException.ThrowIfNull(creator);
+        if (creator.SystemUserId == Guid.Empty)
+            throw new InvalidOperationException(
+                "The caller principal carries an empty systemuser id; refusing to create an unattributed row (FR-25).");
+        if (!CanStampCreator(creator))
+            throw new InvalidOperationException(
+                "The caller principal resolves to neither a systemuser nor a contact; refusing to create an unattributed "
+                + "row (FR-25).");
+    }
+
+    /// <summary>Whether <paramref name="key"/> names a creator column (<see cref="CreatorColumns"/>): the logical name, its
+    /// <c>_x_value</c> read form, or any <c>x@…</c> annotation such as <c>@odata.bind</c>. Case-insensitive.</summary>
+    internal static bool NamesCreatorColumn(string? key)
+    {
+        var trimmed = key?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+            return false;
+
+        foreach (var column in CreatorColumns)
+        {
+            if (string.Equals(trimmed, column, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(trimmed, $"_{column}_value", StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith(column + "@", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -736,9 +835,11 @@ public class ExternalDataService
     // `virtual` per ADR-038 §4 (substitution seam), added by task 146 so the endpoint tests can assert the owner the
     // route resolved reached the create — and that a refused owner never reached Dataverse at all.
     public virtual async Task<ExternalEventDto> CreateEventAsync(
-        Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CancellationToken ct = default)
+        Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
+        CancellationToken ct = default)
     {
         var body = BuildEventCreatePayload(projectId, request, owningTeamId);
+        StampCreator(body, creator); // FR-25 (task 030)
 
         var token = await GetAppOnlyTokenAsync(ct);
 
@@ -856,10 +957,13 @@ public class ExternalDataService
         CreateExternalTodoRequest request,
         Guid owningTeamId,
         Guid? callerContactId,
+        CallerPrincipal creator,
         CancellationToken ct = default)
     {
         if (rootId == Guid.Empty)
             throw new ArgumentException("Root id must be a non-empty GUID.", nameof(rootId));
+        ArgumentNullException.ThrowIfNull(creator);
+        EnsureCanStampCreator(creator); // FR-25: decide the stamp kind before any token / lookup / request
 
         var binding = TryGetRootBinding(rootKind)
             ?? throw new ArgumentOutOfRangeException(nameof(rootKind), rootKind,
@@ -889,6 +993,7 @@ public class ExternalDataService
         // this one request — never in a follow-up PATCH.
         var body = BuildTodoCreatePayload(
             request, binding, rootId, rootDisplayName, recordTypeRef?.Id, owningTeamId, callerContactId);
+        StampCreator(body, creator); // FR-25 (task 030)
         if (!body.ContainsKey(AssignedToBindKey))
         {
             _logger.LogWarning(
