@@ -32,7 +32,7 @@ import {
 import { initializeAuth } from './authInit';
 
 // Control version - must match ControlManifest.Input.xml
-const CONTROL_VERSION = '1.0.37';
+const CONTROL_VERSION = '1.0.38';
 
 /**
  * Props for the DocumentRelationshipViewer component

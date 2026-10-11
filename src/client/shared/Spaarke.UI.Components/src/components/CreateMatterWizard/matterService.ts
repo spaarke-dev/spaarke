@@ -30,6 +30,7 @@ import type {
   AuthenticatedFetchFn,
   IUserBuCascadeDefaults,
 } from '../../services/EntityCreationService';
+import type { AuthenticatedFetchFn as ThrowingFetchFn } from '../../utils/fetchTypes';
 import { applyFieldMappings } from '../../services/FieldMappingService';
 import { cleanGuid, discoverNavProps, toNavPropMap } from '../../services/PolymorphicResolverService';
 import { syncAssignedAccess } from '../../services/assignedAccessSync';
@@ -649,7 +650,7 @@ export async function streamAiDraftSummary(
   practiceArea: string,
   callbacks: StreamAiSummaryCallbacks = {},
   signal?: AbortSignal,
-  authenticatedFetch?: (url: string, init?: RequestInit) => Promise<Response>,
+  authenticatedFetch?: ThrowingFetchFn,
   bffBaseUrl?: string
 ): Promise<IAiDraftSummaryResponse> {
   const { onProgress } = callbacks;
@@ -718,7 +719,7 @@ export async function fetchAiDraftSummary(
   matterName: string,
   matterType: string,
   practiceArea: string,
-  authenticatedFetch?: (url: string, init?: RequestInit) => Promise<Response>,
+  authenticatedFetch?: ThrowingFetchFn,
   bffBaseUrl?: string
 ): Promise<IAiDraftSummaryResponse> {
   return streamAiDraftSummary(matterName, matterType, practiceArea, {}, undefined, authenticatedFetch, bffBaseUrl);

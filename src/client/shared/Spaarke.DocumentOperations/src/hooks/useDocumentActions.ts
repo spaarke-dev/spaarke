@@ -26,7 +26,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { ApiError, authenticatedFetch, isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
+import { authenticatedFetch, isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
 
 // =============================================
 // Types
@@ -106,34 +106,23 @@ function documentsPhrase(count: number): string {
   return count === 1 ? 'the document' : `${count} documents`;
 }
 
-/**
- * A non-2xx from a fetch that RETURNS failures (not `@spaarke/auth`'s, which throws) becomes the same
- * ApiError that fetch would have thrown, so both shapes reach one message path.
- */
-function throwIfNotOk(response: Response): void {
-  if (!response.ok) throw new ApiError(`HTTP ${response.status}`, response.status, null);
-}
-
 // =============================================
 // Helpers
 // =============================================
 
 async function getDocumentLinks(bffBaseUrl: string, documentId: string): Promise<OpenLinksResponse> {
   const response = await authenticatedFetch(`${bffBaseUrl}/api/documents/${documentId}/open-links`);
-  throwIfNotOk(response);
   return response.json() as Promise<OpenLinksResponse>;
 }
 
 async function deleteDocument(bffBaseUrl: string, documentId: string): Promise<void> {
-  const response = await authenticatedFetch(`${bffBaseUrl}/api/documents/${documentId}`, { method: 'DELETE' });
-  throwIfNotOk(response);
+  await authenticatedFetch(`${bffBaseUrl}/api/documents/${documentId}`, { method: 'DELETE' });
 }
 
 async function analyzeDocument(bffBaseUrl: string, documentId: string): Promise<void> {
-  const response = await authenticatedFetch(`${bffBaseUrl}/api/documents/${documentId}/analyze`, {
+  await authenticatedFetch(`${bffBaseUrl}/api/documents/${documentId}/analyze`, {
     method: 'POST',
   });
-  if (response.status !== 202) throwIfNotOk(response);
 }
 
 // =============================================
@@ -190,7 +179,6 @@ export function useDocumentActions(options: UseDocumentActionsOptions): UseDocum
         const url = `${bffBaseUrl}/api/documents/${documentId}/download`;
         // Use a hidden link to trigger browser download
         const response = await authenticatedFetch(url);
-        throwIfNotOk(response);
         const blob = await response.blob();
         const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement('a');

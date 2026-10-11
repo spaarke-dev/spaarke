@@ -142,7 +142,7 @@ Spaarke.SubgridRollup._getApiBaseUrl = function () {
 //    reason, the recalculate call is skipped (best-effort) and logged — the form never breaks.
 //
 // MSAL v2 CDN pin (Subresource-Integrity-friendly, Microsoft-hosted).
-Spaarke.SubgridRollup._MSAL_CDN_URL = "https://alcdn.msauth.net/browser/2.38.4/js/msal-browser.min.js";
+Spaarke.SubgridRollup._MSAL_CDN_URL = "https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js";
 
 /** Cached MSAL PublicClientApplication instance (module-level). */
 Spaarke.SubgridRollup._msalInstance = null;

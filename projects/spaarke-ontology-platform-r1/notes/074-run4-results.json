@@ -1,0 +1,1102 @@
+{
+  "runAtUtc": "2026-10-10T20:10:50.9569342+00:00",
+  "fixture": "tests/fixtures/ontology-classifier-recall/labelled-set.json",
+  "dataverseUrl": "https://spaarkedev1.crm.dynamics.com",
+  "modelCallsExpected": 184,
+  "warnings": [],
+  "linearRuns": [
+    "Linear run: enforced 3 $choices field(s) as output-schema enum from the live Dataverse taxonomy.",
+    "Linear run: consumer=email-triage action=Triage Email operandChannel=Input operandKind=PreResolved promptLen=13282 temp=0.2 modelTier=Fast deployment=gpt-4o-mini allowsKnowledge=False groundingChars=0 context=[User=StablePrefix,est=0,refs=0,budget=700 | Workspace=StablePrefix,est=0,refs=0,budget=150 | Business=StablePrefix,est=0,refs=0,budget=1500 | Organizational=SemiStable,est=0,refs=0,budget=n/a | Semantic=SemiStable,est=0,refs=0,budget=n/a | Memory=VolatileTail,est=0,refs=0,budget=2000]",
+    "Linear run: consumer=email-triage action=Triage Email operandChannel=Input operandKind=PreResolved promptLen=12971 temp=0.2 modelTier=Fast deployment=gpt-4o-mini allowsKnowledge=False groundingChars=0 context=[User=StablePrefix,est=0,refs=0,budget=700 | Workspace=StablePrefix,est=0,refs=0,budget=150 | Business=StablePrefix,est=0,refs=0,budget=1500 | Organizational=SemiStable,est=0,refs=0,budget=n/a | Semantic=SemiStable,est=0,refs=0,budget=n/a | Memory=VolatileTail,est=0,refs=0,budget=2000]"
+  ],
+  "metrics": {
+    "Items": 92,
+    "Positives": 55,
+    "Negatives": 37,
+    "PredicateRecall": 0.8909090909090909,
+    "PredicateRecallWilsonLow95": 0.7817445091344648,
+    "PredicateRecallWilsonHigh95": 0.9490327499921767,
+    "PredicatePrecision": 0.9423076923076923,
+    "ExactAccuracy": 0.8695652173913043,
+    "PerCategory": {
+      "Fee / rate change": {
+        "Labelled": 27,
+        "Predicted": 25,
+        "Correct": 24,
+        "StrictRecall": 0.8888888888888888,
+        "StrictPrecision": 0.96
+      },
+      "Scope / budget change": {
+        "Labelled": 28,
+        "Predicted": 27,
+        "Correct": 25,
+        "StrictRecall": 0.8928571428571429,
+        "StrictPrecision": 0.9259259259259259
+      }
+    },
+    "PredicateMisses": [
+      "L021",
+      "L027",
+      "L030",
+      "L044",
+      "L049",
+      "L083"
+    ],
+    "PredicateFalsePositives": [
+      "L009",
+      "L018",
+      "L045"
+    ],
+    "Confusion": {
+      "Administrative": {
+        "Administrative": 4,
+        "Client instruction": 2,
+        "Fee / rate change": 1
+      },
+      "Client instruction": {
+        "Client instruction": 4
+      },
+      "Court / Filing": {
+        "Court / Filing": 5
+      },
+      "Fee / rate change": {
+        "Administrative": 1,
+        "Client instruction": 1,
+        "Fee / rate change": 24,
+        "Invoice / Billing": 1
+      },
+      "Invoice / Billing": {
+        "Court / Filing": 1,
+        "Invoice / Billing": 8
+      },
+      "Marketing / Noise": {
+        "Marketing / Noise": 3
+      },
+      "Opposing counsel": {
+        "Opposing counsel": 4
+      },
+      "Scheduling": {
+        "Scheduling": 3,
+        "Scope / budget change": 2
+      },
+      "Scope / budget change": {
+        "Client instruction": 3,
+        "Scope / budget change": 25
+      }
+    }
+  },
+  "items": [
+    {
+      "Id": "L001",
+      "Label": "Scope / budget change",
+      "LabelSource": "owner",
+      "Rung5Category": "scope-budget-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "Ridgeline\u0027s document production is about four times the planned volume, requiring additional reviewers and budget approval. Approval is requested this week to begin onboarding staff."
+    },
+    {
+      "Id": "L002",
+      "Label": "Invoice / Billing",
+      "LabelSource": "owner",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The email requests a credit for non-billable time on invoice 77812. It asks to issue a credit of $1,120 and resubmit the invoice."
+    },
+    {
+      "Id": "L003",
+      "Label": "Court / Filing",
+      "LabelSource": "owner",
+      "Rung5Category": "court-notice",
+      "SignalPresent": true,
+      "Predicted": "Court / Filing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The court scheduled a hearing on the Plaintiff\u0027s Motion to Compel for December 2, 2026. Counsel must file a joint status report by November 25."
+    },
+    {
+      "Id": "L004",
+      "Label": "Fee / rate change",
+      "LabelSource": "owner",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "Sakura Patent Translations announces a fee increase effective April 1 for Japanese-to-English patent translations and certification. Clients must submit requests before March 31 to be charged at current rates."
+    },
+    {
+      "Id": "L005",
+      "Label": "Invoice / Billing",
+      "LabelSource": "owner",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "An invoice for professional services rendered in September on the Northfield matters is attached. Payment is due within 30 days as stated in the invoice."
+    },
+    {
+      "Id": "L006",
+      "Label": "Fee / rate change",
+      "LabelSource": "owner",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The firm will bill time in six-minute increments starting May 1. This change aligns with client guidelines and may reduce costs for short tasks."
+    },
+    {
+      "Id": "L007",
+      "Label": "Invoice / Billing",
+      "LabelSource": "owner",
+      "Rung5Category": "court-notice",
+      "SignalPresent": true,
+      "Predicted": "Court / Filing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The USPTO issued a Notice of Allowance for application 17/552,019. The issue fee payment is due by January 9, requiring calendar action."
+    },
+    {
+      "Id": "L008",
+      "Label": "Marketing / Noise",
+      "LabelSource": "owner",
+      "Rung5Category": "marketing",
+      "SignalPresent": true,
+      "Predicted": "Marketing / Noise",
+      "Priority": "Low",
+      "ReviewOutcome": "Dismiss",
+      "Summary": "This is a marketing email promoting SpendLens analytics to reduce outside counsel spend. It invites booking a demo and offers a free audit of legal invoices."
+    },
+    {
+      "Id": "L009",
+      "Label": "Scheduling",
+      "LabelSource": "owner",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email discusses additional interviews beyond the original scope requiring client approval. It requests instruction on whether to proceed with the extended work."
+    },
+    {
+      "Id": "L010",
+      "Label": "Fee / rate change",
+      "LabelSource": "owner",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The firm will bill attorney travel time at the full hourly rate starting next month. The client is asked to provide any conflicting guidelines for compliance."
+    },
+    {
+      "Id": "L011",
+      "Label": "Scope / budget change",
+      "LabelSource": "owner",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email discusses additional budget needed to complete four licensing agreements in Q4. It requests a decision on whether to proceed or hold the work until the new budget year."
+    },
+    {
+      "Id": "L012",
+      "Label": "Fee / rate change",
+      "LabelSource": "owner",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Veridian Health mandates reverting to 2025 panel rates for all timekeepers from Q2 onward. Confirmation of acceptance or contact for discussion is requested."
+    },
+    {
+      "Id": "L013",
+      "Label": "Fee / rate change",
+      "LabelSource": "owner",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The firm notifies a change to billing terms for court appearances effective June 1. In-person appearances will have a half-day minimum billing per attorney; remote appearances billed by actual time."
+    },
+    {
+      "Id": "L014",
+      "Label": "Client instruction",
+      "LabelSource": "owner",
+      "Rung5Category": "client-instruction",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The client provides settlement authority up to $150,000 inclusive of fees. They instruct to escalate any settlement above that limit and confirm readiness to proceed with depositions."
+    },
+    {
+      "Id": "L015",
+      "Label": "Administrative",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "This is an automatic out-of-office reply indicating unavailability until October 20. It provides alternate contact information for urgent matters."
+    },
+    {
+      "Id": "L016",
+      "Label": "Court / Filing",
+      "LabelSource": "owner",
+      "Rung5Category": "court-notice",
+      "SignalPresent": true,
+      "Predicted": "Court / Filing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The court granted Plaintiff $87,500 in attorneys\u0027 fees and $6,214.33 in costs. Defendant must pay within 30 days of the order date."
+    },
+    {
+      "Id": "L017",
+      "Label": "Marketing / Noise",
+      "LabelSource": "owner",
+      "Rung5Category": "marketing",
+      "SignalPresent": true,
+      "Predicted": "Marketing / Noise",
+      "Priority": "Low",
+      "ReviewOutcome": "Dismiss",
+      "Summary": "This is a promotional email about sponsorship opportunities for the Legal Ops Summit 2027. No action is required from the recipient."
+    },
+    {
+      "Id": "L018",
+      "Label": "Scheduling",
+      "LabelSource": "owner",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "Discovery will extend about three months due to court-approved subpoenas. A revised budget estimate will be sent tomorrow."
+    },
+    {
+      "Id": "L019",
+      "Label": "Scheduling",
+      "LabelSource": "owner",
+      "Rung5Category": "scheduling",
+      "SignalPresent": true,
+      "Predicted": "Scheduling",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The email confirms the deposition of Javier Ortiz scheduled for November 14 at 9:30 a.m. It requests attendee names by Monday to arrange building access."
+    },
+    {
+      "Id": "L020",
+      "Label": "Invoice / Billing",
+      "LabelSource": "owner",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "A credit memo CM-0331 for $3,450.00 has been issued against invoice 5521. The credit will appear on the next statement and payment is due accordingly."
+    },
+    {
+      "Id": "L021",
+      "Label": "Scope / budget change",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "This is a quarterly update on the Brightwater licensing program covering negotiations, compliance audit results, and upcoming renewals. It also informs about a future 5% rate increase effective February."
+    },
+    {
+      "Id": "L022",
+      "Label": "Fee / rate change",
+      "LabelSource": "owner",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email informs that Tom\u0027s hourly rate will increase from $640 to $735 starting in July. This change affects billing on existing matters and should be noted before the next bill is issued."
+    },
+    {
+      "Id": "L023",
+      "Label": "Scope / budget change",
+      "LabelSource": "owner",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "Counsel requests approval for two additional testifying experts not covered in the current budget. Approval is needed by the end of next week to retain them before the disclosure window closes."
+    },
+    {
+      "Id": "L024",
+      "Label": "Client instruction",
+      "LabelSource": "owner",
+      "Rung5Category": "client-instruction",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The client instructs to proceed with filing an opposition against the KINETIQ application. The work should be kept within the previously approved budget."
+    },
+    {
+      "Id": "L025",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "Scope / budget change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The client requests a full review of all 140 patents in the Vexa portfolio, increasing the scope from the originally scoped 40 patents. A revised diligence estimate of $165,000 is proposed, requiring client confirmation to proceed."
+    },
+    {
+      "Id": "L026",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The firm informs that the 10% volume discount for Pioneer Freight invoices in 2026 will not be renewed for 2027. Standard rates will apply from January, with an offer to discuss alternative arrangements."
+    },
+    {
+      "Id": "L027",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "Medium",
+      "ReviewOutcome": "Update",
+      "Summary": "This email provides a weekly status update on the Orchard Lane development project. It requests agreement on additional budget for new easement work before starting."
+    },
+    {
+      "Id": "L028",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-budget-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The email requests an increase of $95,000 to the Phase 2 budget for the Aldridge matter. A call is offered to discuss the budget details and next steps."
+    },
+    {
+      "Id": "L029",
+      "Label": "Administrative",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email requests granting data room access to two additional team members for Project Talon. It requires updating access permissions accordingly."
+    },
+    {
+      "Id": "L030",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "client-instruction",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The client requests approval to add Dr. Kenji Sato to the Delmar merger review team. This involves a higher billing rate for the market-definition analysis work. "
+    },
+    {
+      "Id": "L031",
+      "Label": "Opposing counsel",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Opposing counsel",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Opposing counsel requests a meet and confer regarding objections to Interrogatories 3-9. They seek availability for Tuesday or Wednesday and may involve the court if unresolved."
+    },
+    {
+      "Id": "L032",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email proposes a new fee structure for the Halvorsen v. Corridor Energy case. It includes a draft amendment to the engagement letter and requests review and discussion."
+    },
+    {
+      "Id": "L033",
+      "Label": "Invoice / Billing",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The email informs that the October invoice will be higher due to deposition prep and expert depositions. It clarifies the charges are within the approved Phase 2 budget and reflect timing, not new costs."
+    },
+    {
+      "Id": "L034",
+      "Label": "Opposing counsel",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Opposing counsel",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Opposing counsel sends redlines to the stipulated protective order draft. They request availability to discuss the changes on Friday."
+    },
+    {
+      "Id": "L035",
+      "Label": "Opposing counsel",
+      "LabelSource": "claude",
+      "Rung5Category": "discovery",
+      "SignalPresent": true,
+      "Predicted": "Opposing counsel",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Opposing counsel identifies deficiencies in discovery responses and requests supplementation within ten days. They also seek to schedule a conference if needed this week."
+    },
+    {
+      "Id": "L036",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "Defendants served an unexpected expert report requiring a rebuttal expert. Approval for an estimated $60k cost is requested this week."
+    },
+    {
+      "Id": "L037",
+      "Label": "Court / Filing",
+      "LabelSource": "claude",
+      "Rung5Category": "court-notice",
+      "SignalPresent": true,
+      "Predicted": "Court / Filing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "This is a docket reminder for a response to a Non-Final Office Action due November 21, 2026. The deadline requires calendaring and linking to the relevant matter."
+    },
+    {
+      "Id": "L038",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The tribunal approved a document production phase lasting about four months. A revised budget estimate for this phase will be sent next week."
+    },
+    {
+      "Id": "L039",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-budget-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The client requests a second-opinion review on a robotics patent freedom-to-operate analysis. They require a scope and cost estimate for this work within the next month."
+    },
+    {
+      "Id": "L040",
+      "Label": "Invoice / Billing",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The client requests an estimate of unbilled work in progress for all Kite Surgical matters through December 31. The estimate is due by December 20 for year-end close purposes."
+    },
+    {
+      "Id": "L041",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The opposing party has reopened negotiation points affecting timing and budget. The budget needs to be revisited and impact reviewed."
+    },
+    {
+      "Id": "L042",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email shares the 2027 rate card with a 7% increase effective February 1. It requires review of the new rate card details."
+    },
+    {
+      "Id": "L043",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The client requests adding the Delaware entity to the scope of work for an additional $12k. Approval is needed to update the matter scope and adjust the budget accordingly."
+    },
+    {
+      "Id": "L044",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The firm will change invoicing for all Brightline matters from sterling to US dollars starting next billing period. They request confirmation if dollar invoices should be sent to a different address."
+    },
+    {
+      "Id": "L045",
+      "Label": "Administrative",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-confirmation",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The sender requests confirmation of current 2026 hourly rates for timekeepers on Matter 1123. No changes to rates are being requested, only verification of existing rates."
+    },
+    {
+      "Id": "L046",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The email notifies a paralegal rate increase from $185 to $205 starting next month. Attorney rates remain unchanged and no immediate action is required."
+    },
+    {
+      "Id": "L047",
+      "Label": "Court / Filing",
+      "LabelSource": "claude",
+      "Rung5Category": "court-notice",
+      "SignalPresent": true,
+      "Predicted": "Court / Filing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The court granted an extension of time for the defendant\u0027s answer. The new deadline is November 18, 2026, and must be calendared and linked to the matter."
+    },
+    {
+      "Id": "L048",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The court requires all exhibits to be submitted in Korean, necessitating certified translation of about 2,000 pages. Confirmation is requested to proceed with the $58,000 translation estimate and four-week turnaround."
+    },
+    {
+      "Id": "L049",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "client-instruction",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "General Counsel instructs to extend contract review to include 2019 and 2020 supplier contracts. The full five-year review is needed before the March meeting."
+    },
+    {
+      "Id": "L050",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The formation of a creditors\u0027 committee will increase monitoring work and monthly costs from $15,000 to $35,000. Client input is requested on whether to keep the monitoring scope narrower."
+    },
+    {
+      "Id": "L051",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The firm informs the client that Priya Natarajan\u0027s billing rate will increase to the partner scale of $890/hr effective Jan 1. The client is offered the option to discuss staffing alternatives if preferred."
+    },
+    {
+      "Id": "L052",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The firm informs the client of a staffing change on the Kessler arbitration with a higher billing rate. Client input is requested on staffing preferences regarding cost."
+    },
+    {
+      "Id": "L053",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The email notifies a change in payment terms effective 1 March, reducing payment period from 60 to 30 days. It requires updating billing processes to reflect the new terms and noting the attached updated standard terms."
+    },
+    {
+      "Id": "L054",
+      "Label": "Invoice / Billing",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The invoice INV-30418 for matter 1123 was rejected due to invalid task and missing receipt. The invoice must be corrected and resubmitted through the portal."
+    },
+    {
+      "Id": "L055",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-budget-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The email requests approval for additional trial preparation budget of $700,000. Approval is needed before committing to the jury consultant."
+    },
+    {
+      "Id": "L056",
+      "Label": "Invoice / Billing",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The client confirms a wire payment of $112,400 for invoices 5521, 5534, and 5540. They request contact if the amount received differs."
+    },
+    {
+      "Id": "L057",
+      "Label": "Scheduling",
+      "LabelSource": "claude",
+      "Rung5Category": "scheduling",
+      "SignalPresent": true,
+      "Predicted": "Scheduling",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The email proposes mediation dates for Delgado v. Pacifica Rail and requests availability by Friday. A response is required to confirm suitable dates for all parties."
+    },
+    {
+      "Id": "L058",
+      "Label": "Marketing / Noise",
+      "LabelSource": "claude",
+      "Rung5Category": "Marketing / Noise",
+      "SignalPresent": true,
+      "Predicted": "Marketing / Noise",
+      "Priority": "Low",
+      "ReviewOutcome": "Dismiss",
+      "Summary": "This email is an unsolicited invitation to a webinar on AI and patent prosecution. No action is required from the recipient."
+    },
+    {
+      "Id": "L059",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email proposes switching from hourly billing to a fixed monthly retainer of $40,000 for trademark portfolio maintenance. It requests agreement to start the new billing method next quarter."
+    },
+    {
+      "Id": "L060",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-budget-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "Counsel recommends filing a new inter partes review petition against Corvex\u0027s \u0027417 patent as a new workstream. Client confirmation is requested to begin preparing the petition with an estimated cost of $350,000."
+    },
+    {
+      "Id": "L061",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-budget-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The SEC staff requested adding nine custodians to the data collection, doubling the data volume and increasing costs. A revised estimate of $340k is proposed, with a discussion scheduled for Thursday\u0027s call."
+    },
+    {
+      "Id": "L062",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "Scope / budget change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The client confirms additional anti-corruption training sessions in Mexico City, Singapore, and Dubai. An engagement addendum will be sent for execution reflecting the new scope and estimated costs."
+    },
+    {
+      "Id": "L063",
+      "Label": "Administrative",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The client acknowledges receipt of the draft APA and plans to review it over the weekend. They will send comments by Monday as requested."
+    },
+    {
+      "Id": "L064",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email discusses a potential increase in depositions in Houston, possibly adding 20% to the current phase. It requests a discussion on Thursday to review this potential scope change."
+    },
+    {
+      "Id": "L065",
+      "Label": "Scheduling",
+      "LabelSource": "claude",
+      "Rung5Category": "scheduling",
+      "SignalPresent": true,
+      "Predicted": "Scheduling",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The email requests rescheduling a planned call from Tuesday to Wednesday. It requires updating the calendar to reflect the new meeting time."
+    },
+    {
+      "Id": "L066",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-budget-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email proposes expanding the diligence scope to include three Brazilian subsidiaries. It requests approval for a revised budget covering local counsel and additional firm time."
+    },
+    {
+      "Id": "L067",
+      "Label": "Administrative",
+      "LabelSource": "claude",
+      "Rung5Category": "esign-completion",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email contains the renewed engagement letter for 2027 with unchanged rates and scope. The client is requested to countersign and return the document at their convenience."
+    },
+    {
+      "Id": "L068",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The email discusses expanding notification obligations to multiple states and EU authorities. It requires review of the scope and budget implications for the matter."
+    },
+    {
+      "Id": "L069",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Halcyon Retail will switch to fixed-fee pricing for new matters starting July 1. Proposed fixed fees must be submitted by May 31 using the attached template."
+    },
+    {
+      "Id": "L070",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The lender\u0027s counsel requests updated title commitments and new surveys due to an easement issue. Client confirmation is needed before ordering these additional services."
+    },
+    {
+      "Id": "L071",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "This email notifies about an increase in monthly hosting fees for matter 4471. It informs about the new rate and offers assistance to discuss archiving data to reduce costs."
+    },
+    {
+      "Id": "L072",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-negotiation",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The firm offers a 12% fee discount for Crestline matters starting March, contingent on consolidating employment work with them. They propose documenting this agreement in a short side letter."
+    },
+    {
+      "Id": "L073",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email proposes a capped fee arrangement for the hearing phase of the Torvald arbitration. It requires linking this fee change to the relevant matter record."
+    },
+    {
+      "Id": "L074",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The client approves a $95,000 increase to Phase 2 budget for the Aldridge matter. They authorize proceeding with the mock trial as planned."
+    },
+    {
+      "Id": "L075",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The email announces a service fee increase for patent annuity payments starting January 1, 2027. It informs the client of the new fee amount and its effective date."
+    },
+    {
+      "Id": "L076",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The firm notifies a change to invoicing practice, applying a flat 3% administrative charge on professional fees instead of itemising certain disbursements. Updated terms are attached for review."
+    },
+    {
+      "Id": "L077",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The firm notifies Northfield Holdings of 2027 hourly rate increases effective January 1. The client is invited to discuss the changes before the new year."
+    },
+    {
+      "Id": "L078",
+      "Label": "Administrative",
+      "LabelSource": "claude",
+      "Rung5Category": "budget-report",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "This email provides a routine monthly budget report for the Aldridge matter\u0027s Phase 1. No changes or actions are required at this time."
+    },
+    {
+      "Id": "L079",
+      "Label": "Client instruction",
+      "LabelSource": "claude",
+      "Rung5Category": "client-instruction",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The client directs a change in legal strategy regarding Corvex, shifting from litigation to negotiation. They request a discussion tomorrow to plan the initial contact approach."
+    },
+    {
+      "Id": "L080",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The email proposes a single blended rate of $575/hr for all associate time on the Orion supply disputes matter. It requests confirmation if this new rate should start from next month."
+    },
+    {
+      "Id": "L081",
+      "Label": "Court / Filing",
+      "LabelSource": "claude",
+      "Rung5Category": "court-notice",
+      "SignalPresent": true,
+      "Predicted": "Court / Filing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The defendant filed a motion for attorneys\u0027 fees seeking $412,000. Our opposition is due November 3 and has been calendared for the trial team."
+    },
+    {
+      "Id": "L082",
+      "Label": "Opposing counsel",
+      "LabelSource": "claude",
+      "Rung5Category": "settlement-demand",
+      "SignalPresent": true,
+      "Predicted": "Opposing counsel",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Opposing counsel demands $2,400,000 to resolve all claims by October 24 at 5:00 p.m. They warn of proceeding with depositions and seeking fees at trial if the demand is not met. "
+    },
+    {
+      "Id": "L083",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The email communicates updated outside counsel guidelines from Tarrant Medical Systems. It requires acknowledgment of receipt and confirmation of compliance with the new billing rules."
+    },
+    {
+      "Id": "L084",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email discusses expanding clearance searches to 12 additional countries with estimated extra costs. Client approval is requested to instruct local agents for this expanded scope."
+    },
+    {
+      "Id": "L085",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The firm notifies clients of hourly rate increases effective December 1 for specific timekeepers. No immediate action or deadlines are required from the client."
+    },
+    {
+      "Id": "L086",
+      "Label": "Invoice / Billing",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The vendor requests a completed W-9 and remittance details to set up the firm for invoice processing. Payments will be withheld until the setup is complete."
+    },
+    {
+      "Id": "L087",
+      "Label": "Administrative",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The firm announces the New York office relocation effective November 1. Clients are requested to update their contact records accordingly."
+    },
+    {
+      "Id": "L088",
+      "Label": "Client instruction",
+      "LabelSource": "claude",
+      "Rung5Category": "client-instruction",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Client instructs to hold all work on the Rivera matter pending a board decision. No contact with the other side is allowed until further notice."
+    },
+    {
+      "Id": "L089",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-budget-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The email provides an estimated budget for a potential appeal phase. It informs the client for planning purposes without requiring immediate decisions."
+    },
+    {
+      "Id": "L090",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-rate-change",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The firm announces revised fixed fees for EPO opposition proceedings effective January 1. The new fee schedule applies to all new instructions received after that date."
+    },
+    {
+      "Id": "L091",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-budget-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The client requests a revised budget for Project Atlas due to an expanded scope including the EU regulatory workstream. A revised budget submission is needed to update the approval in the system."
+    },
+    {
+      "Id": "L092",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "scope-budget-change",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email proposes filing two divisional patent applications outside the agreed prosecution budget. Client approval is requested to proceed with the additional work and estimated fees."
+    }
+  ]
+}

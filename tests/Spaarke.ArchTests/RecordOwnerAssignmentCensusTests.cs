@@ -473,10 +473,19 @@ public class RecordOwnerAssignmentCensusTests
             "appnotification from a playbook — owned by its recipient."),
         new OwnerWriteEntry("DirectThreadAccessService.cs", "FindOrCreateDirectThreadAsync", 1, OwnerWriteKind.PerUser,
             "A Direct (two-party) thread — per-participant by design (E2)."),
+        new OwnerWriteEntry("SignalWriter.cs", "BuildEntity", 1, OwnerWriteKind.PerUser,
+            "Ontology task 037 (D-35): a Do-lane Signal whose item has NO core record is owner-only: it is owned by the item's " +
+            "own owner, copied from the item and read back. Reached only on CoreAncestorResolver no-core status (Error " +
+            "escalates); every Signal that has a core record takes the resolver's answer (ApplyTo) or the FR-14 business unit. " +
+            "uac-r2 approved on #1355."),
         new OwnerWriteEntry("PlaybookService.cs", "BuildCreatePayload", 1, OwnerWriteKind.PerUser,
             "sprk_analysisplaybook — a playbook definition owned by the person who created it, so task 164's OwnerOnly "
             + "(caller systemuserid == _ownerid_value) admits its creator; never a business record's child (dev gate D-G6-2)."),
 
+        // spaarke-ontology-platform-r1 task 040 (owner D-39): needs uac-r2 review: ontology PR #1600 (listed PerUser; the no-core owner is the item's owner by D-39).
+        new OwnerWriteEntry("DecisionRecordWriter.cs", "WriteAsync", 1, OwnerWriteKind.PerUser,
+            "sprk_decisionrecord of an item with NO core record: owned by the item's own owner (a user), never by a team. A "
+            + "Decision Record WITH a core record takes the resolver's answer through ApplyTo (the censused resolver write)."),
         new OwnerWriteEntry("CommunicationEnrichmentService.cs", "AssignOwningTeamAsync", 1, OwnerWriteKind.UnfiledOnly,
             "FR-E7 category routing — a communication FILED under a record is the resolver's (r2): routing applies only to "
             + "a row filed under nothing (IsFiledOrUnreadableAsync first)."),

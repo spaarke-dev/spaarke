@@ -19,7 +19,7 @@
 // inline-confirmation injection.
 import type { ChatAttachment, AttachmentChip } from './hooks/useChatFileAttachment';
 import type { INextStepChip } from './OutcomeCard';
-import type { ResponseFetchFn } from '../../utils/fetchTypes';
+import type { AuthenticatedFetchFn as ThrowingFetchFn } from '../../utils/fetchTypes';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chat Message Types
@@ -822,14 +822,15 @@ export interface IPredefinedPrompt {
  * The function MUST attach a fresh Bearer token (and X-Tenant-Id when applicable)
  * to every call and re-acquire on 401. See `@spaarke/auth/authenticatedFetch`.
  *
- * Typed as the EITHER-shape {@link ResponseFetchFn} for now, although `authenticatedFetch` throws on
- * failure: some hooks here still branch on the returned status (e.g. `useChatContextMapping`'s 404),
- * so moving to the throwing type is a follow-up, not a mechanical change.
+ * Typed as the THROWING fetch (`utils/fetchTypes`' structural copy of `@spaarke/auth`'s type): it resolves
+ * only with a 2xx and THROWS `ApiError` / `AuthError` for every failure, so these hooks handle failures
+ * in their `catch` and never branch on a returned status. Every SprkChat host injects `@spaarke/auth`'s
+ * `authenticatedFetch`.
  *
  * Auth v2 (D-AUTH-1, D-AUTH-7): tokens are NEVER snapshotted as strings in component
  * state; callers always go through this function.
  */
-export type AuthenticatedFetchFn = ResponseFetchFn;
+export type AuthenticatedFetchFn = ThrowingFetchFn;
 
 /**
  * Token getter for code paths that cannot use `authenticatedFetch` (e.g., SSE streams

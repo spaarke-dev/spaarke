@@ -1447,8 +1447,7 @@ public sealed class AssignedAccessMaterializer
         // Task 141 §2/§5: the link (sprk_primarycontact) is honoured as it is; a user with NO link is represented by the
         // contact bound to its oid. A user linked to ANOTHER contact is not this contact's, whatever the oid says.
         var represented = candidates
-            .Where(c => c.PrimaryContactId == subject.Id
-                        || (c.PrimaryContactId is null && boundOid is { } b && c.Oid == b))
+            .Where(c => c.Represents(subject.Id, boundOid))
             .GroupBy(c => c.SystemUserId)
             .Select(g => g.First())
             .ToList();

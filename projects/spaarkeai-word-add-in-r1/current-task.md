@@ -2,7 +2,7 @@
 
 > **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas" (incl. "Multi-customer add-in (Model 1)" and "Guest sign-in, PCFs and telemetry" blocks). History: git log + `notes/handoff-history/` (do not load on recovery).
 
-> **Last Updated**: 2026-10-10 (task 127 rollout complete in dev).
+> **Last Updated**: 2026-10-10 (task 127 rollout complete in dev; 14 PCFs re-synced to master in dev).
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
@@ -19,6 +19,7 @@
 - Guest sign-in fix (#1453, tasks 122-125): @spaarke/auth + 10 PCFs + 8 code pages + 3 web resources.
 - Task 121 (pane Message-ID, per-caller duplicate check, file-if-unfiled): #1495, add-in + BFF.
 - Task 127 (#1537): BFF `cc9fd0809`; code pages DailyBriefing/EmailPage/CommunicationReconciliation from `9c04c4320`; SemanticSearchControl **1.1.85** + VisualHost **1.4.40** from `f022544d6`; Matter main form static `appInsightsKey` + `tenantId` removed, `sprk_matter` published.
+- PCF re-sync to master (#1613, built from `b69b85a95`): 14 controls imported and verified. The record is in `notes/pcf-dev-resync-2026-10-10.md`.
 
 ## Waiting on the owner (live checks)
 - **Task 127**:
@@ -26,6 +27,10 @@
   - The visuals (VisualHost) render as before.
   - The dev App Insights resource receives `customEvents` such as `view_toggled` and `card_rendered`.
   - Daily Briefing, the Email page and Communication Reconciliation open and behave as before.
+- **PCF re-sync**:
+  - A Matter record shows MatterHeader 1.0.22. A Project, Invoice, Agreement or Work Assignment record shows RecordHeader 1.1.12.
+  - The Communication form shows the timeline, conversation panel and actions, and they work as before.
+  - The document relationship viewer opens.
 - **Guest + member UAT** for the sign-in fix (list given 2026-10-09).
 - **Task 121 live checks**:
   - Message-ID header, and the link to an existing communication.
@@ -44,10 +49,9 @@
 
 ## Open owner items / later
 - Optional: reassign the 3 pre-task-146 app-owned dev events (#1034 comment). Dataverse write, needs owner go.
-- SpeDocumentViewer 1.0.29, CommunicationConnections 1.7.1, RegardingResolver 1.6.2 (external-service-usage=true) deploy at their next deploy.
 - Repo copy of the Matter form loses the 6 lines at the next SpaarkeMaster release export (not hand-edited).
 - 090 wrap-up (`/test-diet`) after full UAT; dev package rename "Spaarke (Dev)"; AppStore publishing later.
 - Filed follow-ups (other owners): #1464, #1468, #1469, #1470, #1471, #1476, #1477, #1505, #1540, #1551, #1591; #1034 status comment.
 
 ## Main checkout
-`C:\code_files\spaarke` may be on another branch with another session's changes — leave it (memory). Deploy worktree `C:\wt127` (detached at `f022544d6`) is this session's own and can be removed.
+`C:\code_files\spaarke` may be on another branch with another session's changes — leave it (memory). Deploy worktree `C:\wt127` (detached at `b69b85a95`) is this session's own and can be removed.

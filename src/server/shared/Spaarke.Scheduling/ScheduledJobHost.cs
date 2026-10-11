@@ -553,6 +553,14 @@ public sealed class ScheduledJobHost : BackgroundService
     /// Callers do NOT need to wrap this in a try/catch for those scenarios; only
     /// <see cref="OperationCanceledException"/> propagates out.
     /// </para>
+    /// <para>
+    /// A refresh does not reschedule a job whose schedule is unchanged (#1575): when the job was already
+    /// scheduled, is still enabled, has the same cron expression and the same handler, its pending next fire
+    /// carries over — including one that is due now or overdue, which the loop then dispatches. Recomputing it
+    /// from <c>now</c> (exclusive) would drop that occurrence whenever a refresh lands on, or just after, a due
+    /// instant. A new, re-enabled or re-scheduled job gets a fresh next fire from <c>now</c>; a disabled job
+    /// has none.
+    /// </para>
     /// </remarks>
     public async Task RefreshDefinitionsAsync(CancellationToken cancellationToken)
     {
@@ -560,6 +568,7 @@ public sealed class ScheduledJobHost : BackgroundService
         {
             var definitions = await _store.LoadJobsAsync(cancellationToken).ConfigureAwait(false);
             var now = _timeProvider.GetUtcNow();
+            var prior = _state;
             var next = new Dictionary<string, ScheduledJobState>(StringComparer.Ordinal);
 
             foreach (var def in definitions)
@@ -584,6 +593,13 @@ public sealed class ScheduledJobHost : BackgroundService
                         ex,
                         "Background job '{JobId}' has invalid cron expression '{Cron}' — disabling for this load cycle",
                         def.JobId, def.CronSchedule);
+                    continue;
+                }
+
+                if (prior.TryGetValue(def.JobId, out var previous) && previous.KeepsScheduleFor(def, handler))
+                {
+                    // Same schedule: share the pending next fire rather than recompute it (#1575).
+                    next[def.JobId] = previous.WithDefinition(def, handler);
                     continue;
                 }
 
@@ -1040,24 +1056,59 @@ public sealed class ScheduledJobHost : BackgroundService
         int Attempts = 0);
 
     /// <summary>Per-job scheduling state. Mutable <see cref="NextFireUtc"/> via <see cref="AdvanceNextFire"/>.</summary>
+    /// <remarks>
+    /// The next fire lives in a <see cref="FireCursor"/> that a refresh hands on to the job's new state when the
+    /// schedule is unchanged (<see cref="WithDefinition"/>). Sharing it, rather than copying the value, matters
+    /// because an admin refresh runs on a request thread while the loop may be dispatching from its snapshot of
+    /// the old state: the loop's advance must be visible to the new state, or the same occurrence fires twice.
+    /// </remarks>
     internal sealed class ScheduledJobState
     {
+        private readonly FireCursor _cursor;
+
         public BackgroundJobDefinition Definition { get; }
         public IScheduledJob Handler { get; }
         public CronExpression Cron { get; }
-        public DateTimeOffset? NextFireUtc { get; private set; }
+        public DateTimeOffset? NextFireUtc => _cursor.NextFireUtc;
 
         public ScheduledJobState(
             BackgroundJobDefinition definition,
             IScheduledJob handler,
             CronExpression cron,
             DateTimeOffset? nextFireUtc)
+            : this(definition, handler, cron, new FireCursor(nextFireUtc))
+        {
+        }
+
+        private ScheduledJobState(
+            BackgroundJobDefinition definition,
+            IScheduledJob handler,
+            CronExpression cron,
+            FireCursor cursor)
         {
             Definition = definition;
             Handler = handler;
             Cron = cron;
-            NextFireUtc = nextFireUtc;
+            _cursor = cursor;
         }
+
+        /// <summary>
+        /// True when <paramref name="definition"/> leaves this job's schedule as it is: it was scheduled (enabled,
+        /// with a pending next fire), it stays enabled, and its cron expression and handler are the same.
+        /// </summary>
+        public bool KeepsScheduleFor(BackgroundJobDefinition definition, IScheduledJob handler) =>
+            Definition.Enabled
+            && definition.Enabled
+            && NextFireUtc is not null
+            && ReferenceEquals(Handler, handler)
+            && string.Equals(Definition.CronSchedule, definition.CronSchedule, StringComparison.Ordinal);
+
+        /// <summary>
+        /// The state for a refreshed definition whose schedule is unchanged: the new definition (so non-schedule
+        /// fields such as <c>ConfigJson</c> take effect) over this state's cron and shared next-fire cursor.
+        /// </summary>
+        public ScheduledJobState WithDefinition(BackgroundJobDefinition definition, IScheduledJob handler) =>
+            new(definition, handler, Cron, _cursor);
 
         /// <summary>Advance <see cref="NextFireUtc"/> to the next cron occurrence strictly after the given firing time.</summary>
         public void AdvanceNextFire(DateTimeOffset firingUtc)
@@ -1065,7 +1116,20 @@ public sealed class ScheduledJobHost : BackgroundService
             // GetNextOccurrence is exclusive of the input by default — pass the firing time as
             // the "from" so the next occurrence is the next future fire.
             var next = Cron.GetNextOccurrence(firingUtc.UtcDateTime, TimeZoneInfo.Utc);
-            NextFireUtc = next.HasValue ? new DateTimeOffset(next.Value, TimeSpan.Zero) : null;
+            _cursor.NextFireUtc = next.HasValue ? new DateTimeOffset(next.Value, TimeSpan.Zero) : null;
+        }
+
+        /// <summary>The pending next fire, shared by every state of a job whose schedule has not changed.</summary>
+        private sealed class FireCursor(DateTimeOffset? nextFireUtc)
+        {
+            private readonly object _gate = new();
+            private DateTimeOffset? _nextFireUtc = nextFireUtc;
+
+            public DateTimeOffset? NextFireUtc
+            {
+                get { lock (_gate) { return _nextFireUtc; } }
+                set { lock (_gate) { _nextFireUtc = value; } }
+            }
         }
     }
 }

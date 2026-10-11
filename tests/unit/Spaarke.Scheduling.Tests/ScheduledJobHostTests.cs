@@ -26,14 +26,11 @@ public class ScheduledJobHostTests
     /// Options for virtual-clock tests: tick often, refresh rarely.
     /// </summary>
     /// <remarks>
-    /// RefreshInterval MUST exceed the cron period (1s for the "every second" test schedule).
-    /// <see cref="ScheduledJobHost.TickAsync"/> refreshes first and recomputes NextFireUtc from
-    /// <c>now</c> EXCLUSIVE, so a refresh that lands on the same instant as a due job pushes that
-    /// job to the following occurrence. With the default 200ms RefreshInterval and an exactly
-    /// periodic 200ms virtual step the two resonate: refresh fires on every tick that could have
-    /// dispatched, and the job starves indefinitely. Real time escapes this only by jitter —
-    /// sleeps overshoot, so the alignment drifts. Virtual time has no jitter, so the test states
-    /// the intended configuration explicitly instead of relying on that accident.
+    /// Historical: before #1575 a refresh recomputed NextFireUtc from <c>now</c> EXCLUSIVE, so a
+    /// 200ms refresh stepped by an exactly periodic 200ms virtual clock landed on every due instant
+    /// and starved the job. A refresh now carries an unchanged job's next fire over (pinned by
+    /// <c>RefreshLoop_IntervalDividingTheCronPeriod_DoesNotStarveDispatch_1575</c>); the long
+    /// interval is kept so these tests exercise dispatch without refresh noise.
     /// </remarks>
     private static ScheduledJobHostOptions VirtualClockOptions(TimeSpan? drainTimeout = null) =>
         FastOptions(drainTimeout, refreshInterval: TimeSpan.FromSeconds(30));
@@ -209,16 +206,9 @@ public class ScheduledJobHostTests
 
         // This test cannot use VirtualClockOptions' long refresh interval — the behaviour under
         // test IS the refresh tick noticing a runtime addition, so refresh has to fire during the
-        // test. But it also cannot use the default 200ms: TickAsync refreshes BEFORE the due-check
-        // and recomputes NextFireUtc from `now` EXCLUSIVE, so a refresh landing exactly on a due
-        // instant pushes the job to the next occurrence. With a 1s cron and a 200ms virtual step,
-        // due instants fall on whole seconds and a 200ms (or 500ms) refresh lands on them every
-        // time — the job starves forever.
-        //
-        // 700ms is deliberately NOT a divisor of the 1s cron period, so refresh and due-check
-        // drift apart instead of resonating: refreshes land at 800/1600/2300… while the job comes
-        // due at 2000, which no refresh coincides with. Real time escapes this only via jitter;
-        // virtual time has none, so the test states the requirement explicitly.
+        // test. 700ms (not a divisor of the 1s cron period) dates from before #1575, when a refresh
+        // landing on a due instant pushed the job to its next occurrence; since #1575 an unchanged
+        // job keeps its next fire across a refresh, so the choice is no longer load-bearing.
         var (host, time) = HostWithVirtualClock(
             registry, store, FastOptions(refreshInterval: TimeSpan.FromMilliseconds(700)));
 
@@ -527,10 +517,8 @@ public class ScheduledJobHostTests
         // refactor already existed; this test had simply never adopted it. On the virtual clock the
         // 1500 ms real sleep below becomes advanced time, so the wall-clock race cannot occur.
         //
-        // VirtualClockOptions (30 s refresh) is REQUIRED, not incidental: TickAsync refreshes BEFORE
-        // the due-check and recomputes NextFireUtc from `now` EXCLUSIVE, so under jitter-free virtual
-        // time a refresh interval dividing the 1 s cron period starves dispatch forever. This test
-        // drives refresh EXPLICITLY, so a long refresh interval costs it nothing.
+        // VirtualClockOptions (30 s refresh): this test drives refresh EXPLICITLY, so a long refresh
+        // interval keeps the loop's own refresh out of the way (see VirtualClockOptions, #1575).
         var (host, time) = HostWithVirtualClock(registry, store, VirtualClockOptions());
         await host.StartAsync(CancellationToken.None);
 
@@ -617,6 +605,413 @@ public class ScheduledJobHostTests
         var act = async () => await host.RefreshDefinitionsAsync(CancellationToken.None);
 
         await act.Should().NotThrowAsync();
+    }
+
+    // ================================================================================
+    // ===== #1575: a definitions refresh must not drop a due tick ====================
+    // ================================================================================
+    //
+    // RefreshDefinitionsAsync used to recompute every job's NextFireUtc from `now` EXCLUSIVE, so a refresh
+    // landing on a due instant (the hourly refresh, which the loop runs before its due-check, or an admin
+    // enable/disable) — or between a due instant and its dispatch — dropped that occurrence. Live on dev this
+    // turned a 2-minute reconcile bound into ~4 minutes about once an hour. These tests drive the loop one
+    // iteration at a time on a virtual clock (StepDriver) with the 5-field cron the live jobs use.
+
+    private static readonly DateTimeOffset Noon = DateTimeOffset.Parse("2026-10-09T12:00:00Z");
+
+    private const string EveryTwoMinutes = "*/2 * * * *";
+
+    private static BackgroundJobDefinition EveryTwoMinutesJob(string jobId, bool enabled = true, string? configJson = null) =>
+        new(jobId, $"Test {jobId}", $"Test job {jobId}", enabled, EveryTwoMinutes, configJson);
+
+    private static ScheduledJobHostOptions StepOptions(TimeSpan refreshInterval) => new()
+    {
+        RefreshInterval = refreshInterval,
+        ShutdownDrainTimeout = TimeSpan.FromSeconds(5),
+        MaxLoopSleep = TimeSpan.FromMinutes(1),
+    };
+
+    private static DateTimeOffset At(int hour, int minute, int second = 0) =>
+        new(2026, 10, 9, hour, minute, second, TimeSpan.Zero);
+
+    private static List<DateTimeOffset?> ScheduledFires(InMemoryBackgroundJobStore store, string jobId) =>
+        store.RunRecords.Where(r => r.JobId == jobId).Select(r => r.ScheduledFireUtc).OrderBy(f => f).ToList();
+
+    [Fact]
+    public async Task HourlyRefresh_LandingOnDueInstant_DoesNotDropThatTick_1575()
+    {
+        // The refresh interval equals the cron period, so the loop's own refresh (which runs BEFORE the
+        // due-check) lands exactly on the 12:02 occurrence. Before #1575 that refresh recomputed the next
+        // fire from 12:02 exclusive (12:04) and the 12:02 tick never ran.
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("refresh-on-due");
+        registry.Register(fake);
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(EveryTwoMinutesJob("refresh-on-due"));
+
+        await using var driver = new StepDriver(registry, store, StepOptions(TimeSpan.FromMinutes(2)), Noon);
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None); // 12:00 — next fire 12:02
+
+        driver.Time.SetUtcNow(At(12, 2));
+        driver.Tick(); // refresh is due (2 min since 12:00) and runs first, then the due-check
+        await driver.DrainAsync();
+
+        ScheduledFires(store, "refresh-on-due").Should().Equal(
+            new DateTimeOffset?[] { At(12, 2) },
+            "a refresh at the due instant MUST NOT push the job past the occurrence it was about to fire");
+        fake.InvocationCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RefreshLoop_IntervalDividingTheCronPeriod_DoesNotStarveDispatch_1575()
+    {
+        // The resonance the older tests in this file had to configure around: a 200 ms refresh stepped by an
+        // exactly periodic 200 ms virtual clock lands on every whole second, i.e. on every due instant of the
+        // every-second cron. Before #1575 the job never dispatched; now every occurrence still fires.
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("resonant-refresh");
+        registry.Register(fake);
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(EverySecond("resonant-refresh"));
+
+        var (host, time) = HostWithVirtualClock(registry, store, FastOptions()); // 200 ms refresh
+
+        await host.StartAsync(CancellationToken.None);
+        await AdvanceUntilAsync(time, () => fake.InvocationCount >= 3,
+            "a refresh interval that divides the cron period MUST NOT starve dispatch");
+        await host.StopAsync(CancellationToken.None);
+
+        fake.InvocationCount.Should().BeGreaterThanOrEqualTo(3);
+    }
+
+    [Fact]
+    public async Task AdminRefresh_WhileATickIsDueButUnfired_TickSurvivesAndFires_1575()
+    {
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("due-unfired");
+        registry.Register(fake);
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(EveryTwoMinutesJob("due-unfired"));
+
+        await using var driver = new StepDriver(registry, store, StepOptions(TimeSpan.FromHours(1)), Noon);
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None); // next fire 12:02
+
+        // 12:02 is due but the loop has not woken yet; an admin enable/disable on ANOTHER job refreshes now.
+        driver.Time.SetUtcNow(At(12, 2, 30));
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None);
+
+        driver.Tick(); // the surviving 12:02 occurrence fires
+        await driver.WaitForCompletedRunsAsync("due-unfired", 1);
+
+        driver.Time.SetUtcNow(At(12, 3));
+        driver.Tick(); // nothing due: firing at 12:02:30 advanced the job to 12:04
+
+        driver.Time.SetUtcNow(At(12, 4));
+        driver.Tick();
+        await driver.DrainAsync();
+
+        ScheduledFires(store, "due-unfired").Should().Equal(
+            new DateTimeOffset?[] { At(12, 2), At(12, 4) },
+            "the overdue occurrence MUST fire once after the refresh, and the schedule then continues normally");
+    }
+
+    [Fact]
+    public async Task Refresh_WithChangedCron_RecomputesNextFire_1575()
+    {
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("cron-changed");
+        registry.Register(fake);
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(EveryTwoMinutesJob("cron-changed"));
+
+        await using var driver = new StepDriver(registry, store, StepOptions(TimeSpan.FromHours(1)), Noon);
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None); // next fire 12:02 on the old cron
+
+        // Re-schedule AT the old cron's due instant: the old occurrence must NOT carry over.
+        driver.Time.SetUtcNow(At(12, 2));
+        store.AddOrReplaceJob(EveryTwoMinutesJob("cron-changed") with { CronSchedule = "*/3 * * * *" });
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None);
+
+        driver.Tick(); // 12:02 is not an occurrence of the new cron
+
+        driver.Time.SetUtcNow(At(12, 3));
+        driver.Tick();
+        await driver.DrainAsync();
+
+        ScheduledFires(store, "cron-changed").Should().Equal(
+            new DateTimeOffset?[] { At(12, 3) },
+            "a changed cron MUST be recomputed from the refresh instant, not inherit the old schedule's next fire");
+    }
+
+    [Fact]
+    public async Task Refresh_DisabledThenEnabled_GetsAFreshNextFire_1575()
+    {
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("re-enabled");
+        registry.Register(fake);
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(EveryTwoMinutesJob("re-enabled"));
+
+        await using var driver = new StepDriver(registry, store, StepOptions(TimeSpan.FromHours(1)), Noon);
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None); // next fire 12:02
+
+        driver.Time.SetUtcNow(At(12, 1));
+        (await store.SetEnabledAsync("re-enabled", enabled: false, CancellationToken.None)).Should().BeTrue();
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None);
+
+        foreach (var minute in new[] { 2, 4 })
+        {
+            driver.Time.SetUtcNow(At(12, minute));
+            driver.Tick(); // disabled: no fire
+        }
+
+        driver.Time.SetUtcNow(At(12, 5));
+        (await store.SetEnabledAsync("re-enabled", enabled: true, CancellationToken.None)).Should().BeTrue();
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None);
+        driver.Tick(); // the pre-disable 12:02 MUST NOT come back as a catch-up fire
+
+        driver.Time.SetUtcNow(At(12, 6));
+        driver.Tick();
+        await driver.DrainAsync();
+
+        ScheduledFires(store, "re-enabled").Should().Equal(
+            new DateTimeOffset?[] { At(12, 6) },
+            "a re-enabled job MUST be scheduled fresh from the enable instant");
+    }
+
+    [Fact]
+    public async Task Refresh_UnchangedJob_KeepsItsNextFire_AndFiresItOnce_1575()
+    {
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("unchanged");
+        registry.Register(fake);
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(EveryTwoMinutesJob("unchanged"));
+
+        await using var driver = new StepDriver(registry, store, StepOptions(TimeSpan.FromHours(1)), Noon);
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None); // next fire 12:02
+
+        // Refreshes before, and exactly at, the due instant leave the 12:02 occurrence in place.
+        foreach (var instant in new[] { At(12, 1), At(12, 1, 59), At(12, 2) })
+        {
+            driver.Time.SetUtcNow(instant);
+            await driver.Host.RefreshDefinitionsAsync(CancellationToken.None);
+        }
+
+        driver.Tick();
+        await driver.WaitForCompletedRunsAsync("unchanged", 1);
+
+        // A refresh after the dispatch carries the ADVANCED next fire (12:04), never the one just fired.
+        driver.Time.SetUtcNow(At(12, 2, 30));
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None);
+        driver.Tick();
+        await driver.DrainAsync();
+
+        ScheduledFires(store, "unchanged").Should().Equal(
+            new DateTimeOffset?[] { At(12, 2) },
+            "an unchanged job keeps its next fire across refreshes, and a fired occurrence never fires twice");
+    }
+
+    [Fact]
+    public async Task Refresh_AtDueInstant_NonScheduleChange_KeepsTheTick_AndAppliesTheNewConfig_1575()
+    {
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("config-changed");
+        registry.Register(fake);
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(EveryTwoMinutesJob("config-changed", configJson: "{\"v\":1}"));
+
+        await using var driver = new StepDriver(registry, store, StepOptions(TimeSpan.FromHours(1)), Noon);
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None);
+
+        driver.Time.SetUtcNow(At(12, 2));
+        store.AddOrReplaceJob(EveryTwoMinutesJob("config-changed", configJson: "{\"v\":2}"));
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None);
+
+        driver.Tick();
+        await driver.DrainAsync();
+
+        ScheduledFires(store, "config-changed").Should().Equal(
+            new DateTimeOffset?[] { At(12, 2) },
+            "a change outside the schedule MUST NOT reschedule the job");
+        fake.LastContext!.Parameters["configJson"].Should().Be("{\"v\":2}",
+            "the refreshed definition still takes effect for the run");
+    }
+
+    [Fact]
+    public async Task AdminRefresh_RacingTheLoopsDispatch_DoesNotFireTheSameTickTwice_1575()
+    {
+        // The race the shared next-fire cursor exists for. An admin refresh (request thread) reads the job's
+        // pending next fire (12:02) BEFORE the loop dispatches it and advances the loop's snapshot of the OLD
+        // state to 12:04, then publishes the NEW state AFTER. Had the refresh copied 12:02 into the new state,
+        // the loop's next pass would see 12:02 still due and dispatch it again; sharing the cursor makes the
+        // advance visible to the new state. The gated store pauses the refresh at exactly that point, so the
+        // interleaving is deterministic.
+        var registry = new ScheduledJobRegistry();
+        var fake = new FakeScheduledJob("racing-refresh");
+        registry.Register(fake);
+        var store = new InMemoryBackgroundJobStore();
+        store.AddOrReplaceJob(EveryTwoMinutesJob("racing-refresh"));
+        var gated = new GatedRefreshStore(store);
+
+        await using var driver = new StepDriver(registry, store, StepOptions(TimeSpan.FromHours(1)), Noon, gated);
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None); // next fire 12:02
+
+        driver.Time.SetUtcNow(At(12, 2));
+        gated.Arm();
+        var adminRefresh = Task.Run(() => driver.Host.RefreshDefinitionsAsync(CancellationToken.None));
+        gated.WaitUntilPaused(); // the refresh has read 12:02 and not yet published its state
+
+        driver.Tick(); // the loop, on the OLD state: fires 12:02, advances to 12:04
+        await driver.WaitForCompletedRunsAsync("racing-refresh", 1);
+
+        gated.Release();
+        await adminRefresh; // the NEW state is published
+
+        driver.Time.SetUtcNow(At(12, 3));
+        driver.Tick(); // nothing due — 12:02 has already fired
+
+        driver.Time.SetUtcNow(At(12, 4));
+        driver.Tick();
+        await driver.DrainAsync();
+
+        ScheduledFires(store, "racing-refresh").Should().Equal(
+            new DateTimeOffset?[] { At(12, 2), At(12, 4) },
+            "a refresh racing the loop's dispatch MUST NOT bring back the occurrence the loop just fired");
+        store.RunRecords.Should().NotContain(r => r.Result != null && r.Result.Skipped,
+            "a second dispatch of 12:02 would have been recorded as a skipped tick");
+    }
+
+    /// <summary>
+    /// Store wrapper for <c>AdminRefresh_RacingTheLoopsDispatch_DoesNotFireTheSameTickTwice_1575</c>. When armed,
+    /// the next <see cref="LoadJobsAsync"/> returns definitions whose enumeration pauses after the last item — the
+    /// refresh has read every job's prior state but not yet published its new one. Its idempotency probe always
+    /// answers "not run" (as it does across instances, ADR-036 A1 §2) so a duplicate dispatch reaches the lease
+    /// and shows up as a skipped run record instead of being silently deduped.
+    /// </summary>
+    private sealed class GatedRefreshStore(InMemoryBackgroundJobStore inner) : IBackgroundJobStore
+    {
+        private readonly ManualResetEventSlim _paused = new();
+        private readonly ManualResetEventSlim _release = new();
+        private volatile bool _armed;
+
+        public void Arm() => _armed = true;
+
+        public void WaitUntilPaused() =>
+            _paused.Wait(TimeSpan.FromSeconds(30)).Should().BeTrue("the refresh must reach the pause point");
+
+        public void Release() => _release.Set();
+
+        public async Task<IReadOnlyList<BackgroundJobDefinition>> LoadJobsAsync(CancellationToken ct)
+        {
+            var definitions = await inner.LoadJobsAsync(ct);
+            if (!_armed) return definitions;
+            _armed = false;
+            return new PausingList(definitions, _paused, _release);
+        }
+
+        public Task<Guid> RecordRunStartAsync(string jobId, JobRunTrigger trigger, string correlationId, DateTimeOffset? scheduledFireUtc, CancellationToken ct) =>
+            inner.RecordRunStartAsync(jobId, trigger, correlationId, scheduledFireUtc, ct);
+
+        public Task RecordRunCompleteAsync(Guid runId, JobRunResult result, CancellationToken ct) =>
+            inner.RecordRunCompleteAsync(runId, result, ct);
+
+        public Task<IReadOnlyList<BackgroundJobRunRecord>> GetRecentRunsAsync(string jobId, int limit, CancellationToken ct) =>
+            inner.GetRecentRunsAsync(jobId, limit, ct);
+
+        public Task<bool> HasRunForScheduledTimeAsync(string jobId, DateTimeOffset scheduledFireUtc, CancellationToken ct) =>
+            Task.FromResult(false);
+
+        public Task<bool> SetEnabledAsync(string jobId, bool enabled, CancellationToken ct) =>
+            inner.SetEnabledAsync(jobId, enabled, ct);
+
+        private sealed class PausingList(
+            IReadOnlyList<BackgroundJobDefinition> items,
+            ManualResetEventSlim paused,
+            ManualResetEventSlim release) : IReadOnlyList<BackgroundJobDefinition>
+        {
+            public int Count => items.Count;
+
+            public BackgroundJobDefinition this[int index] => items[index];
+
+            public IEnumerator<BackgroundJobDefinition> GetEnumerator()
+            {
+                foreach (var item in items)
+                {
+                    yield return item;
+                }
+
+                paused.Set();
+                release.Wait(TimeSpan.FromSeconds(30));
+            }
+
+            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+        }
+    }
+
+    /// <summary>
+    /// Drives <see cref="ScheduledJobHost.TickAsync"/> one iteration at a time on a virtual clock, without the
+    /// background loop.
+    /// </summary>
+    /// <remarks>
+    /// The due-check and dispatch run synchronously inside <c>TickAsync</c> (the in-memory store completes
+    /// synchronously); only the iteration's trailing sleep waits on the virtual clock, so each tick's task is
+    /// left pending and cancelled by <see cref="DrainAsync"/>. The tick token is cancelled only AFTER the host
+    /// has drained its in-flight runs, because a scheduled run is linked to it.
+    /// </remarks>
+    private sealed class StepDriver : IAsyncDisposable
+    {
+        private readonly CancellationTokenSource _cts = new();
+        private readonly List<Task> _ticks = new();
+        private readonly InMemoryBackgroundJobStore _store;
+        private bool _drained;
+
+        /// <param name="hostStore">The store the host reads; <paramref name="store"/> (the run records asserted on) when <c>null</c>.</param>
+        public StepDriver(
+            ScheduledJobRegistry registry,
+            InMemoryBackgroundJobStore store,
+            ScheduledJobHostOptions options,
+            DateTimeOffset start,
+            IBackgroundJobStore? hostStore = null)
+        {
+            _store = store;
+            Time = new FakeTimeProvider(start);
+            Host = new ScheduledJobHost(registry, hostStore ?? store, options, NullLogger<ScheduledJobHost>.Instance, Time);
+        }
+
+        public ScheduledJobHost Host { get; }
+
+        public FakeTimeProvider Time { get; }
+
+        public void Tick() => _ticks.Add(Host.TickAsync(_cts.Token));
+
+        public Task WaitForCompletedRunsAsync(string jobId, int count) =>
+            WaitUntilAsync(
+                () => _store.RunRecords.Count(r => r.JobId == jobId && r.CompletedAtUtc is not null) >= count,
+                TimeSpan.FromSeconds(10),
+                $"{count} completed run(s) of '{jobId}'");
+
+        /// <summary>Waits for every dispatched run to finish, then ends the pending tick sleeps.</summary>
+        public async Task DrainAsync()
+        {
+            if (_drained) return;
+            _drained = true;
+
+            await Host.StopAsync(CancellationToken.None);
+            _cts.Cancel();
+            foreach (var tick in _ticks)
+            {
+                try { await tick; }
+                catch (OperationCanceledException) { }
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await DrainAsync();
+            _cts.Dispose();
+            Host.Dispose();
+        }
     }
 
     /// <summary>

@@ -66,7 +66,7 @@ Spaarke.BffAuth._version = "1.0.0"; // 1.0.0 — initial shared helper (task 030
  * MSAL v2 CDN pin (Microsoft-hosted). Classic web resources cannot bundle npm modules; a CDN
  * <script> is the standard shared-lib load path here. Pin matches sprk_subgrid_parent_rollup.js.
  */
-Spaarke.BffAuth._MSAL_CDN_URL = "https://alcdn.msauth.net/browser/2.38.4/js/msal-browser.min.js";
+Spaarke.BffAuth._MSAL_CDN_URL = "https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js";
 
 /** Cached MSAL PublicClientApplication instance (module-level). */
 Spaarke.BffAuth._msalInstance = null;

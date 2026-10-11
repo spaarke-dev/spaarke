@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Records" constructor="MatterHeader" version="1.0.21"
+  <control namespace="Spaarke.Records" constructor="MatterHeader" version="1.0.22"
            display-name-key="Matter Header"
            description-key="Compact 5-field summary card + 3-action toolbar for Matter records. Part of the record-header-and-notepad-r1 shared primitive set. AI Summary sparkle popover reads the standardized sprk_recordsummary field."
            control-type="virtual">
