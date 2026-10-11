@@ -30,12 +30,25 @@ on:
 permissions:
   contents: read
 
+# One run per target environment at a time; a queued run waits rather than cancelling a deploy in flight.
+concurrency:
+  group: deploy-external-spa-${{ inputs.environment }}
+  cancel-in-progress: false
+
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
     name: Build and deploy external-spa (${{ inputs.environment }})
     environment: ${{ inputs.environment == 'prod' && 'external-spa-prod' || 'external-spa-dev' }}
     steps:
+      # A REST/gh dispatch can pass a value the UI choice list would refuse. Anything but dev|prod would otherwise
+      # resolve to the dev GitHub environment (and, with no matching deploy step, end as a green no-op).
+      - name: Validate environment input
+        env:
+          TARGET: ${{ inputs.environment }}
+        run: |
+          case "$TARGET" in dev|prod) ;; *) echo "::error::environment must be dev or prod (got '$TARGET')"; exit 1;; esac
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
@@ -61,6 +74,9 @@ jobs:
           fail=0
           guid='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
           scope='^api://[0-9a-fA-F-]{36}/user_impersonation$'
+          # https URL whose path is one tenant GUID segment (optional trailing slash); no query or fragment. The host is
+          # not constrained: the SPA accepts any https authority host (src/auth/msal-config.ts).
+          authority='^https://[^/?#[:space:]]+/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?$'
           need() { if [ -z "${!1}" ]; then echo "::error::GitHub environment variable $1 is not set for the '$TARGET' environment"; fail=1; fi; }
           match() { if [ -n "${!1}" ] && ! printf '%s' "${!1}" | grep -Eq "$2"; then echo "::error::$1 has the wrong format ($3)"; fail=1; fi; }
           for k in VITE_MSAL_AUTHORITY VITE_MSAL_CLIENT_ID VITE_MSAL_TENANT_ID VITE_MSAL_BFF_SCOPE \
@@ -75,7 +91,7 @@ jobs:
           match VITE_TEAMS_MSAL_TENANT_ID "$guid" "GUID"
           match VITE_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A7"
           match VITE_TEAMS_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A7"
-          match VITE_MSAL_AUTHORITY '^https://[^/]+\.ciamlogin\.com/' "https://{subdomain}.ciamlogin.com/{tenant}"
+          match VITE_MSAL_AUTHORITY "$authority" "https://{host}/{tenant GUID}, no query or fragment"
           if [ -n "$VITE_BFF_API_URL" ]; then match VITE_BFF_API_URL '^https://' "https URL"; fi
           if [ -n "$VITE_BACKENDS" ] && ! printf '%s' "$VITE_BACKENDS" | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), list)'; then
             echo "::error::VITE_BACKENDS must be a JSON list"; fail=1

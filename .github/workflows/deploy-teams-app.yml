@@ -60,6 +60,12 @@ on:
 permissions:
   contents: read
 
+# One run per target environment at a time; a queued run waits rather than cancelling a publish in flight. The prefix
+# differs from deploy-external-spa.yml so the two workflows never block each other.
+concurrency:
+  group: deploy-teams-app-${{ inputs.environment }}
+  cancel-in-progress: false
+
 jobs:
   # ──────────────────────────────────────────────────────────────────────────
   # Job 1: Build the external-spa Teams surface (sanity/regression gate) and
@@ -72,6 +78,14 @@ jobs:
     name: Build external-spa and package Teams app (${{ inputs.environment }})
     environment: ${{ inputs.environment == 'prod' && 'external-spa-prod' || 'external-spa-dev' }}
     steps:
+      # A REST/gh dispatch can pass a value the UI choice list would refuse. Anything but dev|prod would otherwise
+      # resolve to the dev GitHub environment and publish the dev manifest under another environment's label.
+      - name: Validate environment input
+        env:
+          TARGET: ${{ inputs.environment }}
+        run: |
+          case "$TARGET" in dev|prod) ;; *) echo "::error::environment must be dev or prod (got '$TARGET')"; exit 1;; esac
+
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
@@ -177,12 +191,14 @@ jobs:
           retention-days: 7
 
       - name: Write build summary
+        env:
+          TARGET: ${{ inputs.environment }}
         run: |
           echo "## Teams App — Build & Package" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Environment | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | \`$TARGET\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Package | \`appPackage.zip\` (manifest.json + color.png + outline.png) |" >> $GITHUB_STEP_SUMMARY
           echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
 
@@ -198,6 +214,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: build_and_package
     steps:
+      # A REST/gh dispatch can pass a value the UI choice list would refuse. Anything but dev|prod would otherwise
+      # resolve to the dev GitHub environment and publish the dev manifest under another environment's label.
+      - name: Validate environment input
+        env:
+          TARGET: ${{ inputs.environment }}
+        run: |
+          case "$TARGET" in dev|prod) ;; *) echo "::error::environment must be dev or prod (got '$TARGET')"; exit 1;; esac
+
       - name: Download build artifact
         uses: actions/download-artifact@v7
         with:
@@ -216,12 +240,16 @@ jobs:
           retention-days: 90
 
       - name: Write deploy summary
+        env:
+          TARGET: ${{ inputs.environment }}
         run: |
+          SUFFIX=""
+          if [ "$TARGET" = "prod" ]; then SUFFIX="-prod"; fi
           echo "## Teams App — Deploy" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Published artifact **teams-app-package${{ inputs.environment == 'prod' && '-prod' || '' }}** (\`appPackage.zip\`, ${{ inputs.environment }} environment, 90-day retention)." >> $GITHUB_STEP_SUMMARY
+          echo "Published artifact **teams-app-package${SUFFIX}** (\`appPackage.zip\`, $TARGET environment, 90-day retention)." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ inputs.environment }}" = "prod" ]; then
+          if [ "$TARGET" = "prod" ]; then
             echo "**Next step (task 073, go-live gated on T240c/T240d and DNS):** the production package is built only; do not submit it to a tenant catalog until go-live is approved." >> $GITHUB_STEP_SUMMARY
           else
             echo "**Next step (task 072, manual/admin-gated):** download this artifact and submit it to the org app catalog under App Centric Management for admin approval." >> $GITHUB_STEP_SUMMARY

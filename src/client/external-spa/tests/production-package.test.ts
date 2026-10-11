@@ -6,8 +6,13 @@
 // production build only with the production token, stay manual-only, and package a production manifest that is on
 // external.spaarke.com, has its own app id placeholder and declares no webApplicationInfo.
 import * as fs from 'node:fs';
+import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
+
+// js-yaml is not a declared dependency of this package (it arrives with eslint) and ships no types, so it is loaded
+// through require with a minimal local type. The workflows are PARSED, not scanned with a regex over the file.
+const { load: loadYaml } = createRequire(import.meta.url)('js-yaml') as { load: (text: string) => unknown };
 
 const SPA_ROOT = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(SPA_ROOT, '../../..');
@@ -23,6 +28,17 @@ const code = (text: string) =>
     .split('\n')
     .filter(line => !/^\s*#/.test(line))
     .join('\n');
+interface WorkflowStep {
+  name?: string;
+  env?: Record<string, string>;
+  run?: string;
+  uses?: string;
+}
+interface ParsedWorkflow {
+  concurrency?: { group?: string; 'cancel-in-progress'?: boolean };
+  jobs: Record<string, { steps: WorkflowStep[] }>;
+}
+const parsedWorkflow = (name: string) => loadYaml(workflow(name)) as ParsedWorkflow;
 const appPackage = (name: string) => JSON.parse(read(path.join(SPA_ROOT, 'appPackage', name)));
 
 describe('Production build workflows (FR-20)', () => {
@@ -113,6 +129,53 @@ describe('Production build workflows (FR-20)', () => {
     expect(text.slice(preflight, build)).toContain('exit "$fail"');
   });
 
+  it.each(WORKFLOWS)(
+    '%s: the first step of every job rejects any environment other than dev|prod before anything runs',
+    name => {
+      const jobs = Object.entries(parsedWorkflow(name).jobs);
+      expect(jobs.length).toBeGreaterThan(0);
+      for (const [jobId, job] of jobs) {
+        const first = job.steps[0];
+        expect(first.name, `${name}/${jobId}: first step`).toBe('Validate environment input');
+        expect(first.env, `${name}/${jobId}: first step env`).toEqual({ TARGET: '${{ inputs.environment }}' });
+        expect(first.run, `${name}/${jobId}: first step script`).toContain(
+          `case "$TARGET" in dev|prod) ;; *) echo "::error::environment must be dev or prod (got '$TARGET')"; exit 1;; esac`
+        );
+      }
+    }
+  );
+
+  it.each(WORKFLOWS)('%s: no run: body interpolates inputs.* or vars.* (they reach the shell through env:)', name => {
+    const offenders: string[] = [];
+    for (const [jobId, job] of Object.entries(parsedWorkflow(name).jobs)) {
+      for (const step of job.steps) {
+        if (step.run && /\$\{\{\s*(inputs|vars|github\.event\.inputs)\b/.test(step.run)) {
+          offenders.push(`${jobId}/${step.name ?? step.run.slice(0, 40)}`);
+        }
+      }
+    }
+    expect(offenders, `${name}: steps with an expression inside run:`).toEqual([]);
+  });
+
+  it('workflow-level concurrency is keyed on inputs.environment, queues instead of cancelling, and differs per workflow', () => {
+    const spa = parsedWorkflow('deploy-external-spa.yml').concurrency;
+    const teams = parsedWorkflow('deploy-teams-app.yml').concurrency;
+    expect(spa).toEqual({ group: 'deploy-external-spa-${{ inputs.environment }}', 'cancel-in-progress': false });
+    expect(teams).toEqual({ group: 'deploy-teams-app-${{ inputs.environment }}', 'cancel-in-progress': false });
+    expect(spa?.group).not.toBe(teams?.group);
+  });
+
+  it('deploy-external-spa.yml: the authority preflight is an https URL with one tenant GUID path segment, not tied to a host', () => {
+    const wf = parsedWorkflow('deploy-external-spa.yml');
+    const preflight = wf.jobs.build_and_deploy.steps.find(s => s.name === 'Check required environment variables');
+    expect(preflight?.run).toBeDefined();
+    expect(preflight?.run).not.toContain('ciamlogin');
+    expect(preflight?.run).toContain(
+      "authority='^https://[^/?#[:space:]]+/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?$'"
+    );
+    expect(preflight?.run).toContain('match VITE_MSAL_AUTHORITY "$authority"');
+  });
+
   it('deploy-teams-app.yml: stages manifest.json for dev and a TEAMS_APP_ID-rendered manifest.prod.json for prod, and validates the staged file', () => {
     const text = code(workflow('deploy-teams-app.yml'));
     expect(text).toContain('TEAMS_APP_ID: ${{ vars.TEAMS_APP_ID }}');
@@ -143,6 +206,10 @@ describe('Production Teams manifest (A1/A2)', () => {
     expect(prod.validDomains).toEqual([PROD_ORIGIN_HOST, 'teams.microsoft.com', '*.cloud.microsoft']);
     expect(JSON.stringify(prod)).not.toMatch(/azurewebsites\.net|azurestaticapps\.net/);
     // Same product surface as dev apart from identity and origin.
+    expect(prod.name).toEqual(dev.name);
+    expect(prod.description).toEqual(dev.description);
+    expect(prod.accentColor).toBe(dev.accentColor);
+    expect(dev.accentColor).toBeDefined();
     expect(prod.manifestVersion).toBe(dev.manifestVersion);
     expect(prod.icons).toEqual(dev.icons);
     expect(prod.staticTabs[0].entityId).toBe(dev.staticTabs[0].entityId);

@@ -115,3 +115,26 @@ Revert the commit. Dev is restored by the old literal values (git history of bot
 - `src/client/external-spa/README.md` (Environment Variables section) says the values come from `.env.example`; it does not mention the GitHub environments - a one-line pointer to this file would help.
 - The dev manifest `id` and URLs in `appPackage/manifest.json` are literals (not rendered from `env.dev.json`); `env.dev.json` is documentation only. Left as is to keep dev output unchanged.
 - The Teams workflow's sanity build does not run the SPA preflight (decision 4).
+
+## Review results and fixes (2026-10-11)
+
+One adversarial pass, no F-class finding. Five known-limit items fixed in scope (workflows, `tests/production-package.test.ts`, `docs/procedures/ci-cd-workflow.md`):
+
+| # | Item | Fix | Test (all in `tests/production-package.test.ts`) | Fail before |
+|---|---|---|---|---|
+| 1 | K2: an unlisted `environment` value (REST/`gh` dispatch) resolved to the dev GitHub environment and ended as a green no-op, or published the dev manifest under another environment's label | First step of every environment-dependent job (`build_and_deploy`; `build_and_package` and `deploy`) is `Validate environment input` (`env: TARGET: ${{ inputs.environment }}`, `case "$TARGET" in dev\|prod) ;; *) ...exit 1;; esac`) | `<workflow>: the first step of every job rejects any environment other than dev\|prod before anything runs` (x2, YAML-parsed) | yes (both) |
+| 2 | K4: `${{ inputs.environment }}` interpolated inside `run:` in `deploy-teams-app.yml` (build summary, deploy summary x3) | Passed via `env: TARGET`; the artifact-name suffix is a shell `SUFFIX` variable. Neither file has any other `inputs.*`/`vars.*` in a `run:` body | `<workflow>: no run: body interpolates inputs.* or vars.* ...` (x2, YAML-parsed over every job and step) | yes (Teams); SPA passed (nothing to fix there) |
+| 3 | K4: overlapping runs for one environment | Workflow-level `concurrency: { group: deploy-external-spa-${{ inputs.environment }} / deploy-teams-app-${{ inputs.environment }}, cancel-in-progress: false }` | `workflow-level concurrency is keyed on inputs.environment, queues instead of cancelling, and differs per workflow` | yes |
+| 4 | K3: preflight required `*.ciamlogin.com`; the SPA accepts any https authority host (`src/auth/msal-config.ts`) | `authority` pattern = https URL whose path is one tenant GUID segment, optional trailing slash, no query/fragment, no whitespace; host not constrained. Exercised by hand with `grep -Eq`: ciamlogin+GUID, GUID with `/`, other https host accept; http, `?a=1`, `#f`, `/v2.0` suffix, no path, `/common`, embedded space reject | `deploy-external-spa.yml: the authority preflight is an https URL with one tenant GUID path segment, not tied to a host` (asserts text, see open items) | yes |
+| 5 | Manifest drift | `name`, `description`, `accentColor` of `manifest.prod.json` must equal `manifest.json` (added to the existing `manifest.prod.json: ...` test; `dev.accentColor` asserted defined) | existing test extended | proven by temporarily changing `accentColor` in `manifest.prod.json` (restored): test failed |
+
+**Fail-before** (the HEAD versions of both workflows swapped in, then restored): `production-package.test.ts` 5 failed / 16 passed (21); with the change: 21 passed. Full `npx vitest run`: 12 files, 268 tests passed (one run hit a 7.5 s timeout in the other agent's `DocumentUploadPage.externalUpload.test.tsx` while the machine was loaded; it passes alone and on the re-run). `npm run typecheck`: clean. The tests parse the workflows with js-yaml (an eslint transitive dependency, not declared in this package; loaded with `createRequire` because it ships no types - declare it as a devDependency if that coupling is not wanted).
+
+**Notes section 4, row 2 (replaces the wording "same SPA ... as before")**: the dev output is behaviourally identical, not byte identical: the bundle gains an empty `VITE_BACKENDS` key (from the `.env.production` placeholder and the workflow's `vars.VITE_BACKENDS`), which the runtime treats as unset.
+
+**validDomains question: CLOSED.** The browser's calls to a BFF host are `fetch`/XHR, governed by CORS on the BFF, not by the Teams manifest `validDomains`; nothing in `src/` embeds an iframe of, or navigates to, a BFF host. `validDomains` stays `external.spaarke.com`, `teams.microsoft.com`, `*.cloud.microsoft`.
+
+**Still open**
+- `actionlint` has not been run (not installed on this machine). Run it on both workflows before the PR.
+- The `jq` render line (`jq --arg id "$TEAMS_APP_ID" '.id = $id' manifest.prod.json`) was never executed locally (`jq` absent; only run with a shim in the original task).
+- The preflight tests assert the workflow text, not behaviour. The script itself was exercised by hand (section 6 and the authority cases above).
