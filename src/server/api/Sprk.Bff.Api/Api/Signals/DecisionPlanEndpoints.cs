@@ -23,6 +23,7 @@ public static class DecisionPlanEndpoints
 {
     internal const string CallerUnresolvedReasonCode = "sdap.access.deny.caller_unresolved";
     internal const string PlanRefusedReasonCode = "ontology.decisionplan.refused";
+    internal const string SuppressionUnavailableReasonCode = "ontology.suppression.unavailable";
 
     public static void MapDecisionPlanEndpoints(this WebApplication app)
     {
@@ -48,10 +49,11 @@ public static class DecisionPlanEndpoints
             .WithSummary("Get the (policy, core record) dismissal count and suppression date for a Signal")
             .WithDescription("Returns the counted and recorded dismissals in the trailing 30 days for the Signal's policy on the Signal's "
                 + "core record (or on the item itself when it has none) and the current sprk_suppresseduntil. 404 when the Signal or its "
-                + "core record is not readable by the caller; 403 when the caller cannot be resolved.")
+                + "core record is not readable by the caller; 403 when the caller cannot be resolved; 503 when an authorized caller's count cannot be read.")
             .Produces<SuppressionResponse>(200)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
     internal static async Task<IResult> GetSuppressionAsync(
@@ -75,7 +77,8 @@ public static class DecisionPlanEndpoints
         }
 
         // The caller may read this Signal and its core record, so the count is theirs to see. The count itself is read with the BFF's
-        // own reader (Decision Records are not readable to Console users), and only the numbers and the date are returned.
+        // own reader (Decision Records are not readable to Console users), trimmed to the Signals the caller's own read returns, and only
+        // the numbers and the date are returned.
         SuppressionStatus? status;
         try
         {
@@ -83,10 +86,18 @@ public static class DecisionPlanEndpoints
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            // Same rule as AuthorizeAsync: a timeout (a cancellation the caller did not ask for) is a fault, not a 500. Logged WITH the
-            // exception so the stack is kept; the answer stays the uniform 404, never a guessed count.
-            logger.LogError(ex, "Suppression count failed for a Signal; answering not found.");
-            status = null;
+            // AFTER Allowed: the caller is authorized, so this is a fault of ours, not a denial. A timeout (a cancellation the caller did
+            // not ask for) is the same. 503 with the trace id, never a guessed count and never the uniform 404 (that answer is for "not yours").
+            logger.LogError(ex, "Suppression count failed for an authorized caller (Signal {SignalId}); answering 503.", signalId);
+            return Results.Problem(
+                title: "Service Unavailable",
+                detail: "The suppression count could not be read. Try again.",
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["reasonCode"] = SuppressionUnavailableReasonCode,
+                    ["correlationId"] = httpContext.TraceIdentifier,
+                });
         }
 
         return status is null

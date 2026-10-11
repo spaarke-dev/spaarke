@@ -556,30 +556,52 @@ public class SignalSuppressionTests
     }
 
     [Fact]
-    public async Task TheRoute_Returns404_WhenTheCountCannotBeRead_NeverAGuess()
+    public async Task TheRoute_Returns503_WhenTheCountCannotBeRead_AfterAuthorization_NeverAGuess()
     {
         var s = new Store { FailReads = true };
         var signal = s.Open(MatterId, Guid.NewGuid());
 
-        var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })));
+        var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })), new DefaultHttpContext { TraceIdentifier = "trace-9" });
 
-        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404);
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(503);
+        problem.ProblemDetails.Extensions["correlationId"].Should().Be("trace-9");
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(DecisionPlanEndpoints.SuppressionUnavailableReasonCode);
     }
 
     [Fact]
-    public async Task TheRoute_Returns404_WhenTheCallersGrainReadFaults_AndForATimeout_NotA500()
+    public async Task TheRoute_Returns503_WhenTheCallersGrainReadFaults_TimesOut_OrIsNotASuccess_AfterAuthorization()
     {
         var s = new Store();
         var signal = s.Open(MatterId, Guid.NewGuid());
 
         var faulted = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" }), listFault: new InvalidOperationException("boom")));
-        // An HttpClient timeout is a cancellation the caller did not ask for (ct is NOT cancelled): same handling as AuthorizeAsync.
+        // An HttpClient timeout is a cancellation the caller did not ask for (ct is NOT cancelled).
         var timedOut = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" }), listFault: new TaskCanceledException("timeout")));
         var notSuccess = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" }), listResponse: Fail(500, DataverseUserClientErrorCodes.ServiceError)));
 
-        faulted.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404);
-        timedOut.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404);
-        notSuccess.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404);
+        faulted.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(503);
+        timedOut.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(503);
+        notSuccess.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(503, "the trim read is fail-closed: a non-success is never an empty or partial count");
+    }
+
+    [Fact]
+    public async Task TheRoute_Returns404_ForAFaultDuringAuthorization_NotA503()
+    {
+        var s = new Store();
+        var signal = s.Open(MatterId, Guid.NewGuid());
+        var before = s.Queries;
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("timeout"));
+        var users = new Mock<IDataverseUserClient>();
+        users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>())).ReturnsAsync(Ok(SignalRow()));
+        var access = new SignalCoreRecordAccess(users.Object, entities.Object, NullLogger<SignalCoreRecordAccess>.Instance);
+
+        var result = await Route(signal, s, (access, users.Object));
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404, "AuthorizeAsync fails closed to the uniform 404, as decision-plan does");
+        s.Queries.Should().Be(before);
     }
 
     [Fact]
