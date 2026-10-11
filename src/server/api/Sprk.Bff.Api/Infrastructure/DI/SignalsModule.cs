@@ -1,3 +1,5 @@
+using Spaarke.Scheduling;
+using Sprk.Bff.Api.Infrastructure.HealthChecks;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -87,6 +89,19 @@ public static class SignalsModule
         // RuleBodyDescriber (task 026, FR-48): the read-side plain-language description of a rule body. Stateless over the
         // compiler and the shared sysadmin entity service, both singletons.
         services.AddSingleton<RuleBodyDescriber>();
+
+        // Task 031 (FR-11, FR-15, D-13): the side-effect-free evaluation core (reused by the event triggers, 032, and the admin
+        // dry run, 101) and the ONE nightly re-evaluating job wrapping it with the writes. An ADR-036 IScheduledJob on the
+        // shared Spaarke.Scheduling host (no timer BackgroundService, ADR-052: BFF placement), registered unconditionally
+        // (bff-extensions.md F.1). The diagnostic staleness check is a /healthz/catalog check (catalog tag), never liveness.
+        services.AddSingleton<SignalEvaluator>();
+        services.AddScheduledJob<SignalReevaluationJob>(SignalReevaluationJob.DefaultCronSchedule);
+        services.AddSingleton<SignalEvaluatorHealthCheck>();
+        services.AddHealthChecks()
+            .AddCatalogCheck<SignalEvaluatorHealthCheck>(
+                "signal-reevaluation",
+                failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
+                tags: new[] { "ontology", "signals" });
 
         return services;
     }

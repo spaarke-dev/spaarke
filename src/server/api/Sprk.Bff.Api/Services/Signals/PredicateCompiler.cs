@@ -782,6 +782,25 @@ public sealed partial class PredicateCompiler
         return true;
     }
 
+    /// <summary>Task 031 (D-25): the day offset of a relative-date token (<c>now</c> 0, <c>now-3d</c> -3, <c>now+2d</c> 2), by
+    /// the compiler's own grammar, so the evaluator re-judges a Date Only bound per item without a second parser.</summary>
+    internal static bool TryParseRelativeDays(string? token, out int days)
+    {
+        var match = RelativeDateToken().Match(token ?? string.Empty);
+        if (!match.Success)
+        {
+            days = 0;
+            return false;
+        }
+
+        var magnitude = match.Groups["days"].Success ? int.Parse(match.Groups["days"].Value, CultureInfo.InvariantCulture) : 0;
+        days = match.Groups["sign"].Value == "-" ? -magnitude : magnitude;
+        return true;
+    }
+
+    /// <summary>Task 031: the exact text the compiler emits for an instant, so the evaluator can find a compiled condition.</summary>
+    internal static string FormatInstantForFetch(DateTimeOffset instant) => FormatInstant(instant);
+
     private static XElement Condition(string attribute, string op, string value) =>
         new("condition",
             new XAttribute("attribute", attribute),
