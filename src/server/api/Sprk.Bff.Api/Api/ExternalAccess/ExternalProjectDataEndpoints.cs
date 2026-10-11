@@ -28,6 +28,15 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   GET  /workassignments/{id}/todos     — to-dos for a work assignment
 ///   POST /workassignments/{id}/todos     — create a new to-do regarding the work assignment
 ///   PATCH /todos/{id}                    — update a to-do (scoped to its own accessible root)
+///   GET  /{matters|workassignments|servicerequests}/{id}/documents                          — documents (task 031)
+///   GET  /{matters|workassignments|servicerequests}/{id}/documents/{documentId}/content     — download
+///   POST /{matters|workassignments|servicerequests}/{id}/documents                          — upload
+///   GET  /{matters|workassignments|servicerequests}/{id}/documents/{documentId}/versions    — version history
+///
+/// DOCUMENTS ON EVERY CORE RECORD (task 031 / FR-24): one list, download, versions and upload handler,
+/// generalized over the document parent (ExternalDataService.DocumentParentKind). Project, matter and
+/// work assignment rights come from RightsForRoot; a service request's from the submitter scope (the
+/// Service Requests module's accessible set). Invoice is not mapped: escalated, no Tier-2 answer yet.
 ///
 /// READ routes verify the caller holds Read on the requested record (HoldsReadOnProject /
 /// ListTodosForRoot, both through RightsForRoot). Returns 403 if not; NEVER an empty collection, which
@@ -211,6 +220,125 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
+        // ---------------------------------------------------------------------------------------
+        // Documents on the other core records (spaarke-SPA-external-access-platform-r3 task 031, FR-24).
+        //
+        // The same four document routes as the project's, for matters, work assignments and service
+        // requests, through the SAME four handlers (generalized over the document parent). Each checks
+        // Tier-2 on the route record: Read to list, download and read versions, Create to upload. A
+        // service request is checked through the submitter scope (the requester is the caller). Invoice
+        // is not mapped: task 031 escalated it (no Tier-2 answer for an invoice id). The templates are
+        // literal, one registration per route, so the route-authorization ArchTest reads each one.
+        // ---------------------------------------------------------------------------------------
+
+        group.MapGet("/matters/{id:guid}/documents", GetMatterDocuments)
+            .WithName("GetExternalMatterDocuments")
+            .WithSummary("Get documents for a matter the caller can read")
+            .Produces<ExternalCollectionResponse<ExternalDocumentDto>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        group.MapGet("/matters/{id:guid}/documents/{documentId:guid}/content", DownloadMatterDocumentContent)
+            .WithName("DownloadExternalMatterDocument")
+            .WithSummary("Download a matter document's content (authz-before-stream, app-only)")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapPost("/matters/{id:guid}/documents", UploadMatterDocument)
+            .WithName("UploadExternalMatterDocument")
+            .WithSummary("Upload a document to a matter (server-derived container, app-only)")
+            .Accepts<IFormFile>("multipart/form-data")
+            .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
+            .Produces<ExternalDocumentDto>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+
+        group.MapGet("/matters/{id:guid}/documents/{documentId:guid}/versions", GetMatterDocumentVersions)
+            .WithName("GetExternalMatterDocumentVersions")
+            .WithSummary("Get SPE version history for a document on a matter")
+            .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapGet("/workassignments/{id:guid}/documents", GetWorkAssignmentDocuments)
+            .WithName("GetExternalWorkAssignmentDocuments")
+            .WithSummary("Get documents for a work assignment the caller can read")
+            .Produces<ExternalCollectionResponse<ExternalDocumentDto>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        group.MapGet("/workassignments/{id:guid}/documents/{documentId:guid}/content", DownloadWorkAssignmentDocumentContent)
+            .WithName("DownloadExternalWorkAssignmentDocument")
+            .WithSummary("Download a work assignment document's content (authz-before-stream, app-only)")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapPost("/workassignments/{id:guid}/documents", UploadWorkAssignmentDocument)
+            .WithName("UploadExternalWorkAssignmentDocument")
+            .WithSummary("Upload a document to a work assignment (server-derived container, app-only)")
+            .Accepts<IFormFile>("multipart/form-data")
+            .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
+            .Produces<ExternalDocumentDto>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+
+        group.MapGet("/workassignments/{id:guid}/documents/{documentId:guid}/versions", GetWorkAssignmentDocumentVersions)
+            .WithName("GetExternalWorkAssignmentDocumentVersions")
+            .WithSummary("Get SPE version history for a document on a work assignment")
+            .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapGet("/servicerequests/{id:guid}/documents", GetServiceRequestDocuments)
+            .WithName("GetExternalServiceRequestDocuments")
+            .WithSummary("Get documents for a service request the caller submitted")
+            .Produces<ExternalCollectionResponse<ExternalDocumentDto>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        group.MapGet("/servicerequests/{id:guid}/documents/{documentId:guid}/content", DownloadServiceRequestDocumentContent)
+            .WithName("DownloadExternalServiceRequestDocument")
+            .WithSummary("Download a service request document's content (authz-before-stream, app-only)")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapPost("/servicerequests/{id:guid}/documents", UploadServiceRequestDocument)
+            .WithName("UploadExternalServiceRequestDocument")
+            .WithSummary("Upload a document to a service request the caller submitted (server-derived container, app-only)")
+            .Accepts<IFormFile>("multipart/form-data")
+            .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
+            .Produces<ExternalDocumentDto>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+
+        group.MapGet("/servicerequests/{id:guid}/documents/{documentId:guid}/versions", GetServiceRequestDocumentVersions)
+            .WithName("GetExternalServiceRequestDocumentVersions")
+            .WithSummary("Get SPE version history for a document on a service request the caller submitted")
+            .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
         // GET /api/v1/external/projects/{id}/events — calendar events for the project
         group.MapGet("/projects/{id:guid}/events", GetEvents)
             .WithName("GetExternalProjectEvents")
@@ -294,36 +422,51 @@ public static class ExternalProjectDataEndpoints
         return project is null ? Results.NotFound() : Results.Ok(project);
     }
 
-    private static async Task<IResult> GetDocuments(
-        Guid id,
+    // -------------------------------------------------------------------------------------------
+    // Documents on every core record (spaarke-SPA-external-access-platform-r3 task 031, FR-24).
+    //
+    // ONE implementation each of list, download, versions and upload, generalized over the document
+    // parent (project, matter, work assignment, service request), as task 029 did for to-dos. The route
+    // handlers are thin adapters that name their parent kind. The project routes keep their templates,
+    // names, statuses and messages: "project" is now one row of the parent map, not a separate code path.
+    // -------------------------------------------------------------------------------------------
+
+    private static async Task<IResult> ListDocumentsForParent(
+        ExternalDataService.DocumentParentKind parentKind,
+        Guid parentId,
         HttpContext httpContext,
         ExternalDataService dataService,
+        ExternalModuleRegistry modules,
         CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        if (!HoldsReadOnProject(callerContext, id))
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this project");
+        // ADR-003: an inaccessible parent DENIES, never an empty list (task 136).
+        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, parentId, dataService, modules, ct);
+        if (upstreamFault is not null) return upstreamFault;
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
+            return DenyDocumentParent(parentKind);
 
-        return Results.Ok(await dataService.GetDocumentsAsync(id, ct));
+        return Results.Ok(await dataService.GetDocumentsAsync(parentKind, parentId, ct));
     }
 
     /// <summary>
     /// Streams a document's content to an authorized external caller.
     ///
-    /// <b>Authz-before-stream (highest-consequence property).</b> Authorization — project access AND
-    /// document→project scoping — is fully enforced BEFORE any SPE pointer resolution or Graph read.
+    /// <b>Authz-before-stream (highest-consequence property).</b> Authorization — Read on the parent AND
+    /// document→parent scoping — is fully enforced BEFORE any SPE pointer resolution or Graph read.
     /// An unauthorized caller receives 403 with NO bytes and NO Graph call. Broker-only: streaming uses
     /// the existing app-only <see cref="SpeFileStore.DownloadFileAsync(string, string, CancellationToken)"/>
     /// — NOT the OBO path — and no Graph pointer (driveId/itemId) is ever returned to the client.
     /// </summary>
-    private static async Task<IResult> DownloadDocumentContent(
+    private static async Task<IResult> DownloadDocumentForParent(
+        ExternalDataService.DocumentParentKind parentKind,
         Guid id,
         Guid documentId,
         HttpContext httpContext,
         ExternalDataService dataService,
+        ExternalModuleRegistry modules,
         IDocumentStorageResolver storageResolver,
         ISpeFileOperations fileStore,
         ILogger<Program> logger,
@@ -333,28 +476,31 @@ public static class ExternalProjectDataEndpoints
         if (callerContext is null) return MissingContextResult();
 
         // ── AUTHORIZATION FIRST — nothing below reads SPE/Graph until BOTH checks pass ──
-        // (1) Read on the project (task 136 · C2). Presence in the caller's map is NOT enough: a Secure
+        // (1) Read on the parent (task 136 · C2). Presence in the caller's map is NOT enough: a Secure
         //     project reached only through an organization grant used to sit there with no rights, and this
         //     route then streamed its documents app-only.
-        if (!HoldsReadOnProject(callerContext, id))
+        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        if (upstreamFault is not null) return upstreamFault;
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
-            logger.LogWarning("[EXT-DOWNLOAD] Contact {ContactId} denied — no access to project {ProjectId}",
-                callerContext.ContactId, id);
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this project");
+            logger.LogWarning("[EXT-DOWNLOAD] Contact {ContactId} denied — no access to {ParentKind} {ParentId}",
+                callerContext.ContactId, parentKind, id);
+            return DenyDocumentParent(parentKind);
         }
 
-        // (2) Document→project scoping — the requested document MUST belong to the requested project.
-        //     A mismatch OR a non-existent document is a uniform 403 (do not leak document existence).
-        //     This is an app-only Dataverse authorization read — it resolves NO Graph pointer.
-        var (documentProjectId, documentName) = await dataService.GetDocumentProjectAndNameAsync(documentId, ct);
-        if (documentProjectId is null || documentProjectId.Value != id)
+        // (2) Document→parent scoping — the requested document MUST belong to the requested record through
+        //     that record type's own lookup. A mismatch OR a non-existent document is a uniform 403 (do not
+        //     leak document existence). This is an app-only Dataverse authorization read — it resolves NO
+        //     Graph pointer.
+        var (documentParentId, documentName) =
+            await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
+        if (documentParentId is null || documentParentId.Value != id)
         {
             logger.LogWarning(
-                "[EXT-DOWNLOAD] Contact {ContactId} denied — document {DocumentId} not in project {ProjectId}",
-                callerContext.ContactId, documentId, id);
+                "[EXT-DOWNLOAD] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}",
+                callerContext.ContactId, documentId, parentKind, id);
             return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "This document is not part of the requested project");
+                detail: $"This document is not part of the requested {DocumentParentNoun(parentKind)}");
         }
 
         // ── AUTHORIZED — only now resolve SPE pointers (server-side) and stream app-only ──
@@ -371,8 +517,8 @@ public static class ExternalProjectDataEndpoints
             }
 
             logger.LogInformation(
-                "[EXT-DOWNLOAD] Contact {ContactId} downloaded document {DocumentId} from project {ProjectId}",
-                callerContext.ContactId, documentId, id);
+                "[EXT-DOWNLOAD] Contact {ContactId} downloaded document {DocumentId} from {ParentKind} {ParentId}",
+                callerContext.ContactId, documentId, parentKind, id);
 
             // application/octet-stream + attachment: force download of untrusted external content
             // (no inline rendering). Pointers are never surfaced to the client.
@@ -558,6 +704,205 @@ public static class ExternalProjectDataEndpoints
         RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, projectId)
             .HasFlag(Spaarke.Dataverse.AccessRights.Read);
 
+    /// <summary>
+    /// The caller's rights on one document parent (task 031, FR-24): Read gates list, download and versions;
+    /// Create gates upload. Fail-closed: a parent the caller cannot reach is <see cref="Spaarke.Dataverse.AccessRights.None"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Project, matter, work assignment</b> are accessible roots: their rights are the evaluator's answer on
+    /// the principal, through the same <see cref="RightsForRoot"/> the to-do routes use.</para>
+    /// <para><b>A service request is not a root.</b> It is authorized through the submitter scope, the Service
+    /// Requests module's accessible set (<c>sprk_requestedby</c> = the caller's contact; CIAM partners only when
+    /// <c>ExternalAccess:PartnerServiceRequestsEnabled</c> is on). The requester alone gets Read and Create; anyone
+    /// else, and a request that does not exist, gets None. Both deny identically, so an id cannot be probed. A missing
+    /// module descriptor, or a module that grants the caller nothing, denies before any read. A requester read that
+    /// FAILS (throttle, outage) is a 503 <see cref="ServiceRequestUnreadableReasonCode"/>, never a 403.</para>
+    /// </remarks>
+    private static async Task<(Spaarke.Dataverse.AccessRights Rights, IResult? Fault)> RightsForDocumentParentAsync(
+        CallerPrincipal caller,
+        ExternalDataService.DocumentParentKind parentKind,
+        Guid parentId,
+        ExternalDataService dataService,
+        ExternalModuleRegistry modules,
+        CancellationToken ct)
+    {
+        switch (parentKind)
+        {
+            case ExternalDataService.DocumentParentKind.Project:
+                return (RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, parentId), null);
+            case ExternalDataService.DocumentParentKind.Matter:
+                return (RightsForRoot(caller, ExternalDataService.TodoRootKind.Matter, parentId), null);
+            case ExternalDataService.DocumentParentKind.WorkAssignment:
+                return (RightsForRoot(caller, ExternalDataService.TodoRootKind.WorkAssignment, parentId), null);
+            case ExternalDataService.DocumentParentKind.ServiceRequest:
+                try
+                {
+                    return (await RightsForServiceRequestAsync(caller, parentId, dataService, modules, ct), null);
+                }
+                catch (ExternalDataService.DataverseUnavailableException)
+                {
+                    // The requester could not be READ — a fault, not an answer. "Could not tell" must never read as
+                    // "no access" (a throttle would 403 the real requester), and it must not read as access either.
+                    // Nothing has touched SPE or been written. The detail is generic, so it leaks nothing.
+                    return (Spaarke.Dataverse.AccessRights.None, Results.Problem(
+                        statusCode: StatusCodes.Status503ServiceUnavailable,
+                        title: "Service request unavailable",
+                        detail: "The service request could not be checked right now. Try again shortly.",
+                        extensions: new Dictionary<string, object?> { ["reasonCode"] = ServiceRequestUnreadableReasonCode }));
+                }
+            default:
+                return (Spaarke.Dataverse.AccessRights.None, null);
+        }
+    }
+
+    /// <summary>The 503 reason code when a service request's requester could not be read (task 031 review).</summary>
+    internal const string ServiceRequestUnreadableReasonCode = "sdap.access.service_request_unreadable";
+
+    private static async Task<Spaarke.Dataverse.AccessRights> RightsForServiceRequestAsync(
+        CallerPrincipal caller,
+        Guid serviceRequestId,
+        ExternalDataService dataService,
+        ExternalModuleRegistry modules,
+        CancellationToken ct)
+    {
+        var entity = ExternalDataService
+            .GetDocumentParentBinding(ExternalDataService.DocumentParentKind.ServiceRequest).EntityLogicalName;
+        var module = modules.FindByEntity(entity);
+        if (module is null)
+            return Spaarke.Dataverse.AccessRights.None;
+
+        // The module grants this caller nothing at all (a CIAM partner with PartnerServiceRequestsEnabled off, or a
+        // principal with no contact): deny BEFORE any Dataverse read. The read could not change the answer.
+        if (!module.EffectiveDimensions.Any(d => d.AccessibleIds(caller).Count > 0))
+            return Spaarke.Dataverse.AccessRights.None;
+
+        // A genuine "no such request" is null (uniform 403, no oracle); a read that failed throws
+        // DataverseUnavailableException, which the caller turns into 503.
+        var requester = await dataService.GetServiceRequestRequesterAsync(serviceRequestId, ct);
+        return requester is { } requesterId && module.IsRecordAccessible(caller, requesterId)
+            ? Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Create
+            : Spaarke.Dataverse.AccessRights.None;
+    }
+
+    /// <summary>The noun a document parent is named by in a ProblemDetails detail.</summary>
+    private static string DocumentParentNoun(ExternalDataService.DocumentParentKind parentKind) => parentKind switch
+    {
+        ExternalDataService.DocumentParentKind.Matter => "matter",
+        ExternalDataService.DocumentParentKind.WorkAssignment => "work assignment",
+        ExternalDataService.DocumentParentKind.ServiceRequest => "service request",
+        _ => "project",
+    };
+
+    private static IResult DenyDocumentParent(ExternalDataService.DocumentParentKind parentKind) =>
+        Results.Problem(statusCode: 403, title: "Forbidden",
+            detail: $"You do not have access to this {DocumentParentNoun(parentKind)}");
+
+    // Route adapters (task 031). Each names its parent kind; the behaviour lives in the four *ForParent handlers.
+
+    private static Task<IResult> GetDocuments(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        CancellationToken ct) =>
+        ListDocumentsForParent(ExternalDataService.DocumentParentKind.Project, id, httpContext, dataService, modules, ct);
+
+    private static Task<IResult> GetMatterDocuments(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        CancellationToken ct) =>
+        ListDocumentsForParent(ExternalDataService.DocumentParentKind.Matter, id, httpContext, dataService, modules, ct);
+
+    private static Task<IResult> GetWorkAssignmentDocuments(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        CancellationToken ct) =>
+        ListDocumentsForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, httpContext, dataService, modules, ct);
+
+    private static Task<IResult> GetServiceRequestDocuments(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        CancellationToken ct) =>
+        ListDocumentsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, httpContext, dataService, modules, ct);
+
+    private static Task<IResult> DownloadDocumentContent(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        ILogger<Program> logger, CancellationToken ct) =>
+        DownloadDocumentForParent(ExternalDataService.DocumentParentKind.Project, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, logger, ct);
+
+    private static Task<IResult> DownloadMatterDocumentContent(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        ILogger<Program> logger, CancellationToken ct) =>
+        DownloadDocumentForParent(ExternalDataService.DocumentParentKind.Matter, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, logger, ct);
+
+    private static Task<IResult> DownloadWorkAssignmentDocumentContent(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        ILogger<Program> logger, CancellationToken ct) =>
+        DownloadDocumentForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, logger, ct);
+
+    private static Task<IResult> DownloadServiceRequestDocumentContent(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        ILogger<Program> logger, CancellationToken ct) =>
+        DownloadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, logger, ct);
+
+    private static Task<IResult> UploadDocument(
+        Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
+        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        UploadDocumentForParent(ExternalDataService.DocumentParentKind.Project, id, file, httpContext, dataService,
+            modules, containerResolver, fileStore, ownership, logger, ct);
+
+    private static Task<IResult> UploadMatterDocument(
+        Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
+        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        UploadDocumentForParent(ExternalDataService.DocumentParentKind.Matter, id, file, httpContext, dataService,
+            modules, containerResolver, fileStore, ownership, logger, ct);
+
+    private static Task<IResult> UploadWorkAssignmentDocument(
+        Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
+        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        UploadDocumentForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, file, httpContext, dataService,
+            modules, containerResolver, fileStore, ownership, logger, ct);
+
+    private static Task<IResult> UploadServiceRequestDocument(
+        Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
+        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        UploadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, file, httpContext, dataService,
+            modules, containerResolver, fileStore, ownership, logger, ct);
+
+    private static Task<IResult> GetDocumentVersions(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.Project, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+
+    private static Task<IResult> GetMatterDocumentVersions(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.Matter, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+
+    private static Task<IResult> GetWorkAssignmentDocumentVersions(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+
+    private static Task<IResult> GetServiceRequestDocumentVersions(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+
     private static IResult DenyRoot(ExternalDataService.TodoRootKind rootKind)
     {
         var noun = rootKind switch
@@ -599,16 +944,18 @@ public static class ExternalProjectDataEndpoints
         CreateTodoForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, request, httpContext, dataService, ownership, ct);
 
     /// <summary>
-    /// POST /api/v1/external/projects/{id}/documents — upload a file and create its <c>sprk_document</c>.
+    /// POST /api/v1/external/{projects|matters|workassignments|servicerequests}/{id}/documents — upload a file
+    /// and create its <c>sprk_document</c> (task 031 generalized it from project to every document parent).
     /// </summary>
     /// <remarks>
-    /// <para><b>Two-stage gate, mirroring <see cref="CreateEvent"/>:</b> project participation, then the
-    /// <c>Create</c> right. A View-Only participant can read documents but must never add one.</para>
+    /// <para><b>Two-stage gate, mirroring <see cref="CreateEvent"/>:</b> Read on the parent, then the
+    /// <c>Create</c> right (<see cref="RightsForDocumentParentAsync"/>). A View-Only participant can read
+    /// documents but must never add one.</para>
     ///
     /// <para><b>The container is SERVER-DERIVED and the client cannot name it</b> (#858). The request
     /// carries only the file; the container comes from
-    /// <c>RecordContainerResolver.ResolveForRecordAsync("sprk_project", id)</c>, so the authorization key
-    /// and the storage target both derive from the same project id and no code path lets them disagree.
+    /// <c>RecordContainerResolver.ResolveForRecordAsync(parent entity, id)</c>, so the authorization key
+    /// and the storage target both derive from the same record id and no code path lets them disagree.
     /// The old route this replaces (<c>POST /api/v1/external/documents/upload</c>) never existed
     /// server-side at all, so there is no prior contract to preserve here.</para>
     ///
@@ -630,11 +977,13 @@ public static class ExternalProjectDataEndpoints
     /// orphaned file in the container rather than a document record pointing at nothing — the recoverable
     /// direction, and the same order the wizard's pipeline uses.</para>
     /// </remarks>
-    private static async Task<IResult> UploadDocument(
+    private static async Task<IResult> UploadDocumentForParent(
+        ExternalDataService.DocumentParentKind parentKind,
         Guid id,
         IFormFile file,
         HttpContext httpContext,
         ExternalDataService dataService,
+        ExternalModuleRegistry modules,
         RecordContainerResolver containerResolver,
         ISpeFileOperations fileStore,
         IRecordOwnershipResolver ownership,
@@ -644,23 +993,27 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        // ── AUTHORIZATION FIRST — nothing below touches Dataverse or SPE until both checks pass ──
-        if (!callerContext.HasProjectAccess(id))
+        var noun = DocumentParentNoun(parentKind);
+        var parentEntity = ExternalDataService.GetDocumentParentBinding(parentKind).EntityLogicalName;
+
+        // ── AUTHORIZATION FIRST — nothing below touches SPE, or writes Dataverse, until both checks pass ──
+        // (A service request's rights need one app-only read of its requester; nothing is written.)
+        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        if (upstreamFault is not null) return upstreamFault;
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
-            logger.LogWarning("[EXT-UPLOAD] Contact {ContactId} denied — no access to project {ProjectId}",
-                callerContext.ContactId, id);
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this project");
+            logger.LogWarning("[EXT-UPLOAD] Contact {ContactId} denied — no access to {ParentKind} {ParentId}",
+                callerContext.ContactId, parentKind, id);
+            return DenyDocumentParent(parentKind);
         }
 
-        var rights = callerContext.GetEffectiveRights(id);
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
         {
             logger.LogWarning(
-                "[EXT-UPLOAD] Contact {ContactId} denied — access level lacks Create on project {ProjectId}",
-                callerContext.ContactId, id);
+                "[EXT-UPLOAD] Contact {ContactId} denied — access level lacks Create on {ParentKind} {ParentId}",
+                callerContext.ContactId, parentKind, id);
             return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "Your access level does not permit uploading documents to this project",
+                detail: $"Your access level does not permit uploading documents to this {noun}",
                 extensions: new Dictionary<string, object?>
                 {
                     ["reasonCode"] = "sdap.access.deny.insufficient_rights"
@@ -673,8 +1026,8 @@ public static class ExternalProjectDataEndpoints
         if (!ExternalDataService.CanStampCreator(callerContext))
         {
             logger.LogWarning(
-                "[EXT-UPLOAD] Refused upload to project {ProjectId}: the caller resolves to neither a systemuser nor a contact",
-                id);
+                "[EXT-UPLOAD] Refused upload to {ParentKind} {ParentId}: the caller resolves to neither a systemuser nor a contact",
+                parentKind, id);
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "Your identity could not be attributed, so the document cannot be uploaded");
         }
@@ -689,22 +1042,23 @@ public static class ExternalProjectDataEndpoints
         // it to a single bare segment. Both facts are enforced by SpeUploadPathIsFlatGuardTests.
         var uploadPath = SpeUploadPath.SanitizeFileName(file.FileName);
 
-        // ── AUTHORIZED — resolve the document's OWNER from the project BEFORE any write (task 146) ──
-        // A document filed to a secure project is owned by the named Secure team. Resolved before the SPE upload so a
+        // ── AUTHORIZED — resolve the document's OWNER from the parent BEFORE any write (task 146) ──
+        // A document filed to a secure record is owned by the named Secure team. Resolved before the SPE upload so a
         // refusal leaves neither bytes nor a row behind.
-        var (owningTeamId, ownerRefusal) = await ResolveChildOwnerAsync(ownership, "sprk_project", id, "document", ct);
+        var (owningTeamId, ownerRefusal) = await ResolveChildOwnerAsync(ownership, parentEntity, id, "document", ct);
         if (ownerRefusal is not null)
         {
             logger.LogWarning(
-                "[EXT-UPLOAD] Refused upload to project {ProjectId}: no owner could be resolved for the document", id);
+                "[EXT-UPLOAD] Refused upload to {ParentKind} {ParentId}: no owner could be resolved for the document",
+                parentKind, id);
             return ownerRefusal;
         }
 
-        // ── Derive the container from the PROJECT, never from the request ──
+        // ── Derive the container from the PARENT RECORD, never from the request ──
         ContainerDecision decision;
         try
         {
-            decision = await containerResolver.ResolveForRecordAsync("sprk_project", id, ct);
+            decision = await containerResolver.ResolveForRecordAsync(parentEntity, id, ct);
         }
         catch (SdapProblemException ex)
         {
@@ -716,13 +1070,13 @@ public static class ExternalProjectDataEndpoints
             || string.IsNullOrWhiteSpace(decision.ContainerId))
         {
             // Refuse rather than write into whatever container happens to be reachable. For a secure
-            // project that substitution IS the leak this project exists to close.
+            // record that substitution IS the leak this project exists to close.
             logger.LogWarning(
-                "[EXT-UPLOAD] No usable container for project {ProjectId} (outcome {Outcome}) — refusing upload",
-                id, decision.Outcome);
+                "[EXT-UPLOAD] No usable container for {ParentKind} {ParentId} (outcome {Outcome}) — refusing upload",
+                parentKind, id, decision.Outcome);
             return Results.Problem(statusCode: 422, title: "Storage not configured",
-                detail: "This project has no storage container configured, so the document cannot be "
-                        + "uploaded. Please contact the project owner.");
+                detail: $"This {noun} has no storage container configured, so the document cannot be "
+                        + $"uploaded. Please contact the {noun} owner.");
         }
 
         FileHandleDto? uploaded;
@@ -737,21 +1091,22 @@ public static class ExternalProjectDataEndpoints
             // Nothing was written — the existing document is intact. Stated plainly so the SPA can tell
             // the user to rename, rather than the upload silently replacing someone else's file.
             logger.LogInformation(
-                "[EXT-UPLOAD] Contact {ContactId} hit a name collision on '{FileName}' in project {ProjectId}",
-                callerContext.ContactId, uploadPath, id);
+                "[EXT-UPLOAD] Contact {ContactId} hit a name collision on '{FileName}' in {ParentKind} {ParentId}",
+                callerContext.ContactId, uploadPath, parentKind, id);
             return Results.Problem(statusCode: 409, title: "File already exists",
-                detail: $"A file named '{uploadPath}' already exists in this project. Nothing was uploaded "
+                detail: $"A file named '{uploadPath}' already exists in this {noun}. Nothing was uploaded "
                         + "or changed — rename the file and try again.");
         }
 
         if (uploaded is null)
         {
-            logger.LogError("[EXT-UPLOAD] Upload returned no handle for project {ProjectId}", id);
+            logger.LogError("[EXT-UPLOAD] Upload returned no handle for {ParentKind} {ParentId}", parentKind, id);
             return Results.Problem(statusCode: 502, title: "Upload failed",
                 detail: "The document could not be stored. Please try again.");
         }
 
         var created = await dataService.CreateDocumentAsync(
+            parentKind,
             id,
             new ExternalUploadedFilePointers(
                 // FileHandleDto.DriveId is the drive resolved during the upload; fall back to the
@@ -766,33 +1121,45 @@ public static class ExternalProjectDataEndpoints
             ct);
 
         logger.LogInformation(
-            "[EXT-UPLOAD] Contact {ContactId} uploaded '{FileName}' to project {ProjectId} as document {DocumentId}",
-            callerContext.ContactId, uploadPath, id, created.SprkDocumentid);
+            "[EXT-UPLOAD] Contact {ContactId} uploaded '{FileName}' to {ParentKind} {ParentId} as document {DocumentId}",
+            callerContext.ContactId, uploadPath, parentKind, id, created.SprkDocumentid);
 
         // Response carries the document row only — Graph pointers are never surfaced on this surface.
         return Results.Created(
-            $"/api/v1/external/projects/{id}/documents/{created.SprkDocumentid}", created);
+            $"/api/v1/external/{DocumentParentSegment(parentKind)}/{id}/documents/{created.SprkDocumentid}", created);
     }
 
+    /// <summary>The route segment of a document parent, for the Location of a created document.</summary>
+    private static string DocumentParentSegment(ExternalDataService.DocumentParentKind parentKind) => parentKind switch
+    {
+        ExternalDataService.DocumentParentKind.Matter => "matters",
+        ExternalDataService.DocumentParentKind.WorkAssignment => "workassignments",
+        ExternalDataService.DocumentParentKind.ServiceRequest => "servicerequests",
+        _ => "projects",
+    };
+
     /// <summary>
-    /// GET /api/v1/external/projects/{id}/documents/{documentId}/versions — SPE version history.
+    /// GET /api/v1/external/{projects|matters|workassignments|servicerequests}/{id}/documents/{documentId}/versions
+    /// — SPE version history.
     /// </summary>
     /// <remarks>
-    /// Authorization is the SAME two-stage gate as <c>DownloadDocumentContent</c>, deliberately
+    /// Authorization is the SAME two-stage gate as <c>DownloadDocumentForParent</c>, deliberately
     /// mirrored rather than reinvented, and for the same reason: nothing touches SPE/Graph until BOTH
     /// checks pass.
-    ///   (1) Read on the project (task 136 — was project presence), and
-    ///   (2) document→project scoping — a mismatch OR a non-existent document is a UNIFORM 403, so
+    ///   (1) Read on the parent (task 136 — was project presence; task 031 — any document parent), and
+    ///   (2) document→parent scoping — a mismatch OR a non-existent document is a UNIFORM 403, so
     ///       this route cannot be used to probe which document ids exist.
     /// Only then are the SPE pointers resolved and the version list read APP-ONLY. It must not use
     /// the OBO ListFileVersionsAsUserAsync path: an external CIAM contact is not a Dataverse
     /// principal and holds no delegated permission on the drive item.
     /// </remarks>
-    private static async Task<IResult> GetDocumentVersions(
+    private static async Task<IResult> ListDocumentVersionsForParent(
+        ExternalDataService.DocumentParentKind parentKind,
         Guid id,
         Guid documentId,
         HttpContext httpContext,
         ExternalDataService dataService,
+        ExternalModuleRegistry modules,
         IDocumentStorageResolver storageResolver,
         ISpeFileOperations fileStore,
         Spaarke.Dataverse.IGenericEntityService entityService,
@@ -803,22 +1170,23 @@ public static class ExternalProjectDataEndpoints
         if (callerContext is null) return MissingContextResult();
 
         // ── AUTHORIZATION FIRST — nothing below reads SPE/Graph until BOTH checks pass ──
-        if (!HoldsReadOnProject(callerContext, id))
+        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        if (upstreamFault is not null) return upstreamFault;
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
-            logger.LogWarning("[EXT-VERSIONS] Contact {ContactId} denied — no access to project {ProjectId}",
-                callerContext.ContactId, id);
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this project");
+            logger.LogWarning("[EXT-VERSIONS] Contact {ContactId} denied — no access to {ParentKind} {ParentId}",
+                callerContext.ContactId, parentKind, id);
+            return DenyDocumentParent(parentKind);
         }
 
-        var (documentProjectId, _) = await dataService.GetDocumentProjectAndNameAsync(documentId, ct);
-        if (documentProjectId is null || documentProjectId.Value != id)
+        var (documentParentId, _) = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
+        if (documentParentId is null || documentParentId.Value != id)
         {
             logger.LogWarning(
-                "[EXT-VERSIONS] Contact {ContactId} denied — document {DocumentId} not in project {ProjectId}",
-                callerContext.ContactId, documentId, id);
+                "[EXT-VERSIONS] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}",
+                callerContext.ContactId, documentId, parentKind, id);
             return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "This document is not part of the requested project");
+                detail: $"This document is not part of the requested {DocumentParentNoun(parentKind)}");
         }
 
         // ── AUTHORIZED — resolve SPE pointers server-side and read app-only ──

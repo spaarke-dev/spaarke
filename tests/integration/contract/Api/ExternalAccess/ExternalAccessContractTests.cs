@@ -1476,8 +1476,9 @@ internal sealed class StubExternalDataService : ExternalDataService
             new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto { SprkProjectid = projectId.ToString(), SprkName = "Project" });
     }
 
+    // Task 031: the document seams take the parent kind; these routes are project-only, so the recorded read is unchanged.
     public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalDocumentDto>> GetDocumentsAsync(
-        Guid projectId, CancellationToken ct = default)
+        DocumentParentKind parentKind, Guid projectId, CancellationToken ct = default)
     {
         _reads.Enqueue($"{nameof(GetDocumentsAsync)}:{projectId}");
         return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalDocumentDto> { Truncated = TruncatedRequested });
@@ -1512,7 +1513,8 @@ internal sealed class StubExternalDataService : ExternalDataService
         return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalOrganizationDto> { Truncated = TruncatedRequested });
     }
 
-    public override Task<(Guid? ProjectId, string? DocumentName)> GetDocumentProjectAndNameAsync(Guid documentId, CancellationToken ct = default)
+    public override Task<(Guid? ParentId, string? DocumentName)> GetDocumentParentAndNameAsync(
+        DocumentParentKind parentKind, Guid documentId, CancellationToken ct = default)
     {
         var raw = _accessor.HttpContext?.Request.Headers.TryGetValue("X-Test-DocProject", out var v) == true ? v.ToString() : null;
         return Guid.TryParse(raw, out var projectId)

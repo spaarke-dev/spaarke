@@ -304,18 +304,85 @@ public class ExternalDataService
     // Document queries
     // ---------------------------------------------------------------------------
 
-    /// <summary>Retrieves all documents belonging to the specified project.</summary>
+    // ---------------------------------------------------------------------------
+    // Document parents (spaarke-SPA-external-access-platform-r3 task 031, FR-24)
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// The record types an external caller can list, download and upload documents on (FR-24). Each is a
+    /// <c>sprk_document</c> parent through its own lookup (<see cref="DocumentParentBinding"/>).
+    /// </summary>
+    /// <remarks>
+    /// Invoice is NOT here: invoices are not in the caller's accessible set as roots, so there is no Tier-2 answer for
+    /// an invoice id. Task 031 escalated it (POML escalation trigger 2). Adding it is one row in
+    /// <see cref="DocumentParents"/> plus its rights arm in the endpoint, once the owner decides how an invoice is
+    /// authorized.
+    /// </remarks>
+    public enum DocumentParentKind
+    {
+        Project = 1,
+        Matter = 2,
+        WorkAssignment = 3,
+        ServiceRequest = 4,
+    }
+
+    /// <summary>
+    /// Everything the Web API path needs to read or write a document against one parent: the parent entity, its entity
+    /// set, the <c>sprk_document</c> navigation property that binds it, and the lookup attribute (whose <c>_..._value</c>
+    /// form filters and scopes).
+    /// </summary>
+    /// <remarks>
+    /// Names from the solution source (<c>Entities/sprk_Document/Entity.xml</c>, <c>Other/Relationships/*.xml</c>;
+    /// task 031). The navigation property differs in case from the attribute, and the service-request lookup is
+    /// <c>sprk_relatedservicerequest</c>, not <c>sprk_servicerequest</c>.
+    /// </remarks>
+    internal sealed record DocumentParentBinding(
+        DocumentParentKind Kind,
+        string EntityLogicalName,
+        string EntitySet,
+        string NavigationProperty,
+        string LookupAttribute)
+    {
+        /// <summary>The <c>_..._value</c> form used in <c>$filter</c> and <c>$select</c>.</summary>
+        public string LookupValueAttribute => $"_{LookupAttribute}_value";
+
+        /// <summary>The full <c>@odata.bind</c> key, e.g. <c>sprk_Project@odata.bind</c>.</summary>
+        public string BindKey => $"{NavigationProperty}@odata.bind";
+    }
+
+    private static readonly IReadOnlyDictionary<DocumentParentKind, DocumentParentBinding> DocumentParents =
+        new Dictionary<DocumentParentKind, DocumentParentBinding>
+        {
+            [DocumentParentKind.Project] = new(
+                DocumentParentKind.Project, "sprk_project", "sprk_projects", "sprk_Project", "sprk_project"),
+            [DocumentParentKind.Matter] = new(
+                DocumentParentKind.Matter, "sprk_matter", "sprk_matters", "sprk_Matter", "sprk_matter"),
+            [DocumentParentKind.WorkAssignment] = new(
+                DocumentParentKind.WorkAssignment, "sprk_workassignment", "sprk_workassignments",
+                "sprk_WorkAssignment", "sprk_workassignment"),
+            [DocumentParentKind.ServiceRequest] = new(
+                DocumentParentKind.ServiceRequest, "sprk_servicerequest", "sprk_servicerequests",
+                "sprk_RelatedServiceRequest", "sprk_relatedservicerequest"),
+        };
+
+    /// <summary>The binding for a document parent kind. Throws for a value outside the table: a programming error.</summary>
+    internal static DocumentParentBinding GetDocumentParentBinding(DocumentParentKind kind) =>
+        DocumentParents.TryGetValue(kind, out var binding)
+            ? binding
+            : throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a document parent kind.");
+
+    /// <summary>Retrieves all documents linked to the specified parent record through that parent's lookup.</summary>
     /// <remarks>
     /// Task 105: followed page by page up to <see cref="MaxCollectionRows"/> (it was a single <c>$top=200</c> read, so
     /// a project's 201st document was silently missing); a cut-short list says
     /// <see cref="ExternalCollectionResponse{T}.Truncated"/>. The primary key breaks <c>createdon</c> ties so pages
-    /// never overlap.
+    /// never overlap. Task 031 generalized it from project to every <see cref="DocumentParentKind"/>; the project query
+    /// is unchanged.
     /// </remarks>
-    public virtual async Task<ExternalCollectionResponse<ExternalDocumentDto>> GetDocumentsAsync(Guid projectId, CancellationToken ct = default)
+    public virtual async Task<ExternalCollectionResponse<ExternalDocumentDto>> GetDocumentsAsync(
+        DocumentParentKind parentKind, Guid parentId, CancellationToken ct = default)
     {
-        var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,createdon";
-        var filter = Uri.EscapeDataString($"_sprk_project_value eq {projectId}");
-        var url = $"{GetApiUrl()}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc,sprk_documentid asc";
+        var url = BuildDocumentListUrl(GetApiUrl(), parentKind, parentId);
 
         var read = await GetCollectionAsync<DocumentRow>(url, ct);
         return new ExternalCollectionResponse<ExternalDocumentDto>
@@ -325,8 +392,17 @@ public class ExternalDataService
         };
     }
 
+    /// <summary>The document list URL for one parent. Pure, so a test can read the filter (task 031).</summary>
+    internal static string BuildDocumentListUrl(string apiUrl, DocumentParentKind parentKind, Guid parentId)
+    {
+        var binding = GetDocumentParentBinding(parentKind);
+        var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,createdon";
+        var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {parentId}");
+        return $"{apiUrl}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc,sprk_documentid asc";
+    }
+
     /// <summary>
-    /// Creates a <c>sprk_document</c> row for a file already uploaded to SPE, linked to the project.
+    /// Creates a <c>sprk_document</c> row for a file already uploaded to SPE, linked to its parent record.
     /// </summary>
     /// <remarks>
     /// <para>Called ONLY after the bytes are in SPE — the pointers in <paramref name="pointers"/> are
@@ -340,16 +416,16 @@ public class ExternalDataService
     /// the display name; <c>sprk_filename</c> / <c>sprk_filesize</c> / <c>sprk_graphitemid</c> /
     /// <c>sprk_filepath</c> carry the file identity.</para>
     ///
-    /// <para><c>sprk_Project@odata.bind</c> uses the PascalCase navigation property, the same
-    /// case-sensitive form the event and to-do creates use. The read side of this service filters
-    /// documents on <c>_sprk_project_value</c>, so this is the lookup that makes an uploaded document
-    /// visible in the SPA's own list.</para>
+    /// <para>The parent bind (<c>sprk_Project@odata.bind</c>, <c>sprk_Matter@odata.bind</c>, ...) uses the PascalCase
+    /// navigation property from <see cref="DocumentParentBinding"/>, the same case-sensitive form the event and to-do
+    /// creates use. The read side of this service filters documents on the same lookup, so this is the bind that makes
+    /// an uploaded document visible in the SPA's own list (task 031).</para>
     /// </remarks>
     public virtual async Task<ExternalDocumentDto> CreateDocumentAsync(
-        Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId, CallerPrincipal creator,
-        CancellationToken ct = default)
+        DocumentParentKind parentKind, Guid parentId, ExternalUploadedFilePointers pointers, Guid owningTeamId,
+        CallerPrincipal creator, CancellationToken ct = default)
     {
-        var body = BuildDocumentCreatePayload(projectId, pointers, owningTeamId);
+        var body = BuildDocumentCreatePayload(parentKind, parentId, pointers, owningTeamId);
         StampCreator(body, creator); // FR-25 (task 030)
 
         var token = await GetAppOnlyTokenAsync(ct);
@@ -371,8 +447,8 @@ public class ExternalDataService
         {
             var errorBody = await response.Content.ReadAsStringAsync(ct);
             _logger.LogWarning(
-                "[EXT-DATA] Create document failed for project {ProjectId}: {Status} — {Body}",
-                projectId, response.StatusCode, errorBody);
+                "[EXT-DATA] Create document failed for {ParentKind} {ParentId}: {Status} — {Body}",
+                parentKind, parentId, response.StatusCode, errorBody);
             throw new InvalidOperationException($"Failed to create document: {response.StatusCode}");
         }
 
@@ -384,8 +460,8 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// The COMPLETE create payload for an external upload's <c>sprk_document</c>: the file identity, the project
-    /// bind, and the OWNER (unified-access-control-r2 task 146).
+    /// The COMPLETE create payload for an external upload's <c>sprk_document</c>: the file identity, the parent
+    /// bind (task 031: any <see cref="DocumentParentKind"/>), and the OWNER (unified-access-control-r2 task 146).
     /// </summary>
     /// <remarks>
     /// <para><b>The owner is passed in, and its absence refuses</b> (the <c>OfficeDocumentPersistence</c> pattern,
@@ -397,10 +473,11 @@ public class ExternalDataService
     /// <para>Pure so a test can read the payload; <see cref="CreateDocumentAsync"/> is a substitution seam.</para>
     /// </remarks>
     internal static Dictionary<string, object?> BuildDocumentCreatePayload(
-        Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId)
+        DocumentParentKind parentKind, Guid parentId, ExternalUploadedFilePointers pointers, Guid owningTeamId)
     {
-        if (projectId == Guid.Empty)
-            throw new ArgumentException("Project id must be a non-empty GUID.", nameof(projectId));
+        var parent = GetDocumentParentBinding(parentKind);
+        if (parentId == Guid.Empty)
+            throw new ArgumentException("Parent id must be a non-empty GUID.", nameof(parentId));
         ArgumentNullException.ThrowIfNull(pointers);
         RequireOwner(owningTeamId, "sprk_document");
 
@@ -411,7 +488,7 @@ public class ExternalDataService
             ["sprk_graphitemid"] = pointers.ItemId,
             [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = pointers.ItemId, // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
             ["sprk_graphdriveid"] = pointers.DriveId,
-            ["sprk_Project@odata.bind"] = $"/sprk_projects({projectId})",
+            [parent.BindKey] = $"/{parent.EntitySet}({parentId})",
             [OwnerBindKey] = $"/teams({owningTeamId})",
         };
 
@@ -536,23 +613,61 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// Returns the document's parent project id and display name — used by the external download
-    /// endpoint (task 027) for document→project authorization scoping BEFORE any SPE pointer
-    /// resolution or Graph content read. App-only Dataverse read; returns (null, null) when the
-    /// document does not exist. Does NOT expose any Graph pointer (driveId/itemId).
+    /// Returns the document's parent id THROUGH THE LOOKUP OF <paramref name="parentKind"/>, and its display name. The
+    /// external download and versions endpoints use it (task 027; generalized by task 031) for document→parent
+    /// authorization scoping BEFORE any SPE pointer resolution or Graph content read.
     /// </summary>
-    public virtual async Task<(Guid? ProjectId, string? DocumentName)> GetDocumentProjectAndNameAsync(
-        Guid documentId, CancellationToken ct = default)
+    /// <remarks>
+    /// App-only Dataverse read. Returns (null, null) when the document does not exist or cannot be read, and
+    /// (null, name) when it is not linked through that lookup. Does NOT expose any Graph pointer (driveId/itemId).
+    /// </remarks>
+    public virtual async Task<(Guid? ParentId, string? DocumentName)> GetDocumentParentAndNameAsync(
+        DocumentParentKind parentKind, Guid documentId, CancellationToken ct = default)
     {
-        var select = "sprk_documentname,_sprk_project_value";
-        var url = $"{GetApiUrl()}/sprk_documents({documentId})?$select={select}";
+        var binding = GetDocumentParentBinding(parentKind);
+        var url = $"{GetApiUrl()}/sprk_documents({documentId})?$select=sprk_documentname,{binding.LookupValueAttribute}";
 
-        var row = await GetSingleAsync<DocumentRow>(url, ct);
+        var row = await GetSingleAsync<Dictionary<string, JsonElement>>(url, ct);
         if (row is null) return (null, null);
 
-        var projectId = Guid.TryParse(row.SprkProjectidValue, out var pid) ? pid : (Guid?)null;
-        return (projectId, row.SprkName);
+        var name = row.TryGetValue("sprk_documentname", out var n) && n.ValueKind == JsonValueKind.String
+            ? n.GetString()
+            : null;
+        return (GuidValue(row, binding.LookupValueAttribute), name);
     }
+
+    /// <summary>
+    /// The requester (<c>sprk_requestedby</c>, a contact) of a service request. Null when the request does not exist
+    /// (a genuine 404) or names no requester. App-only Dataverse read.
+    /// </summary>
+    /// <remarks>
+    /// Task 031 (FR-24): a service request's document rights come from the submitter scope (the requester is the
+    /// caller), so this is the one fact that decision needs. A read that FAILS (non-404 status, transport error, token
+    /// failure) throws <see cref="DataverseUnavailableException"/> rather than returning null: "could not tell" must not
+    /// be reported as "no such request", or a throttle would 403 the real requester.
+    /// </remarks>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    public virtual async Task<Guid?> GetServiceRequestRequesterAsync(Guid serviceRequestId, CancellationToken ct = default)
+    {
+        var url = $"{GetApiUrl()}/sprk_servicerequests({serviceRequestId})?$select=_sprk_requestedby_value";
+
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
+        return row is null ? null : GuidValue(row, "_sprk_requestedby_value");
+    }
+
+    /// <summary>An app-only Dataverse read could not be completed (not a 404): the caller reports it as a 503.</summary>
+    public sealed class DataverseUnavailableException : Exception
+    {
+        public DataverseUnavailableException(string message, Exception? inner = null) : base(message, inner) { }
+    }
+
+    /// <summary>A GUID-valued column of a dictionary row, or null when it is absent, null or not a GUID.</summary>
+    private static Guid? GuidValue(IReadOnlyDictionary<string, JsonElement> row, string column) =>
+        row.TryGetValue(column, out var value)
+        && value.ValueKind == JsonValueKind.String
+        && Guid.TryParse(value.GetString(), out var id)
+            ? id
+            : null;
 
     // ---------------------------------------------------------------------------
     // To Do queries and mutations (smart-todo-decoupling-r3 FR-29)
@@ -661,7 +776,7 @@ public class ExternalDataService
     /// Returns the to-do's regarding-ROOT (project, matter, or work assignment), its id, and its
     /// display name — used by the external PATCH endpoint (task 009 / FR-08 / finding A-7) to scope
     /// a to-do write to the caller's accessible root set BEFORE any mutation. App-only Dataverse
-    /// read. Deliberately mirrors <see cref="GetDocumentProjectAndNameAsync"/> (task 027), which
+    /// read. Deliberately mirrors <see cref="GetDocumentParentAndNameAsync"/> (task 027), which
     /// solves the same child-record-to-root authorization problem for documents.
     /// </summary>
     /// <remarks>
@@ -1664,6 +1779,49 @@ public class ExternalDataService
         {
             _logger.LogError(ex, "[EXT-DATA] Error fetching single record: {Url}", url);
             return default;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="GetSingleAsync{TRow}"/> for a caller that must tell "not there" from "could not read": a 404 is
+    /// <c>default</c>; any other non-success, transport error or token failure throws
+    /// <see cref="DataverseUnavailableException"/>. A cancelled caller still sees <see cref="OperationCanceledException"/>.
+    /// </summary>
+    private async Task<TRow?> GetSingleOrThrowAsync<TRow>(string url, CancellationToken ct)
+    {
+        try
+        {
+            var token = await GetAppOnlyTokenAsync(ct);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("OData-MaxVersion", "4.0");
+            request.Headers.Add("OData-Version", "4.0");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await _httpClient.SendAsync(request, ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                return default;
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[EXT-DATA] GET single failed: {Status} — {Url}", response.StatusCode, url);
+                throw new DataverseUnavailableException($"Dataverse answered {(int)response.StatusCode}.");
+            }
+
+            return await response.Content.ReadFromJsonAsync<TRow>(ct);
+        }
+        catch (DataverseUnavailableException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[EXT-DATA] Error fetching single record: {Url}", url);
+            throw new DataverseUnavailableException("Dataverse could not be read.", ex);
         }
     }
 
