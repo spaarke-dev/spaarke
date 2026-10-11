@@ -385,6 +385,45 @@ public sealed partial class SecureRootInheritance
             [Project] = Array.Empty<(string, string)>(),
         };
 
+    /// <summary>
+    /// #1616: the inheriting tables whose ADR-024 pair (<see cref="PairIdColumn"/> + <see cref="PairTypeColumn"/>) is
+    /// BFF-MANAGED — field-secured, so ONLY the BFF application user can create or update it (after asking AppendTo on the
+    /// record it names AS THE CALLER, <c>OwnedChildWrite</c>), while every user still reads it (task 133's two profiles;
+    /// <c>scripts/Set-RegardingPairFieldSecurity.ps1</c>; the solution's <c>FieldSecurityProfiles.xml</c>). On such a table the
+    /// pair names a parent ON ITS OWN: <c>sprk_project</c> has no typed filing lookup, so the pair is its only filing.
+    /// </summary>
+    /// <remarks>
+    /// <para>On every other inheriting table (<c>sprk_workassignment</c>) the pair is plain text that any user with Write
+    /// can set through the Web API, so it names a parent ONLY by repeating one of the typed filing lookups
+    /// (<see cref="TypedFilingColumns"/>) — which Dataverse itself AppendTo-checks for whoever sets them. A pair that names
+    /// a matter or project no typed lookup names is undetermined, never a filing (<see cref="PairNamesAParentOnItsOwn"/>).
+    /// Its writers send the typed lookup and the same pair (the Create Work Assignment wizard, the BFF).</para>
+    /// <para>Why not field security on the work assignment's pair too: the Create Work Assignment wizard and the Assign
+    /// Work follow-on create the row through <c>Xrm.WebApi</c> AS THE USER with the pair in the payload, which a secured
+    /// column would refuse.</para>
+    /// </remarks>
+    internal static readonly IReadOnlySet<string> BffManagedPairTables =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Project };
+
+    /// <summary>
+    /// #1616: whether a row of <paramref name="table"/> is filed under the record its ADR-024 pair names when no typed filing
+    /// lookup repeats it — only where the pair is BFF-managed (<see cref="BffManagedPairTables"/>).
+    /// </summary>
+    internal static bool PairNamesAParentOnItsOwn(string? table) =>
+        table is not null && BffManagedPairTables.Contains(table.Trim());
+
+    /// <summary>
+    /// #1616: why a <paramref name="table"/> row's pair naming a <paramref name="pairTable"/> that none of its typed filing
+    /// lookups names files it under nothing — the reason both the readers and the BFF writers give.
+    /// </summary>
+    internal static string PairWithoutTypedLookupReason(string table, string pairTable)
+    {
+        var columns = TypedFilingColumns.TryGetValue(table, out var typed) ? typed.Select(t => t.Column) : Enumerable.Empty<string>();
+        return $"its {PairIdColumn} names a {pairTable} that none of its filing lookups ({string.Join(", ", columns)}) names; " +
+               $"a {(string.Equals(table, Project, StringComparison.OrdinalIgnoreCase) ? "project" : "work assignment")} is " +
+               "filed under a matter or project only through those lookups (the pair repeats one)";
+    }
+
     private static readonly AsyncLocal<int> NestedProvisioning = new();
 
     private readonly IGenericEntityService _dataverse;
@@ -3160,7 +3199,8 @@ public sealed partial class SecureRootInheritance
     /// <summary>
     /// The secure matters / projects <paramref name="facts"/> names, and why any other could not be read. Typed lookups
     /// first; then the pair (agreement by identity with a typed lookup adds nothing; otherwise its type decides — a matter or
-    /// project is a parent, any other type is not this rule). Every named record is read even after one fails, so a readable
+    /// project is a parent where the pair is BFF-managed (<see cref="PairNamesAParentOnItsOwn"/>, #1616) and undetermined
+    /// anywhere else, any other type is not this rule). Every named record is read even after one fails, so a readable
     /// secure parent is never hidden behind an unreadable sibling (secure-if-any).
     /// </summary>
     private Task<SecureParentsAnswer> DecideParentsAsync(FilingFacts facts, CancellationToken ct) =>
@@ -3237,8 +3277,15 @@ public sealed partial class SecureRootInheritance
                         var pairTable = await ReadRecordTypeAsync(dataverse, recordTypes, typeRef, ct).ConfigureAwait(false);
                         if (pairTable is null)
                             unknown ??= "the type of the record it is filed under could not be determined";
-                        else if (IsParent(pairTable))
+                        else if (IsParent(pairTable) && PairNamesAParentOnItsOwn(facts.Table))
                             named.Add((pairTable, pairId));
+                        else if (IsParent(pairTable))
+                        {
+                            // #1616: the pair is text any user with Write can set through the Web API, bypassing the AppendTo
+                            // check a lookup costs. On a table whose pair is not BFF-managed it files the row under nothing on
+                            // its own — undetermined, so nothing is secured, shared or un-secured from it (fail closed).
+                            unknown ??= PairWithoutTypedLookupReason(facts.Table, pairTable);
+                        }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                     {

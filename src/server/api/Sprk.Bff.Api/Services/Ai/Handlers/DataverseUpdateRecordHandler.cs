@@ -279,7 +279,23 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId, refileResult, stopwatch);
             }
 
-            if (!refile.Written)
+            // #1616: a project's ADR-024 pair is field-secured so that only this server writes it (its only filing column; the
+            // pair rule was asked AS THE CALLER above) — the caller's own PATCH carries every other column, the app the pair.
+            OwnedChildWrite.RefileOutcome? managedPair = null;
+            if (!refile.Written && OwnedChildWrite.BffManagedPairColumnsOf(tablename).Count > 0)
+            {
+                using var pairScope = _scopes?.CreateScope();
+                managedPair = await OwnedChildWrite.PatchWithBffManagedPairAsync(
+                        _dataverse, pairScope?.ServiceProvider.GetService<Spaarke.Dataverse.IFieldMappingDataverseService>(),
+                        tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
+                    .ConfigureAwait(false);
+                if (managedPair is { Written: false })
+                {
+                    return LogOutcome(context, tablename, recordId, RefileRefusal(tool, tablename, managedPair, startedAt), stopwatch);
+                }
+            }
+
+            if (!refile.Written && managedPair is null)
             {
                 // PATCH carries If-Match: * (update-only) — see IDataverseUserClient.PatchAsync.
                 var response = await _dataverse.PatchAsync(

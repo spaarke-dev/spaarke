@@ -475,20 +475,28 @@ internal static class OwnedChildWrite
         if (missing is not null)
             return new Outcome { Denied = $"You do not have permission to create records in '{table}' ({missing})." };
 
-        // (3) No column under field-level security: an app-only write would pass the caller's column security.
-        var columnFilter = string.Join(" or ", item.Columns.Select(c => $"LogicalName eq '{c}'"));
-        var attributes = await user.GetAsync(
-            $"EntityDefinitions(LogicalName='{table}')/Attributes?$select=LogicalName,IsSecured&$filter={Uri.EscapeDataString(columnFilter)}", ct)
-            .ConfigureAwait(false);
-        if (!attributes.IsSuccess)
-            return new Outcome { ClientFailure = attributes };
-
-        if (SecuredColumnIn(attributes.Body) is { } secured)
+        // (3) No column under field-level security: an app-only write would pass the caller's column security. #1616: except
+        // a BFF-managed pair (SecureRootInheritance.BffManagedPairTables) — it is secured so that ONLY this server writes it,
+        // and what this server asks before writing it is the pair rule in (2) below (AppendTo AS THE CALLER on the record it
+        // names), so the column security it would pass is the one that forces every write of it through here.
+        var bffManaged = BffManagedPairColumnsOf(table);
+        var asked = item.Columns.Where(c => !bffManaged.Contains(c)).ToArray();
+        var columnFilter = string.Join(" or ", asked.Select(c => $"LogicalName eq '{c}'"));
+        if (asked.Length > 0 || item.Columns.Count == 0)
         {
-            return new Outcome
+            var attributes = await user.GetAsync(
+                $"EntityDefinitions(LogicalName='{table}')/Attributes?$select=LogicalName,IsSecured&$filter={Uri.EscapeDataString(columnFilter)}", ct)
+                .ConfigureAwait(false);
+            if (!attributes.IsSuccess)
+                return new Outcome { ClientFailure = attributes };
+
+            if (SecuredColumnIn(attributes.Body) is { } secured)
             {
-                Denied = $"Column '{secured}' is field-secured and cannot be set from chat on a record the application creates for you.",
-            };
+                return new Outcome
+                {
+                    Denied = $"Column '{secured}' is field-secured and cannot be set from chat on a record the application creates for you.",
+                };
+            }
         }
 
         // (2) AppendTo on every record a lookup names (the server-set ones name the caller) and on the record the ADR-024
@@ -561,6 +569,128 @@ internal static class OwnedChildWrite
 
     private static bool IsPairType(string column) =>
         string.Equals(column, SecureRootInheritance.PairTypeColumn, StringComparison.OrdinalIgnoreCase);
+
+    private static readonly IReadOnlySet<string> NoColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly IReadOnlySet<string> PairColumns =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { SecureRootInheritance.PairIdColumn, SecureRootInheritance.PairTypeColumn };
+
+    /// <summary>#1616: the pair columns of <paramref name="table"/> when its pair is BFF-managed (field-secured so that only
+    /// this server writes it — <see cref="SecureRootInheritance.BffManagedPairTables"/>); empty for every other table.</summary>
+    internal static IReadOnlySet<string> BffManagedPairColumnsOf(string table) =>
+        SecureRootInheritance.PairNamesAParentOnItsOwn(table) ? PairColumns : NoColumns;
+
+    /// <summary>
+    /// #1616: whether a typed filing lookup of <paramref name="table"/> (<see cref="SecureRootInheritance.TypedFilingColumns"/>)
+    /// names (<paramref name="pairTable"/>, <paramref name="pairId"/>) — one this write sets, else one the row keeps.
+    /// </summary>
+    private static bool RepeatsTypedFilingLookup(
+        string table, string pairTable, Guid pairId, IReadOnlyCollection<DataverseWriteItemMapper.MappedLookup> lookups,
+        IReadOnlyCollection<(string Column, Guid Id)>? keptOnTheRow)
+    {
+        if (!SecureRootInheritance.TypedFilingColumns.TryGetValue(table, out var filing))
+            return false;
+        var columns = filing.Where(f => string.Equals(f.ParentTable, pairTable, StringComparison.OrdinalIgnoreCase))
+            .Select(f => f.Column)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return lookups.Any(l => l.RecordId == pairId && columns.Contains(l.Column)
+                                && string.Equals(l.RelatedTable, pairTable, StringComparison.OrdinalIgnoreCase))
+               || (keptOnTheRow ?? Array.Empty<(string, Guid)>()).Any(k => k.Id == pairId && columns.Contains(k.Column));
+    }
+
+    /// <summary>
+    /// #1616: the update tool's write of a row whose ADR-024 pair is BFF-managed (<see cref="BffManagedPairColumnsOf"/>): the
+    /// pair columns are field-secured so that no user can set them through the Web API, so the caller's own PATCH of them
+    /// would be refused. The pair rule has already been asked AS THE CALLER (<see cref="CheckCallerMayFileRootUnderAsync"/>:
+    /// AppendTo on the record the pair will name); this asks, as the caller too, what a run-as-user PATCH of the pair would
+    /// otherwise have had Dataverse check — Write on the row, and Append on it plus AppendTo on the record-type catalog row
+    /// when the type is set — then sends the caller's own PATCH of every OTHER column (Dataverse authorizes it, field
+    /// security included), and last the application writes the pair (update-only, never a create).
+    /// </summary>
+    /// <returns><c>null</c> when <paramref name="item"/> writes no BFF-managed pair column (the caller's own PATCH, as
+    /// before); otherwise <see cref="RefileOutcome.Written"/> or the refusal. A refusal before the caller's PATCH writes nothing;
+    /// a fault of the application's write after it propagates (the caller's other columns are then written).</returns>
+    internal static async Task<RefileOutcome?> PatchWithBffManagedPairAsync(
+        IDataverseUserClient user, IFieldMappingDataverseService? appOnly, string table, string entitySetName, Guid recordId,
+        DataverseWriteItemMapper.MappedItem item, CancellationToken ct)
+    {
+        var managed = BffManagedPairColumnsOf(table);
+        if (managed.Count == 0)
+            return null;
+
+        var pairFields = new Dictionary<string, object?>(StringComparer.Ordinal);
+        string? callerBody = null;
+        using (var body = JsonDocument.Parse(item.JsonBody))
+        {
+            using var stream = new MemoryStream();
+            var rest = 0;
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                foreach (var property in body.RootElement.EnumerateObject())
+                {
+                    if (managed.Contains(SecureRootInheritance.NormalizeColumn(property.Name)))
+                    {
+                        pairFields[property.Name] = property.Value.Clone();
+                        continue;
+                    }
+
+                    property.WriteTo(writer);
+                    rest++;
+                }
+
+                writer.WriteEndObject();
+            }
+
+            if (rest > 0)
+                callerBody = System.Text.Encoding.UTF8.GetString(stream.ToArray());
+        }
+
+        if (pairFields.Count == 0)
+            return null; // no pair column in the body: the caller's own PATCH, as before
+
+        if (appOnly is null)
+        {
+            return new RefileOutcome
+            {
+                ClientFailure = DataverseUserResponse.Fail(0, DataverseUserClientErrorCodes.ServiceError,
+                    $"What this {table} is filed under is written only by Spaarke, which cannot write it here, so nothing was written."),
+            };
+        }
+
+        var me = await WhoAmIAsync(user, ct).ConfigureAwait(false);
+        if (me.Failure is { } failure)
+            return new RefileOutcome { ClientFailure = failure };
+
+        var typeLookups = item.Lookups.Where(l => IsPairType(l.Column)).ToArray();
+        var needed = typeLookups.Length > 0 ? AccessRights.Write | AccessRights.Append : AccessRights.Write;
+        var rights = await RightsOnAsync(user, me.SystemUserId, entitySetName, recordId, ct).ConfigureAwait(false);
+        if ((rights & needed) != needed)
+            return new RefileOutcome { Denied = $"You do not have permission to change what this {table} is filed under." };
+
+        var typeAppendTo = await CheckCallerMayAppendToAsync(user, me.SystemUserId, typeLookups, ct).ConfigureAwait(false);
+        if (typeAppendTo.ClientFailure is { } typeFailure)
+            return new RefileOutcome { ClientFailure = typeFailure };
+        if (!typeAppendTo.Succeeded)
+        {
+            return new RefileOutcome
+            {
+                Denied = typeAppendTo.Denied ?? "You do not have permission to file this record under the record type it names.",
+                ParentUnavailable = typeAppendTo.ParentUnavailable,
+            };
+        }
+
+        if (callerBody is not null)
+        {
+            // If-Match: * (update-only), AS THE CALLER — every column but the pair, authorized by Dataverse itself.
+            var response = await user.PatchAsync($"{entitySetName}({recordId:D})", callerBody, ct).ConfigureAwait(false);
+            if (!response.IsSuccess)
+                return new RefileOutcome { ClientFailure = response };
+        }
+
+        await appOnly.UpdateExistingRecordFieldsAsync(table, recordId, pairFields, ct).ConfigureAwait(false);
+        return new RefileOutcome { Written = true };
+    }
 
     /// <summary>The answer of <see cref="PairTargetAsync"/>: the record to check AppendTo on, or why the pair is refused.</summary>
     internal readonly record struct PairTarget(DataverseWriteItemMapper.MappedLookup? Lookup, Outcome? Refusal);
@@ -679,6 +809,19 @@ internal static class OwnedChildWrite
             : null;
         if (string.IsNullOrEmpty(pairTable) || !LogicalName.IsMatch(pairTable))
             return Refuse($"The record type '{SecureRootInheritance.PairTypeColumn}' names no table, so what this row is filed under cannot be told.");
+
+        // #1616: on a work assignment (an inheriting table whose pair is NOT BFF-managed) the pair names a matter or project
+        // only by repeating a typed filing lookup — the readers' one rule (SecureRootInheritance.PairNamesAParentOnItsOwn),
+        // so this server never writes a filing they would read as undetermined. Decided from the payload, the row's kept
+        // lookups and the catalog only, never from the record the pair names.
+        if (SecureRootInheritance.Inherits(table)
+            && !SecureRootInheritance.PairNamesAParentOnItsOwn(table)
+            && SecureRootInheritance.IsParent(pairTable)
+            && !RepeatsTypedFilingLookup(table, pairTable, pairId, lookups, keptOnTheRow))
+        {
+            return Refuse($"It was not written: {SecureRootInheritance.PairWithoutTypedLookupReason(table, pairTable)}. " +
+                          "Set that lookup to the same record.");
+        }
 
         var entitySet = await EntitySetOfAsync(user, pairTable, ct).ConfigureAwait(false);
         if (entitySet.Failure is { } failure)

@@ -1508,6 +1508,50 @@ public partial class ChildRecordContainerResolutionTests
         world.Reads("businessunit").Should().Be(0);
     }
 
+    [Fact(DisplayName = "#1616: a to-do under a work assignment whose pair ALONE names a SECURE matter is refused (container_ancestor_unresolved 409) — the pair is text any Write-holder can set, never a filing on its own")]
+    public async Task Todo_UnderAWorkAssignmentWhosePairAloneNamesASecureMatter_IsRefused()
+    {
+        // Before #1616 the walk followed the pair to the secure matter and stored the to-do's files in the MATTER's
+        // container — a filing Dataverse never AppendTo-checked for whoever wrote the pair.
+        var world = new World()
+            .WithChild("sprk_todo", regardingWorkAssignment: WorkAssignmentId)
+            .WithRoot("sprk_workassignment", WorkAssignmentId, isSecure: false, containerId: null,
+                pairId: MatterId.ToString(), pairType: MatterTypeRef)
+            .WithRecordType(MatterTypeRef, "sprk_matter")
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>(
+                "what the work assignment is filed under cannot be determined, so neither can the to-do's container")).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.Reads("sprk_matter").Should().Be(0, "the record the pair names is never read — nothing about it is told");
+        world.Reads("businessunit").Should().Be(0, "undetermined is never 'not secure'");
+    }
+
+    [Fact(DisplayName = "#1616 control: a to-do under a work assignment with its TYPED matter and the SAME pair resolves the secure matter's container")]
+    public async Task Todo_UnderAWorkAssignmentWithItsTypedMatterAndTheSamePair_ResolvesTheMattersContainer()
+    {
+        var world = new World()
+            .WithChild("sprk_todo", regardingWorkAssignment: WorkAssignmentId)
+            .WithRoot("sprk_workassignment", WorkAssignmentId, isSecure: false, containerId: null,
+                regardingMatter: MatterId, pairId: MatterId.ToString(), pairType: MatterTypeRef)
+            .WithRecordType(MatterTypeRef, "sprk_matter")
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
+        decision.ContainerId.Should().Be(RootContainer);
+    }
+
     [Fact(DisplayName = "Task 155 f4: a row two hops above the record that cannot be READ refuses with the retryable 503 — never read as non-secure")]
     public async Task Todo_WhoseRootTwoHopsUpCannotBeRead_IsThe503()
     {

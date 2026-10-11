@@ -354,8 +354,8 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
     }
 
     /// <summary>
-    /// Owner round 31 item 1 (task 158 r1): a work assignment under a readably SECURE matter and, by its pair, a project whose
-    /// flag cannot be read is NOT secured: the person it would be secured for must not be walled off ANY secure record it is
+    /// Owner round 31 item 1 (task 158 r1): a work assignment under a readably SECURE matter and a project whose flag cannot
+    /// be read (both typed lookups — since #1616 a work assignment's pair names a parent only by repeating one) is NOT secured: the person it would be secured for must not be walled off ANY secure record it is
     /// filed under, and the unreadable one cannot be checked — so the provisioning refuses before its first write
     /// (<c>creator_no_access_unverifiable</c>), nothing is written, and the result is incomplete so the job retries (pre-r1
     /// this record was secured with its sharees held — that no longer holds once the creator's walls are checked first).
@@ -367,7 +367,7 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         SecureMatter(_fixture, matter, null, Colleague);
         SecureProject(_fixture, unreadable, Colleague);
         FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", matter);
-        FilePair(_fixture, "sprk_workassignment", workAssignment, unreadable, RecordTypeRef(_fixture, "sprk_project"));
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingproject", new EntityReference("sprk_project", unreadable));
         World.FailingRowReadsOf("sprk_project", unreadable);
         var inheritance = InheritanceInScope(out var scope);
         using (scope)
@@ -379,6 +379,79 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
             result.IsComplete.Should().BeFalse("retried by the job");
             ShouldBeUntouched(workAssignment, "refused before provisioning's first write");
         }
+    }
+
+    // ── #1616: a work assignment's pair is plain text — it names a parent only by repeating a typed lookup ─────────────────
+
+    /// <summary>
+    /// #1616 (the bypass): a user with Write on a work assignment sets its pair, through the Web API, to a SECURE matter they
+    /// may not append to — no typed lookup names it, so Dataverse checked nothing. The pair is never a filing on its own: the
+    /// work assignment is undetermined (never secured under that matter, never given its sharees, never told it is secure),
+    /// and nothing is written. Before the fix it was isolated under the matter's team and shared to the matter's sharees.
+    /// </summary>
+    [Fact]
+    public async Task AWorkAssignmentWhosePairAloneNamesASecureMatter_IsNotSecured_AndNothingIsWritten()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        _fixture.SeedWorkAssignment(workAssignment, isSecure: false);
+        FilePair(_fixture, "sprk_workassignment", workAssignment, matter, RecordTypeRef(_fixture, "sprk_matter"));
+        var inheritance = InheritanceInScope(out var scope);
+        using (scope)
+        {
+            var result = await inheritance.SecureIfFiledUnderSecureAsync("sprk_workassignment", workAssignment, "t1616", CancellationToken.None);
+
+            result.Outcome.Should().NotBe(SecureRootInheritOutcome.Secured);
+            result.Outcome.Should().NotBe(SecureRootInheritOutcome.AlreadySecure);
+            result.IsComplete.Should().BeFalse("undetermined is never 'not filed under a secure record'");
+            ShouldBeUntouched(workAssignment, "a pair no typed lookup repeats files it under nothing");
+        }
+
+        await RunJobAsync();
+
+        ShouldBeUntouched(workAssignment, "the job does not secure it either");
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "the matter's sharee is never given it");
+    }
+
+    /// <summary>
+    /// #1616, the legitimate shapes still file: the Create Work Assignment wizard's typed matter lookup PLUS the same pair is
+    /// secured under the secure matter; and a PROJECT's pair (its only filing, BFF-managed) still files it under the matter.
+    /// </summary>
+    [Fact]
+    public async Task AWorkAssignmentWithItsTypedMatterAndTheSamePair_AndAProjectFiledByItsPair_AreBothSecured()
+    {
+        var (matter, workAssignment, project) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        var matterType = RecordTypeRef(_fixture, "sprk_matter");
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", matter);
+        FilePair(_fixture, "sprk_workassignment", workAssignment, matter, matterType);
+        _fixture.SeedProject(project, isSecure: false);
+        FilePair(_fixture, "sprk_project", project, matter, matterType);
+
+        var run = await RunJobAsync();
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        ShouldBeSecure(workAssignment, "filed by its typed matter and the same pair");
+        ShouldBeSecure(project, "filed by its pair (a project's only filing)");
+    }
+
+    /// <summary>
+    /// #1616: a work assignment typed under an ORDINARY matter whose pair names a DIFFERENT, secure matter is not secured —
+    /// the disagreeing pair makes it undetermined (never "filed under the ordinary matter only", never "under the secure
+    /// one"); nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task AWorkAssignmentWhosePairDisagreesWithItsTypedMatter_IsNotSecured()
+    {
+        var (secure, ordinary, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, secure, null, Colleague);
+        _fixture.SeedMatter(ordinary, isSecure: false);
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+        FilePair(_fixture, "sprk_workassignment", workAssignment, secure, RecordTypeRef(_fixture, "sprk_matter"));
+
+        await RunJobAsync();
+
+        ShouldBeUntouched(workAssignment, "the pair alone never files it under the secure matter");
     }
 
     // ── The sharees (task 149's mechanism, add-only on a root) ────────────────────────────────────────────────────────
