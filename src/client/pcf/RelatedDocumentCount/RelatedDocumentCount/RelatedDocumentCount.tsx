@@ -157,7 +157,7 @@ export const RelatedDocumentCount: React.FC<IRelatedDocumentCountProps> = ({ con
       : null;
 
   return (
-    <div data-pcf-version="1.21.5">
+    <div data-pcf-version="1.21.6">
       <RelationshipCountCard
         count={count}
         isLoading={effectiveIsLoading}

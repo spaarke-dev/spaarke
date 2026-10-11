@@ -657,7 +657,7 @@ node scripts/quality/client-lint/client-lint.mjs check --package spaarkeai      
 node scripts/quality/client-lint/client-lint.mjs controls                       # must-fire / must-not-fire fixtures
 ```
 
-`check` takes about 1 minute for all ten packages on a warm dev box (UI.Components is the longest at 10-65 s depending on machine load). CI runs `controls` then `check` in the standalone workflow `.github/workflows/client-lint.yml` (check `Client lint (type-aware ratchet)`, on PRs and master pushes that touch the covered packages). It is kept out of the router/tier files so the CI shadow window's comparison is untouched, and is not yet a required check: make it required in the master ruleset once it has run green and the shadow window has closed.
+`check` takes about 1 minute for all ten packages on a warm dev box (UI.Components is the longest at 10-65 s depending on machine load). CI runs `controls` then `check` in the standalone workflow `.github/workflows/client-lint.yml` (check `Client lint (type-aware ratchet)`). It runs on every PR and reports success without linting when no covered path changed, so it can be a required check without leaving unrelated PRs waiting; master pushes run it only when a covered path changed. It is kept out of the router/tier files so the CI shadow window's comparison is untouched, and is not yet a required check: the owner approved (2026-10-10) adding it to the master ruleset once the shadow window has closed.
 
 ### How suppressions work
 

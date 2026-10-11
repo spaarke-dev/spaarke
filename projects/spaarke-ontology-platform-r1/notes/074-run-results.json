@@ -1,0 +1,1692 @@
+{
+  "runAtUtc": "2026-10-10T02:58:36.7078522+00:00",
+  "fixture": "tests/fixtures/ontology-classifier-recall/labelled-set.json",
+  "dataverseUrl": "https://spaarkedev1.crm.dynamics.com",
+  "modelCallsExpected": 184,
+  "warnings": [
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    },
+    {
+      "Category": "Sprk.Bff.Api.Services.Ai.PromptSchemaRenderer",
+      "level": "Warning",
+      "Message": "Failed to parse JPS schema; falling back to flat text rendering",
+      "ExceptionType": null
+    }
+  ],
+  "linearRuns": [
+    "Linear run: enforced 3 $choices field(s) as output-schema enum from the live Dataverse taxonomy.",
+    "Linear run: consumer=email-triage action=Triage Email operandChannel=Input operandKind=PreResolved promptLen=11806 temp=0.2 modelTier=Fast deployment=gpt-4o-mini allowsKnowledge=False groundingChars=0 context=[User=StablePrefix,est=0,refs=0,budget=700 | Workspace=StablePrefix,est=0,refs=0,budget=150 | Business=StablePrefix,est=0,refs=0,budget=1500 | Organizational=SemiStable,est=0,refs=0,budget=n/a | Semantic=SemiStable,est=0,refs=0,budget=n/a | Memory=VolatileTail,est=0,refs=0,budget=2000]",
+    "Linear run: consumer=email-triage action=Triage Email operandChannel=Input operandKind=PreResolved promptLen=11425 temp=0.2 modelTier=Fast deployment=gpt-4o-mini allowsKnowledge=False groundingChars=0 context=[User=StablePrefix,est=0,refs=0,budget=700 | Workspace=StablePrefix,est=0,refs=0,budget=150 | Business=StablePrefix,est=0,refs=0,budget=1500 | Organizational=SemiStable,est=0,refs=0,budget=n/a | Semantic=SemiStable,est=0,refs=0,budget=n/a | Memory=VolatileTail,est=0,refs=0,budget=2000]"
+  ],
+  "metrics": {
+    "Items": 92,
+    "Positives": 55,
+    "Negatives": 37,
+    "PredicateRecall": 0.21818181818181817,
+    "PredicateRecallWilsonLow95": 0.12946024041123025,
+    "PredicateRecallWilsonHigh95": 0.34370034021840024,
+    "PredicatePrecision": 1,
+    "ExactAccuracy": 0.43478260869565216,
+    "PerCategory": {
+      "Fee / rate change": {
+        "Labelled": 27,
+        "Predicted": 4,
+        "Correct": 4,
+        "StrictRecall": 0.14814814814814814,
+        "StrictPrecision": 1
+      },
+      "Scope / budget change": {
+        "Labelled": 28,
+        "Predicted": 8,
+        "Correct": 8,
+        "StrictRecall": 0.2857142857142857,
+        "StrictPrecision": 1
+      }
+    },
+    "PredicateMisses": [
+      "L004",
+      "L006",
+      "L010",
+      "L011",
+      "L012",
+      "L013",
+      "L021",
+      "L022",
+      "L023",
+      "L026",
+      "L027",
+      "L030",
+      "L039",
+      "L041",
+      "L042",
+      "L043",
+      "L044",
+      "L046",
+      "L048",
+      "L049",
+      "L050",
+      "L052",
+      "L053",
+      "L059",
+      "L060",
+      "L061",
+      "L062",
+      "L064",
+      "L066",
+      "L068",
+      "L070",
+      "L071",
+      "L072",
+      "L073",
+      "L074",
+      "L075",
+      "L076",
+      "L077",
+      "L080",
+      "L083",
+      "L084",
+      "L090",
+      "L092"
+    ],
+    "PredicateFalsePositives": [],
+    "Confusion": {
+      "Administrative": {
+        "Administrative": 6,
+        "Client instruction": 1
+      },
+      "Client instruction": {
+        "Client instruction": 4
+      },
+      "Court / Filing": {
+        "Court / Filing": 4,
+        "Scheduling": 1
+      },
+      "Fee / rate change": {
+        "Administrative": 3,
+        "Client instruction": 1,
+        "Fee / rate change": 4,
+        "Invoice / Billing": 19
+      },
+      "Invoice / Billing": {
+        "Administrative": 1,
+        "Invoice / Billing": 8
+      },
+      "Marketing / Noise": {
+        "Administrative": 1,
+        "Marketing / Noise": 2
+      },
+      "Opposing counsel": {
+        "Client instruction": 3,
+        "Opposing counsel": 1
+      },
+      "Scheduling": {
+        "Client instruction": 2,
+        "Scheduling": 3
+      },
+      "Scope / budget change": {
+        "Administrative": 7,
+        "Client instruction": 10,
+        "Invoice / Billing": 3,
+        "Scope / budget change": 8
+      }
+    }
+  },
+  "items": [
+    {
+      "Id": "L001",
+      "Label": "Scope / budget change",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Ridgeline\u0027s document production is significantly larger than planned, requiring additional staffing and budget approval. Approval is requested this week to proceed with onboarding contract reviewers."
+    },
+    {
+      "Id": "L002",
+      "Label": "Invoice / Billing",
+      "LabelSource": "owner",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The client disputes billing for 3.2 hours on invoice 77812, citing non-billable time per guidelines. They request a credit of $1,120 and resubmission of the corrected invoice."
+    },
+    {
+      "Id": "L003",
+      "Label": "Court / Filing",
+      "LabelSource": "owner",
+      "Rung5Category": "court-notice",
+      "SignalPresent": true,
+      "Predicted": "Court / Filing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "A hearing on the Plaintiff\u0027s Motion to Compel is scheduled for December 2, 2026 at 10:00 a.m. Counsel must file a joint status report by November 25. This requires calendaring the deadline and linking the event to the matter."
+    },
+    {
+      "Id": "L004",
+      "Label": "Fee / rate change",
+      "LabelSource": "owner",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "Sakura Patent Translations notifies a fee increase effective April 1 for Japanese-to-English patent translation and certification services. Requests before March 31 will be charged at current rates."
+    },
+    {
+      "Id": "L005",
+      "Label": "Invoice / Billing",
+      "LabelSource": "owner",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "Invoice 2026-0912 for September services on the Northfield matters totals $48,320.50. Payment is due within 30 days as per the attached wire instructions."
+    },
+    {
+      "Id": "L006",
+      "Label": "Fee / rate change",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "Fennimore Law informs Coastline that time will be recorded and billed in six-minute increments starting May 1. This change aligns with client guidelines and aims to reduce costs for short communications."
+    },
+    {
+      "Id": "L007",
+      "Label": "Invoice / Billing",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The USPTO issued a Notice of Allowance for patent application 17/552,019. Payment of the issue fee is due by January 9 and requires calendar tracking."
+    },
+    {
+      "Id": "L008",
+      "Label": "Marketing / Noise",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Marketing / Noise",
+      "Priority": "Low",
+      "ReviewOutcome": "Dismiss",
+      "Summary": "This is a marketing email promoting SpendLens legal invoice analytics. It offers a demo and free audit but requires no immediate action."
+    },
+    {
+      "Id": "L009",
+      "Label": "Scheduling",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email discusses extending an internal investigation with eight additional employee interviews. Confirmation is requested to proceed with the extra work beyond the original scope."
+    },
+    {
+      "Id": "L010",
+      "Label": "Fee / rate change",
+      "LabelSource": "owner",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The email informs about a change in billing practice for attorney travel time, moving to full hourly rates starting next month. It requests any conflicting guidelines to be sent for compliance."
+    },
+    {
+      "Id": "L011",
+      "Label": "Scope / budget change",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email discusses the Q4 budget for the licensing program and the cost of completing four agreements. It requests direction on whether to proceed or hold until the new budget year."
+    },
+    {
+      "Id": "L012",
+      "Label": "Fee / rate change",
+      "LabelSource": "owner",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Veridian Health mandates that only 2025 panel rates apply for all timekeepers from Q2 onward, requiring reversal of 2026 increases on invoices dated April 1 or later. Confirmation of acceptance or contact for discussion is requested promptly."
+    },
+    {
+      "Id": "L013",
+      "Label": "Fee / rate change",
+      "LabelSource": "owner",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The firm notifies a change in billing terms for court appearances effective June 1. In-person appearances will have a half-day minimum charge per attorney; remote appearances remain billed by actual time."
+    },
+    {
+      "Id": "L014",
+      "Label": "Client instruction",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The email sets settlement authority limits at $150,000 inclusive of fees for Marsh v. Lattimore. It instructs to communicate readiness to proceed with depositions and requires escalation if settlement exceeds authority."
+    },
+    {
+      "Id": "L015",
+      "Label": "Administrative",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "This is an automatic out-of-office reply indicating unavailability until October 20. It provides alternate contact information for urgent matters."
+    },
+    {
+      "Id": "L016",
+      "Label": "Court / Filing",
+      "LabelSource": "owner",
+      "Rung5Category": "court-notice",
+      "SignalPresent": true,
+      "Predicted": "Court / Filing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The court granted the plaintiff\u0027s motion for attorneys\u0027 fees and costs, awarding $87,500.00 in fees and $6,214.33 in costs. The defendant must pay the award within 30 days of October 2, 2026."
+    },
+    {
+      "Id": "L017",
+      "Label": "Marketing / Noise",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Marketing / Noise",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "This email presents sponsorship opportunities for the Legal Ops Summit 2027 in Austin from April 12-14. It invites a reply to request the sponsorship prospectus."
+    },
+    {
+      "Id": "L018",
+      "Label": "Scheduling",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The discovery timeline has been extended by about three months due to court approval of third-party subpoenas. A revised budget estimate will be sent tomorrow and deadlines need to be calendared."
+    },
+    {
+      "Id": "L019",
+      "Label": "Scheduling",
+      "LabelSource": "owner",
+      "Rung5Category": "scheduling",
+      "SignalPresent": true,
+      "Predicted": "Scheduling",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The deposition of Javier Ortiz is confirmed for November 14 at 9:30 a.m. Attendee names are requested by Monday to arrange building access."
+    },
+    {
+      "Id": "L020",
+      "Label": "Invoice / Billing",
+      "LabelSource": "owner",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "A credit memo CM-0331 for $3,450.00 has been issued against invoice 5521. The credit will appear on the next statement and relates to billing and payment matters."
+    },
+    {
+      "Id": "L021",
+      "Label": "Scope / budget change",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "This email provides a quarterly update on the Brightwater licensing program, covering negotiations, compliance audits, and upcoming renewals. It requires noting a December deadline for memos and linking the update to the relevant matter."
+    },
+    {
+      "Id": "L022",
+      "Label": "Fee / rate change",
+      "LabelSource": "owner",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "This email notifies that Tom\u0027s billing rate will increase from $640 to $735 starting in July. It requires updating billing records to reflect this change before the next invoice."
+    },
+    {
+      "Id": "L023",
+      "Label": "Scope / budget change",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The email requests approval for retaining two additional testifying experts for Delgado v. Pacifica Rail. Approval is needed by the end of next week to meet the disclosure deadline."
+    },
+    {
+      "Id": "L024",
+      "Label": "Client instruction",
+      "LabelSource": "owner",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The client instructs to proceed with filing the opposition against the KINETIQ application. The work must be kept within the previously approved budget."
+    },
+    {
+      "Id": "L025",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The client requests a full review of 140 patents, increasing the scope and estimated cost to $165,000 from the original $55,000. Confirmation is needed to proceed with the revised diligence work."
+    },
+    {
+      "Id": "L026",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The email informs that the 10% volume discount on Pioneer Freight invoices in 2026 will not be renewed for 2027. It invites discussion of alternative billing arrangements to assist with planning."
+    },
+    {
+      "Id": "L027",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "This is a weekly status update on the Orchard Lane development covering zoning, construction contract, leasing, and a new easement negotiation. It requires tracking the matter and project, and noting the Friday deadline to close contract points."
+    },
+    {
+      "Id": "L028",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "budget-request",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The email requests a $95,000 increase to the Phase 2 budget for the Aldridge matter. A call is offered to discuss the budget details and next steps."
+    },
+    {
+      "Id": "L029",
+      "Label": "Administrative",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "Request to grant view-only data room access to two team members for Project Talon. The email requires updating access permissions and linking to the project matter."
+    },
+    {
+      "Id": "L030",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email requests approval to add Dr. Kenji Sato to the Delmar merger review team, noting his higher billing rate. It seeks confirmation to proceed with this change in team composition."
+    },
+    {
+      "Id": "L031",
+      "Label": "Opposing counsel",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The email requests a meet and confer regarding objections to Interrogatories 3-9, focusing on relevance objections. It requires scheduling the meeting promptly to address the issues before potential court involvement."
+    },
+    {
+      "Id": "L032",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "fee-proposal",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The email proposes an alternative fee structure for Halvorsen v. Corridor Energy, including a draft amendment to the engagement letter. It requires review and execution of the document and routing to billing."
+    },
+    {
+      "Id": "L033",
+      "Label": "Invoice / Billing",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The email notifies that the October invoice will be higher due to deposition prep and expert depositions. It confirms all charges are within the approved Phase 2 budget and require no new approvals."
+    },
+    {
+      "Id": "L034",
+      "Label": "Opposing counsel",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The email contains redlines to a draft stipulated protective order with key changes and objections. Counsel requests availability for a discussion on Friday regarding these revisions."
+    },
+    {
+      "Id": "L035",
+      "Label": "Opposing counsel",
+      "LabelSource": "claude",
+      "Rung5Category": "discovery-deficiency",
+      "SignalPresent": true,
+      "Predicted": "Opposing counsel",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The opposing counsel identifies deficiencies in discovery responses, specifically missing documents and boilerplate objections. They require supplementation within ten days or a meeting to confer this week."
+    },
+    {
+      "Id": "L036",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Defendants served an unexpected expert report requiring a rebuttal expert. Approval for an estimated $60k budget increase is requested this week."
+    },
+    {
+      "Id": "L037",
+      "Label": "Court / Filing",
+      "LabelSource": "claude",
+      "Rung5Category": "scheduling",
+      "SignalPresent": true,
+      "Predicted": "Scheduling",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "This email is a docket reminder for a response to a Non-Final Office Action in the VANTA matter. The response deadline is November 21, 2026, with an extension option to February 21, 2027, subject to fees."
+    },
+    {
+      "Id": "L038",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The tribunal has ordered a document production phase lasting approximately four months. Counsel will send a revised budget estimate and requests tracking of related deadlines."
+    },
+    {
+      "Id": "L039",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The client requests a second-opinion review of a robotics patent freedom-to-operate analysis. They ask for a scope and cost estimate with completion desired within one month."
+    },
+    {
+      "Id": "L040",
+      "Label": "Invoice / Billing",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The Corporate Controller requests estimates of unbilled work in progress for all Kite Surgical matters by December 20. A single total per matter is sufficient; no narrative detail is needed."
+    },
+    {
+      "Id": "L041",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The email updates on reopened negotiation points and a delayed closing to mid-March for Project Cedar. It requests revisiting the budget and indicates additional negotiation rounds requiring attention."
+    },
+    {
+      "Id": "L042",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "An external party sent the 2027 rate card showing a 7% increase effective February 1. The sender offers to discuss the details if needed."
+    },
+    {
+      "Id": "L043",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "Client requests adding the Delaware entity to the scope of work for an additional $12k. Approval is needed to proceed with this addition."
+    },
+    {
+      "Id": "L044",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The firm notifies a change in invoicing currency for Brightline matters from sterling to US dollars at a fixed conversion rate. They request confirmation if invoices should be sent to a different address."
+    },
+    {
+      "Id": "L045",
+      "Label": "Administrative",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The client requests confirmation of the current 2026 hourly rates for timekeepers on Matter 1123. This is a routine inquiry requiring a response to confirm existing rates."
+    },
+    {
+      "Id": "L046",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The email informs about a paralegal rate increase from $185 to $205 starting next month. Attorney rates remain unchanged. It requires routing to the billing department for processing."
+    },
+    {
+      "Id": "L047",
+      "Label": "Court / Filing",
+      "LabelSource": "claude",
+      "Rung5Category": "court-notice",
+      "SignalPresent": true,
+      "Predicted": "Court / Filing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The court granted an extension of time for the defendant\u0027s answer to the Amended Complaint. The new deadline is November 18, 2026, requiring calendaring and matter linkage."
+    },
+    {
+      "Id": "L048",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The email requests confirmation to proceed with a $58,000 certified translation of 2,000 pages of exhibits for a Seoul court proceeding. A four-week turnaround is required for this additional work outside the original plan."
+    },
+    {
+      "Id": "L049",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "General Counsel requests extending contract review to include 2019 and 2020 supplier contracts. A full five-year review is needed before the March meeting deadline."
+    },
+    {
+      "Id": "L050",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The email informs about increased monitoring work and expected monthly costs rising from $15,000 to $35,000 for the Halberd chapter 11 matter. It requests guidance on whether to keep monitoring narrower."
+    },
+    {
+      "Id": "L051",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "Priya Natarajan has been promoted to partner effective January 1. Her billing rate will change to the partner scale of $890/hr on your matters. Please update billing records accordingly and notify the billing department of this change."
+    },
+    {
+      "Id": "L052",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "This email informs about a staffing change in the Kessler arbitration matter, replacing Rachel Huang with Victor Lindqvist. It notes the cost increase but confirms the work plan and hours remain unchanged."
+    },
+    {
+      "Id": "L053",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Ostrander \u0026 Co. notifies a change in payment terms effective 1 March, reducing payment period from 60 to 30 days. Interest of 1% per month applies to unpaid balances after 30 days under updated terms."
+    },
+    {
+      "Id": "L054",
+      "Label": "Invoice / Billing",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The invoice INV-30418 for matter 1123 was rejected due to invalid task and missing receipt. The sender requests correction and resubmission through the portal."
+    },
+    {
+      "Id": "L055",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "budget-approval",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The email requests approval for the additional trial preparation budget of approximately $700,000. The sender is available to discuss the budget details this week."
+    },
+    {
+      "Id": "L056",
+      "Label": "Invoice / Billing",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "Payment of $112,400.00 was sent by wire for invoices 5521, 5534, and 5540. The sender requests contact if the amount received differs from the payment sent."
+    },
+    {
+      "Id": "L057",
+      "Label": "Scheduling",
+      "LabelSource": "claude",
+      "Rung5Category": "scheduling",
+      "SignalPresent": true,
+      "Predicted": "Scheduling",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Judge Hamilton is available to mediate Delgado v. Pacifica Rail on January 12, 14, or 20. A response is required by Friday to confirm available dates."
+    },
+    {
+      "Id": "L058",
+      "Label": "Marketing / Noise",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "This email invites recipients to a free 60-minute webinar on AI and the future of patent prosecution scheduled for November 6. It requires calendaring the event if interested."
+    },
+    {
+      "Id": "L059",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "billing-proposal",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The email proposes a fixed monthly retainer of $40,000 for routine trademark portfolio maintenance instead of hourly billing. It requests agreement to start this arrangement from the first of next quarter."
+    },
+    {
+      "Id": "L060",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The email recommends filing an inter partes review petition against Corvex\u0027s \u0027417 patent as a new workstream. It requests confirmation to proceed with preparing the petition and notes an estimated cost of $350,000 through the institution decision."
+    },
+    {
+      "Id": "L061",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The SEC has requested adding nine custodians to the subpoena response, significantly increasing data volume and costs. A call is scheduled Thursday to discuss the revised $340k estimate and next steps."
+    },
+    {
+      "Id": "L062",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The client confirms additional anti-corruption training sessions in Mexico City, Singapore, and Dubai. An engagement addendum and estimated costs totaling $42,000 plus travel will be sent for approval."
+    },
+    {
+      "Id": "L063",
+      "Label": "Administrative",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The sender acknowledges receipt of the draft APA and commits to reviewing it over the weekend. Comments will be sent by Monday as a response deadline."
+    },
+    {
+      "Id": "L064",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email discusses the possibility of additional depositions in Houston, potentially increasing the phase cost by about 20%. A meeting is proposed for Thursday to discuss further."
+    },
+    {
+      "Id": "L065",
+      "Label": "Scheduling",
+      "LabelSource": "claude",
+      "Rung5Category": "scheduling",
+      "SignalPresent": true,
+      "Predicted": "Scheduling",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The email requests rescheduling a planned call from Tuesday at 2pm to Wednesday at 3pm due to a conflict. It requires updating the calendar to reflect the new meeting time."
+    },
+    {
+      "Id": "L066",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email discusses additional diligence work for three Brazilian subsidiaries outside the original scope. It requests confirmation on engaging local counsel and whether a formal revised estimate is needed."
+    },
+    {
+      "Id": "L067",
+      "Label": "Administrative",
+      "LabelSource": "claude",
+      "Rung5Category": "executed-document",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The email contains the renewed engagement letter for 2027 with unchanged rates and terms. It requests countersignature and return at the recipient\u0027s convenience."
+    },
+    {
+      "Id": "L068",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The email discusses the expanded scope of incident response notifications across multiple US states and EU authorities. It requires linking to the matter and routing for billing due to estimated additional costs."
+    },
+    {
+      "Id": "L069",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "billing-policy",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Halcyon Retail announces a shift to fixed-fee pricing for new matters starting July 1, FY27. Counsel must submit proposed fixed fees by May 31 using the provided template."
+    },
+    {
+      "Id": "L070",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The lender\u0027s counsel requests additional title work for two parcels due to an easement issue. Confirmation is needed to proceed with ordering and billing for the extra costs and hours."
+    },
+    {
+      "Id": "L071",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "This email notifies a hosting fee increase from $8 to $12 per GB for Matter 4471\u0027s review workspace. It requires payment of the adjusted fees and suggests discussing data archiving to manage costs."
+    },
+    {
+      "Id": "L072",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The firm offers a 12% fee concession on Crestline matters starting March, conditional on consolidating employment work with them. They propose documenting this agreement in a short side letter."
+    },
+    {
+      "Id": "L073",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "billing-arrangement",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The email proposes a capped fee arrangement of $250,000 for the hearing phase of the Torvald arbitration. It requires linking this billing arrangement to the matter and routing it to billing for processing."
+    },
+    {
+      "Id": "L074",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email confirms approval of a $95,000 budget increase for Phase 2 of the Aldridge matter. Finance has updated the purchase order and the mock trial should proceed as planned."
+    },
+    {
+      "Id": "L075",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The email notifies a service fee increase for patent annuity payments effective January 1, 2027. It requires routing to the billing team for processing and payment management."
+    },
+    {
+      "Id": "L076",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The sender informs that future invoices will include a flat 3% administrative charge on professional fees instead of itemizing certain office disbursements. They provide updated terms and suggest routing this information to billing for review."
+    },
+    {
+      "Id": "L077",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The firm notifies Northfield Holdings of the 2027 hourly rate increases effective January 1. No immediate action is required but discussion is offered if needed before the new year."
+    },
+    {
+      "Id": "L078",
+      "Label": "Administrative",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "This email provides a routine monthly budget report for the Aldridge matter, Phase 1. No changes to the budget or work plan are required at this time."
+    },
+    {
+      "Id": "L079",
+      "Label": "Client instruction",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The client requests a strategic change in litigation approach regarding Corvex, prioritizing a cross-license over damages. A follow-up discussion is planned to coordinate the initial contact with opposing counsel."
+    },
+    {
+      "Id": "L080",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The email proposes a blended billing rate of $575/hr for all associate time on the Orion supply disputes matter. It requests confirmation to implement this change starting next month."
+    },
+    {
+      "Id": "L081",
+      "Label": "Court / Filing",
+      "LabelSource": "claude",
+      "Rung5Category": "court-notice",
+      "SignalPresent": true,
+      "Predicted": "Court / Filing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The defendant filed a motion for attorneys\u0027 fees seeking $412,000 in Delgado v. Pacifica Rail. Our opposition is due by November 3 and has been calendared for the trial team."
+    },
+    {
+      "Id": "L082",
+      "Label": "Opposing counsel",
+      "LabelSource": "claude",
+      "Rung5Category": "settlement-demand",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "This email is a settlement demand in Marsh v. Lattimore Foods requesting $2,400,000 to resolve all claims. A response is required by 5:00 p.m. on October 24 to avoid further legal action."
+    },
+    {
+      "Id": "L083",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "Tarrant Medical Systems has issued revised Outside Counsel Guidelines effective January 1, 2027. Firms must acknowledge receipt and confirm compliance with the new billing rules by the specified deadline."
+    },
+    {
+      "Id": "L084",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email discusses clearance searches for the VANTA mark in 12 additional countries, estimating $38,000 in extra costs. It requests confirmation to instruct local agents for these searches."
+    },
+    {
+      "Id": "L085",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Fee / rate change",
+      "Priority": "Low",
+      "ReviewOutcome": "Route",
+      "Summary": "The firm informs the client of rate adjustments following the Linden and Hartwell Price combination effective December 1. New rates will be applied to invoices for December work onward."
+    },
+    {
+      "Id": "L086",
+      "Label": "Invoice / Billing",
+      "LabelSource": "claude",
+      "Rung5Category": "vendor-setup",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "High",
+      "ReviewOutcome": "Route",
+      "Summary": "The vendor requests a completed W-9 form and remittance details to complete vendor setup. Payment processing is on hold until setup is finalized."
+    },
+    {
+      "Id": "L087",
+      "Label": "Administrative",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Administrative",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The email announces the relocation of the New York office to a new address effective November 1. Recipients are requested to update their contact records accordingly."
+    },
+    {
+      "Id": "L088",
+      "Label": "Client instruction",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The sender instructs to hold all work on the Rivera matter until the board meeting on the 18th. No contact with the other side should be made until further notice."
+    },
+    {
+      "Id": "L089",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "budget-discussion",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "Low",
+      "ReviewOutcome": "File",
+      "Summary": "The email provides a budget estimate of $210,000 to $260,000 for a potential appeal if Westmark decides to proceed. No immediate decision is required; the information is for planning purposes."
+    },
+    {
+      "Id": "L090",
+      "Label": "Fee / rate change",
+      "LabelSource": "claude",
+      "Rung5Category": "invoice",
+      "SignalPresent": true,
+      "Predicted": "Invoice / Billing",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email informs about revised fixed fees for EPO opposition proceedings effective January 1. It requires linking this updated fee schedule to the relevant organization record."
+    },
+    {
+      "Id": "L091",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "budget-revision-request",
+      "SignalPresent": true,
+      "Predicted": "Scope / budget change",
+      "Priority": "High",
+      "ReviewOutcome": "Update",
+      "Summary": "The email requests a revised budget submission for Project Atlas due to an expanded scope including the EU regulatory workstream. This update is needed to refresh the approval in the system promptly."
+    },
+    {
+      "Id": "L092",
+      "Label": "Scope / budget change",
+      "LabelSource": "claude",
+      "Rung5Category": "general-correspondence",
+      "SignalPresent": true,
+      "Predicted": "Client instruction",
+      "Priority": "Low",
+      "ReviewOutcome": "Update",
+      "Summary": "The email discusses filing two divisional patent applications for the \u0027882 family due to a restriction requirement. It requests approval to proceed with estimated fees of about $22,000."
+    }
+  ]
+}

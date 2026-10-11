@@ -44,4 +44,14 @@ public class AiClassificationOptions
     /// </summary>
     [Range(1, 20000)]
     public int MaxInputChars { get; set; } = 8000;
+
+    /// <summary>
+    /// The <c>$choices</c> reference of the editable triage taxonomy rung 5 classifies against
+    /// (spaarke-ontology-platform-r1 D-117(b)). Default: <c>lookup:sprk_triagecategory.sprk_name</c>, the same
+    /// reference the TRIAGE-EMAIL Action's <c>category</c> field uses, so both classification steps read the same
+    /// rows (names + <c>sprk_classifierguidance</c>, enabled rows only) and a row edit changes both prompts with no
+    /// code change. Rung 5 then also emits <c>triageCategory</c> (one of those names) as the hint for TRIAGE-EMAIL.
+    /// Empty turns the taxonomy off without a redeploy: rung 5 sends its pre-D-117 prompt and schema unchanged.
+    /// </summary>
+    public string? TriageTaxonomyChoicesRef { get; set; } = "lookup:sprk_triagecategory.sprk_name";
 }

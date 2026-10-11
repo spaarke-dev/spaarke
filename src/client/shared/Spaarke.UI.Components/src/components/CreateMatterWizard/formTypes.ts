@@ -13,6 +13,7 @@
 
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { IUploadedFile } from './wizardTypes';
+import type { AuthenticatedFetchFn } from '../../utils/fetchTypes';
 
 // ---------------------------------------------------------------------------
 // Form state
@@ -204,7 +205,7 @@ export interface ICreateRecordStepProps {
    * Authenticated fetch function for BFF API calls.
    * Required for AI pre-fill. Injected by the host application.
    */
-  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
+  authenticatedFetch: AuthenticatedFetchFn;
 
   /**
    * BFF API base URL (e.g. "https://spe-api-dev-67e2xz.azurewebsites.net/api").

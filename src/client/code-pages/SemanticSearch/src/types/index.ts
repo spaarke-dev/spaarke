@@ -541,23 +541,6 @@ export interface AppUrlParams {
   associatedOnly?: boolean;
 }
 
-/**
- * API error response following RFC 7807 ProblemDetails format.
- * @see ADR-019 — ProblemDetails for all HTTP failures
- */
-export interface ApiError {
-  /** HTTP status code. */
-  status: number;
-  /** Error type URI. */
-  type?: string;
-  /** Short human-readable summary of the problem. */
-  title: string;
-  /** Detailed human-readable explanation. */
-  detail?: string;
-  /** Validation errors keyed by field name. */
-  errors?: Record<string, string[]>;
-}
-
 // =============================================
 // Search State Types
 // =============================================

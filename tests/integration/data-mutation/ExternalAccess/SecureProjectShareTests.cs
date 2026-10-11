@@ -102,7 +102,8 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
         var childShare = _fixture.Grants.Should().ContainSingle(g => g.RecordId == documentId).Subject;
         childShare.EntitySet.Should().Be("sprk_documents");
         childShare.Principal.Should().Be(DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId));
-        childShare.AccessRightsCsv.Should().NotContain("ShareAccess");
+        childShare.AccessRightsCsv.Should().Contain("ShareAccess",
+            "the creator's Collaborate share carries Share, and a child mirrors it since owner round 91");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -164,7 +165,8 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
             "new-container path").Subject;
         childShare.EntitySet.Should().Be("sprk_documents");
         childShare.Principal.Should().Be(DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId));
-        childShare.AccessRightsCsv.Should().NotContain("ShareAccess");
+        childShare.AccessRightsCsv.Should().Contain("ShareAccess",
+            "the creator's Collaborate share carries Share, and a child mirrors it since owner round 91");
     }
 
     /// <summary>

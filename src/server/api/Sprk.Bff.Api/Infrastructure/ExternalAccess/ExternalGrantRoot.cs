@@ -69,6 +69,27 @@ internal static class ExternalGrantRoot
     };
 
     /// <summary>
+    /// The column holding a root's DISPLAY name (task 181). Not the table's primary-name column on project and matter,
+    /// which is the number (<c>sprk_projectnumber</c> / <c>sprk_matternumber</c>); verified live by task 100.
+    /// </summary>
+    public static string NameColumnFor(ExternalGrantRootType type) => type switch
+    {
+        ExternalGrantRootType.Project => "sprk_projectname",
+        ExternalGrantRootType.Matter => "sprk_mattername",
+        ExternalGrantRootType.WorkAssignment => "sprk_name",
+        _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown external grant root type.")
+    };
+
+    /// <summary>The root's name in a sentence, lower case: "project", "matter", "work assignment" (task 181).</summary>
+    public static string LabelFor(ExternalGrantRootType type) => type switch
+    {
+        ExternalGrantRootType.Project => "project",
+        ExternalGrantRootType.Matter => "matter",
+        ExternalGrantRootType.WorkAssignment => "work assignment",
+        _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown external grant root type.")
+    };
+
+    /// <summary>
     /// Parses a wire <c>recordType</c> token (case-insensitive) into an <see cref="ExternalGrantRootType"/>.
     /// Accepts <c>project</c> | <c>matter</c> | <c>workassignment</c> (hyphen/underscore spellings of the
     /// last are also accepted). Returns <c>false</c> for null/empty/unknown so callers reject fail-closed.

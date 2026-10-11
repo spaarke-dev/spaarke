@@ -387,8 +387,10 @@ public sealed class AssignedAccessSyncTestFixture : WorkspaceTestFixture
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
         {
             _fixture.ProbedTargets.Add((entitySet, recordId));
+            // Write and Share (task 179): the list and dismiss routes need both; sync's Write-only exception is pinned in
+            // DelegationRuleCharacterizationTests.
             return Task.FromResult(_fixture.WritableRecords.ContainsKey(recordId)
-                ? AccessRights.Read | AccessRights.Write
+                ? AccessRights.Read | AccessRights.Write | AccessRights.Share
                 : AccessRights.None);
         }
     }

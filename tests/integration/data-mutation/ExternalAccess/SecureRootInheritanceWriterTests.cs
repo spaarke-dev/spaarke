@@ -153,8 +153,12 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
 
     // ── (1) CREATE: dataverse.create_record ────────────────────────────────────────────────────────────────────────
 
+    /// <summary>The caller's scripted Dataverse, reading the ADR-024 record-type catalog from this fixture's own rows.</summary>
+    private SecureChildOwnershipAiToolTests.ScriptedUserClient Scripted() =>
+        new(Creator) { RecordTypeOf = id => World.ValueOf<string>("sprk_recordtype_ref", id, "sprk_recordlogicalname") };
+
     private DataverseCreateRecordHandler ChatCreate(IFieldMappingDataverseService appOnly) =>
-        new(new SecureChildOwnershipAiToolTests.ScriptedUserClient(Creator), CreateLogger<DataverseCreateRecordHandler>(),
+        new(Scripted(), CreateLogger<DataverseCreateRecordHandler>(),
             new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new RecordOwnershipResolver(
                 SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
@@ -355,7 +359,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
     public async Task ChatCreate_UnderASecureMatterByThePair_WithoutAppendToOnTheMatter_IsDenied_AndNothingIsCreated()
     {
         var (secure, _) = Matters();
-        var user = new SecureChildOwnershipAiToolTests.ScriptedUserClient(Creator);
+        var user = Scripted();
         user.NoAppendTo.Add(secure);
         var handler = new DataverseCreateRecordHandler(user, CreateLogger<DataverseCreateRecordHandler>(),
             new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
@@ -506,7 +510,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         resolver.Setup(r => r.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RecordOwnerResolution.Owned(SecureTeam) with { IsSecureOwner = true });
         var handler = new DataverseCreateRecordHandler(
-            new SecureChildOwnershipAiToolTests.ScriptedUserClient(Creator), CreateLogger<DataverseCreateRecordHandler>(),
+            Scripted(), CreateLogger<DataverseCreateRecordHandler>(),
             new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"), resolver.Object,
             AppCreatesIntoTheWorld().Object, IdentityNormalizationFixtures.NoLinkedContact(), _gate);
 
@@ -944,9 +948,16 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
 
     /// <param name="afterPatch">Task 158 r1c-v1: what changes right after the caller's PATCH — between the re-file's pre-check
     /// and the securing that follows it.</param>
-    private Task<ToolResult> ChatRefile(Guid workAssignment, Guid matter, Action? afterPatch = null)
+    private Task<ToolResult> ChatRefile(Guid workAssignment, Guid matter, Action? afterPatch = null) =>
+        ChatRefileWith(workAssignment, Scripted(),
+            new Dictionary<string, object> { ["sprk_regardingmatter"] = new { relatedTable = "sprk_matter", recordId = matter } },
+            afterPatch);
+
+    private Task<ToolResult> ChatRefileWith(
+        Guid workAssignment, SecureChildOwnershipAiToolTests.ScriptedUserClient scripted, Dictionary<string, object> item,
+        Action? afterPatch = null)
     {
-        var user = new PatchingUserClient(new SecureChildOwnershipAiToolTests.ScriptedUserClient(Creator), (path, body) =>
+        var user = new PatchingUserClient(scripted, (path, body) =>
         {
             using var doc = JsonDocument.Parse(body);
             ApplyFiling("sprk_workassignment", workAssignment,
@@ -961,10 +972,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
                 {
                     tablename = "sprk_workassignment",
                     recordId = workAssignment,
-                    item = new Dictionary<string, object>
-                    {
-                        ["sprk_regardingmatter"] = new { relatedTable = "sprk_matter", recordId = matter },
-                    },
+                    item,
                 })) with
                 { UserId = Guid.NewGuid().ToString() },
                 BuildAnalysisTool(nameof(DataverseUpdateRecordHandler)), CancellationToken.None);
@@ -1122,6 +1130,258 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+        _writes.Should().BeEmpty("the caller's PATCH is never sent");
+    }
+
+    // ── The ADR-024 pair is AppendTo-checked AS THE CALLER like any lookup (ontology-platform-r1 task 046's review) ───────
+
+    /// <summary>A work assignment filed ONLY by the pair (no typed regarding lookup) under <paramref name="matter"/>.</summary>
+    private Task<ToolResult> CreateWorkAssignmentByThePair(
+        SecureChildOwnershipAiToolTests.ScriptedUserClient user, Guid matter, IFieldMappingDataverseService appOnly) =>
+        new DataverseCreateRecordHandler(user, CreateLogger<DataverseCreateRecordHandler>(),
+                new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+                new RecordOwnershipResolver(
+                    SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                    NullLogger<RecordOwnershipResolver>.Instance),
+                appOnly, IdentityNormalizationFixtures.NoLinkedContact(), _gate)
+            .ExecuteChatAsync(
+                BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
+                {
+                    tablename = "sprk_workassignment",
+                    item = new Dictionary<string, object>
+                    {
+                        ["sprk_name"] = "Review the lease",
+                        ["sprk_regardingrecordid"] = matter.ToString("D"),
+                        ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, "sprk_matter") },
+                    },
+                })) with
+                { UserId = Guid.NewGuid().ToString() },
+                BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
+
+    /// <summary>
+    /// THE ORACLE. Before the fix the pair's matter was AppendTo-checked only when it was SECURE (the plan's guard): a missing
+    /// matter or an ordinary one the caller cannot see was CREATED under, and only a secure one was refused — so the refusal
+    /// said "this id exists and is secure". Now all three answer the same denial, and nothing is created.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_AWorkAssignmentFiledOnlyByThePair_UnderAMissingAnUnreadableOrASecureUnreadableMatter_AnswersIdentically()
+    {
+        var (secure, ordinary) = Matters();
+        var absent = Guid.NewGuid();
+        var user = Scripted();
+        user.Missing.Add(absent);
+        user.NoAppendTo.Add(ordinary);
+        user.NoAppendTo.Add(secure);
+
+        var missing = await CreateWorkAssignmentByThePair(user, absent, AppCreatesIntoTheWorld().Object);
+        var unreadable = await CreateWorkAssignmentByThePair(user, ordinary, AppCreatesIntoTheWorld().Object);
+        var secureUnreadable = await CreateWorkAssignmentByThePair(user, secure, AppCreatesIntoTheWorld().Object);
+
+        missing.Success.Should().BeFalse("a work assignment is never filed under a record that does not exist");
+        unreadable.Success.Should().BeFalse("nor under an ordinary record the caller may not append to");
+        (unreadable.ErrorCode, unreadable.ErrorMessage).Should().Be((missing.ErrorCode, missing.ErrorMessage));
+        (secureUnreadable.ErrorCode, secureUnreadable.ErrorMessage).Should().Be((missing.ErrorCode, missing.ErrorMessage),
+            "a secure record the caller cannot see answers exactly as a missing one");
+        missing.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        _writes.Should().BeEmpty();
+    }
+
+    /// <summary>The control: filed only by the pair under a secure matter the caller MAY append to — created into isolation.</summary>
+    [Fact]
+    public async Task ChatCreate_AWorkAssignmentFiledOnlyByThePair_UnderAnAppendableSecureMatter_IsCreatedSecure()
+    {
+        var (secure, _) = Matters();
+
+        var result = await CreateWorkAssignmentByThePair(Scripted(), secure, AppCreatesIntoTheWorld().Object);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ShouldBeSecure(_writes.Should().ContainSingle().Subject.Id, "filed by the pair under a secure matter");
+    }
+
+    /// <summary>
+    /// The update tool asks the caller's AppendTo on the record a work assignment is moved under BEFORE the secure-root gate:
+    /// the gate reads app-only, and its own refusal (the record's creator walled off the secure matter) would otherwise say
+    /// "this matter exists and is secure" to a caller who may not see it. Pair and typed lookup alike; nothing written.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ChatUpdate_ReFilingUnderASecureMatterTheCallerCannotAppendTo_IsTheSameDenialAsAMissingMatter(bool byThePair)
+    {
+        var (secure, ordinary) = Matters();
+        var absent = Guid.NewGuid();
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+        _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure); // the gate alone would refuse with creator_no_access
+        var user = Scripted();
+        user.Missing.Add(absent);
+        user.NoAppendTo.Add(secure);
+        var typeRef = RecordTypeRef(_fixture, "sprk_matter");
+
+        Dictionary<string, object> Under(Guid matter) => byThePair
+            ? new()
+            {
+                ["sprk_regardingrecordid"] = matter.ToString("D"),
+                ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = typeRef },
+            }
+            : new() { ["sprk_regardingmatter"] = new { relatedTable = "sprk_matter", recordId = matter } };
+
+        var toSecure = await ChatRefileWith(workAssignment, user, Under(secure));
+        var toMissing = await ChatRefileWith(workAssignment, user, Under(absent));
+
+        toSecure.Success.Should().BeFalse();
+        toSecure.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        (toSecure.ErrorCode, toSecure.ErrorMessage).Should().Be((toMissing.ErrorCode, toMissing.ErrorMessage));
+        _writes.Should().BeEmpty("the caller's PATCH is never sent");
+        _fixture.IsSecureOf(workAssignment).Should().BeFalse();
+    }
+
+    /// <summary>The control: re-filed by the pair under a secure matter the caller may append to — secured after the write.</summary>
+    [Fact]
+    public async Task ChatUpdate_ReFilingByThePairUnderAnAppendableSecureMatter_SecuresIt()
+    {
+        var (secure, ordinary) = Matters();
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+
+        var result = await ChatRefileWith(workAssignment, Scripted(), new()
+        {
+            ["sprk_regardingrecordid"] = secure.ToString("D"),
+            ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, "sprk_matter") },
+        });
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ShouldBeSecure(workAssignment, "re-filed by the pair under a secure matter");
+    }
+
+    // ── Verifier round on #1612 (F1/F2): a lookup with the same id in ANOTHER table never stands in for the pair's record ──
+
+    /// <summary>
+    /// A <paramref name="table"/> row assigned to a contact whose id the caller chose equal to <paramref name="matter"/>'s (a
+    /// client may pick a new row's id), and filed by the pair under that matter. Before the fix the pair's AppendTo check —
+    /// and the plan's own guard — were skipped because the pair's id equalled SOME lookup's.
+    /// </summary>
+    private Task<ToolResult> CreateAssignedToAContactWithTheMattersId(
+        SecureChildOwnershipAiToolTests.ScriptedUserClient user, string table, string contactColumn, Guid matter,
+        IFieldMappingDataverseService appOnly) =>
+        new DataverseCreateRecordHandler(user, CreateLogger<DataverseCreateRecordHandler>(),
+                new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+                new RecordOwnershipResolver(
+                    SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                    NullLogger<RecordOwnershipResolver>.Instance),
+                appOnly, IdentityNormalizationFixtures.NoLinkedContact(), _gate)
+            .ExecuteChatAsync(
+                BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
+                {
+                    tablename = table,
+                    item = new Dictionary<string, object>
+                    {
+                        ["sprk_name"] = "Review the lease",
+                        [contactColumn] = new { relatedTable = "contact", recordId = matter },
+                        ["sprk_regardingrecordid"] = matter.ToString("D"),
+                        ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, "sprk_matter") },
+                    },
+                })) with
+                { UserId = Guid.NewGuid().ToString() },
+                BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
+
+    [Theory]
+    [InlineData("sprk_workassignment", "sprk_assignedto")]
+    [InlineData("sprk_project", "sprk_assignedtointernal")]
+    public async Task ChatCreate_AssignedToAContactWithASecureMattersId_AndFiledByThePairUnderThatMatter_IsTheSameDenialAsAMissingMatter(
+        string table, string contactColumn)
+    {
+        var (secure, _) = Matters();
+        var absent = Guid.NewGuid();
+        var user = Scripted();
+        user.NoAppendToIn.Add(("sprk_matters", secure)); // the caller may append to the CONTACT with that id, not the matter
+        user.MissingIn.Add(("sprk_matters", absent));
+
+        var toSecure = await CreateAssignedToAContactWithTheMattersId(user, table, contactColumn, secure, AppCreatesIntoTheWorld().Object);
+        var toMissing = await CreateAssignedToAContactWithTheMattersId(user, table, contactColumn, absent, AppCreatesIntoTheWorld().Object);
+
+        toSecure.Success.Should().BeFalse("a row is never filed under a secure matter the caller may not append to");
+        toSecure.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        (toSecure.ErrorCode, toSecure.ErrorMessage).Should().Be((toMissing.ErrorCode, toMissing.ErrorMessage),
+            "the matter's existence and security are not told by a contact sharing its id");
+        _writes.Should().BeEmpty("nothing is created");
+    }
+
+    /// <summary>The legitimate shape still works: the typed filing lookup and the same pair, under a secure matter.</summary>
+    [Fact]
+    public async Task ChatCreate_AWorkAssignmentWithItsTypedMatterAndTheSamePair_UnderAnAppendableSecureMatter_IsCreatedSecure()
+    {
+        var (secure, _) = Matters();
+
+        var result = await new DataverseCreateRecordHandler(Scripted(), CreateLogger<DataverseCreateRecordHandler>(),
+                new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+                new RecordOwnershipResolver(
+                    SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                    NullLogger<RecordOwnershipResolver>.Instance),
+                AppCreatesIntoTheWorld().Object, IdentityNormalizationFixtures.NoLinkedContact(), _gate)
+            .ExecuteChatAsync(
+                BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new
+                {
+                    tablename = "sprk_workassignment",
+                    item = new Dictionary<string, object>
+                    {
+                        ["sprk_name"] = "Review the lease",
+                        ["sprk_regardingmatter"] = new { relatedTable = "sprk_matter", recordId = secure },
+                        ["sprk_regardingrecordid"] = secure.ToString("D"),
+                        ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, "sprk_matter") },
+                    },
+                })) with
+                { UserId = Guid.NewGuid().ToString() },
+                BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        ShouldBeSecure(_writes.Should().ContainSingle().Subject.Id, "filed by its typed matter and the same pair");
+    }
+
+    /// <summary>
+    /// The update tool's oracle (verifier F1/F2): an update that assigns a contact whose id equals matter X's and moves the
+    /// pair onto X used to skip the pair's AppendTo check, so the app-only secure-root gate then read X and answered with its
+    /// OWN refusals — the Access Permission floor ("filed under {name}, cannot be lower than Restricted") or the creator's
+    /// wall (<c>creator_no_access</c>) — telling the caller that X exists, its name and its permission level. Now AppendTo on
+    /// X is asked as the caller FIRST: a missing matter, an ordinary one they cannot see, a secure one they cannot see and a
+    /// Restricted one they cannot see answer identically, and nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task ChatUpdate_AssigningAContactWithAMattersId_AndMovingThePairOntoIt_AnswersIdentically_ForAMissingAnOrdinaryASecureAndARestrictedMatter()
+    {
+        var (secure, ordinary) = Matters();
+        var restricted = Guid.NewGuid();
+        _fixture.SeedMatter(restricted, isSecure: false);
+        World.Set("sprk_matter", restricted, "sprk_accesspermission",
+            new OptionSetValue(Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService.AccessPermissionRestricted));
+        var absent = Guid.NewGuid();
+        var (filedUnder, _) = Matters();
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", filedUnder);
+        _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure); // the gate alone would refuse with creator_no_access
+        var user = Scripted();
+        user.MissingIn.Add(("sprk_matters", absent));
+        foreach (var matter in new[] { ordinary, secure, restricted })
+            user.NoAppendToIn.Add(("sprk_matters", matter)); // the contacts with these ids are the caller's to append to
+        var typeRef = RecordTypeRef(_fixture, "sprk_matter");
+
+        Task<ToolResult> Move(Guid matter) => ChatRefileWith(workAssignment, user, new()
+        {
+            ["sprk_assignedto"] = new { relatedTable = "contact", recordId = matter },
+            ["sprk_regardingrecordid"] = matter.ToString("D"),
+            ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = typeRef },
+            ["sprk_accesspermission"] = 100000000, // Standard: below a Restricted parent's floor
+        });
+
+        var missing = await Move(absent);
+        var answers = new[] { await Move(ordinary), await Move(secure), await Move(restricted) };
+
+        missing.Success.Should().BeFalse();
+        missing.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        foreach (var answer in answers)
+            (answer.ErrorCode, answer.ErrorMessage).Should().Be((missing.ErrorCode, missing.ErrorMessage));
+        missing.ErrorMessage.Should().NotContain("creator_no_access")
+            .And.NotContain("Access Permission").And.NotContain("Restricted");
         _writes.Should().BeEmpty("the caller's PATCH is never sent");
     }
 

@@ -14,6 +14,8 @@
  * Returns result object — never throws.
  */
 
+import type { AuthenticatedFetchFn } from '../../utils/fetchTypes';
+
 // ---------------------------------------------------------------------------
 // Request / Response types (mirror BFF Dtos)
 // ---------------------------------------------------------------------------
@@ -63,9 +65,9 @@ export interface ICloseProjectResult {
  */
 export async function closeSecureProject(
   request: ICloseProjectRequest,
-  // See CloseProjectDialog's prop of the same name: narrowed from `typeof fetch` to the repo-wide
-  // `@spaarke/auth` shape (ADR-028) so a real `authenticatedFetch` is assignable.
-  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
+  // See CloseProjectDialog's prop of the same name: `@spaarke/auth`'s throwing `authenticatedFetch`
+  // (ADR-028) - a non-2xx rejects and the catch below reports it.
+  authenticatedFetch: AuthenticatedFetchFn,
   bffBaseUrl: string
 ): Promise<ICloseProjectResult> {
   const url = `${bffBaseUrl}/api/v1/external-access/close-project`;
@@ -76,24 +78,6 @@ export async function closeSecureProject(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),
     });
-
-    if (!response.ok) {
-      let errorDetail = `HTTP ${response.status}`;
-      try {
-        // Attempt to extract ProblemDetails detail field
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const problem: any = await response.json();
-        errorDetail = problem?.detail ?? problem?.title ?? errorDetail;
-      } catch {
-        /* ignore JSON parse failure */
-      }
-
-      console.error('[ClosureService] Project closure failed:', response.status, errorDetail);
-      return {
-        success: false,
-        errorMessage: `Project closure failed: ${errorDetail}`,
-      };
-    }
 
     const data: ICloseProjectResponse = await response.json();
 
