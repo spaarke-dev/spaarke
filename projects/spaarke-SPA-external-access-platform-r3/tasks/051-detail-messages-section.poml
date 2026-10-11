@@ -38,6 +38,7 @@
     <constraint source="project">Every BFF call this task adds goes through the external plane (/api/v1/external/**) via bffApiCall/bffApiBlob (src/client/external-spa/src/auth/bff-client.ts) and the active token acquirer (acquireActiveBffToken). No call uses a BFF URL or scope taken from a link or query string.</constraint>
     <constraint source="project">No attachment control; body max 10,000 characters (matches task 034).</constraint>
     <constraint source="project">Visual anchor: mirror the message list/compose layout of the shared EmailComposer/NewThreadModal in Spaarke.UI.Components (spacing, typography tokens), without their Xrm dependencies.</constraint>
+    <constraint source="review 033 K1">The server does not sanitize message bodies. Render HTML bodies only through a sanitizer (no dangerouslySetInnerHTML of raw sprk_body); plain-text bodies render as text. Test with a script-bearing body.</constraint>
   </constraints>
 
   <knowledge>

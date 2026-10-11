@@ -41,6 +41,7 @@
     <constraint source="project">The record must be in the caller's accessible set (service requests: requester scope); checked before any write, fail-closed. The sender is the resolved principal; any sender/from/createdby in the body is ignored.</constraint>
     <constraint source="project">Body only (plain text, max length enforced, e.g. 10,000 chars); attachments are rejected (400). The message is not internal-only.</constraint>
     <constraint source="project">Coordinate with open PR #1494 (Services/Communication) via /conflict-check before the PR.</constraint>
+    <constraint source="review 033 K1">The read endpoint (task 033) returns sprk_body verbatim, including HTML (sprk_bodyformat 100000001). This send endpoint MUST sanitize HTML on write (or store external-authored messages as plain text) so a contact cannot plant script or markup that other readers receive. Also stamp the contact creator (task 030 pattern) so the read shows a sender name.</constraint>
   </constraints>
 
   <knowledge>
