@@ -39,6 +39,9 @@
     <constraint source="project">No attachment control; body max 10,000 characters (matches task 034).</constraint>
     <constraint source="project">Visual anchor: mirror the message list/compose layout of the shared EmailComposer/NewThreadModal in Spaarke.UI.Components (spacing, typography tokens), without their Xrm dependencies.</constraint>
     <constraint source="review 033 K1">The server does not sanitize message bodies. Render HTML bodies only through a sanitizer (no dangerouslySetInnerHTML of raw sprk_body); plain-text bodies render as text. Test with a script-bearing body.</constraint>
+    <constraint source="review 034 K3">The 201 body from POST messages has sendername null and a server-time createdon; after a 201, re-fetch the thread (GET) instead of appending the returned DTO.</constraint>
+    <constraint source="review 034 K4">The server has no idempotency guard: disable the send button while a POST is in flight so a double-click cannot create two rows.</constraint>
+    <constraint source="review 034 K2">Own-vs-other rendering uses the external DTO isMine flag (added by the 034 fix round); never compare names or infer from direction.</constraint>
   </constraints>
 
   <knowledge>

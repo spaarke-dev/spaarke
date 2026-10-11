@@ -42,6 +42,7 @@
     <constraint source="ADR-009">The last-seen marker uses the existing IDistributedCache (Redis) registration with a key prefix that includes the principal id; no new cache client.</constraint>
     <constraint source="project">Every feed item's record is checked against the caller's accessible set at read time; a grant row for a record no longer accessible is dropped (fail-closed).</constraint>
     <constraint source="project">The feed query is bounded: last 30 days, at most 100 items, newest first.</constraint>
+    <constraint source="review 034 K2">"Not sent by the caller" is decided by the creator stamp (sprk_createdbycontact for a contact, the systemuser creator for a systemuser), as the 034 isMine mapping does; never by direction or sender name.</constraint>
   </constraints>
 
   <knowledge>
