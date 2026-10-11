@@ -30,8 +30,22 @@ public sealed partial class SecureChildOwnershipAiToolTests
     private static readonly Guid WaRecordTypeMatter = Guid.Parse("a0460000-0000-4000-8000-000000000001");
     private static readonly Guid WaLawFirm = Guid.Parse("a0460000-0000-4000-8000-000000000002");
 
-    /// <summary>The wizard's create payload for a work assignment regarding <paramref name="matter"/>.</summary>
-    private static Dictionary<string, object?> WizardWorkAssignment(Guid matter) => new()
+    /// <summary>
+    /// The wizard's create payload for a work assignment regarding <paramref name="matter"/>. Quoted from the wizard:
+    /// <c>applyResolverFields</c> (PolymorphicResolverService.ts) binds the regarding lookup, sets
+    /// <c>entity['sprk_regardingrecordid']</c>, then binds the pair TYPE —
+    /// <c>entity[`${rtNavProp}@odata.bind`] = `/sprk_recordtype_refs(${recordType.id})`</c>, the catalog row that
+    /// <c>resolveRecordType</c> finds (<c>sprk_recordlogicalname eq '&lt;table&gt;' and statecode eq 0</c>). The live catalog has an
+    /// active row for matter, project, event and invoice (spaarkedev1, read 2026-10-10), so the wizard sends a TYPED pair for
+    /// all four. The caller reads that catalog row (the core's pair rule), so the scripted catalog knows it.
+    /// </summary>
+    private Dictionary<string, object?> WizardWorkAssignment(Guid matter)
+    {
+        _user.RecordTypes[WaRecordTypeMatter] = "sprk_matter";
+        return WizardWorkAssignmentPayload(matter);
+    }
+
+    private static Dictionary<string, object?> WizardWorkAssignmentPayload(Guid matter) => new()
     {
         ["sprk_name"] = "Review the lease",
         ["sprk_priority"] = 100000001,
@@ -154,36 +168,99 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _user.Posts.Should().BeEmpty();
     }
 
-    // ── Review F1: the ADR-024 pair must not become a secure-ness oracle ──────────────────────────────────────────
+    // ── The ADR-024 pair on this route is decided by the core alone (uac-r2 #1612, OwnedChildWrite.PairTargetAsync) ──────────
+
+    private static Dictionary<string, object?> PairOnly(Dictionary<string, object?> payload)
+    {
+        payload.Remove("sprk_RegardingMatter@odata.bind");
+        return payload;
+    }
+
+    private static Dictionary<string, object?> Untyped(Dictionary<string, object?> payload)
+    {
+        payload.Remove("sprk_RegardingRecordType@odata.bind");
+        return payload;
+    }
 
     /// <summary>
-    /// A work assignment whose pair (<c>sprk_regardingrecordid</c>) names a record no typed lookup binds is refused BEFORE
-    /// anything is asked about that record — the SAME 400 whether it is a secure matter the caller cannot append to, an
-    /// ordinary one, one they can append to, or nothing at all. (Without this, the plan asked AppendTo on a pair-only parent
-    /// only when it was secure: secure + no AppendTo → 404, missing or ordinary → 201 — an oracle for "exists and is secure".)
+    /// A TYPED pair (the wizard always sends the type) names its record in the type's table, and the core ALWAYS asks the caller
+    /// AppendTo on it: a secure matter they cannot append to, a missing one, and a typed lookup to one record beside a pair
+    /// naming another all answer the SAME uniform 404 — no answer depends on whether the record exists or is secure.
     /// </summary>
     [Fact]
-    public async Task WorkAssignmentCreate_APairNamingARecordNoTypedLookupNames_IsTheSame400_WhateverThatRecordIs_AndNothingIsCreated()
+    public async Task WorkAssignmentCreate_ATypedPairNamingARecordTheCallerCannotAppendTo_IsTheSameUniform404_WhateverThatRecordIs()
     {
         var missing = Guid.Parse("a0460000-0000-4000-8000-0000000000f3");
         _user.NoAppendTo.Add(SecureMatter);
         _user.Missing.Add(missing);
 
-        Dictionary<string, object?> PairOnly(Guid parent)
+        var answers = new List<IResult>
         {
-            var payload = WizardWorkAssignment(parent);
-            payload.Remove("sprk_RegardingMatter@odata.bind");
-            return payload;
+            await CreateChild("sprk_workassignment", PairOnly(WizardWorkAssignment(SecureMatter))),
+            await CreateChild("sprk_workassignment", PairOnly(WizardWorkAssignment(missing))),
+        };
+        // A typed lookup to an ordinary matter and a pair naming a secure one the caller cannot append to.
+        var mismatched = WizardWorkAssignment(OrdinaryMatter);
+        mismatched["sprk_regardingrecordid"] = SecureMatter.ToString("D");
+        answers.Add(await CreateChild("sprk_workassignment", mismatched));
+
+        foreach (var answer in answers)
+        {
+            Status(answer).Should().Be(StatusCodes.Status404NotFound, Detail(answer));
+            ReasonCode(answer).Should().Be(ChildRecordEndpoints.NotFoundCode);
+            ProblemJson(answer).Should().Be(ProblemJson(answers[0]), "no answer depends on what the pair names");
         }
+
+        _appCreates.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Control: the core asks AppendTo on the typed pair's record, not "does a lookup agree" — a pair-only work assignment
+    /// (typed pair, no typed matter lookup) naming a matter the caller CAN append to is created; the route adds no second rule.
+    /// </summary>
+    [Fact]
+    public async Task WorkAssignmentCreate_ATypedPairOnlyNamingAMatterTheCallerCanAppendTo_IsCreated()
+    {
+        // The secure-create plan reads the pair's type and the matter's flag app-only: an ordinary matter.
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken _) => q.EntityName switch
+            {
+                "sprk_recordtype_ref" => new EntityCollection(new List<Entity>
+                    { new("sprk_recordtype_ref", WaRecordTypeMatter) { ["sprk_recordlogicalname"] = "sprk_matter" } }),
+                "sprk_matter" => new EntityCollection(new List<Entity>
+                    { new("sprk_matter", OrdinaryMatter) { ["sprk_issecure"] = false } }),
+                _ => new EntityCollection(),
+            });
+
+        var result = await CreateChild("sprk_workassignment", PairOnly(WizardWorkAssignment(OrdinaryMatter)),
+            SecureRootFilingGateFixtures.Over(entities.Object));
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        _appCreates.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// An UNTYPED pair is read only by agreement with a lookup in the row's agreement columns; one that agrees with none is the
+    /// core's 400 <c>child_record.invalid_payload</c> — the SAME body whatever the record is (secure, missing, ordinary, or
+    /// named by a typed matter lookup that disagrees), mapped by the route (<c>{ Invalid: ... }</c>), nothing created.
+    /// </summary>
+    [Fact]
+    public async Task WorkAssignmentCreate_AnUntypedPairAgreeingWithNoLookup_IsTheSame400_WhateverThatRecordIs()
+    {
+        var missing = Guid.Parse("a0460000-0000-4000-8000-0000000000f5");
+        _user.NoAppendTo.Add(SecureMatter);
+        _user.Missing.Add(missing);
 
         var answers = new List<IResult>
         {
-            await CreateChild("sprk_workassignment", PairOnly(SecureMatter)),
-            await CreateChild("sprk_workassignment", PairOnly(missing)),
-            await CreateChild("sprk_workassignment", PairOnly(OrdinaryMatter)),
+            await CreateChild("sprk_workassignment", Untyped(PairOnly(WizardWorkAssignment(SecureMatter)))),
+            await CreateChild("sprk_workassignment", Untyped(PairOnly(WizardWorkAssignment(missing)))),
+            await CreateChild("sprk_workassignment", Untyped(PairOnly(WizardWorkAssignment(OrdinaryMatter)))),
         };
-        // A typed lookup to one record and a pair naming another: the same refusal.
-        var mismatched = WizardWorkAssignment(OrdinaryMatter);
+        var mismatched = Untyped(WizardWorkAssignment(OrdinaryMatter));
         mismatched["sprk_regardingrecordid"] = SecureMatter.ToString("D");
         answers.Add(await CreateChild("sprk_workassignment", mismatched));
 
@@ -199,30 +276,35 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     /// <summary>
-    /// Review round 2 (High, security): the pair may agree ONLY with the work assignment's typed regarding lookups
-    /// (<c>sprk_regardingmatter</c> / <c>sprk_regardingproject</c>) by table AND id. A caller who creates a contact whose id
-    /// equals a secure matter's, binds it in a NON-regarding lookup (<c>sprk_assignedto</c>), and names the matter in the pair
-    /// with no typed matter lookup used to pass the route guard (the id matched a lookup) and reach a core that skips the
-    /// AppendTo check on the matter. Now the same 400 as any pair-only parent, and nothing is asked or created.
+    /// uac-r2 ask (b), the same-id contact exploit: a contact whose id equals a secure matter's, bound in a NON-regarding
+    /// lookup (<c>sprk_AssignedAttorney1</c>), and the matter named only by the pair. The caller may append to the contact but
+    /// not to the matter. Refused by the core alone (the route has no pair rule): TYPED as a matter the core asks AppendTo on
+    /// the matter, as the caller — the uniform 404; UNTYPED the contact is not an agreement column, so the pair names nothing
+    /// the core can tell — 400 <c>child_record.invalid_payload</c>. Nothing is created either way.
     /// </summary>
-    [Fact]
-    public async Task WorkAssignmentCreate_APairWhoseIdOnlyMatchesANonRegardingLookup_Is400_AndNothingIsCreated()
+    [Theory]
+    [InlineData(true, StatusCodes.Status404NotFound, ChildRecordEndpoints.NotFoundCode)]
+    [InlineData(false, StatusCodes.Status400BadRequest, ChildRecordEndpoints.InvalidPayloadCode)]
+    public async Task WorkAssignmentCreate_APairWhoseIdOnlyMatchesANonRegardingLookup_IsRefusedByTheCoreAlone(
+        bool typed, int status, string reasonCode)
     {
-        var payload = WizardWorkAssignment(SecureMatter);
-        payload.Remove("sprk_RegardingMatter@odata.bind");
-        payload["sprk_AssignedTo@odata.bind"] = $"/contacts({SecureMatter:D})"; // same GUID, different table
+        _user.NoAppendToIn.Add(("sprk_matters", SecureMatter)); // may append to the CONTACT, not to the matter
+        var payload = PairOnly(WizardWorkAssignment(SecureMatter));
+        if (!typed)
+            Untyped(payload);
+        payload["sprk_AssignedAttorney1@odata.bind"] = $"/contacts({SecureMatter:D})"; // same GUID, a different table
 
         var result = await CreateChild("sprk_workassignment", payload);
 
-        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
-        ReasonCode(result).Should().Be(ChildRecordEndpoints.InvalidPayloadCode);
+        Status(result).Should().Be(status, Detail(result));
+        ReasonCode(result).Should().Be(reasonCode);
         _appCreates.Should().BeEmpty();
         _user.Posts.Should().BeEmpty();
     }
 
     /// <summary>
-    /// The wizard's shape stays accepted: the pair agrees with the typed matter lookup — even when another (contact) lookup
-    /// happens to carry the same id, because agreement is decided by the regarding lookup alone.
+    /// The wizard's matter shape stays accepted — even when another (contact) lookup happens to carry the same id: the typed
+    /// pair's record (the matter) is AppendTo-checked, and so is the contact.
     /// </summary>
     [Fact]
     public async Task WorkAssignmentCreate_APairAgreeingWithTheTypedMatterLookup_IsStillAccepted()
@@ -237,21 +319,22 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     /// <summary>
-    /// Review round 3 (F-A): the wizard also offers an invoice and an event. For those <c>applyResolverFields</c> binds the
-    /// work assignment's <c>sprk_RegardingInvoice</c> / <c>sprk_RegardingEvent</c> and sets the pair to the same id (no matter
-    /// lookup) — the pair agrees with that typed regarding lookup, so the create is accepted (the core AppendTo-checks it).
+    /// uac-r2 ask (a): the wizard also offers an invoice and an event. For those <c>applyResolverFields</c> binds the work
+    /// assignment's <c>sprk_RegardingInvoice</c> / <c>sprk_RegardingEvent</c>, sets the pair id to the same id, and binds the
+    /// pair TYPE to the invoice's / event's catalog row — exactly this payload (no matter lookup). The pair is TYPED, so the
+    /// core AppendTo-checks the record in the type's table as the caller and the create is accepted (201), with no route rule.
     /// </summary>
     [Theory]
     [InlineData("sprk_RegardingInvoice", "sprk_invoices", "sprk_invoice")]
     [InlineData("sprk_RegardingEvent", "sprk_events", "sprk_event")]
-    public async Task WorkAssignmentCreate_TheWizardsInvoiceOrEventShape_PairAgreeingWithTheTypedLookup_Is201(
+    public async Task WorkAssignmentCreate_TheWizardsInvoiceOrEventShape_TypedPair_IsCreatedThroughTheCore_201(
         string navigation, string entitySet, string table)
     {
         var record = Guid.Parse("a0460000-0000-4000-8000-0000000000a1");
         var recordType = Guid.Parse("a0460000-0000-4000-8000-0000000000a3");
         _world.WithRecord(table, record, Directory.ChildBu, owningTeam: Directory.ChildTeam); // record-first owner (I-6)
-        var payload = WizardWorkAssignment(OrdinaryMatter);
-        payload.Remove("sprk_RegardingMatter@odata.bind");
+        _user.RecordTypes[recordType] = table; // the caller reads the catalog row (the core's pair rule)
+        var payload = PairOnly(WizardWorkAssignment(OrdinaryMatter));
         payload["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({recordType:D})";
         payload[$"{navigation}@odata.bind"] = $"/{entitySet}({record:D})";
         payload["sprk_regardingrecordid"] = record.ToString("D");
@@ -278,24 +361,57 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     /// <summary>
-    /// Control for the above: the same id carried only by a NON-regarding lookup (a contact) while the pair names an invoice
-    /// is still the 400 — the invoice/event allowance matches by column and table, not by id alone.
+    /// The same typed invoice shape, but the caller holds no AppendTo on the invoice: the core's check on the typed pair (and on
+    /// the invoice lookup) is the uniform 404 — byte-identical to the shape naming an invoice that does not exist.
     /// </summary>
     [Fact]
-    public async Task WorkAssignmentCreate_APairWhoseIdOnlyMatchesAContactLookup_NotTheInvoiceLookup_Is400()
+    public async Task WorkAssignmentCreate_TheWizardsInvoiceShape_WithoutAppendToOnTheInvoice_IsTheUniform404()
     {
         var invoice = Guid.Parse("a0460000-0000-4000-8000-0000000000a2");
-        var payload = WizardWorkAssignment(OrdinaryMatter);
-        payload.Remove("sprk_RegardingMatter@odata.bind");
-        payload["sprk_AssignedTo@odata.bind"] = $"/contacts({invoice:D})"; // same GUID, a non-regarding column
+        var absent = Guid.Parse("a0460000-0000-4000-8000-0000000000a4");
+        var recordType = Guid.Parse("a0460000-0000-4000-8000-0000000000a3");
+        _user.RecordTypes[recordType] = "sprk_invoice";
+        _user.NoAppendTo.Add(invoice);
+        _user.Missing.Add(absent);
+
+        async Task<IResult> InvoiceShape(Guid id)
+        {
+            var payload = PairOnly(WizardWorkAssignment(OrdinaryMatter));
+            payload["sprk_RegardingRecordType@odata.bind"] = $"/sprk_recordtype_refs({recordType:D})";
+            payload["sprk_RegardingInvoice@odata.bind"] = $"/sprk_invoices({id:D})";
+            payload["sprk_regardingrecordid"] = id.ToString("D");
+            return await CreateChild("sprk_workassignment", payload);
+        }
+
+        var denied = await InvoiceShape(invoice);
+        var missing = await InvoiceShape(absent);
+
+        Status(denied).Should().Be(StatusCodes.Status404NotFound, Detail(denied));
+        ProblemJson(denied).Should().Be(ProblemJson(missing));
+        _appCreates.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Fallback shape, documented: when the catalog has no ACTIVE row for the invoice, <c>resolveRecordType</c> returns null and
+    /// the wizard logs a warning and sends the pair UNTYPED (invoice lookup + pair id, no type). The core accepts it (the invoice
+    /// lookup carries the pair's id), but the secure-create plan (uac-r2's <c>NameParentsAsync</c>) cannot tell what an untyped
+    /// pair that names no matter/project is filed under, so it refuses the create: 409, nothing written. (Live catalog: the
+    /// row exists, so this is not today's wizard — a missing catalog row would make the wizard's invoice/event create fail.)
+    /// </summary>
+    [Fact]
+    public async Task WorkAssignmentCreate_TheWizardsInvoiceShape_UntypedBecauseTheCatalogRowIsMissing_IsRefusedByThePlan_409()
+    {
+        var invoice = Guid.Parse("a0460000-0000-4000-8000-0000000000a2");
+        var payload = Untyped(PairOnly(WizardWorkAssignment(OrdinaryMatter)));
+        payload["sprk_RegardingInvoice@odata.bind"] = $"/sprk_invoices({invoice:D})";
         payload["sprk_regardingrecordid"] = invoice.ToString("D");
 
         var result = await CreateChild("sprk_workassignment", payload);
 
-        Status(result).Should().Be(StatusCodes.Status400BadRequest, Detail(result));
-        ReasonCode(result).Should().Be(ChildRecordEndpoints.InvalidPayloadCode);
+        Status(result).Should().Be(StatusCodes.Status409Conflict, Detail(result));
+        ReasonCode(result).Should().Be(RecordOwnerRefusal.ParentUndetermined);
         _appCreates.Should().BeEmpty();
-        _user.Posts.Should().BeEmpty();
     }
 
     /// <summary>

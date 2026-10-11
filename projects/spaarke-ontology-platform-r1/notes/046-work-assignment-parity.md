@@ -85,8 +85,10 @@ both (243 s).
 - `Api/ChildRecordEndpoints.cs` (uac-r2's): `sprk_workassignment` in `CreateTables`; the secure-create plan passed for
   every create (decides only for a root); `CompleteRootCreateAsync` after a root create (isolated completion — removed
   again → 500 and nothing created; stranded/incomplete → 201 with `warnings`; then the I-12 materializer); provisioning's
-  columns (`sprk_containerid`, `sprk_securitybu`, `sprk_accesspermission`) refused for a root; **a root whose ADR-024 pair
-  names a record no typed regarding lookup binds is refused 400 before anything is asked** (review F1, no secure-ness oracle); plan
+  columns (`sprk_containerid`, `sprk_securitybu`, `sprk_accesspermission`) refused for a root; **the ADR-024 pair is decided by the
+  core alone** (uac-r2 #1612, `OwnedChildWrite.PairTargetAsync`; the route has no pair rule of its own, round 4): a typed pair is always
+  AppendTo-checked as the caller (uniform 404), an untyped pair that agrees with none of the row's agreement columns is the core's
+  400 `child_record.invalid_payload`, which the route only maps (`{ Invalid: ... }`); plan
   refusals mapped (`AccessDenied` → uniform 404, No Access / server-only column → 403,
   unverifiable / no secure team → 500, else 409); **a caller WhoAmI cannot name → the single 403
   `sdap.access.deny.caller_unresolved`** (NFR-10, D-29) on this create route for every table; the share mirror only for
@@ -113,14 +115,14 @@ both (243 s).
 
 ## F. Found, not fixed (D-106 — document only)
 
-1. ([#1607](https://github.com/spaarke-dev/spaarke/issues/1607), F-56) **Ordinary users cannot create a work assignment through today's wizard when their BU names an AI search index**:
+1. ([#1607](https://github.com/spaarke-dev/spaarke/issues/1607), F-60) **Ordinary users cannot create a work assignment through today's wizard when their BU names an AI search index**:
    Spaarke Basic User + Core User hold Read but not AppendTo on `sprk_aisearchindex`; the wizard always binds
    `sprk_AI_Search_Index` from the user's BU (live 403 above). The same bind is in the Matter / Project / Event / Invoice
    wizards (`EntityCreationService` cascade). Fix = a role privilege (AppendTo on `sprk_aisearchindex`) — a role change
    for the owner/uac-r2, not made here.
-2. ([#1608](https://github.com/spaarke-dev/spaarke/issues/1608), F-57) The G5 core answers a missing **privilege** on a user-owned lookup target (here AppendTo on the AI index) with the
+2. ([#1608](https://github.com/spaarke-dev/spaarke/issues/1608), F-61) The G5 core answers a missing **privilege** on a user-owned lookup target (here AppendTo on the AI index) with the
    uniform "A record … was not found" 404 — misleading for that case (uac-r2's core; related to task 126's rule).
-3. ([#1608](https://github.com/spaarke-dev/spaarke/issues/1608), F-57) `OwnedChildWrite.ServerOwnedColumns` does not protect a root's `sprk_containerid` / `sprk_securitybu`, so the chat
+3. ([#1608](https://github.com/spaarke-dev/spaarke/issues/1608), F-61) `OwnedChildWrite.ServerOwnedColumns` does not protect a root's `sprk_containerid` / `sprk_securitybu`, so the chat
    `dataverse.create_record` tool can still carry a caller-chosen container on a work-assignment or project create (the
    route now refuses them; the chat tool does not). uac-r2's core.
 4. The opt-in live harness cannot authorise the inline Assigned-To step's secure-flag read
@@ -130,8 +132,9 @@ both (243 s).
    work-assignment/project create whose ADR-024 pair (`sprk_regardingrecordid`) names a record no typed regarding lookup binds is
    AppendTo-checked only when that record is SECURE (`OwnedChildWrite.CreateAsync` → plan's `callerMayFileUnder`), so
    `dataverse.create_record` answers "refused" for a secure record the caller cannot see and "created" for a missing or
-   ordinary one. The child-records route now refuses such a payload with one 400 before anything is asked (§D);
-   `OwnedChildWrite` is unchanged for the chat tool.
+   ordinary one. Fixed in the core by uac-r2 (#1612): the pair's record is AppendTo-checked as the caller always, for the chat tool and the
+   child-records route alike. Round 4: this route's own pair check (rounds 1-3) is removed, so the core is the single rule
+   and the route is not a second one; `OwnedChildWrite` is not changed by this PR.
 6. The plan's No Access refusal text (`CreateWallRefusal`, uac-r2's design) names "the No Access list of the secure matter
    it would be filed under" — passed through by the route as a 403 detail. Recorded, not changed.
 7. K: a create on the child-records route makes two WhoAmI calls (the unresolved-caller pre-check, then the core's own).

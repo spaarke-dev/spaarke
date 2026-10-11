@@ -748,6 +748,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
                 ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
                 ("sprk_assignedlawfirm1", "sprk_organization", "sprk_AssignedLawFirm1"),
+                // A contact lookup that is NOT a regarding column (task 046 r4: the same-id contact exploit binds the matter's GUID here).
+                ("sprk_assignedattorney1", "contact", "sprk_AssignedAttorney1"),
             },
             ["sprk_communication"] = new[]
             {
