@@ -9,7 +9,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 035 (implementer running), 032 (review fix round running), 056 (token-redirect loop fix running) |
+| **Task** | 035 (implementer running), 032 (review fix round running) |
 | **Step** | 020 done and committed (`460467c95`, `9cfa31e4c`). 035 implementation in an isolated worktree from `9cfa31e4c` |
 | **Status** | Not pushed since `e2b547352`: 056 merge + 020 commits wait for the 056 re-check |
 | **Next Action** | On each agent's completion: 056 → commit by path, push, mark done; 032/035 → two fable reviews for 035 (auth), one for 032, fix, merge `--no-ff`, verify |
@@ -35,9 +35,8 @@
 |---|---|
 | 035 Intake submit | FULL, auth. Implementer (opus) in an isolated worktree from `9cfa31e4c`. Then two fable adversarial passes, fix, merge, full verification, mark done. Escalation trigger: a licensed systemuser with no contact |
 | 032 Delete-own | Implemented (`197ecc578`, worktree `agent-a26af84cc7df71a4f`): documents, to-dos and events. The fable review approved it (no F-class). The sonnet fix round is running (doc overclaim, OCE filter, `default:` arm, nits). Then merge `--no-ff` and verify. **Service-request delete is escalated to the owner** |
-| 056 Join page | Merged locally (`7da765f96`). Re-check agent `ad88a91167c15b722` (sonnet) is in the main worktree, uncommitted, working on the sign-in failure gate and AuthGuard `loginRedirect` with no `.catch`. Then commit by path, push, and mark done |
 
-Done: 001, 003, 010, 011, 012, 020, 030, 033, 034, 036, 041 (code), 042, 050, 051.
+Done: 001, 003, 010, 011, 012, 020, 056, 030, 033, 034, 036, 041 (code), 042, 050, 051.
 
 ## Next actions (in order)
 1. After 035: 037 and 052.

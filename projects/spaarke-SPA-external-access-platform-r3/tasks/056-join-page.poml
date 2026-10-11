@@ -4,7 +4,7 @@
     <title>Join page for workforce-contact self-registration (FR-13)</title>
     <phase>5 SPA features</phase>
     <gate>after 003 (approach chosen) and 041; ships behind a flag until 060</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Sign-in flow change (tags auth, frontend)</rigor-reason>
     <model-tier>opus</model-tier>
