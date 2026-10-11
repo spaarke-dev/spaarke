@@ -4,7 +4,7 @@
     <title>Documents on the detail view + delete-own actions (FR-24, FR-26 client)</title>
     <phase>5 SPA features</phase>
     <gate>after 051 and 032</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend over new upload/delete endpoints (tags frontend)</rigor-reason>
     <model-tier>sonnet</model-tier>

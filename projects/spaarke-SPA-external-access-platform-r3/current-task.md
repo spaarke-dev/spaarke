@@ -9,7 +9,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 035 (implementer running), 032 (review fix round running) |
+| **Task** | 035 (implementer running), 032 (merged `19b24414e`, full verification running), 054 (implementer running, main worktree, uncommitted) |
 | **Step** | 020 done and committed (`460467c95`, `9cfa31e4c`). 035 implementation in an isolated worktree from `9cfa31e4c` |
 | **Status** | Not pushed since `e2b547352`: 056 merge + 020 commits wait for the 056 re-check |
 | **Next Action** | On each agent's completion: 056 → commit by path, push, mark done; 032/035 → two fable reviews for 035 (auth), one for 032, fix, merge `--no-ff`, verify |
@@ -34,13 +34,14 @@
 | Task | State |
 |---|---|
 | 035 Intake submit | FULL, auth. Implementer (opus) in an isolated worktree from `9cfa31e4c`. Then two fable adversarial passes, fix, merge, full verification, mark done. Escalation trigger: a licensed systemuser with no contact |
-| 032 Delete-own | Implemented (`197ecc578`, worktree `agent-a26af84cc7df71a4f`): documents, to-dos and events. The fable review approved it (no F-class). The sonnet fix round is running (doc overclaim, OCE filter, `default:` arm, nits). Then merge `--no-ff` and verify. **Service-request delete is escalated to the owner** |
+| 032 Delete-own | Merged `19b24414e` (documents, to-dos, events; review approved; fixes `f7cb07ac3`). Full verification is running. Stays 🔄 until the owner decides service-request delete (AC 1 names service requests) |
+| 054 Detail documents + delete | Sonnet implementer in the main worktree, uncommitted. Scope: no service-request delete (escalated), no invoice documents (031 pending). Then one fable review, fix, commit by path |
 
 Done: 001, 003, 010, 011, 012, 020, 056, 030, 033, 034, 036, 041 (code), 042, 050, 051.
 
 ## Next actions (in order)
 1. After 035: 037 and 052.
-3. When 032 merges, start 054, then 055.
+3. After 054: 055.
 4. Start 060 (the self-registration service is in R3, per the owner 2026-10-11).
 5. Before the BFF PR, run `/conflict-check` (`AuthorizationModule.cs`, `Api/ExternalAccess/**` shared with UAC-r2) and actionlint on both deploy workflows.
 

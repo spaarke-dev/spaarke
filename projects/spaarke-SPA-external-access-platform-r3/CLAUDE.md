@@ -149,6 +149,8 @@ Full table: `spec.md` §Owner Clarifications. These still constrain work:
 
 ## 6. Gotchas — do not re-learn
 
+- **2026-10-11 — do not run the full BFF unit suite while other agents build or test on this machine.** Under that load, host-based contract tests time out (`TaskCanceledException`, about 100 s each): 7 false failures after the 032 merge, and the run took 47 min instead of 26. Run it when the machine is quiet, or re-run the failures in isolation before treating them as real.
+
 - **2026-10-11 — a POML can contradict the spec.** The 036 POML asked for an email on message post, which the 2026-10-08 decision forbids. Check each POML against §1 "Out of scope" and §3 before you implement it, and take any conflict to the owner first.
 - **2026-10-10 — `sprk_servicerequest` schema** (live describe, dev): it has `sprk_requestedby` (→ contact), the `sprk_regarding*` family, `sprk_name` (required), `sprk_direction` (required: Inbound/Outbound) and `sprk_recordsummary`. It has **no** `sprk_createdbyperson`, **no** request-type column and **no** intake-answers column (task 020 adds the last two). Documents link to a service request through the existing `sprk_document.sprk_relatedservicerequest` lookup.
 - **2026-10-10 — `WizardModal` and `WizardRegistry` no longer exist** (deleted 2026-10-03, reuse audit C-20; `Spaarke.UI.Components/src/components/index.ts:197`). The spec's "WizardModal" means the current framework: `Wizard/WizardShell.tsx` + `InAppWizardHost.tsx`, with `CreateRecordWizard` as the structural pattern.

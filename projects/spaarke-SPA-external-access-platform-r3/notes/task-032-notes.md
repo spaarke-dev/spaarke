@@ -162,3 +162,12 @@ The pointer check is the REAL `RecordContainerResolver` (`TestRecordContainerRes
 - `DocumentDestroyAuthorizationTestFixture` overrides only the 3-arg `DeleteAsync`.
 
 **Verification.** `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors. `dotnet test tests/Spaarke.ArchTests/`: 940 passed. Filtered Sprk.Bff.Api.Tests (`ExternalAccess|DocumentCheckout|DocumentOperations|EventReadPath`): 2121 passed.
+
+## Verification after the merge (main session, 2026-10-11)
+
+Merge `19b24414e` on `work/spaarke-SPA-external-access-platform-r3`.
+- BFF build and unit-test build: 0 warnings, 0 errors.
+- ArchTests: 940 passed.
+- Full unit suite: 19,795 passed, 54 skipped, 7 failed. All 7 failed the same way: `TaskCanceledException` from the in-process test host's HttpClient (about 100 s each). The run took 47 min against the usual 26, because two other agents were building and testing on the machine.
+- None of the 7 is in task-032 code: chat streaming, compose seam, Office to-do, Issue975, grant policy, MI route retirement, document identity.
+- Re-run in isolation, all 7 passed (12 cases, 12 s). Recorded as load timeouts, not defects.
