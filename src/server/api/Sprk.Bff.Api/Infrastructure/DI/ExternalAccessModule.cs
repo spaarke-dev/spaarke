@@ -386,10 +386,14 @@ public static class ExternalAccessModule
             // sprk_filepath …).
             SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_documentname",
+            // spaarke-SPA-external-access-platform-r3 task 032 (FR-26, review 031 K2): plus the two creator stamps, so a
+            // documents grid can offer Delete only on the caller's own rows. Not grid-derived; the server re-checks every
+            // delete (ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync).
             ReadableColumns = new HashSet<string>
             {
                 "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
                 "sprk_project", "sprk_matter", "sprk_workassignment",
+                "sprk_createdbyperson", "sprk_createdbycontact",
             },
         });
 

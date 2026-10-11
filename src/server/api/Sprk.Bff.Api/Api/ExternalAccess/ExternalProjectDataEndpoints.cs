@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -32,6 +33,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   GET  /{matters|workassignments|servicerequests}/{id}/documents/{documentId}/content     — download
 ///   POST /{matters|workassignments|servicerequests}/{id}/documents                          — upload
 ///   GET  /{matters|workassignments|servicerequests}/{id}/documents/{documentId}/versions    — version history
+///   DELETE /{documents|todos|events}/{id} — delete a record the caller created, with Read on its parent (task 032)
 ///
 /// DOCUMENTS ON EVERY CORE RECORD (task 031 / FR-24): one list, download, versions and upload handler,
 /// generalized over the document parent (ExternalDataService.DocumentParentKind). Project, matter and
@@ -381,6 +383,42 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        // ---------------------------------------------------------------------------------------
+        // Delete-own (spaarke-SPA-external-access-platform-r3 task 032, FR-26) — the first DELETE routes on this plane.
+        //
+        // Hard delete of a document, to-do or event the CALLER created (the task-030 stamp), while the caller still holds
+        // Read on every parent the row is filed to. One check decides all three (AuthorizeDeleteOwnAsync); no access level
+        // and no Dataverse role lets a caller delete someone else's row here. General delete stays a Dataverse role in the
+        // model-driven app. There is no DELETE for messages (owner 2026-10-10: messages are not deletable), and none for
+        // service requests yet (task 032 escalation: what happens to the staff records filed to one is an owner decision).
+        // ---------------------------------------------------------------------------------------
+
+        group.MapDelete("/documents/{id:guid}", DeleteOwnDocument)
+            .WithName("DeleteOwnExternalDocument")
+            .WithSummary("Delete a document the caller created, and its file (creator stamp + Read on its parent)")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapDelete("/todos/{id:guid}", DeleteOwnTodo)
+            .WithName("DeleteOwnExternalTodo")
+            .WithSummary("Delete a to-do the caller created (creator stamp + Read on its root)")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapDelete("/events/{id:guid}", DeleteOwnEvent)
+            .WithName("DeleteOwnExternalEvent")
+            .WithSummary("Delete a calendar event the caller created (creator stamp + Read on its root)")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
     // =========================================================================
@@ -1417,6 +1455,225 @@ public static class ExternalProjectDataEndpoints
                 detail: "statuscode must be Open (1), In Progress (659490001), Completed (2) or Dismissed (659490002).");
 
         await dataService.UpdateTodoAsync(id, request, ct);
+        return Results.NoContent();
+    }
+
+    // -------------------------------------------------------------------------------------------
+    // Delete-own (spaarke-SPA-external-access-platform-r3 task 032, FR-26)
+    // -------------------------------------------------------------------------------------------
+
+    /// <summary>The reason code of every delete-own refusal: one code, so a refusal says nothing about WHY.</summary>
+    internal const string DeleteOwnDeniedReasonCode = "sdap.access.deny.delete_own";
+
+    /// <summary>The reason code when the row could not be read or deleted right now (nothing was deleted).</summary>
+    internal const string DeleteOwnUnavailableReasonCode = "sdap.access.delete_own_unavailable";
+
+    /// <summary>
+    /// THE delete-own check (FR-26): every external delete runs it, and nothing is deleted unless it returns
+    /// <see langword="null"/>. Otherwise it returns the response to send.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Both halves must hold</b> (project CLAUDE.md §2):</para>
+    /// <list type="number">
+    /// <item><b>The caller created the row</b>: <see cref="ExternalDataService.IsCreatedByCaller"/> over the row's
+    /// task-030 stamps (owner decision 2026-10-11, option (b) widened). A row with no stamp is nobody's. No access level
+    /// (FullAccess included) and no Dataverse role can stand in for the stamp.</item>
+    /// <item><b>The caller still holds Read on EVERY parent the row is filed to</b>, through the same
+    /// <see cref="RightsForDocumentParentAsync"/> the list and download routes use (a project, matter or work assignment
+    /// from the principal's rights; a service request through the requester scope). A row filed to no parent this plane
+    /// authorizes is refused. Every parent, not any: a document also filed by staff to a record the caller can no longer
+    /// read is not the caller's to destroy.</item>
+    /// </list>
+    /// <para><b>No existence oracle.</b> A row that does not exist, someone else's row, an unstamped row and a row whose
+    /// parent the caller lost all get the SAME 403 (<see cref="DeleteOwnDeniedReasonCode"/>). A read that FAILED is a 503
+    /// (<see cref="DeleteOwnUnavailableReasonCode"/>, or the service-request 503 of
+    /// <see cref="RightsForDocumentParentAsync"/>), never a 403 and never a delete.</para>
+    /// <para>App-only, like every read on this plane: no OBO (ADR-028).</para>
+    /// </remarks>
+    private static async Task<IResult?> AuthorizeDeleteOwnAsync(
+        CallerPrincipal caller,
+        ExternalDataService.DeletableKind kind,
+        Guid id,
+        ExternalDataService dataService,
+        ExternalModuleRegistry modules,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        ExternalDataService.DeleteTarget? target;
+        try
+        {
+            target = await dataService.GetDeleteTargetAsync(kind, id, ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return DeleteOwnUnavailable();
+        }
+
+        // (1) The creator stamp. Absent and not-yours deny identically.
+        if (target is null || !ExternalDataService.IsCreatedByCaller(target, caller))
+        {
+            logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: absent or not created by the caller", kind, id);
+            return DenyDeleteOwn();
+        }
+
+        // (2) Read on every parent the row is filed to.
+        if (target.Parents.Count == 0)
+        {
+            logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: filed to no parent this plane authorizes", kind, id);
+            return DenyDeleteOwn();
+        }
+
+        foreach (var parent in target.Parents)
+        {
+            var (rights, fault) = await RightsForDocumentParentAsync(caller, parent.Kind, parent.Id, dataService, modules, ct);
+            if (fault is not null)
+                return fault;
+            if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
+            {
+                logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: no Read on its {ParentKind} {ParentId}",
+                    kind, id, parent.Kind, parent.Id);
+                return DenyDeleteOwn();
+            }
+        }
+
+        return null;
+    }
+
+    private static IResult DenyDeleteOwn() =>
+        Results.Problem(statusCode: 403, title: "Forbidden",
+            detail: "You can only delete a record you created, on a record you can still open.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = DeleteOwnDeniedReasonCode });
+
+    private static IResult DeleteOwnUnavailable() =>
+        Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Delete unavailable",
+            detail: "The record could not be checked or deleted right now, and nothing was deleted. Try again shortly.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = DeleteOwnUnavailableReasonCode });
+
+    /// <summary>
+    /// DELETE /api/v1/external/documents/{id} — hard-delete a document the caller created, and its SPE file.
+    /// </summary>
+    /// <remarks>
+    /// <para>Authorized by <see cref="AuthorizeDeleteOwnAsync"/>, then deleted through the internal plane's delete,
+    /// <see cref="DocumentCheckoutService.DeleteAsync(Guid, string, DocumentFileDeletePolicy, CancellationToken)"/>
+    /// (reused, not forked): the checkout lock is honoured, then the file goes app-only through <see cref="SpeFileStore"/>
+    /// (<c>SpeContainerOwnershipGuard</c>), then the row.</para>
+    /// <para><b>Order and partial failure</b> (<see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>,
+    /// ADR-007): the row's pointer is verified, the FILE is deleted first, and only then the row. If the file cannot be
+    /// deleted the row is kept and this answers 409 (pointer refused) or 503 (try again). If the file went but the row
+    /// could not be deleted, this answers 500: the row then points at a deleted file. A retry here is refused by the
+    /// pointer check (the item no longer exists), so only a staff delete in the model-driven app clears it; the task 032
+    /// notes record this known limit. A file that was already gone before the delete counts as deleted.</para>
+    /// </remarks>
+    private static async Task<IResult> DeleteOwnDocument(
+        Guid id,
+        HttpContext httpContext,
+        ExternalDataService dataService,
+        ExternalModuleRegistry modules,
+        DocumentCheckoutService documents,
+        ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        if (await AuthorizeDeleteOwnAsync(callerContext, ExternalDataService.DeletableKind.Document, id, dataService,
+                modules, logger, ct) is { } refusal)
+            return refusal;
+
+        DeleteResult result;
+        try
+        {
+            result = await documents.DeleteAsync(
+                id, httpContext.TraceIdentifier, DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // DeleteAsync throws only from its token and document read, before anything is deleted.
+            logger.LogError(ex, "[EXT-DELETE] Document {DocumentId} could not be read for the delete", id);
+            return DeleteOwnUnavailable();
+        }
+
+        switch (result)
+        {
+            case SuccessDeleteResult:
+            case NotFoundDeleteResult: // gone between the check and the delete: the end state the caller asked for
+                logger.LogInformation("[EXT-DELETE] Document {DocumentId} and its file deleted by its creator", id);
+                return Results.NoContent();
+
+            case CheckedOutDeleteResult:
+                // The lock holder's name is not shown on the external plane.
+                return Results.Problem(statusCode: 409, title: "Document checked out",
+                    detail: "This document is being edited, so it cannot be deleted now. Nothing was deleted.",
+                    extensions: new Dictionary<string, object?> { ["code"] = "document_locked" });
+
+            case FileNotDeletedDeleteResult notDeleted:
+                return Results.Problem(statusCode: notDeleted.FailureStatusCode, title: "Document not deleted",
+                    detail: "The document's file could not be deleted, so the document was kept. Nothing was deleted.",
+                    extensions: new Dictionary<string, object?> { ["code"] = notDeleted.Code });
+
+            default:
+                logger.LogError(
+                    "[EXT-DELETE] Document {DocumentId}: the file was deleted but the row was not ({Result})",
+                    id, result.GetType().Name);
+                return Results.Problem(statusCode: 500, title: "Document not fully deleted",
+                    detail: "The document's file was deleted, but its record could not be removed. Ask the record's "
+                            + "owner to remove it.",
+                    extensions: new Dictionary<string, object?> { ["code"] = "document_row_not_deleted" });
+        }
+    }
+
+    /// <summary>DELETE /api/v1/external/todos/{id} — hard-delete a to-do the caller created (FR-26).</summary>
+    private static async Task<IResult> DeleteOwnTodo(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        ILogger<Program> logger, CancellationToken ct)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        if (await AuthorizeDeleteOwnAsync(callerContext, ExternalDataService.DeletableKind.Todo, id, dataService,
+                modules, logger, ct) is { } refusal)
+            return refusal;
+
+        return await DeleteAuthorizedRowAsync(ExternalDataService.DeletableKind.Todo, id, dataService, logger, ct);
+    }
+
+    /// <summary>DELETE /api/v1/external/events/{id} — hard-delete a calendar event the caller created (FR-26).</summary>
+    private static async Task<IResult> DeleteOwnEvent(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        ILogger<Program> logger, CancellationToken ct)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        if (await AuthorizeDeleteOwnAsync(callerContext, ExternalDataService.DeletableKind.Event, id, dataService,
+                modules, logger, ct) is { } refusal)
+            return refusal;
+
+        return await DeleteAuthorizedRowAsync(ExternalDataService.DeletableKind.Event, id, dataService, logger, ct);
+    }
+
+    /// <summary>
+    /// The to-do and event row delete, app-only. Call ONLY after <see cref="AuthorizeDeleteOwnAsync"/> returned
+    /// <see langword="null"/>.
+    /// </summary>
+    private static async Task<IResult> DeleteAuthorizedRowAsync(
+        ExternalDataService.DeletableKind kind,
+        Guid id,
+        ExternalDataService dataService,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        try
+        {
+            // A row gone between the check and the delete (false) is the end state the caller asked for.
+            await dataService.DeleteRecordAsync(kind, id, ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return DeleteOwnUnavailable();
+        }
+
+        logger.LogInformation("[EXT-DELETE] {Kind} {Id} deleted by its creator", kind, id);
         return Results.NoContent();
     }
 

@@ -1559,6 +1559,24 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("PATCH /api/v1/external/todos/{id:guid}", "UpdateTodo", "RightsForRoot", Array.Empty<string>(),
             "Write on the to-do's ROOT from RightsForRoot before the patch "
             + "(ExternalProjectDataEndpoints.cs:930-936)."),
+        // Task 032 (external-access-platform-r3, FR-26): delete-own. ONE check (AuthorizeDeleteOwnAsync) for all three:
+        // the row's task-030 creator stamp must be the caller (ExternalDataService.IsCreatedByCaller,
+        // ExternalProjectDataEndpoints.cs:1513) AND the caller must hold Read on EVERY parent the row is filed to, through
+        // RightsForDocumentParentAsync (RightsForRoot for a project / matter / work assignment; the requester scope for a
+        // service request), ExternalProjectDataEndpoints.cs:1520-1537. Absent / not-own / unstamped / no-Read: one 403.
+        new HandlerDecision("DELETE /api/v1/external/documents/{id:guid}", "DeleteOwnDocument", "RightsForRoot",
+            new[] { "ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Creator stamp + Read on every parent (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1493-1540) before "
+            + "DocumentCheckoutService.DeleteAsync deletes the verified-pointer SPE file, then the row "
+            + "(ExternalProjectDataEndpoints.cs:1587)."),
+        new HandlerDecision("DELETE /api/v1/external/todos/{id:guid}", "DeleteOwnTodo", "RightsForRoot",
+            new[] { "ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Creator stamp + Read on every root (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1493-1540) before "
+            + "the app-only row delete (ExternalProjectDataEndpoints.cs:1637)."),
+        new HandlerDecision("DELETE /api/v1/external/events/{id:guid}", "DeleteOwnEvent", "RightsForRoot",
+            new[] { "ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Creator stamp + Read on every root (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1493-1540) before "
+            + "the app-only row delete (ExternalProjectDataEndpoints.cs:1652)."),
         new HandlerDecision("POST /api/v1/external/api/dataverse/fetch", "ExecuteScopedFetchAsync", "Tier2ScopeFilterInjector", Array.Empty<string>(),
             "The caller's FetchXML is rewritten to their accessible-record set before it runs "
             + "(Tier2ScopeFilterInjector.Inject, ExternalModuleDataEndpoints.cs:264), then ScopeRows trims the "
