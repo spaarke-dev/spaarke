@@ -13,6 +13,7 @@ import {
   type ITeamsHostAdapter,
 } from './host/TeamsHostAdapter';
 import { getStoredRealm, setStoredRealm, clearStoredRealm, type Realm } from './auth/realm';
+import { syncActiveAccountOnInteractiveSignIn } from './auth/msal-auth';
 import { resolveStandalonePlane, applyStandalonePlane, type StandalonePlane } from './auth/standalone-plane';
 import {
   activateBackend,
@@ -148,6 +149,9 @@ const StandaloneBootstrap: React.FC = () => {
         }
         const resolved = resolveStandalonePlane(realm);
         applyStandalonePlane(resolved);
+        // Before initialize(): the redirect response is handled there, and the account it signs in must become the
+        // active one (so "Sign in again" with a different identity switches the account the SPA acquires tokens for).
+        syncActiveAccountOnInteractiveSignIn(resolved.instance);
         // MSAL requires explicit initialize() before any token op / render; also processes the
         // auth-code redirect response when returning from the IdP.
         await resolved.instance.initialize();

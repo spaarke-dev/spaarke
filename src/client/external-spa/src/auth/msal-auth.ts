@@ -16,11 +16,15 @@ import {
   BrowserAuthErrorCodes,
   CacheLookupPolicy,
   ClientAuthErrorCodes,
+  EventType,
   InteractionRequiredAuthError,
   InteractionRequiredAuthErrorCodes,
+  InteractionType,
   PublicClientApplication,
   createNestablePublicClientApplication,
   type AccountInfo,
+  type AuthenticationResult,
+  type EventMessage,
   type IPublicClientApplication,
 } from '@azure/msal-browser';
 import { app as teamsApp, nestedAppAuth } from '@microsoft/teams-js';
@@ -130,6 +134,50 @@ function accountsFor(instance: IPublicClientApplication, tenantId?: string): Acc
 }
 
 /**
+ * Instances that already carry the active-account callback (the CIAM singleton survives a plane re-resolve, so the
+ * bootstrap can offer it more than once).
+ */
+const activeAccountSyncRegistered = new WeakSet<object>();
+
+/**
+ * Make the account that just completed an interactive sign-in the instance's ACTIVE account.
+ *
+ * `acquireStandaloneBffToken` prefers the active account over the oldest cached one. Without this, picking a different
+ * identity on the login redirect (BffAccessState's "Sign in again", `prompt: 'select_account'`) would add a second
+ * cached account that nothing ever selects, and the SPA would keep acquiring tokens for the refused first one.
+ *
+ * Call once per standalone instance BEFORE `initialize()` / `<MsalProvider>`, since the redirect response is handled
+ * during start-up. Only LOGIN_SUCCESS and ACQUIRE_TOKEN_SUCCESS from an interactive (redirect or popup) call count: a
+ * silent renewal must not move the active account. Idempotent per instance.
+ */
+export function syncActiveAccountOnInteractiveSignIn(instance: IPublicClientApplication): void {
+  if (activeAccountSyncRegistered.has(instance)) return;
+  activeAccountSyncRegistered.add(instance);
+  instance.addEventCallback((event: EventMessage) => {
+    const interactive =
+      event.interactionType === InteractionType.Redirect || event.interactionType === InteractionType.Popup;
+    const success = event.eventType === EventType.LOGIN_SUCCESS || event.eventType === EventType.ACQUIRE_TOKEN_SUCCESS;
+    if (!interactive || !success) return;
+    const account = (event.payload as AuthenticationResult | null)?.account;
+    if (account) instance.setActiveAccount(account);
+  });
+}
+
+/**
+ * Which account a standalone acquisition uses: the instance's ACTIVE account when it is one of the candidates (the
+ * tenant-filtered list), otherwise the oldest candidate. An active account outside the list (another tenant on the
+ * workforce plane) is never used. With a single candidate there is nothing to choose.
+ */
+function chooseAccount(instance: IPublicClientApplication, candidates: AccountInfo[]): AccountInfo {
+  if (candidates.length > 1) {
+    const activeId = instance.getActiveAccount()?.homeAccountId;
+    const active = activeId ? candidates.find(a => a.homeAccountId === activeId) : undefined;
+    if (active) return active;
+  }
+  return candidates[0];
+}
+
+/**
  * Acquire a BFF access token from a standalone collaboration-host MSAL instance.
  *
  * Broker-only (A1/A2 invariant): the returned token is used ONLY to call the BFF as a
@@ -171,7 +219,7 @@ export async function acquireStandaloneBffToken(
     throw new Error('No authenticated account — redirecting to login');
   }
 
-  const account = accounts[0];
+  const account = chooseAccount(instance, accounts);
 
   try {
     return await acquireSilent(instance, bffScope, account, options.silentRedirectUri, options.forceRefresh === true);

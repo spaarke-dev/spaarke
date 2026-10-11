@@ -536,6 +536,32 @@ describe('Same build, two backends: requests and token scopes go to whichever ba
     expect(scopes).toEqual([scopeOf(CONTOSO.ciamBffAppId), scopeOf(CONTOSO.ciamBffAppId)]);
   });
 
+  it('grid reads: a 401 causes exactly one retry, and the retry forces a network refresh of the token', async () => {
+    stubTwoBackends();
+    const { selection, msalAuth } = await load();
+    const { gridDataverseClient } = await import('../src/services/gridDataverseClient');
+    const scope = scopeOf(FABRIKAM.bffAppId);
+    const acquirer = vi.fn(async (_scope?: string, options?: { forceRefresh?: boolean }) =>
+      options?.forceRefresh ? 'fresh-token' : 'cached-token'
+    );
+    msalAuth.setActiveBffTokenAcquirer(acquirer);
+    selection.activateBackend('workforce', { ...FABRIKAM });
+
+    // 401 then 200: one retry, with a forced refresh, and the retried request carries the fresh token.
+    h.fetchStatus = [401, 200];
+    await gridDataverseClient.retrieveRecord('sprk_matter', '1', ['sprk_name']);
+    expect(h.fetches.map(f => f.authorization)).toEqual(['Bearer cached-token', 'Bearer fresh-token']);
+    expect(acquirer.mock.calls).toEqual([[scope], [scope, { forceRefresh: true }]]);
+
+    // 401 then 401: still exactly one retry — a second refusal is not retried again.
+    h.fetches.length = 0;
+    acquirer.mockClear();
+    h.fetchStatus = [401, 401, 200];
+    await gridDataverseClient.retrieveRecord('sprk_matter', '2', ['sprk_name']).catch(() => undefined);
+    expect(h.fetches).toHaveLength(2);
+    expect(acquirer.mock.calls).toEqual([[scope], [scope, { forceRefresh: true }]]);
+  });
+
   it('a mismatched origin/scope pair cannot happen: a backend switch during token acquisition does not re-route the request', async () => {
     stubTwoBackends();
     const { selection, bff, msalAuth } = await load();

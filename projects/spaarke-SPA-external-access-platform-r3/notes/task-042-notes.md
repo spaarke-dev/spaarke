@@ -146,3 +146,21 @@ Notes for the next reader:
 | `prettier --check` (changed and new files) | clean |
 | `dotnet test tests/Spaarke.ArchTests --filter ExternalSpaGridViewSelectorGuardTests` | 220 / 220 passed |
 | workflow parsed with js-yaml | steps in order: build, check:dist, stage SWA config |
+
+## Re-check fix round
+
+### Fix: "Sign in again" with a different identity now switches the account
+
+`BffAccessState` starts `loginRedirect({ prompt: 'select_account' })` so the user can pick a different identity after the BFF refused a token. `acquireStandaloneBffToken` always took `accounts[0]` (the oldest cached account) and nothing set the active account, so a second account picked there was cached but never used: the refused session came back and the recovery path could not work.
+
+- `src/auth/msal-auth.ts` `syncActiveAccountOnInteractiveSignIn(instance)`: an `addEventCallback` that calls `setActiveAccount(payload.account)` on `LOGIN_SUCCESS` and `ACQUIRE_TOKEN_SUCCESS` when `interactionType` is Redirect or Popup (silent renewals never move the active account). Idempotent per instance (WeakSet).
+- Registered in `src/main.tsx` `StandaloneBootstrap`, once per plane instance, before `initialize()` (the redirect response is handled there). Placed in `main.tsx` rather than `msal-config` / `standalone-plane`: the fake MSAL instances of the existing 040/041 tests have no `addEventCallback`, and registering at construction or in `applyStandalonePlane` would have broken them. The Teams instances are not covered: they never redirect, and their NAA/popup paths already set the active account themselves.
+- `acquireStandaloneBffToken` account choice (`chooseAccount`): with more than one tenant-filtered candidate, use the active account if its `homeAccountId` is in that list, else `accounts[0]`. With one candidate the active account is not consulted. The tenant filter still runs first, so an active account from another tenant is never used on the workforce plane. First-attempt request shapes are unchanged.
+- Tests: `tests/active-account.test.ts` (12), one in `tests/main-bootstrap.test.tsx` (the callback is registered on the plane instance), one in `tests/backend-selection.test.ts` (grid 401 retry, below). `tests/main-bootstrap.test.tsx` gained `addEventCallback` on its fake instance (additive).
+
+### Known limits from the re-check (not fixed)
+
+- K2: whether Entra External ID (CIAM) honours `prompt=select_account` on `loginRedirect` is unconfirmed. Verify it in 070/072 UAT. If CIAM rejects the prompt, send it on the workforce plane only.
+- K3: a forced retry (`forceRefresh: true`) after a 401 can reach a silent iframe when the refresh token is dead. On CIAM that costs up to about 10 s before the login redirect.
+- K4: forced NAA calls are not deduplicated. A failed forced NAA call falls to the popup without a user gesture, which is likely blocked and maps to the sign-in state. A transient token-endpoint error on the forced refresh replaces the original 401.
+- K5 remainder: `gridDataverseClient`'s single 401 retry is now covered (one retry, `forceRefresh: true`, no second retry). Still untested: the `TeamsHostAdapter` options passthrough and the popup-fallback forced path. `PlaybookLibraryPage.tsx:76` still retries without force; that page waits on the owner's playbook decision.

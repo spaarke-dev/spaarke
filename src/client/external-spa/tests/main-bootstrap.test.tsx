@@ -25,6 +25,8 @@ const h = vi.hoisted(() => ({
   teamsInitialize: vi.fn(),
   notifyAppLoaded: vi.fn(),
   notifyFailure: vi.fn(),
+  // Every active-account callback the bootstrap registers on a fake PublicClientApplication.
+  addEventCallback: vi.fn(),
 }));
 
 vi.mock('@microsoft/teams-js', () => ({
@@ -49,6 +51,7 @@ vi.mock('@azure/msal-browser', async importOriginal => {
     getAllAccounts = () => [];
     getActiveAccount = () => null;
     setActiveAccount = () => undefined;
+    addEventCallback = h.addEventCallback;
   }
   return { ...actual, PublicClientApplication: FakePublicClientApplication };
 });
@@ -78,6 +81,7 @@ beforeEach(() => {
   h.teamsInitialize.mockReset();
   h.notifyAppLoaded.mockReset();
   h.notifyFailure.mockReset();
+  h.addEventCallback.mockReset();
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   // Default: not inside Teams (the detection handshake is rejected immediately).
@@ -125,6 +129,15 @@ describe('Standalone browser bootstrap (main.tsx)', () => {
     expect(await screen.findByTestId('app')).toBeTruthy();
     expect(screen.queryByText('Choose an organization')).toBeNull();
     expect(selection.getActiveBackend().customerKey).toBe('contoso');
+  });
+
+  it('registers the active-account callback on the plane instance before the app mounts', SLOW, async () => {
+    vi.stubEnv('VITE_BACKENDS', JSON.stringify([CONTOSO]));
+    await boot();
+
+    expect(await screen.findByTestId('app')).toBeTruthy();
+    expect(h.addEventCallback).toHaveBeenCalledTimes(1);
+    expect(typeof h.addEventCallback.mock.calls[0][0]).toBe('function');
   });
 
   it('no configured backend: fails closed with the sign-in unavailable screen (no app, no backend)', SLOW, async () => {
