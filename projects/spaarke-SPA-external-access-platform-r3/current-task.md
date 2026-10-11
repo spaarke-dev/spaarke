@@ -9,7 +9,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 035 (implementer running), 032 (agent running), 056 (re-check agent running) |
+| **Task** | 035 (implementer running), 032 (review fix round running), 056 (token-redirect loop fix running) |
 | **Step** | 020 done and committed (`460467c95`, `9cfa31e4c`). 035 implementation in an isolated worktree from `9cfa31e4c` |
 | **Status** | Not pushed since `e2b547352`: 056 merge + 020 commits wait for the 056 re-check |
 | **Next Action** | On each agent's completion: 056 → commit by path, push, mark done; 032/035 → two fable reviews for 035 (auth), one for 032, fix, merge `--no-ff`, verify |
@@ -34,7 +34,7 @@
 | Task | State |
 |---|---|
 | 035 Intake submit | FULL, auth. Implementer (opus) in an isolated worktree from `9cfa31e4c`. Then two fable adversarial passes, fix, merge, full verification, mark done. Escalation trigger: a licensed systemuser with no contact |
-| 032 Delete-own | Implementation agent `a26af84cc7df71a4f` (opus) is running in an isolated worktree from `db91ced2b`. Option (b), widened. Then one fable review, fix, merge, verify, mark done |
+| 032 Delete-own | Implemented (`197ecc578`, worktree `agent-a26af84cc7df71a4f`): documents, to-dos and events. The fable review approved it (no F-class). The sonnet fix round is running (doc overclaim, OCE filter, `default:` arm, nits). Then merge `--no-ff` and verify. **Service-request delete is escalated to the owner** |
 | 056 Join page | Merged locally (`7da765f96`). Re-check agent `ad88a91167c15b722` (sonnet) is in the main worktree, uncommitted, working on the sign-in failure gate and AuthGuard `loginRedirect` with no `.catch`. Then commit by path, push, and mark done |
 
 Done: 001, 003, 010, 011, 012, 020, 030, 033, 034, 036, 041 (code), 042, 050, 051.
@@ -47,6 +47,7 @@ Done: 001, 003, 010, 011, 012, 020, 030, 033, 034, 036, 041 (code), 042, 050, 05
 
 ## Open owner questions
 
+1. **032 service-request delete:** A refuse when any related row exists (recommended) / B cascade the caller's own related rows, refuse if staff rows exist / C allow only in the first status.
 1. **003 sub-questions:** Q2 customer consent, Q3 the group, Q4 the registry field owner, Q5 the host.
 2. **031:**
    - Invoice documents: A inherit (recommended).
