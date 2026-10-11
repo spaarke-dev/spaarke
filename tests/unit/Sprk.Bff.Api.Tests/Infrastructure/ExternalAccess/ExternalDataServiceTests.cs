@@ -309,7 +309,7 @@ public class ExternalDataServiceTests
             CreatePath.Event => ExternalDataService.BuildEventCreatePayload(
                 RootId, JsonSerializer.Deserialize<CreateExternalEventRequest>("{\"sprk_name\":\"Created\"}", web)!, TeamId),
             CreatePath.Document => ExternalDataService.BuildDocumentCreatePayload(
-                RootId, new ExternalUploadedFilePointers("drive-1", "item-1", "a.pdf", 10, null), TeamId),
+                ExternalDataService.DocumentParentKind.Project, RootId,new ExternalUploadedFilePointers("drive-1", "item-1", "a.pdf", 10, null), TeamId),
             _ => throw new ArgumentOutOfRangeException(nameof(path)),
         };
         body["sprk_CreatedByContact@odata.bind"] = $"/contacts({OtherContact:D})";
@@ -387,7 +387,7 @@ public class ExternalDataServiceTests
                 RootId, JsonSerializer.Deserialize<CreateExternalEventRequest>(requestJson, web)!, TeamId, creator),
             // The upload route's body is the file only; the pointers are built server-side from the SPE upload.
             CreatePath.Document => service.CreateDocumentAsync(
-                RootId, new ExternalUploadedFilePointers("drive-1", "item-1", "a.pdf", 10, null), TeamId, creator),
+                ExternalDataService.DocumentParentKind.Project, RootId,new ExternalUploadedFilePointers("drive-1", "item-1", "a.pdf", 10, null), TeamId, creator),
             _ => throw new ArgumentOutOfRangeException(nameof(path)),
         };
     }

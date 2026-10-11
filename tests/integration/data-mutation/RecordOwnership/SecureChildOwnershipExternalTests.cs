@@ -183,7 +183,7 @@ public sealed class SecureChildOwnershipExternalTests : IClassFixture<ExternalCh
         var @event = ExternalDataService.BuildEventCreatePayload(
             projectId, new CreateExternalEventRequest { SprkName = "Hearing" }, team);
         var document = ExternalDataService.BuildDocumentCreatePayload(
-            projectId, new ExternalUploadedFilePointers("b!drive", "item-1", "brief.pdf", 3, null), team);
+            ExternalDataService.DocumentParentKind.Project, projectId,new ExternalUploadedFilePointers("b!drive", "item-1", "brief.pdf", 3, null), team);
 
         foreach (var payload in new[] { todo, @event, document })
         {
@@ -354,11 +354,11 @@ public sealed class ExternalChildOwnershipTestFixture : ExternalCollaborationTes
         }
 
         public override Task<ExternalDocumentDto> CreateDocumentAsync(
-            Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId, CallerPrincipal creator,
-            CancellationToken ct = default)
+            DocumentParentKind parentKind, Guid parentId, ExternalUploadedFilePointers pointers, Guid owningTeamId,
+            CallerPrincipal creator, CancellationToken ct = default)
         {
             DocumentCreators.Add(creator);
-            DocumentOwners.Add(BoundOwner(BuildDocumentCreatePayload(projectId, pointers, owningTeamId)));
+            DocumentOwners.Add(BoundOwner(BuildDocumentCreatePayload(parentKind, parentId, pointers, owningTeamId)));
             return Task.FromResult(new ExternalDocumentDto { SprkDocumentid = Guid.NewGuid().ToString(), SprkName = pointers.FileName });
         }
 

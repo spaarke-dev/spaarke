@@ -106,7 +106,7 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         switch (read)
         {
             case "documents":
-                var docs = await _sut.GetDocumentsAsync(Root);
+                var docs = await _sut.GetDocumentsAsync(ExternalDataService.DocumentParentKind.Project, Root);
                 return (docs.Value.Select(d => d.SprkDocumentid).ToList(), docs.Truncated);
             case "todos":
                 var todos = await _sut.GetTodosAsync(ExternalDataService.TodoRootKind.Project, Root);

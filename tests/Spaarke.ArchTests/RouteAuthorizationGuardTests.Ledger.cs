@@ -1463,12 +1463,14 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}", "GetProjectById", "HoldsReadOnProject", Array.Empty<string>(),
             "403 unless the caller holds Read on the route project (HoldsReadOnProject, "
             + "ExternalProjectDataEndpoints.cs:283)."),
-        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents", "GetDocuments", "HoldsReadOnProject", Array.Empty<string>(),
-            "403 unless the caller holds Read on the route project (ExternalProjectDataEndpoints.cs:300) before "
-            + "the document list."),
-        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents/{documentId:guid}/content", "DownloadDocumentContent", "HoldsReadOnProject", Array.Empty<string>(),
-            "Read on the project (ExternalProjectDataEndpoints.cs:334) AND the document must belong to it "
-            + "(:346) before the app-only stream — both caller-chosen ids are decided."),
+        // Task 031 (external-access-platform-r3, FR-24): the project document routes now run the handlers generalized
+        // over the document parent; the project's rights still come from RightsForRoot.
+        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents", "GetDocuments", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentsForParent: 403 unless RightsForDocumentParentAsync gives Read on the route "
+            + "project (RightsForRoot, ExternalProjectDataEndpoints.cs:446) before the document list."),
+        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents/{documentId:guid}/content", "DownloadDocumentContent", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to DownloadDocumentForParent: Read on the project (ExternalProjectDataEndpoints.cs:481) AND the "
+            + "document must belong to it through the project lookup (:494) before the app-only stream."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/todos", "GetTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot, which requires Read from RightsForRoot on the route project "
             + "(ExternalProjectDataEndpoints.cs:411-412)."),
@@ -1488,10 +1490,50 @@ public partial class RouteAuthorizationGuardTests
             "Delegates to CreateTodoForRoot: Create from RightsForRoot on the route work assignment "
             + "(ExternalProjectDataEndpoints.cs:445-446)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/documents", "UploadDocument", "AccessRights", Array.Empty<string>(),
-            "Requires Create on the route project from the caller principal's rights before the upload "
-            + "(rights.HasFlag(AccessRights.Create), ExternalProjectDataEndpoints.cs:605)."),
-        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents/{documentId:guid}/versions", "GetDocumentVersions", "HoldsReadOnProject", Array.Empty<string>(),
-            "Read on the route project (ExternalProjectDataEndpoints.cs:728) before the version read."),
+            "Delegates to UploadDocumentForParent: requires Create on the route project from the caller principal's "
+            + "rights before the upload (rights.HasFlag(AccessRights.Create), ExternalProjectDataEndpoints.cs:978)."),
+        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents/{documentId:guid}/versions", "GetDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentVersionsForParent: Read on the route project (ExternalProjectDataEndpoints.cs:1141) "
+            + "and the document's project scoping (:1149) before the version read."),
+        // Task 031 (FR-24): documents on matters and work assignments — the same four handlers, rights from RightsForRoot.
+        new HandlerDecision("GET /api/v1/external/matters/{id:guid}/documents", "GetMatterDocuments", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentsForParent: Read on the route matter from RightsForRoot "
+            + "(ExternalProjectDataEndpoints.cs:446) before the document list."),
+        new HandlerDecision("GET /api/v1/external/matters/{id:guid}/documents/{documentId:guid}/content", "DownloadMatterDocumentContent", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to DownloadDocumentForParent: Read on the matter (ExternalProjectDataEndpoints.cs:481) AND the "
+            + "document must belong to it through the matter lookup (:494) before the app-only stream."),
+        new HandlerDecision("POST /api/v1/external/matters/{id:guid}/documents", "UploadMatterDocument", "AccessRights", Array.Empty<string>(),
+            "Delegates to UploadDocumentForParent: Create on the route matter (rights.HasFlag(AccessRights.Create), "
+            + "ExternalProjectDataEndpoints.cs:978) before any SPE write."),
+        new HandlerDecision("GET /api/v1/external/matters/{id:guid}/documents/{documentId:guid}/versions", "GetMatterDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentVersionsForParent: Read on the matter (ExternalProjectDataEndpoints.cs:1141) and "
+            + "the document's matter scoping (:1149) before the version read."),
+        new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/documents", "GetWorkAssignmentDocuments", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentsForParent: Read on the route work assignment from RightsForRoot "
+            + "(ExternalProjectDataEndpoints.cs:446) before the document list."),
+        new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/documents/{documentId:guid}/content", "DownloadWorkAssignmentDocumentContent", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to DownloadDocumentForParent: Read on the work assignment (ExternalProjectDataEndpoints.cs:481) "
+            + "AND the document's work-assignment scoping (:494) before the app-only stream."),
+        new HandlerDecision("POST /api/v1/external/workassignments/{id:guid}/documents", "UploadWorkAssignmentDocument", "AccessRights", Array.Empty<string>(),
+            "Delegates to UploadDocumentForParent: Create on the route work assignment (rights.HasFlag(AccessRights.Create), "
+            + "ExternalProjectDataEndpoints.cs:978) before any SPE write."),
+        new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/documents/{documentId:guid}/versions", "GetWorkAssignmentDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentVersionsForParent: Read on the work assignment (ExternalProjectDataEndpoints.cs:1141) "
+            + "and the document's work-assignment scoping (:1149) before the version read."),
+        // Task 031 (FR-24): a service request is not a root — its rights are the submitter scope, the Service Requests
+        // module's accessible set (sprk_requestedby = the caller's contact), decided by IsRecordAccessible.
+        new HandlerDecision("GET /api/v1/external/servicerequests/{id:guid}/documents", "GetServiceRequestDocuments", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentsForParent: Read only when the request's requester is in the Service Requests "
+            + "module's accessible set (module.IsRecordAccessible, ExternalProjectDataEndpoints.cs:751)."),
+        new HandlerDecision("GET /api/v1/external/servicerequests/{id:guid}/documents/{documentId:guid}/content", "DownloadServiceRequestDocumentContent", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to DownloadDocumentForParent: the requester check (ExternalProjectDataEndpoints.cs:751) AND the "
+            + "document's sprk_relatedservicerequest scoping (:494) before the app-only stream."),
+        new HandlerDecision("POST /api/v1/external/servicerequests/{id:guid}/documents", "UploadServiceRequestDocument", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to UploadDocumentForParent: Read and Create only for the requester (module.IsRecordAccessible, "
+            + "ExternalProjectDataEndpoints.cs:751) before any SPE write."),
+        new HandlerDecision("GET /api/v1/external/servicerequests/{id:guid}/documents/{documentId:guid}/versions", "GetServiceRequestDocumentVersions", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentVersionsForParent: the requester check (ExternalProjectDataEndpoints.cs:751) and the "
+            + "document's service-request scoping (:1149) before the version read."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/events", "GetEvents", "HoldsReadOnProject", Array.Empty<string>(),
             "Read on the route project (ExternalProjectDataEndpoints.cs:799) before any Dataverse read."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/events", "CreateEvent", "AccessRights", Array.Empty<string>(),
