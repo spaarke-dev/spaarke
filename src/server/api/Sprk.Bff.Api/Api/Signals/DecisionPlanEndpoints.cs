@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -58,6 +59,7 @@ public static class DecisionPlanEndpoints
         HttpContext httpContext,
         SignalCoreRecordAccess signalAccess,
         SignalSuppressionService suppression,
+        IDataverseUserClient caller,
         ILogger<SignalSuppressionService> logger,
         CancellationToken ct)
     {
@@ -77,11 +79,13 @@ public static class DecisionPlanEndpoints
         SuppressionStatus? status;
         try
         {
-            status = await suppression.GetStatusForSignalAsync(signalId, ct);
+            status = await suppression.GetStatusForSignalAsync(signalId, caller, ct);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            logger.LogError("Suppression count failed for a Signal ({ExceptionType}); answering not found.", ex.GetType().Name);
+            // Same rule as AuthorizeAsync: a timeout (a cancellation the caller did not ask for) is a fault, not a 500. Logged WITH the
+            // exception so the stack is kept; the answer stays the uniform 404, never a guessed count.
+            logger.LogError(ex, "Suppression count failed for a Signal; answering not found.");
             status = null;
         }
 

@@ -171,7 +171,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             counts.Hits += evaluation.Hits.Count;
             var read = await ReadPolicySignalsAsync(policy.Code, counts, ct).ConfigureAwait(false);
             // Task 034 (FR-17): stamp a grain found at the dismissal threshold with no live stamp, so the planner below sees it.
-            var (existing, suppressionFailures) = await _suppression.ReconcileAsync(policy.Id, policy.Code, read, ct).ConfigureAwait(false);
+            var (existing, suppressionFailures) = await _suppression.ReconcileAsync(policy.Id, policy.Code, policy.CountsTowardSuppression, read, ct).ConfigureAwait(false);
             counts.PolicyFailures += suppressionFailures;
             var plan = SignalEpisodePlanner.Plan(lane, evaluation.QuietWindowDays, _timeProvider.GetUtcNow(), evaluation.Hits, existing);
             counts.Add(plan);
@@ -358,7 +358,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     // ── Reads ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
     internal sealed record PolicyRow(
-        Guid Id, string Code, int? Lane, int? Severity, string Headline, Guid? CurrentVersionId, bool IsScoped);
+        Guid Id, string Code, int? Lane, int? Severity, string Headline, Guid? CurrentVersionId, bool IsScoped, bool CountsTowardSuppression = true);
 
     /// <summary>Every enabled, active policy (the same filter as <see cref="PolicyScopeResolver"/>: <c>sprk_enabled</c> and
     /// <c>statecode</c> Active, so a disabled or Retired policy is not evaluated at all), with its lane, severity and headline.</summary>
@@ -367,7 +367,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         var query = new QueryExpression("sprk_policy")
         {
             ColumnSet = new ColumnSet("sprk_policycode", "sprk_lane", "sprk_severity", "sprk_shortname", "sprk_name",
-                "sprk_currentversion", "sprk_tenant", "sprk_matter"),
+                "sprk_currentversion", "sprk_tenant", "sprk_matter", "sprk_countstowardsuppression"),
         };
         query.Criteria.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
         query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
@@ -388,7 +388,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 headline.Length > 200 ? headline[..200] : headline,
                 version is { Id: var id } && id != Guid.Empty ? id : null,
                 !string.IsNullOrWhiteSpace(row.GetAttributeValue<string>("sprk_tenant"))
-                    || row.GetAttributeValue<EntityReference>("sprk_matter") is { Id: var m } && m != Guid.Empty);
+                    || row.GetAttributeValue<EntityReference>("sprk_matter") is { Id: var m } && m != Guid.Empty,
+                row.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true);
         }).ToList();
     }
 
@@ -400,7 +401,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         var query = new QueryExpression("sprk_signal")
         {
             ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon",
-                "sprk_suppresseduntil", "sprk_duedate", "sprk_corerecordtype", "sprk_corerecordid", "ownerid", "versionnumber"),
+                "sprk_suppresseduntil", "sprk_duedate", "sprk_corerecordtype", "sprk_corerecordid", "ownerid", "versionnumber", "sprk_decisionrecord"),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition("sprk_dedupekey", ConditionOperator.BeginsWith, prefix);
@@ -455,7 +456,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
                     DueDate: row.GetAttributeValue<DateTime?>("sprk_duedate")?.Date,
                     CoreTypeRefId: row.GetAttributeValue<EntityReference>("sprk_corerecordtype")?.Id,
                     CoreRecordId: Guid.TryParse(row.GetAttributeValue<string>("sprk_corerecordid")?.Trim(), out var coreId) ? coreId : null,
-                    Owner: row.GetAttributeValue<EntityReference>("ownerid")));
+                    Owner: row.GetAttributeValue<EntityReference>("ownerid"),
+                    DecisionRecordId: row.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id));
             }
 
             if (!result.MoreRecords)
@@ -559,7 +561,8 @@ internal sealed record ExistingSignal(
     DateTime? DueDate,
     Guid? CoreTypeRefId,
     Guid? CoreRecordId,
-    EntityReference? Owner)
+    EntityReference? Owner,
+    Guid? DecisionRecordId = null)
 {
     public bool IsOpen => Status is SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged;
 

@@ -1586,15 +1586,17 @@ public partial class RouteAuthorizationGuardTests
             + "(:205-207); an unresolvable caller is 403 before any query (EventEndpoints.cs:341-498). The query is the gate."),
         new HandlerDecision("GET /api/v1/signals/{signalId:guid}/decision-plan", "GetDecisionPlanAsync", "IDataverseUserClient",
             new[] { "SignalCoreRecordAccess.AuthorizeAsync" },
-            "Ontology task 036: the handler's first act is SignalCoreRecordAccess.AuthorizeAsync (DecisionPlanEndpoints.cs:112), which reads "
+            "Ontology task 036: the handler's first act is SignalCoreRecordAccess.AuthorizeAsync (DecisionPlanEndpoints.cs:116), which reads "
             + "the Signal (SignalCoreRecordAccess.cs:98) and then its core record (:150) through IDataverseUserClient AS THE CALLER; "
-            + "anything but Allowed returns before the plan is read (uniform 404 at DecisionPlanEndpoints.cs:120, caller_unresolved 403 at :115)."),
+            + "anything but Allowed returns before the plan is read (uniform 404 at DecisionPlanEndpoints.cs:124, caller_unresolved 403 at :119)."),
         new HandlerDecision("GET /api/v1/signals/{signalId:guid}/suppression", "GetSuppressionAsync", "IDataverseUserClient",
             new[] { "SignalCoreRecordAccess.AuthorizeAsync" },
-            "Ontology task 034: the handler's first act is SignalCoreRecordAccess.AuthorizeAsync (DecisionPlanEndpoints.cs:64), "
+            "Ontology task 034: the handler's first act is SignalCoreRecordAccess.AuthorizeAsync (DecisionPlanEndpoints.cs:66), "
             + "the same decision as decision-plan: the Signal, then its core record of any type, read AS THE CALLER through IDataverseUserClient "
-            + "(a no-core Do Signal is owner-only, D-35). Anything but Allowed returns the uniform 404 (:72) / caller_unresolved 403 (:67) before the count is "
-            + "read; only the counts and the suppressed-until date are returned. Lives in the already-governed DecisionPlanEndpoints.cs, so the file count is unchanged."),
+            + "(a no-core Do Signal is owner-only, D-35). Anything but Allowed returns the uniform 404 (:74) / caller_unresolved 403 (:69) before the count is "
+            + "read. The count is the caller's: the grain's Signal ids are read through the caller's own IDataverseUserClient and the app-only rows are "
+            + "trimmed to that set before anything is counted; Decision-Record facts are read app-only for those rows only. Only the counts and the "
+            + "suppressed-until date are returned. Lives in the already-governed DecisionPlanEndpoints.cs, so the file count is unchanged."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — the payload mapped with the "
             + "caller's client (ChildRecordEndpoints.cs:194), then OwnedChildWrite.CreateAsync checks the table privilege and "

@@ -35,8 +35,8 @@ completion after review.
    for `CountsTowardSuppression = false`. An undeclared code COUNTS (only a declared non-counting code is excluded). A policy with
    `sprk_countstowardsuppression = No` counts nothing; its dismissals show in `DismissalsRecorded`.
 6. **Quiet window (FR-17a) not implemented here.** It is 031's `SignalEpisodePlanner` re-raise rule (POML constraint).
-7. **Backstop in the nightly job.** `ReconcileAsync` only queries a grain with at least 3 dismissed Signals in the window and no live
-   stamp; after stamping, the grain costs nothing. A failure is logged (50341), metered (`suppression_failed`) and fails the run, but
+7. **Backstop in the nightly job.** `ReconcileAsync` only queries a grain with at least 3 DISTINCT dismissals (Decision Records) in the window and no live
+   stamp or a row missing it (partial-stamp repair); a policy that does not count is skipped; a fully stamped grain costs nothing. A failure is logged (50341), metered (`suppression_failed`) and fails the run, but
    the planner still receives the in-memory stamp so a pairing at the threshold does not resurface that pass.
 8. **Read route.** Keyed by Signal (the wizard has one): `SignalCoreRecordAccess.AuthorizeAsync` decides as the caller (matter or
    any core type readable, no-core owner-only in the Do lane); only counts and the date are returned; an unreadable count is the
@@ -54,9 +54,23 @@ completion after review.
 
 ## Known limits (K class)
 
-- A stamp written while a policy counted stays until it lapses if the policy is later switched to `countstowardsuppression = No`
-  (K2: at most 30 days, then it expires).
-- A Resolved (Acted) Signal carrying a stamp is not read by the status call (K2: the stamp is only ever written on open or dismissed rows).
+- K1: a failed grain read or stamp write leaves that group unsuppressed (the stamp is applied in memory for the planner on a failed write) for that pass; the run fails visibly (policy failure + `suppression_failed` metric, EventId 50341) and the next night retries, including a partly written stamp.
+- K2 (uac-r2 review): Decision-Record facts behind the caller's own readable rows are aggregated, so the counted / recorded split tells a caller a counting reason from a non-counting one on records Console users cannot read. Aggregate numbers on the caller's readable grain only; accepted as designed.
+- K3: in the Do lane a lapsed suppression re-raises only when the due date has changed (031's rule: an unchanged date is `dateUnchanged`).
+- A stamp written while a policy counted stays until it lapses if the policy is later switched to `countstowardsuppression = No` (at most 30 days).
+- A Resolved (Acted) Signal carrying a stamp is not read by the status call (the stamp is only written on open or dismissed rows).
+- Cross-wall stamp (uac-r2 K1) is filed, not fixed: defer row F-65, issue #1661 (owner decision).
+
+## Fix round 1 (independent review + uac-r2 review of eccee0700)
+
+| Finding | Change |
+|---|---|
+| F1 partial stamp never repaired | `ReconcileAsync` selects a group with at least 3 DISTINCT dismissals in the window and either no live stamp, or an open / in-window dismissed Signal whose stamp is missing or older than the group's latest live stamp; per-row comparison kept, so only changed rows are written |
+| F2 fault after Allowed | Conflict between coordinator F2 (propagate like `GetDecisionPlanAsync`) and uac-r2 NIT3 (catch with AuthorizeAsync's `ex is not OperationCanceledException \|\| !ct.IsCancellationRequested`, answer 404): followed uac-r2 as instructed. A genuine read fault or timeout after Allowed is the uniform 404, logged WITH the exception; a real cancellation propagates |
+| F3 nightly re-reads | `sprk_countstowardsuppression` read once per policy in `ReadEnabledPoliciesAsync`; a No policy skips reconciliation with no grain reads; the flag is passed into `AssessAsync` (no per-group policy retrieve); the job's Signal read now carries `sprk_decisionrecord` so one review dismissing 3+ Signals does not pass the pre-filter |
+| uac-r2 F1 hidden Signals | The count route trims the grain's Signals to those the CALLER's own `IDataverseUserClient` read returns (`sprk_signals?$select=sprk_signalid` with the grain filter) before counting `DismissalsCounted`, `DismissalsRecorded` and `SuppressedUntil`; a non-success or page-cap read throws (never a partial count). Nightly job and `ApplyAsync` unchanged (app-only) |
+| uac-r2 F1 no-core variant | The no-core grain query now requires `sprk_corerecordid` null (app-only and caller reads) so core-bearing later episodes of the same To Do belong to the core grain |
+| uac-r2 NITs | Ledger reason reworded (how the data is read) and line refs refreshed; tests added for a Signal with no policy, denied-404 equals not-found-404 (identical body), timeout |
 
 ## uac-r2 coordination (POML constraint)
 

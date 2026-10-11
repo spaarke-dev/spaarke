@@ -3,6 +3,7 @@ using System.Globalization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Telemetry;
 
@@ -126,10 +127,11 @@ public sealed class SignalSuppressionService
 
     /// <summary>
     /// The read the wizard's dismissal step and the admin screen use, keyed by a Signal the caller is ALREADY authorized for
-    /// (the route calls <see cref="SignalCoreRecordAccess.AuthorizeAsync"/> first). Null when the Signal does not carry what the grain
+    /// (the route calls <see cref="SignalCoreRecordAccess.AuthorizeAsync"/> first); <paramref name="caller"/> is that same caller's
+    /// Dataverse client. A fault (including a caller read that is not a success) throws: it is never an empty or a partial count. Null when the Signal does not carry what the grain
     /// needs (no policy, or an unparseable key on a no-core Signal): the route answers the uniform 404, never a guess.
     /// </summary>
-    public async Task<SuppressionStatus?> GetStatusForSignalAsync(Guid signalId, CancellationToken ct)
+    public async Task<SuppressionStatus?> GetStatusForSignalAsync(Guid signalId, IDataverseUserClient caller, CancellationToken ct)
     {
         var signal = await _entities.RetrieveAsync("sprk_signal", signalId,
             ["sprk_policy", "sprk_corerecordtype", "sprk_corerecordid", "sprk_dedupekey"], ct).ConfigureAwait(false);
@@ -161,36 +163,56 @@ public sealed class SignalSuppressionService
             return null; // a no-core grain is keyed by the policy code: without it the count would be silently zero
         }
 
-        return (await AssessAsync(policyId, code, grain, ct).ConfigureAwait(false)).Status;
+        // The count is the CALLER's: the grain's Signals are trimmed to those the caller's own read returns (a Signal owned by a Secure
+        // team under a readable core record is not theirs to count), then Decision-Record facts are read app-only for those rows only.
+        var visible = await ReadVisibleSignalIdsAsync(caller, policyId, code, grain, ct).ConfigureAwait(false);
+        return (await AssessAsync(policyId, code, grain, policyCounts: null, visible, ct).ConfigureAwait(false)).Status;
     }
 
     /// <summary>Counts the grain and, at the threshold, stamps <c>sprk_suppresseduntil</c>. Idempotent: a second call writes nothing.</summary>
     public async Task<SuppressionStatus> ApplyAsync(Guid policyId, string policyCode, SuppressionGrain grain, CancellationToken ct)
     {
-        var assessment = await AssessAsync(policyId, policyCode, grain, ct).ConfigureAwait(false);
+        var assessment = await AssessAsync(policyId, policyCode, grain, policyCounts: null, visibleSignalIds: null, ct).ConfigureAwait(false);
         await StampAsync(policyCode, assessment, ct).ConfigureAwait(false);
         return assessment.Status with { SuppressedUntil = assessment.StampUntil ?? assessment.Status.SuppressedUntil };
     }
 
     /// <summary>
-    /// The nightly backstop (task 031 calls it once per policy with the Signals it already read). A grain with at least the threshold
-    /// of dismissed Signals in the window and no live stamp is counted exactly and stamped. Returns the Signals with the stamps applied
-    /// so the planner that runs next sees them even if a write failed, and the number of grains that failed (the run is then not
+    /// The nightly backstop (task 031 calls it once per policy with the Signals it already read and the policy's
+    /// <c>sprk_countstowardsuppression</c>, read once with the policies). A policy that does not count is skipped outright. Otherwise a
+    /// grain is counted exactly and stamped when it has at least the threshold of DISTINCT dismissals (one per Decision Record) in the
+    /// window AND either no live stamp, or an open / in-window dismissed Signal whose stamp is missing or older than the grain's latest
+    /// live one (a partly written stamp is repaired). Only rows that change are written (D-61). Returns the Signals with the stamps
+    /// applied so the planner that runs next sees them even if a write failed, and the number of grains that failed (the run is then not
     /// successful, and the next run retries).
     /// </summary>
     internal async Task<(IReadOnlyList<ExistingSignal> Signals, int Failures)> ReconcileAsync(
-        Guid policyId, string policyCode, IReadOnlyList<ExistingSignal> existing, CancellationToken ct)
+        Guid policyId, string policyCode, bool policyCountsTowardSuppression, IReadOnlyList<ExistingSignal> existing, CancellationToken ct)
     {
+        if (!policyCountsTowardSuppression) return (existing, 0);
+
         var now = _timeProvider.GetUtcNow().UtcDateTime;
         var windowStart = now.AddDays(-WindowDays);
         static (Guid?, Guid?, string?, Guid?) Key(ExistingSignal s) =>
             s.CoreRecordId is { } core ? (s.CoreTypeRefId, core, null, null) : (null, null, s.SubjectEntity, s.SubjectId);
 
-        var candidates = existing
-            .GroupBy(Key)
-            .Where(g => g.Count(s => s.Resolution == SignalWriter.ResolutionDismissed && s.ResolvedOn is { } on && on >= windowStart.AddDays(-1)) >= ThresholdDismissals
-                && !g.Any(s => s.SuppressedUntil is { } until && until > now))
-            .ToList();
+        bool NeedsWork(IGrouping<(Guid?, Guid?, string?, Guid?), ExistingSignal> g)
+        {
+            var dismissed = g.Where(s => s.Resolution == SignalWriter.ResolutionDismissed && s.ResolvedOn is { } on && on >= windowStart.AddDays(-1)).ToList();
+            if (dismissed.Select(s => s.DecisionRecordId ?? s.Id).Distinct().Count() < ThresholdDismissals) return false;
+
+            DateTime? live = null;
+            foreach (var s in g)
+            {
+                if (s.SuppressedUntil is { } u && u > now && (live is null || u > live)) live = u;
+            }
+
+            if (live is null) return true;
+            var dismissedIds = dismissed.Select(s => s.Id).ToHashSet();
+            return g.Any(s => (s.IsOpen || dismissedIds.Contains(s.Id)) && (s.SuppressedUntil is null || s.SuppressedUntil < live));
+        }
+
+        var candidates = existing.GroupBy(Key).Where(NeedsWork).ToList();
         if (candidates.Count == 0) return (existing, 0);
 
         var stamped = new Dictionary<Guid, DateTime>();
@@ -201,7 +223,7 @@ public sealed class SignalSuppressionService
             var grain = new SuppressionGrain(type, core, entity, subject);
             try
             {
-                var assessment = await AssessAsync(policyId, policyCode, grain, ct).ConfigureAwait(false);
+                var assessment = await AssessAsync(policyId, policyCode, grain, policyCountsTowardSuppression, visibleSignalIds: null, ct).ConfigureAwait(false);
                 if (assessment.StampUntil is { } until)
                 {
                     // In memory first: the planner must see the suppression this pass even when the write below fails.
@@ -232,15 +254,20 @@ public sealed class SignalSuppressionService
 
     private sealed record DismissedSignal(Guid SignalId, DateTime ResolvedOn, Guid? DecisionRecordId);
 
-    private async Task<Assessment> AssessAsync(Guid policyId, string policyCode, SuppressionGrain grain, CancellationToken ct)
+    private async Task<Assessment> AssessAsync(
+        Guid policyId, string policyCode, SuppressionGrain grain, bool? policyCounts, IReadOnlySet<Guid>? visibleSignalIds, CancellationToken ct)
     {
         var now = _timeProvider.GetUtcNow().UtcDateTime;
         var windowStart = now.AddDays(-WindowDays);
 
-        var policy = await _entities.RetrieveAsync("sprk_policy", policyId, ["sprk_countstowardsuppression"], ct).ConfigureAwait(false);
-        var policyCounts = policy.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true;
+        if (policyCounts is null)
+        {
+            var policy = await _entities.RetrieveAsync("sprk_policy", policyId, ["sprk_countstowardsuppression"], ct).ConfigureAwait(false);
+            policyCounts = policy.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true;
+        }
 
         var signals = await ReadGrainSignalsAsync(policyId, policyCode, grain, windowStart.AddDays(-1), ct).ConfigureAwait(false);
+        if (visibleSignalIds is not null) signals = signals.Where(s => visibleSignalIds.Contains(s.Id)).ToList();
         var dismissed = signals
             .Where(s => s.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value == SignalWriter.ResolutionDismissed
                 && s.GetAttributeValue<DateTime?>("sprk_resolvedon") is not null)
@@ -277,7 +304,7 @@ public sealed class SignalSuppressionService
             events[key] = (on, counts);
         }
 
-        var counted = policyCounts ? events.Values.Where(e => e.Counts).ToList() : new List<(DateTime On, bool Counts)>();
+        var counted = policyCounts.Value ? events.Values.Where(e => e.Counts).ToList() : new List<(DateTime On, bool Counts)>();
         DateTime? liveStamp = null;
         foreach (var signal in signals)
         {
@@ -310,7 +337,7 @@ public sealed class SignalSuppressionService
         }
 
         var until = stampUntil is { } fresh && (liveStamp is null || fresh > liveStamp) ? fresh : liveStamp;
-        return new Assessment(new SuppressionStatus(counted.Count, events.Count, until, policyCounts), stampUntil, targets);
+        return new Assessment(new SuppressionStatus(counted.Count, events.Count, until, policyCounts.Value), stampUntil, targets);
     }
 
     private async Task StampAsync(string policyCode, Assessment assessment, CancellationToken ct)
@@ -337,6 +364,48 @@ public sealed class SignalSuppressionService
 
     // ── Reads ───────────────────────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>The ids of the grain's Signals the CALLER can read: the same filter as the app-only read, asked through the caller's own
+    /// Dataverse client, which trims the result to rows that caller may see. A read that is not a success, or a result as large as the page
+    /// cap, throws: a partial answer would be a wrong count.</summary>
+    private static async Task<IReadOnlySet<Guid>> ReadVisibleSignalIdsAsync(
+        IDataverseUserClient caller, Guid policyId, string policyCode, SuppressionGrain grain, CancellationToken ct)
+    {
+        const int cap = 4999;
+        static string Quote(string s) => "'" + s.Replace("'", "''", StringComparison.Ordinal) + "'";
+        var filter = $"_sprk_policy_value eq {policyId:D}";
+        if (grain.CoreRecordId is { } coreId)
+        {
+            filter += $" and sprk_corerecordid eq {Quote(coreId.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant())}";
+            if (grain.CoreTypeRefId is { } typeRef) filter += $" and _sprk_corerecordtype_value eq {typeRef:D}";
+        }
+        else
+        {
+            var prefix = SignalWriter.DedupeKeySubjectPrefix(policyCode, grain.SubjectEntity!, grain.SubjectId!.Value.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant());
+            filter += $" and sprk_corerecordid eq null and startswith(sprk_dedupekey,{Quote(prefix)})";
+        }
+
+        var response = await caller.GetAsync(
+            $"sprk_signals?$select=sprk_signalid&$top={cap}&$filter={Uri.EscapeDataString(filter)}", ct).ConfigureAwait(false);
+        if (!response.IsSuccess || response.Body is not { ValueKind: System.Text.Json.JsonValueKind.Object } body
+            || !body.TryGetProperty("value", out var rows) || rows.ValueKind != System.Text.Json.JsonValueKind.Array)
+        {
+            throw new InvalidOperationException($"The caller's read of the Signals on this record failed ({response.ErrorCode ?? "no body"}).");
+        }
+
+        var ids = new HashSet<Guid>();
+        foreach (var row in rows.EnumerateArray())
+        {
+            if (row.TryGetProperty("sprk_signalid", out var id) && Guid.TryParse(id.GetString(), out var guid)) ids.Add(guid);
+        }
+
+        if (rows.GetArrayLength() >= cap)
+        {
+            throw new InvalidOperationException("More Signals than one caller-read page on one record; the count cannot be trimmed exactly.");
+        }
+
+        return ids;
+    }
+
     /// <summary>The grain's Signals (any status) of one policy: by the generic core pair, or by the subject's dedupe-key prefix.</summary>
     private async Task<IReadOnlyList<Entity>> ReadGrainSignalsAsync(
         Guid policyId, string policyCode, SuppressionGrain grain, DateTime resolvedSince, CancellationToken ct)
@@ -354,6 +423,8 @@ public sealed class SignalSuppressionService
         }
         else
         {
+            // A To Do later filed under a core record has core-bearing episodes under the same key prefix: those belong to the core grain.
+            query.Criteria.AddCondition("sprk_corerecordid", ConditionOperator.Null);
             query.Criteria.AddCondition("sprk_dedupekey", ConditionOperator.BeginsWith,
                 SignalWriter.DedupeKeySubjectPrefix(policyCode, grain.SubjectEntity!, grain.SubjectId!.Value.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant()));
         }

@@ -361,7 +361,7 @@ public class SignalSuppressionTests
         var s = new Store();
         for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1);
 
-        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, s.Existing(), default);
+        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
 
         failures.Should().Be(0);
         s.StampedIds.Should().HaveCount(3);
@@ -375,18 +375,66 @@ public class SignalSuppressionTests
         var s = new Store();
         s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 1);
         s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 2);
-        var quiet = await s.Service.ReconcileAsync(PolicyId, Code, s.Existing(), default);
+        var quiet = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
         s.Queries.Should().Be(0, "two dismissals cannot reach the threshold: no query");
 
         s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 3);
-        await s.Service.ReconcileAsync(PolicyId, Code, s.Existing(), default);
+        await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
         var queriesAfterStamp = s.Queries;
         s.StampedIds.Clear();
-        await s.Service.ReconcileAsync(PolicyId, Code, s.Existing(), default);
+        await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
 
         quiet.Failures.Should().Be(0);
         s.Queries.Should().Be(queriesAfterStamp, "a live stamp ends the nightly work for the grain");
         s.StampedIds.Should().BeEmpty("D-61: unchanged Signals are never stamped nightly");
+    }
+
+    [Fact]
+    public async Task Reconcile_RepairsAPartlyWrittenStamp_TheNextNight()
+    {
+        var s = new Store { FailWriteNumber = 2 };
+        for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1);
+        var open = s.Open(MatterId, Guid.NewGuid());
+
+        var first = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+        first.Failures.Should().Be(1);
+        s.StampedIds.Should().HaveCount(1, "the 2nd of 4 row writes failed: one row carries a live stamp, three do not");
+
+        var second = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        second.Failures.Should().Be(0);
+        s.StampedIds.Should().HaveCount(4, "every row of the grain, the open Signal included, now carries the stamp");
+        s.StampedIds.Distinct().Should().HaveCount(4, "D-61: the row that already had its stamp is not written again");
+        s.Signals.Single(x => x.Id == open).GetAttributeValue<DateTime?>("sprk_suppresseduntil").Should().NotBeNull();
+        s.StampedIds.Clear();
+        await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+        s.StampedIds.Should().BeEmpty("a fully stamped grain is left alone");
+    }
+
+    [Fact]
+    public async Task Reconcile_SkipsAPolicyThatDoesNotCount_WithNoGrainReads()
+    {
+        var s = new Store { PolicyCounts = false };
+        for (var i = 0; i < 4; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1);
+
+        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, false, s.Existing(), default);
+
+        failures.Should().Be(0);
+        s.Queries.Should().Be(0, "a policy that never counts can never reach the threshold: no read at all, every night");
+        s.StampedIds.Should().BeEmpty();
+        signals.Should().OnlyContain(x => x.SuppressedUntil == null);
+    }
+
+    [Fact]
+    public async Task Reconcile_DoesNotReadAGroup_WhoseDismissalsAreOneReview()
+    {
+        var s = new Store();
+        var record = s.Record(RecordedDecisionClass.Dismissal, Counts, daysAgo: 2);
+        for (var i = 0; i < 4; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 2, record: record);
+
+        await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        s.Queries.Should().Be(0, "four Signals of one Decision Record are one dismissal: below the threshold before any read");
     }
 
     [Fact]
@@ -395,7 +443,7 @@ public class SignalSuppressionTests
         var s = new Store { FailWrites = true };
         for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1);
 
-        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, s.Existing(), default);
+        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
 
         failures.Should().Be(1, "the run must not look healthy when a stamp was not written");
         SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, Now, [Hit(MatterId, Guid.NewGuid())], signals).Creates
@@ -403,20 +451,22 @@ public class SignalSuppressionTests
     }
 
     // =====================================================================================
-    // The count read (wizard dismissal step, admin)
+    // The count read (wizard dismissal step, admin): the CALLER's count
     // =====================================================================================
 
+    private static Task<IResult> Route(Guid signal, Store s, (SignalCoreRecordAccess Access, IDataverseUserClient Users) c, HttpContext? http = null, CancellationToken ct = default) =>
+        DecisionPlanEndpoints.GetSuppressionAsync(
+            signal, http ?? new DefaultHttpContext(), c.Access, s.Service, c.Users, NullLogger<SignalSuppressionService>.Instance, ct);
+
     [Fact]
-    public async Task TheRoute_Returns200WithTheCountAndTheUntilDate_ForACallerWhoCanReadTheMatter()
+    public async Task TheRoute_Returns200WithTheCountAndTheUntilDate_ForACallerWhoCanReadEverySignal()
     {
         var s = new Store();
         for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1);
         await s.Service.ApplyAsync(PolicyId, Code, Matter(), default);
         var signal = s.Open(MatterId, Guid.NewGuid());
-        var access = Access(signalRow: Ok(SignalRow()), core: Ok(new { createdon = "x" }));
 
-        var result = await DecisionPlanEndpoints.GetSuppressionAsync(
-            signal, new DefaultHttpContext(), access, s.Service, NullLogger<SignalSuppressionService>.Instance, default);
+        var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })));
 
         var body = result.Should().BeOfType<Ok<SuppressionResponse>>().Subject.Value!;
         (body.DismissalCount, body.DismissalsRecorded, body.Threshold, body.WindowDays).Should().Be((3, 3, 3, 30));
@@ -425,15 +475,52 @@ public class SignalSuppressionTests
     }
 
     [Fact]
+    public async Task TheRoute_NeverCountsASignalTheCallerCannotRead_NorItsStamp()
+    {
+        var s = new Store();
+        // Two readable dismissals; two more on the same (policy, matter) owned by a Secure team: the caller's read does not return them.
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 5);
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 4);
+        var hidden1 = s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 2);
+        var hidden2 = s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 1);
+        s.Stamp(hidden1, Now.UtcDateTime.AddDays(20));
+        s.Stamp(hidden2, Now.UtcDateTime.AddDays(25));
+        var mine = s.Open(MatterId, Guid.NewGuid());
+
+        var trimmed = await Route(mine, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" }), hide: [hidden1, hidden2]));
+        var control = await Route(mine, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })));
+
+        var seen = trimmed.Should().BeOfType<Ok<SuppressionResponse>>().Subject.Value!;
+        (seen.DismissalCount, seen.DismissalsRecorded).Should().Be((2, 2), "hidden dismissals are neither counted nor recorded for this caller");
+        seen.SuppressedUntil.Should().BeNull("a hidden Signal's live stamp is not the caller's to see");
+        var all = control.Should().BeOfType<Ok<SuppressionResponse>>().Subject.Value!;
+        (all.DismissalCount, all.DismissalsRecorded).Should().Be((4, 4), "control: a caller who can read every Signal sees them all");
+        all.SuppressedUntil.Should().Be(Now.UtcDateTime.AddDays(-1).AddDays(30), "four counted dismissals: the stamp the grain would carry");
+    }
+
+    [Fact]
+    public async Task TheRoute_AsksTheCallersOwnClient_ForTheGrainsSignals_WithTheCoreFilter()
+    {
+        var s = new Store();
+        var mine = s.Open(MatterId, Guid.NewGuid());
+        var c = Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" }));
+
+        await Route(mine, s, c);
+
+        var listPath = Mock.Get(c.Users).Invocations.Select(i => (string)i.Arguments[0]).Single(p => p.StartsWith("sprk_signals?", StringComparison.Ordinal));
+        var filter = Uri.UnescapeDataString(listPath);
+        filter.Should().Contain($"_sprk_policy_value eq {PolicyId}").And.Contain($"sprk_corerecordid eq '{MatterId}'")
+            .And.Contain($"_sprk_corerecordtype_value eq {MatterType}");
+    }
+
+    [Fact]
     public async Task TheRoute_Returns404_WhenTheCallerCannotReadTheMatter_AndReadsNoCount()
     {
         var s = new Store();
         var signal = s.Open(MatterId, Guid.NewGuid());
-        var access = Access(signalRow: Ok(SignalRow()), core: Fail(404, DataverseUserClientErrorCodes.NotFound));
         var before = s.Queries;
 
-        var result = await DecisionPlanEndpoints.GetSuppressionAsync(
-            signal, new DefaultHttpContext(), access, s.Service, NullLogger<SignalSuppressionService>.Instance, default);
+        var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Fail(404, DataverseUserClientErrorCodes.NotFound)));
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404);
         s.Queries.Should().Be(before);
@@ -443,12 +530,29 @@ public class SignalSuppressionTests
     public async Task TheRoute_Returns403_ForAnUnresolvedCaller()
     {
         var s = new Store();
-        var access = Access(signalRow: Fail(0, DataverseUserClientErrorCodes.UserContextRequired), core: Ok(new { createdon = "x" }));
 
-        var result = await DecisionPlanEndpoints.GetSuppressionAsync(
-            Guid.NewGuid(), new DefaultHttpContext(), access, s.Service, NullLogger<SignalSuppressionService>.Instance, default);
+        var result = await Route(Guid.NewGuid(), s, Caller(s, Fail(0, DataverseUserClientErrorCodes.UserContextRequired), Ok(new { createdon = "x" })));
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(403);
+    }
+
+    [Fact]
+    public async Task TheRoute_DeniedAndNotFound_AreTheSameBody_NoOracle()
+    {
+        var s = new Store();
+        var noPolicy = s.Open(MatterId, Guid.NewGuid());
+        s.Signals.Single(x => x.Id == noPolicy).Attributes.Remove("sprk_policy");
+        var readable = s.Open(MatterId, Guid.NewGuid());
+
+        static HttpContext Http() => new DefaultHttpContext { TraceIdentifier = "trace-1" };
+        static string Body(IResult r) => JsonSerializer.Serialize(r.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails);
+
+        var denied = await Route(readable, s, Caller(s, Ok(SignalRow()), Fail(404, DataverseUserClientErrorCodes.NotFound)), Http());
+        var unknownPolicy = await Route(noPolicy, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })), Http());
+        var unknownSignal = await Route(Guid.NewGuid(), s, Caller(s, Fail(404, DataverseUserClientErrorCodes.NotFound), Ok(new { createdon = "x" })), Http());
+
+        unknownPolicy.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404, "a Signal with no policy has no grain: never a guess");
+        Body(denied).Should().Be(Body(unknownPolicy)).And.Be(Body(unknownSignal), "byte-identical apart from nothing: same trace id, same shape");
     }
 
     [Fact]
@@ -456,12 +560,57 @@ public class SignalSuppressionTests
     {
         var s = new Store { FailReads = true };
         var signal = s.Open(MatterId, Guid.NewGuid());
-        var access = Access(signalRow: Ok(SignalRow()), core: Ok(new { createdon = "x" }));
 
-        var result = await DecisionPlanEndpoints.GetSuppressionAsync(
-            signal, new DefaultHttpContext(), access, s.Service, NullLogger<SignalSuppressionService>.Instance, default);
+        var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })));
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404);
+    }
+
+    [Fact]
+    public async Task TheRoute_Returns404_WhenTheCallersGrainReadFaults_AndForATimeout_NotA500()
+    {
+        var s = new Store();
+        var signal = s.Open(MatterId, Guid.NewGuid());
+
+        var faulted = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" }), listFault: new InvalidOperationException("boom")));
+        // An HttpClient timeout is a cancellation the caller did not ask for (ct is NOT cancelled): same handling as AuthorizeAsync.
+        var timedOut = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" }), listFault: new TaskCanceledException("timeout")));
+        var notSuccess = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" }), listResponse: Fail(500, DataverseUserClientErrorCodes.ServiceError)));
+
+        faulted.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404);
+        timedOut.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404);
+        notSuccess.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404);
+    }
+
+    [Fact]
+    public async Task TheRoute_LetsARealCancellationPropagate()
+    {
+        var s = new Store();
+        var signal = s.Open(MatterId, Guid.NewGuid());
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var act = () => Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" }), listFault: new OperationCanceledException(cts.Token)), ct: cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task TheNoCoreGrain_IgnoresEpisodesThatLaterGotACoreRecord()
+    {
+        var s = new Store();
+        var item = Guid.NewGuid();
+        s.Dismiss(core: null, subject: item, daysAgo: 3, episode: 1, subjectEntity: "sprk_todo");
+        s.Dismiss(core: null, subject: item, daysAgo: 2, episode: 2, subjectEntity: "sprk_todo");
+        // Episode 3 was raised after the To Do was filed under a matter: it belongs to the matter's grain, not the item's.
+        s.Dismiss(core: MatterId, subject: item, daysAgo: 1, episode: 3, subjectEntity: "sprk_todo");
+
+        var item2 = await s.Service.ApplyAsync(PolicyId, Code, SuppressionGrain.ForItem("sprk_todo", item), default);
+        var matter = await s.Service.ApplyAsync(PolicyId, Code, Matter(), default);
+
+        item2.DismissalsCounted.Should().Be(2);
+        item2.SuppressedUntil.Should().BeNull();
+        matter.DismissalsCounted.Should().Be(1);
     }
 
     // =====================================================================================
@@ -478,17 +627,28 @@ public class SignalSuppressionTests
         new("sprk_todo", itemId, "A To Do", null, new SignalCoreRecord(null, Guid.Empty, null, new EntityReference("systemuser", Guid.NewGuid())),
             null, null, new Dictionary<string, object?>(), []);
 
-    private static SignalCoreRecordAccess Access(DataverseUserResponse signalRow, DataverseUserResponse core)
+    /// <summary>The caller's Dataverse client and the access decision over it. <paramref name="hide"/> are Signals the caller's own read does
+    /// not return (a Secure team's rows under a readable core record); every other Signal in the store is returned.</summary>
+    private static (SignalCoreRecordAccess Access, IDataverseUserClient Users) Caller(
+        Store s, DataverseUserResponse signalRow, DataverseUserResponse core, IEnumerable<Guid>? hide = null,
+        Exception? listFault = null, DataverseUserResponse? listResponse = null)
     {
         var entities = new Mock<IGenericEntityService>();
         entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", MatterType, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_recordtype_ref", MatterType) { ["sprk_recordlogicalname"] = "sprk_matter" });
         entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
+        var hidden = (hide ?? []).ToHashSet();
         var users = new Mock<IDataverseUserClient>();
         users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>())).ReturnsAsync(signalRow);
-        users.Setup(u => u.GetAsync(It.Is<string>(p => !p.StartsWith("sprk_signals(", StringComparison.Ordinal) && p != "WhoAmI"), It.IsAny<CancellationToken>())).ReturnsAsync(core);
+        users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_signals?", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .Returns((string _, CancellationToken _) =>
+            {
+                if (listFault is not null) throw listFault;
+                return Task.FromResult(listResponse ?? Ok(new { value = s.Signals.Where(x => !hidden.Contains(x.Id)).Select(x => new { sprk_signalid = x.Id }).ToArray() }));
+            });
+        users.Setup(u => u.GetAsync(It.Is<string>(p => !p.StartsWith("sprk_signals", StringComparison.Ordinal) && p != "WhoAmI"), It.IsAny<CancellationToken>())).ReturnsAsync(core);
         users.Setup(u => u.GetAsync("WhoAmI", It.IsAny<CancellationToken>())).ReturnsAsync(Fail(0, DataverseUserClientErrorCodes.UserContextRequired));
-        return new SignalCoreRecordAccess(users.Object, entities.Object, NullLogger<SignalCoreRecordAccess>.Instance);
+        return (new SignalCoreRecordAccess(users.Object, entities.Object, NullLogger<SignalCoreRecordAccess>.Instance), users.Object);
     }
 
     private static DataverseUserResponse Ok(object body) => DataverseUserResponse.Ok(200, JsonSerializer.SerializeToElement(body));
@@ -515,6 +675,8 @@ public class SignalSuppressionTests
         public List<Guid> StampedIds { get; } = new();
         public bool PolicyCounts { get; set; } = true;
         public bool FailWrites { get; set; }
+        public int FailWriteNumber { get; set; }
+        private int _writes;
         public bool FailReads { get; set; }
         public int Queries { get; private set; }
         public SignalSuppressionService Service { get; }
@@ -536,7 +698,7 @@ public class SignalSuppressionTests
             org.Setup(o => o.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
                 .Returns((Entity update, CancellationToken _) =>
                 {
-                    if (FailWrites) throw new InvalidOperationException("Simulated Dataverse failure on the update.");
+                    if (FailWrites || (FailWriteNumber > 0 && ++_writes == FailWriteNumber)) throw new InvalidOperationException("Simulated Dataverse failure on the update.");
                     update.Attributes.Keys.Should().Equal(["sprk_suppresseduntil"], "the stamp touches that one column and nothing else");
                     StampedIds.Add(update.Id);
                     Signals.Single(x => x.Id == update.Id)["sprk_suppresseduntil"] = update["sprk_suppresseduntil"];
@@ -618,7 +780,8 @@ public class SignalSuppressionTests
                     null,
                     x.GetAttributeValue<EntityReference>("sprk_corerecordtype")?.Id,
                     Guid.TryParse(x.GetAttributeValue<string>("sprk_corerecordid"), out var core) ? core : null,
-                    new EntityReference("systemuser", Guid.NewGuid()));
+                    new EntityReference("systemuser", Guid.NewGuid()),
+                    x.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id);
             }).ToList();
 
         private EntityCollection Run(QueryExpression q)
@@ -652,6 +815,7 @@ public class SignalSuppressionTests
                 ConditionOperator.Equal => Equals(actual, c.Values[0]),
                 ConditionOperator.In => c.Values.Any(v => Equals(actual, v)),
                 ConditionOperator.BeginsWith => actual is string s && s.StartsWith((string)c.Values[0], StringComparison.Ordinal),
+                ConditionOperator.Null => actual is null,
                 ConditionOperator.GreaterEqual => actual is DateTime d && d >= (DateTime)c.Values[0],
                 _ => throw new NotSupportedException(c.Operator.ToString()),
             };
