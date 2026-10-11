@@ -679,17 +679,23 @@ public class ExternalMessageRouteTests : IClassFixture<CustomWebAppFactory>
     public void MessagesRoute_IsMapped_ForEverySupportedRoot(string root)
     {
         EndpointTable.AssertMapped(_factory, "GET", $"/api/v1/external/{root}/{Guid.NewGuid()}/messages");
+        // Task 034 (FR-11): the post shares the path.
+        EndpointTable.AssertMapped(_factory, "POST", $"/api/v1/external/{root}/{Guid.NewGuid()}/messages");
     }
 
     [Fact]
-    public void MessagesRoute_IsReadOnly_AndRequiresAuthorization()
+    public void MessagesRoutes_AreGetAndPostOnly_AndEachRequiresAuthorization()
     {
-        EndpointTable.Maps(_factory, "POST", $"/api/v1/external/projects/{Guid.NewGuid()}/messages")
-            .Should().BeFalse("task 033 maps GET only; the write path is task 034");
+        EndpointTable.Maps(_factory, "PUT", $"/api/v1/external/projects/{Guid.NewGuid()}/messages").Should().BeFalse();
+        EndpointTable.Maps(_factory, "DELETE", $"/api/v1/external/projects/{Guid.NewGuid()}/messages")
+            .Should().BeFalse("messages are not deletable (owner, 2026-10-10)");
 
-        var endpoint = EndpointTable.Endpoints(_factory)
-            .Single(e => e.RoutePattern.RawText == "/api/v1/external/{root}/{id:guid}/messages");
-        endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Authorization.IAuthorizeData>()
-            .Should().NotBeEmpty("the route inherits the external collaboration group's authorization policy");
+        var endpoints = EndpointTable.Endpoints(_factory)
+            .Where(e => e.RoutePattern.RawText == "/api/v1/external/{root}/{id:guid}/messages")
+            .ToList();
+        endpoints.Should().HaveCount(2, "GET (task 033) and POST (task 034)");
+        endpoints.Should().AllSatisfy(endpoint =>
+            endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Authorization.IAuthorizeData>()
+                .Should().NotBeEmpty("each route inherits the external collaboration group's authorization policy"));
     }
 }

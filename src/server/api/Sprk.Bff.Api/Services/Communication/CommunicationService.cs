@@ -1093,6 +1093,130 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────
+    // External-plane thread post (spaarke-SPA-external-access-platform-r3 task 034, FR-11)
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The longest body an external thread post may carry (FR-11; the column itself holds 100,000).</summary>
+    public const int MaxThreadPostBodyLength = 10_000;
+
+    /// <summary>
+    /// Posts a message to a record's thread AS the resolved external-plane caller (FR-11): ONE <c>sprk_communication</c>
+    /// (type Message) regarding the record, and nothing sent anywhere — no channel dispatch, no Graph, no ACS, no OBO.
+    /// The caller (the external route) has already decided the record is in the author's accessible set with Create.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Same pipeline, no send.</b> The row is filed by the SAME steps every outbound communication takes:
+    /// <see cref="ResolveOutboundOwnerAsync"/> (ADR-024 regarding lookup through <see cref="RegardingLookupMap"/>, the FR-26
+    /// core-ancestor stamp, the denormalized regarding fields, then the owner — the record's team; a refusal is a 409 and
+    /// nothing is written). Thread assignment is the existing best-effort message-thread step: with no ACS thread id the
+    /// resolver files the post in the record's default thread (Tier 2), as an outbound chat message with no ACS id is.</para>
+    /// <para><b>Author.</b> From the resolved principal only (FR-11, FR-25): the creator stamp is
+    /// <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService.StampCreator(Entity, Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerPrincipal)"/>
+    /// (<c>sprk_createdbyperson</c> or <c>sprk_createdbycontact</c>), decided BEFORE anything is read or written, so an
+    /// unattributable principal writes nothing. A systemuser author is also <c>sprk_sentby</c> (the sender name the
+    /// thread reads show). A contact author's post is Incoming / Delivered (a message the organisation received, as an
+    /// inbound one is); a systemuser's is Outgoing / Send. Both statuses are on the external read's allow-list.</para>
+    /// <para><b>Plain text only.</b> The body is stored verbatim with <c>sprk_bodyformat</c> = PlainText, whatever it
+    /// contains, so markup or script in it is text to every reader (each renderer escapes a plain-text body; the external
+    /// read returns the format with the body). Posts are never internal-only: <c>sprk_isinternalonly</c> is written
+    /// <c>false</c> explicitly, because the external read hides a row whose flag is unset from every contact.</para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The author is not attributable (nothing read or written).</exception>
+    /// <exception cref="SdapProblemException">400 invalid input; 409 owner refusal; 502 core-ancestor failure.</exception>
+    public async Task<ThreadPostResult> PostToRecordThreadAsync(
+        string regardingEntityType,
+        Guid regardingId,
+        string body,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerPrincipal author,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(author);
+
+        // FR-25: decide the creator stamp before any read or write — an unattributable principal never writes.
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService.EnsureCanStampCreator(author);
+
+        var correlationId = Guid.NewGuid().ToString("D");
+
+        if (string.IsNullOrWhiteSpace(regardingEntityType)
+            || !RegardingLookupMap.ContainsKey(regardingEntityType)
+            || regardingId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: "A thread post needs a supported regarding record.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        if (string.IsNullOrWhiteSpace(body) || body.Length > MaxThreadPostBodyLength)
+        {
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: $"A message body of 1 to {MaxThreadPostBodyLength} characters is required.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        const string subject = "(No Subject)";
+        var fromContact = author.SystemUserId is null;
+        var direction = fromContact ? CommunicationDirection.Incoming : CommunicationDirection.Outgoing;
+        var status = fromContact ? CommunicationStatus.Delivered : CommunicationStatus.Send;
+        var postedAt = DateTimeOffset.UtcNow;
+
+        // The filing input, in the shape the shared filing step reads (associations[0] = the regarding record).
+        var request = new SendCommunicationRequest
+        {
+            To = Array.Empty<string>(),
+            Subject = subject,
+            Body = body,
+            BodyFormat = BodyFormat.PlainText,
+            CommunicationType = CommunicationType.Message,
+            Associations = new[] { new CommunicationAssociation { EntityType = regardingEntityType, EntityId = regardingId } },
+            CorrelationId = correlationId,
+        };
+
+        var communication = new DataverseEntity("sprk_communication")
+        {
+            ["sprk_name"] = $"Message: {subject}",
+            ["sprk_communicationtype"] = new OptionSetValue((int)CommunicationType.Message),   // 100000004
+            ["statuscode"] = new OptionSetValue((int)status),
+            ["statecode"] = new OptionSetValue(0), // Active
+            ["sprk_direction"] = new OptionSetValue((int)direction),
+            ["sprk_bodyformat"] = new OptionSetValue((int)BodyFormat.PlainText),
+            ["sprk_subject"] = subject,
+            ["sprk_body"] = body,
+            ["sprk_isinternalonly"] = false,
+            ["sprk_sentat"] = postedAt.UtcDateTime,
+            ["sprk_correlationid"] = correlationId,
+        };
+
+        if (!string.IsNullOrWhiteSpace(author.Email))
+            communication["sprk_from"] = author.Email;
+        if (author.SystemUserId is { } sentBy)
+            communication["sprk_sentby"] = new EntityReference("systemuser", sentBy);
+
+        // Regarding + core ancestor + owner (task 146) — the shared filing step. A refusal throws before the create.
+        var owner = await ResolveOutboundOwnerAsync(communication, request, correlationId, ct);
+        owner.ApplyTo(communication);
+
+        // The author, last, so no earlier step can leave another creator on the row.
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalDataService.StampCreator(communication, author);
+
+        var communicationId = await _genericEntityService.CreateAsync(communication, ct);
+
+        _logger.LogInformation(
+            "External thread post created | Id: {CommunicationId}, Regarding: {EntityType}:{RegardingId}, AuthorKind: {Kind}, CorrelationId: {CorrelationId}",
+            communicationId, regardingEntityType, regardingId, fromContact ? "contact" : "systemuser", correlationId);
+
+        // Best-effort (NFR-02): the record's default thread. Never fails the post.
+        var threadId = await ResolveOutboundMessageThreadAsync(communicationId, request, acsThreadId: null, correlationId, ct);
+
+        return new ThreadPostResult(communicationId, postedAt, subject, body, BodyFormat.PlainText, direction, threadId);
+    }
+
     /// <summary>
     /// Sends a communication via Microsoft Graph sendMail API.
     /// Validates the request, resolves the sender, constructs a Graph Message, and sends.

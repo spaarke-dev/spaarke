@@ -342,7 +342,8 @@ public partial class RouteAuthorizationGuardTests
             "GET /api/v1/external/{root}/{id}/messages (spaarke-SPA-external-access-platform-r3 task 033, FR-04) on the "
             + "COLLABORATION group: the record is gated against the caller principal's accessible set through the module "
             + "registry (IsRecordAccessible; ScopeRows for invoices and the requester-scoped service requests) before the "
-            + "app-only message read; an absent record and a foreign one are the same 403."),
+            + "app-only message read; an absent record and a foreign one are the same 403. POST (task 034, FR-11) runs the "
+            + "same gate and also requires Create on the record (GetRecordRightsAsync) before the app-only thread post."),
         new GovernedFile("Api/ExternalAccess/GrantExternalAccessEndpoint.cs", Scope.GroupGated,
             "POST /grant under the DelegationRuleFilter admin group."),
         new GovernedFile("Api/ExternalAccess/RevokeExternalAccessEndpoint.cs", Scope.GroupGated,
@@ -1570,7 +1571,14 @@ public partial class RouteAuthorizationGuardTests
             "403 unless the route record is in the caller principal's accessible set, decided by the registered module "
             + "(module.IsRecordAccessible for project / matter / work assignment; the module's ScopeRows over the record's "
             + "own scope lookups for an invoice or the caller's own service request), before the app-only message read "
-            + "(ExternalMessageEndpoints.cs:134, :210, :242); an unsupported root is a 404 with no read."),
+            + "(ExternalMessageEndpoints.cs:328, :481, :513); an unsupported root is a 404 with no read."),
+        new HandlerDecision("POST /api/v1/external/{root}/{id:guid}/messages", "PostMessageAsync", "IsRecordAccessible",
+            new[] { "ExternalMessageEndpoints.PostMessageCoreAsync", "ExternalMessageEndpoints.GetRecordRightsAsync" },
+            "Task 034 (FR-11): the SAME record gate as the GET (module.IsRecordAccessible / ScopeRows, through "
+            + "EvaluateRecordGateAsync, ExternalMessageEndpoints.cs:481, :513) — outside the set, absent or no grants is the "
+            + "same 403 — and then Create on the record (the caller's rights on the root, on an invoice's parent root, or "
+            + "the requester on their own service request; :206, :218) before CommunicationService.PostToRecordThreadAsync "
+            + "writes app-only (:229). The body is validated and an unattributable sender refused before any read (:177, :195)."),
         new HandlerDecision("GET /api/office/communications/by-message-id/{internetMessageId}", "FindByMessageIdAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Reads through IDataverseUserClient under the CALLER's Dataverse security (task 127, "
             + "CommunicationsEndpoints.cs:145, :179); an unreadable communication 404s like a missing one."),

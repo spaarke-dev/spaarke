@@ -95,6 +95,12 @@ public sealed class CommunicationThreadReadService
     // (IsValidODataAttribute=false → 400 on $select) and was never written by the send path anyway
     // (messaging-r3 2026-07-22). Null when sprk_sentby is unset (e.g. an inbound message with no systemuser sender).
     private const string SentByFormattedValue = "_sprk_sentby_value@OData.Community.Display.V1.FormattedValue";
+    // spaarke-SPA-external-access-platform-r3 task 034 (FR-11/FR-25): a CONTACT's external thread post has no sprk_sentby
+    // (a systemuser lookup); its author is the sprk_createdbycontact stamp. Selected ONLY by the app-only external read
+    // (ReadRegardingAppOnlyAsync) — the column is task 020's, so the internal reads do not depend on it. Its FormattedValue
+    // (the contact's name) is the sender name when sprk_sentby is unset.
+    private const string CreatedByContactValue = "_sprk_createdbycontact_value";
+    private const string CreatedByContactFormattedValue = "_sprk_createdbycontact_value@OData.Community.Display.V1.FormattedValue";
 
     // sprk_communicationattachment columns (pre-existing intersection, task 070).
     private const string AttachmentPkField = "sprk_communicationattachmentid";
@@ -380,8 +386,8 @@ public sealed class CommunicationThreadReadService
         var regardingValue = $"_{regardingField}_value";
         var select = string.Join(',', new[]
         {
-            PkField, BodyField, BodyFormatField, SubjectField, DirectionField, SentByValue, CreatedOnField,
-            InternalOnlyField, PrivilegeField, StatusCodeAttribute, regardingValue,
+            PkField, BodyField, BodyFormatField, SubjectField, DirectionField, SentByValue, CreatedByContactValue,
+            CreatedOnField, InternalOnlyField, PrivilegeField, StatusCodeAttribute, regardingValue,
         });
         // Newest first with one over-fetched row (detects a cut-short list without a COUNT query): when the record has
         // more rows than the bound, the NEWEST ones are kept and the oldest dropped; the page is reversed to oldest→newest
@@ -1040,7 +1046,8 @@ public sealed class CommunicationThreadReadService
             To = SplitRecipients(TryString(row, ToField)),
             Direction = TryInt(row, DirectionField),
             SentBy = TryGuid(row, SentByValue),
-            SentByName = TryString(row, SentByFormattedValue),
+            // The systemuser sender's name; else (task 034) the contact author's name — selected only by the external read.
+            SentByName = TryString(row, SentByFormattedValue) ?? TryString(row, CreatedByContactFormattedValue),
             SentAt = TryDateTimeOffset(row, SentAtField),
             CreatedOn = TryDateTimeOffset(row, CreatedOnField),
             InReplyTo = TryString(row, InReplyToField),

@@ -144,9 +144,10 @@ public class RecordOwnerAssignmentCensusTests
             "The mapper builds the mirrored analysis row; DataverseObservationMirror resolves its owner from the row's "
             + "parent lookups (ForChild) and skips the mirror on a refusal.",
             OwnerFile: "DataverseObservationMirror.cs"),
-        new CensusEntry("CommunicationService.cs", "sprk_communication", 3, Disposition.Routed,
-            "Outbound email, message and shared sends: ForChild over every parent lookup on the row (secure-if-any); an "
-            + "unfiled send keeps its creator (E1); a refusal throws before the create."),
+        new CensusEntry("CommunicationService.cs", "sprk_communication", 4, Disposition.Routed,
+            "Outbound email, message and shared sends, and the external thread post (spaarke-SPA-external-access-platform-r3 "
+            + "task 034, PostToRecordThreadAsync): ForChild over every parent lookup on the row (secure-if-any); an unfiled "
+            + "send keeps its creator (E1); a refusal throws before the create."),
         new CensusEntry("CommunicationService.cs", "sprk_document", 3, Disposition.Routed,
             "Archived .eml and attachment documents — content of the communication (ContentOf), resolved before the SPE "
             + "upload so a refusal leaves neither bytes nor a row."),
