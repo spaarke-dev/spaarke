@@ -4,7 +4,7 @@
     <title>Measure classifier recall against the floor (exit gate)</title>
     <phase>7 Inquiry and the classifier</phase>
     <gate>072 complete</gate>
-    <status>blocked</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>This is a measurement that can FAIL THE PROJECT; it is a gate, not an implementation.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -100,11 +100,10 @@
 
   <notes>spec.md FR-40 and success criterion 11. design.md section 8.0c (D-10). This task CAN FAIL THE PROJECT and that is its purpose.</notes>
 
-  <completion status="blocked" date="2026-10-07" branch="stream/d-074">
-    <summary>BLOCKED at the escalation trigger: no labelled set exists, and building one from spaarkedev1 needs owner judgement. No recall was measured; the gate has neither passed nor failed, and R1 cannot exit on criterion 11 until it is resolved.</summary>
-    <done>D-49 conflict check with the email project: clean (no open PRs on triage; r2 complete and archived; r3 design-only and excludes triage at design.md:126). Three columns created on sprk_triagecategory in spaarkedev1 via the 007 Web API recipe (sprk_MeasuredRecall decimal 0-100 p2, sprk_LabelledSetSize integer, sprk_RecallMeasuredOn DateOnly/DateOnly), PublishXml on the entity only, read back as componenttype-2 members of OntologyPlatformSolution. Values left null (no measurement yet).</done>
-    <blocked-on>Owner decisions 1-5 in notes/classifier-recall-measurement.md section 4: (1) source of items (real redacted mail recommended, or a blind owner-labelled synthetic set, or a hybrid); (2) whether the 50 counts positives (proposal: 25 or more per gated category plus 30 or more negatives, 80-100 items in all); (3) which recall gates (proposal: predicate-level Fee-or-Scope recall of 80 percent or more, with strict per-category recall reported); (4) labelling protocol; (5) in-memory live harness at 2 model calls per item, about 160-200 calls.</blocked-on>
-    <evidence>notes/classifier-recall-measurement.md</evidence>
+  <completion status="completed" date="2026-10-10" branch="stream/d-074-run">
+    <summary>GATE PASSES (D-10, FR-40, success criterion 11): predicate recall 49/55 = 89.1 percent (Wilson 95 percent 78.2-94.9) on a 92-item labelled set (55 fee-or-scope positives, 37 negatives), run 4, 2026-10-10; precision 49/52 = 94.2 percent; strict recall Fee 24/27, Scope 25/28. Runs 1 (21.8) and 2 (34.5) failed and led to D-117; run 3 (81.8) was invalid (Azure token failures tripped the harness guard) and is not counted.</summary>
+    <done>Fixture tests/fixtures/ontology-classifier-recall/labelled-set.json and live harness tests/integration/seam/Ai/ClassifierRecallLiveHarness.cs (guard fails on any Warning+ log and on a missing rung-5 category; scorer matches POL-COMMIT-BUDGET including review outcome not Dismiss), merged via PR #1585 (7d013ea7e) after independent review and re-check. Pass depends on D-117: TRIAGE-EMAIL Action row rewrite (mirror PR #1602 to master, e61bc0892) and rung 5 reading the editable taxonomy (PR #1610 into the project branch, 049ca6db9). D-49 columns written in spaarkedev1 2026-10-10 21:18Z: Fee 88.89, Scope 89.29, set size 92, measured on 2026-10-10. Key labelled per D-64/D-116 before run 1; independent review found no leakage and the result robust to the key.</done>
+    <evidence>notes/classifier-recall-measurement.md sections 10-11; notes/074-run4-results.json; notes/deploy-log.md</evidence>
   </completion>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
