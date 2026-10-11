@@ -223,6 +223,8 @@ public sealed class EventRoutesLiveTests
             ext.SprkStatus.Should().Be(EventStatusCode.Open);
             var listedExternal = (await external.GetEventsAsync(projectId)).Value.Single(e => e.SprkEventid == ext.SprkEventid);
             listedExternal.SprkName.Should().Be("zz-097-test external create");
+            (await ReadEventAsync(dv, Guid.Parse(ext.SprkEventid))).GetProperty("_sprk_createdbyperson_value").GetGuid()
+                .Should().Be(operatorId, "R3 task 030 (FR-25): the external create stamps its creator, read back from Dataverse");
 
             // ── A REAL child-BU user: denied on the operator's root-BU event, allowed on its own ─────────────────
             if (otherUser is { } child)
@@ -405,6 +407,8 @@ public sealed class EventRoutesLiveTests
             createdEvents.Add(Guid.Parse(ext.SprkEventid));
             _out.WriteLine($"ExternalDataService.CreateEventAsync(sprk_duedate 2026-10-21T00:00:00.000Z) -> id={ext.SprkEventid} sprk_duedate={ext.SprkDuedate}");
             ext.SprkDuedate.Should().Be("2026-10-21");
+            (await ReadEventAsync(dv, Guid.Parse(ext.SprkEventid))).GetProperty("_sprk_createdbyperson_value").GetGuid()
+                .Should().Be(operatorId, "R3 task 030 (FR-25): the external create stamps its creator, read back from Dataverse");
             (await ReadDatesAsync(dv, Guid.Parse(ext.SprkEventid))).GetProperty("sprk_duedate").GetString().Should().Be("2026-10-21");
             (await external.GetEventsAsync(projectId)).Value.Single(e => e.SprkEventid == ext.SprkEventid)
                 .SprkDuedate.Should().Be("2026-10-21");
@@ -571,7 +575,7 @@ public sealed class EventRoutesLiveTests
         var leaks = new List<string>();
 
         async Task<JsonElement> ReadTodoAsync(Guid id) =>
-            await dv.GetFromJsonAsync<JsonElement>($"sprk_todos({id})?$select=sprk_duedate,statuscode,statecode");
+            await dv.GetFromJsonAsync<JsonElement>($"sprk_todos({id})?$select=sprk_duedate,statuscode,statecode,_sprk_createdbyperson_value");
 
         try
         {
@@ -585,17 +589,19 @@ public sealed class EventRoutesLiveTests
             var external = new ExternalDataService(new HttpClient(), liveConfiguration, credential,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<ExternalDataService>.Instance);
             var projectTeam = await DefaultOwnerTeamOfRecordAsync(dv, "sprk_projects", projectId);
+            var operatorId = (await dv.GetFromJsonAsync<JsonElement>("WhoAmI()")).GetProperty("UserId").GetGuid();
 
             // Create, as an earlier SPA build sent it: toISOString() of the picked day's NOON UTC.
             var ext = await external.CreateTodoAsync(ExternalDataService.TodoRootKind.Project, projectId,
                 new CreateExternalTodoRequest { SprkName = "zz-106-test external legacy date", SprkDuedate = "2026-10-21T12:00:00.000Z" },
                 projectTeam, callerContactId: null,
-                creator: OperatorAsCreator(
-                    (await dv.GetFromJsonAsync<JsonElement>("WhoAmI()")).GetProperty("UserId").GetGuid())); // R3 task 030 (FR-25)
+                creator: OperatorAsCreator(operatorId)); // R3 task 030 (FR-25)
             var extId = Guid.Parse(ext.SprkTodoid);
             _out.WriteLine($"ExternalDataService.CreateTodoAsync(sprk_duedate 2026-10-21T12:00:00.000Z) -> id={extId} sprk_duedate={ext.SprkDuedate}");
             ext.SprkDuedate.Should().Be("2026-10-21");
             (await ReadTodoAsync(extId)).GetProperty("sprk_duedate").GetString().Should().Be("2026-10-21");
+            (await ReadTodoAsync(extId)).GetProperty("_sprk_createdbyperson_value").GetGuid()
+                .Should().Be(operatorId, "R3 task 030 (FR-25): the external create stamps its creator, read back from Dataverse");
 
             // Reschedule (the SPA's PATCH with a new due date).
             await external.UpdateTodoAsync(extId, new UpdateExternalTodoRequest { SprkDuedate = "2026-10-23" });

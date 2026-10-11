@@ -75,3 +75,20 @@ No new service, DI registration, endpoint, package or column.
 - `tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs:1852` lists `ExternalDataService.cs` under `PersonLessWriters` with the reason "the person is a CONTACT, and sprk_createdbyperson names a systemuser". After this task that reason is stale: the file now records the person.
   - The entry should move to `PersonBearingWriters` with member `StampCreator`. `StampCreator` contains `RecordCreatorPersonColumn`, which the census `PersonToken` already matches.
   - The ArchTests file is outside this task's file list. The test still passes as written, because it checks only that the file exists.
+
+## Review results and fixes (2026-10-10)
+
+Two adversarial review passes found no F-class defects. The following known-limit items were fixed in a follow-up commit.
+
+1. **Upload ordering.** `UploadDocument` now refuses an unattributable principal (403 ProblemDetails) before the SPE write, so the fail-closed stamp can no longer leave an orphaned file. The rule is shared: `ExternalDataService.CanStampCreator(CallerPrincipal)` (also used by `EnsureCanStampCreator` / `StampCreator`).
+   - Test: `SecureChildOwnershipExternalTests.ExternalDocumentUpload_ByAnUnattributablePrincipal_Is403_AndNeverReachesSpe_AndCreatesNoRow` (failed before: 201, bytes uploaded; passes after). Predicate: `ExternalDataServiceTests.CanStampCreator_*`.
+2. **To-do seam ordering.** `CreateTodoAsync` calls `EnsureCanStampCreator` first, before the token, root-name lookup and record-type lookup (event and document already stamped before the token).
+   - Test: `EveryExternalCreatePath_WithAnUnattributablePrincipal_PostsNothing` now also asserts no HTTP request at all (To-do case failed before with `{GET, GET}`; passes after).
+3. **Route to seam principal handoff.** The recording fixtures keep the creator the seam was handed and assert `BeSameAs` the resolved principal: `ExternalTodoScopeTests` (`LastCreateCreator`) and, for to-do, event and document, `SecureChildOwnershipExternalTests` (`TodoCreators` / `EventCreators` / `DocumentCreators`).
+4. **DTO closure vs strip.** `ARequestBodyNamingAnotherCreator_IsStoredWithTheCallersStamp` renamed `ARequestBodyNamingAnotherCreator_IsDroppedByTheClosedDto_AndTheCallersStampIsStored` (it pins DTO closure). New `ACreatorKeyInjectedIntoTheBuiltPayload_IsStrippedByStampCreator_AndTheCallersStampWins` takes the real builder output for each path, injects creator keys, stamps it and asserts the caller's stamp wins.
+5. **Live read-back.** `EventRoutesLiveTests` (opt-in) reads each external create back and asserts `_sprk_createdbyperson_value == operatorId` (event, event with legacy date, to-do). Compiles; not run live.
+6. **Census.** `ExternalDataService.cs` moved from `PersonLessWriters` to `PersonBearingWriters` as `StampCreator` ("the resolved external principal"). `PersonToken` matches `RecordCreatorPersonColumn`.
+
+Known limits not fixed:
+- Deploy order: task 020's `sprk_createdbycontact` import must land before task 038 deploys this BFF. A Dataverse 4xx on the create surfaces as a generic 500; consider a ProblemDetails mapping later.
+- Delete-own identity drift (FR-26): owner decision recorded in the task 032 POML.

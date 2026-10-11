@@ -209,6 +209,25 @@ public class ExternalDataServiceTests
         body.Should().ContainKey("sprk_createdbycontact", "a refusal decides before it mutates");
     }
 
+    [Theory]
+    [InlineData(PrincipalKind.SystemUser, true)]
+    [InlineData(PrincipalKind.SystemUserWithLinkedContact, true)]
+    [InlineData(PrincipalKind.WorkforceContact, true)]
+    [InlineData(PrincipalKind.CiamContact, true)]
+    public void CanStampCreator_IsTrueForEveryAttributableKind(PrincipalKind kind, bool expected) =>
+        ExternalDataService.CanStampCreator(Principal(kind)).Should().Be(expected);
+
+    [Fact]
+    public void CanStampCreator_IsFalseForNeitherKind_AndForAnEmptySystemUserId()
+    {
+        ExternalDataService.CanStampCreator(NeitherKind()).Should().BeFalse();
+        ExternalDataService.CanStampCreator(new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce, SystemUserId = Guid.Empty, ContactId = ContactA,
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        }).Should().BeFalse("an empty systemuser id is not a person");
+    }
+
     [Fact]
     public void StampCreator_EmptySystemUserId_Throws()
     {
@@ -273,9 +292,48 @@ public class ExternalDataServiceTests
     [InlineData(CreatePath.Todo, PrincipalKind.CiamContact)]
     [InlineData(CreatePath.Event, PrincipalKind.SystemUser)]
     [InlineData(CreatePath.Event, PrincipalKind.CiamContact)]
-    public async Task ARequestBodyNamingAnotherCreator_IsStoredWithTheCallersStamp(CreatePath path, PrincipalKind kind)
+    [InlineData(CreatePath.Document, PrincipalKind.SystemUser)]
+    [InlineData(CreatePath.Document, PrincipalKind.CiamContact)]
+    public void ACreatorKeyInjectedIntoTheBuiltPayload_IsStrippedByStampCreator_AndTheCallersStampWins(
+        CreatePath path, PrincipalKind kind)
     {
-        // The SPA body names someone else as creator, in every form a client could try. The request is bound the way the
+        // The strip itself: take the payload the REAL builder produces, add creator keys as if a DTO or builder ever passed
+        // client fields through, and stamp it exactly as the seam does (builder -> StampCreator -> serialize).
+        var web = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var body = path switch
+        {
+            CreatePath.Todo => ExternalDataService.BuildTodoCreatePayload(
+                JsonSerializer.Deserialize<CreateExternalTodoRequest>("{\"sprk_name\":\"Created\"}", web)!,
+                ExternalDataService.TryGetRootBinding(ExternalDataService.TodoRootKind.Project)!, RootId, "Project", null,
+                TeamId, null),
+            CreatePath.Event => ExternalDataService.BuildEventCreatePayload(
+                RootId, JsonSerializer.Deserialize<CreateExternalEventRequest>("{\"sprk_name\":\"Created\"}", web)!, TeamId),
+            CreatePath.Document => ExternalDataService.BuildDocumentCreatePayload(
+                RootId, new ExternalUploadedFilePointers("drive-1", "item-1", "a.pdf", 10, null), TeamId),
+            _ => throw new ArgumentOutOfRangeException(nameof(path)),
+        };
+        body["sprk_CreatedByContact@odata.bind"] = $"/contacts({OtherContact:D})";
+        body["sprk_CreatedByPerson@odata.bind"] = $"/systemusers({OtherSystemUser:D})";
+        body["sprk_requestedby@odata.bind"] = $"/contacts({OtherContact:D})";
+
+        ExternalDataService.StampCreator(body, Principal(kind));
+
+        var strings = AsStrings(body);
+        AssertStampedAs(strings, kind);
+        strings.Values.Should().NotContain(v => v != null
+            && (v.Contains(OtherSystemUser.ToString("D")) || v.Contains(OtherContact.ToString("D"))),
+            "a creator key present in the built payload never reaches Dataverse");
+    }
+
+    [Theory]
+    [InlineData(CreatePath.Todo, PrincipalKind.SystemUser)]
+    [InlineData(CreatePath.Todo, PrincipalKind.CiamContact)]
+    [InlineData(CreatePath.Event, PrincipalKind.SystemUser)]
+    [InlineData(CreatePath.Event, PrincipalKind.CiamContact)]
+    public async Task ARequestBodyNamingAnotherCreator_IsDroppedByTheClosedDto_AndTheCallersStampIsStored(CreatePath path, PrincipalKind kind)
+    {
+        // Pins DTO CLOSURE (the closed request DTO has no creator property, so the keys never bind), not the strip: the
+        // strip is pinned by the next test, which injects the keys AFTER the builder. The request is bound the way the
         // minimal API binds it (web JSON defaults) and the real seam posts it.
         var json = $$"""
         {
@@ -309,6 +367,8 @@ public class ExternalDataServiceTests
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*unattributed*");
         handler.PostBodies.Should().BeEmpty("no row is written without a creator stamp");
+        handler.Requests.Should().BeEmpty(
+            "the stamp decision precedes every lookup, token and request: an unattributable caller costs no round trip");
     }
 
     private static readonly Guid RootId = Guid.Parse("cccccccc-0000-0000-0000-000000000001");
@@ -348,6 +408,9 @@ public class ExternalDataServiceTests
     {
         public List<string> PostBodies { get; } = new();
 
+        /// <summary>Every request that reached the transport, whatever its method.</summary>
+        public List<HttpMethod> Requests { get; } = new();
+
         public IReadOnlyDictionary<string, string?> SinglePostBody()
         {
             PostBodies.Should().ContainSingle("exactly one create is posted");
@@ -358,6 +421,7 @@ public class ExternalDataServiceTests
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
+            Requests.Add(request.Method);
             if (request.Method == HttpMethod.Post)
             {
                 PostBodies.Add(await request.Content!.ReadAsStringAsync(ct));

@@ -614,6 +614,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
             "the parent flows from the ROUTE — the root gated must be the root written");
         _fixture.Data.LastCreateCallerContactId.Should().Be(_fixture.Principal!.ContactId,
             "UAC-r2 task 152: the calling contact is the triggering person — it becomes Assigned To");
+        _fixture.Data.LastCreateCreator.Should().BeSameAs(_fixture.Principal,
+            "task 030 (FR-25): the creator stamp comes from the principal the route resolved, not one rebuilt downstream");
     }
 
     // ---- CREATE: negative (out of scope), one per root ----
@@ -1130,7 +1132,11 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             LastCreateRequest = null;
             LastCreateOwningTeamId = null;
             LastCreateCallerContactId = null;
+            LastCreateCreator = null;
         }
+
+        /// <summary>Task 030 review: the creator principal the route handed the create (FR-25 stamp source).</summary>
+        public CallerPrincipal? LastCreateCreator { get; private set; }
 
         /// <summary>Task 152: the calling contact the endpoint handed the create (becomes Assigned To).</summary>
         public Guid? LastCreateCallerContactId { get; private set; }
@@ -1153,6 +1159,7 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             LastCreateRequest = request;
             LastCreateOwningTeamId = owningTeamId;
             LastCreateCallerContactId = callerContactId;
+            LastCreateCreator = creator;
             return Task.FromResult(new ExternalTodoDto
             {
                 SprkTodoid = Guid.NewGuid().ToString(),

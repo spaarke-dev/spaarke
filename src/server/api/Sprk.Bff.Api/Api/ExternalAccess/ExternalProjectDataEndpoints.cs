@@ -667,6 +667,18 @@ public static class ExternalProjectDataEndpoints
                 });
         }
 
+        // FR-25 (task 030): the document row is stamped with its creator AFTER the SPE write, and the stamp fails closed
+        // for an unattributable principal. Refuse here, before the bytes land, so that failure cannot leave an orphaned
+        // file in the container (same rule StampCreator enforces).
+        if (!ExternalDataService.CanStampCreator(callerContext))
+        {
+            logger.LogWarning(
+                "[EXT-UPLOAD] Refused upload to project {ProjectId}: the caller resolves to neither a systemuser nor a contact",
+                id);
+            return Results.Problem(statusCode: 403, title: "Forbidden",
+                detail: "Your identity could not be attributed, so the document cannot be uploaded");
+        }
+
         if (file is null || file.Length == 0)
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "A non-empty file is required");

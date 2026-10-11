@@ -480,25 +480,9 @@ public class ExternalDataService
         ArgumentNullException.ThrowIfNull(creator);
 
         // Decide first, so a refusal leaves the payload untouched.
-        Guid? systemUserId = null;
-        Guid? contactId = null;
-        if (creator.SystemUserId is { } su)
-        {
-            if (su == Guid.Empty)
-                throw new InvalidOperationException(
-                    "The caller principal carries an empty systemuser id; refusing to create an unattributed row (FR-25).");
-            systemUserId = su;
-        }
-        else if (creator.IsContactPrincipal)
-        {
-            contactId = creator.ContactId;
-        }
-        else
-        {
-            throw new InvalidOperationException(
-                "The caller principal resolves to neither a systemuser nor a contact; refusing to create an unattributed "
-                + "row (FR-25).");
-        }
+        EnsureCanStampCreator(creator);
+        Guid? systemUserId = creator.SystemUserId;
+        Guid? contactId = systemUserId is null ? creator.ContactId : null;
 
         foreach (var key in body.Keys.Where(NamesCreatorColumn).ToList())
             body.Remove(key);
@@ -507,6 +491,29 @@ public class ExternalDataService
             RecordCreatorPersonColumn.BindIfKnown(body, person);
         else
             body[CreatedByContactBindKey] = $"/contacts({contactId!.Value:D})";
+    }
+
+    /// <summary>Whether <paramref name="creator"/> is attributable: a systemuser (non-empty id) or a contact principal.
+    /// The one rule <see cref="StampCreator"/> enforces; routes call it to refuse an unattributable caller BEFORE any
+    /// side effect (the upload route's SPE write) rather than after.</summary>
+    internal static bool CanStampCreator(CallerPrincipal creator)
+    {
+        ArgumentNullException.ThrowIfNull(creator);
+        return creator.SystemUserId is { } su ? su != Guid.Empty : creator.IsContactPrincipal;
+    }
+
+    /// <summary>Throws (the <see cref="StampCreator"/> refusal) when <paramref name="creator"/> is not attributable.
+    /// Called at the top of each create seam so the decision precedes every token, lookup and request.</summary>
+    internal static void EnsureCanStampCreator(CallerPrincipal creator)
+    {
+        ArgumentNullException.ThrowIfNull(creator);
+        if (creator.SystemUserId == Guid.Empty)
+            throw new InvalidOperationException(
+                "The caller principal carries an empty systemuser id; refusing to create an unattributed row (FR-25).");
+        if (!CanStampCreator(creator))
+            throw new InvalidOperationException(
+                "The caller principal resolves to neither a systemuser nor a contact; refusing to create an unattributed "
+                + "row (FR-25).");
     }
 
     /// <summary>Whether <paramref name="key"/> names a creator column (<see cref="CreatorColumns"/>): the logical name, its
@@ -956,6 +963,7 @@ public class ExternalDataService
         if (rootId == Guid.Empty)
             throw new ArgumentException("Root id must be a non-empty GUID.", nameof(rootId));
         ArgumentNullException.ThrowIfNull(creator);
+        EnsureCanStampCreator(creator); // FR-25: decide the stamp kind before any token / lookup / request
 
         var binding = TryGetRootBinding(rootKind)
             ?? throw new ArgumentOutOfRangeException(nameof(rootKind), rootKind,
