@@ -226,7 +226,9 @@ function Root() {
   const handleAssociationsChanged = React.useCallback(() => {}, []);
   const resolveReview = React.useMemo(
     // UAC-r2 task 147 r1 (owner round 28 item 1): regarding writes re-file through the BFF.
-    () => buildResolveReview(webApi, handleAssociationsChanged, bffRefile(authenticatedFetch, getBffBaseUrl() ?? '')),
+    // The getter is passed, not called: this memo runs on the first render, before bootstrapAuth() sets the runtime
+    // config, and calling it then throws and blanks the page (owner UAT 2026-10-11).
+    () => buildResolveReview(webApi, handleAssociationsChanged, bffRefile(authenticatedFetch, getBffBaseUrl)),
     [webApi, handleAssociationsChanged]
   );
 
