@@ -11,8 +11,8 @@ last-reviewed: 2026-05-16
 # merge-to-master
 
 > **Category**: Operations
-> **Last Reviewed**: 2026-06-02
-> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A); auto-merge path added 2026-06-02 (R4 PR #331 ship)
+> **Last Reviewed**: 2026-10-10
+> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A); auto-merge path added 2026-06-02 (R4 PR #331 ship); worktree-safe Step 2 + no `reset --hard` on the main checkout 2026-10-10
 > **Exemplar rationale**: Every merge is a snapshot of branch state — no canonical reference holds.
 
 ---
@@ -134,10 +134,15 @@ CHECK 1 - Working tree clean:
   git status --porcelain
   IF dirty: STOP — "Commit or stash changes before merging"
 
-CHECK 2 - Master is up to date:
-  git checkout master
-  git pull origin master
-  IF conflicts: STOP — "Master has conflicts with origin. Resolve first."
+CHECK 2 - Know the current master (read-only — never `git checkout master` here):
+  git fetch origin
+  → Every comparison below uses `origin/master`. Run all of Step 2 in the PROJECT WORKTREE.
+
+  ⚠️ Corrected 2026-10-10. This check used to read `git checkout master` + `git pull origin master`.
+  In a worktree that fails with "'master' is already checked out at 'C:/code_files/spaarke'"
+  (git allows a branch in one worktree only), which blocked every project's merge. Nothing in this
+  skill needs a local `master`: Path A merges on GitHub, and Step 2.5 merges `origin/master` INTO
+  the branch.
 
 CHECK 3 - Divergence analysis:
   master_ahead = git rev-list --count origin/work/{branch}..origin/master
@@ -145,10 +150,12 @@ CHECK 3 - Divergence analysis:
 
   REPORT: "Master is {master_ahead} commits ahead, branch has {branch_ahead} to merge"
 
-CHECK 4 - Conflict preview:
-  git merge --no-commit --no-ff origin/work/{branch}
-  conflicts = git diff --name-only --diff-filter=U
-  git merge --abort
+CHECK 4 - Conflict preview (read-only; touches no working tree, no checkout needed):
+  git merge-tree --write-tree --name-only origin/master HEAD
+  → exit 0 = clean; exit 1 = conflicts — the lines after the first (the tree id) up to the
+    first blank line are the conflicted files. Needs git ≥ 2.38.
+  (Previously a trial `git merge --no-commit` on a checked-out master, then `--abort` —
+  impossible from a worktree; see CHECK 2.)
 
   IF conflicts:
     REPORT: "{N} files will have conflicts: {list}"
@@ -328,14 +335,22 @@ STEP A.5 — Wait for auto-merge:
   branch (with-lease), then auto-merge resumes.
 
 STEP A.6 — Post-merge cleanup:
-  Operator's main repo aligns with the new master:
-    cd {main-repo-path} && git fetch origin && git checkout master && git reset --hard origin/master
+  Operator's main repo aligns with the new master — fast-forward only:
+    git -C {main-repo-path} pull --ff-only origin master
+  IF it refuses (local changes or divergence in the main checkout): STOP and report it.
+  NEVER `git reset --hard` / `git stash` / `git checkout --` there: the main checkout can hold
+  ANOTHER session's uncommitted work, and those commands destroy it silently. The merge already
+  happened on GitHub; a stale main checkout is an inconvenience, lost work is not recoverable.
+  (Corrected 2026-10-10; this step used to run `git checkout master && git reset --hard origin/master`.)
 
 REPORT: "PR {N} created (URL). Auto-merge enabled. GitHub will merge when CI green."
   After merge fires: "✅ {branch} merged into master via PR {N} (commit {sha})"
 ```
 
 #### Path B: Direct Local Merge (legacy — only for unprotected master)
+
+> Runs in the MAIN checkout (`{main-repo-path}`), never in a project worktree — `master` can be
+> checked out in one worktree only. Server-refused today anyway (ruleset 21824191).
 
 ```
 git checkout master
@@ -373,7 +388,7 @@ FOR EACH branch (oldest divergence first):
 
 AFTER all merges:
   PROCEED to Step 4 (verify build)
-  THEN fast-forward master:
+  THEN fast-forward master (MAIN checkout only — never from a project worktree):
     git checkout master
     git merge reconcile/branch-cleanup --ff-only
 ```
@@ -410,10 +425,7 @@ Do NOT `git push origin master` on this path — direct push is rejected by bran
 
 After the auto-merge fires, run **Step A.6 post-merge cleanup** on the operator's main repo:
 ```
-cd {main-repo-path}
-git fetch origin
-git checkout master
-git reset --hard origin/master
+git -C {main-repo-path} pull --ff-only origin master   # refuses rather than discards; never reset --hard
 ```
 
 #### Path B (Direct Local Merge) — push to master
