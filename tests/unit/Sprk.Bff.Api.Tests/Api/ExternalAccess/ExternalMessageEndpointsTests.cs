@@ -37,9 +37,21 @@ public class ExternalMessageEndpointsTests
     private const int Incoming = 100000000;
     private const int Outgoing = 100000001;
 
+    // sprk_communication Status Reason (Entity.xml statuscode optionset / CommunicationStatus).
+    private const int StatusDraft = 1;
+    private const int StatusDeleted = 2;
+    private const int StatusQueued = 659490001;
+    private const int StatusSend = 659490002;
+    private const int StatusDelivered = 659490003;
+    private const int StatusFailed = 659490004;
+    private const int StatusBounded = 659490005;
+    private const int StatusRecalled = 659490006;
+
     private readonly Mock<IAppOnlyCommunicationQuery> _appOnly = new();
     private readonly Mock<IImpersonatedCommunicationQuery> _impersonated = new(MockBehavior.Strict);
-    private readonly Mock<ISystemUserIdentityResolver> _identity = new();
+    // Strict: a principal kind that reaches IsExternalAsync without an explicit setup fails loudly instead of being
+    // treated as internal by a default-false mock.
+    private readonly Mock<ISystemUserIdentityResolver> _identity = new(MockBehavior.Strict);
     private readonly List<(string Entity, Guid Id, string[]? Select)> _recordReads = new();
     private readonly Dictionary<(string Entity, Guid Id), IReadOnlyDictionary<string, object?>> _records = new();
     private string? _lastOData;
@@ -109,11 +121,13 @@ public class ExternalMessageEndpointsTests
         Mock.Of<ILogger<CommunicationThreadReadService>>(),
         _appOnly.Object);
 
+    // The double answers in the order the query asks for (createdon DESC, the production query's $orderby), as Dataverse
+    // would, so tests can list rows in natural chronological order.
     private void SetupMessages(params Dictionary<string, JsonElement>[] rows) =>
         _appOnly
             .Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Callback<string, string?, CancellationToken>((_, odata, _) => _lastOData = odata)
-            .ReturnsAsync(rows);
+            .ReturnsAsync(rows.OrderByDescending(r => r["createdon"].GetDateTimeOffset()).ToList());
 
     private Task<IReadOnlyDictionary<string, object?>> ReadRecord(
         string entity, Guid id, string[]? select, CancellationToken ct)
@@ -140,7 +154,8 @@ public class ExternalMessageEndpointsTests
         bool? internalOnly,
         string createdOn,
         string subject = "Subject",
-        int direction = Incoming)
+        int direction = Incoming,
+        int? status = StatusDelivered)
     {
         var row = new Dictionary<string, JsonElement>
         {
@@ -160,6 +175,8 @@ public class ExternalMessageEndpointsTests
         };
         if (internalOnly is { } flag)
             row["sprk_isinternalonly"] = El(flag);
+        if (status is { } statusCode)
+            row["statuscode"] = El(statusCode);
         return row;
     }
 
@@ -206,7 +223,8 @@ public class ExternalMessageEndpointsTests
 
         _lastOData.Should().Contain($"_sprk_regardingproject_value eq {project}")
             .And.Contain("statecode eq 0")
-            .And.Contain("$orderby=createdon asc");
+            .And.Contain("(statuscode eq 659490002 or statuscode eq 659490003)")
+            .And.Contain("$orderby=createdon desc");
         _lastOData.Should().NotContain("sprk_from").And.NotContain("sprk_to,");
         _impersonated.VerifyNoOtherCalls();
     }
@@ -481,12 +499,15 @@ public class ExternalMessageEndpointsTests
     }
 
     [Fact]
-    public async Task AThreadPastTheReadBound_IsReturnedCutShort_AndFlaggedTruncated()
+    public async Task AThreadPastTheReadBound_ReturnsTheNewest500_OldestFirst_AndFlagsTruncated()
     {
         var project = Guid.NewGuid();
+        var start = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+        var ids = Enumerable.Range(0, 501).Select(_ => Guid.NewGuid()).ToArray();
+        // Dataverse answers the query's own order (createdon DESC): index 0 is the newest, index 500 the oldest.
         var rows = Enumerable.Range(0, 501)
-            .Select(i => MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false,
-                DateTimeOffset.Parse("2026-01-01T00:00:00Z").AddMinutes(i).ToString("O")))
+            .Select(i => MessageRow(ids[i], "sprk_regardingproject", project, internalOnly: false,
+                start.AddMinutes(500 - i).ToString("O")))
             .ToArray();
         SetupMessages(rows);
 
@@ -495,7 +516,110 @@ public class ExternalMessageEndpointsTests
         var response = ((Ok<ExternalCollectionResponse<ExternalMessageDto>>)result).Value!;
         response.Value.Should().HaveCount(500);
         response.Truncated.Should().BeTrue();
-        _lastOData.Should().Contain("$top=501");
+        _lastOData.Should().Contain("$top=501").And.Contain("$orderby=createdon desc");
+        var returned = response.Value.Select(m => m.SprkCommunicationid).ToList();
+        returned.Should().Contain(ids[0].ToString("D"), "the newest message must survive truncation");
+        returned.Should().NotContain(ids[500].ToString("D"), "the oldest message is the one dropped");
+        returned[0].Should().Be(ids[499].ToString("D"), "the page is oldest to newest");
+        returned[^1].Should().Be(ids[0].ToString("D"), "newest last");
+    }
+
+    // ── status allow-list: only sent / received messages reach an external reader (review F1) ──────
+
+    private (Guid Project, Guid Sent, Guid Received) SetupStatusMix()
+    {
+        var project = Guid.NewGuid();
+        var sent = Guid.NewGuid();
+        var received = Guid.NewGuid();
+        SetupMessages(
+            MessageRow(sent, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z", status: StatusSend, direction: Outgoing),
+            MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z", status: StatusDraft),
+            MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-03T09:00:00Z", status: StatusDeleted),
+            MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-04T09:00:00Z", status: StatusRecalled),
+            MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-05T09:00:00Z", status: StatusQueued),
+            MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-06T09:00:00Z", status: StatusFailed),
+            MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-07T09:00:00Z", status: StatusBounded),
+            MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-08T09:00:00Z", status: null),
+            MessageRow(received, "sprk_regardingproject", project, internalOnly: false, "2026-10-09T09:00:00Z", status: StatusDelivered, direction: Incoming));
+        return (project, sent, received);
+    }
+
+    public static IEnumerable<object[]> PrincipalKinds()
+    {
+        yield return new object[] { "ciam-contact" };
+        yield return new object[] { "workforce-contact" };
+        yield return new object[] { "external-licensed-systemuser" };
+        yield return new object[] { "internal-systemuser" };
+    }
+
+    private CallerPrincipal PrincipalOfKind(string kind, Guid project)
+    {
+        var systemUserId = Guid.NewGuid();
+        switch (kind)
+        {
+            case "ciam-contact":
+                return Ciam(project: project);
+            case "workforce-contact":
+                return WorkforceContact(project: project);
+            case "external-licensed-systemuser":
+                _identity.Setup(i => i.IsExternalAsync(systemUserId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+                return SystemUser(systemUserId, project);
+            default:
+                _identity.Setup(i => i.IsExternalAsync(systemUserId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+                return SystemUser(systemUserId, project);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(PrincipalKinds))]
+    public async Task DraftDeletedRecalledAndOtherUnsentRows_AreDropped_ForEveryPrincipalKind(string kind)
+    {
+        var (project, sent, received) = SetupStatusMix();
+
+        var messages = Messages(await Get("projects", project, PrincipalOfKind(kind, project)));
+
+        messages.Select(m => m.SprkCommunicationid).Should().Equal(
+            new[] { sent, received }.Select(g => g.ToString("D")),
+            "only a Send / Delivered (sent or inbound-received) message is returned; Draft, Deleted, Recalled, Queued, " +
+            "Failed, Bounded and a row with no readable status are not");
+        _lastOData.Should().Contain("(statuscode eq 659490002 or statuscode eq 659490003)");
+    }
+
+    // ── a fault anywhere in the endpoint is its coded 500 ──────────────────────────────────────────
+
+    [Fact]
+    public async Task AFaultInTheRecordGate_IsTheEndpointsCoded500_AndNoMessageIsRead()
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        // An invoice is a child record: the gate reads it app-only, and that read faults (not a "not found").
+        var result = await ExternalMessageEndpoints.GetMessagesCoreAsync(
+            "invoices", invoice, Ciam(matter: matter), ProductionRegistry(),
+            (_, _, _, _) => throw new HttpRequestException("Dataverse unavailable"),
+            ReadService(), NullLogger.Instance, CancellationToken.None);
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Extensions["errorCode"].Should().Be("EXT_MESSAGES_INTERNAL_ERROR");
+        ShouldNotHaveReadMessages();
+    }
+
+    [Fact]
+    public async Task ARecordNotFoundInTheGate_StaysA403_NotA500()
+    {
+        // Pins the no-existence-oracle rule against the try/catch widening: not-found is a deny, a fault is a 500.
+        var matter = Guid.NewGuid();
+        SetupMessages();
+
+        var result = await ExternalMessageEndpoints.GetMessagesCoreAsync(
+            "invoices", Guid.NewGuid(), Ciam(matter: matter), ProductionRegistry(),
+            (entity, id, _, _) => throw new RecordNotFoundException(entity, id),
+            ReadService(), NullLogger.Instance, CancellationToken.None);
+
+        ShouldBeForbiddenNotAccessible(result);
+        ShouldNotHaveReadMessages();
     }
 
     // ── the response is an allow-list ──────────────────────────────────────────────────────────────
@@ -507,5 +631,65 @@ public class ExternalMessageEndpointsTests
 
         json.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
             "sprk_communicationid", "sprk_subject", "sprk_body", "sprk_bodyformat", "sprk_direction", "sendername", "createdon");
+    }
+
+    [Fact]
+    public async Task TheSerializedResponse_CarriesNoAddressPrivilegeOrInternalOnlyFields()
+    {
+        // The Dataverse rows carry sprk_from / sprk_to / the sentby lookup / privilege / the internal-only flag; none of
+        // them may appear in the serialized endpoint response, by name or by value.
+        var project = Guid.NewGuid();
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        var result = await Get("projects", project, Ciam(project: project));
+
+        var body = ((Ok<ExternalCollectionResponse<ExternalMessageDto>>)result).Value!;
+        var json = JsonSerializer.Serialize(body);
+        json.Should().NotContainEquivalentOf("sprk_from")
+            .And.NotContainEquivalentOf("\"sprk_to\"")
+            .And.NotContainEquivalentOf("_sprk_sentby_value")
+            .And.NotContainEquivalentOf("privilege")
+            .And.NotContainEquivalentOf("isinternalonly")
+            .And.NotContain("pat.lawyer@spaarke.test")
+            .And.NotContain("someone@spaarke.test");
+        using var doc = JsonDocument.Parse(json);
+        doc.RootElement.GetProperty("value")[0].EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
+            "sprk_communicationid", "sprk_subject", "sprk_body", "sprk_bodyformat", "sprk_direction", "sendername", "createdon");
+    }
+}
+
+/// <summary>
+/// Route-mapped proof for <c>GET /api/v1/external/{root}/{id}/messages</c>, read from the REAL app's endpoint table
+/// (<see cref="EndpointTable"/> - an anonymous probe cannot prove a route since the authorization FallbackPolicy answers
+/// 401 for unmatched requests too). Also pins that the route carries authorization metadata (the shared external group's
+/// policy), so it cannot be mounted anonymously.
+/// </summary>
+public class ExternalMessageRouteTests : IClassFixture<CustomWebAppFactory>
+{
+    private readonly CustomWebAppFactory _factory;
+
+    public ExternalMessageRouteTests(CustomWebAppFactory factory) => _factory = factory;
+
+    [Theory]
+    [InlineData("projects")]
+    [InlineData("matters")]
+    [InlineData("workassignments")]
+    [InlineData("invoices")]
+    [InlineData("servicerequests")]
+    public void MessagesRoute_IsMapped_ForEverySupportedRoot(string root)
+    {
+        EndpointTable.AssertMapped(_factory, "GET", $"/api/v1/external/{root}/{Guid.NewGuid()}/messages");
+    }
+
+    [Fact]
+    public void MessagesRoute_IsReadOnly_AndRequiresAuthorization()
+    {
+        EndpointTable.Maps(_factory, "POST", $"/api/v1/external/projects/{Guid.NewGuid()}/messages")
+            .Should().BeFalse("task 033 maps GET only; the write path is task 034");
+
+        var endpoint = EndpointTable.Endpoints(_factory)
+            .Single(e => e.RoutePattern.RawText == "/api/v1/external/{root}/{id:guid}/messages");
+        endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Authorization.IAuthorizeData>()
+            .Should().NotBeEmpty("the route inherits the external collaboration group's authorization policy");
     }
 }

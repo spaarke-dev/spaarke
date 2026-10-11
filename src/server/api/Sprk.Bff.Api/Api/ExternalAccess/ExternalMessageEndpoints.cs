@@ -131,18 +131,21 @@ public static class ExternalMessageEndpoints
                 extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorRootNotSupported });
         }
 
-        if (!await IsRootRecordReadableAsync(messageRoot, id, principal, registry, readRecord, logger, ct)
-                .ConfigureAwait(false))
-        {
-            logger.LogWarning(
-                "[EXT-MESSAGES] DENY {Entity} {RecordId} for contact {ContactId} / systemuser {SystemUserId}: not in the " +
-                "caller's accessible set (or absent).",
-                messageRoot.EntityLogicalName, id, principal.ContactId, principal.SystemUserId);
-            return ProblemDetailsHelper.Forbidden(DenyRecordNotAccessible);
-        }
-
         try
         {
+            // The gate is INSIDE the try: a Dataverse fault on its app-only record read (invoices / service requests) is
+            // this endpoint's coded 500, not the global handler's. RecordNotFoundException is handled inside the gate
+            // and stays a 403 (no existence oracle); no message is read unless the gate returned true.
+            if (!await IsRootRecordReadableAsync(messageRoot, id, principal, registry, readRecord, logger, ct)
+                    .ConfigureAwait(false))
+            {
+                logger.LogWarning(
+                    "[EXT-MESSAGES] DENY {Entity} {RecordId} for contact {ContactId} / systemuser {SystemUserId}: not in the " +
+                    "caller's accessible set (or absent).",
+                    messageRoot.EntityLogicalName, id, principal.ContactId, principal.SystemUserId);
+                return ProblemDetailsHelper.Forbidden(DenyRecordNotAccessible);
+            }
+
             // Internal-only reaches a SYSTEMUSER principal only (the read service also asks IsExternalAsync). A contact —
             // CIAM or workforce — passes null, so the shared filter hides every internal-only row from it.
             var read = await threadReadService
@@ -161,7 +164,7 @@ public static class ExternalMessageEndpoints
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[EXT-MESSAGES] Message read failed for {Entity} {RecordId}.",
+            logger.LogError(ex, "[EXT-MESSAGES] Record gate or message read failed for {Entity} {RecordId}.",
                 messageRoot.EntityLogicalName, id);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError, title: "Internal Server Error",

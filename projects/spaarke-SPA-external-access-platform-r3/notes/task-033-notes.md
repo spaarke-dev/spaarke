@@ -135,3 +135,29 @@ The total is ~36.5 MB, well under the 55 MB review and 60 MB stop thresholds.
 - (K3) `sendername` is null for messages without `sprk_sentby` (inbound email; contact-sent messages until task 034 adds the creator-contact name).
 - (K4) The thread is capped at 500 messages per read (flagged `truncated`); no paging.
 - (K5) The gate's app-only record read for invoices / service requests propagates a non-not-found Dataverse fault as a 500 (fail-closed, but not a 403).
+
+## Review results and fixes (2026-10-10)
+
+**Pass 1** found one fix-now defect (F1) and a K list. **Pass 2** (over the fix diff and its direct callers/callees) found no F-class finding; its K list is the "Known limits not fixed" section below.
+
+### Fixed
+
+| # | Finding | Fix | Tests (all in `ExternalMessageEndpointsTests.cs`) | Fail-before |
+|---|---|---|---|---|
+| F1 | The external read filtered only `statecode eq 0`, so Draft rows (statecode 0, full subject/body, written by `EmailDraftToolHandler`) reached external callers | `ReadRegardingAppOnlyAsync` selects `statuscode`, filters `(statuscode eq 659490002 or statuscode eq 659490003)` (Send, Delivered) and re-checks status per returned row (missing/unreadable status is dropped). App-only external path only; internal reads untouched. Set and rationale: `decisions.md` | `DraftDeletedRecalledAndOtherUnsentRows_AreDropped_ForEveryPrincipalKind` x4 (CIAM contact, workforce contact, external-licensed systemuser, internal systemuser: Draft, Deleted, Recalled, Queued, Failed, Bounded and no-status rows dropped; Send and Delivered/inbound rows returned); `AccessibleProject_...` asserts the status clause | Yes: 4 theory cases failed against the pre-fix service |
+| K1 | The 500-row bound kept the OLDEST 500 and dropped the newest | Query `createdon desc, id desc`, `$top=501`, take 500, reverse in memory: the newest 500, oldest first; `truncated` unchanged | `AThreadPastTheReadBound_ReturnsTheNewest500_OldestFirst_AndFlagsTruncated` (501 rows: newest present, oldest absent, order oldest to newest) | Yes |
+| Gate | A Dataverse fault in the record gate (invoice / service-request app-only read) escaped to the global handler | Gate call moved inside the handler's try: a fault is the coded `EXT_MESSAGES_INTERNAL_ERROR` 500 and reads no messages; `RecordNotFoundException` stays a 403 (no existence oracle) | `AFaultInTheRecordGate_IsTheEndpointsCoded500_AndNoMessageIsRead`; `ARecordNotFoundInTheGate_StaysA403_NotA500` (control) | Yes (fault test) |
+| Tests | A forgotten `IsExternalAsync` setup could pass as internal; no serialized-response check; no route-mapped test | `ISystemUserIdentityResolver` mock is now strict; `TheSerializedResponse_CarriesNoAddressPrivilegeOrInternalOnlyFields` (no `sprk_from` / `sprk_to` / `_sprk_sentby_value` / privilege / internal-only by name or value); `ExternalMessageRouteTests` uses `EndpointTable.AssertMapped` for GET `/api/v1/external/{root}/{id}/messages` x5 roots, POST unmapped, authorization metadata present | as named | n/a (hardening; the strict mock made `SystemUserCaller_ReceivesInternalOnlyMessages` fail until its setup was explicit, which it has) |
+
+Fail-before method: the pre-fix `CommunicationThreadReadService.cs` and `ExternalMessageEndpoints.cs` were put back from `HEAD`, the suite run (8 failed / 37 passed of 45), then the fixed files restored (45 passed). The test double for the app-only query now answers in the query's own order (`createdon` desc), as Dataverse would.
+
+Supersedes the earlier K4 (cap now keeps the newest 500) and K5 (a gate fault is now the coded 500).
+
+### Known limits not fixed
+
+- Privilege classification is stripped from the external DTO and does not gate a read. **OWNER DECISION pending**: show it, mark the message, or hide privileged messages from external callers.
+- A child-filed message (e.g. filed on an invoice) rides its root's thread (the data-model rule: a communication's access is decided by its parent root).
+- A row with a null `sprk_isinternalonly` is hidden from every contact (fail closed). Support note: such a row is invisible externally until the flag is set.
+- HTML bodies are NOT sanitised by the server. Task 034 must sanitise on write and task 051 on render.
+- No throttling or retry on the Dataverse named client (parity with the existing app-only reads).
+- The ADR-010 DI ceiling bump (for `IAppOnlyCommunicationQuery`) is that test's sanctioned mechanism.

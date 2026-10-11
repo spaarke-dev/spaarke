@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Services.Communication;
@@ -63,6 +64,15 @@ public sealed class CommunicationThreadReadService
     // sprk_communication and sprk_communicationthread carry the OOB `statecode` attribute.
     private const string StateCodeField = "statecode";
     private const string ActiveOnlyClause = "statecode eq 0";
+    // External-plane status allow-list (task 033 review F1). A message reaches an external reader ONLY when its Status
+    // Reason says it was actually sent or received: Send (659490002) and Delivered (659490003 — also what every inbound
+    // ingest path stamps). Draft/Queued/Failed/Bounded/Deleted/Recalled never qualify. An ALLOW-list, so a status added
+    // later is hidden from the external plane until it is consciously admitted here. Applies to the app-only read only.
+    private const string StatusCodeAttribute = "statuscode";
+    private const int StatusSend = (int)CommunicationStatus.Send;
+    private const int StatusDelivered = (int)CommunicationStatus.Delivered;
+    private static readonly string ExternalStatusClause =
+        $"({StatusCodeAttribute} eq {StatusSend} or {StatusCodeAttribute} eq {StatusDelivered})";
     private const string BodyField = "sprk_body";
     private const string BodyFormatField = "sprk_bodyformat";
     private const string TypeField = "sprk_communicationtype";
@@ -371,17 +381,24 @@ public sealed class CommunicationThreadReadService
         var select = string.Join(',', new[]
         {
             PkField, BodyField, BodyFormatField, SubjectField, DirectionField, SentByValue, CreatedOnField,
-            InternalOnlyField, PrivilegeField, regardingValue,
+            InternalOnlyField, PrivilegeField, StatusCodeAttribute, regardingValue,
         });
-        // Over-fetch one row to detect a cut-short list without a COUNT query.
+        // Newest first with one over-fetched row (detects a cut-short list without a COUNT query): when the record has
+        // more rows than the bound, the NEWEST ones are kept and the oldest dropped; the page is reversed to oldest→newest
+        // below. Active AND sent/received only (ExternalStatusClause) — a Draft/Queued/Failed/Bounded/Recalled row is
+        // never read for the external plane.
         var odata =
-            $"$select={select}&$filter={regardingValue} eq {recordId} and {ActiveOnlyClause}" +
-            $"&$orderby={CreatedOnField} asc,{PkField} asc&$top={MaxRegardingScan + 1}";
+            $"$select={select}&$filter={regardingValue} eq {recordId} and {ActiveOnlyClause} and {ExternalStatusClause}" +
+            $"&$orderby={CreatedOnField} desc,{PkField} desc&$top={MaxRegardingScan + 1}";
         var rows = await appOnlyQuery.QueryAsync(CommunicationSet, odata, ct);
 
         var truncated = rows.Count > MaxRegardingScan;
-        var bounded = rows.Take(MaxRegardingScan).ToList();
-        var scoped = bounded.Where(r => TryGuid(r, regardingValue) == recordId).ToList();
+        var bounded = rows.Take(MaxRegardingScan).Reverse().ToList();
+        // Re-check every row (defence in depth — the query is not the only gate): it must regard THIS record and carry a
+        // sent/received status. A row with a missing or unreadable status is dropped (fail closed).
+        var scoped = bounded
+            .Where(r => TryGuid(r, regardingValue) == recordId && IsExternallyReadableStatus(TryInt(r, StatusCodeAttribute)))
+            .ToList();
 
         var isInternal = callerSystemUserId is { } systemUserId
             && systemUserId != Guid.Empty
@@ -399,11 +416,15 @@ public sealed class CommunicationThreadReadService
 
         _logger.LogDebug(
             "[BY-REGARDING-APPONLY] {EntityType}={RecordId} internalCaller={Internal} returned={Returned} " +
-            "(read={Read}, dropped-regarding-mismatch={Mismatch}, truncated={Truncated})",
+            "(read={Read}, dropped-regarding-or-status={Dropped}, truncated={Truncated})",
             entityType, recordId, isInternal, messages.Count, rows.Count, bounded.Count - scoped.Count, truncated);
 
         return new AppOnlyRegardingReadResult(messages, truncated);
     }
+
+    /// <summary>True only for a Status Reason that means the message was actually sent or received (see the allow-list).</summary>
+    private static bool IsExternallyReadableStatus(int? statusCode)
+        => statusCode is StatusSend or StatusDelivered;
 
     // ── list all threads (R3 task 003 / FR-16) ───────────────────────────────────────────────────────
 
