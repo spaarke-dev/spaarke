@@ -246,6 +246,8 @@ Every Spaarke-internal browser surface routes through one library: **`@spaarke/a
 - Always increment the `@spaarke/auth` `package.json` version to make drift detectable
 - Maintain the [consumer rebuild tracker](../../projects/auth-sso-and-email-wizard-2026-05/CONSUMER-REBUILD-STATUS.md) until propagation is complete
 
+**Classic form scripts and ribbon commands** (framework-free JS that cannot `import`) consume the library through the web resource `sprk_/scripts/bff_auth.js` (`Spaarke.BffAuth.getToken` / `.authenticatedFetch`). Since #1655 that file is a build output, not hand-written: `npm run build:webresource` in `src/client/shared/Spaarke.Auth` bundles the library and `@azure/msal-browser` (v3, the PCFs' major) from `src/webresource/bffAuth.ts` into both committed copies (`src/solutions/webresources/sprk_bff_auth.js` and the SpaarkeMaster copy); `npm run check:webresource` fails when they drift. It is one more consumer to rebuild and redeploy when the library changes. It runs silent-only (no popup), on the PCFs' client id (`sprk_MsalClientId`), so form scripts and PCFs share one MSAL cache.
+
 **Future work**: Convert `@spaarke/auth` to a runtime-loaded Dataverse web resource (`sprk_spaarke_auth.js`) so a single library deploy updates all consumers. Requires versioned API contract and consumer migration. Not scheduled.
 
 ---

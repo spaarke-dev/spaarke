@@ -26,6 +26,11 @@
  *   "refreshDelayMs": 1500
  * }
  *
+ * AUTH (task 023 / spec FR-09; #1655): calls the BFF over an Azure AD bearer token from the
+ * shared helper Spaarke.BffAuth (web resource sprk_/scripts/bff_auth.js = @spaarke/auth, silent
+ * only). The Finance recalculate endpoints are not anonymous. Libraries on the form:
+ *   sprk_/scripts/bff_auth.js, then this script.
+ *
  * @see .claude/patterns/webresource/subgrid-parent-rollup.md
  */
 
@@ -43,7 +48,7 @@ Spaarke.SubgridRollup = Spaarke.SubgridRollup || {};
 Spaarke.SubgridRollup._instances = {};
 
 /** Version for console logging. */
-Spaarke.SubgridRollup._version = "1.0.0";
+Spaarke.SubgridRollup._version = "3.0.0"; // 3.0.0 — token via shared Spaarke.BffAuth, no inline MSAL copy (#1655)
 
 // =============================================================================
 // ENVIRONMENT VARIABLE RESOLUTION
@@ -110,6 +115,26 @@ Spaarke.SubgridRollup._getApiBaseUrl = function () {
             return finalValue;
         });
     });
+};
+
+// =============================================================================
+// BFF AUTHENTICATION (Spaarke.BffAuth -> @spaarke/auth)
+// =============================================================================
+//
+// The BFF recalculate endpoints require an Azure AD bearer token (task 023 / FR-09). Since 3.0.0
+// (#1655) this script no longer carries its own copy of the MSAL flow (2.0.0 inlined one, with a
+// display-name login hint and first-cached-account selection). It calls the shared helper
+// `Spaarke.BffAuth` from the web resource sprk_/scripts/bff_auth.js, which IS @spaarke/auth:
+// silent only (never a popup), tenant authority, the PCFs' MSAL cache, the library's account choice.
+//
+// FORM-LIBRARY REGISTRATION: every form that runs this script must also register
+// sprk_/scripts/bff_auth.js (the Matter main form does). If it is missing, the recalculate call is
+// skipped and an error is logged; the form never breaks.
+
+/** True when the shared sign-in helper is loaded on this form. */
+Spaarke.SubgridRollup._bffAuthLoaded = function () {
+    return typeof Spaarke.BffAuth !== "undefined" && Spaarke.BffAuth !== null &&
+        typeof Spaarke.BffAuth.authenticatedFetch === "function";
 };
 
 // =============================================================================
@@ -275,13 +300,27 @@ Spaarke.SubgridRollup._callApiAndRefresh = function (formContext, key, entityId)
 
     console.log("[SubgridRollup:" + key + "] POST " + apiUrl);
 
-    fetch(apiUrl, {
+    // Task 023 / FR-09, #1655: the call goes through the shared Spaarke.BffAuth helper (@spaarke/auth).
+    // No token -> it resolves null WITHOUT sending the request, and the recalculate is skipped (the
+    // endpoint requires auth; an unauthenticated request would just 401).
+    if (!Spaarke.SubgridRollup._bffAuthLoaded()) {
+        console.error("[SubgridRollup:" + key + "] Spaarke.BffAuth is not loaded (register " +
+            "sprk_/scripts/bff_auth.js on this form); skipping recalculate call.");
+        return;
+    }
+
+    Spaarke.BffAuth.authenticatedFetch(apiUrl, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
-    }).then(function (response) {
+    }, inst.apiBaseUrl).then(function (response) {
+        if (!response) {
+            console.warn("[SubgridRollup:" + key + "] No BFF token acquired; skipping recalculate call.");
+            return;
+        }
+
         if (response.ok) {
             console.log("[SubgridRollup:" + key + "] API succeeded. Refreshing in " +
                 inst.config.refreshDelayMs + "ms...");
