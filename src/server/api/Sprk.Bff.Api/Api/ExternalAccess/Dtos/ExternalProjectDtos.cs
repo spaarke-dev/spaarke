@@ -80,6 +80,17 @@ public sealed class ExternalDocumentDto
 
     [JsonPropertyName("createdon")]
     public string? Createdon { get; init; }
+
+    /// <summary>The systemuser creator stamp (<c>sprk_createdbyperson</c>, task 030). With
+    /// <see cref="SprkCreatedbycontactValue"/> it lets the SPA offer Delete only on the caller's own rows (FR-26,
+    /// task 054); the server re-checks every delete.</summary>
+    [JsonPropertyName("_sprk_createdbyperson_value")]
+    public string? SprkCreatedbypersonValue { get; init; }
+
+    /// <summary>The contact creator stamp (<c>sprk_createdbycontact</c>, task 030). See
+    /// <see cref="SprkCreatedbypersonValue"/>.</summary>
+    [JsonPropertyName("_sprk_createdbycontact_value")]
+    public string? SprkCreatedbycontactValue { get; init; }
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +180,16 @@ public sealed class ExternalTodoDto
     /// <summary>Resolver field — clickable model-driven-app record URL (relative; host resolved at click time).</summary>
     [JsonPropertyName("sprk_regardingrecordurl")]
     public string? SprkRegardingrecordurl { get; init; }
+
+    /// <summary>The systemuser creator stamp (<c>sprk_createdbyperson</c>, task 030): with
+    /// <see cref="SprkCreatedbycontactValue"/>, what the SPA uses to offer Delete only on the caller's own to-dos
+    /// (FR-26, task 054); the server re-checks every delete.</summary>
+    [JsonPropertyName("_sprk_createdbyperson_value")]
+    public string? SprkCreatedbypersonValue { get; init; }
+
+    /// <summary>The contact creator stamp (<c>sprk_createdbycontact</c>, task 030).</summary>
+    [JsonPropertyName("_sprk_createdbycontact_value")]
+    public string? SprkCreatedbycontactValue { get; init; }
 }
 
 /// <summary>
@@ -353,6 +374,16 @@ public sealed class ExternalEventDto
     /// </summary>
     [JsonPropertyName("_sprk_regardingproject_value")]
     public string? SprkRegardingprojectValue { get; init; }
+
+    /// <summary>The systemuser creator stamp (<c>sprk_createdbyperson</c>, task 030): with
+    /// <see cref="SprkCreatedbycontactValue"/>, what the SPA uses to offer Delete only on the caller's own events
+    /// (FR-26, task 054); the server re-checks every delete.</summary>
+    [JsonPropertyName("_sprk_createdbyperson_value")]
+    public string? SprkCreatedbypersonValue { get; init; }
+
+    /// <summary>The contact creator stamp (<c>sprk_createdbycontact</c>, task 030).</summary>
+    [JsonPropertyName("_sprk_createdbycontact_value")]
+    public string? SprkCreatedbycontactValue { get; init; }
 }
 
 public sealed class CreateExternalEventRequest

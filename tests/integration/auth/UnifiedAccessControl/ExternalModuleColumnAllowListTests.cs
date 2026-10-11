@@ -65,11 +65,13 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     private const string DocumentEntity = "sprk_document";
     private const string ProjectEntity = "sprk_project";
 
-    /// <summary>The production sprk_document allow-list (ExternalAccessModule, task 134 derivation).</summary>
+    /// <summary>The production sprk_document allow-list (ExternalAccessModule, task 134 derivation, plus task 032's two
+    /// creator stamps).</summary>
     private static readonly IReadOnlySet<string> DocumentColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
         "sprk_project", "sprk_matter", "sprk_workassignment",
+        "sprk_createdbyperson", "sprk_createdbycontact",
     };
 
     /// <summary>The live outside-counsel Documents grid FetchXML (sprk_gridconfiguration 3af4102c, 2026-09-30).</summary>
@@ -737,6 +739,10 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         {
             "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
             "sprk_project", "sprk_matter", "sprk_workassignment",
+            // spaarke-SPA-external-access-platform-r3 task 032 (FR-26, review 031 K2): the two task-030 creator stamps,
+            // NOT grid-derived. The SPA reads them to offer Delete only on the caller's own documents; they name a
+            // systemuser or contact id and nothing else (notes/task-032-notes.md).
+            "sprk_createdbyperson", "sprk_createdbycontact",
         },
         ["sprk_invoice"] = new[]
         {
@@ -769,6 +775,8 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "statecode",
             "modifiedon", "createdon", "ownerid", "sprk_practicearea", "sprk_projecttype_ref",
         },
+        // Task 134's document list was the task-157 derivation (no rule-(b) column); task 032's two creator stamps are a
+        // later, deliberate addition, so they appear on both sides of the shrink comparison and drop nothing.
         ["sprk_document"] = LiveDerivedAllowLists["sprk_document"],
         ["sprk_invoice"] = new[]
         {

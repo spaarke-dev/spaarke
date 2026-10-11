@@ -463,10 +463,12 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     [Fact]
     public void ProjectListUrl_IsUnchanged()
     {
+        // Task 032 (FR-26, review 031 K2) appended the two creator stamps; nothing else changed.
         ExternalDataService.BuildDocumentListUrl("https://org.test/api/data/v9.2", ExternalDataService.DocumentParentKind.Project, RecordA)
             .Should().Be("https://org.test/api/data/v9.2/sprk_documents?$filter="
                          + Uri.EscapeDataString($"_sprk_project_value eq {RecordA}")
                          + "&$select=sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,createdon"
+                         + ",_sprk_createdbyperson_value,_sprk_createdbycontact_value"
                          + "&$orderby=createdon desc,sprk_documentid asc");
     }
 

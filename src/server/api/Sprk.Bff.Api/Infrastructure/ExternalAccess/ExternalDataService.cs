@@ -143,6 +143,8 @@ public class ExternalDataService
         [JsonPropertyName("sprk_filesummary")] public string? SprkSummary { get; set; }
         [JsonPropertyName("_sprk_project_value")] public string? SprkProjectidValue { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
+        [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
+        [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
     }
 
     /// <summary>
@@ -167,6 +169,8 @@ public class ExternalDataService
         [JsonPropertyName("sprk_regardingrecordid")] public string? SprkRegardingrecordid { get; set; }
         [JsonPropertyName("sprk_regardingrecordname")] public string? SprkRegardingrecordname { get; set; }
         [JsonPropertyName("sprk_regardingrecordurl")] public string? SprkRegardingrecordurl { get; set; }
+        [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
+        [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
     }
 
     // Task 097: sprk_event has NO sprk_name / sprk_status columns (live: HTTP 400 "Could not find a property named
@@ -193,6 +197,8 @@ public class ExternalDataService
         [JsonPropertyName(EventStatusColumn)] public int? SprkStatus { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName("_sprk_regardingproject_value")] public string? SprkRegardingprojectValue { get; set; }
+        [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
+        [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
     }
 
     private sealed class ContactRow
@@ -396,7 +402,9 @@ public class ExternalDataService
     internal static string BuildDocumentListUrl(string apiUrl, DocumentParentKind parentKind, Guid parentId)
     {
         var binding = GetDocumentParentBinding(parentKind);
-        var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,createdon";
+        // Task 032 (FR-26, review 031 K2): both creator stamps, so the SPA can offer Delete only on the caller's own rows.
+        var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,createdon,"
+                     + CreatorStampSelect;
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {parentId}");
         return $"{apiUrl}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc,sprk_documentid asc";
     }
@@ -935,7 +943,8 @@ public class ExternalDataService
                      "sprk_todocolumn,sprk_todopinned,statecode,statuscode,createdon," +
                      "_sprk_regardingproject_value,_sprk_regardingmatter_value," +
                      "_sprk_regardingworkassignment_value," +
-                     "sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordurl";
+                     "sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordurl," +
+                     CreatorStampSelect; // task 032 (FR-26): the SPA offers Delete only on the caller's own to-dos
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
 
         // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
@@ -1021,7 +1030,9 @@ public class ExternalDataService
     /// </summary>
     internal static string BuildEventsQuery(Guid projectId)
     {
-        var select = $"sprk_eventid,{EventNameColumn},sprk_duedate,{EventStatusColumn},createdon,_sprk_regardingproject_value";
+        // Task 032 (FR-26): both creator stamps, so the SPA offers Delete only on the caller's own events.
+        var select = $"sprk_eventid,{EventNameColumn},sprk_duedate,{EventStatusColumn},createdon,_sprk_regardingproject_value,"
+                     + CreatorStampSelect;
         var filter = Uri.EscapeDataString($"_sprk_regardingproject_value eq {projectId}");
         // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
         return $"sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc,sprk_eventid asc";
@@ -1395,6 +1406,222 @@ public class ExternalDataService
             _logger.LogWarning("[EXT-DATA] Update to-do failed for to-do {TodoId}: {Status} — {Body}",
                 todoId, response.StatusCode, errorBody);
             throw new InvalidOperationException($"Failed to update to-do: {response.StatusCode}");
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Delete-own (spaarke-SPA-external-access-platform-r3 task 032, FR-26)
+    //
+    // An external caller may hard-delete a document, to-do or event it CREATED (the task-030 stamp), while it still
+    // holds Read on the record's parent. The endpoint (ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync) composes
+    // the two halves; this service supplies the facts (GetDeleteTargetAsync), the stamp rule (IsCreatedByCaller) and the
+    // app-only row delete for to-dos and events (DeleteRecordAsync). A document is deleted through
+    // DocumentCheckoutService so its SPE file goes too. Service requests are NOT here: escalated (task 032 notes).
+    // ---------------------------------------------------------------------------
+
+    /// <summary>The record types an external caller can delete-own (FR-26).</summary>
+    public enum DeletableKind
+    {
+        Document = 1,
+        Todo = 2,
+        Event = 3,
+    }
+
+    /// <summary>One parent lookup of a deletable row: the parent type and the row's <c>_..._value</c> attribute for it.</summary>
+    internal sealed record DeletableParentLookup(DocumentParentKind Parent, string LookupValueAttribute);
+
+    /// <summary>
+    /// What the delete-own read needs for one deletable type: its entity set and the parent lookups the external plane
+    /// authorizes it through.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Documents</b> use the four task-031 parent lookups (<see cref="DocumentParents"/>), the same ones the
+    /// external list, download and upload routes scope by.</para>
+    /// <para><b>To-dos and events</b> use the three root lookups of <see cref="RootBindings"/>
+    /// (<c>sprk_regardingproject</c> / <c>sprk_regardingmatter</c> / <c>sprk_regardingworkassignment</c>; the same column
+    /// names on <c>sprk_event</c>, solution source <c>Entities/sprk_Event/Entity.xml</c>), the roots
+    /// <see cref="GetTodoRootAsync"/> scopes a to-do by. <see cref="DocumentParentKind"/> names the parent type because it
+    /// already names all four record types a child can be filed to on this plane.</para>
+    /// </remarks>
+    internal sealed record DeletableBinding(
+        DeletableKind Kind, string EntityLogicalName, string EntitySet, IReadOnlyList<DeletableParentLookup> Parents);
+
+    /// <summary>The <c>sprk_createdbyperson</c> (→ systemuser) read form: the task-030 stamp of a systemuser creator.</summary>
+    internal const string CreatedByPersonValueAttribute = "_" + RecordCreatorPersonColumn.LogicalName + "_value";
+
+    /// <summary>The <c>sprk_createdbycontact</c> (→ contact) read form: the task-030 stamp of a contact creator.</summary>
+    internal const string CreatedByContactValueAttribute = "_" + CreatedByContactColumn + "_value";
+
+    /// <summary>Both creator stamps in <c>$select</c> form: every external document, to-do and event read returns them
+    /// (task 032, review 031 K2) so the SPA can offer Delete only on the caller's own rows (task 054). Requires task 020's
+    /// <c>sprk_createdbycontact</c> in the environment: without it Dataverse answers 400 and the list is flagged
+    /// truncated (deploy order, task 038).</summary>
+    internal const string CreatorStampSelect = CreatedByPersonValueAttribute + "," + CreatedByContactValueAttribute;
+
+    private static DocumentParentKind ParentKindOf(TodoRootKind kind) => kind switch
+    {
+        TodoRootKind.Project => DocumentParentKind.Project,
+        TodoRootKind.Matter => DocumentParentKind.Matter,
+        TodoRootKind.WorkAssignment => DocumentParentKind.WorkAssignment,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a root kind."),
+    };
+
+    private static readonly IReadOnlyList<DeletableParentLookup> RootParentLookups =
+        RootBindings.Values.Select(b => new DeletableParentLookup(ParentKindOf(b.Kind), b.LookupValueAttribute)).ToList();
+
+    private static readonly IReadOnlyDictionary<DeletableKind, DeletableBinding> Deletables =
+        new Dictionary<DeletableKind, DeletableBinding>
+        {
+            [DeletableKind.Document] = new(DeletableKind.Document, "sprk_document", "sprk_documents",
+                DocumentParents.Values.Select(b => new DeletableParentLookup(b.Kind, b.LookupValueAttribute)).ToList()),
+            [DeletableKind.Todo] = new(DeletableKind.Todo, "sprk_todo", "sprk_todos", RootParentLookups),
+            [DeletableKind.Event] = new(DeletableKind.Event, "sprk_event", "sprk_events", RootParentLookups),
+        };
+
+    /// <summary>The binding for a deletable kind. Throws for a value outside the table: a programming error.</summary>
+    internal static DeletableBinding GetDeletableBinding(DeletableKind kind) =>
+        Deletables.TryGetValue(kind, out var binding)
+            ? binding
+            : throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a deletable kind.");
+
+    /// <summary>A parent the row is filed to through one of its lookups.</summary>
+    public readonly record struct DeleteTargetParent(DocumentParentKind Kind, Guid Id);
+
+    /// <summary>
+    /// The facts the delete-own check decides on: the row's two creator stamps (null when absent) and every parent its
+    /// lookups name (empty when none is set).
+    /// </summary>
+    public sealed record DeleteTarget(Guid? CreatedByPerson, Guid? CreatedByContact, IReadOnlyList<DeleteTargetParent> Parents);
+
+    /// <summary>
+    /// Reads a deletable row's creator stamps and parent lookups, app-only (FR-26). Null when the row does not exist
+    /// (a genuine 404), so absent and someone else's deny the same way.
+    /// </summary>
+    /// <remarks>
+    /// A read that FAILS (non-404 status, transport error, token failure) throws <see cref="DataverseUnavailableException"/>:
+    /// "could not tell" is never reported as "not yours" (the task-031 review rule for the requester read). Until task
+    /// 020's <c>sprk_createdbycontact</c> column exists in the environment, Dataverse answers 400 to this read, so every
+    /// delete there is a 503: fail closed.
+    /// </remarks>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    public virtual async Task<DeleteTarget?> GetDeleteTargetAsync(DeletableKind kind, Guid id, CancellationToken ct = default)
+    {
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(
+            BuildDeleteTargetUrl(GetApiUrl(), kind, id), ct);
+        return row is null ? null : ParseDeleteTarget(kind, row);
+    }
+
+    /// <summary>The single-row read <see cref="GetDeleteTargetAsync"/> sends: both stamps and every parent lookup. Pure.</summary>
+    internal static string BuildDeleteTargetUrl(string apiUrl, DeletableKind kind, Guid id)
+    {
+        var binding = GetDeletableBinding(kind);
+        var columns = new[] { CreatedByPersonValueAttribute, CreatedByContactValueAttribute }
+            .Concat(binding.Parents.Select(p => p.LookupValueAttribute));
+        return $"{apiUrl}/{binding.EntitySet}({id})?$select={string.Join(",", columns)}";
+    }
+
+    /// <summary>The <see cref="DeleteTarget"/> a row's columns describe. Pure.</summary>
+    internal static DeleteTarget ParseDeleteTarget(DeletableKind kind, IReadOnlyDictionary<string, JsonElement> row)
+    {
+        var parents = new List<DeleteTargetParent>();
+        foreach (var lookup in GetDeletableBinding(kind).Parents)
+        {
+            if (GuidValue(row, lookup.LookupValueAttribute) is { } parentId)
+                parents.Add(new DeleteTargetParent(lookup.Parent, parentId));
+        }
+
+        return new DeleteTarget(
+            GuidValue(row, CreatedByPersonValueAttribute),
+            GuidValue(row, CreatedByContactValueAttribute),
+            parents);
+    }
+
+    /// <summary>
+    /// THE stamp half of the delete-own check (FR-26): did <paramref name="caller"/> create this row?
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Owner decision 2026-10-11, option (b) widened</b> (<c>notes/decisions.md</c>):</para>
+    /// <list type="bullet">
+    /// <item>a CONTACT principal matches <c>sprk_createdbycontact</c> = its contact;</item>
+    /// <item>a SYSTEMUSER principal matches <c>sprk_createdbyperson</c> = its systemuser, OR <c>sprk_createdbycontact</c>
+    /// = its linked contact (<see cref="CallerPrincipal.ContactId"/>, resolved by the server from the user↔contact link,
+    /// never from the request) — the same person who created the row before a licence was added.</item>
+    /// </list>
+    /// <para>The principal KIND decides, as it does for the stamp (<see cref="StampCreator(IDictionary{string, object?}, CallerPrincipal)"/>):
+    /// a contact principal never matches a person stamp, and a systemuser matches a contact stamp only through its own
+    /// linked contact. A row with neither stamp (created before task 030, or by staff in the model-driven app) matches
+    /// nobody. An empty id never matches.</para>
+    /// </remarks>
+    internal static bool IsCreatedByCaller(DeleteTarget target, CallerPrincipal caller)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (caller.SystemUserId is { } systemUserId)
+        {
+            if (systemUserId == Guid.Empty)
+                return false;
+            if (target.CreatedByPerson == systemUserId)
+                return true;
+            return caller.ContactId != Guid.Empty && target.CreatedByContact == caller.ContactId;
+        }
+
+        return caller.IsContactPrincipal && target.CreatedByContact == caller.ContactId;
+    }
+
+    /// <summary>
+    /// Hard-deletes a to-do or event row, app-only (FR-26). <see langword="true"/> when deleted, <see langword="false"/>
+    /// when the row was already gone (404). The caller has authorized the delete first
+    /// (<c>ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync</c>).
+    /// </summary>
+    /// <remarks>
+    /// A document is refused here: it is deleted through <c>DocumentCheckoutService</c>, so its SPE file goes with it.
+    /// <c>virtual</c> per ADR-038 §4 (substitution seam): a deny test must be able to assert no delete was sent.
+    /// </remarks>
+    /// <exception cref="DataverseUnavailableException">Dataverse refused or could not complete the delete.</exception>
+    public virtual async Task<bool> DeleteRecordAsync(DeletableKind kind, Guid id, CancellationToken ct = default)
+    {
+        if (kind == DeletableKind.Document)
+            throw new ArgumentOutOfRangeException(nameof(kind), kind,
+                "A document is deleted through DocumentCheckoutService, so its SPE file is deleted too.");
+
+        var binding = GetDeletableBinding(kind);
+        var url = $"{GetApiUrl()}/{binding.EntitySet}({id})";
+
+        try
+        {
+            var token = await GetAppOnlyTokenAsync(ct);
+            using var request = new HttpRequestMessage(HttpMethod.Delete, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("OData-MaxVersion", "4.0");
+            request.Headers.Add("OData-Version", "4.0");
+
+            using var response = await _httpClient.SendAsync(request, ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                return false;
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning("[EXT-DATA] Delete {Entity} {Id} failed: {Status} — {Body}",
+                    binding.EntityLogicalName, id, response.StatusCode, errorBody);
+                throw new DataverseUnavailableException($"Dataverse answered {(int)response.StatusCode} to the delete.");
+            }
+
+            return true;
+        }
+        catch (DataverseUnavailableException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[EXT-DATA] Error deleting {Entity} {Id}", binding.EntityLogicalName, id);
+            throw new DataverseUnavailableException("Dataverse could not complete the delete.", ex);
         }
     }
 
@@ -1935,6 +2162,8 @@ public class ExternalDataService
         SprkSummary = r.SprkSummary,
         SprkProjectidValue = r.SprkProjectidValue,
         Createdon = r.Createdon,
+        SprkCreatedbypersonValue = r.CreatedByPersonValue,
+        SprkCreatedbycontactValue = r.CreatedByContactValue,
     };
 
     private static ExternalTodoDto MapTodo(TodoRow r) => new()
@@ -1954,6 +2183,8 @@ public class ExternalDataService
         SprkRegardingrecordid = r.SprkRegardingrecordid,
         SprkRegardingrecordname = r.SprkRegardingrecordname,
         SprkRegardingrecordurl = r.SprkRegardingrecordurl,
+        SprkCreatedbypersonValue = r.CreatedByPersonValue,
+        SprkCreatedbycontactValue = r.CreatedByContactValue,
     };
 
     private static ExternalEventDto MapEvent(EventRow r) => new()
@@ -1966,6 +2197,8 @@ public class ExternalDataService
         SprkStatus = r.SprkStatus,
         Createdon = r.Createdon,
         SprkRegardingprojectValue = r.SprkRegardingprojectValue,
+        SprkCreatedbypersonValue = r.CreatedByPersonValue,
+        SprkCreatedbycontactValue = r.CreatedByContactValue,
     };
 
     private static ExternalContactDto MapContact(ContactRow r) => new()

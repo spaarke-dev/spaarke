@@ -11,7 +11,7 @@
 
 | Caller | Column the delete check reads |
 |---|---|
-| systemuser | `sprk_createdbyperson` |
+| systemuser | `sprk_createdbyperson` = the systemuser, **or** `sprk_createdbycontact` = its server-resolved linked contact (owner decision 2026-10-11, option (b) widened; task 032) |
 | contact | `sprk_createdbycontact` |
 
 A delete is allowed only when the stamp equals the caller **and** the caller still holds Read on the parent.
