@@ -236,6 +236,31 @@ public class ThreadResolverTests
         created[0].Contains("sprk_isdefaultthread").Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("account")]
+    [InlineData(null)]
+    public async Task ResolveAndAssignAsync_Tier1Create_ReturnsTheAudienceTheCreateWrote(string? regardingType)
+    {
+        // #1629 F3: a Tier-1 CREATE grants what it wrote — the message's own typed regarding (record or party), or the
+        // Direct participants when the message has none. A CREATE that always answered Direct would grant a record's
+        // message to the creator's sharees instead of the record's members.
+        var request = Request(CommunicationType.Email, subject: "Contract review");
+        var regardingId = Guid.NewGuid();
+        var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
+        if (regardingType is not null)
+            SetMessageRegarding(communication, regardingType, regardingId, "Acme");
+        SetupRegardingRead(request.CommunicationId, communication);
+        var newThreadId = SetupThreadCreateCapture(out _);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.CreateNew));
+
+        var result = await sut.ResolveAndAssignAsync(request, CancellationToken.None);
+
+        result.Should().Be(regardingType is null
+            ? ThreadAssignment.Direct(newThreadId)
+            : ThreadAssignment.Anchored(newThreadId, regardingType, regardingId));
+    }
+
     [Fact]
     public async Task ResolveAndAssignThreadAsync_WhenNoStrategyForChannel_ReturnsNullWithoutTouchingDataverse()
     {
@@ -473,6 +498,8 @@ public class ThreadResolverTests
     public async Task ResolveAndAssignAsync_Tier1Join_TakesTheAudienceFromTheReadThatFiledTheMessage(int threadType)
     {
         // #1629 F-C: the Tier-1 JOIN reads the thread ONCE (type + typed lookups) for both the owner re-file and the grant.
+        // #1629 F1: a typed lookup wins over sprk_threadtype — a "Direct" thread whose owner set sprk_regardingmatter = M
+        // files the message under M, so the audience is M's members, never the thread owner and their sharees.
         var request = Request(CommunicationType.Email);
         var existing = Guid.NewGuid();
         var matterId = Guid.NewGuid();
@@ -484,12 +511,48 @@ public class ThreadResolverTests
 
         var result = await sut.ResolveAndAssignAsync(request, CancellationToken.None);
 
-        result.Should().Be(threadType == ThreadTypeDirect
-            ? ThreadAssignment.Direct(existing)
-            : ThreadAssignment.Anchored(existing, "sprk_matter", matterId));
+        result.Should().Be(ThreadAssignment.Anchored(existing, "sprk_matter", matterId));
         _entity.Verify(
             e => e.RetrieveAsync("sprk_communicationthread", existing, It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Theory]
+    [InlineData(ThreadTypeDirect, true)]
+    [InlineData(ThreadTypeRecordAnchored, false)]
+    public async Task ResolveAndAssignAsync_Tier1Join_ThreadWithNoTypedLookup_IsDirectOnlyWhenTypedDirect(int threadType, bool direct)
+    {
+        // #1629 F1: Direct applies ONLY to a thread with no typed regarding lookup; a record-typed thread that lost its
+        // lookup grants nobody (fail closed).
+        var request = Request(CommunicationType.Email);
+        var existing = Guid.NewGuid();
+        var row = Thread(existing, threadType: threadType);
+        _entity
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", existing, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.Join(existing)));
+
+        var result = await sut.ResolveAndAssignAsync(request, CancellationToken.None);
+
+        result.Should().Be(direct ? ThreadAssignment.Direct(existing) : ThreadAssignment.NoGrant(existing));
+    }
+
+    [Fact]
+    public async Task ResolveAndAssignAsync_Tier1Join_DirectThreadWithAPartyLookup_GrantsTheParty_NotTheThreadOwner()
+    {
+        // #1629 F1: a party anchor is not an ownership parent (no re-file), but it is still the thread's typed anchor.
+        var request = Request(CommunicationType.Email);
+        var existing = Guid.NewGuid();
+        var accountId = Guid.NewGuid();
+        var row = Thread(existing, regardingType: "account", regardingId: accountId.ToString(), threadType: ThreadTypeDirect);
+        _entity
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", existing, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.Join(existing)));
+
+        var result = await sut.ResolveAndAssignAsync(request, CancellationToken.None);
+
+        result.Should().Be(ThreadAssignment.Anchored(existing, "account", accountId));
     }
 
     [Fact]

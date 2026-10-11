@@ -203,13 +203,13 @@ public sealed class ThreadResolver : IThreadResolver
     /// metadata 2026-08-03 — the same exclusion <c>CommunicationThreadReadService.ThreadRegardingFields</c> makes).
     /// Selecting a column the table lacks faults the whole read.
     /// </summary>
-    /// <summary>The message's thread lookup — the column a JOIN writes (and a failed owner assignment puts back).</summary>
-    internal const string ThreadLookupOnCommunication = "sprk_communicationthread";
-
     internal static readonly string[] ThreadRegardingColumns = RegardingFieldMap.All
         .Where(x => x.RegardingField != "sprk_regardingreportcard")
         .Select(x => x.RegardingField)
         .ToArray();
+
+    /// <summary>The message's thread lookup — the column a JOIN writes (and a failed owner assignment puts back).</summary>
+    internal const string ThreadLookupOnCommunication = "sprk_communicationthread";
 
     /// <summary>
     /// The owner of a RECORD thread anchored to <paramref name="anchor"/>: its record's team via the ONE resolver (the
@@ -257,9 +257,11 @@ public sealed class ThreadResolver : IThreadResolver
     /// REFUSAL throws <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException"/> without assigning.
     /// A thread with no ownership-parent anchor (Direct / master / party-regarding), or an unreadable thread row, is
     /// assigned as before.
-    /// <para>#1629 F-C: returns the message's read-grant audience from the SAME read of the thread that filed it — Direct
-    /// for a Direct thread, its typed anchor's members for a record thread, nobody otherwise (or when the thread could not
-    /// be read) — so the grant never re-reads a type or lookup the thread's owner can rewrite in between.</para>
+    /// <para>#1629 F-C / F1: returns the message's read-grant audience from the SAME read of the thread that filed it —
+    /// its typed anchor's members whenever the thread carries a typed regarding lookup (whatever its
+    /// <c>sprk_threadtype</c> says: the message is filed under that anchor), Direct only for a Direct thread with NO typed
+    /// lookup, nobody otherwise (or when the thread could not be read) — so the grant never re-reads a type or lookup the
+    /// thread's owner can rewrite in between.</para>
     /// </summary>
     internal static async Task<ThreadAssignment> AssignToThreadReconcilingOwnerAsync(
         IGenericEntityService entityService,
@@ -272,11 +274,16 @@ public sealed class ThreadResolver : IThreadResolver
         var threadRow = await entityService.RetrieveAsync(
             "sprk_communicationthread", threadId, ThreadRegardingColumns.Append("sprk_threadtype").ToArray(), ct);
         var anchor = threadRow is null ? null : ReadTypedRegardingAnchorFromThread(threadRow);
+        // #1629 F1: the typed anchor wins over sprk_threadtype. A thread carrying a typed lookup files the message under
+        // that anchor (the reparent below), so its audience is the anchor's members — never the thread owner's sharees,
+        // which a user with Write + Share on the thread could otherwise point at a record's message. Direct applies only
+        // to a thread with NO typed regarding lookup.
         var assignment = threadRow is null
             ? ThreadAssignment.NoGrant(threadId)
-            : threadRow.GetAttributeValue<OptionSetValue>("sprk_threadtype")?.Value == ThreadTypeDirect
-                ? ThreadAssignment.Direct(threadId)
-                : AssignmentFor(threadId, anchor) ?? ThreadAssignment.NoGrant(threadId);
+            : AssignmentFor(threadId, anchor)
+              ?? (threadRow.GetAttributeValue<OptionSetValue>("sprk_threadtype")?.Value == ThreadTypeDirect
+                  ? ThreadAssignment.Direct(threadId)
+                  : ThreadAssignment.NoGrant(threadId));
 
         if (anchor is null || !Guid.TryParse(anchor.RecordId, out var recordId) || recordId == Guid.Empty
             || !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(anchor.RecordType))

@@ -229,11 +229,13 @@ public class ThreadMembershipDerivationServiceTests
         requested.Should().Contain("sprk_regardingmatter");
     }
 
-    // ── #1629 F-A: the message-grant audience never expands the record's owning team ──
+    // ── #1629 F-A / F2: the message-grant audience never expands the MESSAGE's owning team (and only that team) ──
 
     [Fact]
-    public async Task DeriveAnchorGranteeUserIdsAsync_SkipsTheOwningTeam_KeepsLookupUsersAndNonOwnerTeams()
+    public async Task DeriveAnchorGranteeUserIdsAsync_SkipsTheMessagesOwningTeam_KeepsLookupUsersAndOtherTeams()
     {
+        // The common case (the 174-member default team): the message is owned by the team that owns the matter, so that
+        // team is never expanded, wherever a lookup names it.
         var ownerTeam = Guid.Parse("77777777-0000-0000-0000-000000000007");
         var otherTeam = Guid.Parse("78787878-0000-0000-0000-000000000008");
         var attorney = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
@@ -246,16 +248,82 @@ public class ThreadMembershipDerivationServiceTests
             ["sprk_assignedattorney1"] = new EntityReference("systemuser", attorney),
             ["sprk_assignedteam"] = new EntityReference("team", otherTeam),
         });
+        var expanded = CaptureTeamExpansions(otherTeamMember);
+
+        var grantees = await BuildSut().DeriveAnchorGranteeUserIdsAsync(AnchorEntity, MatterId, messageOwningTeamId: ownerTeam);
+
+        grantees.Should().BeEquivalentTo(new[] { attorney, otherTeamMember });
+        expanded.Should().Equal(otherTeam);
+    }
+
+    [Fact]
+    public async Task DeriveAnchorGranteeUserIdsAsync_PartyAnchorOwnedByATeam_GrantsThatTeamsMembers()
+    {
+        // F2 (a): an account is never an ownership parent, so the message is owned by some other team (the default team
+        // of its primary parent's business unit, or a user). The account's owner team's members do not read the message
+        // through ownership, so they are granted.
+        var accountId = Guid.Parse("acacacac-0000-0000-0000-00000000000a");
+        var accountTeam = Guid.Parse("79797979-0000-0000-0000-000000000009");
+        var messageTeam = Guid.Parse("7a7a7a7a-0000-0000-0000-00000000000a");
+        var member = Guid.Parse("cccccccc-0000-0000-0000-000000000003");
+        SetupDiscoveryFor("account", ("ownerid", "team"), ("owningteam", "team"));
+        SetupAnchorFor("account", accountId, new Dictionary<string, EntityReference>
+        {
+            ["ownerid"] = new EntityReference("team", accountTeam),
+            ["owningteam"] = new EntityReference("team", accountTeam),
+        });
+        var expanded = CaptureTeamExpansions(member);
+
+        var grantees = await BuildSut().DeriveAnchorGranteeUserIdsAsync("account", accountId, messageOwningTeamId: messageTeam);
+
+        grantees.Should().Equal(member);
+        expanded.Should().OnlyContain(t => t == accountTeam);
+    }
+
+    [Fact]
+    public async Task DeriveAnchorGranteeUserIdsAsync_MatterOwnedByANonDefaultTeam_GrantsThatTeamsMembers()
+    {
+        // F2 (b): a matter owned by non-default team T2 (whose members sit in another business unit); the message is
+        // owned by the default team of the matter's business unit, so T2's members are granted.
+        var t2 = Guid.Parse("7b7b7b7b-0000-0000-0000-00000000000b");
+        var defaultTeam = Guid.Parse("7c7c7c7c-0000-0000-0000-00000000000c");
+        var member = Guid.Parse("dddddddd-0000-0000-0000-000000000004");
+        SetupDiscovery(("ownerid", "team"), ("owningteam", "team"));
+        SetupAnchor(new Dictionary<string, EntityReference>
+        {
+            ["ownerid"] = new EntityReference("team", t2),
+            ["owningteam"] = new EntityReference("team", t2),
+        });
+        var expanded = CaptureTeamExpansions(member);
+
+        var grantees = await BuildSut().DeriveAnchorGranteeUserIdsAsync(AnchorEntity, MatterId, messageOwningTeamId: defaultTeam);
+
+        grantees.Should().Equal(member);
+        expanded.Should().OnlyContain(t => t == t2);
+    }
+
+    [Fact]
+    public async Task DeriveAnchorGranteeUserIdsAsync_UserOwnedMessage_ExpandsEveryTeam()
+    {
+        var ownerTeam = Guid.Parse("77777777-0000-0000-0000-000000000007");
+        var member = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000002");
+        SetupDiscovery(("ownerid", "team"));
+        SetupAnchor(new Dictionary<string, EntityReference> { ["ownerid"] = new EntityReference("team", ownerTeam) });
+        CaptureTeamExpansions(member);
+
+        var grantees = await BuildSut().DeriveAnchorGranteeUserIdsAsync(AnchorEntity, MatterId, messageOwningTeamId: null);
+
+        grantees.Should().Equal(member);
+    }
+
+    private List<Guid> CaptureTeamExpansions(params Guid[] members)
+    {
         var expanded = new List<Guid>();
         _entityService
             .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "teammembership"), It.IsAny<CancellationToken>()))
             .Callback<QueryExpression, CancellationToken>((q, _) => expanded.Add((Guid)q.Criteria.Conditions[0].Values[0]))
-            .ReturnsAsync(new EntityCollection(new List<Entity> { new("teammembership") { ["systemuserid"] = otherTeamMember } }));
-
-        var grantees = await BuildSut().DeriveAnchorGranteeUserIdsAsync(AnchorEntity, MatterId);
-
-        grantees.Should().BeEquivalentTo(new[] { attorney, otherTeamMember });
-        expanded.Should().Equal(otherTeam); // the owning team is never expanded, wherever a lookup names it
+            .ReturnsAsync(() => new EntityCollection(members.Select(m => new Entity("teammembership") { ["systemuserid"] = m }).ToList()));
+        return expanded;
     }
 
     [Fact]
@@ -326,25 +394,29 @@ public class ThreadMembershipDerivationServiceTests
             .ReturnsAsync(matter);
     }
 
-    private void SetupDiscovery(params (string field, string target)[] fields)
+    private void SetupDiscovery(params (string field, string target)[] fields) => SetupDiscoveryFor(AnchorEntity, fields);
+
+    private void SetupDiscoveryFor(string entity, params (string field, string target)[] fields)
     {
         var descriptors = fields
             .Select(f => new MembershipDescriptor(f.field, f.field, f.target, f.target, "auto"))
             .ToList();
         _discovery
-            .Setup(s => s.DiscoverAsync(AnchorEntity, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DiscoveryResult(AnchorEntity, DateTimeOffset.UtcNow, descriptors,
+            .Setup(s => s.DiscoverAsync(entity, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DiscoveryResult(entity, DateTimeOffset.UtcNow, descriptors,
                 Array.Empty<IgnoredField>(), Array.Empty<IgnoredField>()));
     }
 
-    private void SetupAnchor(Dictionary<string, EntityReference> lookups)
+    private void SetupAnchor(Dictionary<string, EntityReference> lookups) => SetupAnchorFor(AnchorEntity, MatterId, lookups);
+
+    private void SetupAnchorFor(string entity, Guid id, Dictionary<string, EntityReference> lookups)
     {
-        var anchor = new Entity(AnchorEntity) { Id = MatterId };
+        var anchor = new Entity(entity) { Id = id };
         foreach (var (field, reference) in lookups)
             anchor[field] = reference;
 
         _entityService
-            .Setup(s => s.RetrieveAsync(AnchorEntity, MatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.RetrieveAsync(entity, id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(anchor);
     }
 }

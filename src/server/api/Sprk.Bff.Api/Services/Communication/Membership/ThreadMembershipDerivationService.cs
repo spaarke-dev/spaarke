@@ -66,7 +66,7 @@ public sealed class ThreadMembershipDerivationService : IThreadMembershipDerivat
         if (context.Topology == ThreadTopology.RecordAnchored && context.HasAnchor)
         {
             foreach (var participant in await ReverseResolveAnchorMembersAsync(
-                         context.AnchorRecordType!, context.AnchorRecordId!, expandOwningTeam: true, ct))
+                         context.AnchorRecordType!, context.AnchorRecordId!, skipTeamId: null, ct))
             {
                 Add(authorized, participant, AuthorizationReason.RecordMembership);
             }
@@ -97,12 +97,12 @@ public sealed class ThreadMembershipDerivationService : IThreadMembershipDerivat
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<Guid>> DeriveAnchorGranteeUserIdsAsync(
-        string anchorEntityType, Guid anchorRecordId, CancellationToken ct = default)
+        string anchorEntityType, Guid anchorRecordId, Guid? messageOwningTeamId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(anchorEntityType);
 
         var members = await ReverseResolveAnchorMembersAsync(
-            anchorEntityType, anchorRecordId.ToString(), expandOwningTeam: false, ct);
+            anchorEntityType, anchorRecordId.ToString(), skipTeamId: messageOwningTeamId, ct);
         return members
             .Where(m => string.Equals(m.EntityLogicalName, "systemuser", StringComparison.OrdinalIgnoreCase))
             .Select(m => m.RecordId)
@@ -189,16 +189,19 @@ public sealed class ThreadMembershipDerivationService : IThreadMembershipDerivat
     /// to discover the membership-bearing lookup fields for the anchor entity, reads the anchor record's values
     /// for those fields, and collects systemuser/contact refs (teams expanded to members).
     /// </summary>
-    /// <param name="expandOwningTeam">
-    /// <c>false</c> for the message GRANT (#1629 F-A): the team that owns the record (its <c>ownerid</c> or
-    /// <c>owningteam</c>, whichever lookup names it) is not expanded, wherever a lookup names it. Its members already read
-    /// a message the record's team owns, and the default team of a business unit can hold hundreds of users, each one a
-    /// synchronous share on the send/ingest path. <c>true</c> for the ACS reconcile, which keeps every team's members.
+    /// <param name="skipTeamId">
+    /// For the message GRANT (#1629 F-A, F2): the team that owns the MESSAGE, which is not expanded wherever a lookup
+    /// names it. Its members already read the message through team ownership, and the default team of a business unit
+    /// can hold hundreds of users, each one a synchronous share on the send/ingest path. It is the message's owner, not
+    /// the anchor's: the message's owner comes from its primary ownership parent's business unit
+    /// (<c>RecordOwnershipResolver</c>), and a party anchor is never an ownership parent, so the anchor's owning team can
+    /// be a team whose members do NOT read the message. <c>null</c> (the ACS reconcile, or a user-owned message) expands
+    /// every team.
     /// </param>
     private async Task<IReadOnlyList<ParticipantReference>> ReverseResolveAnchorMembersAsync(
         string anchorEntityType,
         string anchorRecordId,
-        bool expandOwningTeam,
+        Guid? skipTeamId,
         CancellationToken ct)
     {
         if (!Guid.TryParse(anchorRecordId, out var anchorId) || anchorId == Guid.Empty)
@@ -226,16 +229,6 @@ public sealed class ThreadMembershipDerivationService : IThreadMembershipDerivat
 
         var members = new Dictionary<(string, Guid), ParticipantReference>();
 
-        Guid? owningTeam = null;
-        if (!expandOwningTeam)
-        {
-            owningTeam = anchor.GetAttributeValue<EntityReference>("ownerid") is { LogicalName: "team" } ownerTeam && ownerTeam.Id != Guid.Empty
-                ? ownerTeam.Id
-                : anchor.GetAttributeValue<EntityReference>("owningteam") is { } owning && owning.Id != Guid.Empty
-                    ? owning.Id
-                    : null;
-        }
-
         foreach (var field in fields)
         {
             var reference = anchor.GetAttributeValue<EntityReference>(field);
@@ -253,12 +246,12 @@ public sealed class ThreadMembershipDerivationService : IThreadMembershipDerivat
                     break;
 
                 case "team":
-                    if (owningTeam == reference.Id)
+                    if (skipTeamId is { } skip && skip != Guid.Empty && skip == reference.Id)
                     {
                         _logger.LogDebug(
-                            "Not expanding '{Entity}' {AnchorId}'s owning team {TeamId} (field '{Field}') for a message grant: its " +
-                            "members already read the team's records (#1629).",
-                            anchorEntityType, anchorId, reference.Id, field);
+                            "Not expanding team {TeamId} (field '{Field}' of '{Entity}' {AnchorId}) for a message grant: it owns " +
+                            "the message, so its members already read it (#1629).",
+                            reference.Id, field, anchorEntityType, anchorId);
                         break;
                     }
 

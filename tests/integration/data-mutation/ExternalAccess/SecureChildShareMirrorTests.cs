@@ -1545,7 +1545,7 @@ public class SecureChildShareMirrorTests
 
         // #1629: the message grant asks the anchor's grantees (the audience the join fixed), not the thread's set.
         derivation
-            .Setup(d => d.DeriveAnchorGranteeUserIdsAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.DeriveAnchorGranteeUserIdsAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(participants.ToList());
 
         return new DirectThreadAccessService(

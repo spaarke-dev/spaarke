@@ -371,13 +371,25 @@ public class CommunicationServiceMessageSendTests
                 updatedFields = fields;
             })
             .Returns(Task.CompletedTask);
+        // #1629 F3: the thread the caller responds into is a "Direct" thread carrying a typed account lookup (a party:
+        // no re-file). The grant must receive exactly the audience the join's read produced — the account's members —
+        // so the assertion below pins the audience, not just the thread id.
+        var accountId = Guid.Parse("acacacac-3333-3333-3333-333333333333");
+        entity.Setup(s => s.RetrieveAsync(
+                "sprk_communicationthread", explicitThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_communicationthread")
+            {
+                Id = explicitThreadId,
+                ["sprk_threadtype"] = new OptionSetValue(100000001),
+                ["sprk_regardingaccount"] = new EntityReference("account", accountId),
+            });
 
         // Never touched — the explicit-target branch bypasses find-or-create entirely.
         var resolver = new Mock<IThreadResolver>(MockBehavior.Strict);
 
         var grantAccess = new Mock<Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService>();
         grantAccess
-            .Setup(g => g.GrantMessageAccessAsync(It.IsAny<Guid>(), It.Is<ThreadAssignment>(a => a.ThreadId == explicitThreadId), It.IsAny<CancellationToken>()))
+            .Setup(g => g.GrantMessageAccessAsync(It.IsAny<Guid>(), It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var sut = BuildOutboundSut(
@@ -394,9 +406,15 @@ public class CommunicationServiceMessageSendTests
 
         resolver.Invocations.Should().BeEmpty(); // find-or-create resolver never called
         grantAccess.Verify(
-            g => g.GrantMessageAccessAsync(response.CommunicationId!.Value, It.Is<ThreadAssignment>(a => a.ThreadId == explicitThreadId), It.IsAny<CancellationToken>()),
+            g => g.GrantMessageAccessAsync(
+                response.CommunicationId!.Value, ThreadAssignment.Anchored(explicitThreadId, "account", accountId), It.IsAny<CancellationToken>()),
+            Times.Once);
+        grantAccess.Verify(
+            g => g.GrantMessageAccessAsync(It.IsAny<Guid>(), It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
+
+    private static readonly Guid ResolvedMatter = Guid.Parse("4d4d4d4d-4444-4444-4444-444444444444");
 
     // ── task 062 / FR-12 (A): omitting ThreadId leaves the existing find-or-create resolver path
     //    unchanged (email-send parity — regression guard for the additive contract) ──
@@ -407,15 +425,22 @@ public class CommunicationServiceMessageSendTests
         var resolver = new Mock<IThreadResolver>();
         resolver
             .Setup(r => r.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(ThreadAssignment.Direct(resolvedThreadId));
+            .ReturnsAsync(ThreadAssignment.Anchored(resolvedThreadId, "sprk_matter", ResolvedMatter));
+        var grantAccess = new Mock<Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService>();
 
         var entity = EntityServiceCreating();
         var sut = BuildOutboundSut(
-            new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService(), threadResolver: resolver.Object);
+            new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService(), threadResolver: resolver.Object,
+            directThreadAccess: grantAccess.Object);
 
         var response = await sut.SendAsync(MessageRequest(), AuthenticatedContext(), CancellationToken.None);
 
         response.CommunicationId.Should().NotBeNull();
+        // #1629 F3: the grant receives the resolver's assignment unchanged (its audience and anchor).
+        grantAccess.Verify(
+            g => g.GrantMessageAccessAsync(
+                response.CommunicationId!.Value, ThreadAssignment.Anchored(resolvedThreadId, "sprk_matter", ResolvedMatter), It.IsAny<CancellationToken>()),
+            Times.Once);
         resolver.Verify(
             r => r.ResolveAndAssignAsync(
                 It.Is<ThreadResolutionRequest>(req => req.ChannelType == CommunicationType.Message),
