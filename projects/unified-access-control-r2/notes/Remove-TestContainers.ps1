@@ -1,4 +1,4 @@
-# Deletes the 31 test SPE containers left by the 2026-10-06 to 2026-10-10 dev live gates (owner rounds 68 + 72; re-checked unreferenced 2026-10-10 except the last, which the gate deleted with its record).
+# Deletes the 33 test SPE containers left by the 2026-10-06 to 2026-10-11 dev live gates (owner rounds 68 + 72; re-checked unreferenced 2026-10-10 except the last, which the gate deleted with its record).
 # Re-checked 2026-10-08 (gatesA gate 0): no row in any of the 23 container-id columns (project, matter, work assignment, business unit,
 # document container + drive id, sprk_container, communication, attachment, event, invoice, budget, organization, ...) references any of them.
 # 20 of the first 21 read 200 'active' via Graph as the owning app; b!HBRbo... answers 400 'Invalid hostname for this tenancy' (expect SKIPPED).
@@ -37,7 +37,9 @@ $ids = @(
   'b!Ks5hYobUT0GGBI7Le2DZKtNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-09 gate 175 work assignment W2 (deleted)
   'b!rw3hvr0xjk-rqIcAr0_NJ9NtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-09 gate 175 secure matter M2 (deleted)
   'b!WIEh0AfQbkSHzeuucOCsydNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-10 batch-4 sweep secure project (deleted)
-  'b!KDQEkLSGukOQnI4nJV1qUtNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y'   # 2026-10-10 gate 179 step 3 secure matter (deleted)
+  'b!KDQEkLSGukOQnI4nJV1qUtNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-10 gate 179 step 3 secure matter (deleted)
+  'b!bgjWxybhAUOq_wfSmPgY39NtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-11 gate 165 throwaway container 1 (deleted)
+  'b!axaKTtLekUqgkVfbYrmcl9NtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y'   # 2026-10-11 gate 165 throwaway container 2 (deleted)
 )
 foreach ($id in $ids) {
   try {

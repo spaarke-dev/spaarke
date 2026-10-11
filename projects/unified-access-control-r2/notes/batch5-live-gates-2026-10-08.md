@@ -419,3 +419,81 @@ Final sweep 20:15Z: 0 `# gate17*` / `# gate18*` matters or events, 0 grant rows 
 - **CI.** Router green. "Server tests (office scope)" was cancelled at its 20-minute job timeout with no test failure; it is advisory and does not block the merge.
 - **Deploy.** BFF deployed to dev from `C:\wtdep` (detached at 848f63913). The 4 critical-file SHA-256 hashes match and `healthz` returns 200.
 - **Repair.** `scripts/Repair-IntermediateFiledWorkAssignments.ps1` dry run found 1 candidate, ORDINARY `b10b7dab…`, and nothing to secure. `-Verify` PASS (exit 0). No `-Apply` was needed.
+
+## 2026-10-11 live gate 165 (b)(c)(g) as uac.child.user
+
+**Environment.** spaarke-bff-dev at master `848f6391` (healthz 200) and spaarkedev1. Run 19:26:39–19:29:54Z.
+- **Identities.**
+  - Leaf admin: uac.child.user (oid `94047962…`, systemuser `d6f8f439…`). Its business unit is `cb15f587…`, named "Spaarke Business Unit 1" in Dataverse: a direct child of the root "Spaarke" (`06fbf21c…`), with no children. BFF token roles `Admin`, from the separate `AZURE_CONFIG_DIR`.
+  - Root admin: ralph (oid `c74ac1af…`, the default `az` profile). Used for setup, the positive controls and clean-up.
+- **Sources.**
+  - POML criterion (b)/(c).
+  - Note §9: (b), (c) and (g). The (g) letter is defined only in §9 and is the environments rule (round 16 item 4). The POML has no (g).
+  - §14.9 (c), the newest (c): the leaf half of the "probes after deploy".
+- **No writes outside the approval.** No Entra, Key Vault, app-setting or role write, and no `sprk-prod-kv` read. Write probes targeted only throwaway records created for this gate.
+- **Files.** Scripts and log are in the session scratchpad `gate165/` (`p1-setup.ps1`, `p2-probes.ps1`, `p3-cleanup.ps1`, `gate165.log`, `p2.out`, `p3.out`). Tokens were held in memory only.
+
+**Setup (root admin).** Every id below was recorded in `state.json` before any probe.
+- **Throwaway config X `ed9a81a9…`.** Created with `POST /api/spe/configs` → 201, in the ROOT unit, so it is outside the leaf's unit. Its identity values are fresh random GUIDs that no other config uses: containerTypeId `55dbe16d…`, owningAppId `bacfafaa…`, consumingAppId `8f05d27f…`. No secret name and no environment.
+- **Two throwaway containers.** Created with `POST /api/spe/containers?configId=c3a25b9a…` → 201 each, stamped with the root unit: `b!bgjWxy…` and `b!axaKTt…`.
+- **Throwaway environment E `404e83b5…`.** Created with `POST /api/spe/environments` → 201, `isDefault: false`.
+
+"Identical" below means equal after replacing `traceId` and the requested id. The `detail` echoes the caller's own id, e.g. "Container type config '<id>' was not found.". Content type and status were equal in every pair.
+
+| # | Step (leaf admin unless stated) | Result | Evidence |
+|---|---|---|---|
+| b1/b2 | `GET /configs/X` vs `GET /configs/<random>` | **PASS** | 404 / 404 `spe.admin.deny.config_out_of_scope`, identical. |
+| b3 | `GET /configs/68f9a952…` (real root config; §9's original target; read-only) | **PASS** | 404, identical to b2. |
+| b4 | `GET /configs` | PASS | 200 `[]` (no config in the leaf's unit). |
+| b5 | Root `GET /configs/X` (positive control) | **PASS** | 200, full detail of X. |
+| c1 | `PUT /configs/X` `{name:"gate165 PWNED"}` vs PUT on a random id | **PASS** | 404 / 404, identical. |
+| c2 | `DELETE /configs/X` vs random | **PASS** | 404 / 404, identical. |
+| c3 | `POST /bulk/delete {containerIds:[both throwaway], configId:X}` vs random configId | **PASS** | 404 / 404, identical. No `operationId`. |
+| c4 | `POST /bulk/permissions {…, configId:X, userId:<leaf oid>, role:owner}` vs random | **PASS** | 404 / 404, identical. No `operationId`. |
+| c1–c4 | The four X answers compared with each other | PASS | All identical: the same 404 as b1. |
+| c5a | `POST /configs` in the leaf's own unit naming X's **containerTypeId** (new owning app) | **201 — by design; the POML's "→ 403" is superseded** | Owner round 20 item 3 (§11.4; code `DecideConfigWriteAsync`) makes containerTypeId, owningAppId and its secret SHARED identity, so any config may name them. The config it created, `da086bd8…` (unit `cb15f587…`), was deleted in clean-up. |
+| c5b | `POST /configs` in its own unit naming X's **consumingAppId** (the per-customer identity under the current rule) | **PASS** | 403 `spe.admin.deny.config_identity_out_of_scope`. |
+| c5c | The same, naming X's consumingAppId as the OWNING app (cross-column kind) | **PASS** | 403 `config_identity_out_of_scope`. |
+| c5d | `POST /configs` with `businessUnitId` = root | PASS | 403 `spe.admin.deny.business_unit_out_of_scope`. |
+| cs1–cs3 | §14.9 (c) leaf half: `GET /security/alerts`, `GET /security/score` (configId `c3a25b9a…`), `GET /containertypes/8a6ce34c…/permissions?configId=c3a25b9a…` | **PASS** | 403 `spe.admin.deny.platform_operator_required` on each. The container-type route now answers the round-49 operator 403 first, which supersedes §12.9's `container_type_shared`. |
+| cs4 | `GET /businessunits` | **PASS** | 200: only `cb15f587…` (`isRootUnit:false`). |
+| cs5/cs6 | `GET /containers?configId=c3a25b9a…`; `GET /containers/b!bgjWxy…?configId=c3a25b9a…` | PASS | 404 `config_out_of_scope`: the config rule refuses before any container is read. |
+| cs7 | `GET /dashboard/metrics` | PASS | 200 with every count 0 and empty per-config maps (the root aggregate is not leaked). |
+| g1 | `GET /environments` | **PASS** | 200 `[]`. |
+| g2/g3 | `GET /environments/df502cb9…` vs a random id | **PASS** | 404 / 404 `spe.admin.deny.environment_out_of_scope`, identical. The same for throwaway E. |
+| g4/g5 | Root: `GET /environments`; `GET /environments/df502cb9…` | **PASS** | 200: the list holds "Spaarke Dev" (and E at the time); GET 200. |
+| g6 | `POST /environments {"name":"probe","rootSiteUrl":"https://example.sharepoint.com"}` | **PASS** | 403 `spe.admin.deny.environment_write_requires_platform_operator`. |
+| g7/g8/g9 | `PUT` and `DELETE` on throwaway E; `PUT` on a random id | **PASS** | 403, the same code. g6–g9 are identical: decided before any environment is read. The probes did not target the real `df502cb9…`. |
+
+**After the probes (root admin).**
+- X: byte-identical to its pre-probe GET (name and `modifiedOn` unchanged).
+- E: unchanged. `df502cb9…`: unchanged (`modifiedOn` 2026-03-16).
+- Both throwaway containers: still active, with 0 permissions (no leaf owner grant).
+- App Insights (`spe-insights-dev-67e2xz`, 19:26–19:29Z):
+  - A "tenant scope DENIED" / "environment scope DENIED" / "platform-operator route DENIED" trace for every refused call.
+  - **No** `BulkDelete: enqueued`, `BulkPermissions: enqueued`, `UpdateSpeConfig` or `DeleteSpeConfig` trace from the leaf.
+  - The only leaf write that ran was c5a's `CreateSpeConfig`.
+
+**Clean-up (PASS).**
+- Configs `ed9a81a9…` (X) and `da086bd8…` (c5a): root `DELETE` → 204 each. Dataverse read-back → 404.
+- Containers `b!bgjWxy…` and `b!axaKTt…`: root `POST /bulk/delete` (configId `c3a25b9a…`) → 202. Operation `9e4481f6…` finished 2/2 with 0 failed. Active GET → 404 for both, so they are in the SPE recycle bin. **Permanent removal is the owner's** `notes/Remove-TestContainers.ps1`; the full ids are in the agent report.
+- Environment E `404e83b5…`: root `DELETE` → 204. Dataverse read-back → 404.
+- Sweep: `sprk_specontainertypeconfig` holds only `68f9a952…` and `c3a25b9a…`. `sprk_speenvironment` holds only `df502cb9…` (default, unchanged). No "probe" environment exists.
+
+**Finding F-165-RB (class (a)/(d), fails closed; not a gate of this run; for the main session to file).**
+- **What happened.** Root admin `GET /api/spe/recyclebin?configId=c3a25b9a…` returned **200 `{"items":[],"count":0}`** at 19:29:37Z and again at 19:29:54Z.
+- **What Graph says.** Graph listed **4** deleted containers of type `8a6ce34c…`: the two above plus `b!QPhJA-…` and `b!vlLJSa…`.
+- **Where they were dropped.** Each per-id `GET deletedContainers/{id}` answered 200. These are the ownership guard's (task 227d) marker reads, cached as `sdap:graph:marker:deleted:*`. No binding read followed, and no "left out of a list — reason unbound/malformed" warning was logged.
+- **Likely cause.** The deleted-container marker or binding read does not see `customProperties` on `deletedContainers/{id}`. That is the risk §11.16 (i) left unverified.
+- **Effect.** No admin, root included, sees any deleted container in the SpeAdminApp recycle bin. The by-id restore and permanent-delete routes probably refuse the same way. Nothing is exposed.
+- **Next step.** Confirm with a read-only `GET /beta/storage/fileStorage/deletedContainers/{id}?$select=id,containerTypeId,customProperties` as the BFF app (§11.16 (i)).
+
+**Verdict.**
+- **165 (b) PASS. 165 (c) PASS** (POML write probes and the §14.9 leaf half). One exception: the POML's "POST naming X's containerTypeId → 403" is superseded by owner round 20 item 3 and answers 201 by design. The per-customer identity (consumingAppId) gives the 403.
+- **165 (g) PASS**, read and write parts.
+- **Left for 165 under the POML:** only **(d)**, the SpeAdminApp UI check. (a) and (k) passed in G6, and (e) was done during development. The API half of (d) behaved: the root admin started a bulk delete on throwaway containers and it completed.
+- **Note gates outside the POML still unrun:**
+  - §9 (f): the register 400 probe.
+  - §11.16 (i): the deleted-container binding read. F-165-RB above is negative evidence for it.
+  - §11.16 (j) WRITE half: the customproperties PUT → 403. Its read half is covered by cs5/cs6: a leaf admin cannot reach a root config at all.
+  - §14.9 (d): the next real L2 provisioning run.
