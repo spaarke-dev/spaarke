@@ -8,7 +8,8 @@
 //    PENDING_OWNER_DECISION — the task-042 escalation (no external playbook read / search route; task-042 notes, owner
 //    questions 1 and 2). That list is a ratchet: a new violation anywhere else fails, and an entry that no longer
 //    violates fails until it is removed.
-// 2. The production build refuses VITE_DEV_MOCK=true (vite.config.ts `refuseDevMockInProductionBuild`).
+// 2. EVERY build (any --mode, any NODE_ENV) refuses VITE_DEV_MOCK=true and pins it to "false" (vite.config.ts
+//    `refuseDevMockInBuild`, `devMockBuildDefine`).
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -153,7 +154,7 @@ describe('source scan: every BFF call from src/ is on the external plane', () =>
   });
 });
 
-describe('production build refuses VITE_DEV_MOCK=true (vite.config.ts)', () => {
+describe('every build refuses VITE_DEV_MOCK=true and pins it off (vite.config.ts)', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -163,31 +164,63 @@ describe('production build refuses VITE_DEV_MOCK=true (vite.config.ts)', () => {
     const plugin = config.plugins.flat().find(p => p && p.name === 'spaarke-refuse-dev-mock-in-production');
     expect(plugin, 'the guard plugin is registered').toBeTruthy();
     return (command: 'build' | 'serve', mode: string) =>
-      (plugin!.config as (c: object, e: { command: string; mode: string }) => void).call({}, {}, { command, mode });
+      (plugin!.config as (c: object, e: { command: string; mode: string }) => unknown).call({}, {}, { command, mode });
   }
 
   it('a production build with the flag in the environment fails', async () => {
     vi.stubEnv('VITE_DEV_MOCK', 'true');
     const run = await guardPlugin();
-    expect(() => run('build', 'production')).toThrow(/VITE_DEV_MOCK=true is refused for a production build/);
+    expect(() => run('build', 'production')).toThrow(/VITE_DEV_MOCK=true is refused for a build/);
   });
 
-  it('a production build without the flag, and the dev server with it, are allowed', async () => {
+  it.each(['staging', 'development', 'test', 'preview'])(
+    'a "%s"-mode build with the flag in the environment fails (not only --mode production)',
+    async mode => {
+      vi.stubEnv('VITE_DEV_MOCK', 'true');
+      const run = await guardPlugin();
+      expect(() => run('build', mode)).toThrow(/VITE_DEV_MOCK=true is refused for a build/);
+    }
+  );
+
+  it('a build under NODE_ENV=development (where Vite reports DEV === true) with the flag still fails', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('VITE_DEV_MOCK', 'true');
+    const run = await guardPlugin();
+    expect(() => run('build', 'staging')).toThrow(/refused for a build/);
+  });
+
+  it('a build without the flag, and the dev server with it, are allowed', async () => {
     const run = await guardPlugin();
     expect(() => run('build', 'production')).not.toThrow();
+    expect(() => run('build', 'staging')).not.toThrow();
     vi.stubEnv('VITE_DEV_MOCK', 'true');
     expect(() => run('serve', 'development')).not.toThrow();
   });
 
+  it('every build pins import.meta.env.VITE_DEV_MOCK to the literal "false"; the dev server does not', async () => {
+    const run = await guardPlugin();
+    expect(run('build', 'production')).toEqual({ define: { 'import.meta.env.VITE_DEV_MOCK': '"false"' } });
+    expect(run('build', 'staging')).toEqual({ define: { 'import.meta.env.VITE_DEV_MOCK': '"false"' } });
+    expect(run('serve', 'development')).toEqual({ define: {} });
+  });
+
   it.each([
     ['build', 'production', 'true', true],
+    ['build', 'production', 'TRUE', false], // the exact value 'true' is the only one dev-mock.ts honours
+    ['build', 'staging', 'true', true],
+    ['build', 'development', 'true', true],
+    ['build', 'anything-else', 'true', true],
     ['build', 'production', 'false', false],
+    ['build', 'staging', 'false', false],
+    ['build', 'production', '', false],
     ['build', 'production', undefined, false],
-    ['build', 'development', 'true', false],
     ['serve', 'production', 'true', false],
-  ] as const)('refuseDevMockInProductionBuild(%s, %s, %s) throws: %s', async (command, mode, flag, throws) => {
-    const { refuseDevMockInProductionBuild } = await import('../vite.config');
-    const call = () => refuseDevMockInProductionBuild(command, mode, flag);
+    ['serve', 'development', 'true', false],
+  ] as const)('refuseDevMockInBuild(%s, %s, %s) throws: %s', async (command, mode, flag, throws) => {
+    const { refuseDevMockInBuild } = await import('../vite.config');
+    // `mode` is deliberately not an argument: no mode is exempt.
+    void mode;
+    const call = () => refuseDevMockInBuild(command, flag);
     if (throws) expect(call).toThrow();
     else expect(call).not.toThrow();
   });

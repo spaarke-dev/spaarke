@@ -89,8 +89,13 @@ export function resolveStandalonePlane(realm: Realm): StandalonePlane {
 export function applyStandalonePlane(plane: StandalonePlane): void {
   // `scope` is the active backend's scope passed by bff-client.ts (the same record as the request URL); the plane's
   // scope is the fallback for callers that pass none.
-  setActiveBffTokenAcquirer(scope =>
-    acquireStandaloneBffToken(plane.instance, scope ?? plane.bffScope, plane.acquireOptions)
+  // `options.forceRefresh` is set only by the 401 retry (bff-client.ts); every other call shapes the request as before.
+  setActiveBffTokenAcquirer((scope, options) =>
+    acquireStandaloneBffToken(
+      plane.instance,
+      scope ?? plane.bffScope,
+      options?.forceRefresh ? { ...plane.acquireOptions, forceRefresh: true } : plane.acquireOptions
+    )
   );
   setActiveLoginScope(plane.bffScope);
   // MSAL's account list is not client-scoped (both browser instances share the tab's sessionStorage), so the

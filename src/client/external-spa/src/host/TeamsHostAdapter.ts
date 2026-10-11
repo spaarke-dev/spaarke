@@ -301,8 +301,8 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
   private async completeAuthSetup(cfg: TeamsWorkforceAuthConfig): Promise<void> {
     // `scope` is the active backend's scope passed by bff-client.ts (the same record as the request URL, task 041);
     // without one, the active workforce backend's scope at call time.
-    setActiveBffTokenAcquirer(scope =>
-      acquireTeamsWorkforceBffToken({ ...cfg, bffScope: scope ?? activeBffScope('workforce') })
+    setActiveBffTokenAcquirer((scope, options) =>
+      acquireTeamsWorkforceBffToken({ ...cfg, bffScope: scope ?? activeBffScope('workforce') }, options)
     );
     // The instance that holds the signed-in account: the NAA instance, or the popup fallback's
     // instance when NAA failed (ADR-028 A7) — so useMsal() reflects the user either way.

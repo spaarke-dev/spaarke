@@ -20,8 +20,10 @@
  *   - entityId   (required): the record GUID
  *   - containerId — IGNORED. The server derives the container from the record; a client never names one (#858).
  *
- * Refusals: a 401 shows the sign-in state and a 403 the denied state (BffAccessState); an unsupported type or a
- * malformed id is refused before any request; no active backend → the upload fails closed (bffApiCall sends nothing).
+ * Refusals: a 401 shows the sign-in state and a 403 the denied state (BffAccessState), beside the list of files that
+ * had already uploaded; an unsupported type or a malformed id is refused before any request; no active backend → the
+ * upload fails closed (bffApiCall sends nothing). A per-file failure shows the server's ProblemDetails detail; a batch
+ * in which nothing uploaded ends on a warning, not the green checkmark.
  *
  * ADR-021: All styles use Fluent v9 design tokens. No hard-coded colors.
  * ADR-022: React 18 functional component (createRoot is in main.tsx).
@@ -31,7 +33,7 @@
 import * as React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { makeStyles, tokens, Text, MessageBar, MessageBarBody, Button } from '@fluentui/react-components';
-import { CheckmarkCircleRegular } from '@fluentui/react-icons';
+import { CheckmarkCircleRegular, WarningRegular } from '@fluentui/react-icons';
 
 import { WizardShell } from '@spaarke/ui-components/components/Wizard';
 import type {
@@ -41,7 +43,7 @@ import type {
 import { FileUploadZone, UploadedFileList } from '@spaarke/ui-components/components/FileUpload';
 import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components/components/FileUpload/fileUploadTypes';
 
-import { bffApiCall } from '../auth/bff-client';
+import { bffApiCall, problemMessage } from '../auth/bff-client';
 import { ApiError } from '../types';
 import { PageContainer, NavigationBar } from '../components';
 import { BffAccessState, accessFailureOf, type BffAccessFailure } from '../components/auth/BffAccessState';
@@ -158,13 +160,21 @@ export async function uploadDocumentToRecord(root: ExternalDocumentRoot, entityI
   });
 }
 
-/** The per-file message for a non-auth failure (a 401/403 ends the whole upload instead). */
+/**
+ * The per-file message for a non-auth failure (a 401/403 ends the whole upload instead). The server's ProblemDetails
+ * `detail` is shown when it wrote one (`problemMessage`): the collision 409 names the file, the owner-refusal 409
+ * ("Record owner unresolved") says why the record cannot take documents, a 503 says to retry. The status-based text
+ * is only the fallback for a response that carries no detail (a proxy error, an empty body).
+ */
 function uploadFailureMessage(err: unknown, fileName: string, noun: string): string {
   const statusCode = err instanceof ApiError ? err.statusCode : undefined;
+  let fallback = 'Upload failed.';
   if (statusCode === 409)
-    return `A file named "${fileName}" already exists. Nothing was changed — rename it and retry.`;
-  if (statusCode === 422) return `This ${noun} has no document storage configured yet.`;
-  return 'Upload failed.';
+    fallback = `"${fileName}" could not be uploaded because of a conflict (for example a file with that name already exists). Nothing was changed.`;
+  else if (statusCode === 413) fallback = `"${fileName}" is too large to upload.`;
+  else if (statusCode === 422) fallback = `This ${noun} has no document storage configured yet.`;
+  else if (statusCode !== undefined && statusCode >= 500) fallback = 'Upload failed. Please try again later.';
+  return problemMessage(err, fallback);
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +221,8 @@ export const DocumentUploadPage: React.FC<DocumentUploadPageProps> = ({ teamsHos
   const [validationErrors, setValidationErrors] = React.useState<IFileValidationError[]>([]);
   // A 401 / 403 from the upload route replaces the wizard with the sign-in / denied state.
   const [accessFailure, setAccessFailure] = React.useState<BffAccessFailure | null>(null);
+  // When the refusal came part-way through a batch: which files had already uploaded and which had not been sent.
+  const [batchOutcome, setBatchOutcome] = React.useState<{ uploaded: string[]; notUploaded: string[] } | null>(null);
 
   // ── File handlers ───────────────────────────────────────────────────────
   const handleFilesAccepted = React.useCallback((files: IUploadedFile[]) => {
@@ -241,14 +253,22 @@ export const DocumentUploadPage: React.FC<DocumentUploadPageProps> = ({ teamsHos
 
     const results: { name: string; success: boolean; error?: string }[] = [];
 
-    for (const uploadedFile of selectedFiles) {
+    for (const [index, uploadedFile] of selectedFiles.entries()) {
       try {
         await uploadDocumentToRecord(target.root, target.entityId, uploadedFile.file);
         results.push({ name: uploadedFile.name, success: true });
       } catch (err) {
         const failure = accessFailureOf(err);
         if (failure) {
-          // Not signed in / not allowed: stop — every further file would be refused the same way.
+          // Not signed in / not allowed: stop — every further file would be refused the same way. The files that
+          // already went through stay uploaded: say so beside the refusal, so nobody re-sends them.
+          setBatchOutcome({
+            uploaded: results.filter(r => r.success).map(r => r.name),
+            notUploaded: [
+              ...results.filter(r => !r.success).map(r => r.name),
+              ...selectedFiles.slice(index).map(f => f.name),
+            ],
+          });
           setAccessFailure(failure);
           throw new Error(failure === 'signin' ? 'Sign in required.' : 'Access denied.');
         }
@@ -265,7 +285,19 @@ export const DocumentUploadPage: React.FC<DocumentUploadPageProps> = ({ teamsHos
     const warnings = results.filter(r => !r.success).map(r => `${r.name}: ${r.error}`);
 
     return {
-      icon: <CheckmarkCircleRegular style={{ fontSize: '48px', color: tokens.colorPaletteGreenForeground1 }} />,
+      // Nothing uploaded is not a success: a warning, never the green checkmark.
+      icon:
+        successCount === 0 ? (
+          <WarningRegular
+            data-testid="upload-result-warning-icon"
+            style={{ fontSize: '48px', color: tokens.colorPaletteYellowForeground1 }}
+          />
+        ) : (
+          <CheckmarkCircleRegular
+            data-testid="upload-result-success-icon"
+            style={{ fontSize: '48px', color: tokens.colorPaletteGreenForeground1 }}
+          />
+        ),
       title:
         failedCount === 0
           ? `${successCount} file${successCount !== 1 ? 's' : ''} uploaded successfully`
@@ -318,6 +350,25 @@ export const DocumentUploadPage: React.FC<DocumentUploadPageProps> = ({ teamsHos
       <PageContainer>
         <NavigationBar items={breadcrumbs} />
         <div className={styles.errorContainer}>
+          {batchOutcome && (batchOutcome.uploaded.length > 0 || batchOutcome.notUploaded.length > 0) && (
+            <MessageBar
+              intent={batchOutcome.uploaded.length > 0 ? 'info' : 'warning'}
+              data-testid="upload-batch-outcome"
+            >
+              <MessageBarBody>
+                {batchOutcome.uploaded.length > 0 && (
+                  <div data-testid="upload-batch-uploaded">
+                    Already uploaded before this stopped: {batchOutcome.uploaded.join(', ')}.
+                  </div>
+                )}
+                {batchOutcome.notUploaded.length > 0 && (
+                  <div data-testid="upload-batch-not-uploaded">
+                    Not uploaded: {batchOutcome.notUploaded.join(', ')}.
+                  </div>
+                )}
+              </MessageBarBody>
+            </MessageBar>
+          )}
           <BffAccessState
             failure={accessFailure}
             teamsHost={teamsHost}

@@ -22,9 +22,14 @@
  * Failure handling (task 042, FR-18 / #1566):
  *   - 401 (after bffApiCall's one retry) or 403 → the promise REJECTS with the ApiError, so the workspace shows the
  *     sign-in or denied state — never a default workspace or a stand-in user.
- *   - any other failure (5xx, network) → the rollout fallback: the plane's default modules (`PLANE_DEFAULTS`, aligned
- *     with the server's defaults) with an EMPTY identity, plus a console.warn (the UAT tell that it fired). NFR-06: the
- *     module-data endpoints enforce Tier-1/Tier-2 server-side regardless of what this returns.
+ *   - a server failure (an ApiError with statusCode >= 500) → the rollout fallback: the plane's default modules
+ *     (`PLANE_DEFAULTS`, aligned with the server's defaults) with an EMPTY identity, plus a console.warn (the UAT tell
+ *     that it fired). NFR-06: the module-data endpoints enforce Tier-1/Tier-2 server-side regardless of what this
+ *     returns.
+ *   - anything else REJECTS: a token-acquisition failure (TeamsWorkforceAuthError, BackendSelectionError, the
+ *     redirect-in-progress Error), a network fault, or a 4xx other than 401/403. The caller was never answered by the
+ *     BFF, so showing a default workspace would present modules for a caller the server has not seen. The workspace
+ *     renders the sign-in state for a failed Teams sign-in and its load-error state for the rest.
  */
 
 import { bffApiCall } from '../auth/bff-client';
@@ -87,8 +92,8 @@ function resolveDevPersonaOverride(): Plane | null {
 
 /**
  * Resolve the caller's entitlements (task 073 — live). Calls the real BFF endpoint; a 401 or 403 REJECTS (the caller
- * renders the sign-in / denied state — task 042, FR-18); any other failure degrades to the plane's default modules
- * with no identity (see file header). `teamsHost` is the real bootstrap signal used for the dev-mock plane + the
+ * renders the sign-in / denied state — task 042, FR-18); a server failure (5xx) degrades to the plane's default
+ * modules with no identity, and every other failure rejects (see file header). `teamsHost` is the real bootstrap signal used for the dev-mock plane + the
  * rollout fallback plane; the live BFF derives the plane authoritatively from the caller's token.
  */
 export async function fetchMeEntitlements(teamsHost: boolean): Promise<MeEntitlementsResponse> {
@@ -106,11 +111,15 @@ export async function fetchMeEntitlements(teamsHost: boolean): Promise<MeEntitle
   try {
     return await bffApiCall<MeEntitlementsResponse>('/api/v1/external/me/entitlements');
   } catch (err) {
-    // Not signed in (401 after the retry) or not allowed (403): never a default workspace (task 042).
-    if (err instanceof ApiError && (err.statusCode === 401 || err.statusCode === 403)) throw err;
-    // Rollout fallback (NFR-06 — client is not the security boundary): degrade to the plane's default modules so a
-    // transient failure never leaves the workspace tab-less. The console warning is the UAT tell that this fired.
-    console.warn('[me] live /api/v1/external/me/entitlements failed — falling back to plane-derived defaults.', err);
-    return PLANE_DEFAULTS[basePlane];
+    // Rollout fallback (NFR-06 — client is not the security boundary), for a SERVER failure only: the BFF answered
+    // with a 5xx, so degrade to the plane's default modules rather than leave the workspace tab-less. The console
+    // warning is the UAT tell that this fired.
+    if (err instanceof ApiError && err.statusCode >= 500) {
+      console.warn('[me] live /api/v1/external/me/entitlements failed — falling back to plane-derived defaults.', err);
+      return PLANE_DEFAULTS[basePlane];
+    }
+    // Not signed in (401 after the retry), not allowed (403), another 4xx, a failed token acquisition or a network
+    // fault: never a default workspace (task 042). The caller maps it to a state of its own.
+    throw err;
   }
 }

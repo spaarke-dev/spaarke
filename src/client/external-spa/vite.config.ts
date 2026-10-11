@@ -63,28 +63,39 @@ function resolveSharedLibDeps(): import('vite').Plugin {
 }
 
 /**
- * spaarke-SPA-external-access-platform-r3 task 042 (FR-18, #1566): mock mode never reaches a production build.
+ * spaarke-SPA-external-access-platform-r3 task 042 (FR-18, #1566): mock mode never reaches ANY build.
  *
- * `VITE_DEV_MOCK=true` turns on a fake signed-in user and canned BFF responses (src/dev-mock.ts). A production build
- * that carries it FAILS here, whether the flag comes from an .env file or the process environment (loadEnv reads
- * both). Any other build cannot enter mock mode either: `isDevMockEnabled()` also requires `import.meta.env.DEV`,
- * which every `vite build` replaces with `false`, so the mock branches and data are dropped from the bundle.
- * Asserted by tests/out-of-plane-routes.test.ts.
+ * `VITE_DEV_MOCK=true` turns on a fake signed-in user and canned BFF responses (src/dev-mock.ts). EVERY `vite build`
+ * that carries it FAILS here, whatever its `--mode` and whether the flag comes from an .env file or the process
+ * environment (loadEnv reads both) — a staging build is as public as a production one. The `import.meta.env.DEV`
+ * half of `isDevMockEnabled()` is NOT a safeguard on its own: Vite derives DEV from NODE_ENV, so
+ * `NODE_ENV=development vite build` has DEV === true. As the second layer, every build also `define`s
+ * `import.meta.env.VITE_DEV_MOCK` as the literal "false" (`devMockBuildDefine`), so the mock branches, canned data
+ * and mock identity are dead code the bundler drops, whatever the environment says (the flag is compared exactly,
+ * `=== 'true'`, here and in dev-mock.ts, so the bundler can fold the comparison). `npm run check:dist` scans the output
+ * for what slipped through. Asserted by tests/out-of-plane-routes.test.ts.
  */
-export function refuseDevMockInProductionBuild(command: string, mode: string, devMock: string | undefined): void {
-  if (command === 'build' && mode === 'production' && devMock === 'true') {
+export function refuseDevMockInBuild(command: string, devMock: string | undefined): void {
+  if (command === 'build' && devMock === 'true') {
     throw new Error(
-      'VITE_DEV_MOCK=true is refused for a production build (task 042, FR-18): mock mode shows a fake user and ' +
-        'canned data. Unset VITE_DEV_MOCK, or use the dev server for mock mode.'
+      'VITE_DEV_MOCK=true is refused for a build (task 042, FR-18): mock mode shows a fake user and canned data, ' +
+        'and no build mode (production, staging, ...) may carry it. Unset VITE_DEV_MOCK, or use the dev server for ' +
+        'mock mode.'
     );
   }
+}
+
+/** The build-time constant that kills the mock branch in every build: `import.meta.env.VITE_DEV_MOCK` → "false". */
+export function devMockBuildDefine(command: string): Record<string, string> {
+  return command === 'build' ? { 'import.meta.env.VITE_DEV_MOCK': '"false"' } : {};
 }
 
 function devMockProductionGuard(): import('vite').Plugin {
   return {
     name: 'spaarke-refuse-dev-mock-in-production',
     config(_config, { command, mode }) {
-      refuseDevMockInProductionBuild(command, mode, loadEnv(mode, __dirname, 'VITE_').VITE_DEV_MOCK);
+      refuseDevMockInBuild(command, loadEnv(mode, __dirname, 'VITE_').VITE_DEV_MOCK);
+      return { define: devMockBuildDefine(command) };
     },
   };
 }

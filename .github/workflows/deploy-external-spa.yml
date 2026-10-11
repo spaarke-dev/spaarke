@@ -124,6 +124,13 @@ jobs:
           VITE_TEAMS_MSAL_BFF_SCOPE: ${{ vars.VITE_TEAMS_MSAL_BFF_SCOPE }}
         run: npm run build
 
+      # Scan the BUILT bundle before it is staged for upload (task 042 review, FR-18): no dev-mock identity or canned
+      # data, and no "/api/" route outside /api/v1/external beyond the ratchet baseline in scripts/check-dist.mjs.
+      # No workflow value is used here - the script reads only dist/.
+      - name: Check build output (no mock mode, no out-of-plane routes)
+        working-directory: src/client/external-spa
+        run: npm run check:dist
+
       # staticwebapp.config.json lives at the project root (source of truth) but the SWA
       # runtime only reads it from the deployed content root. public/ holds only the static
       # MSAL popup page (auth-callback.html), which Vite copies into dist; the SWA config is not

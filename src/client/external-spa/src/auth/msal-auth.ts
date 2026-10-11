@@ -116,6 +116,12 @@ export interface StandaloneAcquireOptions {
    * RefreshTokenClient `redirect_uri`), so supplying it on every silent call would change the wire request.
    */
   silentRedirectUri?: string;
+  /**
+   * Skip the cached ACCESS token and redeem the refresh token for a new one (`forceRefresh` on the silent request).
+   * Set ONLY by bff-client.ts's 401 retry: the BFF just refused the token that is still in the cache, so
+   * returning it again would repeat the 401 (a sign-in loop). Absent, every request is shaped exactly as before.
+   */
+  forceRefresh?: boolean;
 }
 
 /** The accounts of one instance, optionally scoped to a tenant (case-insensitive GUID). */
@@ -168,7 +174,7 @@ export async function acquireStandaloneBffToken(
   const account = accounts[0];
 
   try {
-    return await acquireSilent(instance, bffScope, account, options.silentRedirectUri);
+    return await acquireSilent(instance, bffScope, account, options.silentRedirectUri, options.forceRefresh === true);
   } catch (err) {
     if (isInteractionNeeded(err)) {
       // Token expired, consent needed, MFA required, silent renewal timed out, etc. — fall back to
@@ -193,10 +199,13 @@ async function acquireSilent(
   instance: IPublicClientApplication,
   bffScope: string,
   account: AccountInfo,
-  silentRedirectUri?: string
+  silentRedirectUri?: string,
+  forceRefresh = false
 ): Promise<string> {
+  // `forceRefresh` is added to the request only when asked for, so the 040 request shapes are otherwise unchanged.
+  const refresh = forceRefresh ? { forceRefresh: true } : {};
   if (!silentRedirectUri) {
-    const result = await instance.acquireTokenSilent({ scopes: [bffScope], account });
+    const result = await instance.acquireTokenSilent({ scopes: [bffScope], account, ...refresh });
     return result.accessToken;
   }
 
@@ -205,6 +214,7 @@ async function acquireSilent(
       scopes: [bffScope],
       account,
       cacheLookupPolicy: CacheLookupPolicy.AccessTokenAndRefreshToken,
+      ...refresh,
     });
     return result.accessToken;
   } catch (err) {
@@ -273,8 +283,10 @@ export async function acquireBffToken(): Promise<string> {
 }
 
 /** The default (CIAM) acquirer: `scope` is the active backend's, passed by bff-client.ts; else the active CIAM scope. */
-function acquireCiamBffToken(scope?: string): Promise<string> {
-  return acquireStandaloneBffToken(msalInstance, scope ?? activeBffScope('ciam'));
+function acquireCiamBffToken(scope?: string, options?: BffTokenAcquireOptions): Promise<string> {
+  return options?.forceRefresh
+    ? acquireStandaloneBffToken(msalInstance, scope ?? activeBffScope('ciam'), { forceRefresh: true })
+    : acquireStandaloneBffToken(msalInstance, scope ?? activeBffScope('ciam'));
 }
 
 /**
@@ -288,7 +300,16 @@ function acquireCiamBffToken(scope?: string): Promise<string> {
  * `acquireTeamsWorkforceBffToken` — no acquisition LOGIC lives outside this file (ADR-028 A2: "the
  * adapter selects the strategy; it must NOT implement its own auth logic").
  */
-export type BffTokenAcquirer = (scope?: string) => Promise<string>;
+export type BffTokenAcquirer = (scope?: string, options?: BffTokenAcquireOptions) => Promise<string>;
+
+/**
+ * Per-call options of the acquirer seam. `forceRefresh` is passed ONLY by bff-client.ts's / gridDataverseClient.ts's
+ * single retry after a 401 (the cached token was just refused, so a cache hit would repeat the refusal); the first
+ * attempt of every request calls the acquirer with the scope alone, exactly as before.
+ */
+export interface BffTokenAcquireOptions {
+  forceRefresh?: boolean;
+}
 
 let activeBffTokenAcquirer: BffTokenAcquirer = acquireCiamBffToken;
 
@@ -306,8 +327,15 @@ export function setActiveBffTokenAcquirer(acquirer: BffTokenAcquirer): void {
  * scope is not `api://{app id}/user_impersonation` (ADR-028 A7) — so no caller can turn an arbitrary string into a
  * scope for `acquireTokenSilent` / NAA.
  */
-export function acquireActiveBffToken(backend?: Pick<ActiveBackend, 'bffScope' | 'plane'>): Promise<string> {
-  if (backend === undefined) return activeBffTokenAcquirer(undefined);
+export function acquireActiveBffToken(
+  backend?: Pick<ActiveBackend, 'bffScope' | 'plane'>,
+  options?: BffTokenAcquireOptions
+): Promise<string> {
+  if (backend === undefined) {
+    return options?.forceRefresh
+      ? activeBffTokenAcquirer(undefined, { forceRefresh: true })
+      : activeBffTokenAcquirer(undefined);
+  }
   const scope = typeof backend === 'object' && backend !== null ? backend.bffScope : undefined;
   if (!isUserImpersonationScope(scope)) {
     return Promise.reject(
@@ -316,7 +344,8 @@ export function acquireActiveBffToken(backend?: Pick<ActiveBackend, 'bffScope' |
       )
     );
   }
-  return activeBffTokenAcquirer(scope);
+  // The options argument is passed only when set, so the first-attempt call shape is `acquirer(scope)` as before.
+  return options?.forceRefresh ? activeBffTokenAcquirer(scope, { forceRefresh: true }) : activeBffTokenAcquirer(scope);
 }
 
 /**
@@ -538,12 +567,16 @@ export function getTeamsWorkforceSignedInInstance(): IPublicClientApplication | 
  * `acquireTokenPopup` on `InteractionRequiredAuthError`. The popup is brokered by the Teams host, so
  * a consented workforce user sees no visible second login. NEVER redirects (NFR-04).
  */
-async function acquireBffTokenViaNaa(instance: IPublicClientApplication, bffScope: string): Promise<string> {
+async function acquireBffTokenViaNaa(
+  instance: IPublicClientApplication,
+  bffScope: string,
+  forceRefresh = false
+): Promise<string> {
   const scopes = [bffScope];
   const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0] ?? null;
   try {
     const result = account
-      ? await instance.acquireTokenSilent({ scopes, account })
+      ? await instance.acquireTokenSilent({ scopes, account, ...(forceRefresh ? { forceRefresh: true } : {}) })
       : await instance.ssoSilent({ scopes });
     // Establish the active account once so useMsal()/useIsAuthenticated() (host adapter's
     // MsalProvider) reflect the signed-in user immediately, and so the NEXT call above takes the
@@ -577,14 +610,19 @@ async function acquireBffTokenViaNaa(instance: IPublicClientApplication, bffScop
 async function acquireBffTokenViaPopup(
   instance: IPublicClientApplication,
   bffScope: string,
-  trySilentFirst: boolean
+  trySilentFirst: boolean,
+  forceRefresh = false
 ): Promise<string> {
   const scopes = [bffScope];
   const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0] ?? null;
 
   if (account && trySilentFirst) {
     try {
-      const result = await instance.acquireTokenSilent({ scopes, account });
+      const result = await instance.acquireTokenSilent({
+        scopes,
+        account,
+        ...(forceRefresh ? { forceRefresh: true } : {}),
+      });
       if (result.accessToken) return result.accessToken;
     } catch {
       // Fall through to the popup, as OfficeNaaStrategy._tryAcquireWith does.
@@ -654,7 +692,11 @@ function teamsWorkforceFailure(naaError: unknown, popupError: unknown): TeamsWor
  * @returns Access token string, ready for `Authorization: Bearer {token}` against the BFF.
  * @throws {TeamsWorkforceAuthError} When not in a Teams host, or neither NAA nor the popup succeeds.
  */
-export async function acquireTeamsWorkforceBffToken(cfg: TeamsWorkforceAuthConfig): Promise<string> {
+export async function acquireTeamsWorkforceBffToken(
+  cfg: TeamsWorkforceAuthConfig,
+  options?: BffTokenAcquireOptions
+): Promise<string> {
+  const forceRefresh = options?.forceRefresh === true;
   try {
     await ensureTeamsInitialized();
   } catch (initError) {
@@ -668,7 +710,7 @@ export async function acquireTeamsWorkforceBffToken(cfg: TeamsWorkforceAuthConfi
     if (isNaaChannelRecommended()) {
       try {
         const instance = await getTeamsWorkforceMsalInstance(cfg);
-        const token = await acquireBffTokenViaNaa(instance, cfg.bffScope);
+        const token = await acquireBffTokenViaNaa(instance, cfg.bffScope, forceRefresh);
         teamsWorkforcePath = 'naa';
         teamsWorkforceSignedInInstance = instance;
         return token;
@@ -691,7 +733,7 @@ export async function acquireTeamsWorkforceBffToken(cfg: TeamsWorkforceAuthConfi
   try {
     // Bootstrap / renewal path: no user gesture to protect, so the silent attempt (a signed-in popup
     // account's cache) is worth trying first.
-    return await signInViaPopupInstance(cfg, true);
+    return await signInViaPopupInstance(cfg, true, forceRefresh);
   } catch (popupError) {
     teamsWorkforcePath = null;
     prewarmTeamsWorkforcePopupInstance(cfg);
@@ -709,9 +751,13 @@ function prewarmTeamsWorkforcePopupInstance(cfg: TeamsWorkforceAuthConfig): void
   void getTeamsWorkforcePopupMsalInstance(cfg).catch(() => undefined);
 }
 
-async function signInViaPopupInstance(cfg: TeamsWorkforceAuthConfig, trySilentFirst: boolean): Promise<string> {
+async function signInViaPopupInstance(
+  cfg: TeamsWorkforceAuthConfig,
+  trySilentFirst: boolean,
+  forceRefresh = false
+): Promise<string> {
   const instance = await getTeamsWorkforcePopupMsalInstance(cfg);
-  const token = await acquireBffTokenViaPopup(instance, cfg.bffScope, trySilentFirst);
+  const token = await acquireBffTokenViaPopup(instance, cfg.bffScope, trySilentFirst, forceRefresh);
   teamsWorkforcePath = 'popup';
   teamsWorkforceSignedInInstance = instance;
   return token;

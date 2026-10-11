@@ -405,6 +405,23 @@ describe('Teams workforce sign-in', () => {
     expect(h.getAuthToken).not.toHaveBeenCalled();
   });
 
+  it('a forced refresh (the 401 retry) reaches the NAA silent call; the first calls carry no forceRefresh', async () => {
+    const { msalAuth } = await loadAuth();
+    h.nestable = async config =>
+      makeFakeInstance('naa', { sso: async () => token('naa'), silent: async () => token('naa-fresh') }, config);
+
+    await expect(msalAuth.acquireTeamsWorkforceBffToken(teamsCfg)).resolves.toBe('token-naa');
+    await expect(msalAuth.acquireTeamsWorkforceBffToken(teamsCfg)).resolves.toBe('token-naa-fresh');
+    await expect(msalAuth.acquireTeamsWorkforceBffToken(teamsCfg, { forceRefresh: true })).resolves.toBe(
+      'token-naa-fresh'
+    );
+
+    const silent = h.requests.filter(r => r.call === 'acquireTokenSilent');
+    expect(silent).toHaveLength(2);
+    expect(silent[0].request).not.toHaveProperty('forceRefresh');
+    expect(silent[1].request).toMatchObject({ scopes: [BFF_SCOPE], forceRefresh: true });
+  });
+
   it('fails loud outside a Teams host', async () => {
     const { msalAuth } = await loadAuth();
     h.teamsInitialize.mockRejectedValue(new Error('no host'));
@@ -559,6 +576,14 @@ describe('Shipped files', () => {
 
 describe('Browser silent renewal: CIAM requests are unchanged on the wire; the workforce iframe retry uses the bridge page', () => {
   const callbackUri = () => `${window.location.origin}/auth-callback.html`;
+  const CIAM_BACKEND = {
+    plane: 'ciam',
+    bffScope: 'api://aaaaaaaa-0000-0000-0000-00000000000a/user_impersonation',
+  } as const;
+  const WORKFORCE_BACKEND = {
+    plane: 'workforce',
+    bffScope: 'api://bbbbbbbb-0000-0000-0000-00000000000b/user_impersonation',
+  } as const;
   const OTHER_TENANT = '7052feba-bfc4-43e0-b09e-65014b429131';
   const account = { homeAccountId: 'u', username: 'u@spaarke.test', tenantId: SPAARKE_TENANT };
 
@@ -636,6 +661,19 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
       expect(instance.acquireTokenRedirect).not.toHaveBeenCalled();
     });
 
+    it('a forced refresh (the 401 retry) adds exactly forceRefresh: true to the silent call - nothing else changes', async () => {
+      const { msalAuth, instance } = await ciam(async () => ({ accessToken: 'tok-fresh' }));
+      await expect(msalAuth.acquireActiveBffToken(CIAM_BACKEND, { forceRefresh: true })).resolves.toBe('tok-fresh');
+      expect(instance.acquireTokenSilent.mock.calls[0][0]).toStrictEqual({
+        scopes: [CIAM_BACKEND.bffScope],
+        account,
+        forceRefresh: true,
+      });
+      // ... and a normal call through the same seam sends no forceRefresh key at all.
+      await msalAuth.acquireActiveBffToken(CIAM_BACKEND);
+      expect(instance.acquireTokenSilent.mock.calls[1][0]).toStrictEqual({ scopes: [CIAM_BACKEND.bffScope], account });
+    });
+
     it('the browser CIAM plane carries no acquire options (no tenant filter, no iframe redirect URI)', async () => {
       vi.resetModules();
       const plane = await import('../src/auth/standalone-plane');
@@ -645,6 +683,35 @@ describe('Browser silent renewal: CIAM requests are unchanged on the wire; the w
 
   describe('workforce browser plane', () => {
     const options = () => ({ tenantId: SPAARKE_TENANT, silentRedirectUri: callbackUri() });
+
+    it('a forced refresh (the 401 retry) adds only forceRefresh: true to the first silent call; the plane seam passes it through', async () => {
+      const { msalAuth } = await loadAuth();
+      const plane = await import('../src/auth/standalone-plane');
+      const { CacheLookupPolicy } = await import('@azure/msal-browser');
+      const instance = browserInstance(async () => ({ accessToken: 'tok-fresh' }));
+      plane.applyStandalonePlane({
+        realm: 'workforce',
+        instance,
+        bffScope: WORKFORCE_BACKEND.bffScope,
+        acquireOptions: options(),
+      } as any);
+
+      await expect(msalAuth.acquireActiveBffToken(WORKFORCE_BACKEND, { forceRefresh: true })).resolves.toBe(
+        'tok-fresh'
+      );
+      expect(instance.acquireTokenSilent.mock.calls[0][0]).toStrictEqual({
+        scopes: [WORKFORCE_BACKEND.bffScope],
+        account,
+        cacheLookupPolicy: CacheLookupPolicy.AccessTokenAndRefreshToken,
+        forceRefresh: true,
+      });
+      await msalAuth.acquireActiveBffToken(WORKFORCE_BACKEND);
+      expect(instance.acquireTokenSilent.mock.calls[1][0]).toStrictEqual({
+        scopes: [WORKFORCE_BACKEND.bffScope],
+        account,
+        cacheLookupPolicy: CacheLookupPolicy.AccessTokenAndRefreshToken,
+      });
+    });
 
     it('first silent call has NO redirectUri (refresh-token grant is unchanged); success makes exactly one call', async () => {
       const { msalAuth } = await loadAuth();

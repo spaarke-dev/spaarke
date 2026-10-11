@@ -100,3 +100,49 @@ The allow-list `ALLOWED` is empty, per POML step 6.
 ## 7. Owner live steps
 
 None. This is client-only; there is no app registration, schema or deploy change.
+
+## Review results and fixes (2026-10-11)
+
+All paths under `src/client/external-spa` unless stated. "Fail-before" = the same tests run against the HEAD versions of the changed `src/` files and `vite.config.ts`: **36 failed / 139** in the five affected test files, plus **13 failed / 43** in `tests/out-of-plane-routes.test.ts`. After the fixes: 17 files, **397 passed** (was 14 files, 307).
+
+### Pass 1
+
+| # | Finding | Fix | Tests (fail-before) |
+|---|---|---|---|
+| F | The mock guard refused only `mode === 'production'`, and the "`import.meta.env.DEV` is false in every vite build" comment was wrong: Vite derives DEV from NODE_ENV. `NODE_ENV=development VITE_DEV_MOCK=true npx vite build --mode staging` shipped Jane Smith / Sam Rivera / mock-project-001. | `vite.config.ts`: `refuseDevMockInBuild(command, flag)` refuses EVERY `build` with `VITE_DEV_MOCK === 'true'`; `devMockBuildDefine` makes every build `define` `import.meta.env.VITE_DEV_MOCK` as `"false"`. `src/dev-mock.ts` compares with the same exact `=== 'true'` (a `String().toLowerCase()` form defeated constant folding: the first attempt still shipped the mock data with the define in place). Both comments corrected. | `out-of-plane-routes.test.ts`: staging / development / test / preview modes, the NODE_ENV=development case, the define result, a 12-row matrix (13 failed before); `no-mock-identity.test.tsx` "honours the exact value true only". Real builds: `NODE_ENV=development VITE_DEV_MOCK=true vite build --mode staging` now exits 1 with the refusal. With the refusal temporarily disabled, the define alone drops every marker (0 hits). Before: the same command produced a bundle with Jane Smith (2), Sam Rivera, Dana Okafor, Alex Reyes, mock-project-001 (18). |
+| K3 | No check on the built output. | `scripts/check-dist.mjs` + `npm run check:dist`; a step right after `npm run build` in `.github/workflows/deploy-external-spa.yml` (no workflow value used). Scans `dist/**/*.js` for the mock markers and for `/api/` strings outside `/api/v1/external`, with a ratchet baseline of ONLY today's pending strings: `/api/ai/analysis/create` (PlaybookLibraryShell) and the `/api/dataverse/` family (`bffDataServiceAdapter`: `/api/dataverse/`, `fetch`, `metadata/`, `record/`, `savedqueries/`, `savedquery/`, one each). A new string fails; a baseline entry that disappears or shrinks fails too. `VITE_DEV_MOCK:"false"` (the pinned constant inside Vite's `import.meta.env` object, new since the define) is the one tolerated mention. | `tests/check-dist.test.ts` (37 tests: every marker fires, tolerated constant and lookalikes do not, the ratchet in both directions) and a workflow-order test in `production-package.test.ts`. Fail-before on a real bundle: run against a bundle built from the HEAD config with the staging + NODE_ENV=development + flag command, it reports Jane Smith, Sam Rivera, Dana Okafor, Alex Reyes, dv_persona, VITE_DEV_MOCK, mock-contact-001, mock-project-001 and (Mock). Against the current build it reports clean. |
+| K2 | `fetchMeEntitlements` defaulted to the plane's modules for ANY non-401/403 failure, including token-acquisition errors and network faults. | `api/me-client.ts` defaults ONLY for an `ApiError` with `statusCode >= 500`; everything else rejects. `accessFailureOf` now maps a `TeamsWorkforceAuthError` to the sign-in state (a failed Teams sign-in is a sign-in problem); a network fault, a 4xx and `BackendSelectionError` reach the workspace's "Unable to load your workspace" state. | `no-mock-identity.test.tsx`: 500/502/503 default; 404, network fault, TeamsWorkforceAuthError, redirect-in-progress Error, BackendSelectionError reject; the page shows the sign-in state for a Teams auth failure and the load error for a network fault. `BffAccessState.signIn.test.tsx` `accessFailureOf`. |
+| K | A 401/403 part-way through a batch hid which files had already uploaded; a batch with nothing uploaded still showed the green checkmark. | `pages/DocumentUploadPage.tsx`: the refusal view lists "Already uploaded before this stopped" and "Not uploaded" beside the sign-in / denied state; `successCount === 0` ends on a `WarningRegular`. | `DocumentUploadPage.externalUpload.test.tsx`: 401 after two files, 403 after one file and a first-file 403, warning vs checkmark; the pinned "no active backend" test now asserts the warning icon and no success icon. |
+
+### Pass 2
+
+| # | Finding | Fix | Tests (fail-before) |
+|---|---|---|---|
+| F | `uploadFailureMessage` mapped EVERY 409 to "a file named X already exists", but the server also returns 409 `RecordOwnerRefused` ("Record owner unresolved"), and the detail of 503 (`sdap.access.service_request_unreadable`), 400, 413 and 502 was dropped. The same mapping sat in `components/DocumentLibrary.tsx` `UploadDialog`, the path real users take. | Both route a non-auth failure through `problemMessage(err, fallback)` (`auth/bff-client.ts`): the server's ProblemDetails `detail` is shown; the per-status text (409 conflict, 413 too large, 422 no storage, 403 access level, 5xx try again later) is only the fallback for a response with no detail. The server's collision 409 detail already names the file. | `DocumentUploadPage.externalUpload.test.tsx` and the new `DocumentLibrary.uploadFailures.test.tsx`: owner-refusal 409 shows the server detail and never "already exists"; the collision 409 still names the file; 503 / 400 / 413 / 502 show their detail; empty or non-JSON bodies use each status's fallback. |
+| K3 | Sign-in loop: bff-client's 401 "fresh token" retry asked the acquirer for the same cached token the BFF had just refused. | The acquirer seam takes `(scope, { forceRefresh })`. Only the 401 retry (`bff-client.ts`, and the identical retry in `services/gridDataverseClient.ts`) passes `{ forceRefresh: true }`; the first attempt still calls `acquirer(scope)`. `forceRefresh: true` reaches the CIAM and workforce silent request (and the Teams NAA / popup silent calls) and is added to the request ONLY then, so the 040 request shapes are unchanged (the existing workforce-auth `toStrictEqual` shape tests still pass). "Sign in again" on the browser plane uses `prompt: 'select_account'`. `handleSignIn` is guarded: a `BackendSelectionError` from `getActiveLoginScope()` or a rejected `loginRedirect` shows "Sign-in could not be started from here" instead of a dead button. | `workforce-auth.test.ts` (CIAM, workforce plane seam and Teams NAA forced refresh, and that normal calls carry no key), `DocumentUploadPage.externalUpload.test.tsx` (acquirer calls are exactly `[scope]` then `[scope, {forceRefresh:true}]`; `select_account`), `BffAccessState.signIn.test.tsx` (4 sign-in tests). |
+
+Notes for the next reader:
+- `npm run check:dist` does not flag the `/api/shorthands#...` documentation URLs Fluent includes in a NODE_ENV=development bundle. Only a development-mode build has them; the deploy workflow builds in production mode.
+- The old known limit 3 above (me-client with no active backend falls back to plane defaults) is superseded: a `BackendSelectionError` now rejects.
+- The `dist/` grep row in section 5 said `VITE_DEV_MOCK` has 0 occurrences. Since the build define it has 1: `VITE_DEV_MOCK:"false"` inside Vite's env object. `check:dist` accepts exactly that.
+
+### Known limits NOT fixed
+
+1. `/upload` has no link in the app. Users upload through DocumentLibrary's dialog; the POML ui-test "upload from the upload page" needs a link or a typed URL.
+2. The pending-file ratchet in the source scan (`PENDING_OWNER_DECISION`) is per file, not per string, so a new violation in PlaybookLibraryPage or SemanticSearch is not caught by it. `check:dist` covers the built output per string.
+3. `usePlaybookExecution` posts to `/api/v1/external/ai/playbook`, which no BFF route maps. It goes with the playbook decision.
+4. "Access denied" for unresolved callers on dev is the intended FR-18 change.
+5. The playbook page and SemanticSearch are unchanged (owner decision pending).
+
+### Command results (2026-10-11)
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npx vitest run` | 17 files, 397 passed |
+| `npm run build` | exit 0 (only the > 500 kB chunk warning) |
+| `npm run check:dist` | exit 0: 1 file clean, baseline matches |
+| `prettier --check` (changed and new files) | clean |
+| `dotnet test tests/Spaarke.ArchTests --filter ExternalSpaGridViewSelectorGuardTests` | 220 / 220 passed |
+| workflow parsed with js-yaml | steps in order: build, check:dist, stage SWA config |

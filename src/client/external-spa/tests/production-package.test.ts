@@ -129,6 +129,17 @@ describe('Production build workflows (FR-20)', () => {
     expect(text.slice(preflight, build)).toContain('exit "$fail"');
   });
 
+  it('deploy-external-spa.yml: the built bundle is scanned (npm run check:dist) right after the build and before it is staged', () => {
+    const steps = parsedWorkflow('deploy-external-spa.yml').jobs.build_and_deploy.steps;
+    const build = steps.findIndex(s => s.run === 'npm run build');
+    expect(build).toBeGreaterThan(-1);
+    const check = steps[build + 1];
+    expect(check.run).toBe('npm run check:dist');
+    expect(check.env, 'no workflow value reaches the scan').toBeUndefined();
+    const stage = steps.findIndex(s => (s.run ?? '').includes('staticwebapp.config.json'));
+    expect(stage).toBeGreaterThan(build + 1);
+  });
+
   it.each(WORKFLOWS)(
     '%s: the first step of every job rejects any environment other than dev|prod before anything runs',
     name => {

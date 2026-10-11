@@ -56,8 +56,9 @@ function gridAuthenticatedFetchFor(backend: ActiveBackend): AuthenticatedFetchFn
     if (response.status !== 401) {
       return response;
     }
-    // Single retry with a freshly-acquired token — same contract as bff-client.ts's bffApiCall.
-    const freshToken = await acquireActiveBffToken(backend);
+    // Single retry with a freshly-acquired token (a forced network refresh, not the cached one the BFF just refused)
+    // - same contract as bff-client.ts's bffApiCall.
+    const freshToken = await acquireActiveBffToken(backend, { forceRefresh: true });
     return executeWithToken(url, init, freshToken);
   };
 }

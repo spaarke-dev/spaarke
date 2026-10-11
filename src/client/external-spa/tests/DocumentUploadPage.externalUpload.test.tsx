@@ -44,8 +44,17 @@ interface Sent {
   formKeys: string[];
 }
 
+/** A scripted response: a bare status (a ProblemDetails body saying `refused` for an error), or status plus body. */
+type Scripted = number | { status: number; body: string };
+
 let sent: Sent[];
-let statuses: number[];
+let statuses: Scripted[];
+
+/** A ProblemDetails body as the BFF writes it. */
+const problem = (status: number, detail: string): Scripted => ({
+  status,
+  body: JSON.stringify({ status, title: 'refused', detail }),
+});
 
 beforeEach(() => {
   sent = [];
@@ -68,11 +77,15 @@ beforeEach(() => {
         fileName: file instanceof File ? file.name : null,
         formKeys: form ? Array.from(form.keys()) : [],
       });
-      const status = statuses.length > 0 ? (statuses.shift() as number) : 201;
-      return new Response(status < 300 ? JSON.stringify({ id: 'doc-1' }) : JSON.stringify({ detail: 'refused' }), {
-        status,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const scripted = statuses.length > 0 ? (statuses.shift() as Scripted) : 201;
+      const status = typeof scripted === 'number' ? scripted : scripted.status;
+      const responseBody =
+        typeof scripted === 'number'
+          ? status < 300
+            ? JSON.stringify({ id: 'doc-1' })
+            : JSON.stringify({ detail: 'refused' })
+          : scripted.body;
+      return new Response(responseBody, { status, headers: { 'Content-Type': 'application/json' } });
     })
   );
 });
@@ -87,7 +100,7 @@ async function loadForPlane(plane: 'workforce' | 'ciam' | null) {
   const selection = await import('../src/auth/backend-selection');
   const msalAuth = await import('../src/auth/msal-auth');
   const scopes: Array<string | undefined> = [];
-  const acquirer = vi.fn(async (scope?: string) => {
+  const acquirer = vi.fn(async (scope?: string, _options?: { forceRefresh?: boolean }) => {
     scopes.push(scope);
     return `${plane}-token`;
   });
@@ -218,7 +231,11 @@ describe('DocumentUploadPage — refusals', () => {
       expect(await screen.findByTestId('bff-access-signin')).toBeTruthy();
       expect(sent).toHaveLength(2); // the request and bff-client's single retry
       fireEvent.click(screen.getByRole('button', { name: 'Sign in again' }));
-      expect(h.loginRedirect).toHaveBeenCalledWith({ scopes: [`api://${CONTOSO.bffAppId}/user_impersonation`] });
+      // select_account: the IdP must not silently hand back the session whose token was just refused.
+      expect(h.loginRedirect).toHaveBeenCalledWith({
+        scopes: [`api://${CONTOSO.bffAppId}/user_impersonation`],
+        prompt: 'select_account',
+      });
       expect(document.body.textContent).not.toMatch(/Mock|Jane Smith|Sam Rivera|Dana Okafor/);
     },
     SLOW
@@ -254,6 +271,9 @@ describe('DocumentUploadPage — refusals', () => {
 
       expect(await screen.findByText('0 of 1 files uploaded')).toBeTruthy();
       expect(screen.getByText(/a\.pdf: Upload failed\./)).toBeTruthy();
+      // Nothing uploaded: a warning, not the green success checkmark.
+      expect(screen.getByTestId('upload-result-warning-icon')).toBeTruthy();
+      expect(screen.queryByTestId('upload-result-success-icon')).toBeNull();
       expect(acquirer).not.toHaveBeenCalled();
       expect(sent).toHaveLength(0);
     },
@@ -261,17 +281,156 @@ describe('DocumentUploadPage — refusals', () => {
   );
 
   it(
-    '409 / 422 are per-file outcomes (the other files still upload)',
+    '409 / 422 are per-file outcomes (the other files still upload); the collision 409 still names the file',
     async () => {
       const { DocumentUploadPage } = await loadForPlane('ciam');
-      statuses = [409, 201, 422];
+      statuses = [
+        problem(
+          409,
+          "A file named 'dup.pdf' already exists in this service request. Nothing was uploaded or changed - rename the file and try again."
+        ),
+        201,
+        problem(
+          422,
+          'This service request has no storage container configured, so the document cannot be uploaded. Please contact the service request owner.'
+        ),
+      ];
       renderAt(DocumentUploadPage, `?entityType=sprk_servicerequest&entityId=${RECORD_ID}`);
       await uploadFiles('dup.pdf', 'ok.pdf', 'nostore.pdf');
 
       expect(await screen.findByText('1 of 3 files uploaded')).toBeTruthy();
-      expect(screen.getByText(/dup\.pdf: A file named "dup\.pdf" already exists/)).toBeTruthy();
-      expect(screen.getByText(/nostore\.pdf: This service request has no document storage/)).toBeTruthy();
+      expect(screen.getByText(/dup\.pdf: A file named 'dup\.pdf' already exists/)).toBeTruthy();
+      expect(screen.getByText(/nostore\.pdf: This service request has no storage container configured/)).toBeTruthy();
       expect(sent).toHaveLength(3);
+    },
+    SLOW
+  );
+
+  it(
+    'an owner-refusal 409 shows the server detail - it is NOT reported as "already exists"',
+    async () => {
+      const { DocumentUploadPage } = await loadForPlane('workforce');
+      const detail =
+        'The document cannot be filed because no owning team could be resolved for this project. Please contact the project team.';
+      statuses = [problem(409, detail)];
+      renderAt(DocumentUploadPage, `?entityType=sprk_project&entityId=${RECORD_ID}`);
+      await uploadFiles('brief.pdf');
+
+      expect(await screen.findByText('0 of 1 files uploaded')).toBeTruthy();
+      expect(screen.getByText(`brief.pdf: ${detail}`)).toBeTruthy();
+      expect(document.body.textContent).not.toMatch(/already exists/);
+    },
+    SLOW
+  );
+
+  it.each([
+    [503, 'The service request could not be read just now. Please try again shortly.'],
+    [400, 'A non-empty file is required'],
+    [413, 'The file is larger than the upload limit.'],
+    [502, 'The document could not be stored. Please try again.'],
+  ])(
+    'a %s shows the server detail for that file, not a generic "Upload failed."',
+    async (status, detail) => {
+      const { DocumentUploadPage } = await loadForPlane('ciam');
+      statuses = [problem(status, detail)];
+      renderAt(DocumentUploadPage, `?entityType=sprk_servicerequest&entityId=${RECORD_ID}`);
+      await uploadFiles('a.pdf');
+
+      expect(await screen.findByText('0 of 1 files uploaded')).toBeTruthy();
+      expect(screen.getByText(`a.pdf: ${detail}`)).toBeTruthy();
+      expect(document.body.textContent).not.toMatch(/Upload failed\./);
+    },
+    SLOW
+  );
+
+  it(
+    'with no ProblemDetails detail (an empty or non-JSON body) each status falls back to its own sensible text',
+    async () => {
+      const { DocumentUploadPage } = await loadForPlane('ciam');
+      statuses = [
+        { status: 409, body: '' },
+        { status: 413, body: '<html>too big</html>' },
+        { status: 422, body: '' },
+        { status: 503, body: '' },
+        { status: 400, body: '' },
+      ];
+      renderAt(DocumentUploadPage, `?entityType=sprk_matter&entityId=${RECORD_ID}`);
+      await uploadFiles('c.pdf', 'big.pdf', 'nostore.pdf', 'down.pdf', 'bad.pdf');
+
+      expect(await screen.findByText('0 of 5 files uploaded')).toBeTruthy();
+      expect(screen.getByText(/c\.pdf: "c\.pdf" could not be uploaded because of a conflict/)).toBeTruthy();
+      expect(screen.getByText(/big\.pdf: "big\.pdf" is too large to upload\./)).toBeTruthy();
+      expect(screen.getByText(/nostore\.pdf: This matter has no document storage configured yet\./)).toBeTruthy();
+      expect(screen.getByText(/down\.pdf: Upload failed\. Please try again later\./)).toBeTruthy();
+      expect(screen.getByText(/bad\.pdf: Upload failed\./)).toBeTruthy();
+    },
+    SLOW
+  );
+
+  it(
+    'nothing uploaded is a warning, not the green checkmark; a partial batch keeps the checkmark',
+    async () => {
+      const { DocumentUploadPage } = await loadForPlane('ciam');
+      statuses = [problem(409, 'x'), 201, problem(409, 'y')];
+      renderAt(DocumentUploadPage, `?entityType=sprk_matter&entityId=${RECORD_ID}`);
+      await uploadFiles('a.pdf', 'b.pdf', 'c.pdf');
+      expect(await screen.findByText('1 of 3 files uploaded')).toBeTruthy();
+      expect(screen.getByTestId('upload-result-success-icon')).toBeTruthy();
+      expect(screen.queryByTestId('upload-result-warning-icon')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'a 401 after some files uploaded shows which files went through, beside the sign-in state',
+    async () => {
+      const { DocumentUploadPage } = await loadForPlane('workforce');
+      statuses = [201, 201, 401, 401]; // a, b uploaded; c refused, and so is bff-client's retry
+      renderAt(DocumentUploadPage, `?entityType=sprk_project&entityId=${RECORD_ID}`);
+      await uploadFiles('a.pdf', 'b.pdf', 'c.pdf', 'd.pdf');
+
+      expect(await screen.findByTestId('bff-access-signin')).toBeTruthy();
+      expect(screen.getByTestId('upload-batch-uploaded').textContent).toContain('a.pdf, b.pdf');
+      expect(screen.getByTestId('upload-batch-not-uploaded').textContent).toContain('c.pdf, d.pdf');
+      expect(screen.getByTestId('upload-batch-not-uploaded').textContent).not.toContain('a.pdf');
+      expect(sent.map(s => s.fileName)).toEqual(['a.pdf', 'b.pdf', 'c.pdf', 'c.pdf']); // d.pdf was never sent
+    },
+    SLOW
+  );
+
+  it(
+    'a 403 after a file uploaded shows the uploaded file beside the denied state; a first-file 403 shows no "uploaded" line',
+    async () => {
+      const { DocumentUploadPage } = await loadForPlane('ciam');
+      statuses = [201, 403];
+      const first = renderAt(DocumentUploadPage, `?entityType=sprk_matter&entityId=${RECORD_ID}`);
+      await uploadFiles('a.pdf', 'b.pdf');
+      expect(await screen.findByTestId('bff-access-denied')).toBeTruthy();
+      expect(screen.getByTestId('upload-batch-uploaded').textContent).toContain('a.pdf');
+      expect(screen.getByTestId('upload-batch-not-uploaded').textContent).toContain('b.pdf');
+      first.unmount();
+
+      statuses = [403];
+      renderAt(DocumentUploadPage, `?entityType=sprk_matter&entityId=${RECORD_ID}`);
+      await uploadFiles('c.pdf');
+      expect(await screen.findByTestId('bff-access-denied')).toBeTruthy();
+      expect(screen.queryByTestId('upload-batch-uploaded')).toBeNull();
+      expect(screen.getByTestId('upload-batch-not-uploaded').textContent).toContain('c.pdf');
+    },
+    SLOW
+  );
+
+  it(
+    'the 401 retry forces a network refresh; the first attempt calls the acquirer with the scope alone (the 040 shape)',
+    async () => {
+      const { DocumentUploadPage, acquirer } = await loadForPlane('ciam');
+      const scope = `api://${CONTOSO.bffAppId}/user_impersonation`;
+      statuses = [401, 201];
+      renderAt(DocumentUploadPage, `?entityType=sprk_matter&entityId=${RECORD_ID}`);
+      await uploadFiles('a.pdf');
+
+      expect(await screen.findByText('1 file uploaded successfully')).toBeTruthy();
+      expect(acquirer.mock.calls).toEqual([[scope], [scope, { forceRefresh: true }]]);
     },
     SLOW
   );

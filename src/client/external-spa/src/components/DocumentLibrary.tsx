@@ -54,7 +54,7 @@ import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components
 import { AiSummaryPopover } from '@spaarke/ui-components/components/AiSummaryPopover';
 import { getDocuments, ODataDocument } from '../api/web-api-client';
 import { TruncatedListNotice } from './TruncatedListNotice';
-import { bffApiCall, bffApiBlob } from '../auth/bff-client';
+import { bffApiCall, bffApiBlob, problemMessage } from '../auth/bff-client';
 import { AccessLevel, ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -432,26 +432,28 @@ const UploadDialog: React.FC<UploadDialogProps> = ({ projectId, open, onClose, o
       onClose();
     } catch (err) {
       console.error('[DocumentLibrary] Upload failed:', err);
-      // Branch on ApiError.statusCode — the field ApiError actually exposes (there is no `status`,
-      // and no `detail`: its `message` is the raw response text). Composing the copy here from the
-      // known file name beats parsing a ProblemDetails JSON string back out of `message`.
+      // The server's ProblemDetails `detail` is shown when it wrote one (`problemMessage`): the collision 409 names the
+      // file, the owner-refusal 409 ("Record owner unresolved") says why the record cannot take documents, a 503 says
+      // to retry. The text below is only the fallback for a response that carries no detail. ApiError exposes
+      // `statusCode` (there is no `status`/`detail`; its `message` is the raw response text).
       const statusCode = err instanceof ApiError ? err.statusCode : undefined;
+      let fallback = 'Failed to upload the document. Please check the file and try again.';
       if (statusCode === 409) {
-        // A NAME COLLISION is not a failure: nothing was uploaded and the existing document is
-        // intact, so "check the file and try again" would be misleading advice.
-        setUploadError(
-          `A file named "${selectedFiles[0].name}" already exists in this project. ` +
-            'Nothing was uploaded or changed — rename the file and try again.'
-        );
+        // A NAME COLLISION is not a failure: nothing was uploaded and the existing document is intact.
+        fallback =
+          `"${selectedFiles[0].name}" could not be uploaded because of a conflict (for example a file with that ` +
+          'name already exists in this project). Nothing was uploaded or changed.';
+      } else if (statusCode === 413) {
+        fallback = 'The file is too large to upload.';
       } else if (statusCode === 422) {
-        setUploadError(
-          'This project has no storage configured, so documents cannot be uploaded yet. Please contact the project owner.'
-        );
+        fallback =
+          'This project has no storage configured, so documents cannot be uploaded yet. Please contact the project owner.';
       } else if (statusCode === 403) {
-        setUploadError('Your access level does not permit uploading documents to this project.');
-      } else {
-        setUploadError('Failed to upload the document. Please check the file and try again.');
+        fallback = 'Your access level does not permit uploading documents to this project.';
+      } else if (statusCode !== undefined && statusCode >= 500) {
+        fallback = 'The document could not be uploaded just now. Please try again later.';
       }
+      setUploadError(problemMessage(err, fallback));
     } finally {
       setUploading(false);
     }

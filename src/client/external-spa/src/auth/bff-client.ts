@@ -166,7 +166,7 @@ export interface ExternalUserContextResponse {
  *
  * - Prepends the ACTIVE backend's base URL to path (task 041; never a URL from a link).
  * - Adds `Authorization: Bearer {token}` header (MSAL-acquired OAuth token).
- * - On 401: acquires a fresh token (MSAL handles silent refresh / redirect) and retries once.
+ * - On 401: forces a network token refresh (MSAL handles silent refresh / redirect) and retries once.
  * - Throws ApiError on any non-2xx response (including after the retry).
  *
  * @param path    Root-relative API path on the active backend (e.g. "/api/v1/external/me")
@@ -228,9 +228,10 @@ async function authorizedFetch(path: string, options: RequestInit): Promise<Resp
   const token = await acquireActiveBffToken(backend);
   const response = await executeFetch(url, options, token);
 
-  // On 401, acquire a fresh token (MSAL will refresh silently or redirect) and retry once
+  // On 401, force a NETWORK refresh (MSAL redeems the refresh token, or redirects) and retry once. Without
+  // `forceRefresh` MSAL would return the cached access token the BFF just refused: the same 401, a sign-in loop.
   if (response.status === 401) {
-    const freshToken = await acquireActiveBffToken(backend);
+    const freshToken = await acquireActiveBffToken(backend, { forceRefresh: true });
     return executeFetch(url, options, freshToken);
   }
 
