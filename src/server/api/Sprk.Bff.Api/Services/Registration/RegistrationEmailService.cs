@@ -9,7 +9,12 @@ namespace Sprk.Bff.Api.Services.Registration;
 /// via the existing CommunicationService pipeline.
 /// Templates are loaded as embedded resources and rendered via simple {{placeholder}} replacement.
 /// </summary>
-public sealed class RegistrationEmailService
+/// <remarks>
+/// Not sealed only so <see cref="SendPortalNotificationEmailAsync"/> (spaarke-SPA-external-access-platform-r3 task 036) and
+/// <see cref="SendCiamOnboardingEmailAsync"/> are test seams: the grant tests replace those two methods to record the send;
+/// no production type derives from this class.
+/// </remarks>
+public class RegistrationEmailService
 {
     private const string FromMailbox = "demo@demo.spaarke.com";
     private const string SupportEmail = "support@spaarke.com";
@@ -168,7 +173,7 @@ public sealed class RegistrationEmailService
     /// password via SSPR ("Forgot password") the first time they sign in.
     /// Sent via the existing CommunicationService → shared-mailbox app-only pipeline (unchanged).
     /// </summary>
-    public async Task SendCiamOnboardingEmailAsync(
+    public virtual async Task SendCiamOnboardingEmailAsync(
         string recipientEmail,
         string firstName,
         string portalUrl,
@@ -200,6 +205,86 @@ public sealed class RegistrationEmailService
 
         await _communicationService.SendAsync(request, cancellationToken: cancellationToken);
     }
+
+    /// <summary>
+    /// Sends a portal notification email (spaarke-SPA-external-access-platform-r3 task 036, FR-07): "you were given access
+    /// to a record", with one link into the external portal. Same sender, send
+    /// mode and pipeline as <see cref="SendCiamOnboardingEmailAsync"/> (the shared mailbox, app-only — never the user's
+    /// mailbox, no OBO). Throws when the send is refused (an unapproved sender, the daily limit) or fails; the caller
+    /// treats every such failure as best effort.
+    /// </summary>
+    /// <param name="linkUrl">
+    /// The portal deep link. Built by the caller from server configuration plus URL-encoded query values; it is
+    /// HTML-attribute-encoded here, like every other value, so an <c>&amp;</c> in it is written <c>&amp;amp;</c>.
+    /// </param>
+    /// <param name="correlationId">Stable per recipient and event, so one event's emails can be told apart in the send log.</param>
+    public virtual async Task SendPortalNotificationEmailAsync(
+        string recipientEmail,
+        string subject,
+        string headline,
+        string message,
+        string linkUrl,
+        string linkText,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        var templateHtml = await LoadTemplateAsync("PortalNotificationTemplate.html");
+
+        var request = BuildPortalNotificationRequest(
+            templateHtml, recipientEmail, subject, headline, message, linkUrl, linkText, correlationId, DateTime.UtcNow.Year);
+
+        _logger.LogInformation(
+            "Sending portal notification email | CorrelationId: {CorrelationId}", correlationId);
+
+        await _communicationService.SendAsync(request, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// The shared-mailbox request for a portal notification: the recipient, this service's from-mailbox, the HTML body from
+    /// the template, <see cref="SendMode.SharedMailbox"/> (app-only; never the user's mailbox). Pure, so the real request is
+    /// testable without a mailbox (task 036 review K3). Every caller-supplied value is HTML-encoded and the template is filled
+    /// in ONE pass (<see cref="FillTemplate"/>), so a value that happens to contain <c>{{Year}}</c> is written as text, not
+    /// substituted by a later placeholder.
+    /// </summary>
+    internal static SendCommunicationRequest BuildPortalNotificationRequest(
+        string templateHtml,
+        string recipientEmail,
+        string subject,
+        string headline,
+        string message,
+        string linkUrl,
+        string linkText,
+        string correlationId,
+        int year)
+        => new()
+        {
+            To = [recipientEmail],
+            Subject = subject,
+            Body = FillTemplate(templateHtml, new Dictionary<string, string>
+            {
+                ["Headline"] = Encode(headline),
+                ["Message"] = Encode(message),
+                ["LinkUrl"] = Encode(linkUrl),
+                ["LinkText"] = Encode(linkText),
+                ["SupportEmail"] = SupportEmail,
+                ["Year"] = year.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            }),
+            BodyFormat = BodyFormat.HTML,
+            FromMailbox = FromMailbox,
+            SendMode = SendMode.SharedMailbox,
+            CorrelationId = correlationId
+        };
+
+    /// <summary>
+    /// Replaces each <c>{{Name}}</c> in <paramref name="template"/> with its value in ONE regex pass: substituted text is never
+    /// re-scanned, so a value containing another placeholder (a record named <c>{{Year}}</c>) cannot be substituted by it.
+    /// A placeholder with no value is left as written.
+    /// </summary>
+    internal static string FillTemplate(string template, IReadOnlyDictionary<string, string> values)
+        => System.Text.RegularExpressions.Regex.Replace(
+            template,
+            @"\{\{(\w+)\}\}",
+            m => values.TryGetValue(m.Groups[1].Value, out var value) ? value : m.Value);
 
     /// <summary>
     /// Sends an expiration warning email 3 days before demo access expires.

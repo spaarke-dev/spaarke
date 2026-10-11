@@ -1,10 +1,13 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.ExternalAccess;
+using Sprk.Bff.Api.Services.Registration;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -43,6 +46,11 @@ internal enum GrantNotificationOutcome
 /// <para><b>What it names, to whom.</b> Only the people the write just gave access to, never the granter, and never a
 /// user the secure record's No Access list walls off (the contact grant does not check users; the read path vetoes them,
 /// so naming the record to them would be the leak). The record's name is read app-only here, after the write.</para>
+/// <para><b>External contacts (task 036, FR-07).</b> A grant to an already-onboarded external contact (an active contact
+/// with a readable identity binding, an email address, and no internal user it represents) is told by email instead, with
+/// one deep link into the portal. The email goes through <see cref="RegistrationEmailService"/> — the sender
+/// <c>SendCiamOnboardingEmailAsync</c> uses (the shared mailbox, app-only; never the user's mailbox, no OBO). Best effort,
+/// like everything here: a send that is refused or fails is logged and the grant stands.</para>
 /// </remarks>
 internal sealed class GrantAccessNotifier
 {
@@ -52,13 +60,26 @@ internal sealed class GrantAccessNotifier
     /// <summary>A record name longer than this is cut, so the title stays inside <c>appnotification.title</c>'s 256.</summary>
     internal const int MaxNameLength = 180;
 
+    /// <summary>
+    /// How long the external email send may take before it is given up as <see cref="GrantNotificationOutcome.Failed"/>
+    /// (task 036 review K2): the grant is already written, so a hung shared-mailbox call must not hold the caller's
+    /// request open for long.
+    /// </summary>
+    internal static readonly TimeSpan DefaultSendTimeout = TimeSpan.FromSeconds(15);
+
     private readonly NotificationService _notifications;
     private readonly DataverseWebApiClient _dataverse;
     private readonly IContactIdentityStore _identities;
     private readonly AssignedAccessStore _links;
     private readonly SecureShareNoAccessGuard _noAccessGuard;
     private readonly ExternalParticipationService _participations;
+    private readonly RegistrationEmailService _emails;
+    private readonly CustomerIdentity _customer;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<GrantAccessNotifier> _logger;
+
+    /// <summary>The bound on one external email send; <see cref="DefaultSendTimeout"/> unless a test shortens it.</summary>
+    internal TimeSpan SendTimeout { get; init; } = DefaultSendTimeout;
 
     public GrantAccessNotifier(
         NotificationService notifications,
@@ -67,6 +88,9 @@ internal sealed class GrantAccessNotifier
         AssignedAccessStore links,
         SecureShareNoAccessGuard noAccessGuard,
         ExternalParticipationService participations,
+        RegistrationEmailService emails,
+        CustomerIdentity customer,
+        IConfiguration configuration,
         ILogger<GrantAccessNotifier> logger)
     {
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
@@ -75,12 +99,17 @@ internal sealed class GrantAccessNotifier
         _links = links ?? throw new ArgumentNullException(nameof(links));
         _noAccessGuard = noAccessGuard ?? throw new ArgumentNullException(nameof(noAccessGuard));
         _participations = participations ?? throw new ArgumentNullException(nameof(participations));
+        _emails = emails ?? throw new ArgumentNullException(nameof(emails));
+        _customer = customer ?? throw new ArgumentNullException(nameof(customer));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>
     /// After a grant to <paramref name="contactId"/> gave it access: tells every enabled person the contact represents.
-    /// An external contact represents nobody, so nothing is sent (its CIAM invitation is the external path's).
+    /// A contact that represents nobody is an external contact (task 036): when it is already onboarded and has an email
+    /// address it is emailed a portal deep link to the record; one not yet onboarded is told nothing here (its CIAM
+    /// invitation is the invite path's).
     /// </summary>
     public async Task<GrantNotificationOutcome> NotifyContactGrantAsync(
         ExternalGrantRootType rootType, Guid rootId, Guid contactId, ExternalAccessLevel? level, ClaimsPrincipal caller)
@@ -88,6 +117,7 @@ internal sealed class GrantAccessNotifier
         IReadOnlyList<AssignedLinkCandidate> candidates;
         Guid? boundOid = null;
         var oidResolvesHere = false;
+        ContactBindingRow? readContact = null;
         try
         {
             // Status-first: a contact read that failed is "could not tell", never "represents nobody". A binding column
@@ -104,6 +134,7 @@ internal sealed class GrantAccessNotifier
                     return GrantNotificationOutcome.NotApplicable;
                 }
 
+                readContact = row;
                 var raw = row.RawOid?.Trim();
                 boundOid = Guid.TryParse(raw, out var oid) && oid != Guid.Empty ? oid : null;
             }
@@ -174,7 +205,17 @@ internal sealed class GrantAccessNotifier
             .ToList();
 
         if (people.Count == 0)
+        {
+            // Task 036: a contact that no internal user can be said to represent (not by link, not by its oid, even where the
+            // oid does not resolve to it alone) is an external contact. Nobody else is told, so the email is the only notice.
+            if (readContact is not null
+                && !candidates.Any(u => u.SystemUserId != Guid.Empty && u.Represents(contactId, boundOid)))
+            {
+                return await EmailExternalContactGrantAsync(rootType, rootId, readContact, caller);
+            }
+
             return GrantNotificationOutcome.NotApplicable;
+        }
 
         // The contact grant checked the contact's No Access entries, not the user's. On a secure record a walled user is
         // vetoed at read, so they must not be told the record's name either; an unanswerable check tells nobody (ADR-003).
@@ -218,6 +259,175 @@ internal sealed class GrantAccessNotifier
         }
 
         return await SendAsync(rootType, rootId, recipients, level, caller, failed);
+    }
+
+    // =========================================================================
+    // External contacts (task 036, FR-07): email with a portal deep link
+    // =========================================================================
+
+    /// <summary>
+    /// The grant gave the already-read, active, ONLY-external contact <paramref name="contact"/> access to a record: emails
+    /// it, once, when it is already onboarded (a readable identity binding) and has an email address. Never the granter
+    /// (a grantee whose sign-in oid is the caller's own is skipped). Best effort: nothing throws.
+    /// </summary>
+    private async Task<GrantNotificationOutcome> EmailExternalContactGrantAsync(
+        ExternalGrantRootType rootType, Guid rootId, ContactBindingRow contact, ClaimsPrincipal caller)
+    {
+        try
+        {
+            if (!IsOnboardedWithEmail(contact))
+            {
+                _logger.LogInformation(
+                    "[GRANT-NOTIFY] Contact {ContactId} is not onboarded (or has no email address); no email for the grant on " +
+                    "{RootType} {RootId}. The invite path emails a contact it onboards.", contact.ContactId, rootType, rootId);
+                return GrantNotificationOutcome.NotApplicable;
+            }
+
+            // Never the person who gave the access: a self-grant, or a caller whose sign-in is the grantee's.
+            var callerOid = CallerResolution.ResolveObjectId(caller);
+            if (contact.Binding.Oid is { } boundOid
+                && Guid.TryParse(callerOid, out var granterOid) && granterOid == boundOid)
+            {
+                _logger.LogInformation(
+                    "[GRANT-NOTIFY] Contact {ContactId} is the caller; no email for the grant on {RootType} {RootId}.",
+                    contact.ContactId, rootType, rootId);
+                return GrantNotificationOutcome.NotApplicable;
+            }
+
+            var link = TryBuildLink(rootType, rootId);
+            if (link is null)
+                return GrantNotificationOutcome.Failed;
+
+            var label = ExternalGrantRoot.LabelFor(rootType);
+            var name = await ReadRecordNameAsync(rootType, rootId);
+            var subject = name is null
+                ? $"You were given access to a {label} in the Spaarke portal"
+                : $"You were given access to the {label} \"{name}\" in the Spaarke portal";
+            var headline = name is null
+                ? $"You were given access to a {label}"
+                : $"You were given access to the {label} \"{name}\"";
+            // The granter is named only by the token's display `name` claim: an external party is never shown a UPN or an
+            // email address (task 036 review K3). With no usable name the sentence simply has no subject.
+            var message = ExternalGranterName(caller) is { } granter
+                ? $"{granter} gave you access in the Spaarke portal. Open it with the button below."
+                : "You were given access in the Spaarke portal. Open it with the button below.";
+
+            return await TrySendAsync(
+                contact, subject, headline, message, link, $"Open the {label}",
+                correlationId: $"portal-grant-{rootId:N}-{contact.ContactId:N}-{DateTime.UtcNow:yyyyMMddHHmmss}",
+                what: $"the grant on {rootType} {rootId}")
+                ? GrantNotificationOutcome.Sent
+                : GrantNotificationOutcome.Failed;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[GRANT-NOTIFY] Could not email contact {ContactId} about the grant on {RootType} {RootId}. The grant stands.",
+                contact.ContactId, rootType, rootId);
+            return GrantNotificationOutcome.Failed;
+        }
+    }
+
+    /// <summary>An already-onboarded contact: a readable identity binding, and an email address to send to.</summary>
+    /// <remarks>
+    /// A binding on the WORKFORCE plane is an employee's work identity, not an external contact's CIAM account: it is never
+    /// emailed as one (task 036 review K4). An oid with no plane marker is a pre-141 CIAM binding (<see cref="ContactBindingDecision.ReadBinding"/>).
+    /// </remarks>
+    private static bool IsOnboardedWithEmail(ContactBindingRow contact)
+    {
+        var binding = contact.Binding;
+        return binding.Kind == BindingKind.Bound
+               && binding.Plane != IdentityPlaneMarker.Workforce
+               && !string.IsNullOrWhiteSpace(contact.Email);
+    }
+
+    /// <summary>
+    /// One send. <c>false</c> (logged, never thrown) when the shared mailbox refuses the sender or the send fails — an
+    /// unconfigured or unapproved sender is skipped, and the mail is never sent as the user.
+    /// </summary>
+    private async Task<bool> TrySendAsync(
+        ContactBindingRow contact, string subject, string headline, string message, string link, string linkText,
+        string correlationId, string what)
+    {
+        // Bounded (task 036 review K2). The notifier has no request token by design (the person is told even if the granter's
+        // browser has gone), so the only cancellation here is this timeout.
+        using var timeout = new CancellationTokenSource(SendTimeout);
+        try
+        {
+            await _emails.SendPortalNotificationEmailAsync(
+                contact.Email!.Trim(), subject, headline, message, link, linkText, correlationId, timeout.Token);
+            _logger.LogInformation(
+                "[GRANT-NOTIFY] Emailed contact {ContactId} about {What} ({CorrelationId}).", contact.ContactId, what, correlationId);
+            return true;
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "[GRANT-NOTIFY] The email to contact {ContactId} about {What} did not finish within {Seconds}s; given up. The " +
+                "grant stands.", contact.ContactId, what, SendTimeout.TotalSeconds);
+            return false;
+        }
+        catch (SdapProblemException ex)
+        {
+            _logger.LogWarning(ex,
+                "[GRANT-NOTIFY] The email to contact {ContactId} about {What} was refused ({Code}); skipped. A stamp whose " +
+                "sender is not configured or approved sends nothing.", contact.ContactId, what, ex.Code);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[GRANT-NOTIFY] Could not email contact {ContactId} about {What}; skipped.", contact.ContactId, what);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The portal deep link for a record from server configuration, or <c>null</c> (logged) when the portal URL or this
+    /// stamp's customer key is not configured. See <see cref="BuildPortalLink"/>.
+    /// </summary>
+    private string? TryBuildLink(ExternalGrantRootType rootType, Guid rootId)
+    {
+        var customerKey = _customer.IsResolved ? _customer.Id : null;
+        var link = BuildPortalLink(_configuration["ExternalAccess:PortalUrl"], customerKey, rootType, rootId);
+        if (link is null)
+        {
+            _logger.LogWarning(
+                "[GRANT-NOTIFY] The portal link for {RootType} {RootId} could not be built: ExternalAccess:PortalUrl must be an " +
+                "https URL and this stamp's customer id (Customer:Id) must be resolved. No email was sent.", rootType, rootId);
+        }
+
+        return link;
+    }
+
+    /// <summary>
+    /// <c>{PortalUrl}/?customer={key}&amp;record={type}:{id}</c> (spec FR-07). Built ONLY from the trusted portal URL, this
+    /// stamp's customer key and the record's type token and id; each query value is URL-encoded, and the link carries no
+    /// BFF URL, scope or token (NFR-02: a link names a customer key and a record, never a backend). The portal URL must be
+    /// an absolute https URL (http only on loopback) with no credentials; its own query and fragment are dropped.
+    /// <c>null</c> when the portal URL or the key is unusable.
+    /// </summary>
+    internal static string? BuildPortalLink(string? portalUrl, string? customerKey, ExternalGrantRootType rootType, Guid rootId)
+    {
+        if (string.IsNullOrWhiteSpace(customerKey) || rootId == Guid.Empty
+            || !Uri.TryCreate(portalUrl?.Trim(), UriKind.Absolute, out var portal)
+            || !string.IsNullOrEmpty(portal.UserInfo)
+            || !(portal.Scheme == Uri.UriSchemeHttps || (portal.Scheme == Uri.UriSchemeHttp && portal.IsLoopback)))
+        {
+            return null;
+        }
+
+        var token = rootType switch
+        {
+            ExternalGrantRootType.Project => "project",
+            ExternalGrantRootType.Matter => "matter",
+            ExternalGrantRootType.WorkAssignment => "workassignment",
+            _ => throw new ArgumentOutOfRangeException(nameof(rootType), rootType, "Unknown external grant root type."),
+        };
+
+        var baseUrl = portal.GetLeftPart(UriPartial.Path).TrimEnd('/');
+        return $"{baseUrl}/?customer={Uri.EscapeDataString(customerKey.Trim())}" +
+               $"&record={Uri.EscapeDataString(token)}:{Uri.EscapeDataString(rootId.ToString("D"))}";
     }
 
     /// <summary>
@@ -315,7 +525,18 @@ internal sealed class GrantAccessNotifier
         return null;
     }
 
-    /// <summary>The granter as their sign-in names them; "Someone" when the token carries no name.</summary>
+    /// <summary>
+    /// The granter as the EXTERNAL email may name them (task 036 review K3): the token's display <c>name</c> claim only —
+    /// never <c>preferred_username</c>, the UPN or an email address, even when the name itself is shaped like one. <c>null</c>
+    /// when there is none.
+    /// </summary>
+    internal static string? ExternalGranterName(ClaimsPrincipal? caller)
+    {
+        var name = caller?.FindFirst("name")?.Value?.Trim();
+        return string.IsNullOrEmpty(name) || name.Contains('@') ? null : name;
+    }
+
+    /// <summary>The granter as their sign-in names them; "Someone" when the token carries no name. Internal recipients only.</summary>
     internal static string GranterName(ClaimsPrincipal? caller)
     {
         var name = caller?.FindFirst("name")?.Value ?? caller?.FindFirst("preferred_username")?.Value;

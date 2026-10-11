@@ -158,6 +158,9 @@ public static class InviteExternalUserEndpoint
     /// </summary>
     internal sealed record InviteLookupFailure(string ReasonCode, string Message);
 
+    /// <summary>The <see cref="ProvisionOutcome.Status"/> of a contact whose CIAM account already existed (no onboarding email sent).</summary>
+    internal const string AlreadyProvisionedStatus = "AlreadyProvisioned";
+
     /// <summary>The provisioning outcome: a contact and a status, or a refusal, or a lookup failure.</summary>
     internal sealed record ProvisionOutcome(
         Guid ContactId, string Status, InviteRefusal? Refusal = null, InviteLookupFailure? Failure = null);
@@ -206,7 +209,7 @@ public static class InviteExternalUserEndpoint
                 logger.LogInformation(
                     "[EXT-INVITE] Contact {ContactId} ({Email}) already has a CIAM oid bound — skipping account creation (idempotent).",
                     resolution.ContactId, request.Email);
-                return new ProvisionOutcome(resolution.ContactId!.Value, "AlreadyProvisioned");
+                return new ProvisionOutcome(resolution.ContactId!.Value, AlreadyProvisionedStatus);
 
             case InviteContactAction.ProvisionExisting:
                 contactId = resolution.ContactId!.Value;

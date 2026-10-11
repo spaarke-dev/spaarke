@@ -798,6 +798,55 @@ internal static class AssignedAccessTestDoubles
         return Options.Create(options);
     }
 
+    /// <summary>
+    /// Task 036: the portal-notification email seam, recording each send instead of reaching the shared mailbox. The
+    /// communication pipeline is never built (the production type only stores it).
+    /// </summary>
+    internal sealed class RecordingEmailService : Sprk.Bff.Api.Services.Registration.RegistrationEmailService
+    {
+        public RecordingEmailService()
+            : base(null!, NullLogger<Sprk.Bff.Api.Services.Registration.RegistrationEmailService>.Instance)
+        {
+        }
+
+        public List<(string To, string Subject, string LinkUrl)> Sent { get; } = new();
+
+        /// <summary>Task 036 review: the CIAM onboarding emails sent (a contact onboarded by an invite), recorded, never sent.</summary>
+        public List<string> Onboarding { get; } = new();
+
+        /// <summary>Task 036 review: the message body of each portal email sent, parallel to <see cref="Sent"/>.</summary>
+        public List<string> Messages { get; } = new();
+
+        /// <summary>When true, a send waits on its cancellation token and never completes by itself (a hung mailbox).</summary>
+        public bool HangUntilCancelled { get; set; }
+
+        /// <summary>When set, every send throws this (the shared mailbox refusing or failing).</summary>
+        public Exception? Failure { get; set; }
+
+        public override Task SendCiamOnboardingEmailAsync(
+            string recipientEmail, string firstName, string portalUrl, CancellationToken cancellationToken = default)
+        {
+            lock (Onboarding)
+                Onboarding.Add(recipientEmail);
+            return Task.CompletedTask;
+        }
+
+        public override async Task SendPortalNotificationEmailAsync(
+            string recipientEmail, string subject, string headline, string message, string linkUrl, string linkText,
+            string correlationId, CancellationToken cancellationToken = default)
+        {
+            if (HangUntilCancelled)
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            if (Failure is { } failure)
+                throw failure;
+            lock (Sent)
+            {
+                Sent.Add((recipientEmail, subject, linkUrl));
+                Messages.Add(message);
+            }
+        }
+    }
+
     /// <summary>Everything one materializer needs, wired, with the production materializer between the doubles.</summary>
     internal sealed class Harness
     {
@@ -895,11 +944,23 @@ internal static class AssignedAccessTestDoubles
                         SentNotifications.Enqueue(entity);
                         return Task.FromResult(Guid.NewGuid());
                     });
+                var settings = new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })
+                    .Build();
                 return new Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier(
                     new Sprk.Bff.Api.Services.NotificationService(entities.Object, NullLogger<Sprk.Bff.Api.Services.NotificationService>.Instance),
-                    Grants, Identities, Store, Guard, Participations, NullLogger<Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier>.Instance);
+                    Grants, Identities, Store, Guard, Participations,
+                    Emails,
+                    new Sprk.Bff.Api.Configuration.CustomerIdentity(
+                        Options.Create(new Sprk.Bff.Api.Configuration.CustomerOptions { Id = "acme" }), settings,
+                        NullLogger<Sprk.Bff.Api.Configuration.CustomerIdentity>.Instance),
+                    settings,
+                    NullLogger<Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier>.Instance);
             }
         }
+
+        /// <summary>Task 036: every portal email the notifier sent (external-contact grants), recorded, never sent.</summary>
+        public RecordingEmailService Emails { get; } = new();
 
         /// <summary>
         /// Task 114: the PRODUCTION Restricted remover over this harness's flags, share table, system users
