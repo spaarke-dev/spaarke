@@ -497,3 +497,26 @@ Final sweep 20:15Z: 0 `# gate17*` / `# gate18*` matters or events, 0 grant rows 
   - §11.16 (i): the deleted-container binding read. F-165-RB above is negative evidence for it.
   - §11.16 (j) WRITE half: the customproperties PUT → 403. Its read half is covered by cs5/cs6: a leaf admin cannot reach a root config at all.
   - §14.9 (d): the next real L2 provisioning run.
+
+## 2026-10-11 #1629 rollout (PR #1639, master 89480bff8)
+
+**Reviews**
+- Two full verifiers (correctness and security) both FAILED round 0.
+- Fix round 1 then failed its re-check: a Direct thread that also carries a typed lookup still granted to the thread owner's sharees, and the grant skipped the record's owner team instead of the message's owner team.
+- Fix round 2: the re-check passed the code, and its only finding was two doc comments, fixed in round 3.
+- Final: full BFF unit suite 19,441 passed, 0 failed; ArchTests 940/940.
+
+**Behaviour that is now live, with no flag**
+- Message read grants go to the typed anchor's lookup users, plus members of the teams those lookups name, except the team that owns the message.
+- A secure message is never granted.
+- The audience is fixed when the message joins its thread, never by re-reading the thread afterwards.
+- A Tier-2 default-thread join requires every other typed lookup to be empty.
+- Tier 3 (the catch-all thread) grants nobody, which closes the read part of #1637.
+
+**Merge and deploy:** merged on Router green, without `--delete-branch` (the legacy Build & Test was still queued). The BFF is deployed to dev; the 4 critical-file hashes match and `healthz` passes. #1629 is closed.
+
+**Filed:** #1644 (channel-ref hijack; keep `MembershipReconcile:SweepEnabled` off), #1645 (Tier-2 routing hijack), #1646 (report-card threads).
+
+**Owner questions:**
+1. Should replying into a thread require AppendTo on its record? That would block View Only sharees from replying.
+2. When a regarding is set on an existing Direct thread later, should new messages keep going to the two parties, or to the record's audience (current behaviour, fails closed)?
