@@ -9,7 +9,11 @@ namespace Sprk.Bff.Api.Services.Registration;
 /// via the existing CommunicationService pipeline.
 /// Templates are loaded as embedded resources and rendered via simple {{placeholder}} replacement.
 /// </summary>
-public sealed class RegistrationEmailService
+/// <remarks>
+/// Not sealed only so <see cref="SendPortalNotificationEmailAsync"/> (spaarke-SPA-external-access-platform-r3 task 036) is a
+/// test seam: the grant notifier's unit tests replace that one method; no production type derives from this class.
+/// </remarks>
+public class RegistrationEmailService
 {
     private const string FromMailbox = "demo@demo.spaarke.com";
     private const string SupportEmail = "support@spaarke.com";
@@ -197,6 +201,55 @@ public sealed class RegistrationEmailService
         _logger.LogInformation(
             "Sending CIAM onboarding email | Recipient: {Recipient}",
             recipientEmail);
+
+        await _communicationService.SendAsync(request, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Sends a portal notification email (spaarke-SPA-external-access-platform-r3 task 036, FR-07): "you were given access
+    /// to a record" and "a message was posted on a record", each with one link into the external portal. Same sender, send
+    /// mode and pipeline as <see cref="SendCiamOnboardingEmailAsync"/> (the shared mailbox, app-only — never the user's
+    /// mailbox, no OBO). Throws when the send is refused (an unapproved sender, the daily limit) or fails; the caller
+    /// treats every such failure as best effort.
+    /// </summary>
+    /// <param name="linkUrl">
+    /// The portal deep link. Built by the caller from server configuration plus URL-encoded query values; it is
+    /// HTML-attribute-encoded here, like every other value, so an <c>&amp;</c> in it is written <c>&amp;amp;</c>.
+    /// </param>
+    /// <param name="correlationId">Stable per recipient and event, so one event's emails can be told apart in the send log.</param>
+    public virtual async Task SendPortalNotificationEmailAsync(
+        string recipientEmail,
+        string subject,
+        string headline,
+        string message,
+        string linkUrl,
+        string linkText,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        var templateHtml = await LoadTemplateAsync("PortalNotificationTemplate.html");
+
+        var body = templateHtml
+            .Replace("{{Headline}}", Encode(headline))
+            .Replace("{{Message}}", Encode(message))
+            .Replace("{{LinkUrl}}", Encode(linkUrl))
+            .Replace("{{LinkText}}", Encode(linkText))
+            .Replace("{{SupportEmail}}", SupportEmail)
+            .Replace("{{Year}}", DateTime.UtcNow.Year.ToString());
+
+        var request = new SendCommunicationRequest
+        {
+            To = [recipientEmail],
+            Subject = subject,
+            Body = body,
+            BodyFormat = BodyFormat.HTML,
+            FromMailbox = FromMailbox,
+            SendMode = SendMode.SharedMailbox,
+            CorrelationId = correlationId
+        };
+
+        _logger.LogInformation(
+            "Sending portal notification email | CorrelationId: {CorrelationId}", correlationId);
 
         await _communicationService.SendAsync(request, cancellationToken: cancellationToken);
     }

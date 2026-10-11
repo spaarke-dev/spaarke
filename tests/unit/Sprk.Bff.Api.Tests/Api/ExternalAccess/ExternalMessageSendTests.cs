@@ -198,10 +198,10 @@ public class ExternalMessageSendTests
 
     private Task<IResult> Post(
         string root, Guid id, CallerPrincipal caller, PostExternalMessageRequest? request,
-        ExternalModuleRegistry? registry = null) =>
+        ExternalModuleRegistry? registry = null, Action<MessagePostedNotification>? onPosted = null) =>
         ExternalMessageEndpoints.PostMessageCoreAsync(
             root, id, request, caller, registry ?? ProductionRegistry(), ReadRecord, Service(), NullLogger.Instance,
-            CancellationToken.None);
+            CancellationToken.None, onPosted);
 
     /// <summary>A request body bound exactly as the route binds it (System.Text.Json, web defaults).</summary>
     private static PostExternalMessageRequest Bind(string json) =>
@@ -806,5 +806,177 @@ public class ExternalMessageSendTests
         TheRow().GetAttributeValue<OptionSetValue>("sprk_direction").Value.Should().Be(Outgoing);
         seen!.Direction.Should().Be(CommunicationDirection.Outgoing);
         seen.Message.Direction.Should().Be(CommunicationDirection.Outgoing);
+    }
+
+    // ── Task 036 (FR-07): the member notification hand-off ───────────────────────────────────────────────────────
+
+    private static CallerPrincipal CreateOn(Guid? matter = null, Guid? project = null, Guid? contactId = null,
+        AccessRights matterRights = AccessRights.Read | AccessRights.Create | AccessRights.Write,
+        ExternalAccessLevel projectLevel = ExternalAccessLevel.Collaborate) =>
+        Ciam(project: project, projectLevel: projectLevel, matter: matter, matterRights: matterRights, contactId: contactId);
+
+    private Guid InvoiceUnder(Guid? matter, Guid? project)
+    {
+        var invoice = Guid.NewGuid();
+        var record = new Dictionary<string, object?> { ["id"] = invoice };
+        if (matter is { } m) record["sprk_matter"] = Lookup(m, "sprk_matter");
+        if (project is { } p) record["sprk_project"] = Lookup(p, "sprk_project");
+        _records[("sprk_invoice", invoice)] = record;
+        return invoice;
+    }
+
+    [Theory]
+    [InlineData("projects")]
+    [InlineData("matters")]
+    [InlineData("workassignments")]
+    public async Task APostedMessage_HandsTheRecordAsItsOwnRoot_ToTheMemberNotification_OnceWithTheAuthorsContact(string root)
+    {
+        var record = Guid.NewGuid();
+        var me = Guid.NewGuid();
+        var caller = root switch
+        {
+            "projects" => Ciam(project: record, contactId: me),
+            "matters" => Ciam(matter: record, contactId: me),
+            _ => Ciam(workAssignment: record, contactId: me),
+        };
+        var seen = new List<MessagePostedNotification>();
+
+        var dto = Created(await Post(root, record, caller, new PostExternalMessageRequest { SprkBody = "Hello" }, onPosted: seen.Add));
+
+        var posted = seen.Should().ContainSingle("one post, one notification").Subject;
+        var expected = root switch
+        {
+            "projects" => ExternalGrantRootType.Project,
+            "matters" => ExternalGrantRootType.Matter,
+            _ => ExternalGrantRootType.WorkAssignment,
+        };
+        posted.Roots.Should().Equal(new MessageNotifyRoot(expected, record));
+        posted.AuthorContactId.Should().Be(me, "the author is the resolved principal's contact, so they are never told");
+        posted.CommunicationId.Should().NotBe(Guid.Empty);
+        dto.SprkBody.Should().Be("Hello");
+        ShouldHaveSentNothing(); // the thread post itself still sends no email (FR-11); the members' email is the notifier's
+    }
+
+    [Fact]
+    public async Task ACallbackThatThrows_NeverFailsOrChangesThePost_ItIsStillA201WithOneRow()
+    {
+        var project = Guid.NewGuid();
+
+        var result = await Post("projects", project, Ciam(project: project),
+            new PostExternalMessageRequest { SprkBody = "Hello" },
+            onPosted: _ => throw new InvalidOperationException("the launcher blew up"));
+
+        Created(result).SprkBody.Should().Be("Hello");
+        TheRow();
+    }
+
+    [Fact]
+    public async Task ARefusedPost_NeverNotifiesAnyone()
+    {
+        var project = Guid.NewGuid();
+        var viewOnly = Ciam(project: project, projectLevel: ExternalAccessLevel.ViewOnly);
+        var foreign = Ciam(project: Guid.NewGuid());
+        var seen = new List<MessagePostedNotification>();
+
+        var denied = await Post("projects", project, viewOnly, new PostExternalMessageRequest { SprkBody = "Hello" }, onPosted: seen.Add);
+        var outside = await Post("projects", project, foreign, new PostExternalMessageRequest { SprkBody = "Hello" }, onPosted: seen.Add);
+        var blank = await Post("projects", project, Ciam(project: project), new PostExternalMessageRequest { SprkBody = " " }, onPosted: seen.Add);
+
+        ShouldBeForbidden(denied, ExternalMessageEndpoints.DenyInsufficientRights);
+        ShouldBeForbidden(outside, ExternalMessageEndpoints.DenyRecordNotAccessible);
+        ShouldBeBadRequest(blank, ExternalMessageEndpoints.ErrorInvalidBody);
+        seen.Should().BeEmpty("no row was created, so there is nothing to tell anyone");
+        ShouldHaveWrittenNothing();
+    }
+
+    [Fact]
+    public async Task AnInvoicePost_NotifiesOnlyTheParentRootsTheCallerHoldsCreateOn_NeverTheOtherParentsMembers()
+    {
+        var matter = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var invoice = InvoiceUnder(matter, project);
+        var seen = new List<MessagePostedNotification>();
+
+        // Create on the matter; the project is readable only (ViewOnly) — the post is admitted through the matter.
+        Created(await Post("invoices", invoice,
+            CreateOn(matter: matter, project: project, projectLevel: ExternalAccessLevel.ViewOnly),
+            new PostExternalMessageRequest { SprkBody = "Question on line 3" }, onPosted: seen.Add));
+
+        seen.Should().ContainSingle().Which.Roots.Should().Equal(
+            new MessageNotifyRoot(ExternalGrantRootType.Matter, matter));
+    }
+
+    [Fact]
+    public async Task AnInvoicePost_UnderTwoParentsTheCallerCanCreateOn_NotifiesBoth()
+    {
+        var matter = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var invoice = InvoiceUnder(matter, project);
+        var seen = new List<MessagePostedNotification>();
+
+        Created(await Post("invoices", invoice, CreateOn(matter: matter, project: project),
+            new PostExternalMessageRequest { SprkBody = "Question" }, onPosted: seen.Add));
+
+        seen.Should().ContainSingle().Which.Roots.Should().BeEquivalentTo(new[]
+        {
+            new MessageNotifyRoot(ExternalGrantRootType.Matter, matter),
+            new MessageNotifyRoot(ExternalGrantRootType.Project, project),
+        });
+    }
+
+    [Fact]
+    public async Task AServiceRequestPost_HasNoMembers_SoNoNotificationIsHandedOver()
+    {
+        var me = Guid.NewGuid();
+        var request = ServiceRequestRequestedBy(me);
+        var seen = new List<MessagePostedNotification>();
+
+        Created(await Post("servicerequests", request, WorkforceContact(contactId: me),
+            new PostExternalMessageRequest { SprkBody = "Any update?" }, onPosted: seen.Add));
+
+        seen.Should().BeEmpty();
+        TheRow();
+    }
+
+    [Fact]
+    public async Task TheBackgroundLauncher_ReturnsAtOnce_WhileTheNotificationIsStillRunning_AndLogsItsFault()
+    {
+        // The notifier is resolved from a NEW scope and blocks there; the launcher must have returned long before.
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var provider = new Mock<IServiceProvider>();
+        provider.Setup(p => p.GetService(typeof(GrantAccessNotifier)))
+            .Returns(() =>
+            {
+                entered.Set();
+                release.Wait(TimeSpan.FromSeconds(30));
+                throw new InvalidOperationException("the notifier could not be built");
+            });
+        var scope = new Mock<IServiceScope>();
+        scope.SetupGet(s => s.ServiceProvider).Returns(provider.Object);
+        var scopes = new Mock<IServiceScopeFactory>();
+        scopes.Setup(f => f.CreateScope()).Returns(scope.Object);
+        var logger = new Mock<ILogger>();
+        var faulted = new TaskCompletionSource();
+        logger.Setup(l => l.Log(
+                LogLevel.Warning, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
+            .Callback(() => faulted.TrySetResult());
+        logger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var launch = ExternalMessageEndpoints.BackgroundMemberNotifier(scopes.Object, logger.Object);
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        launch(new MessagePostedNotification(
+            new[] { new MessageNotifyRoot(ExternalGrantRootType.Project, Guid.NewGuid()) }, Guid.NewGuid(), Guid.NewGuid()));
+        started.Stop();
+
+        started.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5), "the post's response never waits on the email");
+        entered.Wait(TimeSpan.FromSeconds(10)).Should().BeTrue("the work did start, in its own scope");
+        faulted.Task.IsCompleted.Should().BeFalse("it is still blocked");
+
+        release.Set();
+        (await Task.WhenAny(faulted.Task, Task.Delay(TimeSpan.FromSeconds(10)))).Should().Be(faulted.Task,
+            "a fault in the background work is logged, never thrown");
+        scope.Verify(s => s.Dispose(), Times.AtLeastOnce);
     }
 }
