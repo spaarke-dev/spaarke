@@ -712,7 +712,8 @@ internal static class OwnedChildWrite
     /// added as the row holds it, so the pair rule, the secure-root gate and the application's write
     /// (<see cref="PatchWithBffManagedPairAsync"/>) all act on exactly the same (record, type).</item>
     /// <item><b>A work assignment</b> (its pair is not BFF-managed) whose update changes or clears a typed filing lookup
-    /// (<see cref="SecureRootInheritance.TypedFilingColumns"/>) the pair was IN STEP with — same id, a type naming that
+    /// (<see cref="SecureRootInheritance.TypedLookupsOf"/>: a matter or project, or #1630 an invoice or event) the pair was IN
+    /// STEP with — same id, a type naming that
     /// lookup's table — and does not write the pair itself: the pair is kept in step in the same caller PATCH (moved to the
     /// lookup's new record, or cleared with its display columns when the lookup is cleared). Otherwise a BFF re-file would
     /// leave a pair no typed lookup repeats, which holds the record's sharees and every loosening until a repair. The pair
@@ -726,9 +727,11 @@ internal static class OwnedChildWrite
     {
         var pair = PairOf(item);
         var managed = BffManagedPairColumnsOf(table).Count > 0;
-        var filing = SecureRootInheritance.TypedFilingColumns.TryGetValue(table.Trim().ToLowerInvariant(), out var typed)
-            ? typed
-            : Array.Empty<(string Column, string ParentTable)>();
+        // #1630: the intermediate lookups too (an invoice or event files a work assignment as its matter or project lookup
+        // does), so a re-file from one invoice to another moves the pair with it.
+        var filing = SecureRootInheritance.TypedLookupsOf(table.Trim().ToLowerInvariant())
+            .Select(t => (Column: t.Column, ParentTable: t.Table))
+            .ToArray();
         var changedFiling = filing
             .Where(f => item.Lookups.Any(l => string.Equals(l.Column, f.Column, StringComparison.OrdinalIgnoreCase))
                         || item.ClearedColumns.Contains(f.Column, StringComparer.OrdinalIgnoreCase))
@@ -1144,6 +1147,36 @@ internal static class OwnedChildWrite
 
         return await CheckCallerMayRefileByPairAsync(user, me.SystemUserId, table, entitySetName, recordId, item, ct).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// #1630: the update tool's AS-THE-CALLER check handed to the secure-root gate (<see cref="SecureRootFilingGate.CheckAsync"/>)
+    /// for the secure matters and projects a re-file reaches only THROUGH an invoice or event it sets — records no lookup of the
+    /// write names, so <see cref="CheckCallerMayFileRootUnderAsync"/> asked only about the invoice or event. AppendTo on each,
+    /// as the create plan asks of every secure parent (create parity): a caller with AppendTo on an invoice but not on the
+    /// secure matter it belongs to cannot file a work assignment under that matter by way of the invoice.
+    /// </summary>
+    internal static Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>> CallerMayFileRootUnderSecure(
+        IDataverseUserClient user) =>
+        async (parents, ct) =>
+        {
+            var me = await WhoAmIAsync(user, ct).ConfigureAwait(false);
+            if (me.Failure is { } failure)
+            {
+                return RecordOwnerResolution.Refused(failure.ErrorCode ?? DataverseUserClientErrorCodes.UserContextRequired,
+                    "you could not be identified, so whether you may file this record under the secure record it would belong to " +
+                    "could not be checked");
+            }
+
+            var lookups = parents
+                .Select(p => new DataverseWriteItemMapper.MappedLookup(
+                    "filed under", p.Table, SecureDesignationRemoval.EntitySetFor(p.Table), p.Id))
+                .ToArray();
+            var appendTo = await CheckCallerMayAppendToAsync(user, me.SystemUserId, lookups, ct).ConfigureAwait(false);
+            return appendTo.Succeeded
+                ? null
+                : RecordOwnerResolution.Refused(DataverseUserClientErrorCodes.AccessDenied,
+                    appendTo.Denied ?? "you do not have permission to file this record under the secure record it would belong to");
+        };
 
     /// <summary>
     /// AS THE CALLER, AppendTo on each record in <paramref name="lookups"/> (<c>RetrievePrincipalAccess</c>) — the right a

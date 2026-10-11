@@ -986,6 +986,170 @@ public class SecureRootInheritanceTests : IClassFixture<ProvisionProjectTestFixt
         _fixture.Updates.Should().NotContain(u => u.RecordId == workAssignment);
     }
 
+    // ── #1630 (owner Option A, 2026-10-11): filed under an INVOICE or EVENT of a secure matter or project ─────────────────
+
+    /// <summary>An invoice belonging to <paramref name="matter"/> (its typed <c>sprk_matter</c> — its core-ancestor stamp).</summary>
+    internal static Guid InvoiceOf(ProvisionProjectTestFixture fixture, Guid matter)
+    {
+        var id = Guid.NewGuid();
+        fixture.ChildWorld.Add("sprk_invoice", id, ("sprk_matter", new EntityReference("sprk_matter", matter)));
+        return id;
+    }
+
+    /// <summary>An event filed regarding <paramref name="parentTable"/> <paramref name="parentId"/> by its typed lookup.</summary>
+    internal static Guid EventOf(ProvisionProjectTestFixture fixture, string parentTable, Guid parentId)
+    {
+        var id = Guid.NewGuid();
+        fixture.ChildWorld.Add("sprk_event", id,
+            ("sprk_regarding" + parentTable["sprk_".Length..], new EntityReference(parentTable, parentId)));
+        return id;
+    }
+
+    /// <summary>
+    /// #1630: a work assignment filed under an INVOICE of a secure matter (the wizard's shape: the typed
+    /// <c>sprk_regardinginvoice</c> AND the same pair) and one filed under an EVENT of a secure project are secured by one job
+    /// run — flag, named team, own container, creator share — and given the matter's / project's sharee, exactly as if
+    /// filed directly under it. Decoys never written: a work assignment under an invoice of an ORDINARY matter, and one
+    /// under an event rooted at a (secure) WORK ASSIGNMENT — not the parent rule. Before #1630 the first two were never
+    /// listed, never isolated.
+    /// </summary>
+    [Fact]
+    public async Task TheJob_SecuresAWorkAssignmentFiledUnderAnInvoiceOfASecureMatter_OrAnEventOfASecureProject_AndGivesThemTheSharee()
+    {
+        var (matter, project, ordinaryMatter) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecureProject(_fixture, project, Colleague);
+        _fixture.SeedMatter(ordinaryMatter, isSecure: false);
+        var invoice = InvoiceOf(_fixture, matter);
+        var projectEvent = EventOf(_fixture, "sprk_project", project);
+
+        var (underInvoice, underEvent) = (Guid.NewGuid(), Guid.NewGuid());
+        FiledWorkAssignment(_fixture, underInvoice, "sprk_regardinginvoice", "sprk_invoice", invoice);
+        FilePair(_fixture, "sprk_workassignment", underInvoice, invoice, RecordTypeRef(_fixture, "sprk_invoice"));
+        FiledWorkAssignment(_fixture, underEvent, "sprk_regardingevent", "sprk_event", projectEvent);
+        FilePair(_fixture, "sprk_workassignment", underEvent, projectEvent, RecordTypeRef(_fixture, "sprk_event"));
+
+        var secureWorkAssignment = Guid.NewGuid();
+        SecureFiledWorkAssignment(secureWorkAssignment, matter);
+        var (underOrdinaryInvoice, underWorkAssignmentEvent) = (Guid.NewGuid(), Guid.NewGuid());
+        FiledWorkAssignment(_fixture, underOrdinaryInvoice, "sprk_regardinginvoice", "sprk_invoice", InvoiceOf(_fixture, ordinaryMatter));
+        FiledWorkAssignment(_fixture, underWorkAssignmentEvent, "sprk_regardingevent", "sprk_event",
+            EventOf(_fixture, "sprk_workassignment", secureWorkAssignment));
+
+        var run = await RunJobAsync();
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        ShouldBeSecure(underInvoice, "filed under an invoice of a secure matter");
+        ShouldBeSecure(underEvent, "filed under an event of a secure project");
+        foreach (var filed in new[] { underInvoice, underEvent })
+        {
+            _fixture.ShareMaskOf(filed, Colleague).Should().Be(MirrorOf(ProvisionProjectEndpoint.CollaboratorAccessRights),
+                "the secure parent's sharee sees it, as if it were filed directly under that parent");
+        }
+
+        ShouldBeUntouched(underOrdinaryInvoice, "its invoice belongs to an ORDINARY matter");
+        ShouldBeUntouched(underWorkAssignmentEvent, "its event is rooted at a work assignment — not the parent rule");
+
+        using var scope = _fixture.Services.CreateScope();
+        var inheritance = scope.ServiceProvider.GetRequiredService<SecureRootInheritance>();
+        var answer = await inheritance.FindSecureParentsAsync("sprk_workassignment", underInvoice, CancellationToken.None);
+        answer.IsKnown.Should().BeTrue();
+        answer.SecureParents.Should().ContainSingle().Which.Should().Match<SecureFilingParent>(p =>
+            p.Table == "sprk_matter" && p.Id == matter && p.Name == null,
+            "the parent reached through the invoice keeps its name to itself (task 174 F1-d)");
+        var listed = await inheritance.ListFiledRootsAsync(new[] { ("sprk_matter", matter), ("sprk_project", project) }, CancellationToken.None);
+        listed.Where(r => r.Id == underInvoice || r.Id == underEvent).Should().HaveCount(2).And.OnlyContain(r => r.Confirmed,
+            "the child-direction listing agrees with the decision side: typed lookups, so Confirmed");
+        listed.Should().NotContain(r => r.Id == underOrdinaryInvoice || r.Id == underWorkAssignmentEvent);
+    }
+
+    /// <summary>
+    /// #1630, the cascade: provisioning a matter secures, in the same call, the work assignment filed under ITS invoice —
+    /// provisioning's own Step 8 listing reaches it — and gives it the matter's sharee.
+    /// </summary>
+    [Fact]
+    public async Task ProvisioningAMatter_SecuresTheWorkAssignmentFiledUnderItsInvoice()
+    {
+        var matter = Guid.NewGuid();
+        _fixture.SeedMatter(matter, isSecure: true); // flagged, not yet provisioned
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardinginvoice", "sprk_invoice", InvoiceOf(_fixture, matter));
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(ProvisionRoute,
+            new { recordType = "matter", recordId = matter, sharePrincipalIds = new[] { Colleague } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        ShouldBeSecure(workAssignment, "filed under an invoice of the matter that became secure");
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(MirrorOf(ProvisionProjectEndpoint.CollaboratorAccessRights));
+        var filedRecords = (await JsonOf(response)).GetProperty("filedRecords");
+        filedRecords.GetProperty("records").EnumerateArray().Select(r => r.GetProperty("recordId").GetGuid())
+            .Should().Equal(workAssignment);
+    }
+
+    /// <summary>
+    /// #1630, the way back (task 175): unsecuring the matter un-secures the work assignment filed only under its invoice, in
+    /// the same call — the cascade's listing reaches it — and reports it.
+    /// </summary>
+    [Fact]
+    public async Task UnsecuringTheMatter_UnsecuresTheWorkAssignmentFiledOnlyUnderItsInvoice()
+    {
+        var matter = Guid.NewGuid();
+        SecureMatter(_fixture, matter);
+        var workAssignment = Guid.NewGuid();
+        _fixture.SeedWorkAssignment(workAssignment, owningTeamId: SecureTeam, containerId: $"b!wa-{workAssignment:N}", isSecure: true);
+        _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Creator), ProvisionProjectEndpoint.CreatorAccessRights);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardinginvoice",
+            new EntityReference("sprk_invoice", InvoiceOf(_fixture, matter)));
+        InheritedAccessRecord(_fixture, "sprk_workassignment", workAssignment, ("sprk_matter", matter));
+
+        var response = await UnsecureAsync("matter", matter);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.IsSecureOf(workAssignment).Should().BeFalse("it follows the matter its invoice belongs to out of secure");
+        _fixture.SharesOn(workAssignment).Should().BeEmpty();
+        var outcome = (await JsonOf(response)).GetProperty("relatedRecordsUnsecured").EnumerateArray().Single();
+        outcome.GetProperty("recordId").GetGuid().Should().Be(workAssignment);
+        outcome.GetProperty("outcome").GetString().Should().Be("unsecured");
+    }
+
+    /// <summary>
+    /// #1630, fail closed (ADR-003): a work assignment filed under an invoice that cannot be read is UNVERIFIABLE — never "not
+    /// secure" — through the one-record walk and the batched walk alike, and the decision writes nothing to it.
+    /// </summary>
+    [Fact]
+    public async Task AWorkAssignmentFiledUnderAnInvoiceThatCannotBeRead_IsUnverifiable_AndNothingIsWritten()
+    {
+        var matter = Guid.NewGuid();
+        SecureMatter(_fixture, matter);
+        var invoice = InvoiceOf(_fixture, matter);
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardinginvoice", "sprk_invoice", invoice);
+        World.FailingRowReadsOf("sprk_invoice", invoice);
+        World.FailingIdListReadsOf("sprk_invoice", invoice);
+        var dataverse = SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object;
+
+        var one = await SecureRootInheritance.ReadSecureParentsAsync(
+            dataverse, NullLogger.Instance, "sprk_workassignment", workAssignment, CancellationToken.None);
+        var many = await SecureRootInheritance.ReadSecureParentsOfManyAsync(
+            dataverse, NullLogger.Instance, "sprk_workassignment", new[] { workAssignment, Guid.NewGuid() }, CancellationToken.None);
+
+        foreach (var answer in new[] { one, many[workAssignment] })
+        {
+            answer.IsKnown.Should().BeFalse("an unread intermediate is never 'filed under nothing'");
+            answer.Unverifiable.Should().Contain("sprk_invoice");
+            answer.HasSecureParent.Should().BeFalse();
+        }
+
+        var inheritance = InheritanceInScope(out var scope);
+        using (scope)
+        {
+            var result = await inheritance.SecureIfFiledUnderSecureAsync("sprk_workassignment", workAssignment, "t1630", CancellationToken.None);
+            result.Outcome.Should().Be(SecureRootInheritOutcome.Unverifiable);
+        }
+
+        ShouldBeUntouched(workAssignment, "an unread intermediate is never a reason to write");
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>The host's REAL inheritance, in a scope the caller disposes.</summary>

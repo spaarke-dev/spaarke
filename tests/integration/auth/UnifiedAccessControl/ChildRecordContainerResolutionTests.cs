@@ -534,16 +534,14 @@ public partial class ChildRecordContainerResolutionTests
     // Task 156 (owner round 4 item 5, option b) REPLACED this theory's to-do / event rows: a child filed under a
     // communication, event, invoice, document, analysis, agreement, budget or report card is now read live and its copy
     // compared (ChildRecordContainerResolutionTests.StampFreshness.cs). What stays HELD is below.
-    [Theory(DisplayName = "Task 155 / 156: a child filed under a SERVICE REQUEST, and a WORK ASSIGNMENT filed under a communication / event / invoice, stay refused as unverifiable — nothing on those rows is a copy to compare")]
+    [Theory(DisplayName = "Task 155 / 156: a child filed under a SERVICE REQUEST, and a WORK ASSIGNMENT filed under a communication, stay refused as unverifiable — nothing on those rows is a copy to compare (#1630: a work assignment's invoice / event is followed instead)")]
     // Task 155 f3: a service request hangs off a matter / project / work assignment (live: its own
     // sprk_regarding{matter,project,workassignment}) and cannot carry sprk_issecure — an intermediate, not a root.
     [InlineData("sprk_todo", "sprk_regardingservicerequest")]
     [InlineData("sprk_event", "sprk_regardingservicerequest")]
-    // Task 155 f3: a work assignment (a ROOT that is itself filed regarding something) under a communication / event /
-    // invoice (live: 1 of 22 work assignments regards an invoice).
+    // Task 155 f3: a work assignment (a ROOT that is itself filed regarding something) under a communication. #1630 (owner
+    // Option A) moved its invoice / event rows to WorkAssignment_FiledUnderAnInvoiceOrEvent_* below: those are followed.
     [InlineData("sprk_workassignment", "sprk_regardingcommunication")]
-    [InlineData("sprk_workassignment", "sprk_regardingevent")]
-    [InlineData("sprk_workassignment", "sprk_regardinginvoice")]
     public async Task Child_FiledUnderAnotherChild_IsRefusedAsUnverifiable(string entity, string intermediateColumn)
     {
         // A service request is CORE (nothing is copied from it) and cannot carry sprk_issecure; a work assignment carries
@@ -1580,7 +1578,7 @@ public partial class ChildRecordContainerResolutionTests
         world.Reads("businessunit").Should().Be(0, "undetermined is never 'not secure'");
     }
 
-    [Theory(DisplayName = "#1616 F-A: a work assignment filed under an INVOICE or an EVENT with the SAME pair (the Create Work Assignment wizard's shape) is resolved exactly as with the typed lookup alone — the held path, never the new refusal")]
+    [Theory(DisplayName = "#1616 F-A / #1630: a work assignment filed under an INVOICE or an EVENT with the SAME pair (the Create Work Assignment wizard's shape) is resolved exactly as with the typed lookup alone — through that record to its secure matter")]
     [InlineData("sprk_regardinginvoice", "sprk_invoice")]
     [InlineData("sprk_regardingevent", "sprk_event")]
     public async Task Todo_UnderAWorkAssignmentFiledUnderAnIntermediate_WithTheSamePair_IsUnchanged(string column, string table)
@@ -1588,27 +1586,29 @@ public partial class ChildRecordContainerResolutionTests
         var intermediateId = Guid.Parse("16161616-0000-0000-0000-0000000000f1");
         var typeRef = Guid.Parse("16161616-0000-0000-0000-0000000000f2");
 
-        async Task<SdapProblemException> Resolve(bool withPair)
+        async Task<string?> Resolve(bool withPair)
         {
-            var world = new World()
+            var world = new World(securable: SecurableWithInvoice)
                 .WithChild("sprk_todo", regardingWorkAssignment: WorkAssignmentId)
                 .WithRecordType(typeRef, table)
                 .WithRoot("sprk_workassignment", WorkAssignmentId, isSecure: false, containerId: null,
                     pairId: withPair ? intermediateId.ToString() : null, pairType: withPair ? typeRef : null,
                     intermediate: (column, intermediateId))
+                .WithRow(table, intermediateId,
+                    lookups: [(table == "sprk_invoice" ? "sprk_matter" : "sprk_regardingmatter", "sprk_matter", MatterId)],
+                    isSecure: table == "sprk_invoice" ? false : null)
+                .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
                 .WithBusinessUnit(BusinessUnitContainer);
-            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
-            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            var decision = await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
             world.Reads("businessunit").Should().Be(0);
-            return ex;
+            return decision.ContainerId;
         }
 
         var typedAlone = await Resolve(withPair: false);
         var withThePair = await Resolve(withPair: true);
 
-        typedAlone.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode, "a work assignment under an intermediate is held");
-        (withThePair.Code, withThePair.StatusCode).Should().Be((typedAlone.Code, typedAlone.StatusCode),
-            "the pair repeating the typed lookup adds nothing — the wizard's shape resolves as before");
+        typedAlone.Should().Be(RootContainer, "#1630: the work assignment belongs to the secure matter through that record");
+        withThePair.Should().Be(typedAlone, "the pair repeating the typed lookup adds nothing — the wizard's shape resolves alike");
     }
 
     [Fact(DisplayName = "Task 155 f4: a row two hops above the record that cannot be READ refuses with the retryable 503 — never read as non-secure")]
@@ -1630,29 +1630,134 @@ public partial class ChildRecordContainerResolutionTests
         world.Reads("businessunit").Should().Be(0);
     }
 
-    [Fact(DisplayName = "Task 155 f4: a to-do under a work assignment that is itself filed under an INVOICE takes the held path (unverifiable) — the live work assignment b10b7dab shape, one level down")]
-    public async Task Todo_UnderAWorkAssignmentFiledUnderAnInvoice_IsRefusedAsUnverifiable()
+    /// <remarks>#1630 (owner Option A) REPLACED task 155 f4's "held" expectation for this shape: the work assignment's invoice
+    /// is followed to the matter it belongs to — here a SECURE one, so the to-do's files go to that matter's container
+    /// (before #1630 the to-do was refused unverifiable, and the work assignment was never isolated).</remarks>
+    [Fact(DisplayName = "#1630: a to-do under a work assignment that is itself filed under an INVOICE of a SECURE matter resolves the MATTER's container — the live work assignment b10b7dab shape, one level down")]
+    public async Task Todo_UnderAWorkAssignmentFiledUnderAnInvoiceOfASecureMatter_ResolvesTheMattersContainer()
     {
-        var world = new World()
+        var invoice = Guid.Parse("16301630-0000-0000-0000-0000000000a1");
+        var world = new World(securable: SecurableWithInvoice)
             .WithChild("sprk_todo", regardingWorkAssignment: WorkAssignmentId)
             .WithRoot("sprk_workassignment", WorkAssignmentId, isSecure: false, containerId: null,
-                regardingMatter: MatterId, intermediate: ("sprk_regardinginvoice", ChildId))
-            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
+                intermediate: ("sprk_regardinginvoice", invoice))
+            .WithRow("sprk_invoice", invoice, lookups: [("sprk_matter", "sprk_matter", MatterId)], isSecure: false)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
             .WithBusinessUnit(BusinessUnitContainer);
 
         foreach (var fallback in new[] { null, ArchiveContainer })
         {
-            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
+            var decision = await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
 
-            var ex = (await act.Should().ThrowAsync<SdapProblemException>(
-                "the work assignment itself cannot be placed, so neither can what is filed under it")).Which;
-            ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
-            ex.StatusCode.Should().Be(409);
-            ex.Detail.Should().Contain("sprk_workassignment", "the advice names the record that is mis-filed");
+            decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
+            decision.ContainerId.Should().Be(RootContainer, "the work assignment belongs to the secure matter through its invoice");
         }
 
-        world.Reads("sprk_matter").Should().Be(0, "the held work assignment's typed matter is not consulted");
+        world.Reads("businessunit").Should().Be(0, "a shared container is never in scope under a secure matter");
+    }
+
+    [Theory(DisplayName = "#1630: a NON-secure work assignment filed under an INVOICE of a secure matter or an EVENT of a secure project resolves that record's container — the inheritance's own parent, followed live")]
+    [InlineData("sprk_regardinginvoice", "sprk_invoice", "sprk_matter", "sprk_matter")]
+    [InlineData("sprk_regardingevent", "sprk_event", "sprk_regardingproject", "sprk_project")]
+    public async Task WorkAssignment_FiledUnderAnInvoiceOrEvent_OfASecureRoot_ResolvesThatRootsContainer(
+        string column, string intermediateTable, string rootColumn, string rootTable)
+    {
+        var intermediate = Guid.Parse("16301630-0000-0000-0000-0000000000b1");
+        var rootId = rootTable == "sprk_matter" ? MatterId : ProjectId;
+        var world = new World(securable: SecurableWithInvoice)
+            .WithChild("sprk_workassignment", intermediate: (column, intermediate), isSecure: false)
+            .WithRow(intermediateTable, intermediate, lookups: [(rootColumn, rootTable, rootId)],
+                isSecure: intermediateTable == "sprk_invoice" ? false : null)
+            .WithRoot(rootTable, rootId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var decision = await world.Resolver().ResolveForRecordAsync("sprk_workassignment", ChildId, fallback);
+
+            decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
+            decision.ContainerId.Should().Be(RootContainer);
+        }
+
+        world.Reads(intermediateTable).Should().BeGreaterThan(0, "the intermediate is read live, never guessed");
         world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Theory(DisplayName = "#1630: a work assignment filed under an INVOICE or EVENT of an ORDINARY matter resolves its business unit's container, as before for an ordinary parent")]
+    [InlineData("sprk_regardinginvoice", "sprk_invoice", "sprk_matter")]
+    [InlineData("sprk_regardingevent", "sprk_event", "sprk_regardingmatter")]
+    public async Task WorkAssignment_FiledUnderAnInvoiceOrEvent_OfAnOrdinaryMatter_ResolvesItsBusinessUnit(
+        string column, string intermediateTable, string rootColumn)
+    {
+        var intermediate = Guid.Parse("16301630-0000-0000-0000-0000000000c1");
+        var world = new World(securable: SecurableWithInvoice)
+            .WithChild("sprk_workassignment", intermediate: (column, intermediate), isSecure: false)
+            .WithRow(intermediateTable, intermediate, lookups: [(rootColumn, "sprk_matter", MatterId)],
+                isSecure: intermediateTable == "sprk_invoice" ? false : null)
+            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_workassignment", ChildId);
+
+        decision.ContainerId.Should().Be(BusinessUnitContainer);
+        world.Reads("sprk_matter").Should().Be(1, "the matter the invoice or event belongs to is what decides");
+    }
+
+    [Fact(DisplayName = "#1630: a work assignment filed under an EVENT that is itself rooted at a WORK ASSIGNMENT stays held (unverifiable) — not the inheritance's parent rule")]
+    public async Task WorkAssignment_FiledUnderAnEventOfAWorkAssignment_StaysHeld()
+    {
+        var intermediate = Guid.Parse("16301630-0000-0000-0000-0000000000d1");
+        var otherWorkAssignment = Guid.Parse("16301630-0000-0000-0000-0000000000d2");
+        var world = new World(securable: SecurableWithInvoice)
+            .WithChild("sprk_workassignment", intermediate: ("sprk_regardingevent", intermediate), isSecure: false)
+            .WithRow("sprk_event", intermediate,
+                lookups: [("sprk_regardingworkassignment", "sprk_workassignment", otherWorkAssignment)])
+            .WithRoot("sprk_workassignment", otherWorkAssignment, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_workassignment", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "#1630: a work assignment filed under an INVOICE that cannot be read refuses with the retryable 503 — never read as non-secure")]
+    public async Task WorkAssignment_FiledUnderAnUnreadableInvoice_IsThe503()
+    {
+        var intermediate = Guid.Parse("16301630-0000-0000-0000-0000000000e1");
+        var world = new World(securable: SecurableWithInvoice)
+            .WithChild("sprk_workassignment", intermediate: ("sprk_regardinginvoice", intermediate), isSecure: false)
+            .WithRootFault("sprk_invoice", intermediate, new TimeoutException("Dataverse timed out"))
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_workassignment", ChildId);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+        ex.StatusCode.Should().Be(503);
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "#1630 lock-step: every column the inheritance follows through an intermediate is one the storage resolver knows as that table's intermediate")]
+    public void IntermediateFilingColumns_AreTheResolversIntermediateColumns()
+    {
+        foreach (var (table, columns) in Sprk.Bff.Api.Services.Access.SecureRootInheritance.IntermediateFilingColumns)
+        {
+            var links = RecordContainerResolver.ChildAncestorLinks.For(table);
+            foreach (var (column, intermediate) in columns)
+            {
+                links.Should().NotBeNull(table);
+                links!.IntermediateColumns.Should().Contain((column, intermediate), $"{table}.{column}");
+                CoreAncestorResolver.IntermediateRootColumns.Should().ContainKey(intermediate,
+                    "the parents are read from the intermediate's own core-ancestor stamp columns");
+            }
+        }
     }
 
     [Theory(DisplayName = "Task 155 f4: two DIFFERENT secure roots anywhere in the chain refuse as ambiguous (container_ancestor_ambiguous) — on two branches, or stacked one above the other")]
