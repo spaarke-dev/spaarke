@@ -405,6 +405,78 @@ public class ExternalMessageEndpointsTests
         messages.Select(m => m.SprkCommunicationid).Should().Equal(visible.ToString("D"));
     }
 
+    // ── isMine: the caller-relative author flag (task 034, review fix) ─────────────────────────────
+
+    /// <summary>A message row authored by the given contact (a task-034 external post) or sent by the given systemuser.</summary>
+    private static Dictionary<string, JsonElement> AuthoredRow(
+        Guid project, string createdOn, Guid? createdByContact = null, Guid? sentBy = null)
+    {
+        var row = MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, createdOn);
+        row.Remove("_sprk_sentby_value");
+        row.Remove("_sprk_sentby_value@OData.Community.Display.V1.FormattedValue");
+        if (sentBy is { } systemUser)
+            row["_sprk_sentby_value"] = El(systemUser.ToString("D"));
+        if (createdByContact is { } contact)
+            row["_sprk_createdbycontact_value"] = El(contact.ToString("D"));
+        return row;
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ContactCaller_IsMine_IsTrueForOwnContactPost_FalseForAnotherContactsAndForASystemUsersPost(bool workforce)
+    {
+        var project = Guid.NewGuid();
+        var me = Guid.NewGuid();
+        var own = AuthoredRow(project, "2026-10-01T09:00:00Z", createdByContact: me);
+        var theirs = AuthoredRow(project, "2026-10-02T09:00:00Z", createdByContact: Guid.NewGuid());
+        var lawyers = AuthoredRow(project, "2026-10-03T09:00:00Z", sentBy: Guid.NewGuid());
+        var anonymous = AuthoredRow(project, "2026-10-04T09:00:00Z");
+        SetupMessages(own, theirs, lawyers, anonymous);
+        var caller = workforce ? WorkforceContact(project: project, contactId: me) : Ciam(project: project, contactId: me);
+
+        var messages = Messages(await Get("projects", project, caller));
+
+        messages.Select(m => m.IsMine).Should().Equal(true, false, false, false);
+    }
+
+    [Fact]
+    public async Task SystemUserCaller_IsMine_IsTrueForOwnMessage_FalseForAnotherUsersAndForAContactsPost()
+    {
+        var project = Guid.NewGuid();
+        var me = Guid.NewGuid();
+        _identity.Setup(i => i.IsExternalAsync(me, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        var caller = SystemUser(me, project);
+        var own = AuthoredRow(project, "2026-10-01T09:00:00Z", sentBy: me);
+        var colleagues = AuthoredRow(project, "2026-10-02T09:00:00Z", sentBy: Guid.NewGuid());
+        // A contact post whose contact id happens to equal the systemuser caller's LINKED contact id is still not theirs:
+        // the kind decides (a systemuser authors as its systemuser, exactly as the stamp does).
+        var linkedContactPost = AuthoredRow(project, "2026-10-03T09:00:00Z", createdByContact: caller.ContactId);
+        var partnersPost = AuthoredRow(project, "2026-10-04T09:00:00Z", createdByContact: Guid.NewGuid());
+        SetupMessages(own, colleagues, linkedContactPost, partnersPost);
+
+        var messages = Messages(await Get("projects", project, caller));
+
+        messages.Select(m => m.IsMine).Should().Equal(true, false, false, false);
+    }
+
+    [Fact]
+    public async Task IsMine_NeverExposesAContactOrSystemUserId()
+    {
+        var project = Guid.NewGuid();
+        var me = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        SetupMessages(AuthoredRow(project, "2026-10-01T09:00:00Z", createdByContact: me),
+            AuthoredRow(project, "2026-10-02T09:00:00Z", createdByContact: other));
+
+        var json = JsonSerializer.Serialize(Messages(await Get("projects", project, Ciam(project: project, contactId: me))));
+
+        json.Should().Contain("\"isMine\":true").And.Contain("\"isMine\":false");
+        json.Should().NotContain(me.ToString("D"), "the id is compared server-side and never returned")
+            .And.NotContain(other.ToString("D"))
+            .And.NotContainEquivalentOf("createdbycontact");
+    }
+
     // ── service requests: requester scope ──────────────────────────────────────────────────────────
 
     private Guid ServiceRequestRequestedBy(Guid requester)
@@ -630,7 +702,7 @@ public class ExternalMessageEndpointsTests
         var json = JsonSerializer.SerializeToElement(new ExternalMessageDto { SprkCommunicationid = Guid.NewGuid().ToString() });
 
         json.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
-            "sprk_communicationid", "sprk_subject", "sprk_body", "sprk_bodyformat", "sprk_direction", "sendername", "createdon");
+            "sprk_communicationid", "sprk_subject", "sprk_body", "sprk_bodyformat", "sprk_direction", "sendername", "createdon", "isMine");
     }
 
     [Fact]
@@ -654,7 +726,7 @@ public class ExternalMessageEndpointsTests
             .And.NotContain("someone@spaarke.test");
         using var doc = JsonDocument.Parse(json);
         doc.RootElement.GetProperty("value")[0].EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
-            "sprk_communicationid", "sprk_subject", "sprk_body", "sprk_bodyformat", "sprk_direction", "sendername", "createdon");
+            "sprk_communicationid", "sprk_subject", "sprk_body", "sprk_bodyformat", "sprk_direction", "sendername", "createdon", "isMine");
     }
 }
 
@@ -679,17 +751,41 @@ public class ExternalMessageRouteTests : IClassFixture<CustomWebAppFactory>
     public void MessagesRoute_IsMapped_ForEverySupportedRoot(string root)
     {
         EndpointTable.AssertMapped(_factory, "GET", $"/api/v1/external/{root}/{Guid.NewGuid()}/messages");
+        // Task 034 (FR-11): the post shares the path.
+        EndpointTable.AssertMapped(_factory, "POST", $"/api/v1/external/{root}/{Guid.NewGuid()}/messages");
     }
 
     [Fact]
-    public void MessagesRoute_IsReadOnly_AndRequiresAuthorization()
+    public void MessagesRoutes_AreGetAndPostOnly_AndEachRequiresAuthorization()
     {
-        EndpointTable.Maps(_factory, "POST", $"/api/v1/external/projects/{Guid.NewGuid()}/messages")
-            .Should().BeFalse("task 033 maps GET only; the write path is task 034");
+        EndpointTable.Maps(_factory, "PUT", $"/api/v1/external/projects/{Guid.NewGuid()}/messages").Should().BeFalse();
+        EndpointTable.Maps(_factory, "DELETE", $"/api/v1/external/projects/{Guid.NewGuid()}/messages")
+            .Should().BeFalse("messages are not deletable (owner, 2026-10-10)");
 
-        var endpoint = EndpointTable.Endpoints(_factory)
-            .Single(e => e.RoutePattern.RawText == "/api/v1/external/{root}/{id:guid}/messages");
-        endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Authorization.IAuthorizeData>()
-            .Should().NotBeEmpty("the route inherits the external collaboration group's authorization policy");
+        var endpoints = EndpointTable.Endpoints(_factory)
+            .Where(e => e.RoutePattern.RawText == "/api/v1/external/{root}/{id:guid}/messages")
+            .ToList();
+        endpoints.Should().HaveCount(2, "GET (task 033) and POST (task 034)");
+        endpoints.Should().AllSatisfy(endpoint =>
+            endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Authorization.IAuthorizeData>()
+                .Should().NotBeEmpty("each route inherits the external collaboration group's authorization policy"));
+    }
+
+    [Fact]
+    public void PostRoute_IsRateLimited_OnAPerUserPolicy()
+    {
+        // The write path carries a per-user throttle. "dataverse-query" partitions on CallerResolution.ResolveOpaqueCallerKey
+        // (oid in either form, then sub / NameIdentifier) - claims a CIAM token carries - and falls back to the IP, so a
+        // CIAM caller is throttled per user, not per shared bucket.
+        var endpoints = EndpointTable.Endpoints(_factory)
+            .Where(e => e.RoutePattern.RawText == "/api/v1/external/{root}/{id:guid}/messages")
+            .ToList();
+        var post = endpoints.Single(e => e.Metadata.GetMetadata<Microsoft.AspNetCore.Routing.IHttpMethodMetadata>()!
+            .HttpMethods.Contains("POST"));
+
+        post.Metadata.GetMetadata<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()
+            .Should().NotBeNull("the external write path is throttled")
+            .And.Subject.As<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()
+            .PolicyName.Should().Be("dataverse-query");
     }
 }

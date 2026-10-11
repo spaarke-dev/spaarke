@@ -570,6 +570,35 @@ public class ExternalDataService
             body[CreatedByContactBindKey] = $"/contacts({contactId!.Value:D})";
     }
 
+    /// <summary>The <c>sprk_createdbycontact</c> (→ contact) lookup's logical name: what an SDK create payload sets.</summary>
+    internal const string CreatedByContactColumn = "sprk_createdbycontact";
+
+    /// <summary>
+    /// <see cref="StampCreator(IDictionary{string, object?}, CallerPrincipal)"/> for an SDK create payload — the external
+    /// message post (task 034, FR-11) creates its <c>sprk_communication</c> through <c>CommunicationService</c>'s SDK
+    /// writer. The same decision, the same strip of every creator column already on the row, and exactly one stamp:
+    /// <c>sprk_createdbyperson</c> (a systemuser principal) or <c>sprk_createdbycontact</c> (a contact principal).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The principal is not attributable; the row is left untouched.</exception>
+    internal static void StampCreator(Microsoft.Xrm.Sdk.Entity row, CallerPrincipal creator)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(creator);
+
+        // Decide first, so a refusal leaves the row untouched.
+        EnsureCanStampCreator(creator);
+        Guid? systemUserId = creator.SystemUserId;
+        Guid? contactId = systemUserId is null ? creator.ContactId : null;
+
+        foreach (var key in row.Attributes.Keys.Where(NamesCreatorColumn).ToList())
+            row.Attributes.Remove(key);
+
+        if (systemUserId is { } person)
+            Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Stamp(row, person);
+        else
+            row[CreatedByContactColumn] = new Microsoft.Xrm.Sdk.EntityReference("contact", contactId!.Value);
+    }
+
     /// <summary>Whether <paramref name="creator"/> is attributable: a systemuser (non-empty id) or a contact principal.
     /// The one rule <see cref="StampCreator"/> enforces; routes call it to refuse an unattributable caller BEFORE any
     /// side effect (the upload route's SPE write) rather than after.</summary>

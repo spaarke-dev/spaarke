@@ -144,9 +144,10 @@ public class RecordOwnerAssignmentCensusTests
             "The mapper builds the mirrored analysis row; DataverseObservationMirror resolves its owner from the row's "
             + "parent lookups (ForChild) and skips the mirror on a refusal.",
             OwnerFile: "DataverseObservationMirror.cs"),
-        new CensusEntry("CommunicationService.cs", "sprk_communication", 3, Disposition.Routed,
-            "Outbound email, message and shared sends: ForChild over every parent lookup on the row (secure-if-any); an "
-            + "unfiled send keeps its creator (E1); a refusal throws before the create."),
+        new CensusEntry("CommunicationService.cs", "sprk_communication", 4, Disposition.Routed,
+            "Outbound email, message and shared sends, and the external thread post (spaarke-SPA-external-access-platform-r3 "
+            + "task 034, PostToRecordThreadAsync): ForChild over every parent lookup on the row (secure-if-any); an unfiled "
+            + "send keeps its creator (E1); a refusal throws before the create."),
         new CensusEntry("CommunicationService.cs", "sprk_document", 3, Disposition.Routed,
             "Archived .eml and attachment documents — content of the communication (ContentOf), resolved before the SPE "
             + "upload so a refusal leaves neither bytes nor a row."),
@@ -1830,6 +1831,8 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateEmailArtifactAsync", "seam: maps CreatedByPersonId"),
         // R3 task 030 (FR-25): the external portal stamps its resolved principal (systemuser -> sprk_createdbyperson, contact -> sprk_createdbycontact).
         new PersonBearingWriter("ExternalDataService.cs", "StampCreator", "the resolved external principal"),
+        // R3 task 034 (FR-11): the external thread post stamps its resolved author (StampCreator) on the sprk_communication it creates.
+        new PersonBearingWriter("CommunicationService.cs", "PostToRecordThreadAsync", "the external-plane author (StampCreator)"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", "seam: maps CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "BuildCreateEventPayload", "seam: binds CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "CreateEventLogAsync", "seam: binds createdByPersonId"),
@@ -1856,7 +1859,7 @@ public class RecordOwnerAssignmentCensusTests
     };
 
     private static readonly Regex PersonToken = new(
-        @"\b(?:RequestedBy|requestedBy|RequestedBySystemUserId|RecordRequester|CreatedByPerson|CreatedByPersonId|createdByPersonId|createdByPerson|StampCreatorOn|RecordCreatorPerson|RecordCreatorPersonColumn|SecureExitCaller)\b",
+        @"\b(?:RequestedBy|requestedBy|RequestedBySystemUserId|RecordRequester|CreatedByPerson|CreatedByPersonId|createdByPersonId|createdByPerson|StampCreatorOn|RecordCreatorPerson|RecordCreatorPersonColumn|SecureExitCaller|StampCreator|EnsureCanStampCreator)\b",
         RegexOptions.Compiled);
 
     [Fact(DisplayName = "Task 146 c1-r1: every child table a census create writes carries the creator-person column, inside the codified set")]

@@ -23,6 +23,15 @@
 // parsing and the SAME shared internal-only filter, not a fork. Internal-only messages reach only an internal systemuser
 // principal; a CIAM contact and a workforce contact never receive them. Every returned row is re-checked against the
 // gated record there. The response is an explicit allow-list DTO (ExternalMessageDto), newest last.
+//
+// Task 034 (FR-11) — POST /api/v1/external/{root}/{id}/messages posts a message to the same record's thread as the caller.
+// Same group, same roots, same record gate (so the 403 is the same, with no existence oracle), PLUS Create on the record:
+// projects / matters / workassignments → the caller's rights on that root; invoices → Create on a parent root the invoice
+// is filed under; servicerequests → the requester (the gate's requester scope) may answer on their own request. A
+// ViewOnly caller can read the thread but gets 403 insufficient_rights on a post. The body is the text only (≤ 10,000
+// chars, stored as PLAIN TEXT so markup is never rendered), attachments are 400, the sender is the resolved principal
+// (an unattributable one is 403 before any read), and the write is CommunicationService.PostToRecordThreadAsync: one
+// app-only sprk_communication through the shared filing step — no email, no Graph, no OBO, never internal-only.
 
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -43,6 +52,18 @@ public static class ExternalMessageEndpoints
 
     /// <summary>Error code for a root segment that has no message thread on this surface.</summary>
     public const string ErrorRootNotSupported = "EXT_MESSAGES_ROOT_NOT_SUPPORTED";
+
+    /// <summary>Deny code for a post by a caller who can read the record but holds no Create on it (e.g. ViewOnly).</summary>
+    public const string DenyInsufficientRights = "sdap.access.deny.insufficient_rights";
+
+    /// <summary>Deny code for a post by a principal that is neither a systemuser nor a contact (no sender to stamp).</summary>
+    public const string DenySenderUnattributable = "sdap.external.messages.sender_unattributable";
+
+    /// <summary>Error code for a post body that is missing, blank or too long.</summary>
+    public const string ErrorInvalidBody = "EXT_MESSAGES_INVALID_BODY";
+
+    /// <summary>Error code for a post that carries attachments (FR-11: thread posts have none).</summary>
+    public const string ErrorAttachmentsNotSupported = "EXT_MESSAGES_ATTACHMENTS_NOT_SUPPORTED";
 
     /// <summary>One supported root segment: the Dataverse entity it names (also the regarding family member).</summary>
     internal sealed record MessageRoot(string Segment, string EntityLogicalName);
@@ -82,8 +103,183 @@ public static class ExternalMessageEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
+        // POST /api/v1/external/{root}/{id}/messages — post to the record's thread as the caller (task 034, FR-11).
+        externalGroup.MapPost("/{root}/{id:guid}/messages", PostMessageAsync)
+            .WithName("PostExternalRecordMessage")
+            .WithSummary("Post a message to the thread of a record the caller can access")
+            .WithDescription(
+                "Posts a plain-text message (sprk_body, at most 10,000 characters, no attachments) to the thread of a " +
+                "project, matter, work assignment, invoice or (own) service request, as the caller. No email is sent. 403 " +
+                "unless the record is in the caller's accessible set with Create (service requests: the caller's own); 404 " +
+                "for any other root.")
+            // A write path: per-user throttle on the caller key (oid/sub, present on a CIAM token as on a workforce one).
+            .RequireRateLimiting("dataverse-query")
+            .Accepts<PostExternalMessageRequest>("application/json")
+            .Produces<ExternalMessageDto>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status502BadGateway);
+
         return externalGroup;
     }
+
+    private static Task<IResult> PostMessageAsync(
+        string root,
+        Guid id,
+        PostExternalMessageRequest? request,
+        HttpContext httpContext,
+        ExternalModuleRegistry registry,
+        RecordService recordService,
+        CommunicationService communicationService,
+        ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        if (httpContext.Items[CallerPrincipal.HttpContextItemsKey] is not CallerPrincipal principal)
+        {
+            return Task.FromResult(Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "Authentication context not available — ensure AddCallerPrincipalAuthorizationFilter is applied"));
+        }
+
+        return PostMessageCoreAsync(
+            root, id, request, principal, registry, recordService.GetRecordAsync, communicationService, logger, ct);
+    }
+
+    /// <summary>
+    /// The message post pipeline (task 034, FR-11): root lookup → request validation → attributable sender → record gate
+    /// with Create (<see cref="GetRecordRightsAsync"/>) → <see cref="CommunicationService.PostToRecordThreadAsync"/>.
+    /// Nothing is read before the request and the sender are known to be valid, and nothing is written unless the gate
+    /// granted Create. Separated from the route handler, as the read is, so it can be driven with a test double for
+    /// <paramref name="readRecord"/>.
+    /// </summary>
+    internal static async Task<IResult> PostMessageCoreAsync(
+        string root,
+        Guid id,
+        PostExternalMessageRequest? request,
+        CallerPrincipal principal,
+        ExternalModuleRegistry registry,
+        Func<string, Guid, string[]?, CancellationToken, Task<IReadOnlyDictionary<string, object?>>> readRecord,
+        CommunicationService communicationService,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(root) || !Roots.TryGetValue(root, out var messageRoot))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status404NotFound, title: "Not Found",
+                detail: "Messages are not available for this kind of record.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorRootNotSupported });
+        }
+
+        // FR-11: no attachments. A property that names one is refused, not dropped, so the caller is not told it was sent.
+        if (request?.Other?.Keys.FirstOrDefault(NamesAttachment) is { } attachmentKey)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest, title: "Bad Request",
+                detail: $"Messages cannot carry attachments ('{attachmentKey}').",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorAttachmentsNotSupported });
+        }
+
+        var body = request?.SprkBody;
+        if (string.IsNullOrWhiteSpace(body) || body.Length > CommunicationService.MaxThreadPostBodyLength)
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest, title: "Bad Request",
+                detail: $"sprk_body is required and may be at most {CommunicationService.MaxThreadPostBodyLength} characters.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorInvalidBody });
+        }
+
+        // FR-11/FR-25: the sender is the resolved principal. One that cannot be stamped is refused before any read.
+        if (!ExternalDataService.CanStampCreator(principal))
+        {
+            logger.LogWarning(
+                "[EXT-MESSAGES] Refused post to {Entity} {RecordId}: the caller resolves to neither a systemuser nor a contact.",
+                messageRoot.EntityLogicalName, id);
+            return ProblemDetailsHelper.Forbidden(
+                DenySenderUnattributable, "Your identity could not be attributed, so the message cannot be posted.");
+        }
+
+        try
+        {
+            var rights = await GetRecordRightsAsync(messageRoot, id, principal, registry, readRecord, logger, ct)
+                .ConfigureAwait(false);
+
+            if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
+            {
+                logger.LogWarning(
+                    "[EXT-MESSAGES] DENY post on {Entity} {RecordId} for contact {ContactId} / systemuser {SystemUserId}: not in " +
+                    "the caller's accessible set (or absent).",
+                    messageRoot.EntityLogicalName, id, principal.ContactId, principal.SystemUserId);
+                return ProblemDetailsHelper.Forbidden(DenyRecordNotAccessible);
+            }
+
+            if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
+            {
+                logger.LogWarning(
+                    "[EXT-MESSAGES] DENY post on {Entity} {RecordId} for contact {ContactId} / systemuser {SystemUserId}: the " +
+                    "access level lacks Create.",
+                    messageRoot.EntityLogicalName, id, principal.ContactId, principal.SystemUserId);
+                return ProblemDetailsHelper.Forbidden(
+                    DenyInsufficientRights, "Your access level does not permit posting messages on this record.");
+            }
+
+            var posted = await communicationService
+                .PostToRecordThreadAsync(messageRoot.EntityLogicalName, id, body, principal, ct)
+                .ConfigureAwait(false);
+
+            return Results.Created(
+                $"/api/v1/external/{messageRoot.Segment}/{id:D}/messages",
+                new ExternalMessageDto
+                {
+                    SprkCommunicationid = posted.CommunicationId.ToString("D"),
+                    SprkSubject = posted.Subject,
+                    SprkBody = posted.Body,
+                    SprkBodyformat = (int)posted.BodyFormat,
+                    SprkDirection = (int)posted.Direction,
+                    // The display name is Dataverse's (the stamped lookup's name); the thread read returns it.
+                    SenderName = null,
+                    Createdon = posted.PostedAt,
+                    // The caller is, by construction, the author of the row just created.
+                    IsMine = true,
+                });
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException ex)
+        {
+            // The shared filing step's own answers: 409 owner refusal, 502 core-ancestor failure, 400 validation.
+            logger.LogWarning(ex, "[EXT-MESSAGES] Post on {Entity} {RecordId} refused by the communication pipeline ({Code}).",
+                messageRoot.EntityLogicalName, id, ex.Code);
+            return Results.Problem(statusCode: ex.StatusCode, title: ex.Title, detail: ex.Detail,
+                extensions: new Dictionary<string, object?> { ["errorCode"] = ex.Code });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[EXT-MESSAGES] Record gate or message post failed for {Entity} {RecordId}.",
+                messageRoot.EntityLogicalName, id);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError, title: "Internal Server Error",
+                detail: "An unexpected error occurred posting the message.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = "EXT_MESSAGES_INTERNAL_ERROR" });
+        }
+    }
+
+    /// <summary>Whether a request property names an attachment (any casing): <c>attachments</c>,
+    /// <c>attachmentDocumentIds</c>, <c>sprk_hasattachments</c>, <c>files</c> …</summary>
+    internal static bool NamesAttachment(string? key) =>
+        !string.IsNullOrWhiteSpace(key)
+        && (key.Contains("attach", StringComparison.OrdinalIgnoreCase)
+            || key.Trim().Equals("file", StringComparison.OrdinalIgnoreCase)
+            || key.Trim().Equals("files", StringComparison.OrdinalIgnoreCase));
 
     private static Task<IResult> GetMessagesAsync(
         string root,
@@ -154,7 +350,7 @@ public static class ExternalMessageEndpoints
 
             return Results.Ok(new ExternalCollectionResponse<ExternalMessageDto>
             {
-                Value = read.Messages.Select(ToExternalDto).ToList(),
+                Value = read.Messages.Select(m => ToExternalDto(m, principal)).ToList(),
                 Truncated = read.Truncated,
             });
         }
@@ -192,30 +388,109 @@ public static class ExternalMessageEndpoints
         ExternalModuleRegistry registry,
         Func<string, Guid, string[]?, CancellationToken, Task<IReadOnlyDictionary<string, object?>>> readRecord,
         ILogger logger,
+        CancellationToken ct) =>
+        (await EvaluateRecordGateAsync(root, id, principal, registry, readRecord, logger, ct).ConfigureAwait(false))
+            .Readable;
+
+    /// <summary>
+    /// The caller's rights on the record for a POST (task 034): <see cref="Spaarke.Dataverse.AccessRights.None"/> unless
+    /// the read gate (<see cref="IsRootRecordReadableAsync"/>, the same evaluation) admits it; then:
+    /// <list type="bullet">
+    /// <item>project / matter / work assignment — the caller's stored rights on that root
+    /// (<see cref="CallerPrincipal.RightsOn"/>, the dispatch the to-do and document routes use);</item>
+    /// <item>invoice — the union of the caller's rights on the parent roots the invoice is filed under (the lookups the
+    /// gate read), so Create on any parent the caller can reach admits a post, as Read on any admits the read;</item>
+    /// <item>service request — Read and Create: the gate's requester scope is the caller's own request, and FR-11 lets the
+    /// requester answer on it (the same answer the service-request document routes give).</item>
+    /// </list>
+    /// </summary>
+    internal static async Task<Spaarke.Dataverse.AccessRights> GetRecordRightsAsync(
+        MessageRoot root,
+        Guid id,
+        CallerPrincipal principal,
+        ExternalModuleRegistry registry,
+        Func<string, Guid, string[]?, CancellationToken, Task<IReadOnlyDictionary<string, object?>>> readRecord,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var (readable, scopeRow) = await EvaluateRecordGateAsync(root, id, principal, registry, readRecord, logger, ct)
+            .ConfigureAwait(false);
+        if (!readable)
+        {
+            return Spaarke.Dataverse.AccessRights.None;
+        }
+
+        return root.EntityLogicalName switch
+        {
+            "sprk_project" => principal.RightsOn(ExternalGrantRootType.Project, id),
+            "sprk_matter" => principal.RightsOn(ExternalGrantRootType.Matter, id),
+            "sprk_workassignment" => principal.RightsOn(ExternalGrantRootType.WorkAssignment, id),
+            "sprk_invoice" => RightsThroughParents(principal, scopeRow),
+            "sprk_servicerequest" => Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Create,
+            _ => Spaarke.Dataverse.AccessRights.None,
+        };
+    }
+
+    /// <summary>The caller's rights on an invoice: the union over its parent roots (<c>sprk_matter</c>,
+    /// <c>sprk_project</c>) as the gate read them; <see cref="Spaarke.Dataverse.AccessRights.None"/> with none.</summary>
+    private static Spaarke.Dataverse.AccessRights RightsThroughParents(
+        CallerPrincipal principal, IReadOnlyDictionary<string, object?>? scopeRow)
+    {
+        var rights = Spaarke.Dataverse.AccessRights.None;
+        if (scopeRow is null)
+        {
+            return rights;
+        }
+
+        if (scopeRow.TryGetValue("sprk_matter", out var matter) && matter is Guid matterId)
+        {
+            rights |= principal.RightsOn(ExternalGrantRootType.Matter, matterId);
+        }
+
+        if (scopeRow.TryGetValue("sprk_project", out var project) && project is Guid projectId)
+        {
+            rights |= principal.RightsOn(ExternalGrantRootType.Project, projectId);
+        }
+
+        return rights;
+    }
+
+    /// <summary>
+    /// The one record-gate evaluation behind <see cref="IsRootRecordReadableAsync"/> and <see cref="GetRecordRightsAsync"/>:
+    /// whether the record is readable, and — for a child or requester-scoped root — the scope row the module predicate was
+    /// applied to (the record's scope attributes, read app-only). <c>ScopeRow</c> is null for a root module.
+    /// </summary>
+    private static async Task<(bool Readable, IReadOnlyDictionary<string, object?>? ScopeRow)> EvaluateRecordGateAsync(
+        MessageRoot root,
+        Guid id,
+        CallerPrincipal principal,
+        ExternalModuleRegistry registry,
+        Func<string, Guid, string[]?, CancellationToken, Task<IReadOnlyDictionary<string, object?>>> readRecord,
+        ILogger logger,
         CancellationToken ct)
     {
         if (id == Guid.Empty)
         {
-            return false;
+            return (false, null);
         }
 
         var module = registry.FindByEntity(root.EntityLogicalName);
         if (module is null)
         {
             logger.LogWarning("[EXT-MESSAGES] No external module is registered for {Entity}; refusing.", root.EntityLogicalName);
-            return false;
+            return (false, null);
         }
 
         var dimensions = module.EffectiveDimensions;
         var primaryIdAttribute = root.EntityLogicalName + "id";
         if (dimensions.All(d => string.Equals(d.Attribute, primaryIdAttribute, StringComparison.OrdinalIgnoreCase)))
         {
-            return module.IsRecordAccessible(principal, id);
+            return (module.IsRecordAccessible(principal, id), null);
         }
 
         if (dimensions.All(d => d.AccessibleIds(principal).Count == 0))
         {
-            return false;
+            return (false, null);
         }
 
         IReadOnlyDictionary<string, object?> record;
@@ -227,7 +502,7 @@ public static class ExternalMessageEndpoints
         }
         catch (RecordNotFoundException)
         {
-            return false;
+            return (false, null);
         }
 
         var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
@@ -242,7 +517,7 @@ public static class ExternalMessageEndpoints
             }
         }
 
-        return module.ScopeRows(principal, new[] { row }).Count > 0;
+        return (module.ScopeRows(principal, new[] { row }).Count > 0, row);
     }
 
     /// <summary>
@@ -256,7 +531,18 @@ public static class ExternalMessageEndpoints
         _ => null,
     };
 
-    private static ExternalMessageDto ToExternalDto(ThreadMessageDto message) => new()
+    /// <summary>
+    /// Whether <paramref name="principal"/> authored <paramref name="message"/>, decided by the same rule the post stamp
+    /// uses (<see cref="ExternalDataService.StampCreator(Microsoft.Xrm.Sdk.Entity, CallerPrincipal)"/>): a systemuser
+    /// principal authors as its systemuser (<c>sprk_sentby</c>), any other as its contact
+    /// (<c>sprk_createdbycontact</c>). An empty id never matches.
+    /// </summary>
+    internal static bool IsAuthoredBy(ThreadMessageDto message, CallerPrincipal principal) =>
+        principal.SystemUserId is { } systemUserId
+            ? systemUserId != Guid.Empty && message.SentBy == systemUserId
+            : principal.ContactId is { } contactId && contactId != Guid.Empty && message.CreatedByContactId == contactId;
+
+    private static ExternalMessageDto ToExternalDto(ThreadMessageDto message, CallerPrincipal principal) => new()
     {
         SprkCommunicationid = message.MessageId.ToString("D"),
         SprkSubject = message.Subject,
@@ -265,5 +551,6 @@ public static class ExternalMessageEndpoints
         SprkDirection = message.Direction,
         SenderName = message.SentByName,
         Createdon = message.CreatedOn,
+        IsMine = IsAuthoredBy(message, principal),
     };
 }

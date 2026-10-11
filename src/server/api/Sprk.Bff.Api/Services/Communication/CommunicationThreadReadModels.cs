@@ -47,6 +47,11 @@ public sealed record ThreadAttachmentRef(
 /// decision 2026-07-16), NOT by this flag — so surfacing it on a row the caller is already permitted to read cannot
 /// imply access anyone lacks. Defaults to <c>false</c> when unset.
 /// </param>
+/// <param name="CreatedByContactId">
+/// <c>_sprk_createdbycontact_value</c> (spaarke-SPA-external-access-platform-r3 task 034): the contact who authored an
+/// external-plane post; null for every other row. Server-side only (<c>JsonIgnore</c>, so the internal thread wire
+/// contract is unchanged) — the external endpoint turns it into a boolean <c>isMine</c> and never exposes the id.
+/// </param>
 public sealed record ThreadMessageDto(
     Guid MessageId,
     string? Body,
@@ -64,7 +69,8 @@ public sealed record ThreadMessageDto(
     int Privilege,
     bool IsInternalOnly,
     bool IsPrivate,
-    IReadOnlyList<ThreadAttachmentRef> Attachments);
+    IReadOnlyList<ThreadAttachmentRef> Attachments,
+    [property: System.Text.Json.Serialization.JsonIgnore] Guid? CreatedByContactId = null);
 
 /// <summary>
 /// Thread-read endpoint result: the access-filtered, ordered message list for a thread (task 050 / FR-11).
