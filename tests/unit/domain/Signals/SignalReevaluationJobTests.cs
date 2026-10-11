@@ -1000,6 +1000,232 @@ public class SignalReevaluationJobTests
         hit.Core!.TypeRefId, hit.Core.IsNoCore ? null : hit.Core.Id, hit.Core.NoCoreOwner ?? new EntityReference("systemuser", UserId));
 
     /// <summary>The real job, evaluator, writer, validator and core-ancestor resolver over the in-memory seams.</summary>
+    // =====================================================================================
+    // Task 033: closure semantics (FR-16; D-13, D-14, D-22, D-32, D-34)
+    // =====================================================================================
+
+    private static void AssertSystemClosure(Entity row, int resolution)
+    {
+        row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value.Should().Be(SignalWriter.SignalStatusResolved);
+        row.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value.Should().Be(resolution);
+        row.GetAttributeValue<DateTime?>("sprk_resolvedon").Should().NotBeNull("closing stamps sprk_resolvedon");
+        row.Contains("sprk_resolvedby").Should().BeFalse("no human acted");
+        row.Contains("sprk_decisionrecord").Should().BeFalse("a system closure has no Decision Record");
+        row.Contains("sprk_suppresseduntil").Should().BeFalse("an auto-closure never feeds suppression");
+    }
+
+    [Fact]
+    public async Task Run_CommunicationAgedOutOfTheWindow_ClosesConditionCleared_AndTheWindowIsInTheQuery()
+    {
+        // The only communication is older than 30 days, so the rule's window excludes it: no hit (the fake returns the rows
+        // the FetchXML filter would keep, i.e. none). The window bound itself is asserted on the query text.
+        var h = new Harness().WithPathBPolicy();
+        var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        AssertSystemClosure(h.Org.Rows[id], SignalWriter.ResolutionConditionCleared);
+        h.Sysadmin.Fetches.Should().Contain(f => f.Contains("sprk_receiveddate") && f.Contains("2026-09-10"),
+            "now-30d is evaluated against the run time (2026-10-10), so an older communication does not match");
+    }
+
+    [Fact]
+    public async Task Run_OpenSignalCitingASupersededVersion_ClosesSuperseded_AndTheNewVersionReRaisesTheSubject()
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
+        var v1 = h.Sysadmin.CurrentVersionOf(PolicyCode);
+        var v1Signal = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: policyId, versionId: v1);
+        var v2 = h.Sysadmin.PublishNewVersion(PolicyCode, PathBBody, PathBTemplate);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        AssertSystemClosure(h.Org.Rows[v1Signal], SignalWriter.ResolutionSuperseded);
+        var created = h.Org.CreatedPayloads.Should().ContainSingle("the new version still holds for the subject").Subject;
+        created.GetAttributeValue<string>("sprk_dedupekey").Should().EndWith("|2", "a new episode, FR-03");
+        created.GetAttributeValue<EntityReference>("sprk_policyversion")!.Id.Should().Be(v2, "the new episode cites the new version");
+        result.ResultJson.Should().Contain("\"supersededClosed\":1").And.Contain("\"reraised\":1");
+    }
+
+    [Fact]
+    public async Task Run_SupersededSignalWhoseSubjectTheNewVersionNoLongerHolds_StaysSuperseded_AndRaisesNothing()
+    {
+        var h = new Harness().WithPathBPolicy(); // no hit under v2
+        var v1Signal = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: h.Sysadmin.PolicyIdOf(PolicyCode), versionId: h.Sysadmin.CurrentVersionOf(PolicyCode));
+        h.Sysadmin.PublishNewVersion(PolicyCode, PathBBody, PathBTemplate);
+
+        await h.RunAsync();
+
+        AssertSystemClosure(h.Org.Rows[v1Signal], SignalWriter.ResolutionSuperseded);
+        h.Org.CreateCalls.Should().Be(0);
+        h.Org.ConditionalUpdates.Should().ContainSingle("closed once, as Superseded, not again as ConditionCleared");
+    }
+
+    [Fact]
+    public async Task CloseSupersededAsync_Callable_ClosesOnlyTheOldVersionsOpenSignals_AndNeverAResolvedOne()
+    {
+        var h = new Harness().WithPathBPolicy();
+        var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
+        var v1 = h.Sysadmin.CurrentVersionOf(PolicyCode);
+        var openOld = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: policyId, versionId: v1);
+        var actedOld = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", OtherMatterId, 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionActed, resolvedOn: RunAt.UtcDateTime.AddDays(-2), coreId: OtherMatterId,
+            policyId: policyId, versionId: v1);
+        var v2 = h.Sysadmin.PublishNewVersion(PolicyCode, PathBBody, PathBTemplate);
+        var openNew = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", Guid.NewGuid(), 1), SignalWriter.SignalStatusOpen,
+            policyId: policyId, versionId: v2);
+
+        var outcome = await h.Closure.CloseSupersededAsync(policyId);
+
+        outcome.Should().Be(new SignalClosureOutcome(1, 0, 0));
+        AssertSystemClosure(h.Org.Rows[openOld], SignalWriter.ResolutionSuperseded);
+        h.Org.Rows[actedOld].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value.Should().Be(SignalWriter.ResolutionActed);
+        h.Org.Rows[openNew].GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value.Should().Be(SignalWriter.SignalStatusOpen);
+        h.Org.ConditionalUpdates.Should().ContainSingle();
+        h.Org.CreateCalls.Should().Be(0, "the callable closes only; the job raises the new episode");
+    }
+
+    [Fact]
+    public async Task Run_PolicySwitchedOff_ClosesItsOpenSignalsPolicyRetired_AtThePass_AndLeavesResolvedOnesAlone()
+    {
+        var h = new Harness().WithPathBPolicy(enabled: false).WithMatterHit(MatterId);
+        var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
+        var version = h.Sysadmin.CurrentVersionOf(PolicyCode);
+        var open = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: policyId, versionId: version);
+        var acknowledged = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", OtherMatterId, 1), SignalWriter.SignalStatusAcknowledged,
+            coreId: OtherMatterId, policyId: policyId, versionId: version);
+        var acted = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", Guid.NewGuid(), 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionActed, resolvedOn: RunAt.UtcDateTime.AddDays(-1), policyId: policyId, versionId: version);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        AssertSystemClosure(h.Org.Rows[open], SignalWriter.ResolutionPolicyRetired);
+        AssertSystemClosure(h.Org.Rows[acknowledged], SignalWriter.ResolutionPolicyRetired);
+        h.Org.Rows[acted].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value
+            .Should().Be(SignalWriter.ResolutionActed, "no closure path touches a Resolved Signal");
+        h.Org.ConditionalUpdates.Should().HaveCount(2);
+        h.Org.CreateCalls.Should().Be(0, "an Off policy is not evaluated, so nothing is raised");
+        result.ResultJson.Should().Contain("\"policyRetiredClosed\":2");
+    }
+
+    [Fact]
+    public async Task Run_RetiredPolicy_ClosesItsOpenSignalsPolicyRetired()
+    {
+        var h = new Harness().WithPathBPolicy();
+        h.Sysadmin.SetPolicyState(PolicyCode, enabled: true, statecode: 1); // Retired: Inactive
+        var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: h.Sysadmin.PolicyIdOf(PolicyCode), versionId: h.Sysadmin.CurrentVersionOf(PolicyCode));
+
+        await h.RunAsync();
+
+        AssertSystemClosure(h.Org.Rows[id], SignalWriter.ResolutionPolicyRetired);
+    }
+
+    [Fact]
+    public async Task ClosePolicyRetiredNowAsync_ClosesOpenSignalsImmediately_NoPassNeeded()
+    {
+        var h = new Harness().WithPathBPolicy();
+        var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
+        var version = h.Sysadmin.CurrentVersionOf(PolicyCode);
+        var open = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: policyId, versionId: version);
+        var acted = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", OtherMatterId, 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionActed, resolvedOn: RunAt.UtcDateTime.AddDays(-1), policyId: policyId, versionId: version);
+
+        var outcome = await h.Closure.ClosePolicyRetiredNowAsync(policyId);
+
+        outcome.Should().Be(new SignalClosureOutcome(1, 0, 0));
+        AssertSystemClosure(h.Org.Rows[open], SignalWriter.ResolutionPolicyRetired);
+        h.Org.Rows[acted].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value.Should().Be(SignalWriter.ResolutionActed);
+        (await h.Closure.ClosePolicyRetiredNowAsync(policyId)).Should().Be(SignalClosureOutcome.None, "idempotent: a second call writes nothing");
+    }
+
+    [Fact]
+    public async Task Run_PolicySwitchedOffThenOn_ReRaisesStillTrueSubjects_AndLeavesThePolicyRetiredSignalUnchanged()
+    {
+        var h = new Harness().WithPathBPolicy(enabled: false).WithMatterHit(MatterId);
+        var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
+        var old = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: policyId, versionId: h.Sysadmin.CurrentVersionOf(PolicyCode));
+        await h.RunAsync(); // Off: closed PolicyRetired
+        AssertSystemClosure(h.Org.Rows[old], SignalWriter.ResolutionPolicyRetired);
+        var closedAs = h.Org.Rows[old].Attributes.ToDictionary(a => a.Key, a => a.Value);
+        h.Org.ResetCounts();
+
+        h.Sysadmin.SetPolicyState(PolicyCode, enabled: true); // On again
+        h.Clock.Advance(TimeSpan.FromDays(1));
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        h.Org.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_dedupekey").Should().EndWith("|2", "D-32");
+        h.Org.Updates.Should().BeEmpty();
+        h.Org.ConditionalUpdates.Should().BeEmpty("the PolicyRetired Signal is not touched again");
+        h.Org.Rows[old].Attributes.ToDictionary(a => a.Key, a => a.Value).Should().BeEquivalentTo(closedAs);
+    }
+
+    [Fact]
+    public async Task Run_ASignalAPersonResolvedBeforeAnOffClosure_IsNotClosed()
+    {
+        var h = new Harness().WithPathBPolicy(enabled: false);
+        var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: h.Sysadmin.PolicyIdOf(PolicyCode), versionId: h.Sysadmin.CurrentVersionOf(PolicyCode));
+        h.Org.ResolveByPersonBeforeConditionalUpdate.Add(id);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        result.ResultJson.Should().Contain("\"changedSinceRead\":1").And.Contain("\"closed\":0");
+        h.Org.Rows[id].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value.Should().Be(SignalWriter.ResolutionDismissed);
+    }
+
+    [Fact]
+    public async Task Run_AutoClosuresOfProjectGroupedSignals_NeverCountAsADismissal_ForThePolicyProjectGrain()
+    {
+        // Superseded and ConditionCleared closures of Signals grouped under a project: none is Dismissed and none sets
+        // sprk_suppresseduntil, so a later hit on the same (policy, project) is not suppressed (D-34).
+        var h = new Harness().WithPathBPolicy();
+        var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
+        var v1 = h.Sysadmin.CurrentVersionOf(PolicyCode);
+        var ids = new[] { Guid.NewGuid(), Guid.NewGuid() }
+            .Select(todo => h.Org.SeedSignal(Key(PolicyCode, "sprk_todo", todo, 1), SignalWriter.SignalStatusOpen, policyId: policyId, versionId: v1))
+            .ToArray();
+        foreach (var id in ids)
+        {
+            h.Org.Rows[id]["sprk_corerecordtype"] = new EntityReference("sprk_recordtype_ref", ProjectType);
+            h.Org.Rows[id]["sprk_corerecordid"] = Lower(ProjectId);
+        }
+
+        h.Sysadmin.PublishNewVersion(PolicyCode, PathBBody, PathBTemplate);
+        // ids[1] now cites the current version and is not a hit (ConditionCleared); ids[0] still cites v1 (Superseded).
+        h.Org.Rows[ids[1]]["sprk_policyversion"] = new EntityReference("sprk_policyversion", h.Sysadmin.CurrentVersionOf(PolicyCode));
+        await h.RunAsync();
+
+        h.Org.Rows[ids[0]].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value.Should().Be(SignalWriter.ResolutionSuperseded);
+        h.Org.Rows[ids[1]].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value.Should().Be(SignalWriter.ResolutionConditionCleared);
+        h.Org.Rows.Values.Count(r => r.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value == SignalWriter.ResolutionDismissed)
+            .Should().Be(0, "an auto-closure is never recorded as a dismissal");
+        h.Org.Rows.Values.Should().OnlyContain(r => !r.Contains("sprk_suppresseduntil"));
+
+        var hit = TodoHit(Guid.NewGuid(), due: new DateTime(2026, 10, 1), project: ProjectId);
+        var closed = ids.Select(id => PlannerView(h.Org.Rows[id])).ToArray();
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDo, 14, RunAt, new[] { hit }, closed)
+            .Creates.Should().ContainSingle("no Signal of the (policy, project) grain is suppressed by auto-closures");
+    }
+
+    private static ExistingSignal PlannerView(Entity row) => new(
+        row.Id, null, "sprk_todo", Guid.NewGuid(), 1,
+        row.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value, row.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value,
+        row.GetAttributeValue<DateTime?>("sprk_resolvedon"), row.GetAttributeValue<DateTime?>("sprk_suppresseduntil"), null,
+        row.GetAttributeValue<EntityReference>("sprk_corerecordtype")?.Id,
+        Guid.TryParse(row.GetAttributeValue<string>("sprk_corerecordid"), out var c) ? c : null, null);
+
     private sealed class Harness
     {
         public FakeTimeProvider Clock { get; }
@@ -1011,6 +1237,7 @@ public class SignalReevaluationJobTests
         public SignalWriter Writer { get; }
         public SignalEvaluator Evaluator { get; }
         public SignalReevaluationJob Job { get; }
+        public SignalClosureService Closure { get; }
 
         public Harness(DateTimeOffset? runAt = null, string? writerClientId = null)
         {
@@ -1031,7 +1258,8 @@ public class SignalReevaluationJobTests
             var schema = new RuleBodySchemaValidator();
             var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, Clock), Logger<PolicyVersionValidator>());
             Evaluator = new SignalEvaluator(validator, Sysadmin, Writer, Logger<SignalEvaluator>());
-            Job = new SignalReevaluationJob(Evaluator, Writer, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
+            Closure = new SignalClosureService(Writer, Sysadmin, Clock, Logger<SignalClosureService>());
+            Job = new SignalReevaluationJob(Evaluator, Writer, Closure, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
             Sysadmin.Stub(new Entity("sprk_matter", MatterId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
             Sysadmin.Stub(new Entity("sprk_project", ProjectId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
         }
@@ -1209,6 +1437,36 @@ public class SignalReevaluationJobTests
             return this;
         }
 
+        public Guid PolicyIdOf(string code) => _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code).Id;
+
+        public Guid CurrentVersionOf(string code) =>
+            _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code).GetAttributeValue<EntityReference>("sprk_currentversion").Id;
+
+        /// <summary>Publishes a new version the way task 101 does: the old version's in-force end stamped, a new current version, the pointer moved.</summary>
+        public Guid PublishNewVersion(string code, string body, string template)
+        {
+            var policy = _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code);
+            var oldVersion = policy.GetAttributeValue<EntityReference>("sprk_currentversion").Id;
+            _rows[("sprk_policyversion", oldVersion)]["sprk_inforceto"] = new DateTime(2026, 10, 9, 0, 0, 0, DateTimeKind.Utc);
+            var versionId = Guid.NewGuid();
+            policy["sprk_currentversion"] = new EntityReference("sprk_policyversion", versionId);
+            Stub(new Entity("sprk_policyversion", versionId)
+            {
+                ["sprk_ruletype"] = new OptionSetValue(Existence),
+                ["sprk_rulebody"] = body,
+                ["sprk_messagetemplate"] = template,
+            });
+            return versionId;
+        }
+
+        /// <summary>Off (<c>sprk_enabled</c> No) or Retired (<c>statecode</c> Inactive).</summary>
+        public void SetPolicyState(string code, bool enabled, int statecode = 0)
+        {
+            var policy = _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code);
+            policy["sprk_enabled"] = enabled;
+            policy["statecode"] = new OptionSetValue(statecode);
+        }
+
         public void AddPolicy(string code, int lane, bool enabled, string body, string template, string? tenant = null)
         {
             var versionId = Guid.NewGuid();
@@ -1224,6 +1482,7 @@ public class SignalReevaluationJobTests
             };
             if (tenant is not null) policy["sprk_tenant"] = tenant;
             _policies.Add(policy);
+            Stub(policy);
             Stub(new Entity("sprk_policyversion", versionId)
             {
                 ["sprk_ruletype"] = new OptionSetValue(Existence),
@@ -1277,6 +1536,17 @@ public class SignalReevaluationJobTests
                                  c.Operator == ConditionOperator.Equal && Matches(p, c.AttributeName, c.Values[0]))))
                     {
                         result.Entities.Add(p);
+                    }
+
+                    break;
+                case "sprk_signal" when Value("sprk_policy") is Guid policyId:
+                    var openStatuses = query.Criteria.Conditions.Single(c => c.AttributeName == "sprk_signalstatus").Values.Cast<int>().ToHashSet();
+                    foreach (var row in Org.Rows.Values.Where(r => r.GetAttributeValue<EntityReference>("sprk_policy")?.Id == policyId
+                                 && openStatuses.Contains(r.GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value)))
+                    {
+                        var copy = new Entity("sprk_signal", row.Id) { RowVersion = Org.VersionOf(row.Id) };
+                        foreach (var attribute in row.Attributes) copy[attribute.Key] = attribute.Value;
+                        result.Entities.Add(copy);
                     }
 
                     break;
@@ -1379,7 +1649,7 @@ public class SignalReevaluationJobTests
         public string VersionOf(Guid id) => _versions[id].ToString();
 
         public Guid SeedSignal(string key, int status, int? resolution = null, DateTime? resolvedOn = null, Guid? coreId = null,
-            DateTime? suppressedUntil = null, DateTime? due = null)
+            DateTime? suppressedUntil = null, DateTime? due = null, Guid? policyId = null, Guid? versionId = null)
         {
             var id = Guid.NewGuid();
             var row = new Entity("sprk_signal", id)
@@ -1388,6 +1658,8 @@ public class SignalReevaluationJobTests
                 ["sprk_signalstatus"] = new OptionSetValue(status),
                 ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
             };
+            if (policyId is { } pid) row["sprk_policy"] = new EntityReference("sprk_policy", pid);
+            if (versionId is { } vid) row["sprk_policyversion"] = new EntityReference("sprk_policyversion", vid);
             if (resolution is { } r) row["sprk_resolutiontype"] = new OptionSetValue(r);
             if (resolvedOn is { } on) row["sprk_resolvedon"] = on;
             if (suppressedUntil is { } until) row["sprk_suppresseduntil"] = until;
