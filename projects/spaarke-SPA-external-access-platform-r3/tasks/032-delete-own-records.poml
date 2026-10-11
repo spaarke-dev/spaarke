@@ -4,7 +4,7 @@
     <title>DELETE your own documents, to-dos, events and service requests (FR-26)</title>
     <phase>3 BFF features</phase>
     <gate>after 031</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New destructive external routes gated by an authorization rule (tags bff-api, auth)</rigor-reason>
     <model-tier>opus</model-tier>

@@ -10,14 +10,14 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 |----|-------|-------|--------|------|----------|-------|----------|
 | 001 | ADR-028 amendment for R3 (A2, A3 :124, A1 :55) | P0 | ✅ [done] | none | O/h | FULL | — (.claude/, main session; owner approval) |
 | 002 | Grid columns per owner list (FR-09) | P0 | 🔲 [open] | none (owner list) | S/h | STANDARD | Wave 1 when the list arrives |
-| 003 | Spike: Entra B2B self-service sign-up vs custom join (FR-12) | P0 | 🔄 [wip] spike done, awaiting owner choice | none | O/h | STANDARD | Wave 1 |
+| 003 | Spike: Entra B2B self-service sign-up vs custom join (FR-12) | P0 | ✅ [done] | none | O/h | STANDARD | Wave 1 |
 | 010 | Ciam audience forms + default-scheme CIAM guard (FR-22, FR-23) | P1 | ✅ [done] | none | O/h | FULL | Wave 1 |
 | 011 | Modules by user type + partner service-request switch (FR-19, FR-06) | P1 | ✅ [done] | 001 | O/h | FULL | Wave 2 |
 | 012 | Member-test branch for registered guests (FR-15) | P1 | ✅ [done] | 001 | O/h | FULL | Wave 2 |
 | 020 | R3 schema: sprk_createdbycontact + intake columns (FR-25, FR-05) | P2 | 🔄 [wip] source done + reviewed, awaiting owner dev import | none | S/h | FULL | Wave 1 (owner-gated import) |
 | 030 | Creator stamping on every external create (FR-25) | P3 | ✅ [done] | 020 | O/h | FULL | Wave 2 |
 | 031 | Document routes for Matter/WA/Invoice/Service Request (FR-24) | P3 | 🔄 [wip] matter/WA/SR routes merged; invoices await owner decision | 030 | O/h | FULL | Wave 3 |
-| 032 | DELETE own documents/to-dos/events/service requests (FR-26) | P3 | 🔲 [open] | 031 | O/h | FULL | Wave 4 |
+| 032 | DELETE own documents/to-dos/events/service requests (FR-26) | P3 | 🔄 [wip] | 031 | O/h | FULL | Wave 4 |
 | 033 | External message read endpoint (FR-04) | P3 | ✅ [done] | 011 | O/h | FULL | Wave 3 |
 | 034 | External message send endpoint (FR-11) | P3 | ✅ [done] | 030, 033 | O/h | FULL | Wave 4 |
 | 035 | Intake submit endpoint (FR-05, FR-06) | P3 | 🔲 [open] | 011, 020, 033 | O/h | FULL | Wave 5 |
@@ -35,7 +35,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 053 | Intake wizards: Invention + Trademark (FR-05) | P5 | 🔲 [open] | 052 | S/h | FULL | Wave 7 |
 | 054 | Detail documents + delete-own actions (FR-24/FR-26 client) | P5 | 🔲 [open] | 051, 032 | S/h | FULL | Wave 6 |
 | 055 | Notification bell + deep-link record open (FR-08/FR-07 client) | P5 | 🔲 [open] | 054, 037, 041 | S/h | FULL | Wave 7 |
-| 056 | Join page (FR-13), flagged until 060 | P5 | 🔲 [open] | 003, 041 | O/h | FULL | Wave 8 |
+| 056 | Join page (FR-13), flagged until 060 | P5 | 🔄 [wip] | 003, 041 | O/h | FULL | Wave 8 |
 | 060 | Registration service: owner host decision, then build or R4 hand-off (FR-14) | P6 | 🔲 [open] | 003 + owner decision | O/h | FULL | — (blocked on owner) |
 | 070 | Deploy SPA + dev Teams package to dev | P7 | 🔲 [open] | 038, 042, 043, 053, 055, 056 | S/h | STANDARD | — (live, owner-gated) |
 | 071 | Teams live check with the test guest (FR-21) | P7 | 🔲 [open] | 070 | S/h | STANDARD | — (owner-driven) |
