@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **116 tasks** across 14 phases (69 ✅ · 1 🔄 · 33 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-10)
+> (spec §9) · **116 tasks** across 14 phases (70 ✅ · 1 🔄 · 32 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-11)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -181,7 +181,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
 | ✅ [done] 030 | [Signal writer + dedupe + **ownership**](030-signal-writer-dedupe-and-ownership.poml) | FULL | sonnet/high | 021, 006 | — | Two independent reviews. Writer owns, owning BU from matter; create-first + reconcile; fail-closed MI; refusals logged (EventId 50300) + metered. Live as writer: matter PASS; **communication blocked by F26 (owner role decision)** |
-| 🔲 [open] 031 | [Nightly re-evaluating `IScheduledJob` (+ episodes, secured skip, per-item today)](031-nightly-reevaluating-scheduled-job.poml) | FULL | sonnet/**xhigh** | 030, 003, 007, 008, 009, 024, 037, 039, 098, 106 | — | ONE evaluator, not evaluator + sweep. **Amended 2026-10-07**: episode key before the first Signal (**D-13**); **no Restricted/Limited skip** — Secure-matter ownership via 039, one narrow skip (**D-33**); Off→On re-raise (**D-32**); per-item today via 098's helper (**D-25**); witness evidence lines (**D-23**); side-effect-free `Evaluate(version, scope)` · **[uac]** |
+| ✅ [done] 031 | [Nightly re-evaluating `IScheduledJob` (+ episodes, secured skip, per-item today)](031-nightly-reevaluating-scheduled-job.poml) | FULL | sonnet/**xhigh** | 030, 003, 007, 008, 009, 024, 037, 039, 098, 106 | — | ONE evaluator, not evaluator + sweep. **Amended 2026-10-07**: episode key before the first Signal (**D-13**); **no Restricted/Limited skip** — Secure-matter ownership via 039, one narrow skip (**D-33**); Off→On re-raise (**D-32**); per-item today via 098's helper (**D-25**); witness evidence lines (**D-23**); side-effect-free `Evaluate(version, scope)` · **[uac]** |
 | 🔲 [open] 032 | [Three event triggers (D-48)](032-event-triggers-classification-and-budgetrevision.poml) | FULL | sonnet/high | 031 | — | Budget-revision hook is correctness, not polish. **Amended**: shared core (D-13, D-33); never re-closes a decision-Acted Signal (X-6). **Association-confirmed trigger added (D-48)** · **[uac]** |
 | 🔲 [open] 033 | [Closure semantics](033-closure-semantics.poml) | FULL | sonnet/high | 031 | C | Aged-out maps to `ConditionCleared`. **Amended**: Superseded → new episode (D-13), reads `sprk_inforceto` (D-14); Off (next pass, reversible: **D-32**) vs Retire (immediate) |
 | 🔲 [open] 034 | [Suppression per (policy, matter), 30d](034-suppression-policy-matter-30-days.poml) | FULL | sonnet/high | 031, 036 | C | D-11 grain; auto-close never counts. **Amended**: lapse → new episode (D-13); *misresolved* never counts (R-10); count read for wizard/admin · **[uac]** |
