@@ -177,6 +177,14 @@ public sealed class SignalReevaluationJob : IScheduledJob
                     "episode is still open alongside a newer one.", policy.Code, plan.Anomalies);
             }
 
+            if (plan.NoDatedEvidence > 0)
+            {
+                // One line per policy per pass, never per Signal and never retried within the pass (D-119).
+                _logger.LogInformation(
+                    "Policy {PolicyCode}: {Count} Acted Signal(s) still hold but their hit carries no dated evidence (or the " +
+                    "resolution time is unknown), so they stay un-raised.", policy.Code, plan.NoDatedEvidence);
+            }
+
             await ApplyAsync(policy, spec, plan, counts, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -317,12 +325,12 @@ public sealed class SignalReevaluationJob : IScheduledJob
         _logger.Log(success ? LogLevel.Information : LogLevel.Warning, OntologyWriterEvents.EvaluatorHeartbeat,
             "[SIGNAL-EVALUATOR] heartbeat outcome={Outcome} lastEvaluated={LastEvaluated:o} policies={Policies} hits={Hits} " +
             "written={Written} reraised={Reraised} updated={Updated} closed={Closed} reassigned={Reassigned} refused={Refused} " +
-            "unchanged={Unchanged} suppressed={Suppressed} quietWindow={QuietWindow} dateUnchanged={DateUnchanged} " +
+            "unchanged={Unchanged} suppressed={Suppressed} quietWindow={QuietWindow} dateUnchanged={DateUnchanged} awaitingEvidence={AwaitingEvidence} noDatedEvidence={NoDatedEvidence} " +
             "invalidPolicies={InvalidPolicies} policyFailures={PolicyFailures} attempt={Attempt} durationMs={DurationMs} " +
             "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             success ? "succeeded" : "failed", now, counts.PoliciesEvaluated, counts.Hits, counts.Written, counts.Reraised,
             counts.Updated, counts.Closed, counts.Reassigned, counts.Refused, counts.Unchanged, counts.Suppressed,
-            counts.QuietWindow, counts.DateUnchanged, counts.InvalidPolicies, counts.PolicyFailures, context.Attempt,
+            counts.QuietWindow, counts.DateUnchanged, counts.AwaitingEvidence, counts.NoDatedEvidence, counts.InvalidPolicies, counts.PolicyFailures, context.Attempt,
             (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
         return duration;
     }
@@ -468,7 +476,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     {
         public int PoliciesEvaluated, DecideLanePolicies, DoLanePolicies, InvalidPolicies, PolicyFailures, ScopedNotEvaluated;
         public int Hits, Written, Reraised, Updated, Closed, Reassigned, Refused, ChangedSinceRead;
-        public int Unchanged, Suppressed, QuietWindow, DateUnchanged, UnparseableKeys, Anomalies, CreatesDeferred;
+        public int Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred;
 
         /// <summary>A scoped policy that is silently skipped, or a Signal left untouched as an anomaly, is not a healthy run.</summary>
         public bool IsSuccess =>
@@ -480,6 +488,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
             Suppressed += plan.Suppressed;
             QuietWindow += plan.QuietWindow;
             DateUnchanged += plan.DateUnchanged;
+            AwaitingEvidence += plan.AwaitingEvidence;
+            NoDatedEvidence += plan.NoDatedEvidence;
             Refused += plan.RefusedHits.Count;
             Anomalies += plan.Anomalies;
         }
@@ -519,6 +529,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
             suppressed = Suppressed,
             quietWindow = QuietWindow,
             dateUnchanged = DateUnchanged,
+            awaitingEvidence = AwaitingEvidence,
+            noDatedEvidence = NoDatedEvidence,
             unparseableKeys = UnparseableKeys,
             anomalies = Anomalies,
             createsDeferred = CreatesDeferred,
@@ -565,6 +577,12 @@ internal sealed class EpisodePlan
     public int Suppressed { get; set; }
     public int QuietWindow { get; set; }
     public int DateUnchanged { get; set; }
+
+    /// <summary>D-119: Decide-lane Acted Signals whose predicate still holds but whose evidence is all older than the resolution.</summary>
+    public int AwaitingEvidence { get; set; }
+
+    /// <summary>D-119: Decide-lane Acted Signals held un-raised because the hit carries no dated evidence (or the resolution time is unknown).</summary>
+    public int NoDatedEvidence { get; set; }
     public int Anomalies { get; set; }
 }
 
@@ -583,7 +601,9 @@ internal sealed class EpisodePlan
 /// a new owner is reassigned (D-35); a changed date is reconciled. Otherwise NOTHING is written (D-61).</item>
 /// <item><b>Latest Resolved</b>: never closed again (FR-16). Re-raised as n+1 when not suppressed and: Superseded or
 /// PolicyRetired (FR-16, D-32) always; Do lane only when the subject's date differs from the resolved Signal's
-/// <c>sprk_duedate</c>; Decide lane unless it was Dismissed less than the quiet window ago (FR-17a).</item>
+/// <c>sprk_duedate</c>; Decide lane unless it was Dismissed less than the quiet window ago (FR-17a). <b>D-119:</b> a Decide-lane
+/// <b>Acted</b> Signal re-raises only when at least one witness line is dated after its <c>sprk_resolvedon</c>; a predicate that
+/// merely still holds does not re-raise it, and a hit with no dated evidence stays un-raised.</item>
 /// <item><b>Not a hit</b>: every open Signal is closed as ConditionCleared. A hit whose core record the writer refused is
 /// still a hit: its Signal is neither written nor closed.</item>
 /// </list>
@@ -683,6 +703,16 @@ internal static class SignalEpisodePlanner
             {
                 plan.QuietWindow++;
             }
+            else if (lane == SignalWriter.LaneDecide && latest.Resolution == SignalWriter.ResolutionActed)
+            {
+                // D-119: an Acted decision is not undone by the predicate still holding. Only evidence newer than it re-raises.
+                switch (EvidenceAfter(hit, latest.ResolvedOn))
+                {
+                    case EvidenceVerdict.Newer: plan.Creates.Add(new PlannedCreate(hit, latest.Episode + 1)); break;
+                    case EvidenceVerdict.Older: plan.AwaitingEvidence++; break;
+                    default: plan.NoDatedEvidence++; break;
+                }
+            }
             else
             {
                 plan.Creates.Add(new PlannedCreate(hit, latest.Episode + 1));
@@ -698,6 +728,32 @@ internal static class SignalEpisodePlanner
         }
 
         return plan;
+    }
+
+    private enum EvidenceVerdict { Newer, Older, Undated }
+
+    /// <summary>D-119 (generic, no policy knowledge): the hit's witness lines (the rows the Existence clauses matched, each carrying
+    /// its clause date as <c>AsOf</c>) against the resolution time. <see cref="EvidenceVerdict.Newer"/> when at least one is dated
+    /// strictly after it; <see cref="EvidenceVerdict.Undated"/> when the resolution time is unknown or no witness has a readable
+    /// date (the Signal then stays un-raised, never re-raised on a guess). Context lines (no clause) are not evidence of the test.</summary>
+    private static EvidenceVerdict EvidenceAfter(SignalHit hit, DateTime? resolvedOn)
+    {
+        if (resolvedOn is not { } resolved) return EvidenceVerdict.Undated;
+        var dated = false;
+        foreach (var line in hit.Evidence)
+        {
+            if (line.Clause is null
+                || !DateTimeOffset.TryParse(line.AsOf, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var asOf))
+            {
+                continue;
+            }
+
+            dated = true;
+            if (asOf.UtcDateTime > DateTime.SpecifyKind(resolved, DateTimeKind.Utc)) return EvidenceVerdict.Newer;
+        }
+
+        return dated ? EvidenceVerdict.Older : EvidenceVerdict.Undated;
     }
 
     private static bool InDecideQuietWindow(int lane, ExistingSignal latest, int quietWindowDays, DateTime now) =>

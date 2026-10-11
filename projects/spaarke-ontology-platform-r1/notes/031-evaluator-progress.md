@@ -40,9 +40,17 @@ after independent review.
      subject's date differs from the resolved Signal's `sprk_duedate`; Decide lane → n+1 unless Dismissed less than the
      quiet window ago. **A Resolved latest whose core record differs from the hit's current core is re-raisable** (not
      Superseded: that resolution means a newer policy version, FR-16), except a Decide-lane Dismissed inside the quiet window:
-     it keeps a failed re-file create from stranding the subject behind the Do-lane date rule. **Decide-lane Acted / ConditionCleared re-raise on the next pass when the predicate still holds**
-     (FR-03 literal: only a dismissal has a waiting period). A Dismissed Signal with no `sprk_resolvedon` is held, not
-     re-raised.
+     it keeps a failed re-file create from stranding the subject behind the Do-lane date rule. **D-119 (owner, 2026-10-11,
+     amends FR-03 / FR-17a): a Decide-lane Acted Signal does NOT re-raise because the predicate still holds.** It re-raises
+     (n+1) only when at least one witness line of the hit is dated after the latest episode's `sprk_resolvedon`. The date is
+     the witness line's `asOf` (the `exists` clause's relative-bound date field on the matching row; for POL-COMMIT-BUDGET
+     the communication's received date), read from `SignalHit.Evidence` with no change to the query shape. Older evidence
+     only: nothing is written (`awaitingEvidence`). No dated evidence, or no `sprk_resolvedon` on the Acted Signal: stays
+     un-raised (`noDatedEvidence`, one Information log per policy per pass, no retry loop). Strictly after: evidence at the
+     exact resolution time is not newer. Generic: no policy code or table is named. Decide-lane ConditionCleared still
+     re-raises when the predicate holds again; Dismissed keeps the quiet window and suppression; Superseded /
+     PolicyRetired and the Do lane are unchanged. (Send-inquiry no longer resolving the Signal is task 043's change.)
+     A Dismissed Signal with no `sprk_resolvedon` is held, not re-raised.
    - Not a hit → every open Signal closes `ConditionCleared`. A hit whose core record the writer refused is still a hit:
      neither written nor closed, counted refused (D-38).
 4. **Closures** use the writer's dedicated identity with an optimistic-concurrency update: a Signal a person resolved

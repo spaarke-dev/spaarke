@@ -615,6 +615,131 @@ public class SignalReevaluationJobTests
         }
     }
 
+    // ---- D-119: Decide-lane Acted re-raises only on evidence newer than the resolution ----------------------------------
+
+    private static SignalHit WithEvidence(SignalHit hit, params string?[] asOf) => hit with
+    {
+        Evidence = asOf.Select((t, i) => new SignalEvidenceRef("communication", $"sprk_communication:{Guid.NewGuid():D}", "Fact")
+        { AsOf = t, Clause = $"all[{i}]" }).ToArray(),
+    };
+
+    private static string Iso(DateTime utc) => utc.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture);
+
+    [Fact]
+    public void Plan_DecideActed_PredicateStillHolds_OnlyOlderEvidence_RaisesNothing()
+    {
+        var resolvedOn = RunAt.UtcDateTime.AddDays(-3);
+        var hit = WithEvidence(CommHit(MatterId), Iso(resolvedOn.AddDays(-1)), Iso(resolvedOn.AddHours(-2)));
+        var acted = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed, resolvedOn: resolvedOn);
+
+        var plan = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { acted });
+
+        plan.Creates.Should().BeEmpty("D-119: the predicate still holding is not new evidence");
+        plan.AwaitingEvidence.Should().Be(1);
+        (plan.Reconciles.Count + plan.Reassigns.Count + plan.Closes.Count).Should().Be(0);
+    }
+
+    [Fact]
+    public void Plan_DecideActed_OneEvidenceRowNewerThanTheResolution_RaisesTheNextEpisode()
+    {
+        var resolvedOn = RunAt.UtcDateTime.AddDays(-3);
+        var hit = WithEvidence(CommHit(MatterId), Iso(resolvedOn.AddDays(-1)), Iso(resolvedOn.AddHours(5)));
+        var acted = Existing(hit, 2, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed, resolvedOn: resolvedOn);
+
+        var plan = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { acted });
+
+        plan.Creates.Should().ContainSingle().Which.Episode.Should().Be(3);
+        plan.AwaitingEvidence.Should().Be(0);
+    }
+
+    [Fact]
+    public void Plan_DecideActed_EvidenceExactlyAtTheResolution_IsNotNewer()
+    {
+        var resolvedOn = new DateTime(2026, 10, 7, 9, 0, 0, DateTimeKind.Utc);
+        var hit = WithEvidence(CommHit(MatterId), Iso(resolvedOn));
+        var acted = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed, resolvedOn: resolvedOn);
+
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { acted }).Creates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false)] // no evidence lines at all
+    [InlineData(true)]  // evidence lines without a readable date
+    public void Plan_DecideActed_NoDatedEvidence_StaysUnraised_AndIsCountedOnce(bool undatedLine)
+    {
+        var hit = undatedLine ? WithEvidence(CommHit(MatterId), (string?)null, "not a date") : CommHit(MatterId);
+        var acted = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed, resolvedOn: RunAt.UtcDateTime.AddDays(-3));
+
+        var plan = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { acted });
+
+        plan.Creates.Should().BeEmpty();
+        plan.NoDatedEvidence.Should().Be(1);
+    }
+
+    [Fact]
+    public void Plan_DecideActed_WithNoResolutionTime_StaysUnraised()
+    {
+        var hit = WithEvidence(CommHit(MatterId), Iso(RunAt.UtcDateTime.AddDays(-1)));
+        var acted = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed, resolvedOn: null);
+
+        var plan = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { acted });
+
+        plan.Creates.Should().BeEmpty();
+        plan.NoDatedEvidence.Should().Be(1);
+    }
+
+    [Fact]
+    public void Plan_DecideDismissed_PastTheQuietWindow_StillReRaises_WithoutAnyEvidence()
+    {
+        // Dismissed keeps its own rules (quiet window + suppression): D-119 does not touch it.
+        var hit = CommHit(MatterId);
+        var dismissed = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionDismissed,
+            resolvedOn: RunAt.UtcDateTime.AddDays(-20));
+
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { dismissed })
+            .Creates.Should().ContainSingle().Which.Episode.Should().Be(2);
+    }
+
+    [Fact]
+    public void Plan_DecideConditionCleared_StillReRaisesWhenThePredicateHoldsAgain()
+    {
+        var hit = CommHit(MatterId);
+        var cleared = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionConditionCleared,
+            resolvedOn: RunAt.UtcDateTime.AddDays(-1));
+
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { cleared })
+            .Creates.Should().ContainSingle().Which.Episode.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task Run_DecideActed_PredicateStillHolds_NoNewerEvidence_WritesNothing()
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionActed, resolvedOn: RunAt.UtcDateTime.AddDays(-1), coreId: MatterId);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        h.Org.WriteCalls.Should().Be(0, "D-61 and D-119: a no-change night writes nothing");
+        h.Org.CreateCalls.Should().Be(0);
+        h.Log.Should().Contain(e => e.EventId.Id == OntologyWriterEvents.EvaluatorHeartbeat.Id && e.Message.Contains("awaitingEvidence=1"));
+    }
+
+    [Fact]
+    public async Task Run_DecideActed_ACommunicationNewerThanTheResolution_RaisesEpisodeTwo()
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId); // the communication is dated 2026-10-05 09:15 UTC
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionActed, resolvedOn: new DateTime(2026, 10, 4, 0, 0, 0, DateTimeKind.Utc), coreId: MatterId);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        h.Org.CreateCalls.Should().Be(1);
+        h.Org.Rows.Values.Should().Contain(r => r.GetAttributeValue<string>("sprk_dedupekey") == Key(PolicyCode, "sprk_matter", MatterId, 2));
+    }
+
     [Fact]
     public void Plan_RefiledWhileOpen_TheCreateNamesTheSignalItReplaces()
     {
