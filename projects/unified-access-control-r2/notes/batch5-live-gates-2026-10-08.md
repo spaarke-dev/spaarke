@@ -317,3 +317,66 @@ Run against the deployed BFF (master `ebacd2e15`) as the admin and testuser1, GE
 
 **Observed, by design (task 176 note §6, §8.4):** the trim runs after ranking, so a restricted caller gets shorter pages. This costs recall, not access.
 
+## 2026-10-10 live gates 179 + 181
+
+**Environment.** spaarke-bff-dev, master `74dc51c60` (healthz 200), and spaarkedev1. Run 19:41–20:15Z.
+- Identities: admin (`az` default, ralph.schroeder `1d02f31c…`); testuser1 (`AZURE_CONFIG_DIR=C:/tmp/az-uac-child`, `8d7bad7a…`, BU1, linked contact `ac6d7b68…`); uac.child (`d6f8f439…`) as a share target only.
+- Tokens: `api://1e40baad…/.default` for the BFF; `az` tokens for Dataverse.
+- No role, Entra, Key Vault or app-setting write, and no `sprk-prod-kv` read.
+- Scripts and raw logs: session scratchpad `gate179_181/`: `gate.py` + `run1.out` (main run), `gate179v.py` + `gate179v.out` (share-based 179 variant), `retry181.out`, `shape181.out`, `repro_unshare.out`, `results*.json`.
+
+**testuser1's roles changed during the run (not by the agent).**
+- 19:32Z: direct roles Basic User + Office Add In User. RetrieveUserPrivileges: `prvWritesprk_Matter` Deep, no Share on matter, project or work assignment (the owner's Office Add In User edit, role `modifiedon` 19:23:37Z).
+- 19:41:41Z onward: **Spaarke Core User** also direct (Share Deep on all three). The audit has no association record. The coordinator confirms no agent assigned it and is asking the owner to remove it. Intended state: Basic + Office Add In User only.
+- So the first run's 179.1 on a record owned by testuser1's BU team (M1 `c53fca96…`) had an invalid premise. testuser1 held Share Deep, RPA answered all eight rights, and can-manage-access, `/share-user` and `/grant` all answered 200. That is correct behaviour for a Share holder, and it is superseded by the share-based variant below.
+- The variant reaches Write only through a record share, on a root-BU matter outside testuser1's Deep reach. That makes "Write but no Share" real whatever roles testuser1 holds.
+
+### Gate 179
+
+| # | Step | Result | Evidence |
+|---|---|---|---|
+| 179.0 | No share, root-BU matter M5 `79e3618f…` (owner admin) | **PASS** (control) | RPA as testuser1 → 403 `0x80048306` ×2. `GET /can-manage-access?recordType=matter&recordId=M5` → **403 `sdap.access.deny.delegation_write_required`**. |
+| 179.1 | Write without Share (GrantAccess `ReadAccess, WriteAccess` to testuser1) | **PASS** | RPA ×3 over 12 s: `ReadAccess, WriteAccess`. can-manage-access → **403 `sdap.access.deny.delegation_share_required`**, detail "To change who else can access this record you need Write access to it and the Share privilege on its table (set in your security role)." So canManageAccess is false: the client reads non-200 as no. `POST /share-user` (testuser1 → uac.child, ViewOnly) → **403 `delegation_share_required`**. Nothing written: the shares are testuser1's only. |
+| 179.2 | Share from a record share (ModifyAccess `ReadAccess, WriteAccess, ShareAccess`) | **PASS** | RPA ×3: **`ReadAccess, WriteAccess, ShareAccess`**. can-manage-access → **200 `canManageAccess: true`**. `/share-user` → 200 `created`, mask 1. Then unshared (200). |
+| 179.2-Q | Does RPA report a SHARED Share? | **Yes, for a caller whose roles hold prvShare** | Shown above: testuser1 holds `prvSharesprk_Matter` Deep through Core User, but the record is outside that depth, so the Share right came from the share alone. **Still open:** the same question for a caller with NO Share privilege in any role (the Microsoft Learn rule "a share cannot give rights the role does not allow"). Re-run 179.1/179.2 with `gate179v.py` after the owner removes Core User from testuser1, re-probing at least 3 times for the privilege cache. If step 2 then answers 200, RPA ignores the privilege for shared Share, and the POML's escalation applies (the table privilege needs a second call). |
+| 179.3a | Round 91 child mirror carries Share (request path) | **PASS** | Matter M3 `33aacebc…` with event E3 `35aacebc…` filed under it (`sprk_RegardingMatter`). `POST /provision-project` make-secure → 200, owner Secure Record Owners, `children.reowned 1` (sprk_event), container below. `/share-user` admin → testuser1 Collaborate on M3 → 200, M3 mask `Read, Write, Append, AppendTo, Share`. E3's mirrored share for testuser1 at once: **`ReadAccess, WriteAccess, AppendAccess, AppendToAccess, ShareAccess`**, with no Assign or Delete. The admin's creator share on E3 also carries Share. |
+| 179.3b | The scheduled `secure-child-share-reconciliation` (`*/2`) raises an existing child share | **PASS** | 19:43:05Z: ModifyAccess put E3/testuser1 back to a pre-round-91 mask, `Read, Write, Append, AppendTo` (read back). 19:44:06Z, **61 s** later, the next scheduled run had raised it to **`… , ShareAccess`**. testuser1's RPA on E3 then reads `Read, Write, Append, AppendTo, Share`. |
+
+### Gate 181
+
+| # | Step | Result | Evidence |
+|---|---|---|---|
+| 181.1 | `/share-user` admin → testuser1 Collaborate on M2 `48c0d2ac…` notifies testuser1 | **FAIL: environment (role gap); the BFF behaved correctly** | 200 `outcome created`, mask 262167, **`notificationFailed: true`**. No appnotification row. App Insights 19:42:12Z: `Read Privilege Check For Owner failed … Principal user (Id=8d7bad7a…) is missing prvReadappnotification privilege (Id=24ba2370-9cdc-4d1a-a7f7-c9956548777b) on OTC=10294 … context.Caller=8793f4b0…` (the BFF app user), then `Failed to create appnotification record` (Error) and `Failed to create notification for user …` (Warning, the `[GRANT-NOTIFY] Could not tell user … The grant stands.` line). The share stands. |
+| 181.2 | Same-level re-share sends nothing; the granter is not told | **PASS** | Re-share → 200 `outcome unchanged`, `notificationFailed: false`, no attempt logged. No row for the admin (granter). In the first run, testuser1's `/grant` to its own linked contact on M1 → 200, `notificationFailed: false`, no row: the granter is excluded. |
+| 181.3 | `/grant` admin → testuser1's linked contact `ac6d7b68…` ViewOnly on M4 `ce0cc2b3…` | **FAIL: same role gap** | 200 `accessRecordId d40cc2b3…`, `grantedAccessLevel 100000000`, **`notificationFailed: true`**. The same `prvReadappnotification` refusal at 19:42:28Z. The notifier did resolve the contact to testuser1 (the attempt was made for `8d7bad7a…`). |
+| 181.4 | Row shape, with a recipient who holds the privilege | **PASS** | testuser1 (Read/Write/Share via a share) `/share-user` → admin Collaborate on M6 `5734e2ec…` → 200, narrowed (mask 262147), `notificationFailed: false`. Row `b96045ef…`: title **`You were given access to the matter "# gate181 M6 shape …"`**, body **`Test User 1 gave you access.`** (no level word, because the narrowed mask matches no level), icontype 100000000, priority 200000000, ttl 604800. `data`: `actionUrl` `/main.aspx?etn=sprk_matter&id=5734e2ec…&pagetype=entityrecord`, **`actions[0]` = `{title: "Open matter", data: {url: <same>, navigationTarget: "inline"}}`**, `regardingId`, `category: "access"`. In the first run uac.child also received one (19:41:46Z, `75da9b9c…`). |
+| 181.5 | In-app notifications enabled for the model-driven app | **Matter Management: ON** | `appsettings`: `AllowNotificationsEarlyAccess = true` for **Matter Management** (`sprk_MatterManagement`, `729afe6d…`, set 2026-04-06), and for the Dataverse Accelerator App. No override on Spaarke Administration, Document Management, Spaarke Platform or AI Setup, so they use the default `false` and show no bell. |
+
+**Root cause of 181.1 / 181.3 (read-only).**
+- Dataverse creates an `appnotification` only if its owner (the recipient) holds `prvReadappnotification` ("Read Privilege Check For Owner").
+- **No Spaarke role holds any appnotification privilege**: Basic User, Core User, Office Add In User, AI Analysis User and Reporting Access Viewer, direct and through the BU1 team (`RetrieveRolePrivilegesRole` per role; `RetrieveUserPrivileges` for testuser1 and uac.child). The exported `src/dataverse/solutions/SpaarkeMaster/Roles/*.xml` have none either.
+- In the root BU only System Administrator, System Customizer, Service Reader/Writer (Global) and Support User (Basic) hold it. Impersonated `GET appnotifications` as testuser1 and as uac.child → 403 `0x80040220`.
+- No non-admin person owns any appnotification on dev (only the admin and the BFF's app user). The bell has never reached a Spaarke-role user, and task 100's reminders are affected the same way.
+- uac.child's row at 19:41:46Z was created, but the same share-user to uac.child at 20:01Z failed with the same refusal. Most likely a stale privilege cache after the 19:23Z role edit. It cannot be shown read-only (no role audit).
+- Adding Core User did not help: testuser1 failed at 19:42:12, 19:42:58 and 20:01Z, all with Core User held.
+- **Minimal fix (owner, role write):** add **`prvReadappnotification` at Basic (User) depth** to **Spaarke Basic User**, the base role every internal user holds (direct or through the BU teams). Read is all Dataverse checks. The BFF creates the row as its own app user, which already holds Create. Then re-run 181.1/181.3 (`gate.py`, or `retry181.py` for one share), re-probing for the privilege cache.
+
+**The client message.** The BFF reports the failure honestly: `notificationFailed: true` on the 200, the grant stands, and the logs name the user and the cause. The modal turns it into the warning "Some people could not be notified; share the record link with them." (`NOTIFICATION_FAILED_SENTENCE`, `AccessGrantModal.tsx:854`, read at :1453/:1549/:1583/:1619). That was not shown in the UI here. Nothing misleading was found. One nit: NotificationService logs this expected configuration gap at Error level.
+
+**Defect found (pre-existing, filed #1620).** `/unshare-user` cannot remove a share held by the record's current owning user. `InternalShareEndpoints.cs:758` calls the app-only `RevokeAccessAsync`, so Dataverse refuses with 400 (0x80040223), and the route answers 500 `sdap.access.user_share.write_not_confirmed` with the share kept. The owner-aware overload (`IDataverseRecordShareService.cs:81`, used by unsecure and provision) is not used. Reproduced twice (M6 `5734e2ec…`, M7 `91cc9122…`; both deleted, so the stranded share went with the record).
+
+**Throwaway records** (all names `# gate179 …` / `# gate181 …`; all deleted and read back **404**):
+- matters M1 `c53fca96…`, M2 `48c0d2ac…`, M3 `33aacebc…` (unsecured through the BFF first: 200, `sharesRevoked 2`), M4 `ce0cc2b3…`, M5 `79e3618f…`, M6 `5734e2ec…`, M7 `91cc9122…`, a retry matter `df755b6c…`;
+- event E3 `35aacebc…`;
+- grants `d40cc2b3…` (revoked through `/revoke` 200, then deleted) and `79da9b9c…` (first-run 179.1, deleted);
+- every share was removed through `/unshare-user` (200 `removed: true`), except the owner share above, which went with its record;
+- the gate's appnotification rows (uac.child `75da9b9c…`, admin `b96045ef…` and one on M7) were deleted after they were recorded.
+
+Final sweep 20:15Z: 0 `# gate17*` / `# gate18*` matters or events, 0 grant rows created since 19:30Z, 0 appnotifications since 19:30Z for testuser1, uac.child or the admin.
+
+**SPE container created:** M3 `b!KDQEkLSGukOQnI4nJV1qUtNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y` (empty; add it to `Remove-TestContainers.ps1`, #1445).
+
+**Verdict.**
+- **179:** steps 1, 2 and 3 PASS. Still open: step 2's platform question for a caller with no Share privilege, re-run after Core User is removed from testuser1.
+- **181:** the server logic PASSES (recipient resolution, gain check, granter exclusion, best-effort failure report, row shape and link). Delivery to internal users FAILS on dev until a Spaarke base role holds `prvReadappnotification`. Matter Management has the bell enabled.
+
