@@ -1638,8 +1638,9 @@ public class ExternalSpaGridViewSelectorGuardTests
     private static readonly string[] RequiredResolverStatements =
     [
         "fallbackEntityName: string | undefined, host: GridSourceHost",
-        "if (source.type === 'savedquery-set') { if (host === 'external') return null; try {",
-        "const queries = await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName);",
+        // The savedquery-set branch is the tail of resolveSource (the union is exhaustive, so it has no `if`): the refusal
+        // must come straight before the try that lists.
+        "if (host === 'external') return null; try { const queries = await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName);",
     ];
 
     /// <summary>
@@ -3011,7 +3012,7 @@ public class ExternalSpaGridViewSelectorGuardTests
         { "external-refusal-inverted", "if (host === 'external') return null;", "if (host === 'internal') return null;" },
         { "host-argument-made-optional", "host: GridSourceHost", "host?: GridSourceHost" },
         { "discovery-call-removed", "await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName)", "[] as { id: string; isDefault?: boolean }[]" },
-        { "discovery-condition-rewritten", "if (source.type === 'savedquery-set') {", "if (source.type === 'savedquery-set' || true) {" },
+        { "refusal-after-the-list", "if (host === 'external') return null;\n  try {\n    const queries = await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName);", "try {\n    const queries = await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName);\n    if (host === 'external') return null;" },
         { "second-discovery-call", "const def = queries.find", "void dataverseClient.retrieveSavedQueriesForEntity('x');\n      const def = queries.find" },
         { "second-view-fetch", "const def = queries.find", "void dataverseClient.retrieveSavedQuery('x');\n      const def = queries.find" },
     };
