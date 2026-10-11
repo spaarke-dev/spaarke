@@ -19,7 +19,8 @@
     The script provisions, in order:
       (a) COLUMNS    sprk_createdbycontact (schema sprk_CreatedByContact, navigation property sprk_CreatedByContact) on each
                      of the four tables: a lookup to contact through a 1:N relationship sprk_contact_<table>_createdbycontact
-                     whose cascade is NoCascade for Assign/Share/Unshare/Reparent/Merge and RemoveLink for Delete (and for
+                     whose cascade is NoCascade for Assign/Share/Unshare/Reparent, Cascade for Merge (Dataverse forces it on every
+                     relationship to contact, which supports merge - 81/81 in dev, 2026-10-11), and RemoveLink for Delete (and for
                      Archive, when the environment's Web API exposes that cascade).
                      sprk_servicerequest.sprk_requesttype: local choice, 100000000 NDA Assessment, 100000001 Invention
                      Submission, 100000002 Policy Question, 100000003 Trademark Search.
@@ -148,7 +149,8 @@ $IntakeMaxLength = 1048576
 $IntakeFormat = 'Text'
 # A plain hashtable on purpose: an [ordered] dictionary indexed by an int is positional, not by key.
 $RequestTypeOptions = @{ 100000000 = 'NDA Assessment'; 100000001 = 'Invention Submission'; 100000002 = 'Policy Question'; 100000003 = 'Trademark Search' }
-$ExpectedCascadeBase = [ordered]@{ Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Merge = 'NoCascade'; Delete = 'RemoveLink' }
+# Merge = Cascade: Dataverse forces it on relationships to contact (merge-capable); a NoCascade request is stored as Cascade.
+$ExpectedCascadeBase = [ordered]@{ Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Merge = 'Cascade'; Delete = 'RemoveLink' }
 function RelationshipSchemaName([string]$Table) { "sprk_contact_$($Table)_createdbycontact" }
 
 $LookupDescription = 'The CONTACT who created this record from the external SPA. Stamped by the BFF only (field-secured), from the resolved contact principal and never from client input; createdby is the BFF application user for a record the BFF creates app-only. The delete-own check reads this column for a contact caller (sprk_createdbyperson for a systemuser caller). spaarke-SPA-external-access-platform-r3 task 020, FR-25.'
@@ -409,7 +411,7 @@ foreach ($s in $Specs) {
         $solutionHeader = @{ 'MSCRM.SolutionUniqueName' = $SolutionUniqueName }
         switch ($s.Kind) {
             'Lookup' {
-                $cascade = @{ Assign = 'NoCascade'; Delete = 'RemoveLink'; Merge = 'NoCascade'; Reparent = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade' }
+                $cascade = @{ Assign = 'NoCascade'; Delete = 'RemoveLink'; Merge = 'Cascade'; Reparent = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade' }
                 if ($SupportsArchive) { $cascade['Archive'] = 'RemoveLink' }
                 Invoke-DvWrite POST 'RelationshipDefinitions' @{
                     '@odata.type'        = 'Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata'

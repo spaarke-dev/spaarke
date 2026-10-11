@@ -1,6 +1,6 @@
 # Task 020 — R3 schema: sprk_createdbycontact + intake columns
 
-**Status (2026-10-11):** the repo source and the import script are done. The **live dev import is owner-gated** and has not run. Nothing in this task has touched a live environment.
+**Status (2026-10-11):** the repo source and the import script are done. The **dev import ran on 2026-10-11** with owner approval ("you can proceed with the import"). `-Verify` passes. See [Live run](#live-run-dev-2026-10-11).
 
 ## What changed in source
 - **`sprk_CreatedByContact`** (lookup → contact, field-secured), on:
@@ -20,6 +20,7 @@
   - `sprk_IntakeData`: memo, max 1,048,576, format text, **field-secured** (`IsSecured` 1). Owner decision 2026-10-11 (`notes/decisions.md`): it follows the `sprk_createdbyperson` settings. Before that decision it was unsecured (like `sprk_recordsummary`).
 - **Relationships:** `sprk_contact_<table>_createdbycontact` (`Other/Relationships.xml`, `Other/Relationships/Contact.xml`).
   - Delete and archive cascade: RemoveLink.
+  - Merge cascade: **Cascade**. Dataverse forces it on every relationship to `contact`, which supports merge. A NoCascade request is stored as Cascade; all 81 custom contact relationships in dev have it (read 2026-10-11). The script expects and creates Cascade.
   - Every other cascade: NoCascade.
 - **Field security** (`Other/FieldSecurityProfiles.xml`) — five columns in both profiles (the four `sprk_createdbycontact` columns and `sprk_servicerequest.sprk_intakedata`):
   - "BFF-Managed Field Readers": read-only (`CanRead` 4, create and update 0).
@@ -44,7 +45,25 @@ How the Readers profile is populated today (from the repo; no per-user grant exi
 - The repo does not state that a business unit's default team automatically contains all of that unit's users; that is Dataverse platform behaviour, not shown here. Step 1c lists the Readers teams against the default teams so the owner can see the actual coverage in dev before the change.
 - To give one user (for example a support analyst) the column without a team: add them to the Readers profile in the Dataverse admin centre (Settings > Security > Field security profiles), or `POST fieldsecurityprofiles(<readerId>)/systemuserprofiles_association/$ref`. No script in the repo does this; the Writers profile must never get a human (the script and `-Verify` fail on that).
 
-## Owner-gated live steps (not run)
+## Live run (dev, 2026-10-11)
+
+Run by the main session against SPAARKE DEV 1 (org `spaarkedev1`) as `ralph.schroeder@spaarke.com`.
+
+| Step | Result |
+|---|---|
+| 1 Pre-check | All six columns were absent. `sprk_recordsummary` Format is Text, and the relationships expose `Archive`. Writers held the two BFF application users and no team. Readers held all 6 default teams. pac was on SPAARKE DEV 1 |
+| 2 Dry run | exit 0 |
+| 3 Apply, first run | Exit 1. It created all six columns, secured `sprk_intakedata` and granted it to both profiles, and published the five tables. It reported DRIFT on the four new contact relationships (`Merge=Cascade`, expected NoCascade), so it did **not** secure the four `sprk_createdbycontact` lookups. The cause was a wrong expectation: Dataverse forces Merge=Cascade on contact relationships (81/81 in dev). The script's expected and created Merge was changed to Cascade |
+| 3 Apply, second run | exit 0. It secured the four lookups and granted each to Readers (read) and Writers (read/create/update). Everything else was already OK |
+| 4 Verify | `VERIFY PASS`, exit 0 |
+| 5 Re-export and diff | Exported to `C:	mp\smx-r3-020` and compared by content. Every task-020 item matches the source: the four `sprk_CreatedByContact` lookups (secured), `sprk_RequestType` (four values, unsecured), `sprk_IntakeData` (secured, Text, 1,048,576), the ten field permissions and `Contact.xml` (no difference). The source was **not** overwritten (5d not run). Other differences are other work in dev or formatting: extra `sprk_project`/`sprk_workassignment` permissions and the profile description text |
+| 6 Test rows | A service request accepted `sprk_requesttype` 100000000 and `sprk_intakedata` and read them back. A todo accepted `sprk_CreatedByContact` and read it back. Both rows were deleted; 0 `TEST task020` rows are left |
+
+The four lookups existed without field security for the few minutes between the two apply runs. Nothing writes or reads them yet: the R3 BFF is not deployed.
+
+The deploy-order rule in [Open](#open) is now satisfied in dev.
+
+## Live steps (as run; kept for other environments)
 
 Everything runs from the worktree root in **PowerShell 7**. The script is invoked with `&` and an id array, never `pwsh -File` (which passes the comma list as one string; the script also splits it). Auth is your own `az login` identity (System Administrator in dev). The access token is never printed. Times are estimates, not measurements.
 
@@ -239,6 +258,6 @@ foreach ($x in 'sprk_document:sprk_createdbycontact','sprk_todo:sprk_createdbyco
   - The memo `Format` is created as `Text` to match the XML and `sprk_recordsummary`; step 1b confirms `sprk_recordsummary` is `Text` before anything is created.
 
 ## Open
-- Owner approval of the columns, the field-security posture (now including `sprk_intakedata`) and the rollback (acceptance criterion 6).
-- **DEPLOY ORDER (live now):** task 030's code in this branch already writes `sprk_CreatedByContact@odata.bind` on external creates (`ExternalDataService.cs:~528,~570`), so a BFF built from this branch must **not** be deployed to dev before step 3 (`-Apply`) has run and `-Verify` exits 0; until then those creates fail.
+- ~~Owner approval of the columns, the field-security posture and the rollback (acceptance criterion 6).~~ Approved 2026-10-11: the field-security posture ("follow sprk_createdbyperson settings") and the import ("you can proceed with the import").
+- **DEPLOY ORDER (satisfied in dev 2026-10-11; applies to every other environment):** task 030's code in this branch already writes `sprk_CreatedByContact@odata.bind` on external creates (`ExternalDataService.cs:~528,~570`), so a BFF built from this branch must **not** be deployed to dev before step 3 (`-Apply`) has run and `-Verify` exits 0; until then those creates fail.
 - Live criteria 1–3 wait for the import.

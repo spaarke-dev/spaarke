@@ -14,7 +14,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 010 | Ciam audience forms + default-scheme CIAM guard (FR-22, FR-23) | P1 | ✅ [done] | none | O/h | FULL | Wave 1 |
 | 011 | Modules by user type + partner service-request switch (FR-19, FR-06) | P1 | ✅ [done] | 001 | O/h | FULL | Wave 2 |
 | 012 | Member-test branch for registered guests (FR-15) | P1 | ✅ [done] | 001 | O/h | FULL | Wave 2 |
-| 020 | R3 schema: sprk_createdbycontact + intake columns (FR-25, FR-05) | P2 | 🔄 [wip] source done + reviewed, awaiting owner dev import | none | S/h | FULL | Wave 1 (owner-gated import) |
+| 020 | R3 schema: sprk_createdbycontact + intake columns (FR-25, FR-05) | P2 | ✅ [done] dev import 2026-10-11, verify pass (Merge cascade = Cascade, platform-forced) | none | S/h | FULL | Wave 1 (owner-gated import) |
 | 030 | Creator stamping on every external create (FR-25) | P3 | ✅ [done] | 020 | O/h | FULL | Wave 2 |
 | 031 | Document routes for Matter/WA/Invoice/Service Request (FR-24) | P3 | 🔄 [wip] matter/WA/SR routes merged; invoices await owner decision | 030 | O/h | FULL | Wave 3 |
 | 032 | DELETE own documents/to-dos/events/service requests (FR-26) | P3 | 🔄 [wip] | 031 | O/h | FULL | Wave 4 |
@@ -23,7 +23,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 035 | Intake submit endpoint (FR-05, FR-06) | P3 | 🔲 [open] | 011, 020, 033 | O/h | FULL | Wave 5 |
 | 036 | Email on subsequent grant (FR-07); no message email (spec C6) | P3 | ✅ [done] | 034 (UAC-r2 PR #1583 merged 2026-10-10, in branch) | S/h | FULL | Wave 5 |
 | 037 | Notification feed + last-seen (FR-08) | P3 | 🔲 [open] | 034, 035 | O/h | FULL | Wave 6 |
-| 038 | Deploy R3 BFF to dev + live probes | P3 | 🔲 [open] | 010, 011, 012, 032, 035, 036, 037, 039 + **020 columns live in dev first** (task 030 stamps sprk_createdbycontact; without it a contact create returns 400, after the upload bytes are already in SPE; tasks 033/034: the external message read selects _sprk_createdbycontact_value, so GET messages returns 500 and a contact POST fails until the column exists) | S/h | STANDARD | — (live deploy, owner-gated) |
+| 038 | Deploy R3 BFF to dev + live probes | P3 | 🔲 [open] | 010, 011, 012, 032, 035, 036, 037, 039 + 020 columns live in dev first — **satisfied 2026-10-11** (task 030 stamps sprk_createdbycontact; without it a contact create returns 400, after the upload bytes are already in SPE; tasks 033/034: the external message read selects _sprk_createdbycontact_value, so GET messages returns 500 and a contact POST fails until the column exists) | S/h | STANDARD | — (live deploy, owner-gated) |
 | 039 | Event reads for Matter and Work Assignment (FR-03 server) | P3 | 🔲 [open] | 032, 037 | S/h | FULL | Wave 7 |
 | 040 | Workforce client switch (FR-16) | P4 | 🔄 [wip] | 001 (+ owner client registration) | O/h | FULL | Wave 2 |
 | 041 | Run-time backend selection (FR-17) | P4 | ✅ [done] | 040 | O/h | FULL | Wave 3 |

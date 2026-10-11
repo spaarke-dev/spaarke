@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-11 (Wave 5 complete; by context-handoff)
+> **Last Updated**: 2026-10-11 (020 dev import done; by context-handoff)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | None active. Every remaining task is blocked on owner decisions (below) |
-| **Step** | Waiting on the owner |
-| **Status** | Pushed. Verified on `b1556b42a` (036 merge): builds 0 warnings, ArchTests 940/940, full unit suite 19,732 passed / 54 skipped / 0 failed |
-| **Next Action** | When the owner answers an item below, start the task it unblocks through task-execute (032 → 054 → 055; 020 import → 035 → 037/052; 003 → 056/060) |
+| **Task** | 020 (closing), 032 (agent running), 056 (re-check agent running) |
+| **Step** | 020: steps 1–4 and 6 done in dev and `-Verify` passes; step 5 (re-export and diff) is running |
+| **Status** | `7da765f96` (056 merge) is **not pushed**. The script Merge fix and the 020 notes are uncommitted |
+| **Next Action** | Diff the export (`notes/task-020-notes.md` step 5c), commit the script and notes, mark 020 done, then start 035 |
 
 ### Critical Context
 - **Parallel pattern:**
@@ -25,45 +25,45 @@
   - A scoped re-check runs when a fix changes the approach.
   - At most 4 agents at once.
 - **Root `node_modules`** was installed for the pre-commit prettier. `npm install` rewrites `.husky/_/*` line endings; restore them with `git checkout -- .husky/_/`.
-- **POML vs spec:** an owner decision recorded in the spec or the project CLAUDE.md wins over a POML. Surface any conflict to the owner before acting (036 lesson, 2026-10-11).
+- **POML vs spec:** an owner decision recorded in the spec or the project CLAUDE.md wins over a POML. Surface any conflict to the owner before acting (036 lesson).
 
 ---
 
-## Task state
+## Active lanes
 
 | Task | State |
 |---|---|
-| 001, 010, 011, 012, 030, 033, 034, 036, 041, 050, 051 | ✅ done |
-| 031 Document routes | Matter, work-assignment and service-request routes merged. Invoices and the SR container wait on the owner |
-| 040 Workforce client | Code done. Waits on the owner's "Spaarke Workspace" registration |
-| 042 Out-of-plane pages | Upload and no-mock done and reviewed. Waits on the owner's playbook page + SemanticSearch decision |
-| 043 Prod CI | Code done. Waits on the owner's GitHub environments |
-| 032, 035, 037, 039, 052–056, 060 | Blocked (owner decisions or 020 import) |
+| 020 Schema | Dev import done 2026-10-11 (approved). One deviation: Merge cascade is `Cascade`, because the platform forces it on contact relationships. Remaining: the step 5 export diff, the commit, marking it done, and updating TASK-INDEX 038 (the deploy-order rule is satisfied in dev) |
+| 032 Delete-own | Implementation agent `a26af84cc7df71a4f` (opus) is running in an isolated worktree from `db91ced2b`. Option (b), widened. Then one fable review, fix, merge, verify, mark done |
+| 056 Join page | Merged locally (`7da765f96`). Re-check agent `ad88a91167c15b722` (sonnet) is in the main worktree, uncommitted, working on the sign-in failure gate and AuthGuard `loginRedirect` with no `.catch`. Then commit by path, push, and mark done |
 
-## Open Owner Questions / Blockers
+Done: 001, 003, 010, 011, 012, 030, 033, 034, 036, 041 (code), 042, 050, 051.
 
-1. **020:** approve the dev import, and say whether `sprk_intakedata` is field-secured. This blocks 035 → 037/052, and 038.
-2. **032:** delete-own, (a) strict or (b) widened (recommended). This blocks 032 → 054 → 055.
-3. **003:** option B plus its sub-questions. This blocks 056/060.
-4. **031:** invoice documents (A inherit, recommended / B grantable / C defer); SR container (A secure regarding root, recommended / B keep BU).
-   - **034 review:** a post on an invoice also stamps `sprk_regardingproject`, so partners on that project can read it. Decide with the invoice question.
-5. **033:** privileged messages to external callers: show / mark / hide.
-   - **034 review:** contact author names are shown to every external reader of the record (the versions route hides them). Confirm or restrict.
-6. **042:** playbook page + SemanticSearch: (a) hide, recommended / (b) BFF task.
-7. **036:** approve the email copy (`notes/task-036-notes.md`).
-   - The sender is the constant `demo@demo.spaarke.com` until the per-customer mailbox (#1562) exists; decide before go-live.
-   - The link uses `Customer:Id` as the customer key.
-   - Follow-up: contact-issuer grants (`ContactGrantEndpoints`) still send no email.
-8. **040:** register "Spaarke Workspace" and its pre-authorizations; add the `/auth-callback.html` redirect URIs on CIAM client `bd57e54e…`.
-9. **041:** expose `user_impersonation` on CIAM BFF app `4a4d5126…` and consent it for `bd57e54e…` (070 precondition).
-10. **043:** create GitHub environments `external-spa-dev` (9 vars) and `external-spa-prod` (9 vars + `TEAMS_APP_ID` + secret `AZURE_SWA_TOKEN_EXTERNAL_SPA_PROD`).
-11. **002:** the column list. **060:** the host, and R3 or R4. **Portfolio:** R3 is not on the board.
+## Next actions (in order)
+1. Finish 020 (above).
+2. Start 035 (intake submit); it is unblocked by 020. Then 037 and 052.
+3. When 032 merges, start 054, then 055.
+4. Start 060 (the self-registration service is in R3, per the owner 2026-10-11).
+5. Before the BFF PR, run `/conflict-check` (`AuthorizationModule.cs`, `Api/ExternalAccess/**` shared with UAC-r2) and actionlint on both deploy workflows.
+
+## Open owner questions
+
+1. **003 sub-questions:** Q2 customer consent, Q3 the group, Q4 the registry field owner, Q5 the host.
+2. **031:**
+   - Invoice documents: A inherit (recommended).
+   - A service request regarding a secure matter goes to the secure container (recommended yes).
+   - The owner confirmed one container per customer or business unit, and secure records only.
+3. **033:** privileged messages to external callers. Options: (a) hide (recommended), (b) mark, (c) show. Explained to the owner 2026-10-11.
+4. **036:** the address of the central sender mailbox (one Spaarke shared mailbox for all Model 1 customers is feasible). Then make `RegistrationEmailService.FromMailbox` configurable.
+5. **040/041/043:** go/no-go on:
+   - the app-registration steps given;
+   - the CIAM `user_impersonation` steps;
+   - the GitHub environment `external-spa-dev` (9 known values), and an empty `external-spa-prod` with protection rules.
+6. **002:** the owner will send the column list.
 
 ## Dependencies tracked elsewhere
-
 - **ISS-001** (#1623): `AuthorizationModule` once-per-process flag.
 - **ISS-002** (#1633): intermittent chat streaming contract test (two occurrences).
 - **ISS-003** (#1636): the shared `sanitizeEmailHtml` keeps style positioning and remote images; R3 contains it in the SPA only.
 - **Copilot agent** still uses `access_as_user`; do not remove it from `1e40baad`.
-- **Before the BFF PR:** `/conflict-check` (`AuthorizationModule.cs`, `Api/ExternalAccess/**` shared with UAC-r2); actionlint on both deploy workflows.
-- **038 deploy order:** the 020 columns must be live in dev before the R3 BFF is deployed (creator stamp, message read and post).
+- **038 deploy order:** satisfied in dev. Every other environment needs the 020 columns before the R3 BFF.

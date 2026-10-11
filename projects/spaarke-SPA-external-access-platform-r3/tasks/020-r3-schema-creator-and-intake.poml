@@ -4,7 +4,7 @@
     <title>R3 schema: sprk_createdbycontact on document/to-do/event/communication + intake columns on sprk_servicerequest (FR-25, FR-05)</title>
     <phase>2 Schema</phase>
     <gate>startable — live import needs owner approval</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Dataverse schema change used by authorization (delete-own)</rigor-reason>
     <model-tier>sonnet</model-tier>
