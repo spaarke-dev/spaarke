@@ -244,6 +244,25 @@ public sealed class OntologyWriterDataverseClient : IDisposable
         return GetOrganizationService().UpdateAsync(entity, ct);
     }
 
+    /// <summary>
+    /// Task 031: an update applied only while the row's version is still <paramref name="rowVersion"/> (Dataverse optimistic
+    /// concurrency, <c>ConcurrencyBehavior.IfRowVersionMatches</c>). A row changed since it was read faults with
+    /// <c>ConcurrencyVersionMismatch</c> (0x80060882) and nothing is written.
+    /// </summary>
+    public Task UpdateIfRowVersionMatchesAsync(
+        string entityLogicalName, Guid id, string rowVersion, Dictionary<string, object> fields, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rowVersion);
+        var entity = new Entity(entityLogicalName, id) { RowVersion = rowVersion };
+        foreach (var (key, value) in fields)
+        {
+            entity[key] = value;
+        }
+
+        return GetOrganizationService().ExecuteAsync(
+            new UpdateRequest { Target = entity, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches }, ct);
+    }
+
     /// <summary>R3: disposes the underlying connection (if one was ever built). Safe to call more than once.
     /// Registered as a DI singleton, so the host disposes this automatically at shutdown.</summary>
     public void Dispose()

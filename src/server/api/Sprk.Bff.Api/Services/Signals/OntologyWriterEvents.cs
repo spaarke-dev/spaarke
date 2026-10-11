@@ -70,4 +70,13 @@ public static class OntologyWriterEvents
     /// <c>subjectEntity</c>, <c>subjectId</c>, <c>signalId</c>, <c>reason</c> ONLY.
     /// </summary>
     public static readonly EventId WriteSkippedCoreRecordChanged = new(50305, nameof(WriteSkippedCoreRecordChanged));
+
+    /// <summary>Task 031: the re-evaluating job's heartbeat, one per attempt (ADR-036 A1 rule 5).</summary>
+    public static readonly EventId EvaluatorHeartbeat = new(50306, nameof(EvaluatorHeartbeat));
+
+    /// <summary>Task 031: one policy (or one Signal of it) could not be evaluated or written this run; the run is failed.</summary>
+    public static readonly EventId EvaluatorPolicyFailed = new(50307, nameof(EvaluatorPolicyFailed));
+
+    /// <summary>Task 031 (D-35): a no-core Signal was reassigned to its item's current owner.</summary>
+    public static readonly EventId NoCoreSignalReassigned = new(50308, nameof(NoCoreSignalReassigned));
 }

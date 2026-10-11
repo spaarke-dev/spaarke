@@ -1,35 +1,39 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-10 (main session). State only — history is in git log, task `<completion>` blocks and
+> **Last Updated**: 2026-10-11 (main session). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (**D-106: critical path only**;
-> merges D-107 branch + **D-115 master**) and §6 gotchas. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-118).
-> Issues for after the project: [`notes/defer-issues.md`](notes/defer-issues.md) (F-1..F-56; the 074 and 046 branches add their own F-rows: renumber on merge). Sub-agents never edit this file.
+> merges D-107 branch + **D-115 master**) and §6 gotchas. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-119).
+> Issues for after the project: [`notes/defer-issues.md`](notes/defer-issues.md) (F-1..F-59 on the branch; 046 adds F-60/F-61, 031 adds F-62..F-64 — whichever merges second resolves the append conflict). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Orchestrating ontology lanes. 116 tasks: **68 ✅**, 1 🔄 (130: live proof in D-112 deploy), 34 🔲, 9 ⏸️, 4 🚫. 037 (#1603) and 040 (#1600) merged 2026-10-10. |
-| **Branch** | `docs/ontology-platform-design` (draft #1111) at `459fc505d`. Synced with master 2026-10-10 (`48742f4d2`). |
-| **Owner prefs (2026-10-10)** | Finish fast but not at a cost premium. Keep 101/102/103/025; **073 lowest priority, last**. Subagent cap 4 (owner may raise to 8). Every Agent call passes `model`. |
-| **Critical path** | **031 (running)** → 032/033/034/025 → 035 deploy BFF → 050/038 → 059 → 055 deploy Console → 064. Decision path: 040 ✅ + 046 → 043 → 058 → 045/049. Exit gate 074. |
-| **Next Action** | Act on lane notifications: PR → independent review → fix round → re-check → merge (`scratchpad/merge-when-green2.sh <pr> <head> <branch|master>`). When 046 merges start **043** (tell uac-r2 when its PR is up). |
+| **Task** | Orchestrating ontology lanes. 116 tasks: **69 ✅**, 1 🔄 (130: live proof in D-112 deploy), 33 🔲, 9 ⏸️, 4 🚫. |
+| **Branch** | `docs/ontology-platform-design` (draft #1111) at `d4e947274`: master synced through `848f63913` (#1643) 2026-10-11; ArchTests guard re-pinned after #1640 (958/958). |
+| **Owner prefs** | Finish fast but not at a cost premium. Keep 101/102/103/025; **073 lowest priority, last**. Subagent cap 4. Every Agent call passes `model`. Don't merge #1111 to master yet (recommendation given 2026-10-11; owner to choose: wait for 035/055, or add an on/off setting). |
+| **Critical path** | **031 (merging)** → 032/033/034/025 → 035 deploy BFF → 050/038 → 059 → 055 deploy Console → 064. Decision path: 040 ✅ + **046 (merging)** → 043 → 058 → 045/049. Exit gate 074 ✅. |
+| **Next Action** | When #1626 merges: mark 031 done (POML + TASK-INDEX + drift check), launch 032/033/034/025. When the 046 re-check is CLEAN and CI green: merge #1609 (`scratchpad/merge-when-green2.sh 1609 <full sha> docs/ontology-platform-design`), mark 046 done, launch **043** (POML carries D-119 + typed-pair constraints; tell uac-r2 when its PR is up). |
 
 ## Running now
 
 | Lane | What | Then |
 |---|---|---|
-| **031** (opus, worktree `C:\wts-031`, branch `task/ontology-031-evaluator`) | Evaluator via task-execute | Independent review (adversarial-reviewer, opus) → fix → re-check → merge; mark 031 done |
-| **046 review 2** (adversarial-reviewer, opus) | Second pass on #1609 head d956779c3 (security-tagged: two passes). uac-r2 approved their parts; parity accepted (D-118) | Fix-now findings → lane fix + re-check; then merge; record "Reviewer: owner (D-118)" in parity notes; mark 046 done |
-| **074 run 4** (sonnet) | Clean re-run in `C:\wts-d74r` (`tmp/074-run3-local`, unpushed). Run 3 = 81.8% (Wilson 69.7–89.8%) but INVALID: Azure token failures left some items without the live taxonomy; harness guard failed it | ≥ 80% and guard clean → review/merge #1585 (renumber F-rows) + #1602 (mirror, master); mark 074 done. Else → owner |
-| **#1610 merge** (shell) | Rung-5 taxonomy (D-117 b); office-scope job timed out again (F-49), rerun 38072961261 | Merges into project branch when green |
+| **#1626 (031)** head `26057660…` | merge-when-green watcher into the project branch. The office-scope job may hit the 20-min cap (F-49): merge on log evidence + PR comment | Mark 031 done; resolve the defer-issues append conflict if 046 merged first |
+| **#1609 (046)** head `e27104c85` | Scoped re-check (sonnet) of the test realignment to uac-r2 #1628/#1643 (4 tests re-asserted: pair-only/mismatched typed pair → 400; untyped invoice fallback → filed under the invoice). Results posted to uac-r2 (#1355 + SendMessage) | CLEAN + CI green → merge; F-findings → fix + re-check |
 
 ## Waiting / owner
 
+- **Owner questions open:**
+  - deferred-list walkthrough now or at project end;
+  - rename defer rows F-nn → I-nn (avoid confusion with the F1–F4 triage classes);
+  - confirm D-119 uses the communication's received date (not its classification date);
+  - where to send the #1501 / dev-deploy answer;
+  - #1111 merge strategy.
 - **130 / 111 / 114**: run in the D-112 full E2E dev deploy.
-- **Housekeeping (owner, by hand):** many stale `C:\wt*` / `C:\wts-*` worktrees (list: `notes/handoff-history/2026-10.md`). A runaway publish-size loop (`C:\wts-132-out`, unexpanded `$d`) was killed 2026-10-10.
+- **Housekeeping (owner, by hand):** stale `C:\wt*` / `C:\wts-*` worktrees (list: `notes/handoff-history/2026-10.md`).
 - **Checklist page** https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV.
 
 ## Coordination
 
-uac-r2: post on #1355 **and** SendMessage their session. They are fixing #1575 (F-52) and F-56 (secure-ness oracle in OwnedChildWrite, branch `fix/uac-r2-pair-appendto`). Email project owns the triage-email Action (#1584).
+uac-r2: post on #1355 **and** SendMessage `spaarke-wt-unified-access-control-r2-1d`. Their #1628 (pair must be repeated by a typed lookup) and #1643 (WA under invoice/event inherits) are on master and on our branch.
