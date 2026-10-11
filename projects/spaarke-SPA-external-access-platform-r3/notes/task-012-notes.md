@@ -142,3 +142,41 @@ BFF Hygiene §10 verified: publish size = 36.44 MB (incl. PDBs), delta vs master
    - So the email bind is only as safe as Spaarke-tenant guest-invite governance and FR-14 deriving the invite address from the verified home token. FR-14 / task 060 should state this.
 2. **Disabled licensed users.** `MembershipEndpoints.ResolveSystemUserIdAsync` (`Api/Membership/MembershipEndpoints.cs:450-453`) excludes disabled systemusers. A *disabled* licensed guest whose home tenant is listed now reaches the binder and can get a workforce contact. This matches how a disabled `acct = 0` member of a listed tenant behaves today. It is not the escalation trigger (an enabled licensed guest never reaches the branch), but the reviewers should confirm that it is intended.
 3. **Sovereign-cloud issuers** (`login.microsoftonline.us`, `sts.chinacloudapi.cn`, …) are refused by `TryParseHomeTenant`. That is correct for the current commercial-only Model 1, and fails closed if that ever changes.
+
+## Review results and fixes (2026-10-10)
+
+Two adversarial passes (auth task: two). Fixes below ship in the commit "fix(external-access-r3): task 012 review fixes + app-only token hardening". "Fail-before" = the named tests were run against the same tree with the fix neutralised (condition forced false / helper stubbed) and failed; the fix was then restored.
+
+### Pass 1
+
+**F2 (fix-now) — a disabled licensed guest regained access.** `WorkforcePrincipalResolver` branch (a) looks the systemuser up with `isdisabled = false` (`MembershipEndpoints.ResolveSystemUserIdAsync`: a disabled systemuser "is no longer a valid principal"). On null the oid fell through to the binder, where FR-15 admits the same guest token as a Member and hands it a contact.
+- Fix: on the null path only, one extra query for a systemuser row with that oid regardless of `isdisabled` (same query shape, no `isdisabled` condition, uncached). A row means DENY: `Denied(PrincipalNotResolved, "sdap.access.deny.systemuser_disabled")`, no binder call, no store writes. If the existence check itself throws, the caller is denied (`principal_not_resolved`), not 500.
+- This also closes the **pre-existing Model-2 analogue**: a disabled systemuser carrying an `acct = 0` member token of a listed tenant fell through the same way.
+- Tests: `ResolveAsync_DisabledSystemUser_IsDeniedAndNeverReachesTheBinder(acct 1/guest, acct 0/member)`, `ResolveAsync_SystemUserExistenceCheckThrows_DeniesFailClosed`. Fail-before: both theory rows failed (the guest and the member token were resolved through the binder). `..._ExistenceCheckThrows_...` is a fail-closed control (it passes with the deny branch disabled only because the throwing check still runs).
+
+**Pass 1 K-list**
+- K1 (task 011) app-only token whose oid is a Dataverse application user's systemuser could resolve as a person before `Evaluate`'s NotUserToken check — fixed (see "App-only hardening").
+- K3 diagnostics — fixed (see "Diagnostics").
+- K4 `#EXT#` UPN used as the guest's email, and an app-only `acct=1` theory row — fixed (see below).
+
+### Pass 2 (no F-class finding)
+
+K-list: K3 stale comments — fixed; K4 diagnostics (startup warning when the stamp tenant is not a GUID) — fixed. Also hardened from pass 2: the 3-arg `ResolveWorkforceCallerAsync(user, oid, ct)` overload (silently skips FR-15) is removed, and `Evaluate`'s `stampTenantId` / `idp` parameters are now required.
+
+### Fixes, with tests
+
+| # | Change | Tests | Fail-before |
+|---|---|---|---|
+| App-only hardening | At the top of `ResolveAsync` (after the missing-oid check, before branch (a)): `CallerIdentity.FromPrincipal(user).Kind != UserDelegated` -> `Denied(PrincipalNotResolved, workforce_app_only_token)`. Before any lookup. No legitimate app-only caller of `/api/v1/external` or the workforce resolver exists (grep: the only entry is `WorkforcePrincipalStrategy` behind the `/api/v1/external` group; every client is a user-delegated SPA / Teams host; test hosts use `HeaderWorkforcePrincipalResolver`; resolver tests all carry `scp`). | `ResolveAsync_AppOnlyTokenWhoseOidIsAnEnabledSystemUser_IsDeniedNotUserTokenWithNoLookups`; theory `ResolveAsync_AppOnlyTokenWithTheMemberOrGuestShape_IsDeniedNotUserTokenWithNoWrites` (acct=1/tid=stamp/listed idp; acct=0/listed tenant) | all 3 failed. The system-user row resolved as a systemuser. The two theory rows already denied with the right code and no writes (the member test's NotUserToken), but failed the "no lookup side effects" assertion: the binder read the store. |
+| Overload removal | `ContactIdentityBinder.ResolveWorkforceCallerAsync(user, oid, ct)` deleted; `IdentityLinkReconciliationTests` passes `stampTenantId: null`. `WorkforceMembershipTest.Evaluate(..., stampTenantId, idp)` parameters are required; the 9 `WorkforceMembershipTests` calls pass `null, null`. Compiles cleanly across `src/` and `tests/`. | compile | n/a |
+| Diagnostics | Every `acct = 1` deny in the resolver (not-a-user-token, disabled systemuser, existence-check/binder failure, binder deny) logs ONE warning: deny code, `stampTenantParsed`, `idpHost`, `idpHomeTenant` (host and GUID only when `idp` parsed; `unparsed` otherwise; never the raw idp). The `[WF-AUTH] Resolved ... contact-only principal` line carries `homeTenant` (parsed GUID for a guest, `n/a` otherwise). `WorkforceIdentityOptionsValidator` (now takes `ILogger`) logs one startup warning "FR-15 registered-guest admission disabled" when `AzureAd:TenantId` is not a non-zero GUID; startup is NOT failed. | `ResolveAsync_GuestDenied_LogsOneWarning...`, `..._LogsTheTwoFactsAndNoRawIdp`, `ResolveAsync_NonGuestDeny_DoesNotWriteTheGuestDiagnosticLine`, `ResolveAsync_RegisteredGuestResolved_LogsTheParsedHomeTenant`, `Validator_StampTenantNotANonZeroGuid_...`, `Validator_StampTenantIsAGuid_LogsNothing` | three log tests (`GuestDenied_LogsOneWarning`, `..._LogsTheTwoFacts...`, `RegisteredGuestResolved_LogsTheParsedHomeTenant`) and the validator warning test failed with the logging stubbed; the non-guest and valid-GUID tests are negative controls |
+| `#EXT#` email | `WorkforceCallerClaims.TokenEmail`: for `acct = 1`, a candidate containing `#EXT#` is skipped. One change covers the binder's bind/create email and the principal's display email. A guest with no real email claim creates the contact without an email. `acct = 0` unchanged. | `ResolveAsync_GuestWithOnlyAnExtUpn_CreatesTheContactWithoutAnEmail`, `..._NeverEmailBindsAnUnboundContactNamedLikeTheUpn`, control `..._GuestWithARealEmailAndAnExtUpn_UsesTheRealEmail`, control `TokenEmail_ForAMember_IsUnchanged...` | the two UPN tests failed (the UPN became the contact email / bind key); both controls pass before and after |
+| Stale comments | `WorkforceIdentityOptions.cs` header, `WorkforceMembershipTests.cs`, `WorkforceEmailNoHijackTests.cs`: "a registered guest (FR-15) additionally requires tid = AzureAd:TenantId". | n/a | n/a |
+
+### Known limits NOT fixed
+
+1. **Guest email-bind trust basis.** A registered guest is email-bound exactly like a member, but a guest's `email` claim comes from the guest object in Spaarke's tenant, not the customer's. The bind is only as safe as task 060 (FR-14 registration) deriving the invite address from the verified home-tenant token AND being the only guest-creation path. This aligns with ADR-028 A7 :493 by delegation; task 060 must state it.
+2. **Principal `TenantId` is the stamp tenant for guests** (the token's `tid`), not the home tenant. Audit consumers that want the home tenant must read the `homeTenant` / `idpHomeTenant` log fields.
+3. **HTTP-level test hosts use a non-GUID `AzureAd:TenantId`**, so FR-15 is only resolver-tested (unit level) until a contract fixture sets a GUID.
+4. **Sovereign-cloud issuers** (`login.microsoftonline.us`, `sts.chinacloudapi.cn`, ...) are refused by `TryParseHomeTenant`.
+5. The systemuser id cache in `ResolveSystemUserIdAsync` (existing) can keep an enabled->disabled user resolving until its TTL; the new check only covers the not-cached path. Pre-existing, not changed here.

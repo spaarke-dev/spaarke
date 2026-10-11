@@ -8,6 +8,11 @@
 // on AzureAd:TenantId would refuse every Model-1 Type-2 employee AND auto-bind Spaarke's own staff into that
 // customer's environment. In Model 2 the two happen to coincide — and the setting then lists it explicitly.
 //
+// The ONE use of AzureAd:TenantId on this plane (R3 FR-15, #1563): a registered workforce-contact guest — a B2B
+// guest (acct = 1) of the stamp's own tenant whose home tenant (idp) is on this list — is a member too. A
+// registered guest therefore additionally requires tid = AzureAd:TenantId; the member test itself still never
+// defaults the list from it.
+//
 // Provisioning writes the value (customer-provisioning-orchestration-r1); the contract for that is in
 // projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md.
 
@@ -50,11 +55,29 @@ public sealed class WorkforceIdentityOptionsValidator : IValidateOptions<Workfor
 {
     private readonly string? _ciamTenantId;
 
-    public WorkforceIdentityOptionsValidator(IConfiguration configuration)
+    public WorkforceIdentityOptionsValidator(
+        IConfiguration configuration, ILogger<WorkforceIdentityOptionsValidator> logger)
     {
         ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(logger);
         _ciamTenantId = configuration["Ciam:TenantId"];
+
+        // R3 FR-15: a registered guest is admitted only when tid = AzureAd:TenantId, so a deployment whose stamp
+        // tenant is missing or not a non-zero GUID silently refuses every guest. That is the safe failure, but an
+        // operator must be able to see it. Warn once (this validator is a singleton, built at startup); never fail
+        // startup on it — most deployments have no guests.
+        if (!IsUsableStampTenant(configuration[WorkforcePrincipalResolver.StampTenantConfigKey]))
+        {
+            logger.LogWarning(
+                "[WF-AUTH] {Key} is not a non-zero GUID — FR-15 registered-guest admission disabled " +
+                "(every acct=1 workforce caller will be denied on the guest branch)",
+                WorkforcePrincipalResolver.StampTenantConfigKey);
+        }
     }
+
+    /// <summary>True when the stamp tenant is a non-zero GUID — the precondition of the FR-15 guest branch.</summary>
+    internal static bool IsUsableStampTenant(string? stampTenantId)
+        => Guid.TryParse(stampTenantId?.Trim(), out var stamp) && stamp != Guid.Empty;
 
     /// <inheritdoc />
     public ValidateOptionsResult Validate(string? name, WorkforceIdentityOptions options)
@@ -176,21 +199,39 @@ public sealed record WorkforceCallerClaims(
         return values.Count == 1 ? values[0] : null;
     }
 
+    /// <summary>The marker Entra puts in a B2B guest's UPN (<c>name_domain#EXT#@tenant.onmicrosoft.com</c>).</summary>
+    private const string ExternalUpnMarker = "#EXT#";
+
     /// <summary>
     /// The token's email: <c>email</c>, then <c>preferred_username</c>, then <c>upn</c>. NOT verified by
     /// anything here — Microsoft documents these as mutable and unsuitable for authorization. It is trusted
     /// only behind the member test: for a MEMBER of a configured customer tenant, that tenant's admin controls
     /// the attribute. A non-member's email is never used to bind or create.
     /// </summary>
+    /// <remarks>
+    /// For a guest (<c>acct = 1</c>) a value containing <c>#EXT#</c> is NOT an email: it is the guest object's UPN in
+    /// the tenant signed in to, an address that is neither deliverable nor the person's. It is skipped, so a guest
+    /// with no real <c>email</c> claim carries no email (a contact is then created without one, never bound to or
+    /// named after the UPN). <c>acct = 0</c> tokens are unchanged.
+    /// </remarks>
     public static string? TokenEmail(ClaimsPrincipal user)
-        => First(user, "email", "preferred_username", "upn", ClaimTypes.Email);
+    {
+        var isGuest = First(user, AcctClaim) == "1";
+        return First(
+            user,
+            v => !isGuest || !v.Contains(ExternalUpnMarker, StringComparison.OrdinalIgnoreCase),
+            "email", "preferred_username", "upn", ClaimTypes.Email);
+    }
 
     private static string? First(ClaimsPrincipal user, params string[] types)
+        => First(user, _ => true, types);
+
+    private static string? First(ClaimsPrincipal user, Func<string, bool> accept, params string[] types)
     {
         foreach (var type in types)
         {
             var value = user.FindFirst(type)?.Value;
-            if (!string.IsNullOrWhiteSpace(value))
+            if (!string.IsNullOrWhiteSpace(value) && accept(value.Trim()))
             {
                 return value.Trim();
             }
@@ -234,14 +275,16 @@ public static class WorkforceMembershipTest
     /// <paramref name="customerTenantIds"/>. It yields <see cref="WorkforceMembership.Member"/>; when any part
     /// fails the result is exactly what it was before the branch existed (and so is its deny code). With no
     /// stamp tenant or no <c>idp</c> supplied the branch never applies — a guest is never admitted by default.
+    /// Both parameters are REQUIRED (no defaults) so that a caller cannot silently skip FR-15 by omission; pass
+    /// <c>null</c> to say "no stamp tenant / no idp" explicitly.
     /// </remarks>
     public static WorkforceMembership Evaluate(
         CallerKind kind,
         string? tenantId,
         string? acct,
         IReadOnlySet<Guid> customerTenantIds,
-        string? stampTenantId = null,
-        string? idp = null)
+        string? stampTenantId,
+        string? idp)
     {
         ArgumentNullException.ThrowIfNull(customerTenantIds);
 

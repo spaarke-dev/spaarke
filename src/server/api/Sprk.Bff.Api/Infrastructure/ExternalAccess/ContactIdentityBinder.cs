@@ -156,21 +156,17 @@ public sealed class ContactIdentityBinder
     // ── Workforce token plane ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Resolves a workforce caller with no systemuser (Type 2) WITHOUT the stamp tenant: the registered-guest
-    /// branch of the member test (R3 FR-15) never applies, so a guest is denied as before. Fail-closed overload.
-    /// </summary>
-    public Task<ContactBindingResult> ResolveWorkforceCallerAsync(
-        ClaimsPrincipal user, Guid callerOid, CancellationToken ct)
-        => ResolveWorkforceCallerAsync(user, callerOid, stampTenantId: null, ct);
-
-    /// <summary>
     /// Resolves a workforce caller with no systemuser (Type 2). A MEMBER of a configured customer tenant may be
     /// email-bound on first sign-in, or have a contact created keyed by the oid; everyone else resolves only
     /// through an existing oid binding. A registered workforce-contact guest (R3 FR-15: <c>acct = 1</c>,
     /// <c>tid</c> = <paramref name="stampTenantId"/>, home tenant from <c>idp</c> on the customer list) is a
     /// member here and is treated exactly like one.
     /// </summary>
-    /// <param name="stampTenantId">The stamp's own tenant id (<c>AzureAd:TenantId</c>), never a token value.</param>
+    /// <param name="stampTenantId">
+    /// The stamp's own tenant id (<c>AzureAd:TenantId</c>), never a token value. REQUIRED — there is deliberately no
+    /// overload without it, so no caller can skip FR-15 by omission; pass <c>null</c> to say "no stamp tenant" (a
+    /// guest is then never admitted).
+    /// </param>
     public async Task<ContactBindingResult> ResolveWorkforceCallerAsync(
         ClaimsPrincipal user, Guid callerOid, string? stampTenantId, CancellationToken ct)
     {
