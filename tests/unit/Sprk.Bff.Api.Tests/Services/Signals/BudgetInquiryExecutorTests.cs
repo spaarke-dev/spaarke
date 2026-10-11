@@ -25,22 +25,40 @@ public sealed class BudgetInquiryExecutorTests
     private static readonly Guid Me = Guid.NewGuid();
     private static readonly Guid Matter = Guid.NewGuid();
     private static readonly Guid Team = Guid.NewGuid();
+    private static readonly Guid MatterType = Guid.NewGuid();
 
-    private sealed class FakeUser(bool canCreate, string matterRights, Guid? noAppendToOn = null) : IDataverseUserClient
+    private sealed class FakeUser(bool canCreate, string matterRights, Guid? noAppendToOn = null, bool matterTypeCataloged = true) : IDataverseUserClient
     {
         public List<(string Path, string Body)> Posts { get; } = [];
+        /// <summary>Every GET the core made, so a test can prove which records were asked about as the caller.</summary>
+        public List<string> Gets { get; } = [];
 
         private static JsonElement J(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
         public Task<DataverseUserResponse> GetAsync(string p, CancellationToken ct)
         {
+            Gets.Add(p);
             if (p.StartsWith("WhoAmI"))
                 return Ok($"{{\"UserId\":\"{Me}\"}}");
+            // uac-r2 #1612: a service request is a core table with no pair agreement column, so its ADR-024 pair must be TYPED.
+            // The catalog is organization-owned (no RetrievePrincipalAccess; the AppendTo privilege plus a readable row instead).
+            if (p.StartsWith("sprk_recordtype_refs?"))
+                return Ok(matterTypeCataloged ? $"{{\"value\":[{{\"sprk_recordtype_refid\":\"{MatterType}\"}}]}}" : "{\"value\":[]}");
+            if (p.StartsWith($"sprk_recordtype_refs({MatterType:D})"))
+                return Ok("{\"sprk_recordlogicalname\":\"sprk_matter\"}");
+            if (p.StartsWith("EntityDefinitions(LogicalName='sprk_matter')?"))
+                return Ok("{\"EntitySetName\":\"sprk_matters\"}");
+            if (p.StartsWith("EntityDefinitions(LogicalName='sprk_recordtype_ref')?"))
+                return Ok("{\"LogicalName\":\"sprk_recordtype_ref\",\"OwnershipType\":\"OrganizationOwned\",\"PrimaryIdAttribute\":\"sprk_recordtype_refid\",\"Privileges\":[{\"PrivilegeType\":\"AppendTo\",\"Name\":\"prvAppendTosprk_recordtype_ref\"}]}");
+            if (p.StartsWith("sprk_recordtype_refs(") && p.Contains("?$select=sprk_recordtype_refid"))
+                return Ok("{}");
+            if (p.Contains("RetrievePrincipalAccess") && p.Contains("sprk_recordtype_refs"))
+                return Task.FromResult(DataverseUserResponse.Fail(400, "0x80040800", "RetrievePrincipalAccess does not support sprk_recordtype_ref"));
             if (p.StartsWith("EntityDefinitions(LogicalName='sprk_servicerequest')?"))
                 return Ok("{\"Privileges\":[{\"PrivilegeType\":\"Create\",\"Name\":\"prvCreatesprk_servicerequest\"},{\"PrivilegeType\":\"Append\",\"Name\":\"prvAppendsprk_servicerequest\"}]}");
             if (p.Contains("RetrieveUserSetOfPrivilegesByNames"))
                 return Ok(canCreate
-                    ? "{\"RolePrivileges\":[{\"PrivilegeName\":\"prvCreatesprk_servicerequest\"},{\"PrivilegeName\":\"prvAppendsprk_servicerequest\"}]}"
+                    ? "{\"RolePrivileges\":[{\"PrivilegeName\":\"prvCreatesprk_servicerequest\"},{\"PrivilegeName\":\"prvAppendsprk_servicerequest\"},{\"PrivilegeName\":\"prvAppendTosprk_recordtype_ref\"}]}"
                     : "{\"RolePrivileges\":[]}");
             if (p.Contains("/Attributes?"))
                 return Ok("{\"value\":[]}");
@@ -134,6 +152,39 @@ public sealed class BudgetInquiryExecutorTests
         ((JsonElement)write.Fields["sprk_RegardingMatter@odata.bind"]!).GetString().Should().Be($"/sprk_matters({Matter:D})");
         write.Fields["ownerid@odata.bind"].Should().Be($"/teams({Team})");
         user.Posts.Should().BeEmpty("the row is written by the application after the caller's rights check, not by a run-as-user POST");
+    }
+
+    [Fact]
+    public async Task Pair_is_typed_and_the_pairs_record_is_checked_as_the_caller()
+    {
+        // Regression (uac-r2 #1612): an untyped pair on sprk_servicerequest is refused 400 Invalid (the table has no pair
+        // agreement column), so every real inquiry was refused. The pair must name the matter by TYPE, and the core then
+        // reads the type row and asks AppendTo on the matter AS THE CALLER.
+        var user = new FakeUser(true, "ReadAccess,AppendToAccess");
+        var (sut, rig) = Build(user, new FakeSender());
+
+        var result = await sut.ExecuteAsync(Req(), default);
+
+        result.Outcome.Should().Be(BudgetInquiryOutcome.Sent);
+        var fields = rig.Writes.Single().Fields;
+        ((JsonElement)fields["sprk_RegardingRecordType@odata.bind"]!).GetString().Should().Be($"/sprk_recordtype_refs({MatterType:D})");
+        ((JsonElement)fields["sprk_regardingrecordid"]!).GetString().Should().Be(Matter.ToString("D"));
+        user.Gets.Should().Contain(g => g.StartsWith($"sprk_recordtype_refs({MatterType:D})"), "the pair's type row is read as the caller");
+        user.Gets.Should().Contain(g => g.Contains("RetrievePrincipalAccess") && g.Contains(Matter.ToString("D")),
+            "AppendTo is asked on the record the pair names");
+    }
+
+    [Fact]
+    public async Task Matter_record_type_not_cataloged_refuses_before_any_write_or_send()
+    {
+        var sender = new FakeSender();
+        var (sut, rig) = Build(new FakeUser(true, "AppendToAccess", matterTypeCataloged: false), sender);
+
+        (await sut.ExecuteAsync(Req(), default)).Outcome.Should().Be(BudgetInquiryOutcome.Refused);
+        (await sut.PreflightAsync(Req(), default))!.Outcome.Should().Be(BudgetInquiryOutcome.Refused);
+
+        rig.Writes.Should().BeEmpty();
+        sender.Sends.Should().Be(0);
     }
 
     [Fact]
