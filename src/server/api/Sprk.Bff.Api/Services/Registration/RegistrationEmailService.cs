@@ -207,7 +207,7 @@ public class RegistrationEmailService
 
     /// <summary>
     /// Sends a portal notification email (spaarke-SPA-external-access-platform-r3 task 036, FR-07): "you were given access
-    /// to a record" and "a message was posted on a record", each with one link into the external portal. Same sender, send
+    /// to a record", with one link into the external portal. Same sender, send
     /// mode and pipeline as <see cref="SendCiamOnboardingEmailAsync"/> (the shared mailbox, app-only — never the user's
     /// mailbox, no OBO). Throws when the send is refused (an unapproved sender, the daily limit) or fails; the caller
     /// treats every such failure as best effort.

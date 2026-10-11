@@ -24,9 +24,8 @@ namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
 /// <summary>
 /// FR-07 (spaarke-SPA-external-access-platform-r3 task 036): the external-contact email branch of
 /// <see cref="GrantAccessNotifier.NotifyContactGrantAsync"/> (a grant that gave an already-onboarded external contact
-/// access) and its message entry point <see cref="GrantAccessNotifier.NotifyMessagePostedAsync"/> (a posted message told to
-/// the record's other member contacts). The PRODUCTION notifier; doubled are only the I/O boundaries — the identity
-/// store, the ledger store's link read, the Dataverse client (the member read and the record's name) and the email
+/// access). The PRODUCTION notifier; doubled are only the I/O boundaries — the identity
+/// store, the ledger store's link read, the Dataverse client (the record's name) and the email
 /// service, which RECORDS each send instead of reaching the shared mailbox. The cases that depend on the grant endpoint's
 /// "access gained" decision (same-level re-grant, expiry-only change, lower level, organization grant) run through the
 /// production endpoint in <c>GrantExternalContactEmailTests</c> (tests/integration/auth). Link rules are asserted here
@@ -312,201 +311,6 @@ public class GrantAccessNotifierExternalTests
         _log.Warnings.Should().Contain(w => w.Contains("portal link"));
     }
 
-    // ── FR-07 / FR-11: a posted message → each OTHER member contact, once ────────────────────────────────────────────────
-
-    private static MessagePostedNotification Posted(Guid author, params (ExternalGrantRootType Type, Guid Id)[] roots) =>
-        new(roots.Select(r => new MessageNotifyRoot(r.Type, r.Id)).ToList(), Guid.NewGuid(), author);
-
-    [Fact]
-    public async Task APostedMessage_EmailsEachOtherMemberContactOnce_AndNeverTheAuthor()
-    {
-        var author = Contact(oid: Guid.NewGuid(), email: "author@outside.test");
-        var memberA = Contact(oid: Guid.NewGuid(), email: "a@outside.test");
-        var memberB = Contact(oid: Guid.NewGuid(), email: "b@outside.test");
-        _dataverse.Members[_matter] = new Guid?[] { author, memberA, memberB, memberA };
-
-        var outcome = await Notifier().NotifyMessagePostedAsync(
-            Posted(author, (ExternalGrantRootType.Matter, _matter)), CancellationToken.None);
-
-        outcome.Should().Be(GrantNotificationOutcome.Sent);
-        _emails.Sent.Select(s => s.To).Should().BeEquivalentTo(new[] { "a@outside.test", "b@outside.test" });
-        _emails.Sent.Should().OnlyContain(s => s.LinkUrl == Link(_matter));
-        _emails.Sent.Should().OnlyContain(s => s.Subject.Contains(RecordName));
-    }
-
-    [Fact]
-    public async Task APostedMessage_ByAContactWithNoGrantRowOfTheirOwn_StillNeverEmailsThemselves()
-    {
-        // The author is excluded by identity, not by being absent from the grant rows (a systemuser author's derived contact).
-        var author = Contact(oid: Guid.NewGuid(), email: "author@spaarke.test");
-        var member = Contact(oid: Guid.NewGuid(), email: "m@outside.test");
-        _dataverse.Members[_matter] = new Guid?[] { member, author };
-
-        await Notifier().NotifyMessagePostedAsync(Posted(author, (ExternalGrantRootType.Matter, _matter)), CancellationToken.None);
-
-        _emails.Sent.Should().ContainSingle().Which.To.Should().Be("m@outside.test");
-    }
-
-    [Fact]
-    public async Task TheMemberRead_IsScopedToTheRootsPostedOn_ActiveAndUnexpiredOnly()
-    {
-        var other = Guid.NewGuid();
-        _dataverse.Members[_matter] = Array.Empty<Guid?>();
-        _dataverse.Members[other] = new Guid?[] { Contact(oid: Guid.NewGuid()) };
-
-        await Notifier().NotifyMessagePostedAsync(
-            Posted(Guid.NewGuid(), (ExternalGrantRootType.Matter, _matter)), CancellationToken.None);
-
-        var filter = _dataverse.Filters.Should().ContainSingle("one root, one read").Subject;
-        filter.Should().Contain($"_sprk_matter_value eq {_matter:D}");
-        filter.Should().Contain("statecode eq 0").And.Contain("sprk_expiresdate ge ");
-        filter.Should().NotContain(other.ToString("D"), "another root's members are never read, so never told");
-        _emails.Sent.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task APostedMessage_UnderTwoRoots_EmailsAMemberOfBothOnce_WithTheLinkToTheFirstRoot()
-    {
-        var project = Guid.NewGuid();
-        var both = Contact(oid: Guid.NewGuid(), email: "both@outside.test");
-        var onlyProject = Contact(oid: Guid.NewGuid(), email: "p@outside.test");
-        _dataverse.Names[project] = "Project Falcon";
-        _dataverse.Members[_matter] = new Guid?[] { both };
-        _dataverse.Members[project] = new Guid?[] { both, onlyProject };
-
-        await Notifier().NotifyMessagePostedAsync(
-            Posted(Guid.NewGuid(), (ExternalGrantRootType.Matter, _matter), (ExternalGrantRootType.Project, project)),
-            CancellationToken.None);
-
-        _emails.Sent.Select(s => (s.To, s.LinkUrl)).Should().BeEquivalentTo(new[]
-        {
-            ("both@outside.test", Link(_matter)),
-            ("p@outside.test", Link(project, "project")),
-        });
-    }
-
-    [Fact]
-    public async Task OrganizationGrantRows_AndMembersWhoAreNotOnboardedOrActiveOrHaveNoEmail_AreSkipped()
-    {
-        var notOnboarded = Contact(oid: null, email: "new@outside.test");
-        var inactive = Contact(oid: Guid.NewGuid(), email: "gone@outside.test", stateCode: 1);
-        var noEmail = Contact(oid: Guid.NewGuid(), email: null);
-        var good = Contact(oid: Guid.NewGuid(), email: "ok@outside.test");
-        _dataverse.Members[_matter] = new Guid?[] { null, notOnboarded, inactive, noEmail, good, Guid.Empty };
-
-        var outcome = await Notifier().NotifyMessagePostedAsync(
-            Posted(Guid.NewGuid(), (ExternalGrantRootType.Matter, _matter)), CancellationToken.None);
-
-        outcome.Should().Be(GrantNotificationOutcome.Sent);
-        _emails.Sent.Should().ContainSingle().Which.To.Should().Be("ok@outside.test");
-    }
-
-    [Fact]
-    public async Task APostedMessage_WithNoOtherMembers_SendsNothing()
-    {
-        var author = Contact(oid: Guid.NewGuid());
-        _dataverse.Members[_matter] = new Guid?[] { author };
-
-        var outcome = await Notifier().NotifyMessagePostedAsync(
-            Posted(author, (ExternalGrantRootType.Matter, _matter)), CancellationToken.None);
-
-        outcome.Should().Be(GrantNotificationOutcome.NotApplicable);
-        _emails.Sent.Should().BeEmpty();
-    }
-
-    [Fact]
-    public async Task OneFailedSend_IsLogged_TheOtherMembersAreStillEmailed_NothingIsThrown()
-    {
-        var bad = Contact(oid: Guid.NewGuid(), email: "bad@outside.test");
-        var good = Contact(oid: Guid.NewGuid(), email: "good@outside.test");
-        _dataverse.Members[_matter] = new Guid?[] { bad, good };
-        _emails.Fail = to => to == "bad@outside.test" ? new HttpRequestException("mailbox full") : null;
-
-        var outcome = await Notifier().NotifyMessagePostedAsync(
-            Posted(Guid.NewGuid(), (ExternalGrantRootType.Matter, _matter)), CancellationToken.None);
-
-        outcome.Should().Be(GrantNotificationOutcome.Failed);
-        _emails.Sent.Should().ContainSingle().Which.To.Should().Be("good@outside.test");
-        _log.Warnings.Should().Contain(w => w.Contains("Could not email contact"));
-    }
-
-    [Fact]
-    public async Task AMemberReadThatFails_IsLogged_AndTheOtherRootsStillGoOut()
-    {
-        var project = Guid.NewGuid();
-        var member = Contact(oid: Guid.NewGuid(), email: "p@outside.test");
-        _dataverse.Names[project] = "Project Falcon";
-        _dataverse.FailingRoots.Add(_matter);
-        _dataverse.Members[project] = new Guid?[] { member };
-
-        var outcome = await Notifier().NotifyMessagePostedAsync(
-            Posted(Guid.NewGuid(), (ExternalGrantRootType.Matter, _matter), (ExternalGrantRootType.Project, project)),
-            CancellationToken.None);
-
-        outcome.Should().Be(GrantNotificationOutcome.Failed);
-        _emails.Sent.Should().ContainSingle().Which.LinkUrl.Should().Be(Link(project, "project"));
-        _log.Warnings.Should().Contain(w => w.Contains("Could not read the members"));
-    }
-
-    [Fact]
-    public async Task AMemberWhoseContactCannotBeRead_IsSkippedAndLogged_TheOthersStillGoOut()
-    {
-        var unreadable = Guid.NewGuid();
-        _identities.Setup(i => i.GetContactAsync(unreadable, It.IsAny<CancellationToken>())).ReturnsAsync(ContactLookup.Failed);
-        var good = Contact(oid: Guid.NewGuid(), email: "good@outside.test");
-        _dataverse.Members[_matter] = new Guid?[] { unreadable, good };
-
-        var outcome = await Notifier().NotifyMessagePostedAsync(
-            Posted(Guid.NewGuid(), (ExternalGrantRootType.Matter, _matter)), CancellationToken.None);
-
-        outcome.Should().Be(GrantNotificationOutcome.Failed);
-        _emails.Sent.Should().ContainSingle().Which.To.Should().Be("good@outside.test");
-    }
-
-    [Fact]
-    public async Task APostedMessage_WithoutAPortalLink_SendsNothing_AndSaysSo()
-    {
-        var member = Contact(oid: Guid.NewGuid());
-        _dataverse.Members[_matter] = new Guid?[] { member };
-
-        var outcome = await Notifier(portalUrl: null).NotifyMessagePostedAsync(
-            Posted(Guid.NewGuid(), (ExternalGrantRootType.Matter, _matter)), CancellationToken.None);
-
-        outcome.Should().Be(GrantNotificationOutcome.Failed);
-        _emails.Sent.Should().BeEmpty();
-        _log.Warnings.Should().Contain(w => w.Contains("portal link"));
-    }
-
-    [Fact]
-    public async Task TheEmailForAMessage_NamesNoMessageText_AndCarriesOnlyThePortalLink()
-    {
-        var member = Contact(oid: Guid.NewGuid(), email: "m@outside.test");
-        _dataverse.Members[_matter] = new Guid?[] { member };
-
-        await Notifier().NotifyMessagePostedAsync(
-            Posted(Guid.NewGuid(), (ExternalGrantRootType.Matter, _matter)), CancellationToken.None);
-
-        var sent = _emails.Sent.Should().ContainSingle().Subject;
-        sent.LinkUrl.Should().Be(Link(_matter));
-        sent.LinkUrl.Should().NotContainAny("api://", "user_impersonation", "token", "azurewebsites");
-        sent.CorrelationId.Should().StartWith("portal-msg-");
-    }
-
-    [Fact]
-    public async Task ACancelledNotification_StopsQuietly_ReportingFailed()
-    {
-        var member = Contact(oid: Guid.NewGuid());
-        _dataverse.Members[_matter] = new Guid?[] { member };
-        using var cts = new CancellationTokenSource();
-        cts.Cancel();
-
-        var outcome = await Notifier().NotifyMessagePostedAsync(
-            Posted(Guid.NewGuid(), (ExternalGrantRootType.Matter, _matter)), cts.Token);
-
-        outcome.Should().Be(GrantNotificationOutcome.Failed);
-        _emails.Sent.Should().BeEmpty();
-    }
-
     [Fact]
     public void ThePortalNotificationTemplate_IsAnEmbeddedResource_WithEveryPlaceholderTheServiceFills()
     {
@@ -559,8 +363,7 @@ public class GrantAccessNotifierExternalTests
     }
 
     /// <summary>
-    /// The Dataverse client: answers the member read (<c>sprk_externalrecordaccesses</c>, recording each filter) from
-    /// <see cref="Members"/> by the root id in the filter, and a record's name read from <see cref="Names"/>. No HTTP.
+    /// The Dataverse client: answers a record's name read from <see cref="Names"/>. No HTTP.
     /// </summary>
     private sealed class FakeDataverse : DataverseWebApiClient
     {
@@ -572,29 +375,7 @@ public class GrantAccessNotifierExternalTests
         {
         }
 
-        public Dictionary<Guid, Guid?[]> Members { get; } = new();
-        public HashSet<Guid> FailingRoots { get; } = new();
         public Dictionary<Guid, string> Names { get; } = new();
-        public List<string> Filters { get; } = new();
-
-        public override Task<List<T>> QueryAsync<T>(
-            string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null,
-            CancellationToken cancellationToken = default)
-        {
-            entitySetName.Should().Be("sprk_externalrecordaccesses");
-            select.Should().Be("_sprk_contact_value");
-            Filters.Add(filter!);
-
-            var root = Members.Keys.Concat(FailingRoots).Distinct().FirstOrDefault(
-                id => filter!.Contains(id.ToString("D"), StringComparison.OrdinalIgnoreCase));
-            if (FailingRoots.Contains(root))
-                throw new HttpRequestException("Simulated Dataverse failure.");
-
-            var rows = Members.TryGetValue(root, out var contacts)
-                ? contacts.Select(c => new Dictionary<string, object?> { ["_sprk_contact_value"] = c }).ToList()
-                : new List<Dictionary<string, object?>>();
-            return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(rows))!);
-        }
 
         public override Task<T?> RetrieveAsync<T>(
             string entitySetName, Guid id, string? select = null, CancellationToken cancellationToken = default)

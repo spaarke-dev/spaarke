@@ -31,12 +31,7 @@
 // ViewOnly caller can read the thread but gets 403 insufficient_rights on a post. The body is the text only (≤ 10,000
 // chars, stored as PLAIN TEXT so markup is never rendered), attachments are 400, the sender is the resolved principal
 // (an unattributable one is 403 before any read), and the write is CommunicationService.PostToRecordThreadAsync: one
-// app-only sprk_communication through the shared filing step — the message itself is never emailed, no OBO, never internal-only.
-//
-// Task 036 (FR-07) — after the row exists, the record's OTHER member contacts are sent a portal deep link by email
-// (GrantAccessNotifier.NotifyMessagePostedAsync, shared mailbox, app-only): fire-and-forget in its own DI scope, so the 201
-// never waits on or fails because of it. The email names no message text. For an invoice only the parents the caller holds
-// Create on are told; a service request has no members.
+// app-only sprk_communication through the shared filing step — no email, no Graph, no OBO, never internal-only.
 
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -114,7 +109,7 @@ public static class ExternalMessageEndpoints
             .WithSummary("Post a message to the thread of a record the caller can access")
             .WithDescription(
                 "Posts a plain-text message (sprk_body, at most 10,000 characters, no attachments) to the thread of a " +
-                "project, matter, work assignment, invoice or (own) service request, as the caller. The message is not emailed; the record's other member contacts are sent a portal link by a best-effort notification. 403 " +
+                "project, matter, work assignment, invoice or (own) service request, as the caller. No email is sent. 403 " +
                 "unless the record is in the caller's accessible set with Create (service requests: the caller's own); 404 " +
                 "for any other root.")
             // A write path: per-user throttle on the caller key (oid/sub, present on a CIAM token as on a workforce one).
@@ -142,7 +137,6 @@ public static class ExternalMessageEndpoints
         ExternalModuleRegistry registry,
         RecordService recordService,
         CommunicationService communicationService,
-        IServiceScopeFactory scopeFactory,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -155,42 +149,8 @@ public static class ExternalMessageEndpoints
         }
 
         return PostMessageCoreAsync(
-            root, id, request, principal, registry, recordService.GetRecordAsync, communicationService, logger, ct,
-            onPosted: BackgroundMemberNotifier(scopeFactory, logger));
+            root, id, request, principal, registry, recordService.GetRecordAsync, communicationService, logger, ct);
     }
-
-    /// <summary>How long the background member email may run before it is abandoned (the post it follows has long returned).</summary>
-    internal static readonly TimeSpan MemberNotificationTimeout = TimeSpan.FromMinutes(2);
-
-    /// <summary>
-    /// The hand-off the route gives <see cref="PostMessageCoreAsync"/> (task 036, FR-07): starts the members' email on a
-    /// background task in a NEW dependency scope and returns at once, so the 201 never waits on, or fails because of, the
-    /// email. Fire-and-forget rather than a queued job (ADR-052 / ADR-004; see the task notes): it is low-volume BFF-domain
-    /// work with no retry or ordering need, and a restart that drops it loses at most one best-effort email. The notifier is
-    /// resolved from the new scope because the request's scoped services are disposed when the response completes. Nothing
-    /// escapes the task: every fault is logged.
-    /// </summary>
-    internal static Action<MessagePostedNotification> BackgroundMemberNotifier(
-        IServiceScopeFactory scopeFactory, ILogger logger) =>
-        posted => _ = Task.Run(async () =>
-        {
-            try
-            {
-                await using var scope = scopeFactory.CreateAsyncScope();
-                var notifier = scope.ServiceProvider.GetRequiredService<GrantAccessNotifier>();
-                using var timeout = new CancellationTokenSource(MemberNotificationTimeout);
-                var outcome = await notifier.NotifyMessagePostedAsync(posted, timeout.Token);
-                logger.LogInformation(
-                    "[EXT-MESSAGES] Member notification for message {CommunicationId}: {Outcome}.",
-                    posted.CommunicationId, outcome);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex,
-                    "[EXT-MESSAGES] Member notification for message {CommunicationId} failed. The post stands.",
-                    posted.CommunicationId);
-            }
-        });
 
     /// <summary>
     /// The message post pipeline (task 034, FR-11): root lookup → request validation → attributable sender → record gate
@@ -208,8 +168,7 @@ public static class ExternalMessageEndpoints
         Func<string, Guid, string[]?, CancellationToken, Task<IReadOnlyDictionary<string, object?>>> readRecord,
         CommunicationService communicationService,
         ILogger logger,
-        CancellationToken ct,
-        Action<MessagePostedNotification>? onPosted = null)
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(root) || !Roots.TryGetValue(root, out var messageRoot))
         {
@@ -249,7 +208,7 @@ public static class ExternalMessageEndpoints
 
         try
         {
-            var (rights, notifyRoots) = await GetRecordRightsAsync(messageRoot, id, principal, registry, readRecord, logger, ct)
+            var rights = await GetRecordRightsAsync(messageRoot, id, principal, registry, readRecord, logger, ct)
                 .ConfigureAwait(false);
 
             if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
@@ -274,10 +233,6 @@ public static class ExternalMessageEndpoints
             var posted = await communicationService
                 .PostToRecordThreadAsync(messageRoot.EntityLogicalName, id, body, principal, ct)
                 .ConfigureAwait(false);
-
-            // Task 036: tell the record's other members. After the row exists, best effort, never awaited here, and a fault
-            // in the hand-off (or its callback) can neither fail nor delay the 201.
-            NotifyMembers(onPosted, notifyRoots, posted.CommunicationId, principal, messageRoot, id, logger);
 
             return Results.Created(
                 $"/api/v1/external/{messageRoot.Segment}/{id:D}/messages",
@@ -438,38 +393,6 @@ public static class ExternalMessageEndpoints
             .Readable;
 
     /// <summary>
-    /// Tells the record's other members a message was posted (task 036): builds the notification and hands it to
-    /// <paramref name="onPosted"/>. Does nothing when there is no callback or no root whose members are to be told (a
-    /// service request has none). The callback is the route's fire-and-forget launcher; a fault in it is logged here and
-    /// never reaches the caller, so the post that already succeeded stays a 201.
-    /// </summary>
-    private static void NotifyMembers(
-        Action<MessagePostedNotification>? onPosted,
-        IReadOnlyList<MessageNotifyRoot> notifyRoots,
-        Guid communicationId,
-        CallerPrincipal principal,
-        MessageRoot messageRoot,
-        Guid recordId,
-        ILogger logger)
-    {
-        if (onPosted is null || notifyRoots.Count == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            onPosted(new MessagePostedNotification(notifyRoots, communicationId, principal.ContactId));
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "[EXT-MESSAGES] Could not hand message {CommunicationId} on {Entity} {RecordId} to the member notification. " +
-                "The post stands.", communicationId, messageRoot.EntityLogicalName, recordId);
-        }
-    }
-
-    /// <summary>
     /// The caller's rights on the record for a POST (task 034): <see cref="Spaarke.Dataverse.AccessRights.None"/> unless
     /// the read gate (<see cref="IsRootRecordReadableAsync"/>, the same evaluation) admits it; then:
     /// <list type="bullet">
@@ -480,12 +403,8 @@ public static class ExternalMessageEndpoints
     /// <item>service request — Read and Create: the gate's requester scope is the caller's own request, and FR-11 lets the
     /// requester answer on it (the same answer the service-request document routes give).</item>
     /// </list>
-    /// Alongside the rights, the grant roots whose members a post is to be told to (task 036): the record itself for a
-    /// project / matter / work assignment; for an invoice ONLY the parents the caller holds Create on (the roots the post
-    /// was made through — never the other parent's members); none for a service request (it has no members).
     /// </summary>
-    internal static async Task<(Spaarke.Dataverse.AccessRights Rights, IReadOnlyList<MessageNotifyRoot> NotifyRoots)>
-        GetRecordRightsAsync(
+    internal static async Task<Spaarke.Dataverse.AccessRights> GetRecordRightsAsync(
         MessageRoot root,
         Guid id,
         CallerPrincipal principal,
@@ -498,50 +417,18 @@ public static class ExternalMessageEndpoints
             .ConfigureAwait(false);
         if (!readable)
         {
-            return (Spaarke.Dataverse.AccessRights.None, Array.Empty<MessageNotifyRoot>());
+            return Spaarke.Dataverse.AccessRights.None;
         }
-
-        // The member roots are exactly the roots the Create was held on: one root for a root module, the Create-bearing
-        // parents for an invoice, none for a service request (no grant roots, so no members).
-        IReadOnlyList<MessageNotifyRoot> NotifyOn(ExternalGrantRootType type) => new[] { new MessageNotifyRoot(type, id) };
 
         return root.EntityLogicalName switch
         {
-            "sprk_project" => (principal.RightsOn(ExternalGrantRootType.Project, id), NotifyOn(ExternalGrantRootType.Project)),
-            "sprk_matter" => (principal.RightsOn(ExternalGrantRootType.Matter, id), NotifyOn(ExternalGrantRootType.Matter)),
-            "sprk_workassignment" =>
-                (principal.RightsOn(ExternalGrantRootType.WorkAssignment, id), NotifyOn(ExternalGrantRootType.WorkAssignment)),
-            "sprk_invoice" => (RightsThroughParents(principal, scopeRow), CreateParents(principal, scopeRow)),
-            "sprk_servicerequest" =>
-                (Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Create, Array.Empty<MessageNotifyRoot>()),
-            _ => (Spaarke.Dataverse.AccessRights.None, Array.Empty<MessageNotifyRoot>()),
+            "sprk_project" => principal.RightsOn(ExternalGrantRootType.Project, id),
+            "sprk_matter" => principal.RightsOn(ExternalGrantRootType.Matter, id),
+            "sprk_workassignment" => principal.RightsOn(ExternalGrantRootType.WorkAssignment, id),
+            "sprk_invoice" => RightsThroughParents(principal, scopeRow),
+            "sprk_servicerequest" => Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Create,
+            _ => Spaarke.Dataverse.AccessRights.None,
         };
-    }
-
-    /// <summary>The invoice's parent roots (as the gate read them) on which the caller holds Create — the roots a post on
-    /// the invoice was made through. A parent the caller cannot create on is not one, so its members are not told.</summary>
-    private static IReadOnlyList<MessageNotifyRoot> CreateParents(
-        CallerPrincipal principal, IReadOnlyDictionary<string, object?>? scopeRow)
-    {
-        var roots = new List<MessageNotifyRoot>(2);
-        if (scopeRow is null)
-        {
-            return roots;
-        }
-
-        if (scopeRow.TryGetValue("sprk_matter", out var matter) && matter is Guid matterId
-            && principal.RightsOn(ExternalGrantRootType.Matter, matterId).HasFlag(Spaarke.Dataverse.AccessRights.Create))
-        {
-            roots.Add(new MessageNotifyRoot(ExternalGrantRootType.Matter, matterId));
-        }
-
-        if (scopeRow.TryGetValue("sprk_project", out var project) && project is Guid projectId
-            && principal.RightsOn(ExternalGrantRootType.Project, projectId).HasFlag(Spaarke.Dataverse.AccessRights.Create))
-        {
-            roots.Add(new MessageNotifyRoot(ExternalGrantRootType.Project, projectId));
-        }
-
-        return roots;
     }
 
     /// <summary>The caller's rights on an invoice: the union over its parent roots (<c>sprk_matter</c>,

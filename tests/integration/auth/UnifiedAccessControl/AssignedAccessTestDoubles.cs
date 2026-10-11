@@ -938,7 +938,7 @@ internal static class AssignedAccessTestDoubles
             }
         }
 
-        /// <summary>Task 036: every portal email the notifier sent (external-contact grants and posted messages), recorded, never sent.</summary>
+        /// <summary>Task 036: every portal email the notifier sent (external-contact grants), recorded, never sent.</summary>
         public RecordingEmailService Emails { get; } = new();
 
         /// <summary>

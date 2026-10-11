@@ -1,6 +1,5 @@
 using System.Security.Claims;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Authentication;
@@ -24,18 +23,6 @@ internal enum GrantNotificationOutcome
     /// <summary>At least one person to be told could not be sent it, or who they are could not be read.</summary>
     Failed,
 }
-
-/// <summary>One grant root a posted message is to be told to the members of.</summary>
-internal readonly record struct MessageNotifyRoot(ExternalGrantRootType Type, Guid Id);
-
-/// <summary>
-/// A message was just posted to a record's thread (spaarke-SPA-external-access-platform-r3 task 036, FR-07/FR-11 notify).
-/// <see cref="Roots"/> are the grant roots whose members are told — for a project, matter or work assignment the record
-/// itself; for an invoice the parent roots the poster holds Create on; empty for a service request (it has no members).
-/// <see cref="AuthorContactId"/> is the poster's contact (<see cref="Guid.Empty"/> when none) and is never told.
-/// </summary>
-internal sealed record MessagePostedNotification(
-    IReadOnlyList<MessageNotifyRoot> Roots, Guid CommunicationId, Guid AuthorContactId);
 
 /// <summary>
 /// Tells an internal user, in the model-driven app's notification bell, that they were just given access to a record,
@@ -61,10 +48,9 @@ internal sealed record MessagePostedNotification(
 /// so naming the record to them would be the leak). The record's name is read app-only here, after the write.</para>
 /// <para><b>External contacts (task 036, FR-07).</b> A grant to an already-onboarded external contact (an active contact
 /// with a readable identity binding, an email address, and no internal user it represents) is told by email instead, with
-/// one deep link into the portal; <see cref="NotifyMessagePostedAsync"/> does the same for the other member contacts of a
-/// record a message was posted on. The email goes through <see cref="RegistrationEmailService"/> — the sender
+/// one deep link into the portal. The email goes through <see cref="RegistrationEmailService"/> — the sender
 /// <c>SendCiamOnboardingEmailAsync</c> uses (the shared mailbox, app-only; never the user's mailbox, no OBO). Best effort,
-/// like everything here: a send that is refused or fails is logged and the grant or post stands.</para>
+/// like everything here: a send that is refused or fails is logged and the grant stands.</para>
 /// </remarks>
 internal sealed class GrantAccessNotifier
 {
@@ -269,9 +255,6 @@ internal sealed class GrantAccessNotifier
     // External contacts (task 036, FR-07): email with a portal deep link
     // =========================================================================
 
-    /// <summary>The most member rows read for one root when a message is posted (and so the most emails one post can send per root).</summary>
-    internal const int MaxMessageRecipientsPerRoot = 50;
-
     /// <summary>
     /// The grant gave the already-read, active, ONLY-external contact <paramref name="contact"/> access to a record: emails
     /// it, once, when it is already onboarded (a readable identity binding) and has an email address. Never the granter
@@ -331,142 +314,6 @@ internal sealed class GrantAccessNotifier
         }
     }
 
-    /// <summary>
-    /// A message was posted to the thread of the records in <paramref name="posted"/>: emails each OTHER member contact of
-    /// each root — an active, unexpired contact grant — once, with a portal deep link to that root. Never the author;
-    /// a contact that is a member of two roots is emailed once. The email names no message text. Best effort: nothing
-    /// throws, and a root whose members cannot be read, or a send that fails, is logged and counted
-    /// <see cref="GrantNotificationOutcome.Failed"/> while the others still go out.
-    /// </summary>
-    /// <remarks>
-    /// Members are the contacts with a direct grant row on the root. Members who hold access only through an
-    /// organization grant, and internal users, are not emailed here (the in-portal feed, task 037, covers them).
-    /// </remarks>
-    public async Task<GrantNotificationOutcome> NotifyMessagePostedAsync(
-        MessagePostedNotification posted, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(posted);
-
-        var failed = false;
-        var sent = 0;
-        try
-        {
-            // The author is marked told first, so they are never a recipient, whatever the grants say.
-            var told = new HashSet<Guid>();
-            if (posted.AuthorContactId != Guid.Empty)
-                told.Add(posted.AuthorContactId);
-
-            foreach (var root in posted.Roots.Distinct())
-            {
-                IReadOnlyList<Guid> members;
-                try
-                {
-                    members = await ReadMemberContactsAsync(root.Type, root.Id, ct);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex,
-                        "[GRANT-NOTIFY] Could not read the members of {RootType} {RootId}; nobody was emailed about message " +
-                        "{CommunicationId} for it.", root.Type, root.Id, posted.CommunicationId);
-                    failed = true;
-                    continue;
-                }
-
-                var recipients = members.Where(told.Add).ToList();
-                if (recipients.Count == 0)
-                    continue;
-
-                var link = TryBuildLink(root.Type, root.Id);
-                if (link is null)
-                {
-                    failed = true;
-                    continue;
-                }
-
-                var label = ExternalGrantRoot.LabelFor(root.Type);
-                var name = await ReadRecordNameAsync(root.Type, root.Id);
-                var subject = name is null
-                    ? $"New message on a {label} in the Spaarke portal"
-                    : $"New message on the {label} \"{name}\" in the Spaarke portal";
-                var headline = name is null
-                    ? $"There is a new message on a {label}"
-                    : $"There is a new message on the {label} \"{name}\"";
-                const string message = "Open the record in the Spaarke portal to read it and reply.";
-
-                foreach (var contactId in recipients)
-                {
-                    ct.ThrowIfCancellationRequested();
-
-                    ContactBindingRow? contact;
-                    try
-                    {
-                        var read = await _identities.GetContactAsync(contactId, ct);
-                        if (read.Status != LookupStatus.Read)
-                        {
-                            _logger.LogWarning(
-                                "[GRANT-NOTIFY] Member contact {ContactId} of {RootType} {RootId} could not be read ({Status}); " +
-                                "not emailed.", contactId, root.Type, root.Id, read.Status);
-                            failed |= read.Status == LookupStatus.Failed;
-                            continue;
-                        }
-
-                        contact = read.Rows.FirstOrDefault(r => r.ContactId == contactId);
-                    }
-                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex,
-                            "[GRANT-NOTIFY] Member contact {ContactId} of {RootType} {RootId} could not be read; not emailed.",
-                            contactId, root.Type, root.Id);
-                        failed = true;
-                        continue;
-                    }
-
-                    if (contact is not { IsActive: true } || !IsOnboardedWithEmail(contact))
-                    {
-                        _logger.LogInformation(
-                            "[GRANT-NOTIFY] Member contact {ContactId} of {RootType} {RootId} is inactive, not onboarded, or has " +
-                            "no email address; not emailed.", contactId, root.Type, root.Id);
-                        continue;
-                    }
-
-                    if (await TrySendAsync(
-                            contact, subject, headline, message, link, $"Open the {label}",
-                            correlationId: $"portal-msg-{posted.CommunicationId:N}-{contactId:N}",
-                            what: $"message {posted.CommunicationId} on {root.Type} {root.Id}"))
-                        sent++;
-                    else
-                        failed = true;
-                }
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            _logger.LogWarning(
-                "[GRANT-NOTIFY] Message notification {CommunicationId} was cancelled after {Sent} email(s). The post stands.",
-                posted.CommunicationId, sent);
-            return GrantNotificationOutcome.Failed;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "[GRANT-NOTIFY] Could not notify the members about message {CommunicationId}. The post stands.",
-                posted.CommunicationId);
-            return GrantNotificationOutcome.Failed;
-        }
-
-        if (failed)
-            return GrantNotificationOutcome.Failed;
-        return sent > 0 ? GrantNotificationOutcome.Sent : GrantNotificationOutcome.NotApplicable;
-    }
-
     /// <summary>An already-onboarded contact: a readable identity binding, and an email address to send to.</summary>
     private static bool IsOnboardedWithEmail(ContactBindingRow contact)
         => contact.Binding.Kind == BindingKind.Bound && !string.IsNullOrWhiteSpace(contact.Email);
@@ -500,42 +347,6 @@ internal sealed class GrantAccessNotifier
                 "[GRANT-NOTIFY] Could not email contact {ContactId} about {What}; skipped.", contact.ContactId, what);
             return false;
         }
-    }
-
-    /// <summary>
-    /// The contacts with an ACTIVE, UNEXPIRED, direct contact grant on one root, read app-only. The expiry predicate is
-    /// the enforcement path's own (<see cref="ExternalParticipationService.ExpiryPredicate"/>), so "member" here and "has
-    /// access" there cannot drift. Exceptions propagate (the caller counts the root as failed, not as empty).
-    /// </summary>
-    private async Task<IReadOnlyList<Guid>> ReadMemberContactsAsync(
-        ExternalGrantRootType rootType, Guid rootId, CancellationToken ct)
-    {
-        var expiry = ExternalParticipationService.ExpiryPredicate(DateOnly.FromDateTime(DateTime.UtcNow));
-        var filter = $"{ExternalGrantRoot.ValueColumnFor(rootType)} eq {rootId:D} and statecode eq 0 and {expiry}";
-
-        var rows = await _dataverse.QueryAsync<MemberGrantRow>(
-            "sprk_externalrecordaccesses", filter: filter, select: "_sprk_contact_value",
-            top: MaxMessageRecipientsPerRoot, cancellationToken: ct);
-
-        if (rows.Count >= MaxMessageRecipientsPerRoot)
-        {
-            _logger.LogWarning(
-                "[GRANT-NOTIFY] {RootType} {RootId} has {Count} or more grant rows; only the first {Max} are considered for the " +
-                "message email.", rootType, rootId, rows.Count, MaxMessageRecipientsPerRoot);
-        }
-
-        return rows
-            .Where(r => r.ContactId is { } id && id != Guid.Empty)
-            .Select(r => r.ContactId!.Value)
-            .Distinct()
-            .ToList();
-    }
-
-    /// <summary>The one column the member read selects.</summary>
-    private sealed class MemberGrantRow
-    {
-        [JsonPropertyName("_sprk_contact_value")]
-        public Guid? ContactId { get; set; }
     }
 
     /// <summary>
