@@ -68,7 +68,9 @@ public class DecisionRouteCores
     }
 
     /// <summary>The child-records create core (<c>POST /api/v1/child-records/{table}</c>): checked as the caller, created by
-    /// the application, owned by the team the ownership rule names.</summary>
+    /// the application, owned by the team the ownership rule names. Also the ONE work-assignment create (task 046, D-113):
+    /// <c>sprk_workassignment</c> goes through the same handler, secure-create plan and root completion included, and
+    /// <see cref="RouteReply.CreatedId"/> is the new work assignment's id (task 043's <c>sprk_followons</c>).</summary>
     public virtual async Task<RouteReply> CreateChildAsync(HttpContext http, string table, JsonElement payload, CancellationToken ct)
     {
         var sp = http.RequestServices;
@@ -79,6 +81,8 @@ public class DecisionRouteCores
             sp.GetRequiredService<IFieldMappingDataverseService>(),
             sp.GetRequiredService<CoreAncestorRestamper>(),
             sp.GetRequiredService<SecureChildShareSynchronizer>(),
+            sp.GetRequiredService<SecureRootFilingGate>(),
+            sp.GetRequiredService<IServiceScopeFactory>(),
             http,
             sp.GetRequiredService<ILogger<Program>>(),
             ct).ConfigureAwait(false);
