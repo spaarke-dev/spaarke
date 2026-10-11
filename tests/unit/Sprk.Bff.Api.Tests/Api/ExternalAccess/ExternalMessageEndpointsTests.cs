@@ -1,0 +1,511 @@
+using System.Security.Claims;
+using System.Text.Json;
+using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.ExternalAccess;
+using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Infrastructure.DI;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Identity;
+using Xunit;
+
+namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
+
+/// <summary>
+/// FR-04 (spaarke-SPA-external-access-platform-r3 task 033): <c>GET /api/v1/external/{root}/{id}/messages</c>.
+/// Driven through the real pipeline below the route: <see cref="ExternalMessageEndpoints.GetMessagesCoreAsync"/> → the
+/// PRODUCTION module registry (built by <c>AddExternalAccess</c>, so the real Tier-2 predicates, partner switch included)
+/// → the real <see cref="CommunicationThreadReadService.ReadRegardingAppOnlyAsync"/> → the real
+/// <see cref="CommunicationAccessFilter"/>. Only the two genuine I/O boundaries are doubled: the app-only Dataverse query
+/// (<see cref="IAppOnlyCommunicationQuery"/>, "the rows Dataverse returned") and the app-only record read the gate makes
+/// for an invoice or a service request.
+/// </summary>
+public class ExternalMessageEndpointsTests
+{
+    private const string CommunicationSet = "sprk_communications";
+    private const int Incoming = 100000000;
+    private const int Outgoing = 100000001;
+
+    private readonly Mock<IAppOnlyCommunicationQuery> _appOnly = new();
+    private readonly Mock<IImpersonatedCommunicationQuery> _impersonated = new(MockBehavior.Strict);
+    private readonly Mock<ISystemUserIdentityResolver> _identity = new();
+    private readonly List<(string Entity, Guid Id, string[]? Select)> _recordReads = new();
+    private readonly Dictionary<(string Entity, Guid Id), IReadOnlyDictionary<string, object?>> _records = new();
+    private string? _lastOData;
+
+    // ── principals ──────────────────────────────────────────────────────────────────────────────────
+
+    private static CallerPrincipal Ciam(
+        Guid? project = null, Guid? matter = null, Guid? workAssignment = null, Guid? contactId = null) => new()
+    {
+        Plane = CallerPrincipalPlane.CiamContact,
+        ContactId = contactId ?? Guid.NewGuid(),
+        Email = "partner@outside.test",
+        ProjectAccess = project is { } p
+            ? new[] { CallerProjectAccess.FromLevel(p, ExternalAccessLevel.ViewOnly) }
+            : Array.Empty<CallerProjectAccess>(),
+        MatterAccess = matter is { } m
+            ? new Dictionary<Guid, AccessRights> { [m] = AccessRights.Read }
+            : new Dictionary<Guid, AccessRights>(),
+        WorkAssignmentAccess = workAssignment is { } w
+            ? new Dictionary<Guid, AccessRights> { [w] = AccessRights.Read }
+            : new Dictionary<Guid, AccessRights>(),
+    };
+
+    /// <summary>A workforce CONTACT (no systemuser) — the licence-free customer staff member.</summary>
+    private static CallerPrincipal WorkforceContact(Guid? project = null, Guid? contactId = null) => new()
+    {
+        Plane = CallerPrincipalPlane.Workforce,
+        ContactId = contactId ?? Guid.NewGuid(),
+        SystemUserId = null,
+        Email = "staff@customer.test",
+        ProjectAccess = project is { } p
+            ? new[] { CallerProjectAccess.FromLevel(p, ExternalAccessLevel.Collaborate) }
+            : Array.Empty<CallerProjectAccess>(),
+    };
+
+    private static CallerPrincipal SystemUser(Guid systemUserId, Guid? project = null) => new()
+    {
+        Plane = CallerPrincipalPlane.Workforce,
+        ContactId = Guid.NewGuid(),
+        SystemUserId = systemUserId,
+        Email = "lawyer@spaarke.test",
+        ProjectAccess = project is { } p
+            ? new[] { CallerProjectAccess.FromLevel(p, ExternalAccessLevel.FullAccess) }
+            : Array.Empty<CallerProjectAccess>(),
+    };
+
+    // ── fixture ─────────────────────────────────────────────────────────────────────────────────────
+
+    private static ExternalModuleRegistry ProductionRegistry(bool partnerServiceRequestsEnabled = false)
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["ExternalAccess:PartnerServiceRequestsEnabled"] = partnerServiceRequestsEnabled ? "true" : "false",
+        };
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
+        services.AddExternalAccess();
+        return services.BuildServiceProvider().GetRequiredService<ExternalModuleRegistry>();
+    }
+
+    private CommunicationThreadReadService ReadService() => new(
+        _impersonated.Object, // Strict: any impersonated call fails the test — this plane reads app-only.
+        new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
+        Mock.Of<ICallerSystemUserResolver>(MockBehavior.Strict),
+        _identity.Object,
+        Mock.Of<ILogger<CommunicationThreadReadService>>(),
+        _appOnly.Object);
+
+    private void SetupMessages(params Dictionary<string, JsonElement>[] rows) =>
+        _appOnly
+            .Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string?, CancellationToken>((_, odata, _) => _lastOData = odata)
+            .ReturnsAsync(rows);
+
+    private Task<IReadOnlyDictionary<string, object?>> ReadRecord(
+        string entity, Guid id, string[]? select, CancellationToken ct)
+    {
+        _recordReads.Add((entity, id, select));
+        return _records.TryGetValue((entity, id), out var record)
+            ? Task.FromResult(record)
+            : throw new RecordNotFoundException(entity, id);
+    }
+
+    private Task<IResult> Get(string root, Guid id, CallerPrincipal caller, ExternalModuleRegistry? registry = null) =>
+        ExternalMessageEndpoints.GetMessagesCoreAsync(
+            root, id, caller, registry ?? ProductionRegistry(), ReadRecord, ReadService(), NullLogger.Instance,
+            CancellationToken.None);
+
+    /// <summary>A lookup value as RecordService projects it.</summary>
+    private static Dictionary<string, object?> Lookup(Guid id, string entity) =>
+        new(StringComparer.OrdinalIgnoreCase) { ["id"] = id, ["logicalName"] = entity, ["name"] = "n" };
+
+    private static Dictionary<string, JsonElement> MessageRow(
+        Guid id,
+        string regardingField,
+        Guid regardingId,
+        bool? internalOnly,
+        string createdOn,
+        string subject = "Subject",
+        int direction = Incoming)
+    {
+        var row = new Dictionary<string, JsonElement>
+        {
+            ["sprk_communicationid"] = El(id.ToString("D")),
+            ["sprk_subject"] = El(subject),
+            ["sprk_body"] = El("<p>Body</p>"),
+            ["sprk_bodyformat"] = El(100000001),
+            ["sprk_direction"] = El(direction),
+            ["_sprk_sentby_value"] = El(Guid.NewGuid().ToString("D")),
+            ["_sprk_sentby_value@OData.Community.Display.V1.FormattedValue"] = El("Pat Lawyer"),
+            ["createdon"] = El(createdOn),
+            ["sprk_privilegeclassification"] = El(100000000),
+            [$"_{regardingField}_value"] = El(regardingId.ToString("D")),
+            // Columns that must never cross the external surface even if Dataverse returned them.
+            ["sprk_from"] = El("pat.lawyer@spaarke.test"),
+            ["sprk_to"] = El("someone@spaarke.test"),
+        };
+        if (internalOnly is { } flag)
+            row["sprk_isinternalonly"] = El(flag);
+        return row;
+    }
+
+    private static JsonElement El<T>(T value) => JsonSerializer.SerializeToElement(value);
+
+    private static IReadOnlyList<ExternalMessageDto> Messages(IResult result)
+    {
+        result.Should().BeOfType<Ok<ExternalCollectionResponse<ExternalMessageDto>>>();
+        return ((Ok<ExternalCollectionResponse<ExternalMessageDto>>)result).Value!.Value;
+    }
+
+    private static void ShouldBeForbiddenNotAccessible(IResult result)
+    {
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ExternalMessageEndpoints.DenyRecordNotAccessible);
+    }
+
+    private void ShouldNotHaveReadMessages() =>
+        _appOnly.Verify(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+
+    // ── accessible record → its thread ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task AccessibleProject_ReturnsItsThread_NewestLast_AppOnly_KeyedOnTheRecord()
+    {
+        var project = Guid.NewGuid();
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        SetupMessages(
+            MessageRow(first, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z", "First"),
+            MessageRow(second, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z", "Second", Outgoing));
+
+        var result = await Get("projects", project, Ciam(project: project));
+
+        var messages = Messages(result);
+        messages.Select(m => m.SprkCommunicationid).Should().Equal(first.ToString("D"), second.ToString("D"));
+        messages[0].SprkSubject.Should().Be("First");
+        messages[0].SprkBody.Should().Be("<p>Body</p>");
+        messages[0].SprkBodyformat.Should().Be(100000001);
+        messages[0].SenderName.Should().Be("Pat Lawyer");
+        messages[0].Createdon.Should().Be(DateTimeOffset.Parse("2026-10-01T09:00:00Z"));
+        messages[1].SprkDirection.Should().Be(Outgoing);
+
+        _lastOData.Should().Contain($"_sprk_regardingproject_value eq {project}")
+            .And.Contain("statecode eq 0")
+            .And.Contain("$orderby=createdon asc");
+        _lastOData.Should().NotContain("sprk_from").And.NotContain("sprk_to,");
+        _impersonated.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("matters", "sprk_regardingmatter")]
+    [InlineData("workassignments", "sprk_regardingworkassignment")]
+    [InlineData("MATTERS", "sprk_regardingmatter")]
+    public async Task AccessibleMatterOrWorkAssignment_ReturnsItsThread(string root, string regardingField)
+    {
+        var record = Guid.NewGuid();
+        var caller = root.Equals("workassignments", StringComparison.OrdinalIgnoreCase)
+            ? Ciam(workAssignment: record)
+            : Ciam(matter: record);
+        SetupMessages(MessageRow(Guid.NewGuid(), regardingField, record, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        var messages = Messages(await Get(root, record, caller));
+
+        messages.Should().HaveCount(1);
+        _lastOData.Should().Contain($"_{regardingField}_value eq {record}");
+    }
+
+    [Fact]
+    public async Task InvoiceUnderAnAccessibleMatter_ReturnsItsThread()
+    {
+        var matter = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = invoice,
+            ["sprk_matter"] = Lookup(matter, "sprk_matter"),
+        };
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        var messages = Messages(await Get("invoices", invoice, Ciam(matter: matter)));
+
+        messages.Should().HaveCount(1);
+        _lastOData.Should().Contain($"_sprk_regardinginvoice_value eq {invoice}");
+        _recordReads.Should().ContainSingle()
+            .Which.Select.Should().BeEquivalentTo(new[] { "sprk_matter", "sprk_project" });
+    }
+
+    // ── outside the accessible set → 403, and nothing is read ──────────────────────────────────────
+
+    [Fact]
+    public async Task AnotherPartysProject_Is403_AndNoMessageIsRead()
+    {
+        var mine = Guid.NewGuid();
+        var theirs = Guid.NewGuid();
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingproject", theirs, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        var result = await Get("projects", theirs, Ciam(project: mine));
+
+        ShouldBeForbiddenNotAccessible(result);
+        ShouldNotHaveReadMessages();
+    }
+
+    [Fact]
+    public async Task AnotherPartysInvoice_AndANonexistentInvoice_GetTheSame403()
+    {
+        var myMatter = Guid.NewGuid();
+        var theirMatter = Guid.NewGuid();
+        var theirInvoice = Guid.NewGuid();
+        var missingInvoice = Guid.NewGuid();
+        _records[("sprk_invoice", theirInvoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = theirInvoice,
+            ["sprk_matter"] = Lookup(theirMatter, "sprk_matter"),
+        };
+        SetupMessages();
+
+        var theirs = await Get("invoices", theirInvoice, Ciam(matter: myMatter));
+        var missing = await Get("invoices", missingInvoice, Ciam(matter: myMatter));
+
+        ShouldBeForbiddenNotAccessible(theirs);
+        ShouldBeForbiddenNotAccessible(missing);
+        var a = (ProblemHttpResult)theirs;
+        var b = (ProblemHttpResult)missing;
+        a.ProblemDetails.Detail.Should().Be(b.ProblemDetails.Detail, "a missing record and a foreign one must be indistinguishable");
+        a.ProblemDetails.Title.Should().Be(b.ProblemDetails.Title);
+        ShouldNotHaveReadMessages();
+    }
+
+    [Theory]
+    [InlineData("projects")]
+    [InlineData("matters")]
+    [InlineData("workassignments")]
+    [InlineData("invoices")]
+    [InlineData("servicerequests")]
+    public async Task NonexistentRecord_Is403_NotA404(string root)
+    {
+        // Every accessible set non-empty, so the gate is the only thing deciding; the id exists nowhere.
+        var caller = Ciam(project: Guid.NewGuid(), matter: Guid.NewGuid(), workAssignment: Guid.NewGuid());
+        SetupMessages();
+
+        var result = await Get(root, Guid.NewGuid(), caller, ProductionRegistry(partnerServiceRequestsEnabled: true));
+
+        ShouldBeForbiddenNotAccessible(result);
+        ShouldNotHaveReadMessages();
+    }
+
+    [Theory]
+    [InlineData("projects")]
+    [InlineData("matters")]
+    [InlineData("workassignments")]
+    [InlineData("invoices")]
+    public async Task TierOneOnlyCaller_WithNoRecordGrants_Is403_AndCausesNoDataverseRead(string root)
+    {
+        // Entitled to modules (Tier-1) but holding no Tier-2 grant on anything.
+        SetupMessages();
+
+        var result = await Get(root, Guid.NewGuid(), WorkforceContact());
+
+        ShouldBeForbiddenNotAccessible(result);
+        ShouldNotHaveReadMessages();
+        _recordReads.Should().BeEmpty("a caller with an empty accessible set must not cause a record read");
+    }
+
+    // ── internal-only by principal kind ────────────────────────────────────────────────────────────
+
+    private (Guid Project, Guid Visible, Guid InternalOnly, Guid Unflagged) SetupMixedThread()
+    {
+        var project = Guid.NewGuid();
+        var visible = Guid.NewGuid();
+        var internalOnly = Guid.NewGuid();
+        var unflagged = Guid.NewGuid();
+        SetupMessages(
+            MessageRow(visible, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"),
+            MessageRow(internalOnly, "sprk_regardingproject", project, internalOnly: true, "2026-10-02T09:00:00Z"),
+            MessageRow(unflagged, "sprk_regardingproject", project, internalOnly: null, "2026-10-03T09:00:00Z"));
+        return (project, visible, internalOnly, unflagged);
+    }
+
+    [Fact]
+    public async Task CiamCaller_NeverReceivesAnInternalOnlyMessage()
+    {
+        var (project, visible, _, _) = SetupMixedThread();
+
+        var messages = Messages(await Get("projects", project, Ciam(project: project)));
+
+        messages.Select(m => m.SprkCommunicationid).Should().Equal(visible.ToString("D"));
+    }
+
+    [Fact]
+    public async Task WorkforceContactCaller_NeverReceivesAnInternalOnlyMessage()
+    {
+        var (project, visible, _, _) = SetupMixedThread();
+
+        var messages = Messages(await Get("projects", project, WorkforceContact(project: project)));
+
+        messages.Select(m => m.SprkCommunicationid).Should().Equal(visible.ToString("D"));
+        _identity.Verify(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SystemUserCaller_ReceivesInternalOnlyMessages()
+    {
+        var (project, visible, internalOnly, unflagged) = SetupMixedThread();
+        var systemUserId = Guid.NewGuid();
+        _identity.Setup(i => i.IsExternalAsync(systemUserId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        var messages = Messages(await Get("projects", project, SystemUser(systemUserId, project)));
+
+        messages.Select(m => m.SprkCommunicationid)
+            .Should().Equal(visible.ToString("D"), internalOnly.ToString("D"), unflagged.ToString("D"));
+    }
+
+    [Fact]
+    public async Task ExternalLicensedSystemUser_DoesNotReceiveInternalOnlyMessages()
+    {
+        // #675 parity with the impersonated reads: sprk_isexternal = true makes a systemuser non-internal.
+        var (project, visible, _, _) = SetupMixedThread();
+        var systemUserId = Guid.NewGuid();
+        _identity.Setup(i => i.IsExternalAsync(systemUserId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        var messages = Messages(await Get("projects", project, SystemUser(systemUserId, project)));
+
+        messages.Select(m => m.SprkCommunicationid).Should().Equal(visible.ToString("D"));
+    }
+
+    // ── service requests: requester scope ──────────────────────────────────────────────────────────
+
+    private Guid ServiceRequestRequestedBy(Guid requester)
+    {
+        var request = Guid.NewGuid();
+        _records[("sprk_servicerequest", request)] = new Dictionary<string, object?>
+        {
+            ["id"] = request,
+            ["sprk_requestedby"] = Lookup(requester, "contact"),
+        };
+        return request;
+    }
+
+    [Fact]
+    public async Task Requester_ReadsTheThreadOnTheirOwnServiceRequest()
+    {
+        var me = Guid.NewGuid();
+        var request = ServiceRequestRequestedBy(me);
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingservicerequest", request, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        var messages = Messages(await Get("servicerequests", request, WorkforceContact(contactId: me)));
+
+        messages.Should().HaveCount(1);
+        _lastOData.Should().Contain($"_sprk_regardingservicerequest_value eq {request}");
+        _recordReads.Should().ContainSingle().Which.Select.Should().Equal("sprk_requestedby");
+    }
+
+    [Fact]
+    public async Task SomeoneElsesServiceRequest_Is403_AndNoMessageIsRead()
+    {
+        var request = ServiceRequestRequestedBy(Guid.NewGuid());
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingservicerequest", request, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        var result = await Get("servicerequests", request, WorkforceContact(contactId: Guid.NewGuid()));
+
+        ShouldBeForbiddenNotAccessible(result);
+        ShouldNotHaveReadMessages();
+    }
+
+    [Fact]
+    public async Task CiamRequester_PartnerSwitchOff_Is403_WithNoRead_AndSwitchOn_ReadsOwnThread()
+    {
+        var me = Guid.NewGuid();
+        var request = ServiceRequestRequestedBy(me);
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingservicerequest", request, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        var off = await Get("servicerequests", request, Ciam(contactId: me), ProductionRegistry(partnerServiceRequestsEnabled: false));
+        ShouldBeForbiddenNotAccessible(off);
+        _recordReads.Should().BeEmpty();
+        ShouldNotHaveReadMessages();
+
+        var on = await Get("servicerequests", request, Ciam(contactId: me), ProductionRegistry(partnerServiceRequestsEnabled: true));
+        Messages(on).Should().HaveCount(1);
+    }
+
+    // ── unsupported roots → 404 ────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("documents")] // sprk_communication has no regarding lookup to a document
+    [InlineData("events")]
+    [InlineData("organizations")]
+    [InlineData("contacts")]
+    [InlineData("todos")]
+    [InlineData("api")]
+    public async Task UnsupportedRoot_Is404_AndNothingIsRead(string root)
+    {
+        SetupMessages();
+
+        var result = await Get(root, Guid.NewGuid(), Ciam(project: Guid.NewGuid()));
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+        problem.ProblemDetails.Extensions["errorCode"].Should().Be(ExternalMessageEndpoints.ErrorRootNotSupported);
+        ShouldNotHaveReadMessages();
+        _recordReads.Should().BeEmpty();
+    }
+
+    // ── every returned row is re-checked; the read is bounded ──────────────────────────────────────
+
+    [Fact]
+    public async Task ARowRegardingAnotherRecord_IsDropped_EvenIfTheQueryReturnedIt()
+    {
+        var project = Guid.NewGuid();
+        var mine = Guid.NewGuid();
+        SetupMessages(
+            MessageRow(mine, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"),
+            MessageRow(Guid.NewGuid(), "sprk_regardingproject", Guid.NewGuid(), internalOnly: false, "2026-10-02T09:00:00Z"));
+
+        var messages = Messages(await Get("projects", project, Ciam(project: project)));
+
+        messages.Select(m => m.SprkCommunicationid).Should().Equal(mine.ToString("D"));
+    }
+
+    [Fact]
+    public async Task AThreadPastTheReadBound_IsReturnedCutShort_AndFlaggedTruncated()
+    {
+        var project = Guid.NewGuid();
+        var rows = Enumerable.Range(0, 501)
+            .Select(i => MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false,
+                DateTimeOffset.Parse("2026-01-01T00:00:00Z").AddMinutes(i).ToString("O")))
+            .ToArray();
+        SetupMessages(rows);
+
+        var result = await Get("projects", project, Ciam(project: project));
+
+        var response = ((Ok<ExternalCollectionResponse<ExternalMessageDto>>)result).Value!;
+        response.Value.Should().HaveCount(500);
+        response.Truncated.Should().BeTrue();
+        _lastOData.Should().Contain("$top=501");
+    }
+
+    // ── the response is an allow-list ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ExternalMessageDto_SerializesOnlyTheAllowListedFields()
+    {
+        var json = JsonSerializer.SerializeToElement(new ExternalMessageDto { SprkCommunicationid = Guid.NewGuid().ToString() });
+
+        json.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
+            "sprk_communicationid", "sprk_subject", "sprk_body", "sprk_bodyformat", "sprk_direction", "sendername", "createdon");
+    }
+}

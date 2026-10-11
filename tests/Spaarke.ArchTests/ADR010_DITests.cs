@@ -309,7 +309,16 @@ public class ADR010_DITests
         // (tests/integration/Shared) is its double in the suites that test what retrieval callers do with rows they MAY
         // see, while the trim itself is tested for real in Issue1511_AiRetrievalAccessTrimTests. Same category as
         // IRelocatedFileIndexing / IAiKeylessProbe. Verified as the only addition (master measured 157).
-        const int knownOneToOneCeiling = 158;
+        //
+        // ───────── Ceiling raised 158 → 159, 2026-10-10 (spaarke-SPA-external-access-platform-r3 task 033) ─────────
+        // IAppOnlyCommunicationQuery -> DataverseAppOnlyCommunicationQuery. SEAM JUSTIFICATION: the app-only twin of
+        // IImpersonatedCommunicationQuery (accepted above as a GENUINE seam), for the external-plane message read (FR-04):
+        // a contact has no systemuser to impersonate and the external plane forbids OBO. It is a real test seam — the
+        // internal-only negatives (a CIAM or workforce-contact caller never receives an internal-only message) are proven
+        // through its Moq double in ExternalMessageEndpointsTests, and ADR-038 bans Mock<HttpMessageHandler>. Adding an
+        // app-only member to IImpersonatedCommunicationQuery instead would contradict that interface's "no app-only
+        // fallback" contract and break its hand-written test doubles.
+        const int knownOneToOneCeiling = 159;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

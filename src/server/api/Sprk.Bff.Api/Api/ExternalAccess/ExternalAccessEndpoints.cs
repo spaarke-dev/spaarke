@@ -107,6 +107,12 @@ public static class ExternalAccessEndpoints
         // filter above are untouched.
         externalGroup.MapExternalModuleDataEndpoints();
 
+        // GET /api/v1/external/{root}/{id}/messages — the message thread regarding a record (r3 task 033, FR-04). Inherits
+        // this group's policy + CallerPrincipalAuthorizationFilter; the record is checked against the caller's accessible
+        // set (service requests: the caller's own) before an app-only read, and internal-only messages reach only
+        // internal systemusers.
+        externalGroup.MapExternalMessageEndpoints();
+
         // Contact-side Grant Access (unified-access-control-r2 task 140, owner C4 / Q2): a contact holding Collaborate or
         // Full Access grants colleagues of their OWN organization, at or below their own level, never organization-wide.
         // On THIS group because a contact can authenticate nowhere else (ADR-028 A3: one ExternalCollaboration group);
