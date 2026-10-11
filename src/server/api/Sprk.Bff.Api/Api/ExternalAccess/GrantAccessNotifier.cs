@@ -60,6 +60,13 @@ internal sealed class GrantAccessNotifier
     /// <summary>A record name longer than this is cut, so the title stays inside <c>appnotification.title</c>'s 256.</summary>
     internal const int MaxNameLength = 180;
 
+    /// <summary>
+    /// How long the external email send may take before it is given up as <see cref="GrantNotificationOutcome.Failed"/>
+    /// (task 036 review K2): the grant is already written, so a hung shared-mailbox call must not hold the caller's
+    /// request open for long.
+    /// </summary>
+    internal static readonly TimeSpan DefaultSendTimeout = TimeSpan.FromSeconds(15);
+
     private readonly NotificationService _notifications;
     private readonly DataverseWebApiClient _dataverse;
     private readonly IContactIdentityStore _identities;
@@ -70,6 +77,9 @@ internal sealed class GrantAccessNotifier
     private readonly CustomerIdentity _customer;
     private readonly IConfiguration _configuration;
     private readonly ILogger<GrantAccessNotifier> _logger;
+
+    /// <summary>The bound on one external email send; <see cref="DefaultSendTimeout"/> unless a test shortens it.</summary>
+    internal TimeSpan SendTimeout { get; init; } = DefaultSendTimeout;
 
     public GrantAccessNotifier(
         NotificationService notifications,
@@ -296,7 +306,11 @@ internal sealed class GrantAccessNotifier
             var headline = name is null
                 ? $"You were given access to a {label}"
                 : $"You were given access to the {label} \"{name}\"";
-            var message = $"{GranterName(caller)} gave you access in the Spaarke portal. Open it with the button below.";
+            // The granter is named only by the token's display `name` claim: an external party is never shown a UPN or an
+            // email address (task 036 review K3). With no usable name the sentence simply has no subject.
+            var message = ExternalGranterName(caller) is { } granter
+                ? $"{granter} gave you access in the Spaarke portal. Open it with the button below."
+                : "You were given access in the Spaarke portal. Open it with the button below.";
 
             return await TrySendAsync(
                 contact, subject, headline, message, link, $"Open the {label}",
@@ -315,8 +329,17 @@ internal sealed class GrantAccessNotifier
     }
 
     /// <summary>An already-onboarded contact: a readable identity binding, and an email address to send to.</summary>
+    /// <remarks>
+    /// A binding on the WORKFORCE plane is an employee's work identity, not an external contact's CIAM account: it is never
+    /// emailed as one (task 036 review K4). An oid with no plane marker is a pre-141 CIAM binding (<see cref="ContactBindingDecision.ReadBinding"/>).
+    /// </remarks>
     private static bool IsOnboardedWithEmail(ContactBindingRow contact)
-        => contact.Binding.Kind == BindingKind.Bound && !string.IsNullOrWhiteSpace(contact.Email);
+    {
+        var binding = contact.Binding;
+        return binding.Kind == BindingKind.Bound
+               && binding.Plane != IdentityPlaneMarker.Workforce
+               && !string.IsNullOrWhiteSpace(contact.Email);
+    }
 
     /// <summary>
     /// One send. <c>false</c> (logged, never thrown) when the shared mailbox refuses the sender or the send fails — an
@@ -326,13 +349,23 @@ internal sealed class GrantAccessNotifier
         ContactBindingRow contact, string subject, string headline, string message, string link, string linkText,
         string correlationId, string what)
     {
+        // Bounded (task 036 review K2). The notifier has no request token by design (the person is told even if the granter's
+        // browser has gone), so the only cancellation here is this timeout.
+        using var timeout = new CancellationTokenSource(SendTimeout);
         try
         {
             await _emails.SendPortalNotificationEmailAsync(
-                contact.Email!.Trim(), subject, headline, message, link, linkText, correlationId, CancellationToken.None);
+                contact.Email!.Trim(), subject, headline, message, link, linkText, correlationId, timeout.Token);
             _logger.LogInformation(
                 "[GRANT-NOTIFY] Emailed contact {ContactId} about {What} ({CorrelationId}).", contact.ContactId, what, correlationId);
             return true;
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "[GRANT-NOTIFY] The email to contact {ContactId} about {What} did not finish within {Seconds}s; given up. The " +
+                "grant stands.", contact.ContactId, what, SendTimeout.TotalSeconds);
+            return false;
         }
         catch (SdapProblemException ex)
         {
@@ -492,7 +525,18 @@ internal sealed class GrantAccessNotifier
         return null;
     }
 
-    /// <summary>The granter as their sign-in names them; "Someone" when the token carries no name.</summary>
+    /// <summary>
+    /// The granter as the EXTERNAL email may name them (task 036 review K3): the token's display <c>name</c> claim only —
+    /// never <c>preferred_username</c>, the UPN or an email address, even when the name itself is shaped like one. <c>null</c>
+    /// when there is none.
+    /// </summary>
+    internal static string? ExternalGranterName(ClaimsPrincipal? caller)
+    {
+        var name = caller?.FindFirst("name")?.Value?.Trim();
+        return string.IsNullOrEmpty(name) || name.Contains('@') ? null : name;
+    }
+
+    /// <summary>The granter as their sign-in names them; "Someone" when the token carries no name. Internal recipients only.</summary>
     internal static string GranterName(ClaimsPrincipal? caller)
     {
         var name = caller?.FindFirst("name")?.Value ?? caller?.FindFirst("preferred_username")?.Value;

@@ -10,8 +10,9 @@ namespace Sprk.Bff.Api.Services.Registration;
 /// Templates are loaded as embedded resources and rendered via simple {{placeholder}} replacement.
 /// </summary>
 /// <remarks>
-/// Not sealed only so <see cref="SendPortalNotificationEmailAsync"/> (spaarke-SPA-external-access-platform-r3 task 036) is a
-/// test seam: the grant notifier's unit tests replace that one method; no production type derives from this class.
+/// Not sealed only so <see cref="SendPortalNotificationEmailAsync"/> (spaarke-SPA-external-access-platform-r3 task 036) and
+/// <see cref="SendCiamOnboardingEmailAsync"/> are test seams: the grant tests replace those two methods to record the send;
+/// no production type derives from this class.
 /// </remarks>
 public class RegistrationEmailService
 {
@@ -172,7 +173,7 @@ public class RegistrationEmailService
     /// password via SSPR ("Forgot password") the first time they sign in.
     /// Sent via the existing CommunicationService → shared-mailbox app-only pipeline (unchanged).
     /// </summary>
-    public async Task SendCiamOnboardingEmailAsync(
+    public virtual async Task SendCiamOnboardingEmailAsync(
         string recipientEmail,
         string firstName,
         string portalUrl,
@@ -229,30 +230,61 @@ public class RegistrationEmailService
     {
         var templateHtml = await LoadTemplateAsync("PortalNotificationTemplate.html");
 
-        var body = templateHtml
-            .Replace("{{Headline}}", Encode(headline))
-            .Replace("{{Message}}", Encode(message))
-            .Replace("{{LinkUrl}}", Encode(linkUrl))
-            .Replace("{{LinkText}}", Encode(linkText))
-            .Replace("{{SupportEmail}}", SupportEmail)
-            .Replace("{{Year}}", DateTime.UtcNow.Year.ToString());
-
-        var request = new SendCommunicationRequest
-        {
-            To = [recipientEmail],
-            Subject = subject,
-            Body = body,
-            BodyFormat = BodyFormat.HTML,
-            FromMailbox = FromMailbox,
-            SendMode = SendMode.SharedMailbox,
-            CorrelationId = correlationId
-        };
+        var request = BuildPortalNotificationRequest(
+            templateHtml, recipientEmail, subject, headline, message, linkUrl, linkText, correlationId, DateTime.UtcNow.Year);
 
         _logger.LogInformation(
             "Sending portal notification email | CorrelationId: {CorrelationId}", correlationId);
 
         await _communicationService.SendAsync(request, cancellationToken: cancellationToken);
     }
+
+    /// <summary>
+    /// The shared-mailbox request for a portal notification: the recipient, this service's from-mailbox, the HTML body from
+    /// the template, <see cref="SendMode.SharedMailbox"/> (app-only; never the user's mailbox). Pure, so the real request is
+    /// testable without a mailbox (task 036 review K3). Every caller-supplied value is HTML-encoded and the template is filled
+    /// in ONE pass (<see cref="FillTemplate"/>), so a value that happens to contain <c>{{Year}}</c> is written as text, not
+    /// substituted by a later placeholder.
+    /// </summary>
+    internal static SendCommunicationRequest BuildPortalNotificationRequest(
+        string templateHtml,
+        string recipientEmail,
+        string subject,
+        string headline,
+        string message,
+        string linkUrl,
+        string linkText,
+        string correlationId,
+        int year)
+        => new()
+        {
+            To = [recipientEmail],
+            Subject = subject,
+            Body = FillTemplate(templateHtml, new Dictionary<string, string>
+            {
+                ["Headline"] = Encode(headline),
+                ["Message"] = Encode(message),
+                ["LinkUrl"] = Encode(linkUrl),
+                ["LinkText"] = Encode(linkText),
+                ["SupportEmail"] = SupportEmail,
+                ["Year"] = year.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            }),
+            BodyFormat = BodyFormat.HTML,
+            FromMailbox = FromMailbox,
+            SendMode = SendMode.SharedMailbox,
+            CorrelationId = correlationId
+        };
+
+    /// <summary>
+    /// Replaces each <c>{{Name}}</c> in <paramref name="template"/> with its value in ONE regex pass: substituted text is never
+    /// re-scanned, so a value containing another placeholder (a record named <c>{{Year}}</c>) cannot be substituted by it.
+    /// A placeholder with no value is left as written.
+    /// </summary>
+    internal static string FillTemplate(string template, IReadOnlyDictionary<string, string> values)
+        => System.Text.RegularExpressions.Regex.Replace(
+            template,
+            @"\{\{(\w+)\}\}",
+            m => values.TryGetValue(m.Groups[1].Value, out var value) ? value : m.Value);
 
     /// <summary>
     /// Sends an expiration warning email 3 days before demo access expires.

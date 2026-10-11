@@ -811,18 +811,39 @@ internal static class AssignedAccessTestDoubles
 
         public List<(string To, string Subject, string LinkUrl)> Sent { get; } = new();
 
+        /// <summary>Task 036 review: the CIAM onboarding emails sent (a contact onboarded by an invite), recorded, never sent.</summary>
+        public List<string> Onboarding { get; } = new();
+
+        /// <summary>Task 036 review: the message body of each portal email sent, parallel to <see cref="Sent"/>.</summary>
+        public List<string> Messages { get; } = new();
+
+        /// <summary>When true, a send waits on its cancellation token and never completes by itself (a hung mailbox).</summary>
+        public bool HangUntilCancelled { get; set; }
+
         /// <summary>When set, every send throws this (the shared mailbox refusing or failing).</summary>
         public Exception? Failure { get; set; }
 
-        public override Task SendPortalNotificationEmailAsync(
+        public override Task SendCiamOnboardingEmailAsync(
+            string recipientEmail, string firstName, string portalUrl, CancellationToken cancellationToken = default)
+        {
+            lock (Onboarding)
+                Onboarding.Add(recipientEmail);
+            return Task.CompletedTask;
+        }
+
+        public override async Task SendPortalNotificationEmailAsync(
             string recipientEmail, string subject, string headline, string message, string linkUrl, string linkText,
             string correlationId, CancellationToken cancellationToken = default)
         {
+            if (HangUntilCancelled)
+                await Task.Delay(Timeout.Infinite, cancellationToken);
             if (Failure is { } failure)
                 throw failure;
             lock (Sent)
+            {
                 Sent.Add((recipientEmail, subject, linkUrl));
-            return Task.CompletedTask;
+                Messages.Add(message);
+            }
         }
     }
 

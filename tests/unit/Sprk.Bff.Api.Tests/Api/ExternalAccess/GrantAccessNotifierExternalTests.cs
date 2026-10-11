@@ -53,7 +53,8 @@ public class GrantAccessNotifierExternalTests
 
     // ── fixture ─────────────────────────────────────────────────────────────────────────────────────
 
-    private GrantAccessNotifier Notifier(string? portalUrl = Portal, string? customerId = CustomerKey)
+    private GrantAccessNotifier Notifier(
+        string? portalUrl = Portal, string? customerId = CustomerKey, TimeSpan? sendTimeout = null)
     {
         var settings = new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = portalUrl };
         var config = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
@@ -70,20 +71,23 @@ public class GrantAccessNotifierExternalTests
             new CustomerIdentity(
                 Options.Create(new CustomerOptions { Id = customerId ?? string.Empty }), config,
                 NullLogger<CustomerIdentity>.Instance),
-            config, _log);
+            config, _log)
+        {
+            SendTimeout = sendTimeout ?? GrantAccessNotifier.DefaultSendTimeout,
+        };
     }
 
     private static ClaimsPrincipal Granter(Guid? oid = null) => new(new ClaimsIdentity(
         new[] { new Claim("oid", (oid ?? GranterOid).ToString()), new Claim("name", "Gina Granter") }, "Test"));
 
     /// <summary>An active contact the identity store returns; <paramref name="oid"/> = null is a contact never onboarded.</summary>
-    private Guid Contact(Guid? oid = null, string? email = "partner@outside.test", int stateCode = 0)
+    private Guid Contact(Guid? oid = null, string? email = "partner@outside.test", int stateCode = 0, int? plane = null)
     {
         var id = Guid.NewGuid();
         _identities
             .Setup(i => i.GetContactAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(ContactLookup.Of(new ContactBindingRow(
-                id, stateCode, oid?.ToString("D"), null, Email: email)));
+                id, stateCode, oid?.ToString("D"), plane, Email: email)));
         return id;
     }
 
@@ -265,6 +269,89 @@ public class GrantAccessNotifierExternalTests
         _emails.Sent.Should().BeEmpty();
     }
 
+    // ── review K4: a workforce-plane binding is an employee's identity, not an onboarded external contact ──────────────────
+
+    [Fact]
+    public async Task ContactBoundOnTheWorkforcePlane_GetsNoExternalEmail()
+    {
+        var contact = Contact(oid: Guid.NewGuid(), plane: (int)IdentityPlaneMarker.Workforce);
+
+        var outcome = await Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter());
+
+        outcome.Should().Be(GrantNotificationOutcome.NotApplicable);
+        _emails.Sent.Should().BeEmpty("a workforce binding is not a CIAM account");
+    }
+
+    [Fact]
+    public async Task ContactBoundOnTheExternalPlane_IsEmailed()
+    {
+        var contact = Contact(oid: Guid.NewGuid(), plane: (int)IdentityPlaneMarker.External);
+
+        await Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter());
+
+        _emails.Sent.Should().ContainSingle();
+    }
+
+    // ── review K3: the granter's UPN is never shown to an external party ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ATokenWithOnlyAPreferredUsername_NamesNoOneInTheExternalEmail()
+    {
+        var contact = Contact(oid: Guid.NewGuid());
+        var caller = new ClaimsPrincipal(new ClaimsIdentity(
+            new[]
+            {
+                new Claim("oid", GranterOid.ToString()),
+                new Claim("preferred_username", "gina.granter@firm.example"),
+                new Claim(ClaimTypes.Upn, "gina.granter@firm.example"),
+                new Claim("email", "gina.granter@firm.example"),
+            }, "Test"));
+
+        await Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, caller);
+
+        var message = _emails.Sent.Should().ContainSingle().Subject.Message;
+        message.Should().NotContainAny("gina", "firm.example", "@");
+        message.Should().Contain("You were given access");
+    }
+
+    [Fact]
+    public async Task ANameClaimShapedLikeAnEmailAddress_IsNotUsedEither()
+    {
+        var contact = Contact(oid: Guid.NewGuid());
+        var caller = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim("oid", GranterOid.ToString()), new Claim("name", "gina.granter@firm.example") }, "Test"));
+
+        await Notifier().NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, caller);
+
+        _emails.Sent.Should().ContainSingle().Which.Message.Should().NotContain("@");
+    }
+
+    // ── review K2: a hung send is bounded ─────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task AHungSend_IsGivenUpAfterTheTimeout_AsFailed_NotAwaitedForever()
+    {
+        var contact = Contact(oid: Guid.NewGuid());
+        _emails.HangUntilCancelled = true;
+
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        var outcome = await Notifier(sendTimeout: TimeSpan.FromMilliseconds(100)).NotifyContactGrantAsync(
+            ExternalGrantRootType.Matter, _matter, contact, ExternalAccessLevel.Collaborate, Granter());
+
+        outcome.Should().Be(GrantNotificationOutcome.Failed);
+        started.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10), "the send is bounded by the timeout, not by the mailbox");
+        _log.Warnings.Should().Contain(w => w.Contains("did not finish within"));
+        _emails.Sent.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TheDefaultSendTimeout_IsFifteenSeconds()
+        => GrantAccessNotifier.DefaultSendTimeout.Should().Be(TimeSpan.FromSeconds(15));
+
     // ── best effort: a failed send is logged and never thrown ───────────────────────────────────────────────────────────
 
     [Fact]
@@ -336,14 +423,18 @@ public class GrantAccessNotifierExternalTests
 
         public Func<string, Exception?>? Fail { get; set; }
 
-        public override Task SendPortalNotificationEmailAsync(
+        /// <summary>A send that waits on its token and never completes by itself (a hung mailbox).</summary>
+        public bool HangUntilCancelled { get; set; }
+
+        public override async Task SendPortalNotificationEmailAsync(
             string recipientEmail, string subject, string headline, string message, string linkUrl, string linkText,
             string correlationId, CancellationToken cancellationToken = default)
         {
+            if (HangUntilCancelled)
+                await Task.Delay(Timeout.Infinite, cancellationToken);
             if (Fail?.Invoke(recipientEmail) is { } failure)
                 throw failure;
             Sent.Add((recipientEmail, subject, message, linkUrl, correlationId));
-            return Task.CompletedTask;
         }
     }
 

@@ -92,3 +92,46 @@ Convention: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/ap
 | **Delta** | **+0.003 MB (+3,318 bytes)** | |
 
 Total 36.47 MB ≤ 60 MB; delta ≪ +5 MB. (Before the correction the delta was +10,808 bytes.) The comparison is against the branch's own base, not `master`, so the number isolates this task.
+
+## Review fix round (2026-10-11)
+
+Base for the publish delta: `ab4e91011`. Worktree HEAD before the round: `38e565453`.
+
+### Fixes
+
+| # | Finding | Fix | Fails-before proof |
+|---|---|---|---|
+| F1 | The Manage Access modal's real path never emailed. `AccessGrantModal` posts `/invite-and-grant` for every external contact with an email; for an `AlreadyProvisioned` contact `ProvisionAsync` returns before the CIAM onboarding email and the endpoint never called the notifier. | `InviteAndGrantExternalUserEndpoint` takes `GrantAccessNotifier` and, after the grant write and the Assigned-To adopt, calls `NotifyContactGrantAsync` when `onboardStatus == AlreadyProvisioned` **and** `grantOutcome.AccessGained`. A contact onboarded by the same request (`Provisioned`) is NOT emailed (the CIAM onboarding email is its notice): exactly one email per invite. `InviteAndGrantResponse` gains `bool NotificationFailed = false` (additive). The modal already reads `notificationFailed` from the shared `IGrantWriteResponseBody`, so no SPA change. The grantee on this route is always a Contact, so the organization-grant exclusion needs no branch. `InviteExternalUserEndpoint.AlreadyProvisionedStatus` replaces the literal. | With the call disabled, `AlreadyOnboardedContact_GainingAccess_GetsExactlyOneGrantEmail_WithThePortalLink` and `WhenTheGrantEmailCannotBeSent_TheGrantIsKept_AndTheResponseSaysSo` failed; same-level and newly-provisioned tests are guards that hold before and after. |
+| K2 | Unbounded latency: the send awaited with `CancellationToken.None`. | `TrySendAsync` links the send to a `CancellationTokenSource(SendTimeout)` (`GrantAccessNotifier.DefaultSendTimeout` = 15 s; `internal init` property so a test shortens it). `OperationCanceledException` from that timeout is logged and mapped to `Failed`. The notifier has no request token by design (the person is told even if the granter's browser has gone), so the only cancellation is the timeout; the grant stands. | With the token reverted to `None`, `AHungSend_IsGivenUpAfterTheTimeout_AsFailed_NotAwaitedForever` never finished (the run was killed by the 40 s hang timeout). |
+| K3 | The granter's UPN could reach an external party: `GranterName` falls back to `preferred_username`. | New `ExternalGranterName`: the `name` claim only (a name containing `@` is treated as absent). With none, the message has no subject. The internal in-app branch still uses `GranterName`, unchanged. | With the old call, `ATokenWithOnlyAPreferredUsername_NamesNoOneInTheExternalEmail` and `ANameClaimShapedLikeAnEmailAddress_IsNotUsedEither` failed. |
+| K3 | The real request was untested. | `RegistrationEmailService.BuildPortalNotificationRequest` (`internal static`, pure) builds the `SendCommunicationRequest`; `SendPortalNotificationEmailAsync` calls it. `FillTemplate` fills the template in ONE regex pass, so a value containing `{{Year}}` or `{{SupportEmail}}` is never expanded (K4 sequential-`Replace` issue). New `PortalNotificationRequestTests` (To, From mailbox, `SendMode.SharedMailbox`, HTML encoding of `<b>&"{{Year}}`, no re-substitution, link attribute-encoded, no placeholder left). | With the old chained `Replace`, `ARecordNameWithMarkupAndPlaceholders_IsEncoded_AndNeverSubstituted` failed. |
+| K4 | A Workforce-plane binding counted as an onboarded external contact. | `IsOnboardedWithEmail` also requires `binding.Plane != IdentityPlaneMarker.Workforce` (an oid with no marker is still a pre-141 CIAM binding, as `ReadBinding` documents). | With the condition removed, `ContactBoundOnTheWorkforcePlane_GetsNoExternalEmail` failed. |
+
+Test seams added: `CiamUserProvisioningService` is no longer `sealed` and `CreateCiamUserAsync` is `virtual` (no production type derives from it), and `RegistrationEmailService.SendCiamOnboardingEmailAsync` is `virtual`, so the "newly provisioned" path runs through the production endpoint with no live CIAM tenant and the harness can assert that only the onboarding email goes out. `RecordingEmailService` records onboarding sends and can hang until cancelled.
+
+### Updated email copy (still DRAFT FOR OWNER APPROVAL)
+
+Only the body sentence changed. The granter is named only by the display `name` claim; with none, the sentence has no subject (chosen over "A colleague at {organisation}": the BFF has no organisation name to hand, and a made-up one would be worse than none).
+
+- Body, with a display name: `{name} gave you access in the Spaarke portal. Open it with the button below.`
+- Body, without one: `You were given access in the Spaarke portal. Open it with the button below.`
+- Subject, headline, button and footer: unchanged from the draft above. The open question "whether to name the granter" stands.
+
+### Follow-ups
+
+- **Resolved:** item 4 above for `/invite-and-grant` (an `AlreadyProvisioned` contact is now emailed, tested through the production endpoint).
+- **Still uncovered:** `/contact-grants` in `ContactGrantEndpoints` (a contact grantor's grant of an already-onboarded contact) confers new access and sends nothing. The notifier entry is reusable; wiring it is a few lines plus a test. Keep as a follow-up.
+- The other `RegistrationEmailService` methods (CIAM onboarding, welcome, admin, expiry) still use sequential `Replace`, so a user-supplied value containing another placeholder (a first name of `{{PortalUrl}}`) is expanded. `FillTemplate` is ready to adopt; not changed here (out of scope).
+- The `AccessGrantModal.tsx` comment on `IGrantWriteResponseBody` ("`/invite-and-grant` never sets" `notificationFailed`) is now stale; the SPA is not touched in this round.
+
+### Evidence
+
+| Check | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | 0 warnings, 0 errors |
+| `dotnet build tests/integration/Sprk.Bff.Api.IntegrationTests/` | 0 warnings, 0 errors |
+| `dotnet test tests/Spaarke.ArchTests/` | 940 passed, 0 failed |
+| `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "…~Grant\|…~External\|…~Registration\|…~Communication"` | 4,438 passed, 8 skipped (pre-existing), 0 failed |
+| Task tests | `GrantAccessNotifierExternalTests` 37; `GrantExternalContactEmailTests` 8; `InviteAndGrantExternalContactEmailTests` 4 (new); `PortalNotificationRequestTests` 4 (new) |
+
+Publish size, same convention as above (Release, framework-dependent linux-x64, PDBs included, `Compress-Archive` Optimal, fresh `git archive` trees at `C:\wt036b` / `C:\wt036m`, 192 files each): base `ab4e91011` 38,238,736 bytes; this task after the round 38,243,105 bytes; **delta +4,369 bytes (+0.004 MB)**. Total 36.47 MB; far below the +5 MB / 55 MB / 60 MB thresholds.
