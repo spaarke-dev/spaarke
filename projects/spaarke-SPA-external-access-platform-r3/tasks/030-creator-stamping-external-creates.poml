@@ -4,7 +4,7 @@
     <title>Server-side creator stamping on every external create (FR-25)</title>
     <phase>3 BFF features</phase>
     <gate>after 020</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code on the external write path (tags bff-api, auth)</rigor-reason>
     <model-tier>opus</model-tier>
