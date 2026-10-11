@@ -227,6 +227,18 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId, MapClientError(tool, mapped.ClientFailure, startedAt), stopwatch);
             }
 
+            // #1616: the ADR-024 pair is prepared BEFORE anything is checked — a project's half-pair completed from the row (so
+            // the checks and the application's write see exactly one pair), a work assignment's pair kept in step with the
+            // typed filing lookup this update moves (so this server never leaves a pair no typed lookup repeats).
+            var prepared = await OwnedChildWrite.KeepPairInStepAsync(
+                    _dataverse, tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
+                .ConfigureAwait(false);
+            if (prepared.Refusal is { } pairRefusal)
+            {
+                return LogOutcome(context, tablename, recordId, RefileRefusal(tool, tablename, pairRefusal, startedAt), stopwatch);
+            }
+            mapped = mapped with { Item = prepared.Item };
+
             // AppendTo AS THE CALLER on every record a work assignment or project is moved under — its typed regarding
             // lookups and the record its ADR-024 pair names — BEFORE the secure-root gate below reads anything about them:
             // the gate reads app-only, so a refusal of its own (an unreadable flag, a walled creator) would otherwise tell a
@@ -279,7 +291,23 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId, refileResult, stopwatch);
             }
 
-            if (!refile.Written)
+            // #1616: a project's ADR-024 pair is field-secured so that only this server writes it (its only filing column; the
+            // pair rule was asked AS THE CALLER above) — the caller's own PATCH carries every other column, the app the pair.
+            OwnedChildWrite.RefileOutcome? managedPair = null;
+            if (!refile.Written && OwnedChildWrite.BffManagedPairColumnsOf(tablename).Count > 0)
+            {
+                using var pairScope = _scopes?.CreateScope();
+                managedPair = await OwnedChildWrite.PatchWithBffManagedPairAsync(
+                        _dataverse, pairScope?.ServiceProvider.GetService<Spaarke.Dataverse.IFieldMappingDataverseService>(),
+                        tablename, entitySetName, recordId, mapped.Item!, cancellationToken)
+                    .ConfigureAwait(false);
+                if (managedPair is { Written: false })
+                {
+                    return LogOutcome(context, tablename, recordId, RefileRefusal(tool, tablename, managedPair, startedAt), stopwatch);
+                }
+            }
+
+            if (!refile.Written && managedPair is null)
             {
                 // PATCH carries If-Match: * (update-only) — see IDataverseUserClient.PatchAsync.
                 var response = await _dataverse.PatchAsync(

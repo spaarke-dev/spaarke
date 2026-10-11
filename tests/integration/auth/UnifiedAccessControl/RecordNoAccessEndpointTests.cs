@@ -394,6 +394,33 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
         row.GetProperty("coveredRecordId").GetGuid().Should().Be(SecureMatter);
     }
 
+    /// <summary>
+    /// #1616 fix round (F-C): the same work assignment with a pair naming ANOTHER, ordinary matter that no typed lookup
+    /// repeats — the pair names nothing it is filed under, so the secure matter's entry still covers it (never "unknown" on
+    /// every read, which left the enforcer unable to act on it).
+    /// </summary>
+    [Fact]
+    public async Task AnEntryOnTheSecureMatter_StillCoversAWorkAssignmentWhosePairNamesAnotherMatter()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        var otherMatter = Guid.Parse("16161616-0000-4000-8000-0000000000e1");
+        var matterType = Guid.Parse("16161616-0000-4000-8000-0000000000e2");
+        H.ChildWorld
+            .Add("sprk_recordtype_ref", matterType, ("sprk_recordlogicalname", Matter))
+            .Add(Matter, otherMatter, ("sprk_issecure", false));
+        H.ChildWorld.Set(WorkAssignment, FiledWorkAssignment, "sprk_regardingrecordid", otherMatter.ToString("D"));
+        H.ChildWorld.Set(WorkAssignment, FiledWorkAssignment, "sprk_regardingrecordtype",
+            new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", matterType));
+        var onMatter = H.Store.AddEntry(subjectUser: WalledUser, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write | AccessRights.Share);
+
+        var body = await GetOk(WorkAssignment, FiledWorkAssignment);
+
+        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.Applies);
+        body.GetProperty("entries").EnumerateArray().Should().ContainSingle()
+            .Which.GetProperty("entryId").GetGuid().Should().Be(onMatter);
+    }
+
     [Fact]
     public async Task AWriteCaller_SeesAnOrganizationWallOverWhatTheSecureParentReferences_WithItsShape()
     {
