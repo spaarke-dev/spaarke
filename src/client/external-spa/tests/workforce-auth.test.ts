@@ -1095,13 +1095,17 @@ describe('CI workflows and static config agree with A7', () => {
   it('deploy-teams-app.yml asserts the manifest has NO webApplicationInfo', () => {
     const yml = read('.github/workflows/deploy-teams-app.yml');
     expect(yml).toContain(`jq -e 'has("webApplicationInfo") | not' manifest.json`);
+    // Task 043: the check runs on the STAGED manifest (dev: manifest.json; prod: the rendered manifest.prod.json).
+    expect(yml).toContain('working-directory: src/client/external-spa/appPackage/build/stage');
     expect(yml).not.toMatch(/\.webApplicationInfo\.(id|resource)\s*!=\s*null/);
   });
 
-  it('deploy-external-spa.yml injects the tenant id and the user_impersonation scope, not the retired scope', () => {
+  it('deploy-external-spa.yml injects the tenant id and the user_impersonation scope from environment variables, not the retired scope', () => {
     const yml = read('.github/workflows/deploy-external-spa.yml');
-    expect(yml).toMatch(new RegExp(`VITE_TEAMS_MSAL_TENANT_ID: ${SPAARKE_TENANT}`));
-    expect(yml).toMatch(/VITE_TEAMS_MSAL_BFF_SCOPE: api:\/\/[0-9a-f-]{36}\/user_impersonation\s*$/m);
+    // Task 043: values are GitHub environment variables (no literal); the preflight step enforces their format.
+    expect(yml).toContain('VITE_TEAMS_MSAL_TENANT_ID: ${{ vars.VITE_TEAMS_MSAL_TENANT_ID }}');
+    expect(yml).toContain('VITE_TEAMS_MSAL_BFF_SCOPE: ${{ vars.VITE_TEAMS_MSAL_BFF_SCOPE }}');
+    expect(yml).toContain("scope='^api://[0-9a-fA-F-]{36}/user_impersonation$'");
     expect(yml).not.toContain(RETIRED_SCOPE);
   });
 

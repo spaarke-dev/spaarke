@@ -36,8 +36,26 @@ name: Deploy Teams App Package
 # MANUAL-ONLY for now (workflow_dispatch), matching deploy-external-spa.yml's
 # phase-gated trigger discipline — no push/path trigger until a later task
 # explicitly calls for it.
+#
+# Environment split (task 043, spaarke-SPA-external-access-platform-r3, FR-20, design actions A1/A2):
+#   environment=dev  -> GitHub environment `external-spa-dev`,  packages appPackage/manifest.json      (unchanged output)
+#   environment=prod -> GitHub environment `external-spa-prod`, packages appPackage/manifest.prod.json
+# The prod manifest carries a ${{TEAMS_APP_ID}} placeholder; the job renders it from the environment variable
+# TEAMS_APP_ID (the owner-supplied production Teams app id) into build/stage/manifest.json. Both manifests must declare
+# NO webApplicationInfo (ADR-028 A7). The sanity build reads the same VITE_* environment variables as
+# deploy-external-spa.yml; no environment-specific identifier, URL or scope is written in this file. The variables the
+# owner must create are listed in projects/spaarke-SPA-external-access-platform-r3/notes/task-043-notes.md.
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (dev -> external-spa-dev, prod -> external-spa-prod)"
+        required: true
+        type: choice
+        default: dev
+        options:
+          - dev
+          - prod
 
 permissions:
   contents: read
@@ -51,7 +69,8 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────
   build_and_package:
     runs-on: ubuntu-latest
-    name: Build external-spa and package Teams app
+    name: Build external-spa and package Teams app (${{ inputs.environment }})
+    environment: ${{ inputs.environment == 'prod' && 'external-spa-prod' || 'external-spa-dev' }}
     steps:
       - uses: actions/checkout@v6
 
@@ -73,29 +92,54 @@ jobs:
       - name: Build (Vite production)
         working-directory: src/client/external-spa
         env:
-          VITE_BFF_API_URL: https://spaarke-bff-dev.azurewebsites.net
-          VITE_MSAL_AUTHORITY: https://spaarkeextid.ciamlogin.com/7052feba-bfc4-43e0-b09e-65014b429131
-          VITE_MSAL_CLIENT_ID: bd57e54e-b339-4500-b55c-e451009fd907
-          VITE_MSAL_TENANT_ID: 7052feba-bfc4-43e0-b09e-65014b429131
-          # Run-time backend selection (task 041, FR-17): same non-secret dev values as deploy-external-spa.yml - both
-          # planes request api://{app id}/user_impersonation (ADR-028 A7; the former CIAM default scope is retired). Keep in step with it.
-          VITE_MSAL_BFF_SCOPE: api://4a4d5126-91b0-4865-8e3a-134b7209013e/user_impersonation
+          # GitHub environment variables (dev values in external-spa-dev, prod values in external-spa-prod) - same
+          # names and meaning as in deploy-external-spa.yml; both planes request api://{app id}/user_impersonation
+          # (ADR-028 A7). Unset optional values (VITE_BACKENDS) arrive as empty strings, which the SPA treats as unset.
+          VITE_BFF_API_URL: ${{ vars.VITE_BFF_API_URL }}
+          VITE_BACKENDS: ${{ vars.VITE_BACKENDS }}
+          VITE_MSAL_AUTHORITY: ${{ vars.VITE_MSAL_AUTHORITY }}
+          VITE_MSAL_CLIENT_ID: ${{ vars.VITE_MSAL_CLIENT_ID }}
+          VITE_MSAL_TENANT_ID: ${{ vars.VITE_MSAL_TENANT_ID }}
+          VITE_MSAL_BFF_SCOPE: ${{ vars.VITE_MSAL_BFF_SCOPE }}
           # Workforce plane (Teams host): single-tenant Spaarke public client, authority pinned to Spaarke's tenant.
-          VITE_TEAMS_MSAL_CLIENT_ID: 1e40baad-e065-4aea-a8d4-4b7ab273458c
-          VITE_TEAMS_MSAL_TENANT_ID: a221a95e-6abc-4434-aecc-e48338a1b2f2
-          VITE_TEAMS_MSAL_BFF_SCOPE: api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation
+          VITE_TEAMS_MSAL_CLIENT_ID: ${{ vars.VITE_TEAMS_MSAL_CLIENT_ID }}
+          VITE_TEAMS_MSAL_TENANT_ID: ${{ vars.VITE_TEAMS_MSAL_TENANT_ID }}
+          VITE_TEAMS_MSAL_BFF_SCOPE: ${{ vars.VITE_TEAMS_MSAL_BFF_SCOPE }}
         run: npm run build
 
-      - name: Validate Teams app manifest (required fields present)
+      # Pick the manifest by environment and stage it as build/stage/manifest.json (the file name Teams requires at
+      # the archive root). dev copies manifest.json byte for byte. prod renders manifest.prod.json: the id comes from
+      # the TEAMS_APP_ID environment variable (the owner-supplied production Teams app id) - it must be a GUID and
+      # not the all-zero placeholder - and nothing else in the manifest is touched.
+      - name: Stage manifest for the target environment
         working-directory: src/client/external-spa/appPackage
+        env:
+          TARGET: ${{ inputs.environment }}
+          TEAMS_APP_ID: ${{ vars.TEAMS_APP_ID }}
         run: |
-          echo "Validating manifest.json is well-formed JSON with required fields..."
+          mkdir -p build/stage
+          rm -f build/stage/manifest.json
+          if [ "$TARGET" = "prod" ]; then
+            [ -n "$TEAMS_APP_ID" ] || { echo "::error::GitHub environment variable TEAMS_APP_ID is not set for the 'external-spa-prod' environment (the owner-supplied production Teams app id)"; exit 1; }
+            printf '%s' "$TEAMS_APP_ID" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' || { echo "::error::TEAMS_APP_ID must be a GUID"; exit 1; }
+            [ "$TEAMS_APP_ID" != "00000000-0000-0000-0000-000000000000" ] || { echo "::error::TEAMS_APP_ID is the all-zero placeholder"; exit 1; }
+            jq --arg id "$TEAMS_APP_ID" '.id = $id' manifest.prod.json > build/stage/manifest.json
+          else
+            cp manifest.json build/stage/manifest.json
+          fi
+
+      - name: Validate Teams app manifest (required fields present)
+        working-directory: src/client/external-spa/appPackage/build/stage
+        run: |
+          echo "Validating the staged manifest.json is well-formed JSON with required fields..."
           jq -e '.manifestVersion != null and .manifestVersion != ""' manifest.json > /dev/null || { echo "::error::manifest.json missing manifestVersion"; exit 1; }
           jq -e '.id != null and .id != ""' manifest.json > /dev/null || { echo "::error::manifest.json missing id"; exit 1; }
           jq -e '.staticTabs != null and (.staticTabs | length) > 0' manifest.json > /dev/null || { echo "::error::manifest.json missing staticTabs"; exit 1; }
           jq -e '.validDomains != null and (.validDomains | length) > 0' manifest.json > /dev/null || { echo "::error::manifest.json missing validDomains"; exit 1; }
           # ADR-028 Amendment A7 (MUST NOT): the manifest declares NO webApplicationInfo (no Teams-SSO fallback).
           jq -e 'has("webApplicationInfo") | not' manifest.json > /dev/null || { echo "::error::manifest.json must NOT declare webApplicationInfo (ADR-028 A7: NAA then MSAL popup, no Teams SSO)"; exit 1; }
+          # No unrendered placeholder may reach a package.
+          if grep -Eq '[$][{][{]' manifest.json; then echo "::error::manifest.json still contains an unrendered placeholder"; exit 1; fi
           echo "Manifest validation passed."
 
       - name: Verify icon assets exist
@@ -104,8 +148,8 @@ jobs:
           test -f color.png || { echo "::error::color.png missing (declared in manifest.icons.color)"; exit 1; }
           test -f outline.png || { echo "::error::outline.png missing (declared in manifest.icons.outline)"; exit 1; }
 
-      # Package: zip manifest.json + icons at the archive root (Teams app
-      # package format — no appPackage/ prefix inside the zip). env.*.json is
+      # Package: zip the staged manifest.json + icons at the archive root (Teams
+      # app package format — no appPackage/ prefix inside the zip). env.*.json is
       # a Toolkit environment-variable file, not part of the distributable
       # package, and is intentionally excluded.
       - name: Package Teams app
@@ -113,7 +157,7 @@ jobs:
         run: |
           mkdir -p build
           rm -f build/appPackage.zip
-          zip -j build/appPackage.zip manifest.json color.png outline.png
+          zip -j build/appPackage.zip build/stage/manifest.json color.png outline.png
 
       - name: Verify package contents
         working-directory: src/client/external-spa/appPackage
@@ -128,7 +172,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v6
         with:
-          name: teams-app-package-build
+          name: teams-app-package${{ inputs.environment == 'prod' && '-prod' || '' }}-build
           path: src/client/external-spa/appPackage/build/appPackage.zip
           retention-days: 7
 
@@ -138,6 +182,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | \`${{ inputs.environment }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Package | \`appPackage.zip\` (manifest.json + color.png + outline.png) |" >> $GITHUB_STEP_SUMMARY
           echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
 
@@ -156,7 +201,7 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v7
         with:
-          name: teams-app-package-build
+          name: teams-app-package${{ inputs.environment == 'prod' && '-prod' || '' }}-build
           path: dist
 
       # "Deploy" for a Teams org-catalog app is publishing the durable
@@ -166,7 +211,7 @@ jobs:
       - name: Publish release artifact
         uses: actions/upload-artifact@v6
         with:
-          name: teams-app-package
+          name: teams-app-package${{ inputs.environment == 'prod' && '-prod' || '' }}
           path: dist/appPackage.zip
           retention-days: 90
 
@@ -174,6 +219,10 @@ jobs:
         run: |
           echo "## Teams App — Deploy" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Published artifact **teams-app-package** (\`appPackage.zip\`, 90-day retention)." >> $GITHUB_STEP_SUMMARY
+          echo "Published artifact **teams-app-package${{ inputs.environment == 'prod' && '-prod' || '' }}** (\`appPackage.zip\`, ${{ inputs.environment }} environment, 90-day retention)." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Next step (task 072, manual/admin-gated):** download this artifact and submit it to the org app catalog under App Centric Management for admin approval." >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.environment }}" = "prod" ]; then
+            echo "**Next step (task 073, go-live gated on T240c/T240d and DNS):** the production package is built only; do not submit it to a tenant catalog until go-live is approved." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Next step (task 072, manual/admin-gated):** download this artifact and submit it to the org app catalog under App Centric Management for admin approval." >> $GITHUB_STEP_SUMMARY
+          fi

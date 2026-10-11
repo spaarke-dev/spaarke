@@ -35,6 +35,7 @@
     <constraint source="project">Owner approval and a stated rollback (re-run the workflow on the previous commit) before deploying.</constraint>
     <constraint source="project">Deploy only through the workflows (workflow_dispatch, environment dev); no manual SWA upload.</constraint>
     <constraint source="review 041 K2">PRECONDITION before dispatching deploy-external-spa.yml: the owner has exposed user_impersonation on the CIAM BFF API app (4a4d5126-…) and granted/admin-consented it to the CIAM SPA client (bd57e54e-…), plus the /auth-callback.html redirect URIs (task 040 notes). Without it every partner sign-in on dev fails at Entra. Record the owner confirmation in the notes before deploying.</constraint>
+    <constraint source="task 043">PRECONDITION: the GitHub environment external-spa-dev exists with the nine VITE_* variables listed in notes/task-043-notes.md §3 (deploy-external-spa.yml now reads vars.* and its preflight fails the run without them; deploy-teams-app.yml would otherwise build from empty values). Dispatch with environment=dev.</constraint>
   </constraints>
 
   <knowledge>

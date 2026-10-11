@@ -881,13 +881,14 @@ describe('Shipped configuration', () => {
     }
     const workflow = fs.readFileSync(path.join(REPO_ROOT, '.github/workflows/deploy-external-spa.yml'), 'utf8');
     expect(workflow).not.toContain('SDAP.Access');
-    expect(workflow).toMatch(/VITE_MSAL_BFF_SCOPE: api:\/\/[0-9a-f-]{36}\/user_impersonation\s*$/m);
+    // Task 043: the scope is a GitHub environment variable (dev: external-spa-dev), not a literal in the workflow.
+    expect(workflow).toMatch(/^\s*VITE_MSAL_BFF_SCOPE: \$\{\{ vars\.VITE_MSAL_BFF_SCOPE \}\}\s*$/m);
     expect(fs.readFileSync(path.join(SPA_ROOT, '.env.development'), 'utf8')).toMatch(
       /^VITE_MSAL_BFF_SCOPE=api:\/\/[0-9a-f-]{36}\/user_impersonation\s*$/m
     );
   });
 
-  it('EVERY workflow that builds this SPA: no SDAP.Access, and both BFF scopes (CIAM + workforce) are api://…/user_impersonation', () => {
+  it('EVERY workflow that builds this SPA: no SDAP.Access, and both BFF scopes (CIAM + workforce) come from the matching environment variable', () => {
     const dir = path.join(REPO_ROOT, '.github/workflows');
     const builders = fs
       .readdirSync(dir)
@@ -901,14 +902,17 @@ describe('Shipped configuration', () => {
     for (const { name, text } of builders) {
       expect(text, `${name} still references SDAP.Access`).not.toContain('SDAP.Access');
       for (const key of ['VITE_MSAL_BFF_SCOPE', 'VITE_TEAMS_MSAL_BFF_SCOPE']) {
-        const values = [...text.matchAll(new RegExp(`^\\s*${key}:\\s*(\\S+)\\s*$`, 'gm'))].map(m => m[1]);
+        const values = [...text.matchAll(new RegExp(`^\\s*${key}:[ \\t]*(.+?)[ \\t]*$`, 'gm'))].map(m => m[1]);
         expect(values.length, `${name} sets no ${key}`).toBeGreaterThan(0);
         for (const value of values) {
-          expect(value, `${name}: ${key}`).toMatch(/^api:\/\/[0-9a-f-]{36}\/user_impersonation$/);
+          // Task 043: the value is the GitHub environment variable of the same name, never a literal. The scope FORMAT
+          // (api://{app id}/user_impersonation) is enforced at run time by the deploy workflow's preflight step and by
+          // backend-selection in the SPA.
+          expect(value, `${name}: ${key}`).toBe('${{ vars.' + key + ' }}');
         }
       }
       for (const key of ['VITE_TEAMS_MSAL_CLIENT_ID', 'VITE_TEAMS_MSAL_TENANT_ID']) {
-        expect(text, `${name} sets no ${key}`).toMatch(new RegExp(`^\\s*${key}:\\s*[0-9a-f-]{36}\\s*$`, 'm'));
+        expect(text, `${name} sets no ${key}`).toContain(`${key}: \${{ vars.${key} }}`);
       }
     }
   });
