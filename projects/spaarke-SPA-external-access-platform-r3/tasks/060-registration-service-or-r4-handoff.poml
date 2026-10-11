@@ -36,6 +36,7 @@
     <constraint source="ADR-028 A4/A6">No secret and no ClientSecret credential; MI or federated credential only. The identity holds only User.Invite.All and group membership write for the sprk-*-users groups (or GroupMember.ReadWrite.All if scoping is impossible — escalate first).</constraint>
     <constraint source="project">Approval is automatic only when the caller's verified token shows home tid ∈ that customer's CustomerTenantIds and acct = 0; the allow-list comes from Spaarke-owned data, never from the request. Invites are sent with sendInvitationMessage = false. A re-registration returns success without a second guest or a duplicate group membership.</constraint>
     <constraint source="project">Any live tenant change (app/identity creation, Graph permission grant, deployment) needs owner approval and a stated rollback.</constraint>
+    <constraint source="review 012 K2">The BFF member test (task 012) admits any B2B guest of Spaarke's tenant whose idp home tenant is listed, and email-binds it using the guest object's mail in Spaarke's tenant. Its safety depends on this service: the invite address MUST come from the verified home-tenant token (never the request body), and this service MUST be the only guest-creation path for customer contacts (document any admin-invite path as out of policy). Review checks both.</constraint>
   </constraints>
 
   <knowledge>

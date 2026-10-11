@@ -34,6 +34,7 @@
   <constraints>
     <constraint source="project">Owner approval and a stated rollback (re-run the workflow on the previous commit) before deploying.</constraint>
     <constraint source="project">Deploy only through the workflows (workflow_dispatch, environment dev); no manual SWA upload.</constraint>
+    <constraint source="review 041 K2">PRECONDITION before dispatching deploy-external-spa.yml: the owner has exposed user_impersonation on the CIAM BFF API app (4a4d5126-…) and granted/admin-consented it to the CIAM SPA client (bd57e54e-…), plus the /auth-callback.html redirect URIs (task 040 notes). Without it every partner sign-in on dev fails at Entra. Record the owner confirmation in the notes before deploying.</constraint>
   </constraints>
 
   <knowledge>
