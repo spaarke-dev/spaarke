@@ -29,7 +29,7 @@ So deleting a request does not delete staff messages, staff documents, analyses 
      - a contact principal matches `sprk_createdbycontact` = its contact;
      - a systemuser principal matches `sprk_createdbyperson` = its systemuser, OR `sprk_createdbycontact` = its server-resolved linked contact (`CallerPrincipal.ContactId`, never request input).
      - An unstamped row is nobody's. No access level (FullAccess included) can stand in for the stamp.
-  2. **Read on every parent the row is filed to**, through the existing `RightsForDocumentParentAsync`. For a project, matter or work assignment that is `RightsForRoot`; for a service request it is the requester scope. A row with no parent this plane authorizes is refused.
+  2. **Read on every parent this plane authorizes**, through the existing `RightsForDocumentParentAsync`. For a project, matter or work assignment that is `RightsForRoot`; for a service request it is the requester scope. The parents consulted are the lookups `ExternalDataService` models (`Deletables`): a document's `sprk_project`, `sprk_matter`, `sprk_workassignment`, `sprk_relatedservicerequest`; a to-do's or event's `sprk_regardingproject`, `sprk_regardingmatter`, `sprk_regardingworkassignment`. Other lookups on the row (for example `sprk_invoice`, `sprk_relatedagreement`, `sprk_relatedcontact`, `sprk_parentdocument`, `sprk_email`) are not consulted. A row filed to none of the modelled parents is refused.
   - **No existence oracle.** Absent, not-own, unstamped, no-parent and no-Read all return the same 403 (`reasonCode` `sdap.access.deny.delete_own`, same detail).
   - **Faults are not denials.** A target read that failed returns 503 `sdap.access.delete_own_unavailable`; a failed service-request requester read returns the existing 503 `sdap.access.service_request_unreadable`. Neither returns 403, and nothing is deleted.
 - **`ExternalDataService`**:
@@ -54,11 +54,11 @@ So deleting a request does not delete staff messages, staff documents, analyses 
 
 `DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure`:
 
-1. The external check (stamp + Read on every parent). Nothing has been touched before this.
-2. `DocumentCheckoutService` reads the row. A checked-out document returns 409 `document_locked`; the lock holder's name is not shown on this plane. Nothing is deleted.
+1. The external check (stamp + Read on every modelled parent). Nothing has been touched before this.
+2. `DocumentCheckoutService` reads the row. A checked-out document returns 409 `reasonCode` `document_locked`; the lock holder's name is not shown on this plane. Nothing is deleted.
 3. The pointer check: `RecordContainerResolver.EnsureDocumentPointerContainerAsync`, the check every app-only download runs. A refusal returns 409 with the check's code and keeps the row; the file is never touched.
 4. The SPE file is deleted app-only through `SpeFileStore.DeleteFileAsync` → `SpeContainerOwnershipGuard`. "Already gone" (false) counts as deleted. Any other failure returns 503 `document_file_not_deleted` and keeps the row.
-5. The Dataverse row is deleted. A failure here returns 500 `document_row_not_deleted`.
+5. The Dataverse row is deleted. A failure here returns 500 `reasonCode` `document_row_not_deleted`.
 6. A row that disappeared between steps (Dataverse NotFound) returns 204, because that is the end state the caller asked for.
 
 **Why file first:** a kept row can always be retried or cleaned by staff. The reverse order (row first) would leave an unreachable SPE file that nothing points at, which is invisible and so worse.
@@ -89,7 +89,7 @@ So deleting a request does not delete staff messages, staff documents, analyses 
 4. **Documents module columns are not grid-derived.** `ExternalModuleColumnAllowListTests` pins the two stamps as a deliberate task 032 addition, with a comment.
 5. **Until task 020 is imported**, every list `$select` that names `_sprk_createdbycontact_value` returns a Dataverse 400 (the list is flagged truncated), and every delete returns 503 because the target read fails closed. Deploy order: 020 before this BFF build (task 038).
 6. **A to-do or event filed only to a service request** (`sprk_regardingservicerequest`) has no parent this plane authorizes it through, so it gets 403 (fail closed). To-do and event routes scope by project, matter or work assignment only (`RootBindings`).
-7. **A document filed to two parents needs Read on both** (tested). A document also filed by staff to a record the caller cannot read is not the caller's to destroy.
+7. **A document filed to two modelled parents needs Read on both** (tested). A document also filed by staff to a modelled record the caller cannot read is not the caller's to destroy. The check covers only the lookups this plane models (see the list under the check above); a document also filed to an unmodelled lookup (`sprk_invoice`, `sprk_relatedagreement`, `sprk_relatedcontact`, `sprk_parentdocument`, `sprk_email`) is judged on its modelled parents alone.
 8. **Hard delete.** There is no recycle bin; the POML states hard delete.
 
 ## Tests
@@ -141,3 +141,24 @@ The pointer check is the REAL `RecordContainerResolver` (`TestRecordContainerRes
   - base 38,243,240 B; this tree 38,259,742 B; **delta +16,502 B (+0.016 MB)**; total 36.49 MB, which is under 55 MB.
   - Unzipped: +45,432 B. `Sprk.Bff.Api.dll`: +31,232 B.
 - **CVE:** no package, csproj or `Directory.Packages.props` change, so there is no new HIGH CVE.
+
+## Review fix round (2026-10-11)
+
+**Verdict.** The adversarial review approved the change with no F-class findings. This round fixes its nits and one coordinator request.
+
+**Fixed.**
+
+1. **Overclaim in docs.** The endpoint doc/remarks, the route comment, the ArchTest route-ledger reason text and deviation 7 above said "every parent the row is filed to". They now say Read on every parent this plane authorizes (the modelled lookups), and that other lookups on the row are not consulted. The check's behaviour is unchanged. The ledger reasons also cite method names plus the file:line the guard requires.
+2. **OCE filter.** The document-read catch in `DeleteOwnDocument` is now `when (ex is not OperationCanceledException || !ct.IsCancellationRequested)` (the `DocumentCheckoutService` pattern). An HttpClient timeout (a `TaskCanceledException` while `ct` is not cancelled) now gives the 503 "nothing was deleted" instead of a bare 500. Test `Document_WhenTheRowReadTimesOut_Is503_AndNothingIsDeleted`: failed before the fix (500, 1 failed of 70), passes after.
+3. **`default:` arm.** `case FailedDeleteResult:` now carries the "file was deleted but the record could not be removed" 500. `default:` is a generic 500 (`document_delete_failed`) with a structured error log naming the result type, and makes no claim about the file.
+4. **Nits.** The success log no longer says "and its file deleted" (it also fires for `NotFoundDeleteResult`). The `SpeWriteSinkContainerProvenanceGuardTests` provenance table cites the methods (`DeleteAsync`, `DeleteFileOrRefuseAsync`) instead of line numbers that drift.
+5. **One problem key (coordinator request).** The delete routes used `reasonCode` (403, 503) and `code` (409, 500, file 503). All problem bodies on the three delete routes now use `reasonCode`. Why `reasonCode` and not `errorCode`: the 403 denial, the delete 503 and the service-request 503 from the shared `RightsForDocumentParentAsync` already use `reasonCode` (the plane's access-denial key), so it is the only single key that needs no change to the shared helper or to the 403 convention the SPA already reads. The message routes' `errorCode` (task 034) is not used here. The older `code` key stays on the upload/download routes (`SdapProblemException`), which this task does not touch. `ProblemCode` in `ExternalDeleteOwnTests` now reads `reasonCode` and asserts `code` and `errorCode` are absent; every code assertion goes through it. If task 054 prefers `errorCode` everywhere, it is a rename of six literals in `ExternalProjectDataEndpoints.cs` plus the 403 and shared 503.
+
+**Known limits left as they were.**
+
+- TOCTOU window: the check and the delete are separate calls; a parent lost between them is not re-checked.
+- An unlinked-systemuser outage gives 403 instead of 503: pre-existing resolver behaviour, not changed here.
+- No retry after a half-done document delete (file gone, row kept): only a staff delete clears it.
+- `DocumentDestroyAuthorizationTestFixture` overrides only the 3-arg `DeleteAsync`.
+
+**Verification.** `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors. `dotnet test tests/Spaarke.ArchTests/`: 940 passed. Filtered Sprk.Bff.Api.Tests (`ExternalAccess|DocumentCheckout|DocumentOperations|EventReadPath`): 2121 passed.

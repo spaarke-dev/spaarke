@@ -388,7 +388,8 @@ public static class ExternalProjectDataEndpoints
         // Delete-own (spaarke-SPA-external-access-platform-r3 task 032, FR-26) — the first DELETE routes on this plane.
         //
         // Hard delete of a document, to-do or event the CALLER created (the task-030 stamp), while the caller still holds
-        // Read on every parent the row is filed to. One check decides all three (AuthorizeDeleteOwnAsync); no access level
+        // Read on every parent this plane authorizes (the modelled parent lookups; other lookups on the row are not
+        // consulted). One check decides all three (AuthorizeDeleteOwnAsync); no access level
         // and no Dataverse role lets a caller delete someone else's row here. General delete stays a Dataverse role in the
         // model-driven app. There is no DELETE for messages (owner 2026-10-10: messages are not deletable), and none for
         // service requests yet (task 032 escalation: what happens to the staff records filed to one is an owner decision).
@@ -1478,11 +1479,16 @@ public static class ExternalProjectDataEndpoints
     /// <item><b>The caller created the row</b>: <see cref="ExternalDataService.IsCreatedByCaller"/> over the row's
     /// task-030 stamps (owner decision 2026-10-11, option (b) widened). A row with no stamp is nobody's. No access level
     /// (FullAccess included) and no Dataverse role can stand in for the stamp.</item>
-    /// <item><b>The caller still holds Read on EVERY parent the row is filed to</b>, through the same
+    /// <item><b>The caller still holds Read on EVERY parent this plane authorizes</b>, through the same
     /// <see cref="RightsForDocumentParentAsync"/> the list and download routes use (a project, matter or work assignment
-    /// from the principal's rights; a service request through the requester scope). A row filed to no parent this plane
-    /// authorizes is refused. Every parent, not any: a document also filed by staff to a record the caller can no longer
-    /// read is not the caller's to destroy.</item>
+    /// from the principal's rights; a service request through the requester scope). The parents consulted are the
+    /// lookups <c>ExternalDataService</c> models for the kind: a document's <c>sprk_project</c>, <c>sprk_matter</c>,
+    /// <c>sprk_workassignment</c> and <c>sprk_relatedservicerequest</c>; a to-do's or event's <c>sprk_regardingproject</c>,
+    /// <c>sprk_regardingmatter</c> and <c>sprk_regardingworkassignment</c>. Other lookups on the row (for example
+    /// <c>sprk_invoice</c>, <c>sprk_relatedagreement</c>, <c>sprk_relatedcontact</c>, <c>sprk_parentdocument</c>,
+    /// <c>sprk_email</c>) are not consulted. A row filed to none of the modelled parents is refused. Every modelled
+    /// parent, not any: a document also filed by staff to a modelled record the caller can no longer read is not the
+    /// caller's to destroy.</item>
     /// </list>
     /// <para><b>No existence oracle.</b> A row that does not exist, someone else's row, an unstamped row and a row whose
     /// parent the caller lost all get the SAME 403 (<see cref="DeleteOwnDeniedReasonCode"/>). A read that FAILED is a 503
@@ -1516,7 +1522,7 @@ public static class ExternalProjectDataEndpoints
             return DenyDeleteOwn();
         }
 
-        // (2) Read on every parent the row is filed to.
+        // (2) Read on every parent this plane authorizes (the modelled lookups only).
         if (target.Parents.Count == 0)
         {
             logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: filed to no parent this plane authorizes", kind, id);
@@ -1563,6 +1569,9 @@ public static class ExternalProjectDataEndpoints
     /// could not be deleted, this answers 500: the row then points at a deleted file. A retry here is refused by the
     /// pointer check (the item no longer exists), so only a staff delete in the model-driven app clears it; the task 032
     /// notes record this known limit. A file that was already gone before the delete counts as deleted.</para>
+    /// <para><b>One problem key.</b> Every problem body on the delete routes (403, 409, 500, 503, including the
+    /// service-request 503 of <see cref="RightsForDocumentParentAsync"/>) carries its code in <c>reasonCode</c>, so the
+    /// SPA reads one key. The older <c>code</c> key of the upload and download routes is not used here.</para>
     /// </remarks>
     private static async Task<IResult> DeleteOwnDocument(
         Guid id,
@@ -1586,9 +1595,10 @@ public static class ExternalProjectDataEndpoints
             result = await documents.DeleteAsync(
                 id, httpContext.TraceIdentifier, DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure, ct);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            // DeleteAsync throws only from its token and document read, before anything is deleted.
+            // DeleteAsync throws only from its token and document read, before anything is deleted. An HttpClient timeout
+            // is a TaskCanceledException while ct is NOT cancelled: that is a failed read (503), not the caller leaving.
             logger.LogError(ex, "[EXT-DELETE] Document {DocumentId} could not be read for the delete", id);
             return DeleteOwnUnavailable();
         }
@@ -1597,28 +1607,38 @@ public static class ExternalProjectDataEndpoints
         {
             case SuccessDeleteResult:
             case NotFoundDeleteResult: // gone between the check and the delete: the end state the caller asked for
-                logger.LogInformation("[EXT-DELETE] Document {DocumentId} and its file deleted by its creator", id);
+                logger.LogInformation("[EXT-DELETE] Document {DocumentId} deleted by its creator (or already gone)", id);
                 return Results.NoContent();
 
             case CheckedOutDeleteResult:
                 // The lock holder's name is not shown on the external plane.
                 return Results.Problem(statusCode: 409, title: "Document checked out",
                     detail: "This document is being edited, so it cannot be deleted now. Nothing was deleted.",
-                    extensions: new Dictionary<string, object?> { ["code"] = "document_locked" });
+                    extensions: new Dictionary<string, object?> { ["reasonCode"] = "document_locked" });
 
             case FileNotDeletedDeleteResult notDeleted:
                 return Results.Problem(statusCode: notDeleted.FailureStatusCode, title: "Document not deleted",
                     detail: "The document's file could not be deleted, so the document was kept. Nothing was deleted.",
-                    extensions: new Dictionary<string, object?> { ["code"] = notDeleted.Code });
+                    extensions: new Dictionary<string, object?> { ["reasonCode"] = notDeleted.Code });
 
-            default:
+            case FailedDeleteResult:
+                // Under VerifiedFileFirstKeepRowOnFailure the file step ran first and succeeded, so a failed result is
+                // the row delete failing after the file went.
                 logger.LogError(
                     "[EXT-DELETE] Document {DocumentId}: the file was deleted but the row was not ({Result})",
                     id, result.GetType().Name);
                 return Results.Problem(statusCode: 500, title: "Document not fully deleted",
                     detail: "The document's file was deleted, but its record could not be removed. Ask the record's "
                             + "owner to remove it.",
-                    extensions: new Dictionary<string, object?> { ["code"] = "document_row_not_deleted" });
+                    extensions: new Dictionary<string, object?> { ["reasonCode"] = "document_row_not_deleted" });
+
+            default:
+                // A result this route does not map. It makes no claim about what was deleted.
+                logger.LogError(
+                    "[EXT-DELETE] Document {DocumentId}: unmapped delete result {Result}", id, result.GetType().Name);
+                return Results.Problem(statusCode: 500, title: "Document delete failed",
+                    detail: "The document could not be deleted. Try again shortly.",
+                    extensions: new Dictionary<string, object?> { ["reasonCode"] = "document_delete_failed" });
         }
     }
 

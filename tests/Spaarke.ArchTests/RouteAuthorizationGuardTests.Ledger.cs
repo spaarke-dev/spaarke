@@ -1561,22 +1561,25 @@ public partial class RouteAuthorizationGuardTests
             + "(ExternalProjectDataEndpoints.cs:930-936)."),
         // Task 032 (external-access-platform-r3, FR-26): delete-own. ONE check (AuthorizeDeleteOwnAsync) for all three:
         // the row's task-030 creator stamp must be the caller (ExternalDataService.IsCreatedByCaller,
-        // ExternalProjectDataEndpoints.cs:1513) AND the caller must hold Read on EVERY parent the row is filed to, through
-        // RightsForDocumentParentAsync (RightsForRoot for a project / matter / work assignment; the requester scope for a
-        // service request), ExternalProjectDataEndpoints.cs:1520-1537. Absent / not-own / unstamped / no-Read: one 403.
+        // ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync) AND the caller must hold Read on EVERY parent this plane
+        // authorizes (the lookups ExternalDataService models: a document's project / matter / work assignment / service
+        // request; a to-do's or event's regarding project / matter / work assignment; other lookups on the row, such as
+        // sprk_invoice or sprk_parentdocument, are not consulted), through RightsForDocumentParentAsync (RightsForRoot for
+        // a project / matter / work assignment; the requester scope for a service request). Absent / not-own / unstamped
+        // / no-Read: one 403.
         new HandlerDecision("DELETE /api/v1/external/documents/{id:guid}", "DeleteOwnDocument", "RightsForRoot",
             new[] { "ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Creator stamp + Read on every parent (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1493-1540) before "
+            "Creator stamp + Read on every modelled parent (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1499-1546) before "
             + "DocumentCheckoutService.DeleteAsync deletes the verified-pointer SPE file, then the row "
-            + "(ExternalProjectDataEndpoints.cs:1587)."),
+            + "(ExternalProjectDataEndpoints.cs:1576, DeleteOwnDocument)."),
         new HandlerDecision("DELETE /api/v1/external/todos/{id:guid}", "DeleteOwnTodo", "RightsForRoot",
             new[] { "ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Creator stamp + Read on every root (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1493-1540) before "
-            + "the app-only row delete (ExternalProjectDataEndpoints.cs:1637)."),
+            "Creator stamp + Read on every modelled root (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1499-1546) before "
+            + "the app-only row delete (ExternalProjectDataEndpoints.cs:1679, DeleteAuthorizedRowAsync)."),
         new HandlerDecision("DELETE /api/v1/external/events/{id:guid}", "DeleteOwnEvent", "RightsForRoot",
             new[] { "ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Creator stamp + Read on every root (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1493-1540) before "
-            + "the app-only row delete (ExternalProjectDataEndpoints.cs:1652)."),
+            "Creator stamp + Read on every modelled root (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1499-1546) before "
+            + "the app-only row delete (ExternalProjectDataEndpoints.cs:1679, DeleteAuthorizedRowAsync)."),
         new HandlerDecision("POST /api/v1/external/api/dataverse/fetch", "ExecuteScopedFetchAsync", "Tier2ScopeFilterInjector", Array.Empty<string>(),
             "The caller's FetchXML is rewritten to their accessible-record set before it runs "
             + "(Tier2ScopeFilterInjector.Inject, ExternalModuleDataEndpoints.cs:264), then ScopeRows trims the "

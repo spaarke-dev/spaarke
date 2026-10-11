@@ -320,8 +320,8 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     //   Services/Compose/ComposeService.cs:1448                   ReplaceFileContentAsUserAsync       record
     //   Services/Compose/ComposeService.cs:1484                   UploadSmallAsUserAsync              CLIENT
     //   Services/Compose/ComposeService.cs:1515                   ReplaceFileContentAsUserAsync       CLIENT
-    //   Services/DocumentCheckoutService.cs:787                   DeleteFileAsync                     record
-    //   Services/DocumentCheckoutService.cs:929                   DeleteFileAsync                     record  <-- task 032
+    //   Services/DocumentCheckoutService.cs :: DeleteAsync (best-effort)  DeleteFileAsync          record
+    //   Services/DocumentCheckoutService.cs :: DeleteFileOrRefuseAsync    DeleteFileAsync          record  <-- task 032
     //   Services/Email/EmailAttachmentProcessor.cs:232            UploadSmallAsync                    DEAD
     //   Services/Office/OfficeStorageUploader.cs:54               UploadSmallAsync                    CLIENT  <-- NEW
     //   Services/Office/OfficeStorageUploader.cs:86               DeleteFileAsync                     record

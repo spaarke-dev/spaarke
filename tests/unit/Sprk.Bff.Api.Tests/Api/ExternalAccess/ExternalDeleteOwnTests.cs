@@ -372,9 +372,27 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         using var response = await Delete(segment, id);
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
-        ReasonCode(await response.Content.ReadAsStringAsync()).Should().Be("sdap.access.delete_own_unavailable");
+        ProblemCode(await response.Content.ReadAsStringAsync()).Should().Be("sdap.access.delete_own_unavailable");
         _fixture.Exists(KindOf(segment), id).Should().BeTrue();
         _fixture.Steps.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Document_WhenTheRowReadTimesOut_Is503_AndNothingIsDeleted()
+    {
+        // HttpClient.Timeout surfaces as a TaskCanceledException (inner TimeoutException) while the request token is NOT
+        // cancelled. It is a failed read, not the caller leaving: 503, not a bare 500.
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.Principal = ContactOn(RecordA, ExternalAccessLevel.Collaborate);
+        _fixture.Dataverse.ReadFault = new TaskCanceledException(
+            "The request was canceled due to the configured HttpClient.Timeout.", new TimeoutException());
+
+        using var response = await Delete("documents", id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        ProblemCode(await response.Content.ReadAsStringAsync()).Should().Be("sdap.access.delete_own_unavailable");
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+        _fixture.Steps.Should().BeEmpty("nothing is deleted when the document row could not be read");
     }
 
     [Fact]
@@ -604,14 +622,23 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     {
         var body = await response.Content.ReadAsStringAsync();
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden, body);
-        ReasonCode(body).Should().Be("sdap.access.deny.delete_own");
+        ProblemCode(body).Should().Be("sdap.access.deny.delete_own");
     }
 
     private static string? ReasonCode(string body) =>
         JsonDocument.Parse(body).RootElement.TryGetProperty("reasonCode", out var code) ? code.GetString() : null;
 
-    private static string? ProblemCode(string body) =>
-        JsonDocument.Parse(body).RootElement.TryGetProperty("code", out var code) ? code.GetString() : null;
+    /// <summary>
+    /// The code of a delete-route problem body. Every problem body on these routes carries it in <c>reasonCode</c>; the
+    /// older <c>code</c> and the message routes' <c>errorCode</c> must be absent, so the SPA reads one key.
+    /// </summary>
+    private static string? ProblemCode(string body)
+    {
+        var root = JsonDocument.Parse(body).RootElement;
+        root.TryGetProperty("code", out _).Should().BeFalse("the delete routes use one problem key: reasonCode");
+        root.TryGetProperty("errorCode", out _).Should().BeFalse("the delete routes use one problem key: reasonCode");
+        return ReasonCode(body);
+    }
 
     /// <summary>A problem body without its per-request fields (trace id), for an identical-answer comparison.</summary>
     private static string Problem(string body)
@@ -827,10 +854,14 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         /// <summary>Set to make the row DELETE fail with this status.</summary>
         public HttpStatusCode? RowDeleteStatus { get; set; }
 
+        /// <summary>Set to make the document row GET throw this (an HttpClient timeout is a TaskCanceledException).</summary>
+        public Exception? ReadFault { get; set; }
+
         public void Reset()
         {
             _rows.Clear();
             RowDeleteStatus = null;
+            ReadFault = null;
         }
 
         public void Add(Guid id, string driveId, string itemId) => _rows[id] = new Dictionary<string, object?>
@@ -857,6 +888,9 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             if (!path.Contains("/sprk_documents(", StringComparison.Ordinal) || open < 0
                 || !Guid.TryParse(path[(open + 1)..path.LastIndexOf(')')], out var id))
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest));
+
+            if (request.Method == HttpMethod.Get && ReadFault is { } readFault)
+                return Task.FromException<HttpResponseMessage>(readFault);
 
             if (request.Method == HttpMethod.Delete)
             {
