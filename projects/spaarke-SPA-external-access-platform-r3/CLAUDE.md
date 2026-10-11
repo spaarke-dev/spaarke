@@ -149,6 +149,7 @@ Full table: `spec.md` §Owner Clarifications. These still constrain work:
 
 ## 6. Gotchas — do not re-learn
 
+- **2026-10-11 — a POML can contradict the spec.** The 036 POML asked for an email on message post, which the 2026-10-08 decision forbids. Check each POML against §1 "Out of scope" and §3 before you implement it, and take any conflict to the owner first.
 - **2026-10-10 — `sprk_servicerequest` schema** (live describe, dev): it has `sprk_requestedby` (→ contact), the `sprk_regarding*` family, `sprk_name` (required), `sprk_direction` (required: Inbound/Outbound) and `sprk_recordsummary`. It has **no** `sprk_createdbyperson`, **no** request-type column and **no** intake-answers column (task 020 adds the last two). Documents link to a service request through the existing `sprk_document.sprk_relatedservicerequest` lookup.
 - **2026-10-10 — `WizardModal` and `WizardRegistry` no longer exist** (deleted 2026-10-03, reuse audit C-20; `Spaarke.UI.Components/src/components/index.ts:197`). The spec's "WizardModal" means the current framework: `Wizard/WizardShell.tsx` + `InAppWizardHost.tsx`, with `CreateRecordWizard` as the structural pattern.
 - **2026-10-10 — the Service Requests module descriptor is fail-closed for CIAM** (`ExternalAccessModule.cs:453-462, descriptor "service-requests"`, predicate `Plane == Workforce && ContactId != Guid.Empty`). FR-06's switch changes that predicate, so test both settings.

@@ -4,7 +4,7 @@
     <title>Email on subsequent grant (FR-07). Scope-corrected 2026-10-11: no email on message post</title>
     <phase>3 BFF features</phase>
     <gate>after UAC-r2 PR #1583 merges and after 034</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF change on the grant write path (tags bff-api)</rigor-reason>
     <model-tier>sonnet</model-tier>
