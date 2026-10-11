@@ -66,7 +66,7 @@ import { TruncatedListNotice } from '../TruncatedListNotice';
 const UNKNOWN_SENDER = 'Unknown sender';
 const OWN_SENDER = 'You';
 const EMPTY_TEXT = 'No messages yet. Write the first one below.';
-const LOAD_FAILED = 'The messages could not be loaded just now.';
+const LOAD_FAILED = 'The existing messages could not be loaded just now.';
 const NOT_AVAILABLE = 'Messages are not available for this record.';
 const DENIED_TEXT = 'You do not have permission to view messages on this record.';
 const SEND_FAILED = 'The message could not be sent just now. Your message has been kept - please try again.';
@@ -185,11 +185,20 @@ const useStyles = makeStyles({
     whiteSpace: 'pre-wrap',
     overflowWrap: 'anywhere',
   },
+  // Inbound HTML mail keeps its `style` attributes (shared sanitizer), so a body could carry
+  // `position:fixed; inset:0; z-index:2147483647` and paint a fake sign-in over the whole app. `contain: paint` makes
+  // this box the containing block for fixed and absolute descendants and clips painting to it; `position: relative`
+  // anchors absolute descendants here. overflowX stays `auto` so a wide table scrolls sideways instead of being cut;
+  // overflowY is `hidden` because normal flow never overflows an auto-height box, so only an absolutely placed
+  // descendant could, and that must be clipped (not given a scrollbar).
   bodyHtml: {
     color: tokens.colorNeutralForeground1,
     fontSize: tokens.fontSizeBase300,
     overflowWrap: 'anywhere',
+    position: 'relative',
+    contain: 'paint',
     overflowX: 'auto',
+    overflowY: 'hidden',
   },
   compose: {
     display: 'flex',
@@ -280,9 +289,10 @@ const MessageItem: React.FC<{ message: ExternalMessage }> = ({ message }) => {
 interface MessageThreadProps {
   root: string;
   recordId: string;
+  onSendingChange?: (sending: boolean) => void;
 }
 
-const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId }) => {
+const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSendingChange }) => {
   const styles = useStyles();
   const [thread, setThread] = React.useState<ThreadState>({ status: 'loading' });
   const [refreshFailed, setRefreshFailed] = React.useState(false);
@@ -299,6 +309,20 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId }) => {
   // Closes the gap between a click and React re-rendering the disabled button: a second click in the same tick.
   const sendLock = React.useRef(false);
 
+  // Tells the host a send is in flight (so it can hold off navigating away and losing the result). The latest callback
+  // is read through a ref so a new function identity never re-fires the effect, and unmount always reports "not sending".
+  const onSendingChangeRef = React.useRef(onSendingChange);
+  onSendingChangeRef.current = onSendingChange;
+  React.useEffect(() => {
+    onSendingChangeRef.current?.(sending);
+  }, [sending]);
+  React.useEffect(
+    () => () => {
+      onSendingChangeRef.current?.(false);
+    },
+    []
+  );
+
   const read = React.useCallback(
     async (mode: 'initial' | 'refresh'): Promise<void> => {
       const seq = ++readSeq.current;
@@ -309,12 +333,19 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId }) => {
         setRefreshFailed(false);
       } catch (err: unknown) {
         if (seq !== readSeq.current) return;
+        const failure = accessFailureOf(err);
         if (mode === 'refresh') {
-          // The message was sent; only the re-read failed. The thread on screen stays, and says so.
+          // A 401 is the same sign-in state the list uses (the session ended; nothing more can be read or sent).
+          if (failure === 'signin') {
+            setThread({ status: 'access', failure });
+            return;
+          }
+          // The message was sent; only the re-read failed. Whatever is on screen stays, and the notice says so. A
+          // refresh that overtook the initial read must not leave the spinner up for ever: that read is dropped.
           setRefreshFailed(true);
+          setThread(t => (t.status === 'loading' ? { status: 'error' } : t));
           return;
         }
-        const failure = accessFailureOf(err);
         if (failure) setThread({ status: 'access', failure });
         else if (err instanceof ApiError && err.statusCode === 404) setThread({ status: 'unavailable' });
         else setThread({ status: 'error' });
@@ -372,6 +403,21 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId }) => {
         </div>
       )}
 
+      {/* Shown whatever the thread status: the compose box is available while loading and after a failed read, so a
+          successful send can be followed by a failed re-read there too. */}
+      {refreshFailed && thread.status !== 'access' && (
+        <MessageBar intent="warning" data-testid="record-messages-refresh-failed">
+          <MessageBarBody>{REFRESH_FAILED}</MessageBarBody>
+          {thread.status === 'ready' && (
+            <MessageBarActions>
+              <Button appearance="secondary" size="small" onClick={() => void read('refresh')}>
+                Refresh
+              </Button>
+            </MessageBarActions>
+          )}
+        </MessageBar>
+      )}
+
       {thread.status === 'error' && (
         <MessageBar intent="error" data-testid="record-messages-error">
           <MessageBarBody>{LOAD_FAILED}</MessageBarBody>
@@ -386,16 +432,6 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId }) => {
       {thread.status === 'ready' && (
         <>
           <TruncatedListNotice truncated={thread.truncated} shown={thread.messages.length} noun="messages" />
-          {refreshFailed && (
-            <MessageBar intent="warning" data-testid="record-messages-refresh-failed">
-              <MessageBarBody>{REFRESH_FAILED}</MessageBarBody>
-              <MessageBarActions>
-                <Button appearance="secondary" size="small" onClick={() => void read('refresh')}>
-                  Refresh
-                </Button>
-              </MessageBarActions>
-            </MessageBar>
-          )}
           {thread.messages.length === 0 && !thread.truncated ? (
             <div className={styles.empty} role="status" data-testid="record-messages-empty">
               {EMPTY_TEXT}
@@ -464,12 +500,14 @@ export interface RecordMessagesProps {
   entity: string;
   /** The record's id (a GUID the caller has already validated). */
   recordId: string;
+  /** Called with `true` while a send is in flight and `false` otherwise (and on unmount), so a host can hold navigation. */
+  onSendingChange?: (sending: boolean) => void;
 }
 
-export const RecordMessages: React.FC<RecordMessagesProps> = ({ entity, recordId }) => {
+export const RecordMessages: React.FC<RecordMessagesProps> = ({ entity, recordId, onSendingChange }) => {
   const root = messageRootFor(entity);
   if (!root) return null;
-  return <MessageThread root={root} recordId={recordId} />;
+  return <MessageThread root={root} recordId={recordId} onSendingChange={onSendingChange} />;
 };
 
 export default RecordMessages;

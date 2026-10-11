@@ -79,6 +79,41 @@ Capture the failure with `--logger trx` on a full run. Then check for a fixed SS
 
 ---
 
+### ISS-003 — Shared sanitizeEmailHtml keeps style positioning and remote images
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-11 |
+| **Source** | R3 task 051 adversarial review (F2 on the external surface, K2) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1636 |
+
+**Description**
+
+The shared `sanitizeEmailHtml` keeps the `style` attribute and removes only executable tokens. It also allows `img src` over http(s).
+- An inbound email body can therefore use `position:fixed; inset:0; z-index:…` to paint over the whole host surface, for example a fake "sign in again" panel.
+- Remote images and CSS `url(...)` load when someone opens the message, which tells the sender the reader's IP and read time.
+
+Consumers: the internal CommunicationTimeline `MessageRow` and ConversationView `MessageBubble`; the Spaarke.Communication.Components email views; and the R3 external SPA Messages section, which external contacts read.
+
+R3 confines HTML bodies in the external SPA with `contain: paint` (task 051 fix round). The other consumers are unchanged.
+
+**Entry-points**
+
+- `src/client/shared/Spaarke.UI.Components/src/utils/sanitizeEmailHtml.ts:131` (`img`), `:148` (`style`)
+- `src/client/external-spa/src/components/detail/RecordMessages.tsx` (the R3 containment)
+
+**Suggested fix**
+
+Strip `position`, the `inset` family, `z-index` and `url(` from `style` in the shared util. Add a `blockRemoteImages` option for low-trust consumers.
+
+**Estimated effort**: 4–8 hours.
+**Blockers**: none.
+**Related**: R3 task 051; ISS-003 is not R3 scope because the util is shared.
+
+---
+
 ## Closed
 
 (none)

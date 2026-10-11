@@ -9,7 +9,7 @@
  */
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 const { bffApiCall, gridSpecs } = vi.hoisted(() => ({
@@ -335,11 +335,19 @@ describe.each(CASES)('$label grid', c => {
     await waitFor(() => expect(titleOf(dialog)).toBe(c.title));
     expect(within(dialog).getByTestId(c.fieldTestId).textContent).toBe(c.fieldValue);
 
-    // Read-only: no input of any kind in the record itself. The one input in the modal is the Messages compose box
-    // (task 051: posting to the thread is not editing the record), so it is the only thing excluded from the scan.
-    const outsideMessages = (selector: string): Element[] =>
-      Array.from(dialog.querySelectorAll(selector)).filter(el => !el.closest('[data-testid="record-detail-messages"]'));
-    expect(outsideMessages('input, textarea, select, [role="textbox"]')).toHaveLength(0);
+    // Read-only: the record itself has no input. The ONE input in the modal is the Messages compose box (task 051:
+    // posting to the thread is not editing the record) - exactly one textbox, inside the Messages section, for an entity
+    // with a thread and none at all for a document. Nothing is excluded from the scan, so a stray input anywhere fails.
+    const inputs = Array.from(dialog.querySelectorAll('input, textarea, select, [role="textbox"]'));
+    if (c.entityName === 'sprk_document') {
+      expect(inputs).toHaveLength(0);
+    } else {
+      const messages = within(dialog).getByTestId('record-detail-messages');
+      expect(within(messages).getAllByRole('textbox')).toHaveLength(1);
+      expect(inputs).toHaveLength(1);
+      expect(messages.contains(inputs[0])).toBe(true);
+      expect(inputs[0].tagName).toBe('TEXTAREA');
+    }
     expect(dialog.querySelectorAll('input[type="file"]')).toHaveLength(0);
 
     // In-app: no Xrm navigation and no new window — so it works the same in the browser host and the Teams host.
@@ -461,6 +469,90 @@ describe('browsing', () => {
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByText('Close'));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  describe('while a message is being sent (review 051 K3)', () => {
+    let finishPost!: (v: unknown) => void;
+
+    /** Opens matter 1 of 3 with a POST that stays in flight until `finishPost`, and starts a send. */
+    async function startSend(): Promise<HTMLElement> {
+      const inFlight = new Promise(resolve => {
+        finishPost = resolve;
+      });
+      bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
+        if (path.endsWith('/messages')) return options?.method === 'POST' ? inFlight : { value: [] };
+        const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
+        const detail = detailReadOf(body);
+        if (detail) {
+          return {
+            entities: [{ [detail.c.idAttribute]: detail.id, sprk_mattername: `Matter ${detail.id.slice(-3)}` }],
+            moreRecords: false,
+          };
+        }
+        return { entities: [], moreRecords: false };
+      });
+      renderWidget(matter.Body);
+      fireEvent.click(gridRow(matter, 1));
+      const dialog = await screen.findByRole('dialog');
+      await waitFor(() => expect(titleOf(dialog)).toBe('Matter 201'));
+      await within(dialog).findByTestId('record-messages-empty');
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Write a message' }), {
+        target: { value: 'in flight' },
+      });
+      fireEvent.click(within(dialog).getByRole('button', { name: /^Send/ }));
+      await waitFor(() => expect(within(dialog).getByRole('button', { name: /^Sending/ })).toBeTruthy());
+      return dialog;
+    }
+
+    const matterReads = (): string[] =>
+      bffApiCall.mock.calls
+        .filter(call => String(call[0]).endsWith('/api/dataverse/fetch'))
+        .map(call => JSON.parse(String((call[1] as RequestInit).body)) as { entityName: string; fetchXml: string })
+        .filter(b => b.entityName === 'sprk_matter')
+        .map(b => conditionOf(b.fetchXml).value);
+
+    it('previous / next do not move to another record, and the footer Close is disabled', async () => {
+      const dialog = await startSend();
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
+      // The guard answers on a microtask; give it (and a would-be record read) the chance to run.
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(within(dialog).getByText('1 of 3')).toBeTruthy();
+      expect(titleOf(dialog)).toBe('Matter 201');
+      expect(matterReads()).toEqual([ID.matter[0]]);
+      expect(within(dialog).getByText('Close').closest('button')?.disabled).toBe(true);
+
+      // The send is untouched and still settles in this same view.
+      await act(async () => {
+        finishPost({});
+      });
+      await waitFor(() => expect(within(dialog).queryByRole('button', { name: /^Sending/ })).toBeNull());
+    });
+
+    it('the x, Escape and the footer Close do not close the dialog', async () => {
+      const dialog = await startSend();
+
+      for (const close of within(dialog).getAllByRole('button', { name: 'Close' })) fireEvent.click(close);
+      fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape' });
+      fireEvent.keyDown(document.body, { key: 'Escape', code: 'Escape' });
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(screen.queryByRole('dialog')).not.toBeNull();
+      expect(within(dialog).getByRole('button', { name: /^Sending/ })).toBeTruthy();
+    });
+
+    it('once the send settles, navigation and Close work again', async () => {
+      const dialog = await startSend();
+      await act(async () => {
+        finishPost({});
+      });
+      await waitFor(() => expect(within(dialog).queryByRole('button', { name: /^Sending/ })).toBeNull());
+
+      expect(within(dialog).getByText('Close').closest('button')?.disabled).toBe(false);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
+      await waitFor(() => expect(titleOf(dialog)).toBe('Matter 202'));
+      fireEvent.click(within(dialog).getByText('Close'));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    });
   });
 });
 

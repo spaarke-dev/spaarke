@@ -443,6 +443,9 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
   const styles = useStyles();
   const cfg = getRecordDetailEntity(entityName);
   const [attempt, setAttempt] = React.useState(0);
+  // True while the Messages section has a send in flight. Paging away or closing then would unmount the thread and lose
+  // the send's result (success, error, kept draft), so both are held until it settles (review 051 K3).
+  const [messageSending, setMessageSending] = React.useState(false);
   const id = recordIds[index];
 
   const state = useRecord(cfg, open ? id : undefined, attempt);
@@ -456,15 +459,27 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
     if (next >= 0 && next < recordIds.length) onIndexChange(next);
   };
 
+  // SprkModal routes the x, Escape and the backdrop through `onClose`, so one guard here covers all three. The footer
+  // Close is also disabled so the hold is visible. SprkModal has no disabled state for its x or its "<" ">" buttons
+  // (shared component); the browse buttons are held by the `onBeforeNavigate` guard, which blocks the move.
+  const handleClose = (): void => {
+    if (!messageSending) onClose();
+  };
+
   return (
     <SprkModal
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       title={title}
       size="lg"
-      nav={{ index, total: recordIds.length, onNavigate: handleNavigate }}
+      nav={{
+        index,
+        total: recordIds.length,
+        onNavigate: handleNavigate,
+        onBeforeNavigate: () => !messageSending,
+      }}
       footer={
-        <Button appearance="primary" onClick={onClose}>
+        <Button appearance="primary" onClick={handleClose} disabled={messageSending}>
           Close
         </Button>
       }
@@ -512,7 +527,7 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
             {cfg.invoicesBy && <InvoicesSection parentAttribute={cfg.invoicesBy} parentId={id} />}
             {cfg.showsEventsAndTasks && <EventsAndTasksSection entity={cfg.entity} id={id} />}
             {/* Messages (task 051): the record's thread + compose, for the entities the server has a thread for. */}
-            <RecordMessages entity={cfg.entity} recordId={id} />
+            <RecordMessages entity={cfg.entity} recordId={id} onSendingChange={setMessageSending} />
           </React.Fragment>
         )}
       </div>

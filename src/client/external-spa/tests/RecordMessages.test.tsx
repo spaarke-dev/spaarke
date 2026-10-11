@@ -250,6 +250,56 @@ describe('message bodies', () => {
     expect(text.querySelector('b')).toBeNull();
   });
 
+  // jsdom does no layout, so these cannot show that the overlay is actually clipped on screen. They prove the two things
+  // that make it so in a browser: the HTML body sits inside its message box, and its host element carries the
+  // containment styles (contain: paint = containing block for fixed/absolute descendants + paint clipping).
+  const OVERLAY_HTML =
+    '<div id="overlay" style="position:fixed;inset:0;z-index:2147483647;background:#fff">' +
+    '<p>Session expired. Sign in to continue</p><input name="password"></div>';
+
+  /** The CSS text of every stylesheet rule whose selector uses one of the element's classes (Griffel emits atomic rules). */
+  const cssOf = (el: Element): string => {
+    const classes = new Set(Array.from(el.classList));
+    const rules: string[] = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      for (const rule of Array.from(sheet.cssRules)) {
+        const selector = (rule as CSSStyleRule).selectorText ?? '';
+        if (Array.from(selector.matchAll(/\.([\w-]+)/g)).some(m => classes.has(m[1]))) rules.push(rule.cssText);
+      }
+    }
+    return rules.join('\n').replace(/\s+/g, ' ');
+  };
+
+  it('an HTML body is confined to its message box: the host element carries paint containment and a positioned, clipped box', async () => {
+    thread = [dto(1, { sprk_body: OVERLAY_HTML, sprk_bodyformat: HTML })];
+    renderMessages();
+
+    const host = await screen.findByTestId('record-message-html');
+    const css = cssOf(host);
+    expect(css).toMatch(/contain:\s*paint/);
+    expect(css).toMatch(/position:\s*relative/);
+    expect(css).toMatch(/overflow-y:\s*hidden/);
+    expect(css).toMatch(/overflow-x:\s*auto/);
+  });
+
+  it('a body with style="position:fixed" still renders inside its message container (DOM structure)', async () => {
+    thread = [dto(1, { sprk_body: OVERLAY_HTML, sprk_bodyformat: HTML })];
+    renderMessages();
+
+    const host = await screen.findByTestId('record-message-html');
+    const overlay = host.querySelector('div');
+    // The payload survives sanitizing (the shared util keeps style), so containment is what has to hold it.
+    expect(overlay).not.toBeNull();
+    expect(overlay?.textContent).toContain('Sign in to continue');
+    expect(overlay?.getAttribute('style') ?? '').toMatch(/position:\s*fixed/);
+    // It is a descendant of the host, which is inside its message <li>, which is inside the Messages section.
+    expect(host.contains(overlay)).toBe(true);
+    expect(overlay?.closest('li[data-testid="record-message"]')).not.toBeNull();
+    expect(overlay?.closest('[data-testid="record-detail-messages"]')).not.toBeNull();
+    // A direct child of the host: not hoisted out to the document body or a portal.
+    expect(overlay?.parentElement).toBe(host);
+  });
+
   it('a message I just typed that contains markup is posted as typed and rendered as text after the re-read', async () => {
     const payload = '<img src=x onerror="window.__pwned=2">';
     renderMessages();
@@ -338,13 +388,17 @@ describe('sending', () => {
 
     type('a'.repeat(MAX_MESSAGE_BODY_LENGTH + 1));
     expect(sendButton().disabled).toBe(true);
-    expect(screen.getByTestId('record-messages-counter').textContent).toContain('1 over');
+    // Numbers are formatted for the reader's locale (the component calls toLocaleString), so the expected text is built
+    // the same way and the test does not depend on the runner's locale.
+    expect(screen.getByTestId('record-messages-counter').textContent).toContain(`${(1).toLocaleString()} over`);
     fireEvent.click(sendButton());
     expect(posts()).toHaveLength(0);
 
     type('a'.repeat(MAX_MESSAGE_BODY_LENGTH));
     expect(sendButton().disabled).toBe(false);
-    expect(screen.getByTestId('record-messages-counter').textContent).toBe('10,000 / 10,000');
+    expect(screen.getByTestId('record-messages-counter').textContent).toBe(
+      `${MAX_MESSAGE_BODY_LENGTH.toLocaleString()} / ${MAX_MESSAGE_BODY_LENGTH.toLocaleString()}`
+    );
     fireEvent.click(sendButton());
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(JSON.parse(String((posts()[0][1] as RequestInit).body)).sprk_body).toHaveLength(MAX_MESSAGE_BODY_LENGTH);
@@ -423,6 +477,152 @@ describe('sending', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     await screen.findByText('sent fine');
     expect(screen.queryByTestId('record-messages-refresh-failed')).toBeNull();
+  });
+});
+
+describe('a send that worked while the thread is not ready', () => {
+  it('a failed load, then a successful send whose re-read also fails: the sent notice is shown and the draft is cleared', async () => {
+    bffApiCall.mockImplementation(async (_path: string, options?: RequestInit) => {
+      if (options?.method === 'POST') return dto(99);
+      throw new ApiError(500, 'boom');
+    });
+    renderMessages();
+    await screen.findByTestId('record-messages-error');
+    // The load-error bar does not read as a failed send.
+    expect(screen.getByTestId('record-messages-error').textContent).not.toMatch(/sent/i);
+
+    type('hello from an errored thread');
+    fireEvent.click(sendButton());
+
+    const notice = await screen.findByTestId('record-messages-refresh-failed');
+    expect(notice.textContent).toContain('Your message was sent');
+    expect(posts()).toHaveLength(1);
+    expect(box().value).toBe('');
+    expect(screen.queryByTestId('record-messages-send-error')).toBeNull();
+    // The load error is still shown separately, with its own Try again.
+    expect(screen.getByTestId('record-messages-error')).toBeTruthy();
+  });
+
+  it('Try again after that reads the thread, shows the sent message, and drops the notice', async () => {
+    let readsWork = false;
+    bffApiCall.mockImplementation(async (_path: string, options?: RequestInit) => {
+      if (options?.method === 'POST') {
+        thread = [dto(1, { sprk_body: 'queued', isMine: true })];
+        return dto(99);
+      }
+      if (!readsWork) throw new ApiError(500, 'boom');
+      return { value: thread };
+    });
+    renderMessages();
+    await screen.findByTestId('record-messages-error');
+    type('queued');
+    fireEvent.click(sendButton());
+    await screen.findByTestId('record-messages-refresh-failed');
+
+    readsWork = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await screen.findByText('queued');
+    expect(screen.queryByTestId('record-messages-refresh-failed')).toBeNull();
+    expect(screen.queryByTestId('record-messages-error')).toBeNull();
+  });
+
+  it('a send during the first read whose re-read fails shows the notice and the load error, not a spinner for ever', async () => {
+    let releaseFirst!: () => void;
+    const firstRead = new Promise<void>(resolve => {
+      releaseFirst = resolve;
+    });
+    let reads = 0;
+    bffApiCall.mockImplementation(async (_path: string, options?: RequestInit) => {
+      if (options?.method === 'POST') return dto(99);
+      reads++;
+      if (reads === 1) {
+        await firstRead;
+        return { value: [] };
+      }
+      throw new ApiError(500, 'boom');
+    });
+    renderMessages();
+    // The compose box is available while the first read is still pending.
+    await screen.findByText('Loading messages...');
+    type('fast typist');
+    fireEvent.click(sendButton());
+
+    await screen.findByTestId('record-messages-refresh-failed');
+    await screen.findByTestId('record-messages-error');
+    expect(screen.queryByText('Loading messages...')).toBeNull();
+    releaseFirst();
+  });
+
+  it('a 401 on the re-read after a send is the shared sign-in state, not "could not be refreshed"', async () => {
+    let afterPost = false;
+    bffApiCall.mockImplementation(async (_path: string, options?: RequestInit) => {
+      if (options?.method === 'POST') {
+        afterPost = true;
+        return dto(99);
+      }
+      if (afterPost) throw new ApiError(401, '');
+      return { value: [] };
+    });
+    renderMessages();
+    await screen.findByTestId('record-messages-empty');
+    type('last words');
+    fireEvent.click(sendButton());
+
+    await screen.findByTestId('bff-access-signin');
+    expect(screen.queryByTestId('record-messages-refresh-failed')).toBeNull();
+    expect(posts()).toHaveLength(1);
+  });
+});
+
+describe('onSendingChange', () => {
+  it('reports true while a post is in flight and false when it settles', async () => {
+    let finish!: (v: unknown) => void;
+    const inFlight = new Promise(resolve => {
+      finish = resolve;
+    });
+    installNetwork(() => inFlight);
+    const onSendingChange = vi.fn();
+    renderMessages({ onSendingChange });
+    await screen.findByTestId('record-messages-empty');
+    expect(onSendingChange).toHaveBeenLastCalledWith(false);
+
+    type('hold the door');
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(onSendingChange).toHaveBeenLastCalledWith(true));
+
+    await act(async () => {
+      thread = [dto(1, { sprk_body: 'hold the door', isMine: true })];
+      finish(dto(99));
+      await inFlight;
+    });
+    await screen.findByText('hold the door');
+    expect(onSendingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('reports false again after a refused send', async () => {
+    installNetwork(() => {
+      throw new ApiError(429, '');
+    });
+    const onSendingChange = vi.fn();
+    renderMessages({ onSendingChange });
+    await screen.findByTestId('record-messages-empty');
+    type('nope');
+    fireEvent.click(sendButton());
+    await screen.findByTestId('record-messages-send-error');
+    expect(onSendingChange.mock.calls.map(c => c[0])).toContain(true);
+    expect(onSendingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('reports false when unmounted mid-send, so a host never stays held', async () => {
+    installNetwork(() => new Promise(() => undefined));
+    const onSendingChange = vi.fn();
+    const { unmount } = renderMessages({ onSendingChange });
+    await screen.findByTestId('record-messages-empty');
+    type('abandoned');
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(onSendingChange).toHaveBeenLastCalledWith(true));
+    unmount();
+    expect(onSendingChange).toHaveBeenLastCalledWith(false);
   });
 });
 
