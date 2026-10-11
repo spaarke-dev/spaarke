@@ -146,6 +146,21 @@ export function notifyTeamsAppLoaded(): void {
 }
 
 /**
+ * Tell Teams the tab started successfully, for a screen that is final and needs no sign-in (the `/join` page: its
+ * message is the whole tab). The adapter's own `initialize()` does the same after a sign-in; this is the pre-auth
+ * counterpart, so the host's loading UI is dismissed definitively rather than timing out behind the message. Best-effort.
+ */
+export function notifyTeamsSuccess(): void {
+  try {
+    void Promise.resolve(teamsApp.notifySuccess()).catch(err =>
+      console.warn('[TeamsHostAdapter] notifySuccess failed:', err)
+    );
+  } catch (err) {
+    console.warn('[TeamsHostAdapter] notifySuccess failed:', err);
+  }
+}
+
+/**
  * Tell Teams the tab failed to start for a non-auth reason (no customer backend could be resolved — fail closed),
  * so the host does not keep spinning behind the explicit "No organization available" screen. Best-effort.
  */

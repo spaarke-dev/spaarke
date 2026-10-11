@@ -10,6 +10,7 @@ import {
   createTeamsHostAdapter,
   notifyTeamsAppLoaded,
   notifyTeamsFailureOther,
+  notifyTeamsSuccess,
   type ITeamsHostAdapter,
 } from './host/TeamsHostAdapter';
 import { getStoredRealm, setStoredRealm, clearStoredRealm, type Realm } from './auth/realm';
@@ -28,6 +29,8 @@ import { CustomerPicker } from './components/auth/CustomerPicker';
 import { TeamsAuthError } from './components/auth/TeamsAuthError';
 import { App } from './App';
 import { isDevMockEnabled } from './dev-mock';
+import { isJoinPath } from './auth/registration-client';
+import { JoinPage } from './pages/JoinPage';
 
 // Power Pages Code Page SPA — React 18 with createRoot (bundled, not platform-provided).
 // External users authenticate via Entra B2B — they are guest accounts in the main
@@ -373,12 +376,38 @@ function renderTeamsAuthError(root: Root, adapter: ITeamsHostAdapter, err: unkno
   );
 }
 
+/**
+ * `/join?customer={key}` (task 056, FR-13): a pre-sign-in page, so it is rendered here — before the realm chooser, the
+ * backend activation and any MSAL instance — in both hosts. The page itself decides what to show: "not available"
+ * while `VITE_JOIN_ENABLED` is off, a browser-only message inside Teams (no redirect in the Teams iframe, NFR-04).
+ */
+function renderJoin(root: Root, inTeams: boolean): void {
+  // Inside Teams the host's spinner stops once there is a screen to show (as for the other pre-auth screens), and the
+  // message is the whole tab (no sign-in follows), so the start is also reported as successful, as the Teams bootstrap
+  // does once it has something to show.
+  if (inTeams) {
+    notifyTeamsAppLoaded();
+    notifyTeamsSuccess();
+  }
+  root.render(
+    <React.StrictMode>
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <JoinPage teamsHost={inTeams} />
+      </FluentProvider>
+    </React.StrictMode>
+  );
+}
+
 async function main() {
   const rootElement = getRootElement();
   if (!rootElement) return;
   const root = createRoot(rootElement);
 
   const inTeams = await detectTeamsHost();
+  if (isJoinPath(window.location.pathname)) {
+    renderJoin(root, inTeams);
+    return;
+  }
   if (inTeams) {
     await bootstrapTeams(root);
   } else {

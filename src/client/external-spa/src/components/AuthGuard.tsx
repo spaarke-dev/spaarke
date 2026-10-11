@@ -5,7 +5,9 @@
  * finished processing any in-progress interaction (e.g., auth code redirect).
  *
  * If no account is found and no interaction is in progress, triggers a login redirect
- * to Entra (B2B guest login with Microsoft 365 credentials).
+ * to Entra (B2B guest login with Microsoft 365 credentials) — UNLESS the redirect sign-in just failed (Entra returned
+ * an error such as `access_denied`): then the gate shows <SignInFailed> and starts no redirect of its own, so a declined
+ * sign-in cannot loop. Only the "Try again" click starts another redirect.
  *
  * Place this inside <MsalProvider> (already set up in main.tsx), wrapping all
  * authenticated routes in App.tsx.
@@ -18,7 +20,15 @@ import { useNavigate } from 'react-router-dom';
 import { useMsal } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
 import { Spinner } from '@fluentui/react-components';
-import { accountsForActivePlane, captureReturnTo, consumeReturnTo, getActiveLoginScope } from '../auth/msal-auth';
+import {
+  accountsForActivePlane,
+  captureReturnTo,
+  consumeReturnTo,
+  getActiveLoginScope,
+  getSignInFailure,
+  subscribeSignInFailure,
+} from '../auth/msal-auth';
+import { SignInFailed } from './auth/SignInFailed';
 import { isDevMockEnabled } from '../dev-mock';
 
 interface AuthGuardProps {
@@ -53,6 +63,8 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children, teamsHost = fals
   return <MsalAccountGate>{children}</MsalAccountGate>;
 };
 
+const SIGN_IN_NOT_STARTED = 'Sign-in could not be started. Reload the page and try again.';
+
 /**
  * The MSAL account gate itself — split out of AuthGuard by unified-access-control-r2 task 140 so that its hooks are
  * never called after AuthGuard's early returns (react-hooks/rules-of-hooks; behaviour unchanged: the mock and Teams
@@ -64,11 +76,15 @@ const MsalAccountGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
   // selected plane: a CIAM account cached in this tab is not a workforce sign-in (accountsForActivePlane).
   const isAuthenticated = inProgress !== InteractionStatus.Startup && accountsForActivePlane(accounts).length > 0;
   const navigate = useNavigate();
+  // A redirect sign-in that came back with an error (recorded by the MSAL event callback registered before initialize()).
+  const signInFailure = React.useSyncExternalStore(subscribeSignInFailure, getSignInFailure, getSignInFailure);
+  const [startError, setStartError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     // Only trigger login when MSAL has finished all in-progress interactions
     // and the user is not authenticated. Prevents duplicate redirect loops.
-    if (!isAuthenticated && inProgress === InteractionStatus.None) {
+    // Never while a failed sign-in is showing: re-firing here is the redirect loop (declined consent → Entra → declined…).
+    if (!isAuthenticated && inProgress === InteractionStatus.None && !signInFailure) {
       // Preserve the intended deep link (e.g. an emailed /project/{id}) across the redirect.
       captureReturnTo();
       // Request the BFF scope for the CURRENTLY-SELECTED plane's authority (task 013): CIAM by
@@ -79,7 +95,20 @@ const MsalAccountGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
         scopes: [getActiveLoginScope()],
       });
     }
-  }, [isAuthenticated, inProgress, instance]);
+  }, [isAuthenticated, inProgress, instance, signInFailure]);
+
+  // "Try again" on the failure screen: the one place a user gesture starts another redirect.
+  const tryAgain = React.useCallback(() => {
+    setStartError(null);
+    try {
+      captureReturnTo();
+      void Promise.resolve(instance.loginRedirect({ scopes: [getActiveLoginScope()] })).catch(() =>
+        setStartError(SIGN_IN_NOT_STARTED)
+      );
+    } catch {
+      setStartError(SIGN_IN_NOT_STARTED);
+    }
+  }, [instance]);
 
   React.useEffect(() => {
     // After authentication completes, restore the intended deep link once (react-router soft
@@ -102,6 +131,11 @@ const MsalAccountGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
         <Spinner size="large" label="Signing in..." />
       </div>
     );
+  }
+
+  // Unauthenticated after a FAILED redirect sign-in → fail loud; no automatic redirect while this shows.
+  if (!isAuthenticated && signInFailure) {
+    return <SignInFailed failure={signInFailure} onTryAgain={tryAgain} startError={startError} />;
   }
 
   // Unauthenticated + no interaction in progress → login redirect is being triggered

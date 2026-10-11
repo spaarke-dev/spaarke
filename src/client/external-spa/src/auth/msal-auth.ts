@@ -154,13 +154,88 @@ export function syncActiveAccountOnInteractiveSignIn(instance: IPublicClientAppl
   if (activeAccountSyncRegistered.has(instance)) return;
   activeAccountSyncRegistered.add(instance);
   instance.addEventCallback((event: EventMessage) => {
+    // Same single callback also records a FAILED redirect sign-in (see "Redirect sign-in failure" below).
+    if (isRedirectSignInFailure(event)) {
+      setSignInFailure(safeSignInErrorCode(event.error));
+      return;
+    }
     const interactive =
       event.interactionType === InteractionType.Redirect || event.interactionType === InteractionType.Popup;
     const success = event.eventType === EventType.LOGIN_SUCCESS || event.eventType === EventType.ACQUIRE_TOKEN_SUCCESS;
     if (!interactive || !success) return;
+    setSignInFailure(null);
     const account = (event.payload as AuthenticationResult | null)?.account;
     if (account) instance.setActiveAccount(account);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Redirect sign-in failure (task 056 review fix)
+// ---------------------------------------------------------------------------
+//
+// When Entra returns an error to the redirect URI (`#error=access_denied`, e.g. AADSTS65004 for a new guest who declines
+// the "Review permissions" page), msal-browser rejects `handleRedirectPromise` and emits ACQUIRE_TOKEN_FAILURE with
+// InteractionType.Redirect (msal-browser 5.x has no separate LOGIN_FAILURE event). The account gate used to re-fire
+// `loginRedirect` whenever there was no account and nothing in progress, so a declined sign-in redirected to Entra
+// again, forever. The failure is therefore recorded here (the callback above is registered BEFORE `initialize()`, so it sees the response) and the gate shows a
+// fail-loud screen instead; only the user's "Try again" starts another redirect.
+//
+// Only a SAFE error code is kept: the MSAL `errorCode` (a fixed snake_case identifier) and an `AADSTS` number. The raw
+// description is never stored or shown — it can carry a tenant id, a correlation id or an address.
+// Teams is not affected: it never redirects (the Teams bootstrap acquires the token via NAA / popup before <App> mounts).
+
+/** What the failure screen may show. */
+export interface SignInFailure {
+  /** MSAL / OIDC error code, e.g. `access_denied`; `unknown_error` when none is recognisable. */
+  errorCode: string;
+  /** Entra error number from the description, e.g. `AADSTS65004`; null when there is none. */
+  aadsts: string | null;
+}
+
+let signInFailure: SignInFailure | null = null;
+const signInFailureListeners = new Set<() => void>();
+
+function setSignInFailure(next: SignInFailure | null): void {
+  signInFailure = next;
+  signInFailureListeners.forEach(listener => listener());
+}
+
+/** The recorded failed redirect sign-in, or null. */
+export function getSignInFailure(): SignInFailure | null {
+  return signInFailure;
+}
+
+/** Forget the failure (before another sign-in attempt, or when the user picks a different sign-in). */
+export function clearSignInFailure(): void {
+  setSignInFailure(null);
+}
+
+/** `useSyncExternalStore` subscription. */
+export function subscribeSignInFailure(listener: () => void): () => void {
+  signInFailureListeners.add(listener);
+  return () => {
+    signInFailureListeners.delete(listener);
+  };
+}
+
+/**
+ * A redirect sign-in that FAILED: ACQUIRE_TOKEN_FAILURE of a redirect interaction (msal-browser 5.5 emits it for a
+ * rejected `handleRedirectPromise`, and for a redirect that could not start). `interaction_in_progress` is not a failure of the
+ * sign-in: it means another redirect is already running (e.g. a development double effect), so it is ignored.
+ */
+function isRedirectSignInFailure(event: EventMessage): boolean {
+  if (event.interactionType !== InteractionType.Redirect) return false;
+  if (event.eventType !== EventType.ACQUIRE_TOKEN_FAILURE) return false;
+  return (event.error as { errorCode?: unknown } | null)?.errorCode !== BrowserAuthErrorCodes.interactionInProgress;
+}
+
+/** Reduce an MSAL / OIDC error to the identifiers that are safe to show. Exported for tests. */
+export function safeSignInErrorCode(error: unknown): SignInFailure {
+  const e = (error ?? {}) as { errorCode?: unknown; errorMessage?: unknown; message?: unknown };
+  const code = typeof e.errorCode === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(e.errorCode) ? e.errorCode : null;
+  const text = `${typeof e.errorMessage === 'string' ? e.errorMessage : ''} ${typeof e.message === 'string' ? e.message : ''}`;
+  const aadsts = text.match(/AADSTS\d{3,7}/)?.[0] ?? null;
+  return { errorCode: code ?? 'unknown_error', aadsts };
 }
 
 /**
