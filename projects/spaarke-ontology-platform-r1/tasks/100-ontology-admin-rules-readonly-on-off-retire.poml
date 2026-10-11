@@ -40,6 +40,7 @@
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
     <constraint source="ADR-021">Scope: tokens only; light and dark correct.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
+    <constraint source="task 033 hand-off (PR #1653, 2026-10-11)">Retire closes the policy's open Signals by calling SignalClosureService.ClosePolicyRetiredNowAsync(policyId) AFTER the policy row is Retired (the method does not check that itself). Check outcome.IsComplete, not a count: if it is false only because ChangedSinceRead &gt; 0 (a person acted on a Signal concurrently), re-run once and report failure only if the re-run is still incomplete; any Failed &gt; 0 is reported to the admin. The nightly job also closes Off/Retired policies' Signals, so an incomplete close self-heals within a day.</constraint>
   </constraints>
 
   <knowledge>

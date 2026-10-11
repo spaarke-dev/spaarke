@@ -15,7 +15,9 @@
  *
  * Notes
  *   - We mock `window.Xrm.Utility.getGlobalContext()` to provide the current user ID.
- *   - We mock `IDataService` to capture the entity payload passed to `createRecord`.
+ *   - Ontology task 046 (D-21/D-113): the create is POSTed to the BFF (`/api/v1/child-records/sprk_workassignment`), so
+ *     the payload is captured from the injected `authenticatedFetch` ({@link makeBffFetch}); `IDataService.createRecord`
+ *     must never see a work assignment (no `Xrm.WebApi` create).
  *   - We mock global `fetch` (used by `_discoverNavProps`) to keep tests offline.
  *   - We treat ` _entityService` upload paths as no-ops (no files in these tests).
  *
@@ -104,6 +106,32 @@ function stubFetchEmptyNavProps() {
   );
 }
 
+/**
+ * The host's `authenticatedFetch`, answering the BFF work-assignment create (ontology task 046) with 201 `{ id }` (plus any
+ * `warnings`) and recording each payload POSTed to it. Any other call (the Assigned-To sync the wizard no longer makes)
+ * is recorded too, so a test can assert it was not made.
+ */
+function makeBffFetch(answer?: { status?: number; body?: Record<string, unknown> }) {
+  const payloads: Record<string, unknown>[] = [];
+  const otherCalls: string[] = [];
+  const fetch = jest.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/api/v1/child-records/sprk_workassignment') && init?.method === 'POST') {
+      payloads.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      const status = answer?.status ?? 201;
+      const body = answer?.body ?? { id: NEW_WA_GUID };
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      } as unknown as Response;
+    }
+    otherCalls.push(url);
+    return { ok: true, status: 200, json: async () => ({}), text: async () => '' } as unknown as Response;
+  });
+  return { fetch, payloads, otherCalls };
+}
+
 function makeForm(overrides?: Partial<ICreateWorkAssignmentFormState>): ICreateWorkAssignmentFormState {
   return {
     name: 'WA-Test',
@@ -126,9 +154,12 @@ function makeForm(overrides?: Partial<ICreateWorkAssignmentFormState>): ICreateW
 // ---------------------------------------------------------------------------
 
 describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
+  let bff: ReturnType<typeof makeBffFetch>;
+
   beforeEach(() => {
     stubFetchEmptyNavProps();
     stubXrmUser(USER_GUID);
+    bff = makeBffFetch();
   });
 
   afterEach(() => {
@@ -145,7 +176,7 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
 
     const service = new WorkAssignmentService(
       dataService,
-      jest.fn(),
+      bff.fetch,
       'https://bff.example/api',
       // No constructor _containerId — simulates host that could not resolve one.
       undefined
@@ -154,7 +185,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     const result = await service.createWorkAssignment(makeForm(), [], []);
     expect(result.status).toBe('success');
 
-    const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
+    const payload = bff.payloads[0];
+    expect(dataService._capturedPayloads['sprk_workassignment']).toBeUndefined();
     expect(payload).toBeDefined();
     expect(payload!).not.toHaveProperty('sprk_containerid');
     expect(payload!['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
@@ -170,7 +202,7 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
 
     const service = new WorkAssignmentService(
       dataService,
-      jest.fn(),
+      bff.fetch,
       'https://bff.example/api',
       'host-explicit-container-xyz' // host already resolved a container (record-level / matter-level)
     );
@@ -178,7 +210,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     const result = await service.createWorkAssignment(makeForm(), [], []);
     expect(result.status).toBe('success');
 
-    const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
+    const payload = bff.payloads[0];
+    expect(dataService._capturedPayloads['sprk_workassignment']).toBeUndefined();
     expect(payload).toBeDefined();
     // Task 076: the host container never reaches the row — the server derives it from the WA.
     expect(payload!).not.toHaveProperty('sprk_containerid');
@@ -193,12 +226,13 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
       sprk_searchindexname: null, // BU exists but index not yet configured (Phase A.5)
     });
 
-    const service = new WorkAssignmentService(dataService, jest.fn(), 'https://bff.example/api', undefined);
+    const service = new WorkAssignmentService(dataService, bff.fetch, 'https://bff.example/api', undefined);
 
     const result = await service.createWorkAssignment(makeForm(), [], []);
     expect(result.status).toBe('success');
 
-    const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
+    const payload = bff.payloads[0];
+    expect(dataService._capturedPayloads['sprk_workassignment']).toBeUndefined();
     expect(payload).toBeDefined();
     expect(payload!).not.toHaveProperty('sprk_containerid');
     // BFF tenant-default chain takes over server-side; payload field left unset
@@ -216,7 +250,7 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
 
     const service = new WorkAssignmentService(
       dataService,
-      jest.fn(),
+      bff.fetch,
       'https://bff.example/api',
       'host-explicit-container-xyz'
     );
@@ -224,7 +258,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     const result = await service.createWorkAssignment(makeForm(), [], []);
     expect(result.status).toBe('success');
 
-    const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
+    const payload = bff.payloads[0];
+    expect(dataService._capturedPayloads['sprk_workassignment']).toBeUndefined();
     expect(payload).toBeDefined();
     // No container written (task 076); BU cascade was a no-op (no userId), so searchindexname unset.
     expect(payload!).not.toHaveProperty('sprk_containerid');
@@ -250,7 +285,7 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
 
     const service = new WorkAssignmentService(
       dataService,
-      jest.fn(),
+      bff.fetch,
       'https://bff.example/api',
       'host-explicit-container-xyz'
     );
@@ -258,7 +293,8 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     const result = await service.createWorkAssignment(makeForm(), [], []);
     expect(result.status).toBe('success');
 
-    const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
+    const payload = bff.payloads[0];
+    expect(dataService._capturedPayloads['sprk_workassignment']).toBeUndefined();
     expect(payload).toBeDefined();
     expect(payload!).not.toHaveProperty('sprk_containerid');
     expect('sprk_searchindexname' in payload!).toBe(false);
@@ -274,7 +310,7 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
 
     const service = new WorkAssignmentService(
       dataService,
-      jest.fn(),
+      bff.fetch,
       'https://bff.example/api',
       'host-explicit-container-xyz'
     );
@@ -282,9 +318,75 @@ describe('WorkAssignmentService — FR-WIZ-04 BU cascade', () => {
     const result = await service.createWorkAssignment(makeForm(), [], []);
     expect(result.status).toBe('success');
 
-    const payload = dataService._capturedPayloads['sprk_workassignment']?.[0];
+    const payload = bff.payloads[0];
+    expect(dataService._capturedPayloads['sprk_workassignment']).toBeUndefined();
     expect(payload).toBeDefined();
     expect(payload!).not.toHaveProperty('sprk_containerid');
     expect('sprk_searchindexname' in payload!).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ontology task 046 (D-21; uac-r2 D-113): the create goes through the BFF route
+// ---------------------------------------------------------------------------
+
+describe('WorkAssignmentService — create through POST /api/v1/child-records/sprk_workassignment (task 046)', () => {
+  beforeEach(() => {
+    stubFetchEmptyNavProps();
+    stubXrmUser(USER_GUID);
+  });
+
+  afterEach(() => {
+    clearXrm();
+    jest.restoreAllMocks();
+  });
+
+  it('POSTs the payload to the BFF, never creates through Xrm.WebApi, and makes no client Assigned-To sync', async () => {
+    const bff = makeBffFetch();
+    const dataService = makeDataService({ sprk_searchindexname: 'spaarke-files-index' });
+    const service = new WorkAssignmentService(dataService, bff.fetch, 'https://bff.example/api', undefined);
+
+    const result = await service.createWorkAssignment(makeForm({ name: '  Review the lease  ' }), [], []);
+
+    expect(result.status).toBe('success');
+    expect(result.workAssignmentId).toBe(NEW_WA_GUID);
+    expect(bff.payloads).toHaveLength(1);
+    expect(bff.payloads[0]['sprk_name']).toBe('Review the lease');
+    expect(dataService.createRecord).not.toHaveBeenCalledWith('sprk_workassignment', expect.anything());
+    // The server materializes the Assigned-To access inline; the wizard's former L1 call is not made.
+    expect(bff.otherCalls.filter(u => u.includes('/assigned-access/sync'))).toHaveLength(0);
+  });
+
+  it('a refusal surfaces the server message and creates nothing else', async () => {
+    const bff = makeBffFetch({
+      status: 404,
+      body: {
+        detail: 'A record this work assignment is filed under was not found. The work assignment was not saved.',
+        reasonCode: 'child_record.not_found',
+      },
+    });
+    const dataService = makeDataService({});
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const service = new WorkAssignmentService(dataService, bff.fetch, 'https://bff.example/api', undefined);
+
+    const result = await service.createWorkAssignment(makeForm(), [], []);
+
+    expect(result.status).toBe('error');
+    expect(result.errorMessage).toContain('was not found. The work assignment was not saved.');
+    expect(dataService.createRecord).not.toHaveBeenCalled();
+  });
+
+  it("the server's warnings (a secure create not yet complete) make the result partial, shown like any other", async () => {
+    const warning =
+      'The work assignment was created as a secure record shared to you, but securing it could not be finished yet ' +
+      '(sdap.provision.container_failed); it is completed automatically within a few minutes.';
+    const bff = makeBffFetch({ body: { id: NEW_WA_GUID, warnings: [warning] } });
+    const service = new WorkAssignmentService(makeDataService({}), bff.fetch, 'https://bff.example/api', undefined);
+
+    const result = await service.createWorkAssignment(makeForm(), [], []);
+
+    expect(result.status).toBe('partial');
+    expect(result.workAssignmentId).toBe(NEW_WA_GUID);
+    expect(result.warnings).toEqual([warning]);
   });
 });
