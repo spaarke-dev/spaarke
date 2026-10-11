@@ -740,11 +740,15 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_workassignment"] = new[]
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
                 ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
                 ("sprk_assignedlawfirm1", "sprk_organization", "sprk_AssignedLawFirm1"),
+                // #1616 fix round: the Create Work Assignment wizard also files under an invoice or an event.
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
             },
             ["sprk_communication"] = new[]
             {
@@ -923,6 +927,28 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             return EntitySets.FirstOrDefault(kv => kv.Value == set).Key;
         }
 
+        /// <summary>
+        /// #1616: field-level security on the caller's own PATCH — a body that sets a <see cref="SecuredColumns"/> column (by its
+        /// logical name, or a lookup's navigation property, which is its schema name) is refused 403, nothing written, as
+        /// Dataverse refuses a user without Update on the column's field security profile.
+        /// </summary>
+        private DataverseUserResponse? RefuseSecuredColumn(string jsonBody)
+        {
+            using var document = JsonDocument.Parse(jsonBody);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                var at = property.Name.IndexOf('@', StringComparison.Ordinal);
+                var column = (at >= 0 ? property.Name[..at] : property.Name).ToLowerInvariant();
+                if (SecuredColumns.Contains(column))
+                {
+                    return DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied,
+                        $"0x8004f50b The user does not have update permissions to the {column} field.");
+                }
+            }
+
+            return null;
+        }
+
         /// <summary>Dataverse's answer to a body naming an undeclared property: 400, nothing written.</summary>
         private DataverseUserResponse? RefuseUndeclared(string path, string jsonBody)
         {
@@ -1068,6 +1094,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 return Task.FromResult(DataverseUserResponse.Fail(PatchStatus, DataverseUserClientErrorCodes.AccessDenied, "Denied."));
             if (RefuseUndeclared(relativePath, jsonBody) is { } refused)
                 return Task.FromResult(refused);
+            if (RefuseSecuredColumn(jsonBody) is { } secured)
+                return Task.FromResult(secured);
 
             Patches.Add((relativePath, jsonBody));
             return Task.FromResult(DataverseUserResponse.Ok(204, null));

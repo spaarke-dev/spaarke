@@ -314,6 +314,22 @@
         <CanCreate>0</CanCreate>
         <CanReadUnmasked>0</CanReadUnmasked>
       </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_project</EntityName>
+        <AttributeName>sprk_regardingrecordid</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_project</EntityName>
+        <AttributeName>sprk_regardingrecordtype</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>0</CanUpdate>
+        <CanCreate>0</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
     </FieldPermissions>
   </FieldSecurityProfile>
   <FieldSecurityProfile name="Spaarke BFF-Managed Field Writers" description="Read/Create/Update on columns ONLY the BFF writes (sprk_createdbyperson; task 150 adds sprk_issecure). Members: the BFF application user(s) ONLY. unified-access-control-r2 task 133." fieldsecurityprofileid="{917b64c5-47bf-f111-a05b-3833c5e9614d}">
@@ -625,6 +641,22 @@
       <FieldPermission>
         <EntityName>sprk_report</EntityName>
         <AttributeName>sprk_datasetid</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_project</EntityName>
+        <AttributeName>sprk_regardingrecordid</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_project</EntityName>
+        <AttributeName>sprk_regardingrecordtype</AttributeName>
         <CanRead>4</CanRead>
         <CanUpdate>4</CanUpdate>
         <CanCreate>4</CanCreate>
