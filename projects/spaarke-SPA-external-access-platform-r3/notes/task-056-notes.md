@@ -56,10 +56,32 @@ GET {VITE_REGISTRATION_SERVICE_URL}?customer={key}&state={state}
 | `account_conflict` | The address belongs to an existing **Member** of Spaarke's tenant (§4 step 4) | "This account can't join this way" (no sign-in) |
 | `consent_required` | The home tenant blocks user consent to "Spaarke Registration" (F5, Q2) | "Your company needs to approve Spaarke", **Try again** |
 | `cancelled` | The user cancelled the home sign-in (OIDC `access_denied`) | "Sign-in was cancelled", **Try again** |
-| `error` | Anything else | "Something went wrong", **Try again** |
+| `unavailable` | Joining cannot work right now and retrying will not help: invitations are disabled for the tenant (F7), or the service's customer registry is misconfigured (review fix) | "Joining isn't available right now", **no button** |
+| `error` | Anything else, transient | "Something went wrong", **Try again** |
 | anything else / missing value | — | treated as `error` |
 
-**State check.** The SPA shows an outcome only when `state` equals the one this tab created **for this customer key**. The stored state is removed on every return, so it is single-use. On a mismatch, a missing state, a state from another customer or a replayed link, the SPA shows the neutral "Let's start again" page, with no outcome and no sign-in. After reading the return, the SPA removes `result` and `state` from the address bar.
+**State check.** The SPA shows an outcome only when `state` equals the one this tab created **for this customer key**. The stored state is removed on every return, so it is single-use. On a mismatch, a missing state, a state from another customer or a replayed link, the SPA shows the neutral "Let's start again" page: no outcome, and **Start again** plus **Sign in** (the page says that someone who already completed sign-up can just sign in; the same hand-off as `already_registered`, so it reveals nothing beyond what the key check already shows). After reading the return, the SPA removes `result` and `state` from the address bar.
+
+**Failures that are NOT `result` codes (review fix).** Three things can still go wrong *after* the service returns `registered` / `already_registered`, during the workforce sign-in that **Sign in** starts. The service never sees them and must not try to return a code for them:
+
+- spike **F6** (outbound B2B blocked at the guest's home tenant);
+- spike **F8** (alias mismatch);
+- a declined consent surface (the "Review permissions" page, `access_denied` / AADSTS65004).
+
+Entra returns the error to the SPA's redirect URI. The SPA now shows its **"Sign-in did not complete"** screen (the safe error code only, **Try again**) and does not redirect again on its own. See "Review fix round" below.
+
+**Entra error → `result` mapping task 060 should use** (for errors Entra returns to the *registration service's* own redirect):
+
+| Entra / OIDC error | `result` |
+|---|---|
+| `consent_required`, AADSTS65001, AADSTS90094 | `consent_required` |
+| `access_denied` with AADSTS65004 | `cancelled` |
+| invitations disabled (F7), or a misconfigured customer registry | `unavailable` |
+| anything else | `error` |
+
+**Dependency on T240c / task 060: the key check.** The page validates `?customer=` with the workforce `resolveByKey`, which must therefore be callable **before sign-in**: unauthenticated and keyed only by the customer key. Today `DirectoryServiceClient` throws (`backend-selection.ts` ~300), so with `VITE_USE_DIRECTORY_SERVICE=true` every join link shows "Link not recognised". That is **fail-closed** and intended until T240c ships. Because the lookup answers "does this customer key exist" to anyone, it is inherently a customer-key existence oracle: **T240c / 060 must rate-limit it** (per client address, and an overall ceiling).
+
+**Known limit under T240c.** A user who has just been added to `sprk-{customerId}-users` and has not yet been grouped by T240c's propagation gets **"Sign-in unavailable"** at the workforce sign-in until group propagation completes. The page cannot detect this; **Sign in** is correct and retrying later works.
 
 **What the hand-off assumes of the service.** Before it returns `registered` or `already_registered`, the guest must exist and be in `sprk-{customerId}-users`. On the next screen the SPA starts the Spaarke-tenant workforce sign-in. The FR-15 member-test branch and the T240c group claim must already be in place for that sign-in to resolve.
 
@@ -141,3 +163,18 @@ Every source file was restored and compared byte-for-byte afterwards.
   - prove the end-to-end flow with the "Spaarke Test Partner" tenant (the POML `<ui-tests>`, NFR-07 stamp-shaped configuration).
 - **T240c:** `resolveByKey` for workforce customers (decision 4).
 - The POML `<ui-tests>` were not run: the service does not exist, and no live calls were allowed.
+
+## 9. Review fix round
+
+Two adversarial passes found no F-class defects; the items below were fixed in one round. Evidence is `tests/AuthGuard.signInFailure.test.tsx` and `tests/JoinPage.test.tsx`.
+
+1. **Sign-in redirect loop on login failure (pre-existing).** `AuthGuard` re-fired `loginRedirect` whenever there was no account and MSAL was idle, and nothing handled a failed redirect, so a new guest who declined Entra's "Review permissions" page (`#error=access_denied`, AADSTS65004) was bounced to Entra forever. The same held for any error Entra returns to the redirect URI.
+   - `msal-auth.ts`: the single event callback `syncActiveAccountOnInteractiveSignIn` (registered before `initialize()`, so it sees the response) now also records an `ACQUIRE_TOKEN_FAILURE` of a **redirect** interaction (msal-browser 5.5 emits it for a rejected `handleRedirectPromise`; it has no `LOGIN_FAILURE` event). `interaction_in_progress` and silent/popup failures are ignored. A later successful interactive sign-in clears it. Only the MSAL `errorCode` (a plain identifier) and an `AADSTS` number are kept; the raw description is never stored or shown.
+   - `AuthGuard.tsx`: with a recorded failure and no account the gate renders `components/auth/SignInFailed.tsx` ("Sign-in did not complete", the safe code, **Try again**) and starts no redirect. Only the **Try again** click calls `loginRedirect` (and a start that fails says so).
+   - Both planes (CIAM and workforce browser) go through the same callback and gate. **Teams is not affected:** `AuthGuard` returns its children before the account gate in Teams, and the Teams bootstrap acquires its token by NAA / popup before `<App>` mounts, so there is no redirect; a test asserts it.
+   - Not changed (listed): a *signed-in* user whose later token redirect (`acquireStandaloneBffToken`) comes back with an error is not gated by this screen; the failure is recorded but the app stays up. A declined re-consent there could loop through `bff-client`; no evidence it is reachable today.
+2. **`unavailable` outcome.** Added to `JOIN_RESULT_CODES`; shown as "Joining isn't available right now" with no button (the view the start-failure path already used). `error` stays the transient "Try again".
+3. **Stale-state wording.** "Let's start again" now says that if you already completed sign-up you can just sign in, and offers **Sign in** (the `already_registered` hand-off) beside **Start again**.
+4. **Accessibility.** Every join state renders a real `h1`. The shared `EmptyState` gained an optional `headingAs` prop (omitted: the unchanged `<span>`; one test pins it). Focus moves to the primary action, or to the heading when there is none, on every state change, and `document.title` follows the heading. The transient "Checking your link" spinner has no heading and only sets the title.
+5. **Teams terminal screen.** `renderJoin` in Teams now also calls the new best-effort wrapper `notifyTeamsSuccess()` (`TeamsHostAdapter.ts`, next to `notifyTeamsAppLoaded` / `notifyTeamsFailureOther`; no wrapper existed for `notifySuccess`).
+6. **Tests that proved less than their titles.** The dark-theme test is renamed to what it checks (a clean dark mount; token colours are covered by the source scan). The hand-off bootstrap test now also asserts the login scope the account gate would request. The wrong-state test now also renders the legitimate state afterwards and expects "start again" (a mismatched return consumes the stored state).

@@ -49,6 +49,7 @@ const h = vi.hoisted(() => ({
   teamsInitialize: vi.fn(),
   notifyAppLoaded: vi.fn(),
   notifyFailure: vi.fn(),
+  notifySuccess: vi.fn(),
   addEventCallback: vi.fn(),
   msalInitialize: vi.fn(),
 }));
@@ -58,7 +59,7 @@ vi.mock('@microsoft/teams-js', () => ({
     initialize: h.teamsInitialize,
     getContext: vi.fn(),
     notifyAppLoaded: h.notifyAppLoaded,
-    notifySuccess: vi.fn(),
+    notifySuccess: h.notifySuccess,
     notifyFailure: h.notifyFailure,
     registerOnThemeChangeHandler: vi.fn(),
     FailedReason: { AuthFailed: 'AuthFailed', Timeout: 'Timeout', Other: 'Other' },
@@ -418,6 +419,7 @@ describe('Service return (the task-060 contract)', () => {
     ['cancelled', 'Sign-in was cancelled'],
     ['error', 'Something went wrong'],
     ['made_up_code', 'Something went wrong'],
+    ['UNAVAILABLE', 'Something went wrong'],
     ['', 'Something went wrong'],
   ])('result "%s" shows its state with "Try again" (no sign-in)', async (code, heading) => {
     const state = createJoinState('contoso');
@@ -435,11 +437,48 @@ describe('Service return (the task-060 contract)', () => {
   });
 
   it('a return whose state was not started in this tab shows "start again", not the outcome', async () => {
-    createJoinState('contoso');
+    const legitimate = createJoinState('contoso');
     const { navigate } = renderJoin(`?customer=contoso&state=${'0'.repeat(32)}&result=registered`);
     expect(await screen.findByText('Let’s start again')).toBeTruthy();
     expect(screen.queryByText('You’re registered')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
+    expect(navigate).not.toHaveBeenCalled();
+    document.body.innerHTML = '';
+
+    // The mismatched return also consumed the stored state: the legitimate return can no longer be matched.
+    renderJoin(`?customer=contoso&state=${legitimate}&result=registered`);
+    expect(await screen.findByText('Let’s start again')).toBeTruthy();
+    expect(screen.queryByText('You’re registered')).toBeNull();
+  });
+
+  it('"start again" says an already-completed sign-up can just sign in, and offers the same hand-off as "already registered"', async () => {
+    const { navigate } = renderJoin(`?customer=contoso&state=${'0'.repeat(32)}&result=registered`);
+    await screen.findByText('Let’s start again');
+    expect(document.body.textContent).toMatch(/already completed sign-up, you can just sign in/);
+    expect(screen.getByRole('button', { name: 'Start again' })).toBeTruthy();
+    expect(navigate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(navigate).toHaveBeenCalledWith('/?customer=contoso');
+    expect(sessionStorage.getItem(REALM_KEY)).toBe('workforce');
+  });
+
+  it('the "start again" page does not echo the forged result (no oracle beyond the key check)', async () => {
+    renderJoin(`?customer=contoso&state=${'0'.repeat(32)}&result=tenant_not_allowed`);
+    await screen.findByText('Let’s start again');
+    const text = document.body.textContent ?? '';
+    expect(text).not.toContain('tenant_not_allowed');
+    expect(text).not.toContain('Your company is not set up');
+    expect(text).not.toContain('Contoso');
+  });
+
+  it('result "unavailable" says joining is not available right now and offers NO retry and NO sign-in', async () => {
+    const state = createJoinState('contoso');
+    const { navigate } = renderJoin(`?customer=contoso&state=${state}&result=unavailable`);
+
+    expect(await screen.findByText('Joining isn’t available right now')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByText('Something went wrong')).toBeNull();
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -513,8 +552,9 @@ describe('Inside the Teams tab', () => {
 // Theming (ADR-021)
 // ---------------------------------------------------------------------------
 
+// jsdom computes no theme token values, so what is provable here is the source scan below plus a clean dark mount.
 describe('Theming (ADR-021)', () => {
-  it('renders under the dark theme', async () => {
+  it('mounts and renders its content under the dark Fluent theme (the token-only colours are asserted by the source scan below)', async () => {
     enableJoin();
     renderJoin('?customer=contoso', { dark: true });
     expect(await screen.findByText('Join Spaarke')).toBeTruthy();
@@ -529,6 +569,76 @@ describe('Theming (ADR-021)', () => {
       expect(src).not.toMatch(/from '@azure\/msal-(browser|react)'/);
       expect(src).not.toMatch(/acquireToken|loginRedirect|loginPopup|acquireActiveBffToken|bffApiCall/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Accessibility: a real heading, focus and the tab title follow the state
+// ---------------------------------------------------------------------------
+
+describe('Accessibility', () => {
+  beforeEach(() => enableJoin());
+
+  it('every state has exactly one h1 with the state’s heading', async () => {
+    const cases: Array<[string, () => string]> = [
+      ['Join Spaarke', () => '?customer=contoso'],
+      ['Link not recognised', () => '?customer=initech'],
+      ['You’re registered', () => `?customer=contoso&state=${createJoinState('contoso')}&result=registered`],
+      ['Something went wrong', () => `?customer=contoso&state=${createJoinState('contoso')}&result=error`],
+      [
+        'Joining isn’t available right now',
+        () => `?customer=contoso&state=${createJoinState('contoso')}&result=unavailable`,
+      ],
+      ['Let’s start again', () => `?customer=contoso&state=${'0'.repeat(32)}&result=registered`],
+    ];
+    for (const [heading, search] of cases) {
+      renderJoin(search());
+      const h1s = await screen.findAllByRole('heading', { level: 1 });
+      expect(h1s.map(e => e.textContent)).toEqual([heading]);
+      document.body.innerHTML = '';
+    }
+    renderJoin('?customer=contoso', { teamsHost: true });
+    expect(screen.getByRole('heading', { level: 1, name: 'Open this link in your browser' })).toBeTruthy();
+    document.body.innerHTML = '';
+    vi.stubEnv('VITE_JOIN_ENABLED', 'false');
+    renderJoin('?customer=contoso');
+    expect(screen.getByRole('heading', { level: 1, name: 'Joining isn’t available' })).toBeTruthy();
+  });
+
+  it('focus moves to the primary action when the state changes from checking to the intro', async () => {
+    renderJoin('?customer=contoso');
+    const button = await screen.findByRole('button', { name: 'Continue with your work account' });
+    expect(document.activeElement).toBe(button);
+  });
+
+  it('a state with no action moves focus to the heading instead', async () => {
+    renderJoin('?customer=initech');
+    const heading = await screen.findByRole('heading', { level: 1, name: 'Link not recognised' });
+    expect(document.activeElement).toBe(heading);
+  });
+
+  it('document.title follows the heading of each state', async () => {
+    renderJoin('?customer=contoso');
+    expect(document.title).toBe('Checking your link — Spaarke');
+    await screen.findByText('Join Spaarke');
+    expect(document.title).toBe('Join Spaarke — Spaarke');
+    document.body.innerHTML = '';
+
+    renderJoin('?customer=initech');
+    await screen.findByText('Link not recognised');
+    expect(document.title).toBe('Link not recognised — Spaarke');
+  });
+
+  it('the start-failed state is titled, headed and focused like the others', async () => {
+    renderJoin('?customer=contoso');
+    const button = await screen.findByRole('button', { name: 'Continue with your work account' });
+    // Make the start throw: the service URL becomes unusable after the page loaded.
+    vi.stubEnv('VITE_REGISTRATION_SERVICE_URL', '');
+    fireEvent.click(button);
+
+    const heading = await screen.findByRole('heading', { level: 1, name: 'Joining isn’t available right now' });
+    expect(document.activeElement).toBe(heading);
+    expect(document.title).toBe('Joining isn’t available right now — Spaarke');
   });
 });
 
@@ -552,6 +662,7 @@ describe('Bootstrap: /join is a pre-sign-in page (main.tsx)', () => {
     h.teamsInitialize.mockReset();
     h.notifyAppLoaded.mockReset();
     h.notifyFailure.mockReset();
+    h.notifySuccess.mockReset();
     h.addEventCallback.mockReset();
     h.msalInitialize.mockReset();
     h.msalInitialize.mockResolvedValue(undefined);
@@ -588,33 +699,52 @@ describe('Bootstrap: /join is a pre-sign-in page (main.tsx)', () => {
 
     expect(await screen.findByText('Open this link in your browser')).toBeTruthy();
     expect(h.notifyAppLoaded).toHaveBeenCalledTimes(1);
+    expect(h.notifySuccess).toHaveBeenCalledTimes(1);
+    expect(h.notifyFailure).not.toHaveBeenCalled();
     expect(screen.queryByTestId('app')).toBeNull();
   });
 
-  it('hand-off: after "Sign in", the SPA root starts the workforce sign-in for the joined customer', SLOW, async () => {
+  it('outside Teams: the host is never told anything', SLOW, async () => {
     enableJoin();
-    // The join page's hand-off (registered outcome → "Sign in").
-    const state = createJoinState('fabrikam');
-    const { navigate } = renderJoin(`?customer=fabrikam&state=${state}&result=registered`, {
-      directory: fakeDirectory().directory,
-    });
-    fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }));
-    const target = navigate.mock.calls[0][0] as string;
-    expect(target).toBe('/?customer=fabrikam');
+    await bootAt('/join?customer=contoso');
 
-    // The browser loads that address: the bootstrap skips the chooser (realm = workforce), selects the joined
-    // customer among two configured backends (no picker), initialises the workforce plane and mounts the app.
-    const selection = await bootAt(target);
-    expect(await screen.findByTestId('app')).toBeTruthy();
-    expect(screen.queryByText('Sign in to Spaarke')).toBeNull();
-    expect(screen.queryByText('Choose an organization')).toBeNull();
-    expect(h.msalInitialize).toHaveBeenCalledTimes(1);
-    expect(selection.getActiveBackend()).toMatchObject({
-      plane: 'workforce',
-      customerKey: 'fabrikam',
-      bffScope: `api://${FABRIKAM.bffAppId}/user_impersonation`,
-    });
+    expect(await screen.findByText('Join Spaarke')).toBeTruthy();
+    expect(h.notifyAppLoaded).not.toHaveBeenCalled();
+    expect(h.notifySuccess).not.toHaveBeenCalled();
   });
+
+  it(
+    'hand-off: the address "Sign in" goes to boots the joined customer’s workforce plane and login scope',
+    SLOW,
+    async () => {
+      enableJoin();
+      // The join page's hand-off (registered outcome → "Sign in").
+      const state = createJoinState('fabrikam');
+      const { navigate } = renderJoin(`?customer=fabrikam&state=${state}&result=registered`, {
+        directory: fakeDirectory().directory,
+      });
+      fireEvent.click(await screen.findByRole('button', { name: 'Sign in' }));
+      const target = navigate.mock.calls[0][0] as string;
+      expect(target).toBe('/?customer=fabrikam');
+
+      // The browser loads that address: the bootstrap skips the chooser (realm = workforce), selects the joined
+      // customer among two configured backends (no picker), initialises the workforce plane and mounts the app.
+      const selection = await bootAt(target);
+      expect(await screen.findByTestId('app')).toBeTruthy();
+      expect(screen.queryByText('Sign in to Spaarke')).toBeNull();
+      expect(screen.queryByText('Choose an organization')).toBeNull();
+      expect(h.msalInitialize).toHaveBeenCalledTimes(1);
+      expect(selection.getActiveBackend()).toMatchObject({
+        plane: 'workforce',
+        customerKey: 'fabrikam',
+        bffScope: `api://${FABRIKAM.bffAppId}/user_impersonation`,
+      });
+      // The scope the account gate's loginRedirect requests (the shared App is replaced here, so the gate itself is
+      // covered by AuthGuard.signInFailure.test.tsx): the joined customer's, on the workforce plane.
+      const { getActiveLoginScope } = await import('../src/auth/msal-auth');
+      expect(getActiveLoginScope()).toBe(`api://${FABRIKAM.bffAppId}/user_impersonation`);
+    }
+  );
 
   it('other paths are unchanged: "/" still shows the realm chooser', SLOW, async () => {
     enableJoin();

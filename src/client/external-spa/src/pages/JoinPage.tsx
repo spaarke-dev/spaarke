@@ -10,10 +10,16 @@
  *                                              the Teams iframe, NFR-04)
  *   key missing / malformed / unknown        → "link not recognised" (one neutral message; no list, no echo)
  *   known key, first landing                 → intro + "Continue with your work account" → registration service
- *   known key, service return                → the outcome (registered, already registered, refusals, error), after
- *                                              the one-time `state` check; a mismatch shows the neutral "start again"
+ *   known key, service return                → the outcome (registered, already registered, refusals, unavailable,
+ *                                              error), after the one-time `state` check; a mismatch shows the neutral
+ *                                              "start again" (which also offers "Sign in", for someone who already
+ *                                              completed sign-up)
  *
- * "Sign in" on a registered / already-registered outcome hands off to the normal workforce sign-in for that customer.
+ * "Sign in" on a registered / already-registered outcome (and on "start again") hands off to the normal workforce
+ * sign-in for that customer.
+ *
+ * Accessibility: every state is a real `h1`; when the state changes, focus moves to the primary action (or to the heading
+ * when there is none) and `document.title` follows the heading.
  *
  * ADR-021: Fluent v9 semantic tokens only (light and dark). ADR-012: the shared `EmptyState` shell renders every state.
  */
@@ -98,6 +104,7 @@ export const JoinPage: React.FC<JoinPageProps> = ({ teamsHost, search, directory
   const s = useStyles();
   const [view, setView] = React.useState<ViewState>(() => initialState(teamsHost));
   const [startFailed, setStartFailed] = React.useState(false);
+  const rootRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     if (view.kind !== 'checking') return;
@@ -155,10 +162,11 @@ export const JoinPage: React.FC<JoinPageProps> = ({ teamsHost, search, directory
     description: string,
     footer?: React.ReactNode
   ): React.ReactElement => (
-    <div className={s.root}>
+    <div className={s.root} ref={rootRef}>
       <EmptyState
         icon={icon}
         heading={heading}
+        headingAs="h1"
         description={description}
         descriptionClassName={s.description}
         footer={footer}
@@ -171,6 +179,13 @@ export const JoinPage: React.FC<JoinPageProps> = ({ teamsHost, search, directory
       {label}
     </Button>
   );
+
+  const notAvailableNow = () =>
+    render(
+      <ErrorCircle48Regular className={s.iconDanger} />,
+      'Joining isn’t available right now',
+      'Please try again later. If the problem continues, contact the person who sent you this link.'
+    );
 
   const renderOutcome = (customerKey: string, result: JoinResultCode): React.ReactElement => {
     const signInButton = (
@@ -230,6 +245,9 @@ export const JoinPage: React.FC<JoinPageProps> = ({ teamsHost, search, directory
           'You didn’t finish signing in, so nothing was set up.',
           startButton(customerKey)
         );
+      case 'unavailable':
+        // Retrying cannot help (invitations disabled, or a misconfigured registry): no button.
+        return notAvailableNow();
       case 'error':
       default:
         return render(
@@ -241,13 +259,24 @@ export const JoinPage: React.FC<JoinPageProps> = ({ teamsHost, search, directory
     }
   };
 
-  if (startFailed) {
-    return render(
-      <ErrorCircle48Regular className={s.iconDanger} />,
-      'Joining isn’t available right now',
-      'Please try again later. If the problem continues, contact the person who sent you this link.'
-    );
-  }
+  const stateKey = startFailed ? 'start-failed' : view.kind === 'outcome' ? `outcome:${view.result}` : view.kind;
+  // On every state change: focus the primary action (or the heading when there is none) and title the tab after the
+  // heading. The "checking" spinner has neither, so it only sets the title.
+  React.useEffect(() => {
+    const root = rootRef.current;
+    const heading = root?.querySelector('h1') ?? null;
+    document.title = `${heading?.textContent || 'Checking your link'} — Spaarke`;
+    if (!root || !heading) return;
+    const action = root.querySelector<HTMLElement>('button');
+    if (action) {
+      action.focus();
+    } else {
+      heading.tabIndex = -1;
+      heading.focus();
+    }
+  }, [stateKey]);
+
+  if (startFailed) return notAvailableNow();
 
   switch (view.kind) {
     case 'unavailable':
@@ -265,7 +294,7 @@ export const JoinPage: React.FC<JoinPageProps> = ({ teamsHost, search, directory
       );
     case 'checking':
       return (
-        <div className={s.root}>
+        <div className={s.root} ref={rootRef}>
           <Spinner size="large" label="Checking your link..." />
         </div>
       );
@@ -287,8 +316,14 @@ export const JoinPage: React.FC<JoinPageProps> = ({ teamsHost, search, directory
       return render(
         <Warning48Regular className={s.iconWarning} />,
         'Let’s start again',
-        'We couldn’t match this page to a sign-up started in this browser tab. Start again to continue.',
-        startButton(view.customerKey, 'Start again')
+        'We couldn’t match this page to a sign-up started in this browser tab. Start again to continue. If you ' +
+          'already completed sign-up, you can just sign in.',
+        <>
+          {startButton(view.customerKey, 'Start again')}
+          <Button appearance="secondary" onClick={() => signIn(view.customerKey)}>
+            Sign in
+          </Button>
+        </>
       );
     case 'outcome':
       return renderOutcome(view.customerKey, view.result);

@@ -124,7 +124,13 @@ export async function resolveJoinCustomer(
  *   - `account_conflict`    — the address belongs to an existing MEMBER of Spaarke's tenant (spike §4 step 4).
  *   - `consent_required`    — the home tenant blocks user consent to "Spaarke Registration" (F5).
  *   - `cancelled`           — the user cancelled the home sign-in (OIDC `access_denied`).
- *   - `error`               — anything else (including a `state` the service could not round-trip).
+ *   - `unavailable`         — joining cannot work right now and retrying will not help: invitations are disabled for
+ *                             the tenant (spike F7) or the service's customer registry is misconfigured. The page says
+ *                             "Joining isn't available right now" with NO retry button.
+ *   - `error`               — anything else, transient (including a `state` the service could not round-trip): "Try again".
+ *
+ * Failures that happen LATER, during the workforce sign-in the "Sign in" button starts (spike F6 outbound B2B blocked,
+ * F8 alias mismatch, a declined consent surface), are not `result` codes: the SPA's sign-in failure screen shows them.
  */
 export const JOIN_RESULT_CODES = [
   'registered',
@@ -134,6 +140,7 @@ export const JOIN_RESULT_CODES = [
   'account_conflict',
   'consent_required',
   'cancelled',
+  'unavailable',
   'error',
 ] as const;
 

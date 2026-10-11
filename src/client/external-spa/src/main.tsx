@@ -10,6 +10,7 @@ import {
   createTeamsHostAdapter,
   notifyTeamsAppLoaded,
   notifyTeamsFailureOther,
+  notifyTeamsSuccess,
   type ITeamsHostAdapter,
 } from './host/TeamsHostAdapter';
 import { getStoredRealm, setStoredRealm, clearStoredRealm, type Realm } from './auth/realm';
@@ -381,8 +382,13 @@ function renderTeamsAuthError(root: Root, adapter: ITeamsHostAdapter, err: unkno
  * while `VITE_JOIN_ENABLED` is off, a browser-only message inside Teams (no redirect in the Teams iframe, NFR-04).
  */
 function renderJoin(root: Root, inTeams: boolean): void {
-  // Inside Teams the host's spinner stops once there is a screen to show (as for the other pre-auth screens).
-  if (inTeams) notifyTeamsAppLoaded();
+  // Inside Teams the host's spinner stops once there is a screen to show (as for the other pre-auth screens), and the
+  // message is the whole tab (no sign-in follows), so the start is also reported as successful, as the Teams bootstrap
+  // does once it has something to show.
+  if (inTeams) {
+    notifyTeamsAppLoaded();
+    notifyTeamsSuccess();
+  }
   root.render(
     <React.StrictMode>
       <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>

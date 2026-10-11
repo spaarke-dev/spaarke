@@ -11,6 +11,10 @@ vi.mock('@azure/msal-react', () => ({
   useMsal: () => ({ instance: { loginRedirect: h.loginRedirect }, accounts: [], inProgress: 'none' }),
 }));
 
+// The first dynamic import of the component tree is slow on a cold transform cache when the whole suite runs in
+// parallel (as in main-bootstrap.test.tsx); the 5 s default flaked.
+vi.setConfig({ testTimeout: 60000 });
+
 const SCOPE = 'api://aaaaaaaa-0000-0000-0000-00000000000a/user_impersonation';
 
 beforeEach(() => {
