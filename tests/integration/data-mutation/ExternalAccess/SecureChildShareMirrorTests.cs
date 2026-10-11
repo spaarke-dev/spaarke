@@ -1543,12 +1543,21 @@ public class SecureChildShareMirrorTests
                     .ToList(),
             });
 
+        // #1629: the message grant asks the anchor's grantees (the audience the join fixed), not the thread's set.
+        derivation
+            .Setup(d => d.DeriveAnchorGranteeUserIdsAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(participants.ToList());
+
         return new DirectThreadAccessService(
             entities.Object, _shares, new Lazy<IThreadMembershipDerivationService>(() => derivation.Object),
             SecureChildShareWorld.Configuration(), NullLogger<DirectThreadAccessService>.Instance);
     }
 
     private static readonly Guid ThreadId = Guid.Parse("7e7e0000-0000-4000-8000-000000000001");
+
+    /// <summary>The audience a join onto the project thread fixes (#1629): the project's members.</summary>
+    private static Sprk.Bff.Api.Services.Communication.ThreadAssignment OnProjectThread(Guid project) =>
+        Sprk.Bff.Api.Services.Communication.ThreadAssignment.Anchored(ThreadId, "sprk_project", project);
 
     /// <summary>
     /// F3: a message on a SECURE record's thread. Its participants come from the record's membership lookups (here A, a
@@ -1561,7 +1570,7 @@ public class SecureChildShareMirrorTests
         var world = World();
         _shares.Seed("sprk_project", ProjectR, User(UserA), ViewOnly);
 
-        await MessageAccess(world, UserA, UserC).GrantMessageAccessAsync(CommR, ThreadId);
+        await MessageAccess(world, UserA, UserC).GrantMessageAccessAsync(CommR, OnProjectThread(ProjectR));
 
         _shares.WriteLog.Should().BeEmpty("a secure message's shares are the secure-child synchronizer's alone");
 
@@ -1580,7 +1589,7 @@ public class SecureChildShareMirrorTests
         var world = World().OrdinaryChild("sprk_communication", ordinaryComm,
             ("sprk_regardingproject", "sprk_project", OrdinaryProject));
 
-        await MessageAccess(world, UserA, UserC).GrantMessageAccessAsync(ordinaryComm, ThreadId);
+        await MessageAccess(world, UserA, UserC).GrantMessageAccessAsync(ordinaryComm, OnProjectThread(OrdinaryProject));
 
         _shares.MaskOf("sprk_communication", ordinaryComm, User(UserA)).Should().Be(ViewOnly);
         _shares.MaskOf("sprk_communication", ordinaryComm, User(UserC)).Should().Be(ViewOnly);
@@ -1591,9 +1600,9 @@ public class SecureChildShareMirrorTests
     public async Task MessageAccess_WhenTheSecureRecordTeamIsAmbiguous_OrTheMessageIsMissing_GrantsNothing()
     {
         var ambiguous = World().Add("businessunit", Guid.NewGuid(), ("name", SecureChildShareWorld.SecureBuName));
-        await MessageAccess(ambiguous, UserA, UserC).GrantMessageAccessAsync(CommR, ThreadId);
+        await MessageAccess(ambiguous, UserA, UserC).GrantMessageAccessAsync(CommR, OnProjectThread(ProjectR));
 
-        await MessageAccess(World(), UserA, UserC).GrantMessageAccessAsync(Guid.NewGuid(), ThreadId);
+        await MessageAccess(World(), UserA, UserC).GrantMessageAccessAsync(Guid.NewGuid(), OnProjectThread(ProjectR));
 
         _shares.WriteLog.Should().BeEmpty();
     }

@@ -108,7 +108,7 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
         {
             try
             {
-                var threadId = await _threadResolver.ResolveAndAssignThreadAsync(
+                var assignment = await _threadResolver.ResolveAndAssignAsync(
                     new ThreadResolutionRequest
                     {
                         CommunicationId = communicationId,
@@ -123,9 +123,10 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
                 // the app-only identity, so a Direct-thread message is invisible to BOTH participants under
                 // the impersonated read (task 050) unless explicitly shared. Best-effort inside
                 // GrantMessageAccessAsync itself (no-op for a non-Direct thread; failures logged + swallowed).
-                if (threadId.HasValue && _directThreadAccess is not null)
+                // #1629: the audience is the one the join fixed, never a re-read of the thread.
+                if (assignment is not null && _directThreadAccess is not null)
                 {
-                    await _directThreadAccess.GrantMessageAccessAsync(communicationId, threadId.Value, cancellationToken);
+                    await _directThreadAccess.GrantMessageAccessAsync(communicationId, assignment, cancellationToken);
                 }
             }
             catch (Exception ex)
