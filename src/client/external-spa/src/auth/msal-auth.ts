@@ -97,7 +97,9 @@ export function captureTeamsDeepLink(subPageId: string | undefined | null): void
 
 /**
  * Options only the workforce browser plane supplies (standalone-plane.ts). The CIAM plane passes none,
- * so its requests are byte-for-byte what they were before task 040.
+ * so the token REQUEST it sends is unchanged from before task 040 (`{ scopes, account }`, no redirect URI,
+ * no cache policy). Its error routing differs in one deliberate way: a `timed_out` silent renewal now
+ * falls back to the interactive redirect (see {@link isInteractionNeeded}).
  */
 export interface StandaloneAcquireOptions {
   /**
@@ -130,7 +132,7 @@ function accountsFor(instance: IPublicClientApplication, tenantId?: string): Acc
  * browser plane (via standalone-plane.ts) — without forking the module.
  *
  * Strategy:
- *   1. Try silent acquisition (MSAL cache / refresh token). CIAM: `{ scopes, account }` exactly as before.
+ *   1. Try silent acquisition (MSAL cache / refresh token). CIAM: the same `{ scopes, account }` request as before.
  *      Workforce (`options.silentRedirectUri` set): the same request with
  *      `CacheLookupPolicy.AccessTokenAndRefreshToken` and NO redirect URI — msal never opens an iframe for it.
  *   2. Workforce only: if that fails with an error msal itself would resolve by iframe (expired / invalid
@@ -255,8 +257,9 @@ function isInteractionNeeded(err: unknown): boolean {
  * Acquire an access token for the BFF API — external SPA (CIAM) path.
  *
  * Unchanged public API for bff-client.ts: delegates to `acquireStandaloneBffToken` with the
- * CIAM `msalInstance` singleton and the CIAM BFF scope, preserving the exact prior behavior
- * (FR-15 — no CIAM regression). See `acquireStandaloneBffToken` for the strategy.
+ * CIAM `msalInstance` singleton and the CIAM BFF scope, preserving the prior request shape
+ * (FR-15 — no CIAM regression: the silent request is unchanged; the one deliberate routing change is
+ * that a `timed_out` silent renewal now falls back to the redirect). See `acquireStandaloneBffToken`.
  *
  * @returns Access token string, ready for `Authorization: Bearer {token}` header.
  */
@@ -268,9 +271,9 @@ export async function acquireBffToken(): Promise<string> {
  * Pluggable "which strategy is bff-client.ts currently using" seam (task 012 host-detection wiring).
  *
  * `bff-client.ts` calls `acquireActiveBffToken()` for every BFF request instead of hard-coding
- * `acquireBffToken`. The default remains the CIAM strategy (byte-for-byte unchanged behavior —
+ * `acquireBffToken`. The default remains the CIAM strategy (unchanged request shape —
  * FR-15 no-CIAM-regression: a build that never runs inside Teams never calls `setActiveBffTokenAcquirer`
- * and this module behaves exactly as before). The Teams host adapter is the ONLY caller that ever
+ * and this seam behaves as before). The Teams host adapter is the ONLY caller that ever
  * switches it, and it does so exactly once at bootstrap by re-pointing this seam at
  * `acquireTeamsWorkforceBffToken` — no acquisition LOGIC lives outside this file (ADR-028 A2: "the
  * adapter selects the strategy; it must NOT implement its own auth logic").
@@ -295,7 +298,7 @@ export function acquireActiveBffToken(): Promise<string> {
  * `AuthGuard` triggers the browser sign-in redirect (`loginRedirect({ scopes: [...] })`) and MUST
  * request the BFF scope for the CURRENTLY-SELECTED plane's authority — a CIAM instance cannot
  * mint a token for the workforce BFF resource and vice-versa. The default is the CIAM BFF scope,
- * so the CIAM browser path is byte-for-byte unchanged (FR-15): a build that only ever runs CIAM
+ * so the CIAM browser path's login request is unchanged (FR-15): a build that only ever runs CIAM
  * never calls `setActiveLoginScope`. The standalone workforce browser plane (home-realm discovery →
  * "My organization") re-points this seam at the workforce BFF scope exactly once at bootstrap,
  * mirroring how `setActiveBffTokenAcquirer` re-points the acquirer. The Teams host never uses this
@@ -536,12 +539,20 @@ async function acquireBffTokenViaNaa(instance: IPublicClientApplication, bffScop
  * The popup fallback ladder, mirroring `OfficeNaaStrategy._tryAcquireWith`: `acquireTokenSilent` with a
  * cached account (a failure falls through), then `acquireTokenPopup` with the account as `loginHint`
  * (or `prompt: 'select_account'` when there is none). Throws if the popup fails or yields no token.
+ *
+ * `trySilentFirst` is false on the user-gesture (click) path: a silent attempt can spend up to ~10 s in a
+ * hidden iframe, and browsers only honour `window.open` within a few seconds of the click (transient user
+ * activation), so the click path goes straight to the popup.
  */
-async function acquireBffTokenViaPopup(instance: IPublicClientApplication, bffScope: string): Promise<string> {
+async function acquireBffTokenViaPopup(
+  instance: IPublicClientApplication,
+  bffScope: string,
+  trySilentFirst: boolean
+): Promise<string> {
   const scopes = [bffScope];
   const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0] ?? null;
 
-  if (account) {
+  if (account && trySilentFirst) {
     try {
       const result = await instance.acquireTokenSilent({ scopes, account });
       if (result.accessToken) return result.accessToken;
@@ -578,9 +589,15 @@ function isNaaChannelRecommended(): boolean {
   }
 }
 
-/** True when the user closed or dismissed the NAA sign-in (`user_cancelled`) — do not open a second popup. */
+/**
+ * True when the user closed or dismissed the NAA sign-in — do not open a second popup. Two codes mean this:
+ * `user_cancelled` (BrowserAuthError, a closed MSAL popup) and `user_canceled` (one `l`, ClientAuthError),
+ * which is what `NestedAppAuthAdapter.fromBridgeError` maps `BridgeStatusCode.UserCancel` to when the user
+ * dismisses the Teams-brokered NAA prompt (msal-browser 5.5.0).
+ */
 function isUserCancelled(err: unknown): boolean {
-  return (err as { errorCode?: string } | null)?.errorCode === BrowserAuthErrorCodes.userCancelled;
+  const code = (err as { errorCode?: string } | null)?.errorCode;
+  return code === BrowserAuthErrorCodes.userCancelled || code === ClientAuthErrorCodes.userCanceled;
 }
 
 /** The error a failed Teams workforce sign-in surfaces — the caller renders it (fail loud). */
@@ -636,28 +653,47 @@ export async function acquireTeamsWorkforceBffToken(cfg: TeamsWorkforceAuthConfi
       // The user dismissed the sign-in: a second popup straight away would be hostile. The error screen's
       // "Sign in" button lets them start it again on purpose.
       teamsWorkforcePath = null;
+      prewarmTeamsWorkforcePopupInstance(cfg);
       throw teamsWorkforceFailure(naaError, null);
     }
   }
 
   try {
-    return await signInTeamsWorkforceViaPopup(cfg);
+    // Bootstrap / renewal path: no user gesture to protect, so the silent attempt (a signed-in popup
+    // account's cache) is worth trying first.
+    return await signInViaPopupInstance(cfg, true);
   } catch (popupError) {
     teamsWorkforcePath = null;
+    prewarmTeamsWorkforcePopupInstance(cfg);
     throw teamsWorkforceFailure(naaError, popupError);
   }
 }
 
 /**
- * The MSAL popup path on its own (ADR-028 A7 fallback). Called by `acquireTeamsWorkforceBffToken` after
- * NAA, and directly by the Teams error screen's "Sign in" button so the popup opens from a USER GESTURE
- * (bootstrap cannot guarantee one; Teams webviews and browsers may block a gesture-less `window.open`).
- * Records the popup instance as the signed-in instance on success.
+ * Create + initialise the standard popup instance ahead of time, so the error screen's "Sign in" click does
+ * not spend its user-activation window awaiting `PublicClientApplication.initialize()` before
+ * `acquireTokenPopup`. Best effort and idempotent (the instance is memoized; a failed creation is retried by
+ * the click itself).
  */
-export async function signInTeamsWorkforceViaPopup(cfg: TeamsWorkforceAuthConfig): Promise<string> {
+function prewarmTeamsWorkforcePopupInstance(cfg: TeamsWorkforceAuthConfig): void {
+  void getTeamsWorkforcePopupMsalInstance(cfg).catch(() => undefined);
+}
+
+async function signInViaPopupInstance(cfg: TeamsWorkforceAuthConfig, trySilentFirst: boolean): Promise<string> {
   const instance = await getTeamsWorkforcePopupMsalInstance(cfg);
-  const token = await acquireBffTokenViaPopup(instance, cfg.bffScope);
+  const token = await acquireBffTokenViaPopup(instance, cfg.bffScope, trySilentFirst);
   teamsWorkforcePath = 'popup';
   teamsWorkforceSignedInInstance = instance;
   return token;
+}
+
+/**
+ * The MSAL popup path for the Teams error screen's "Sign in" button (ADR-028 A7 fallback), so the popup opens
+ * from a USER GESTURE (bootstrap cannot guarantee one; Teams webviews and browsers may block a gesture-less
+ * `window.open`). Goes straight to `acquireTokenPopup` with no silent attempt first, which could outlast the
+ * click's transient user activation and get the popup blocked. Records the popup instance as the signed-in
+ * instance on success.
+ */
+export async function signInTeamsWorkforceViaPopup(cfg: TeamsWorkforceAuthConfig): Promise<string> {
+  return signInViaPopupInstance(cfg, false);
 }

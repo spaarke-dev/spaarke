@@ -38,7 +38,7 @@
  * HOST-DETECTION WIRING (task 012 — Teams host adapter)
  * ------------------------------------------------------
  * `bffApiCall` acquires its token via `acquireActiveBffToken()`, a pluggable seam in msal-auth.ts
- * that defaults to the CIAM strategy (`acquireBffToken`) — byte-for-byte unchanged behavior for the
+ * that defaults to the CIAM strategy (`acquireBffToken`) — the same request shape as before for the
  * standalone SPA (FR-15). The Teams host adapter re-points this seam at the Teams workforce
  * strategy (task 011) once at bootstrap, so this SAME module — no fork — serves BFF calls correctly
  * for both hosts. See `src/client/external-spa/src/host/TeamsHostAdapter.ts`.

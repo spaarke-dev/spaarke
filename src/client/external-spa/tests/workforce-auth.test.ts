@@ -861,9 +861,43 @@ describe('Teams NAA step is skipped on a bridge-less host; a cancelled sign-in o
       (error as { cause: { naaError: { errorCode: string }; popupError: unknown } }).cause.naaError.errorCode
     ).toBe('user_cancelled');
     expect((error as { cause: { popupError: unknown } }).cause.popupError).toBeNull();
-    // No standard popup instance was built or asked to open a window.
-    expect(h.pcas.filter(p => p.config.auth.authority === AUTHORITY)).toHaveLength(0);
+    // No window was opened. (The standard popup instance is built ahead of time so the "Sign in" click does not
+    // wait on initialize(), but nothing is asked of it.)
     expect(h.requests.map(r => r.call)).toEqual(['ssoSilent']);
+    const prewarmed = h.pcas.filter(p => p.config.auth.authority === AUTHORITY);
+    expect(prewarmed).toHaveLength(1);
+    expect(prewarmed[0].instance.acquireTokenPopup).not.toHaveBeenCalled();
+  });
+
+  it('opens no popup fallback when NAA fails with user_canceled (ClientAuthError, the shape NAA emits for a dismissed Teams prompt)', async () => {
+    const { msalAuth } = await loadAuth();
+    const { ClientAuthError, ClientAuthErrorCodes } = await import('@azure/msal-browser');
+    // NestedAppAuthAdapter.fromBridgeError maps BridgeStatusCode.UserCancel to exactly this error.
+    expect(ClientAuthErrorCodes.userCanceled).toBe('user_canceled');
+    h.nestable = async config =>
+      makeFakeInstance(
+        'naa',
+        {
+          sso: async () => {
+            throw new ClientAuthError(ClientAuthErrorCodes.userCanceled);
+          },
+        },
+        config
+      );
+    h.pcaBehaviour = { popup: async () => token('popup') };
+
+    const error = await msalAuth.acquireTeamsWorkforceBffToken(teamsCfg).then(
+      () => null,
+      (e: unknown) => e
+    );
+
+    expect(error).toBeInstanceOf(msalAuth.TeamsWorkforceAuthError);
+    expect(
+      (error as { cause: { naaError: { errorCode: string }; popupError: unknown } }).cause.naaError.errorCode
+    ).toBe('user_canceled');
+    expect((error as { cause: { popupError: unknown } }).cause.popupError).toBeNull();
+    expect(h.requests.map(r => r.call)).toEqual(['ssoSilent']);
+    expect(h.requests.some(r => r.call === 'acquireTokenPopup')).toBe(false);
   });
 
   it('a non-cancel NAA failure still falls back to the popup (regression guard)', async () => {
@@ -971,6 +1005,26 @@ describe('Teams error screen: a "Sign in" button runs the popup path on click (u
     }
   );
 
+  it('the click path never runs acquireTokenSilent before acquireTokenPopup, even with a cached account (user gesture)', async () => {
+    const { msalAuth } = await loadAuth();
+    h.pcaBehaviour = { popup: async () => token('popup'), silent: async () => token('silent') };
+    // First click signs in (no account yet); the second click has a cached account, where the old ladder
+    // would have gone through acquireTokenSilent (up to ~10 s in an iframe) before opening the popup.
+    await expect(msalAuth.signInTeamsWorkforceViaPopup(teamsCfg)).resolves.toBe('token-popup');
+    await expect(msalAuth.signInTeamsWorkforceViaPopup(teamsCfg)).resolves.toBe('token-popup');
+    expect(h.requests.map(r => r.call)).toEqual(['acquireTokenPopup', 'acquireTokenPopup']);
+    expect(h.requests[1].request).toMatchObject({ loginHint: 'popup@spaarke.test' });
+  });
+
+  it('the bootstrap (non-click) popup path still tries the cached account silently first', async () => {
+    const { msalAuth } = await loadAuth();
+    h.naaRecommended.mockReturnValue(false);
+    h.pcaBehaviour = { popup: async () => token('popup'), silent: async () => token('silent') };
+    await expect(msalAuth.acquireTeamsWorkforceBffToken(teamsCfg)).resolves.toBe('token-popup');
+    await expect(msalAuth.acquireTeamsWorkforceBffToken(teamsCfg)).resolves.toBe('token-silent');
+    expect(h.requests.map(r => r.call)).toEqual(['acquireTokenPopup', 'acquireTokenSilent']);
+  });
+
   it('signInTeamsWorkforceViaPopup uses the standard instance only: no NAA instance is built', async () => {
     const { msalAuth } = await loadAuth();
     h.nestable = async config => makeFakeInstance('naa', { sso: async () => token('naa') }, config);
@@ -978,6 +1032,28 @@ describe('Teams error screen: a "Sign in" button runs the popup path on click (u
     await expect(msalAuth.signInTeamsWorkforceViaPopup(teamsCfg)).resolves.toBe('token-popup');
     expect(h.nestableConfigs).toHaveLength(0);
     expect(h.requests.map(r => r.call)).toEqual(['acquireTokenPopup']);
+  });
+});
+
+describe('msal-browser assumptions the silent-renewal design relies on (re-verify the design on an msal upgrade)', () => {
+  // acquireSilent() (msal-auth.ts) sends the first silent call with AccessTokenAndRefreshToken so msal NEVER opens an
+  // iframe for it, and only then retries once with Skip + the bridge redirect URI. That split holds only while
+  // msal-browser's iframe renewal policy list contains Skip and not AccessTokenAndRefreshToken. The list is not
+  // exported, so this reads it from the installed dist, like the auth-callback bridge parity test above.
+  it("Skip is in msal-browser's iframe renewal policies; AccessTokenAndRefreshToken is not", () => {
+    const source = fs
+      .readFileSync(path.join(SPA_ROOT, 'node_modules/@azure/msal-browser/dist/utils/BrowserConstants.mjs'), 'utf8')
+      .replace(/\r\n/g, '\n');
+    const list = /const iFrameRenewalPolicies = \[([\s\S]*?)\];/.exec(source);
+    const hint =
+      'msal-browser changed its iframe renewal policies: re-verify acquireSilent() / the workforce silent-renewal design in msal-auth.ts before upgrading.';
+    expect(list, hint).not.toBeNull();
+    const policies = list![1]
+      .split(',')
+      .map(p => p.trim())
+      .filter(Boolean);
+    expect(policies, hint).toContain('CacheLookupPolicy.Skip');
+    expect(policies, hint).not.toContain('CacheLookupPolicy.AccessTokenAndRefreshToken');
   });
 });
 

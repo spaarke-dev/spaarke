@@ -219,3 +219,28 @@ New `src/components/auth/TeamsAuthError.tsx` (Fluent v9, `makeStyles` + semantic
 - `npm run build` exit 0; `dist/auth-callback.html` identical to `public/`.
 - `dotnet test tests/Spaarke.ArchTests --filter ExternalSpaGridViewSelectorGuardTests` -> **220 passed**.
 - Workflow edit is a comment only (no `actionlint` here).
+
+## Re-check fixes (2026-10-10)
+
+A scoped re-check (sonnet) of the task 040 fix round found one fix-now item and four known-limit items.
+
+### F2 (fixed): a dismissed Teams NAA prompt opened a second popup
+
+`isUserCancelled` (msal-auth.ts) matched only `BrowserAuthErrorCodes.userCancelled` (`user_cancelled`). msal-browser 5.5.0 `NestedAppAuthAdapter.fromBridgeError` maps `BridgeStatusCode.UserCancel` to `new ClientAuthError(ClientAuthErrorCodes.userCanceled)` (`user_canceled`, one `l`), so dismissing the Teams-brokered NAA prompt fell through to the MSAL popup (a double prompt). It now matches both codes (`ClientAuthErrorCodes` is re-exported by msal-browser). Test: `opens no popup fallback when NAA fails with user_canceled (ClientAuthError, the shape NAA emits for a dismissed Teams prompt)`; the `user_cancelled` BrowserAuthError case is kept. Fail-before: against the old `msal-auth.ts` the new case fails (`expected null to be an instance of TeamsWorkforceAuthError` - the popup fallback ran and returned a token).
+
+### K1 (fixed): click path no longer spends the user gesture on a silent attempt
+
+`signInTeamsWorkforceViaPopup` (the error screen's "Sign in" click, via `TeamsHostAdapter.signInWithPopup`) used to run `acquireTokenSilent` for a cached account (possible ~10 s hidden iframe) before `acquireTokenPopup`, outlasting the click's transient user activation (~5 s in Chromium) so the popup could be blocked. The click path now goes straight to `acquireTokenPopup` (`signInViaPopupInstance(cfg, false)`); the bootstrap / renewal path (`acquireTeamsWorkforceBffToken`) keeps the silent-first ladder (`signInViaPopupInstance(cfg, true)`). The standard popup instance is also created and initialised ahead of time when the bootstrap fails (user-cancelled NAA, or a failed popup), so the click does not await `PublicClientApplication.initialize()` either (`prewarmTeamsWorkforcePopupInstance`, best effort, memoized). Tests: `the click path never runs acquireTokenSilent before acquireTokenPopup, even with a cached account (user gesture)` (fail-before: second click returned the silent token), `the bootstrap (non-click) popup path still tries the cached account silently first`; the existing cancel test now asserts the pre-built instance was never asked to open a popup.
+
+### K2 (comment fix)
+
+Comments in msal-auth.ts (`StandaloneAcquireOptions`, `acquireStandaloneBffToken`, `acquireBffToken`, the acquirer seam, the login-scope seam) and bff-client.ts claimed the CIAM behaviour is "byte-for-byte" unchanged. Reworded: the CIAM silent request shape (`{ scopes, account }`, no redirect URI, no cache policy) is unchanged; a `timed_out` silent renewal now routes to the interactive redirect, deliberately. (msal-config.ts, standalone-plane.ts and AuthGuard.tsx "byte-for-byte" comments are about config / scope values and stay accurate.)
+
+### K5 (pin added)
+
+Test `msal-browser assumptions the silent-renewal design relies on`: reads `iFrameRenewalPolicies` from the installed `node_modules/@azure/msal-browser/dist/utils/BrowserConstants.mjs` (not exported publicly) and asserts `CacheLookupPolicy.Skip` is in it and `CacheLookupPolicy.AccessTokenAndRefreshToken` is not. The failure message says to re-verify `acquireSilent()` / the workforce silent-renewal design on an msal-browser upgrade. A pin: it passes before and after this round.
+
+### Deferred to live verification (task 071)
+
+- K3: `notifyFailure(AuthFailed)` is sent before the recovery screen renders - Teams may hide the iframe and the "Sign in" button; and a mid-session popup-mode renewal failure has no sign-in UI until reload.
+- K4: Teams web `BroadcastChannel` storage partitioning between the bridge page and the app (already a 071 constraint).
