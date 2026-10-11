@@ -114,6 +114,40 @@ Strip `position`, the `inset` family, `z-index` and `url(` from `style` in the s
 
 ---
 
+### ISS-004 — Internal document delete orphans the SPE file when the file delete fails
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-11 |
+| **Source** | R3 task 032 implementation (delete-own) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1650 |
+
+**Description**
+
+`DocumentCheckoutService.DeleteAsync`, behind the internal `DELETE /api/documents/{documentId}`, deletes the SharePoint Embedded file first. If that call throws, it logs a warning and deletes the Dataverse row anyway.
+
+A transient Graph failure (timeout, 429 or 5xx) therefore leaves the file in the container with no `sprk_document` row pointing to it. The user believes the content is gone, but it is still stored, and nothing in the app can find or delete it later.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/DocumentCheckoutService.cs:794-820`: the catch-all around `_speFileStore.DeleteFileAsync`.
+- The R3 external overload (task 032) keeps the row and returns 503 on a file-delete failure.
+
+**Suggested fix**
+
+- Use the R3 external behaviour on the internal route: keep the row and return 503 on a file-delete failure.
+- Treat "file not found" as success.
+
+Needs a decision from the owner of the internal document UX.
+
+**Estimated effort**: 1–2 hours, including tests.
+**Blockers**: none.
+**Related**: R3 task 032 (FR-26). Out of R3 scope: the internal route is shared.
+
+---
+
 ## Closed
 
 (none)
