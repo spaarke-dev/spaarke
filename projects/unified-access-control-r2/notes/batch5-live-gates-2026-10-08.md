@@ -380,3 +380,35 @@ Final sweep 20:15Z: 0 `# gate17*` / `# gate18*` matters or events, 0 grant rows 
 - **179:** steps 1, 2 and 3 PASS. Still open: step 2's platform question for a caller with no Share privilege, re-run after Core User is removed from testuser1.
 - **181:** the server logic PASSES (recipient resolution, gain check, granter exclusion, best-effort failure report, row shape and link). Delivery to internal users FAILS on dev until a Spaarke base role holds `prvReadappnotification`. Matter Management has the bell enabled.
 
+
+## 2026-10-11 live gate 181 (after the appnotification role fix)
+
+**Environment.** spaarke-bff-dev at master `01ccf46f0`, which includes 181's GrantAccessNotifier (healthz 200), and spaarkedev1. Run 15:56:28–15:57:34Z.
+- Identities: admin (`az` default, `1d02f31c…`, the granter); testuser1 (`8d7bad7a…`, linked contact `ac6d7b68…`, BFF and Dataverse tokens via `AZURE_CONFIG_DIR=C:/tmp/az-uac-child`); uac.child (`d6f8f439…`, linked contact `51a5ddb0…`), used as a recipient and read through impersonation only.
+- No role, Entra, Key Vault or app-setting write, and no `sprk-prod-kv` read.
+- Script and log: session scratchpad `gate179_181/gate181b.py`, `gate181b.out`, `results181b.json`.
+
+**Pre-checks (read-only).**
+- `RetrieveUserPrivileges` shows `prvReadappnotification` (`24ba2370…`) at **Basic** only, for both testuser1 and uac.child.
+- Impersonated `GET appnotifications` (MSCRMCallerID) answers **200** for both users. On 2026-10-10 it answered 403 `0x80040220`.
+- The probe found no stale privilege cache, and no retry was needed.
+
+| # | Step | Result | Evidence |
+|---|---|---|---|
+| 181b.1a | `/share-user` admin → testuser1, Collaborate, on MA `1f501b52…` ("# gate181b A share-user …") | **PASS** | 200: `outcome created`, mask 262167, **`notificationFailed: false`**. One row, `78501b52…`, owned by testuser1 and created 15:56:39Z. Title `You were given access to the matter "# gate181b A share-user 20261011-1556Z"`. Body `Ralph Schroeder gave you Collaborate access.` icontype 100000000, priority 200000000, ttl 604800. `data.actionUrl` = `actions[0].data.url` = `/main.aspx?etn=sprk_matter&id=1f501b52…&pagetype=entityrecord`. `actions[0].title` **"Open matter"**, navigationTarget `inline`, `category: "access"`. |
+| 181b.1b | `/grant` admin → testuser1's linked contact, ViewOnly, on MB `ce71005d…` ("# gate181b B contact-grant …") | **PASS** | 200: `accessRecordId d271005d…`, `grantedAccessLevel 100000000`, **`notificationFailed: false`**. One row, `578d0c5e…`, owned by testuser1 and created 15:56:52Z. Body `Ralph Schroeder gave you View Only access.` Same shape; the link and "Open matter" action point to MB. |
+| 181b.2a | `/share-user` admin → uac.child, Collaborate, on MA | **PASS** | 200: `created`, `notificationFailed: false`. Row `6a151458…`, owned by uac.child and created 15:56:41Z. Same title, body, link and action as 181b.1a. |
+| 181b.2b | `/grant` admin → uac.child's linked contact, ViewOnly, on MB | **PASS** | 200: `accessRecordId d471005d…`, `notificationFailed: false`. Row `738d0c5e…`, owned by uac.child and created 15:56:54Z. Same shape, linked to MB. |
+| 181b.3 | testuser1 reads its own rows as itself, and not uac.child's (User depth) | **PASS** | testuser1's own Dataverse token. List filtered on its own owner id → 200 with exactly its 2 rows (`78501b52…`, `578d0c5e…`). Each row by id → 200. List filtered on uac.child's owner id → 200 with **0 rows**. Each uac.child row by id (`6a151458…`, `738d0c5e…`) → **404 `0x80048d02`**. An unfiltered list (`$top=500`) returns rows of one owner only: testuser1. |
+| 181b.4 | Same-level re-share sends no new row | **PASS** | Re-share admin → testuser1, Collaborate, on MA → 200, **`outcome unchanged`**, `notificationFailed: false`. 0 new testuser1 rows since the re-share; testuser1 still holds 2 gate rows. The admin (granter) received 0 rows for the gate matters. |
+
+**Clean-up (PASS).**
+- Grants `d271005d…` and `d471005d…`: `/revoke` 200 (`deactivatedCount 1`, `speContainerOutcome NotAttempted`), then deleted (204) and read back 404.
+- `/unshare-user` on MA for testuser1 and uac.child: both 200, `removed: true`.
+- The 4 gate appnotifications (`78501b52…`, `578d0c5e…`, `6a151458…`, `738d0c5e…`) were recorded above, then deleted (204 each).
+- Matters MA and MB were deleted (204) and read back 404.
+- Sweep: 0 `# gate18*` matters; 0 gate-matter appnotifications for testuser1, uac.child or the admin; 0 grant rows on the gate matters.
+
+**SPE container created: none.** Neither matter was made secure, and no provision call was made. `/grant` reported `speContainerMembershipGranted: false`.
+
+**Verdict.** **181 PASSES on dev**, delivery included. With `prvReadappnotification` at Basic on Spaarke Basic User / Core User, both internal routes (`/share-user`, and `/grant` to a contact linked to a user) create one correctly shaped row per recipient. Basic depth keeps each user's bell private. A same-level re-share sends nothing. This closes the 2026-10-10 181.1 / 181.3 environment failures.
