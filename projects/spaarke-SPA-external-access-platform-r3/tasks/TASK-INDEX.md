@@ -19,7 +19,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 031 | Document routes for Matter/WA/Invoice/Service Request (FR-24) | P3 | 🔄 [wip] matter/WA/SR routes merged; invoices await owner decision | 030 | O/h | FULL | Wave 3 |
 | 032 | DELETE own documents/to-dos/events/service requests (FR-26) | P3 | 🔲 [open] | 031 | O/h | FULL | Wave 4 |
 | 033 | External message read endpoint (FR-04) | P3 | ✅ [done] | 011 | O/h | FULL | Wave 3 |
-| 034 | External message send endpoint (FR-11) | P3 | 🔄 [wip] | 030, 033 | O/h | FULL | Wave 4 |
+| 034 | External message send endpoint (FR-11) | P3 | ✅ [done] | 030, 033 | O/h | FULL | Wave 4 |
 | 035 | Intake submit endpoint (FR-05, FR-06) | P3 | 🔲 [open] | 011, 020, 033 | O/h | FULL | Wave 5 |
 | 036 | Email on subsequent grant + message notify (FR-07) | P3 | 🔄 [wip] | 034 (UAC-r2 PR #1583 merged 2026-10-10, in branch) | S/h | FULL | Wave 5 |
 | 037 | Notification feed + last-seen (FR-08) | P3 | 🔲 [open] | 034, 035 | O/h | FULL | Wave 6 |
