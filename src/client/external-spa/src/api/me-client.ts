@@ -10,30 +10,26 @@
  * `plane` is derived from the REAL host-detection signal already established at bootstrap
  * (`teamsHost` — a Teams tab is workforce SSO, a standalone browser is CIAM; see
  * `src/host/TeamsHostAdapter.ts` + `main.tsx`) — only `entitlements` is mocked pending task 022.
- * A dev-only `?dv_persona=workforce|ciam|admin` override (gated behind the existing
- * `VITE_DEV_MOCK` flag, same convention as `mocks/mock-service.ts`) lets every persona's
- * role-defaulted workspace be exercised locally without a live entitlement backend — it never
- * activates outside `VITE_DEV_MOCK=true`, so it has no production security surface (NFR-06: the
- * client is never the enforcement boundary regardless).
+ * A dev-only `?dv_persona=workforce|ciam|admin` override lets every persona's role-defaulted workspace be exercised
+ * locally without a live entitlement backend. It runs only in dev-mock mode (`isDevMockEnabled()`, dev-mock.ts: the
+ * dev server with `VITE_DEV_MOCK=true`), which a built bundle cannot enter, so it has no production surface (NFR-06:
+ * the client is never the enforcement boundary regardless).
  *
  * STATUS(task-073): `fetchMeEntitlements` now calls the REAL BFF endpoint
  * `GET /api/v1/external/me/entitlements` (task 072; A7 / r3 task 011: default modules by
  * server-resolved principal kind, plus sprk_approlemodulemap extras). The BFF derives the plane from the caller's token.
  *
- * Rollout safety: on ANY failure of the live call, `fetchMeEntitlements` degrades to the plane-derived
- * `MOCK_BY_PLANE` defaults (a console.warn is emitted) so a transient live-auth hiccup never leaves the
- * workspace tab-less. NFR-06: the client is NEVER the security boundary — the module-data endpoints
- * enforce Tier-1/Tier-2 server-side regardless of what this returns. The mock values are deliberately
- * aligned with the server (workforce = ['legal-front-door','policy-library'] from the seeded map; ciam =
- * ['assigned-work']), so the fallback is behavior-identical to a correct live response for the R2 personas.
- * During UAT, the mock `displayName` ('Sam Rivera' / 'Dana Okafor') is the tell that the fallback fired —
- * a real live response carries the actual signed-in user's name.
- *
- * `VITE_DEV_MOCK=true` (local dev only) still short-circuits to the plane/persona mock without any BFF
- * call, preserving the `?dv_persona=` override for local exercise of every persona's workspace.
+ * Failure handling (task 042, FR-18 / #1566):
+ *   - 401 (after bffApiCall's one retry) or 403 → the promise REJECTS with the ApiError, so the workspace shows the
+ *     sign-in or denied state — never a default workspace or a stand-in user.
+ *   - any other failure (5xx, network) → the rollout fallback: the plane's default modules (`PLANE_DEFAULTS`, aligned
+ *     with the server's defaults) with an EMPTY identity, plus a console.warn (the UAT tell that it fired). NFR-06: the
+ *     module-data endpoints enforce Tier-1/Tier-2 server-side regardless of what this returns.
  */
 
 import { bffApiCall } from '../auth/bff-client';
+import { isDevMockEnabled } from '../dev-mock';
+import { ApiError } from '../types';
 
 /** Identity plane — matches the caller's auth authority (ADR-028 dual-plane). */
 export type Plane = 'workforce' | 'ciam' | 'admin';
@@ -50,33 +46,36 @@ export interface MeEntitlementsResponse {
   entitlements: string[];
 }
 
-/** Mock `/me` payloads, one per plane — entitlement ids match `widgetRegistry.ts`'s `requiredEntitlement` values. */
-const MOCK_BY_PLANE: Record<Plane, MeEntitlementsResponse> = {
-  workforce: {
-    displayName: 'Sam Rivera',
-    email: 'sam.rivera@contoso.example',
-    plane: 'workforce',
-    entitlements: ['legal-front-door', 'policy-library'],
-  },
-  ciam: {
-    displayName: 'Dana Okafor',
-    email: 'dana.okafor@partner-firm.example',
-    plane: 'ciam',
-    entitlements: ['assigned-work'],
-  },
-  admin: {
-    displayName: 'Alex Reyes',
-    email: 'alex.reyes@contoso.example',
-    plane: 'admin',
-    entitlements: ['admin'],
-  },
+/**
+ * Plane defaults for the production ROLLOUT fallback (a 5xx / network failure of the live call): the plane's default
+ * modules and NO identity — the fallback never presents a user (task 042, FR-18: no mock or default user in a
+ * production build). Entitlement ids match `widgetRegistry.ts`'s `requiredEntitlement` values and the server's
+ * defaults (workforce = legal-front-door + policy-library; CIAM = assigned-work).
+ */
+const PLANE_DEFAULTS: Record<Plane, MeEntitlementsResponse> = {
+  workforce: { displayName: '', email: '', plane: 'workforce', entitlements: ['legal-front-door', 'policy-library'] },
+  ciam: { displayName: '', email: '', plane: 'ciam', entitlements: ['assigned-work'] },
+  admin: { displayName: '', email: '', plane: 'admin', entitlements: ['admin'] },
 };
+
+/**
+ * Dev-mock personas — read ONLY inside `isDevMockEnabled()` branches, so a built bundle (where that switch is the
+ * literal `false`) carries neither the branch nor these names (task 042).
+ */
+function devPersona(plane: Plane): MeEntitlementsResponse {
+  const names: Record<Plane, [string, string]> = {
+    workforce: ['Sam Rivera', 'sam.rivera@contoso.example'],
+    ciam: ['Dana Okafor', 'dana.okafor@partner-firm.example'],
+    admin: ['Alex Reyes', 'alex.reyes@contoso.example'],
+  };
+  const [displayName, email] = names[plane];
+  return { ...PLANE_DEFAULTS[plane], displayName, email };
+}
 
 const DEV_PERSONA_PARAM = 'dv_persona';
 
-/** Dev-only persona override — active ONLY when VITE_DEV_MOCK=true (see file header). */
+/** Dev-only persona override — active ONLY in dev-mock mode (see file header). */
 function resolveDevPersonaOverride(): Plane | null {
-  if (import.meta.env.VITE_DEV_MOCK !== 'true') return null;
   try {
     const value = new URLSearchParams(window.location.search).get(DEV_PERSONA_PARAM);
     if (value === 'workforce' || value === 'ciam' || value === 'admin') return value;
@@ -87,30 +86,31 @@ function resolveDevPersonaOverride(): Plane | null {
 }
 
 /**
- * Resolve the caller's entitlements (task 073 — live). Calls the real BFF endpoint in production; on any
- * failure degrades to plane-derived `MOCK_BY_PLANE` defaults (see file header). `teamsHost` is the real
- * bootstrap signal used for the dev-mock plane + the rollout fallback plane; the live BFF derives the
- * plane authoritatively from the caller's token.
+ * Resolve the caller's entitlements (task 073 — live). Calls the real BFF endpoint; a 401 or 403 REJECTS (the caller
+ * renders the sign-in / denied state — task 042, FR-18); any other failure degrades to the plane's default modules
+ * with no identity (see file header). `teamsHost` is the real bootstrap signal used for the dev-mock plane + the
+ * rollout fallback plane; the live BFF derives the plane authoritatively from the caller's token.
  */
 export async function fetchMeEntitlements(teamsHost: boolean): Promise<MeEntitlementsResponse> {
   const basePlane: Plane = teamsHost ? 'workforce' : 'ciam';
 
-  // Local dev (VITE_DEV_MOCK=true): short-circuit to the plane/persona mock, no BFF call. Preserves the
+  // Local dev only (dev-mock.ts): short-circuit to the plane/persona mock, no BFF call. Preserves the
   // `?dv_persona=` override for exercising every persona's workspace without a live entitlement backend.
-  if (import.meta.env.VITE_DEV_MOCK === 'true') {
-    const plane = resolveDevPersonaOverride() ?? basePlane;
-    return new Promise(resolve => window.setTimeout(() => resolve(MOCK_BY_PLANE[plane]), 300));
+  if (isDevMockEnabled()) {
+    const persona = devPersona(resolveDevPersonaOverride() ?? basePlane);
+    return new Promise(resolve => window.setTimeout(() => resolve(persona), 300));
   }
 
-  // Production: the real Tier-1 entitlement endpoint (task 072). bffApiCall attaches the Bearer token +
-  // retries once on 401; the BFF resolves the plane from the token and returns this exact shape.
+  // The real Tier-1 entitlement endpoint (task 072). bffApiCall attaches the Bearer token + retries once on 401;
+  // the BFF resolves the plane from the token and returns this exact shape.
   try {
     return await bffApiCall<MeEntitlementsResponse>('/api/v1/external/me/entitlements');
   } catch (err) {
-    // Rollout fallback (NFR-06 — client is not the security boundary): degrade to plane-derived defaults
-    // so a transient live-auth failure never leaves the workspace tab-less. The mock displayName is the
-    // UAT tell that this fired.
+    // Not signed in (401 after the retry) or not allowed (403): never a default workspace (task 042).
+    if (err instanceof ApiError && (err.statusCode === 401 || err.statusCode === 403)) throw err;
+    // Rollout fallback (NFR-06 — client is not the security boundary): degrade to the plane's default modules so a
+    // transient failure never leaves the workspace tab-less. The console warning is the UAT tell that this fired.
     console.warn('[me] live /api/v1/external/me/entitlements failed — falling back to plane-derived defaults.', err);
-    return MOCK_BY_PLANE[basePlane];
+    return PLANE_DEFAULTS[basePlane];
   }
 }

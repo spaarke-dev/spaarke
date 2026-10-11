@@ -19,6 +19,7 @@ import { useMsal } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
 import { Spinner } from '@fluentui/react-components';
 import { accountsForActivePlane, captureReturnTo, consumeReturnTo, getActiveLoginScope } from '../auth/msal-auth';
+import { isDevMockEnabled } from '../dev-mock';
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -33,7 +34,7 @@ interface AuthGuardProps {
 
 export const AuthGuard: React.FC<AuthGuardProps> = ({ children, teamsHost = false }) => {
   // In mock mode, skip MSAL entirely — render children as if authenticated.
-  if (import.meta.env.VITE_DEV_MOCK === 'true') {
+  if (isDevMockEnabled()) {
     return <>{children}</>;
   }
 

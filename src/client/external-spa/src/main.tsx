@@ -26,6 +26,7 @@ import { RealmChooser } from './components/auth/RealmChooser';
 import { CustomerPicker } from './components/auth/CustomerPicker';
 import { TeamsAuthError } from './components/auth/TeamsAuthError';
 import { App } from './App';
+import { isDevMockEnabled } from './dev-mock';
 
 // Power Pages Code Page SPA — React 18 with createRoot (bundled, not platform-provided).
 // External users authenticate via Entra B2B — they are guest accounts in the main
@@ -66,7 +67,7 @@ function getRootElement(): HTMLElement | null {
  * the acquirer/scope to values identical to the module defaults.
  */
 async function bootstrapStandalone(root: Root): Promise<void> {
-  if (import.meta.env.VITE_DEV_MOCK === 'true') {
+  if (isDevMockEnabled()) {
     // Dev mock: existing behavior — CIAM instance, no chooser, no MSAL initialize (AuthGuard
     // short-circuits in mock mode). Kept as a separate branch so StandaloneBootstrap's hooks stay
     // unconditional (rules of hooks). The configured CIAM backend is activated when it resolves to exactly one

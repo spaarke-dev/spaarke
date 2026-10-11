@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -62,6 +62,33 @@ function resolveSharedLibDeps(): import('vite').Plugin {
   };
 }
 
+/**
+ * spaarke-SPA-external-access-platform-r3 task 042 (FR-18, #1566): mock mode never reaches a production build.
+ *
+ * `VITE_DEV_MOCK=true` turns on a fake signed-in user and canned BFF responses (src/dev-mock.ts). A production build
+ * that carries it FAILS here, whether the flag comes from an .env file or the process environment (loadEnv reads
+ * both). Any other build cannot enter mock mode either: `isDevMockEnabled()` also requires `import.meta.env.DEV`,
+ * which every `vite build` replaces with `false`, so the mock branches and data are dropped from the bundle.
+ * Asserted by tests/out-of-plane-routes.test.ts.
+ */
+export function refuseDevMockInProductionBuild(command: string, mode: string, devMock: string | undefined): void {
+  if (command === 'build' && mode === 'production' && devMock === 'true') {
+    throw new Error(
+      'VITE_DEV_MOCK=true is refused for a production build (task 042, FR-18): mock mode shows a fake user and ' +
+        'canned data. Unset VITE_DEV_MOCK, or use the dev server for mock mode.'
+    );
+  }
+}
+
+function devMockProductionGuard(): import('vite').Plugin {
+  return {
+    name: 'spaarke-refuse-dev-mock-in-production',
+    config(_config, { command, mode }) {
+      refuseDevMockInProductionBuild(command, mode, loadEnv(mode, __dirname, 'VITE_').VITE_DEV_MOCK);
+    },
+  };
+}
+
 export default defineConfig({
   // unified-access-control-r2 task 157: every copy of the shared Spaarke DataGrid in THIS bundle is the external
   // host — no view picker, no saved-query list — whatever tree, root or module instance renders it. Vite replaces
@@ -72,6 +99,7 @@ export default defineConfig({
     __SPAARKE_DATAGRID_EXTERNAL_HOST__: 'true',
   },
   plugins: [
+    devMockProductionGuard(),
     resolveSharedLibDeps(),
     react({
       // Include shared lib source for transpilation

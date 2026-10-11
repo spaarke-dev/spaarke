@@ -10,6 +10,7 @@ import {
 } from '@spaarke/ui-components/utils/themeStorage';
 import { DataGridExternalHostProvider } from '@spaarke/ui-components/components/DataGrid/DataGridExternalHost';
 import { APP_VERSION } from './config';
+import { isDevMockEnabled } from './dev-mock';
 import { clearStoredRealm } from './auth/realm';
 import { clearActiveBackend } from './auth/backend-selection';
 import { accountsForActivePlane } from './auth/msal-auth';
@@ -146,7 +147,7 @@ const AppShell: React.FC<{
               <Route path="/" element={<WorkspaceHomePage teamsHost={teamsHost} />} />
               <Route path="/project/:id" element={<ProjectPage />} />
               <Route path="/playbooks/:entityType/:entityId" element={<PlaybookLibraryPage />} />
-              <Route path="/upload" element={<DocumentUploadPage />} />
+              <Route path="/upload" element={<DocumentUploadPage teamsHost={teamsHost} />} />
               <Route
                 path="/settings"
                 element={<SettingsPage isDark={isDark} onToggleDark={onToggleDark} portalUser={portalUser} />}
@@ -191,16 +192,15 @@ export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) =>
   const [theme, setTheme] = React.useState<Theme>(resolveCodePageTheme);
 
   const { accounts, instance } = useMsal();
-  const portalUser =
-    import.meta.env.VITE_DEV_MOCK === 'true'
-      ? {
-          userName: 'jane.smith@externalfirm.com',
-          firstName: 'Jane',
-          lastName: 'Smith',
-          displayName: 'Jane Smith (Mock)',
-          tenantId: 'mock',
-        }
-      : accountToPortalUser(accountsForActivePlane(accounts)[0]);
+  const portalUser = isDevMockEnabled()
+    ? {
+        userName: 'jane.smith@externalfirm.com',
+        firstName: 'Jane',
+        lastName: 'Smith',
+        displayName: 'Jane Smith (Mock)',
+        tenantId: 'mock',
+      }
+    : accountToPortalUser(accountsForActivePlane(accounts)[0]);
 
   const isDark = theme === webDarkTheme;
 
@@ -225,7 +225,7 @@ export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) =>
   // organization / Partner" chooser and the user can switch planes; no-op for Teams (no stored realm)
   // and for dev mock mode (no live MSAL instance to log out of).
   const handleSignOut = React.useCallback(() => {
-    if (import.meta.env.VITE_DEV_MOCK === 'true') return;
+    if (isDevMockEnabled()) return;
     clearStoredRealm();
     // The tab's active customer key goes with the realm, so the next sign-in re-selects the customer (task 041).
     clearActiveBackend();

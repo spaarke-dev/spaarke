@@ -59,6 +59,7 @@ import { acquireActiveBffToken } from './msal-auth';
 import { bffRequestUrl, getActiveBackend } from './backend-selection';
 import { ApiError } from '../types';
 import { getMockResponse } from '../mocks/mock-service';
+import { isDevMockEnabled } from '../dev-mock';
 
 // ---------------------------------------------------------------------------
 // Request / Response types for BFF endpoints
@@ -173,7 +174,7 @@ export interface ExternalUserContextResponse {
  * @returns Parsed JSON response body typed as T.
  */
 export async function bffApiCall<T>(path: string, options: RequestInit = {}): Promise<T> {
-  if (import.meta.env.VITE_DEV_MOCK === 'true') {
+  if (isDevMockEnabled()) {
     return getMockResponse<T>(path, options);
   }
 
