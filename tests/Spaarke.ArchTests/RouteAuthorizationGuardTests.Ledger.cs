@@ -1594,9 +1594,9 @@ public partial class RouteAuthorizationGuardTests
             + "writes app-only (:229). The body is validated and an unattributable sender refused before any read (:177, :195)."),
         new HandlerDecision("POST /api/v1/external/servicerequests", "SubmitServiceRequestAsync", "IsEntitledAsync", Array.Empty<string>(),
             "Task 035 (FR-05/FR-06): 403 unless the caller principal is entitled to legal-front-door "
-            + "(ModuleEntitlementResolver.IsEntitledAsync, ExternalIntakeEndpoints.cs:101 — a CIAM partner only with the partner "
-            + "switch on) and has a contact (:113), before the one app-only create, whose sprk_requestedby is that contact "
-            + "(:138). The route names no existing record."),
+            + "(ModuleEntitlementResolver.IsEntitledAsync, ExternalIntakeEndpoints.cs:125 — a CIAM partner only with the partner "
+            + "switch on) and has a contact (:138, :149), before the one app-only create, whose sprk_requestedby is that contact "
+            + "(:174). The route names no existing record."),
         new HandlerDecision("GET /api/office/communications/by-message-id/{internetMessageId}", "FindByMessageIdAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Reads through IDataverseUserClient under the CALLER's Dataverse security (task 127, "
             + "CommunicationsEndpoints.cs:145, :179); an unreadable communication 404s like a missing one."),
@@ -1718,7 +1718,9 @@ public partial class RouteAuthorizationGuardTests
                 "Membership of a record in the caller principal's accessible set for a registered module."),
             ["IsEntitledAsync"] = ("Infrastructure/ExternalAccess/ModuleEntitlementResolver.cs",
                 "The caller principal's Tier-1 module entitlement (r3 task 035): the same set /me/entitlements reports, from "
-                + "the server-resolved principal kind and the bound partner switch; false fails the route closed."),
+                + "the server-resolved principal kind and the bound partner switch; false fails the route closed. A MODULE-level "
+                + "decision only: it decides nothing about a record, so it may credit only a route that names none (no '{' in "
+                + "the route; EveryHandlerDecisionIsVerified enforces it)."),
             ["Tier2ScopeFilterInjector"] = ("Api/ExternalAccess/Tier2ScopeFilterInjector.cs",
                 "Rewrites the caller's FetchXML to their accessible-record set before it runs — the query is the gate."),
             ["DownloadFileAsUserAsync"] = ("Infrastructure/Graph/SpeFileStore.cs",

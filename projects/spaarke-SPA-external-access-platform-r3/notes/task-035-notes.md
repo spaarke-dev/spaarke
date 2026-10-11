@@ -169,3 +169,54 @@ The entitlement rule, the bound switch and the `service-requests` descriptor are
 - `tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalIntakeEndpointsTests.cs` (new)
 - `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ModuleEntitlementResolverTests.cs`
 - `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs`
+
+## Review fix round
+
+Two adversarial reviews of `47fe1f7f6` returned four fix-now items (F1 fail-closed contact read, F2 Dataverse failure mapping, F3 body cap, F2 ledger hardening). I worked from the brief's statement of them, not the full review text. Ownership is unchanged: `BuildServiceRequestCreatePayload` still writes no `ownerid`, pending the owner decision. Fix 3 supersedes K1 above (there is now a per-route cap).
+
+### 1. Contact-read fault reported as "not linked" (F1, fail-closed)
+
+- **Cause.** `WorkforcePrincipalResolver` sets `contactUnreadable` when the derived-contact read throws. `WorkforcePrincipalStrategy` mapped the principal to `ContactId = Guid.Empty` and dropped the flag, so a linked lawyer hit by a Dataverse 429 got 403 `sdap.external.intake.no_contact` ("ask your administrator").
+- **Fix.** `CallerPrincipal.ContactUnreadable` (default false) is copied from `WorkforcePrincipal.ContactUnreadable` where the workforce principal is built. The CIAM strategy and every other construction site are untouched, so no other caller changes behaviour. `ExternalIntakeEndpoints` returns 503 `EXT_INTAKE_CONTACT_UNREADABLE` ("...Nothing was submitted; try again shortly.") BEFORE the `Guid.Empty` -> 403 branch.
+- **Tests.** `SystemUserWhoseContactCouldNotBeRead_Gets503_NotTheNoContact403_AndNothingIsCreated` and `CallerPrincipalResolverTests.WorkforceStrategy_SystemUser_CarriesTheContactUnreadableFlagOntoThePrincipal` (true and false cases).
+- **Fail-before.** With the flag copy and the 503 branch disabled: the endpoint test failed, and the resolver test failed for `contactUnreadable: True` (the `False` case is the control and passes).
+- **Other consumers of an empty `ContactId` on the external surface (listed, NOT changed):**
+  - `Infrastructure/DI/ExternalAccessModule.cs:693`, `ServiceRequestsModule.AccessibleRecordIds`: an empty contact gives an empty set, so an unreadable contact shows an empty Service Requests tab, not an error.
+  - `Api/ExternalAccess/ExternalProjectDataEndpoints.cs:633`: to-do create maps `Guid.Empty` to "unassigned"; an unreadable contact creates the to-do unassigned.
+  - `Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:294`, `IsContactPrincipal`: false for a systemuser either way.
+  - `Api/ExternalAccess/ExternalMessageEndpoints.cs:543`: sender attribution treats `Guid.Empty` as "not the sender".
+  - `Infrastructure/ExternalAccess/ExternalDataService.cs:729`: `BuildServiceRequestCreatePayload` rejects an empty requester (backstop).
+
+### 2. Dataverse failures all became 500 (F2)
+
+- **Fix.** `ExternalDataService.CreateServiceRequestAsync` maps `HttpRequestException`, `TaskCanceledException` when `!ct.IsCancellationRequested`, and 429 / 5xx responses to the existing `DataverseUnavailableException` (no new type). Other non-success (4xx) stays `InvalidOperationException`; a caller who cancelled still sees the cancellation. The handler catches it: 503 `EXT_INTAKE_DATAVERSE_UNAVAILABLE`, detail "Nothing was submitted; try again.". Everything else stays 500 `EXT_INTAKE_INTERNAL_ERROR`. Neither response carries exception text.
+- **Tests.** Route level: `DataverseUnavailableOnTheCreate_Gets503_WithTheErrorCode_AndNoExceptionText`, `AnyOtherFailureOnTheCreate_Gets500_WithTheInternalErrorCode_AndNoExceptionText`. Service level (new file `Infrastructure/ExternalAccess/ExternalDataServiceServiceRequestCreateTests.cs`): transport failure, HttpClient timeout, caller cancel (stays a cancellation), 429/500/502/503/504, 400/403/404 (plain failure), success.
+- **Fail-before.** With the service mapping reverted and the handler catch disabled: the route 503 test failed (got 500 `EXT_INTAKE_INTERNAL_ERROR`) and all 7 service-level mapping tests failed (transport, timeout, 5 status codes). The 500 test and the 4xx / cancel / success tests are controls and pass before and after.
+
+### 3. No per-route body cap (F3)
+
+- **Fix.** `.WithMetadata(new RequestSizeLimitAttribute(ExternalIntakeEndpoints.MaxRequestBodyBytes))`, 256 KB (precedent `ComposeSaveEndpoints.cs:41`). Answers over 100 KB and under the cap keep the AC's 400 (`AnswersOver100Kb_Gets400_...` still passes); a body over the cap is 413. The route description and `ProducesProblem(413)` say so.
+- **Test host does not enforce it.** I wrote a 256 KB + 1 body test first; it got the handler's 400, not 413, because TestServer has no `IHttpMaxRequestBodySizeFeature`. I removed it and assert the metadata on the endpoint instead (`TheRoute_CarriesTheRequestSizeLimitMetadata`, `IRequestSizeLimitMetadata.MaxRequestBodySize == 262144`), the same proof the Compose contract test uses. The 413 itself is Kestrel behaviour and is unproven here.
+- **Fail-before.** With the `WithMetadata` line commented out, the metadata test failed.
+
+### 4. Ledger hardening (F2)
+
+- **Fix.** `IsEntitledAsync` in `CallerContextSeams` is a Tier-1 module entitlement, not a per-resource decision. `EveryHandlerDecisionIsVerified` now also fails any `HandlerDecision` whose `Seam == "IsEntitledAsync"` has a `Route` containing `{` (`ModuleSeamOnRecordRouteViolations`). The seam's Reason says so. Added a must-fire / must-not-fire control, `ModuleEntitlementSeam_CannotCreditARecordRoute`. The intake route's ledger line citations were moved to the new line numbers.
+- **Fires.** I added a temporary entry `GET /api/v1/external/{root}/{id:guid}/messages` with seam `IsEntitledAsync` and ran the `RouteAuthorizationGuardTests`. `EveryHandlerDecisionIsVerified` failed with "IsEntitledAsync is a module-level entitlement and decides nothing about a record..." (Rule A also failed, on the same bogus entry). I removed the entry and the full ArchTests passed.
+
+### Known limits (not fixed here)
+
+- **K-a:** AC 2 is proven at the descriptor predicate (`ServiceRequestsModule.ScopeRows` / `AccessibleRecordIds`). A live dev submit plus a Service Requests tab read is the closing proof.
+- **K-b:** a malformed body gives a bare 400 with no problem body (platform binding behaviour, as in task 034). Tasks 052/053 (the wizards) must not parse the error body of a 400 and should treat a bare 400 as "invalid submission".
+- **K-c:** the route mixes `reasonCode` (403) and `errorCode` (400/500/503), the same as task 034. The wizards must read both.
+- **K-d:** the test-host rate limiter is live (50 per minute per fixture key); a test that posts more than that in one fixture would see 429.
+- **K-e:** duplicate keys in `answers` are stored verbatim in `sprk_intakedata` (the raw JSON text is written, not re-serialised).
+- **K-f:** the 850-character title boundary is now pinned (`TitleOfExactly850Characters_Gets201`; 851 was already a 400).
+- **K-g:** the 413 is unproven in the test host (fix 3).
+
+### Verification
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
+- `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~ExternalAccess|FullyQualifiedName~CallerPrincipal|FullyQualifiedName~WorkforcePrincipal"`: 2085 passed, 0 failed.
+- `dotnet test tests/Spaarke.ArchTests/`: 941 passed, 0 failed.
+- The full unit suite was not run (busy machine, per the brief).

@@ -9,6 +9,8 @@ using Azure.Core;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Metadata;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -316,6 +318,101 @@ public sealed class ExternalIntakeEndpointsTests : IClassFixture<ExternalIntakeE
     }
 
     // =====================================================================
+    // Review fix round (F1): a contact that could not be READ is a retryable 503, not "not linked"
+    // =====================================================================
+
+    [Fact]
+    public async Task SystemUserWhoseContactCouldNotBeRead_Gets503_NotTheNoContact403_AndNothingIsCreated()
+    {
+        _fixture.Principal = IntakeTestData.SystemUser(contactId: Guid.Empty, contactUnreadable: true);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route, IntakeTestData.Body(NdaAssessment, "NDA", "{}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, await response.Content.ReadAsStringAsync());
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("errorCode").GetString().Should().Be(ExternalIntakeEndpoints.ErrorContactUnreadable);
+        problem.RootElement.GetProperty("detail").GetString().Should().Contain("try again");
+        problem.RootElement.TryGetProperty("reasonCode", out _).Should().BeFalse("it is not the final no_contact deny");
+        _fixture.Data.Created.Should().BeEmpty();
+    }
+
+    // =====================================================================
+    // Review fix round (F2): Dataverse failures on the create
+    // =====================================================================
+
+    [Fact]
+    public async Task DataverseUnavailableOnTheCreate_Gets503_WithTheErrorCode_AndNoExceptionText()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+        _fixture.Data.ThrowOnCreate = new ExternalDataService.DataverseUnavailableException(
+            "SECRET-HOST-org1234.crm.dynamics.com answered 429", new HttpRequestException("SECRET-INNER-TEXT"));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route, IntakeTestData.Body(NdaAssessment, "NDA", "{}"));
+
+        var raw = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, raw);
+        using var problem = JsonDocument.Parse(raw);
+        problem.RootElement.GetProperty("errorCode").GetString().Should().Be(ExternalIntakeEndpoints.ErrorDataverseUnavailable);
+        problem.RootElement.GetProperty("detail").GetString().Should().Be("Nothing was submitted; try again.");
+        raw.Should().NotContain("SECRET");
+        _fixture.Data.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AnyOtherFailureOnTheCreate_Gets500_WithTheInternalErrorCode_AndNoExceptionText()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+        _fixture.Data.ThrowOnCreate = new InvalidOperationException("SECRET-PAYLOAD-REJECTED sprk_intakedata");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route, IntakeTestData.Body(NdaAssessment, "NDA", "{}"));
+
+        var raw = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, raw);
+        (await IntakeTestData.ProblemCode(response, "errorCode")).Should().Be("EXT_INTAKE_INTERNAL_ERROR");
+        raw.Should().NotContain("SECRET");
+    }
+
+    // =====================================================================
+    // Review fix round (F3): the per-route body cap
+    // =====================================================================
+
+    // The test host does not enforce RequestSizeLimitAttribute (TestServer's request has no IHttpMaxRequestBodySizeFeature, so a
+    // 256 KB + 1 body came back as the handler's 400, not 413). Kestrel enforces it on the real host; here the metadata the
+    // platform enforces is asserted on the endpoint, the same proof the Compose routes' contract test uses.
+    [Fact]
+    public void TheRoute_CarriesTheRequestSizeLimitMetadata()
+    {
+        // Independent of how the test host enforces the limit: the metadata the platform enforces is on the endpoint.
+        var endpoint = _fixture.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Single(e => e.RoutePattern.RawText == "/api/v1/external/servicerequests"
+                && e.Metadata.GetMetadata<IHttpMethodMetadata>()!.HttpMethods.Contains("POST"));
+
+        endpoint.Metadata.GetMetadata<IRequestSizeLimitMetadata>()!.MaxRequestBodySize
+            .Should().Be(ExternalIntakeEndpoints.MaxRequestBodyBytes);
+    }
+
+    // =====================================================================
+    // Review fix round: the 850-character title boundary
+    // =====================================================================
+
+    [Fact]
+    public async Task TitleOfExactly850Characters_Gets201()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+        var title = new string('t', ExternalIntakeEndpoints.MaxTitleLength);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route, IntakeTestData.Body(NdaAssessment, title, "{}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        _fixture.Data.Created.Single().Payload["sprk_name"].Should().Be(title);
+    }
+
+    // =====================================================================
     // Fixture
     // =====================================================================
 
@@ -490,11 +587,23 @@ public sealed class InMemoryServiceRequestData : ExternalDataService
 
     public IReadOnlyList<CreatedServiceRequest> Created => _created.ToList();
 
-    public void Reset() => _created.Clear();
+    /// <summary>When set, the next creates throw it (a Dataverse fault) instead of recording a row.</summary>
+    public Exception? ThrowOnCreate { get; set; }
+
+    public void Reset()
+    {
+        _created.Clear();
+        ThrowOnCreate = null;
+    }
 
     public override Task<Guid> CreateServiceRequestAsync(
         Guid requesterContactId, int requestType, string name, string intakeDataJson, CancellationToken ct = default)
     {
+        if (ThrowOnCreate is { } fault)
+        {
+            throw fault;
+        }
+
         var payload = BuildServiceRequestCreatePayload(requesterContactId, requestType, name, intakeDataJson);
         var id = Guid.NewGuid();
         _created.Enqueue(new CreatedServiceRequest(id, payload));
@@ -534,10 +643,11 @@ internal static class IntakeTestData
     };
 
     /// <summary>A licensed workforce caller; <paramref name="contactId"/> <see cref="Guid.Empty"/> = no linked contact.</summary>
-    public static CallerPrincipal SystemUser(Guid? contactId = null) => new()
+    public static CallerPrincipal SystemUser(Guid? contactId = null, bool contactUnreadable = false) => new()
     {
         Plane = CallerPrincipalPlane.Workforce,
         ContactId = contactId ?? Guid.NewGuid(),
+        ContactUnreadable = contactUnreadable,
         SystemUserId = Guid.NewGuid(),
         Email = "lawyer@spaarke.test",
         ProjectAccess = Array.Empty<CallerProjectAccess>(),

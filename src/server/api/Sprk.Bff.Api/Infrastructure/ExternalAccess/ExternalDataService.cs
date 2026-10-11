@@ -747,7 +747,9 @@ public class ExternalDataService
 
     /// <summary>
     /// Creates one <c>sprk_servicerequest</c> from a Legal Front Door submission, app-only (no OBO), and returns its id.
-    /// The payload is <see cref="BuildServiceRequestCreatePayload"/>'s. A non-success response throws.
+    /// The payload is <see cref="BuildServiceRequestCreatePayload"/>'s. A non-success response throws:
+    /// <see cref="DataverseUnavailableException"/> for a transport failure, an HttpClient timeout, a 429 or a 5xx (nothing was
+    /// created; retry), <see cref="InvalidOperationException"/> for any other failure.
     /// </summary>
     // `virtual` per ADR-038 §4 (substitution seam): the intake route tests record the payload and assert that a refused
     // submission never reached Dataverse.
@@ -770,7 +772,21 @@ public class ExternalDataService
             Encoding.UTF8,
             "application/json");
 
-        var response = await _httpClient.SendAsync(httpRequest, ct);
+        HttpResponseMessage response;
+        try
+        {
+            response = await _httpClient.SendAsync(httpRequest, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            // Transport failure: nothing was created. The caller reports a retryable 503 (task 035 review F2).
+            throw new DataverseUnavailableException("Dataverse could not be reached to create the service request.", ex);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            // The HttpClient timeout, not the caller walking away.
+            throw new DataverseUnavailableException("Dataverse timed out creating the service request.", ex);
+        }
 
         if (!response.IsSuccessStatusCode)
         {
@@ -778,6 +794,12 @@ public class ExternalDataService
             _logger.LogWarning(
                 "[EXT-DATA] Create service request (type {RequestType}) failed for contact {ContactId}: {Status} — {Body}",
                 requestType, requesterContactId, response.StatusCode, errorBody);
+
+            // 429 and 5xx are Dataverse being unavailable or throttling: retryable, so a 503 upstream. Anything else
+            // (a 4xx the payload earned) stays a plain failure and a 500.
+            if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500)
+                throw new DataverseUnavailableException($"Dataverse answered {(int)response.StatusCode} creating the service request.");
+
             throw new InvalidOperationException($"Failed to create service request: {response.StatusCode}");
         }
 

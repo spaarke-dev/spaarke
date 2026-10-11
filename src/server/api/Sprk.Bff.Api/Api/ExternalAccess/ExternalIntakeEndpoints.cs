@@ -10,17 +10,20 @@
 //      ModuleEntitlementResolver.IsEntitledAsync — the ONE check that /me/entitlements reports and that reads the same
 //      ExternalAccessOptions value as the "service-requests" descriptor (review 011 K2). So a CIAM partner is refused
 //      (403) while ExternalAccess:PartnerServiceRequestsEnabled is off, and admitted when it is on, with no plane test here.
-//   2. The requester: the resolved principal's contact. A caller with none (a licensed systemuser not linked to a contact)
-//      is refused 403 with a reason that says so — the row could not be filed in their name, and the Service Requests
+//   2. The requester: the resolved principal's contact. A caller whose contact could not be READ (ContactUnreadable) is told
+//      503 to retry. A caller with none (a licensed systemuser not linked to a contact) is refused 403 with a reason that says so — the row could not be filed in their name, and the Service Requests
 //      module (scope sprk_requestedby = caller contact) could never show it to them.
 //   3. Validation: requestType ∈ the four sprk_requesttype options; title required (→ sprk_name, ≤ 850); answers a JSON
 //      object of ≤ 100 KB (UTF-8) → sprk_intakedata. Anything else is a 400 with an errorCode.
 //   4. The create: app-only (no OBO) through ExternalDataService.CreateServiceRequestAsync — sprk_requestedby,
-//      sprk_requesttype, sprk_intakedata, sprk_name, sprk_direction = Inbound. The request DTO is closed, so a requester,
+//      sprk_requesttype, sprk_intakedata, sprk_name, sprk_direction = Inbound. A Dataverse transport failure, timeout,
+//      429 or 5xx is a 503 (EXT_INTAKE_DATAVERSE_UNAVAILABLE, nothing submitted); any other failure is a 500. The route caps the
+//      whole body at 256 KB (413 above it). The request DTO is closed, so a requester,
 //      owner or creator named in the body never binds.
 
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -47,6 +50,20 @@ public static class ExternalIntakeEndpoints
     /// <summary>Error code for answers that are missing, not a JSON object, or over <see cref="MaxAnswersBytes"/>.</summary>
     public const string ErrorInvalidAnswers = "EXT_INTAKE_INVALID_ANSWERS";
 
+    /// <summary>Error code for a caller whose derived contact could not be READ (a Dataverse fault): retry, not a final deny.</summary>
+    public const string ErrorContactUnreadable = "EXT_INTAKE_CONTACT_UNREADABLE";
+
+    /// <summary>Error code for a create that Dataverse could not take right now (transport, timeout, 429, 5xx).</summary>
+    public const string ErrorDataverseUnavailable = "EXT_INTAKE_DATAVERSE_UNAVAILABLE";
+
+    /// <summary>
+    /// The whole-request body cap for the route: 256 KB. Minimal API binds the body before any handler gate, and the Kestrel
+    /// default is 30 MB, so without this a caller could make the BFF buffer and parse tens of MB only to be told 400.
+    /// Answers between 100 KB (<see cref="MaxAnswersBytes"/>) and this cap still get the handler's 400
+    /// (<see cref="ErrorInvalidAnswers"/>); a body above the cap gets the platform's 413.
+    /// </summary>
+    public const int MaxRequestBodyBytes = 256 * 1024;
+
     /// <summary>The largest <c>answers</c> object accepted: 100 KB of UTF-8 JSON (spec FR-05 / task 035).</summary>
     public const int MaxAnswersBytes = 100 * 1024;
 
@@ -62,12 +79,16 @@ public static class ExternalIntakeEndpoints
         externalGroup.MapPost("/servicerequests", SubmitServiceRequestAsync)
             .WithName("SubmitExternalServiceRequest")
             .WithSummary("Submit a Legal Front Door request as the caller")
+            // Minimal API binds the whole body before any gate; cap it (precedent: ComposeSaveEndpoints).
+            .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes))
             .WithDescription(
                 "Creates one sprk_servicerequest from a Legal Front Door wizard: the request type (NDA Assessment, " +
                 "Invention Submission, Policy Question or Trademark Search), a title and the answers (a JSON object of at " +
                 "most 100 KB). The requester is the caller's contact. 403 unless the caller is entitled to the " +
                 "legal-front-door module (CIAM partners only when the partner service-request switch is on) and has a " +
-                "contact; 400 for an unknown type, a missing title or invalid answers.")
+                "contact; 400 for an unknown type, a missing title or invalid answers; 413 for a request body over 256 KB " +
+                "(answers between 100 KB and that cap are a 400); 503 when the caller's contact cannot be read or Dataverse " +
+                "cannot take the create right now (nothing was submitted; try again).")
             // A write path: the same per-user throttle as the message post (task 034).
             .RequireRateLimiting("dataverse-query")
             .Accepts<SubmitServiceRequestRequest>("application/json")
@@ -75,8 +96,10 @@ public static class ExternalIntakeEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status413PayloadTooLarge)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return externalGroup;
     }
@@ -109,7 +132,20 @@ public static class ExternalIntakeEndpoints
                 DenyModuleNotEntitled, "You are not entitled to submit Legal Front Door requests.");
         }
 
-        // 2. The requester is the resolved principal's contact, never client input.
+        // 2. The requester is the resolved principal's contact, never client input. A contact that could not be READ is
+        //    unknown, not absent: ContactId is Guid.Empty in both cases, so the flag decides. A linked lawyer hit by a
+        //    Dataverse 429 is told to retry, not that their account is unlinked (task 035 review F1, fail closed).
+        if (principal.ContactUnreadable && principal.ContactId == Guid.Empty)
+        {
+            logger.LogWarning(
+                "[EXT-INTAKE] Submit refused for systemuser {SystemUserId}: the derived contact could not be read.",
+                principal.SystemUserId);
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable, title: "Service Unavailable",
+                detail: "Your account could not be checked right now. Nothing was submitted; try again shortly.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorContactUnreadable });
+        }
+
         if (principal.ContactId == Guid.Empty)
         {
             logger.LogWarning(
@@ -148,6 +184,17 @@ public static class ExternalIntakeEndpoints
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (ExternalDataService.DataverseUnavailableException ex)
+        {
+            // Transport failure, timeout, 429 or 5xx: nothing was created, so a retry is safe. No exception text leaves.
+            logger.LogWarning(ex,
+                "[EXT-INTAKE] Dataverse unavailable creating a service request (type {RequestType}) for contact {ContactId}.",
+                requestType, principal.ContactId);
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable, title: "Service Unavailable",
+                detail: "Nothing was submitted; try again.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorDataverseUnavailable });
         }
         catch (Exception ex)
         {
