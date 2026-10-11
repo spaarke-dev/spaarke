@@ -122,6 +122,15 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         if (topology != ThreadTypeDirect)
             return Array.Empty<Guid>(); // topology gate — Open/record-anchored threads are unaffected
 
+        return await ReadOwnerAndSharesAsync(threadId, thread, ct);
+    }
+
+    /// <summary>
+    /// A Direct thread's two-party list: its user owner ∪ the systemusers it is POA-shared to. No topology check: the
+    /// caller has decided the thread is Direct (the gate above, or the join for a grant, #1629).
+    /// </summary>
+    private async Task<IReadOnlyList<Guid>> ReadOwnerAndSharesAsync(Guid threadId, Entity thread, CancellationToken ct)
+    {
         var participants = new List<Guid>();
         if (thread.GetAttributeValue<EntityReference>("ownerid") is { } owner
             && string.Equals(owner.LogicalName, SystemUserEntity, StringComparison.OrdinalIgnoreCase))
@@ -154,12 +163,19 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
 
     /// <inheritdoc />
     /// <remarks>
-    /// Generalized (task 052 / FR-11): topology decides the principal source, the grant call is the SAME
-    /// one call in both branches. <b>Direct</b> → the existing owner ∪ POA two-party list (task 043,
-    /// UNCHANGED). <b>Open / record-anchored</b> (topology gate on <see cref="GetParticipantSystemUserIdsAsync"/>
-    /// returns empty) → the task-041 <see cref="IThreadMembershipDerivationService.DeriveAuthorizedSetAsync"/>
-    /// systemuser participants (contacts skipped — R2 scope). No second grant mechanism: both branches call
-    /// the SAME <see cref="IDataverseRecordShareService.GrantAccessAsync"/>.
+    /// Generalized (task 052 / FR-11): the audience decides the principal source, the grant call is the SAME one call in
+    /// every branch (<see cref="IDataverseRecordShareService.GrantAccessAsync"/>). <b>Direct</b> → the owner ∪ POA two-party
+    /// list (task 043). <b>Record</b> → the anchor record's grantees
+    /// (<see cref="IThreadMembershipDerivationService.DeriveAnchorGranteeUserIdsAsync"/>; contacts skipped — R2 scope).
+    /// <para><b>The audience is the join's, not a re-read (#1629 F-C).</b> A thread's <c>sprk_threadtype</c> and regarding
+    /// lookups are columns its owner can rewrite. Re-reading them here let an owner flip a joined record thread to Direct
+    /// (granting the message to themselves and their sharees) or swap its lookup to another record between the join and
+    /// the grant. <paramref name="assignment"/> carries the topology and anchor the join matched (Tier 2: the message's own
+    /// regarding) or read, so neither is read again.</para>
+    /// <para><b>Never the anchor's owning team (#1629 F-A).</b> A record thread's message is owned by the record's team
+    /// (task 146), so that team's members already read it; expanding the team (the business unit's default team owns
+    /// ordinary records: 174 members for one dev matter) cost one synchronous share per member on the send/ingest path,
+    /// every one redundant.</para>
     /// <para><b>Never on a secure message</b> (unified-access-control-r2 task 149 r1). A message filed under a secure
     /// project, matter or work assignment is owned by the Secure Record Owners team (task 146), and exactly the root's
     /// internal sharees may read it — <see cref="SecureChildShareSynchronizer"/> keeps its shares equal to the root's and
@@ -170,27 +186,27 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// cannot be determined, nothing is granted (fail closed, ADR-003; a missed grant is this method's documented
     /// best-effort degradation).</para>
     /// </remarks>
-    public async Task GrantMessageAccessAsync(Guid communicationId, Guid threadId, CancellationToken ct = default)
+    public async Task GrantMessageAccessAsync(Guid communicationId, ThreadAssignment assignment, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(assignment);
+        var threadId = assignment.ThreadId;
         try
         {
+            if (assignment.Audience == ThreadGrantAudience.None)
+                return;
+
             if (!await IsOrdinaryMessageAsync(communicationId, threadId, ct))
                 return;
 
-            var directParticipants = await GetParticipantSystemUserIdsAsync(threadId, ct);
-            if (directParticipants.Count > 0)
+            IReadOnlyList<Guid> principals = assignment.Audience switch
             {
-                // Direct 1:1 thread — existing owner ∪ POA two-party grant. UNCHANGED from task 043.
-                await GrantReadAccessToPrincipalsAsync(communicationId, threadId, directParticipants, ct);
-                return;
-            }
+                ThreadGrantAudience.DirectParticipants => await ReadDirectParticipantsForGrantAsync(threadId, ct),
+                ThreadGrantAudience.AnchorRecordMembers => await GetAnchorGranteesAsync(communicationId, assignment, ct),
+                _ => Array.Empty<Guid>(),
+            };
 
-            // Topology gate returned empty ⇒ not a Direct thread (or a Direct thread with no participants
-            // on record yet). Try the Open/record-anchored path: grant to the task-041 ADR-034-derived
-            // membership set's systemuser participants (skip contacts — R2 scope, R1 is internal-only).
-            var derivedParticipants = await GetDerivedSystemUserParticipantsAsync(communicationId, threadId, ct);
-            if (derivedParticipants.Count > 0)
-                await GrantReadAccessToPrincipalsAsync(communicationId, threadId, derivedParticipants, ct);
+            if (principals.Count > 0)
+                await GrantReadAccessToPrincipalsAsync(communicationId, threadId, principals, ct);
         }
         catch (Exception ex)
         {
@@ -199,6 +215,15 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
                 "Message access grant lookup failed (non-fatal) | CommunicationId={CommunicationId}, ThreadId={ThreadId}",
                 communicationId, threadId);
         }
+    }
+
+    /// <summary>The Direct two-party list of a thread the join found Direct (#1629: its type is not re-read).</summary>
+    private async Task<IReadOnlyList<Guid>> ReadDirectParticipantsForGrantAsync(Guid threadId, CancellationToken ct)
+    {
+        var thread = await _entityService.RetrieveAsync(ThreadEntity, threadId, new[] { "ownerid" }, ct);
+        if (thread is null || thread.Id == Guid.Empty)
+            return Array.Empty<Guid>();
+        return await ReadOwnerAndSharesAsync(threadId, thread, ct);
     }
 
     /// <summary>
@@ -275,34 +300,28 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     }
 
     /// <summary>
-    /// Open/record-anchored branch: reuses task 041's <see cref="IThreadMembershipDerivationService"/> (no
-    /// second derivation), then narrows to systemuser participants — contact (external) participants are
-    /// R2 scope, skipped for R1. De-duplicated. Derivation failure is swallowed (best-effort, NFR-02) and
-    /// returns empty, which the caller treats as a no-op.
+    /// Record branch: the anchor record's grantees (<see cref="IThreadMembershipDerivationService.DeriveAnchorGranteeUserIdsAsync"/>
+    /// — the anchor the join fixed, never its owning team). De-duplicated. A derivation failure is swallowed (best-effort,
+    /// NFR-02) and returns empty, which the caller treats as a no-op.
     /// </summary>
-    private async Task<IReadOnlyList<Guid>> GetDerivedSystemUserParticipantsAsync(
-        Guid communicationId, Guid threadId, CancellationToken ct)
+    private async Task<IReadOnlyList<Guid>> GetAnchorGranteesAsync(
+        Guid communicationId, ThreadAssignment assignment, CancellationToken ct)
     {
-        ThreadAuthorizedSet authorizedSet;
+        if (string.IsNullOrWhiteSpace(assignment.AnchorEntityType) || assignment.AnchorRecordId is not { } anchorId || anchorId == Guid.Empty)
+            return Array.Empty<Guid>();
+
         try
         {
-            authorizedSet = await _membershipDerivation.Value.DeriveAuthorizedSetAsync(threadId, ct);
+            return await _membershipDerivation.Value.DeriveAnchorGranteeUserIdsAsync(assignment.AnchorEntityType, anchorId, ct);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 ex,
-                "Open-thread membership derivation failed (non-fatal) | CommunicationId={CommunicationId}, ThreadId={ThreadId}",
-                communicationId, threadId);
+                "Record-thread grantee derivation failed (non-fatal) | CommunicationId={CommunicationId}, ThreadId={ThreadId}",
+                communicationId, assignment.ThreadId);
             return Array.Empty<Guid>();
         }
-
-        return authorizedSet.Participants
-            .Select(p => p.Participant)
-            .Where(p => string.Equals(p.EntityLogicalName, SystemUserEntity, StringComparison.OrdinalIgnoreCase))
-            .Select(p => p.RecordId)
-            .Distinct()
-            .ToList();
     }
 
     // ── find-or-create helper ───────────────────────────────────────────────────────────────────────

@@ -287,7 +287,7 @@ public class CommunicationServiceMessageSendTests
     {
         var throwingResolver = new Mock<IThreadResolver>();
         throwingResolver
-            .Setup(r => r.ResolveAndAssignThreadAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("thread boom"));
 
         var idempotency = new FakeIdempotencyService();
@@ -377,7 +377,7 @@ public class CommunicationServiceMessageSendTests
 
         var grantAccess = new Mock<Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService>();
         grantAccess
-            .Setup(g => g.GrantMessageAccessAsync(It.IsAny<Guid>(), explicitThreadId, It.IsAny<CancellationToken>()))
+            .Setup(g => g.GrantMessageAccessAsync(It.IsAny<Guid>(), It.Is<ThreadAssignment>(a => a.ThreadId == explicitThreadId), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var sut = BuildOutboundSut(
@@ -394,7 +394,7 @@ public class CommunicationServiceMessageSendTests
 
         resolver.Invocations.Should().BeEmpty(); // find-or-create resolver never called
         grantAccess.Verify(
-            g => g.GrantMessageAccessAsync(response.CommunicationId!.Value, explicitThreadId, It.IsAny<CancellationToken>()),
+            g => g.GrantMessageAccessAsync(response.CommunicationId!.Value, It.Is<ThreadAssignment>(a => a.ThreadId == explicitThreadId), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -406,8 +406,8 @@ public class CommunicationServiceMessageSendTests
         var resolvedThreadId = Guid.Parse("44444444-4444-4444-4444-444444444444");
         var resolver = new Mock<IThreadResolver>();
         resolver
-            .Setup(r => r.ResolveAndAssignThreadAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(resolvedThreadId);
+            .Setup(r => r.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ThreadAssignment.Direct(resolvedThreadId));
 
         var entity = EntityServiceCreating();
         var sut = BuildOutboundSut(
@@ -417,7 +417,7 @@ public class CommunicationServiceMessageSendTests
 
         response.CommunicationId.Should().NotBeNull();
         resolver.Verify(
-            r => r.ResolveAndAssignThreadAsync(
+            r => r.ResolveAndAssignAsync(
                 It.Is<ThreadResolutionRequest>(req => req.ChannelType == CommunicationType.Message),
                 It.IsAny<CancellationToken>()),
             Times.Once);

@@ -229,6 +229,52 @@ public class ThreadMembershipDerivationServiceTests
         requested.Should().Contain("sprk_regardingmatter");
     }
 
+    // ── #1629 F-A: the message-grant audience never expands the record's owning team ──
+
+    [Fact]
+    public async Task DeriveAnchorGranteeUserIdsAsync_SkipsTheOwningTeam_KeepsLookupUsersAndNonOwnerTeams()
+    {
+        var ownerTeam = Guid.Parse("77777777-0000-0000-0000-000000000007");
+        var otherTeam = Guid.Parse("78787878-0000-0000-0000-000000000008");
+        var attorney = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+        var otherTeamMember = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000002");
+        SetupDiscovery(("ownerid", "team"), ("owningteam", "team"), ("sprk_assignedattorney1", "systemuser"), ("sprk_assignedteam", "team"));
+        SetupAnchor(new Dictionary<string, EntityReference>
+        {
+            ["ownerid"] = new EntityReference("team", ownerTeam),
+            ["owningteam"] = new EntityReference("team", ownerTeam),
+            ["sprk_assignedattorney1"] = new EntityReference("systemuser", attorney),
+            ["sprk_assignedteam"] = new EntityReference("team", otherTeam),
+        });
+        var expanded = new List<Guid>();
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "teammembership"), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((q, _) => expanded.Add((Guid)q.Criteria.Conditions[0].Values[0]))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { new("teammembership") { ["systemuserid"] = otherTeamMember } }));
+
+        var grantees = await BuildSut().DeriveAnchorGranteeUserIdsAsync(AnchorEntity, MatterId);
+
+        grantees.Should().BeEquivalentTo(new[] { attorney, otherTeamMember });
+        expanded.Should().Equal(otherTeam); // the owning team is never expanded, wherever a lookup names it
+    }
+
+    [Fact]
+    public async Task DeriveAuthorizedSetAsync_StillExpandsTheOwningTeamForTheAcsReconcile()
+    {
+        var ownerTeam = Guid.Parse("77777777-0000-0000-0000-000000000007");
+        var member = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000002");
+        SetupThreadRow(ThreadTopology.RecordAnchored, ThreadPrivacyState.Open, typedMatter: MatterId, pair: MatterId.ToString());
+        SetupDiscovery(("ownerid", "team"));
+        SetupAnchor(new Dictionary<string, EntityReference> { ["ownerid"] = new EntityReference("team", ownerTeam) });
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "teammembership"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { new("teammembership") { ["systemuserid"] = member } }));
+
+        var set = await BuildSut().DeriveAuthorizedSetAsync(ThreadId);
+
+        set.Participants.Select(p => p.Participant.RecordId).Should().Equal(member);
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private void SetupThread(ThreadTopology topology, ThreadPrivacyState privacy, Guid? anchorId, string? anchorType)

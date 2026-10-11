@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Membership;
 using Sprk.Bff.Api.Services.Communication.Models;
@@ -221,6 +222,17 @@ public class DirectThreadAccessServiceTests
 
     // ── GrantMessageAccessAsync: the CRITICAL RISK fix — grants both participants, no-op otherwise ─
 
+    private static readonly Guid MatterA = Guid.Parse("77777777-7777-7777-7777-777777777777");
+    private static readonly Guid MatterX = Guid.Parse("88888888-8888-8888-8888-888888888888");
+
+    private static ThreadAssignment DirectJoin => ThreadAssignment.Direct(ThreadId);
+    private static ThreadAssignment AnchoredJoin(Guid matter) => ThreadAssignment.Anchored(ThreadId, "sprk_matter", matter);
+
+    private void SetupGrantees(Guid matter, params Guid[] users) =>
+        _membershipDerivation
+            .Setup(m => m.DeriveAnchorGranteeUserIdsAsync("sprk_matter", matter, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(users);
+
     [Fact]
     public async Task GrantMessageAccessAsync_DirectThread_GrantsReadAccessToBothParticipantsOnTheMessage()
     {
@@ -229,7 +241,7 @@ public class DirectThreadAccessServiceTests
             .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Shares(Other));
 
-        await BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
 
         _accessGrant.Verify(
             g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()),
@@ -240,25 +252,34 @@ public class DirectThreadAccessServiceTests
         _accessGrant.Verify(
             g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(ThirdUser), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
-        // No regression (task 052): the Direct branch returns before ever touching the task-041 derivation —
-        // one grant mechanism per topology, not a second path layered on top.
+        // One grant mechanism per audience: the Direct branch never touches the record derivation.
+        _membershipDerivation.Verify(
+            m => m.DeriveAnchorGranteeUserIdsAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         _membershipDerivation.Verify(
             m => m.DeriveAuthorizedSetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task GrantMessageAccessAsync_RecordAnchoredThreadWithNoDerivedMembership_GrantsNoAccess()
+    public async Task GrantMessageAccessAsync_RecordThreadWithNoGrantees_GrantsNoAccess()
     {
         SetupThread(ThreadId, ThreadTypeRecordAnchored, ownerId: Caller);
-        _membershipDerivation
-            .Setup(m => m.DeriveAuthorizedSetAsync(ThreadId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(ThreadAuthorizedSet.Empty(ThreadId));
+        SetupGrantees(MatterA);
 
-        await BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, AnchoredJoin(MatterA));
 
         _accessGrant.Verify(
             g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    public async Task GrantMessageAccessAsync_NoAudience_ReadsAndGrantsNothing()
+    {
+        // The per-user master (Tier 3) and an unanchored record thread grant nobody (#1629).
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadAssignment.NoGrant(ThreadId));
+
+        _accessGrant.Invocations.Should().BeEmpty();
+        _membershipDerivation.Invocations.Should().BeEmpty();
     }
 
     [Fact]
@@ -272,7 +293,7 @@ public class DirectThreadAccessServiceTests
             .Setup(g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("grant boom"));
 
-        var act = () => BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
+        var act = () => BuildSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
 
         await act.Should().NotThrowAsync(); // best-effort (NFR-02)
         _accessGrant.Verify(
@@ -280,25 +301,15 @@ public class DirectThreadAccessServiceTests
             Times.Once);
     }
 
-    // ── GrantMessageAccessAsync: OPEN/record-anchored thread — task 052 / FR-11 gap closure ──────
+    // ── GrantMessageAccessAsync: record thread — task 052 / FR-11, audience fixed at the join (#1629) ──
 
     [Fact]
-    public async Task GrantMessageAccessAsync_OpenThread_GrantsReadAccessToExactlyTheDerivedSystemUserSet()
+    public async Task GrantMessageAccessAsync_RecordThread_GrantsReadAccessToExactlyTheAnchorsGrantees()
     {
         SetupThread(ThreadId, ThreadTypeRecordAnchored, ownerId: Caller);
-        _membershipDerivation
-            .Setup(m => m.DeriveAuthorizedSetAsync(ThreadId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ThreadAuthorizedSet
-            {
-                ThreadId = ThreadId,
-                Participants = new[]
-                {
-                    new AuthorizedParticipant { Participant = ParticipantReference.SystemUser(Caller), Reason = AuthorizationReason.RecordMembership },
-                    new AuthorizedParticipant { Participant = ParticipantReference.SystemUser(Other), Reason = AuthorizationReason.RecordMembership },
-                },
-            });
+        SetupGrantees(MatterA, Caller, Other);
 
-        await BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, AnchoredJoin(MatterA));
 
         _accessGrant.Verify(
             g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()),
@@ -306,61 +317,152 @@ public class DirectThreadAccessServiceTests
         _accessGrant.Verify(
             g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Other), "ReadAccess", It.IsAny<CancellationToken>()),
             Times.Once);
-        // Negative: a user NOT in the task-041 derived set is never granted (a non-member's impersonated
-        // read must still return nothing).
+        // EXACTLY the grantees — no more, no less (no over-grant), and a non-member never.
         _accessGrant.Verify(
             g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(ThirdUser), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
-        // EXACTLY the derived set — no more, no less (no over-grant).
         _accessGrant.Verify(
             g => g.GrantAccessAsync("sprk_communications", CommunicationId, It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Exactly(2));
     }
 
     [Fact]
-    public async Task GrantMessageAccessAsync_OpenThreadWithContactParticipant_SkipsTheContact()
+    public async Task GrantMessageAccessAsync_ThreadFlippedToDirectAfterAJoinAsARecordThread_StillGrantsOnlyTheAnchorsGrantees()
     {
-        SetupThread(ThreadId, ThreadTypeRecordAnchored, ownerId: Caller);
-        var contactId = Guid.Parse("66666666-6666-6666-6666-666666666666");
-        _membershipDerivation
-            .Setup(m => m.DeriveAuthorizedSetAsync(ThreadId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ThreadAuthorizedSet
-            {
-                ThreadId = ThreadId,
-                Participants = new[]
-                {
-                    new AuthorizedParticipant { Participant = ParticipantReference.SystemUser(Caller), Reason = AuthorizationReason.RecordMembership },
-                    new AuthorizedParticipant { Participant = ParticipantReference.Contact(contactId), Reason = AuthorizationReason.RecordMembership },
-                },
-            });
+        // #1629 F-C: the thread's owner flipped sprk_threadtype to Direct (and shared it) after the join. The grant follows
+        // the join's audience: the anchor's grantees. The owner and their sharee are never granted.
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(ThirdUser));
+        SetupGrantees(MatterA, Other);
 
-        await BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, AnchoredJoin(MatterA));
 
         _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Other), "ReadAccess", It.IsAny<CancellationToken>()),
             Times.Once);
-        // R2 scope: contact (external) participants are skipped in R1.
-        _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(contactId), It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never);
         _accessGrant.Verify(
             g => g.GrantAccessAsync("sprk_communications", CommunicationId, It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Once); // exactly one grant — the systemuser only
+            Times.Once);
+        _entityService.Verify(
+            s => s.RetrieveAsync("sprk_communicationthread", ThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task GrantMessageAccessAsync_OpenThreadWhenDerivationThrows_SwallowsAndGrantsNothing()
+    public async Task GrantMessageAccessAsync_AnchorSwappedAfterTheJoin_GrantsTheJoinTimeAnchorsGrantees()
+    {
+        // #1629 F-C: the owner swapped the thread's lookup from matter A to secure-adjacent matter X after the join. The grant
+        // derives from A (the join's anchor) and never asks for X, nor for the thread's current set.
+        SetupThread(ThreadId, ThreadTypeRecordAnchored, ownerId: Caller);
+        SetupGrantees(MatterA, Other);
+        SetupGrantees(MatterX, ThirdUser);
+
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, AnchoredJoin(MatterA));
+
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Other), "ReadAccess", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(ThirdUser), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _membershipDerivation.Verify(
+            m => m.DeriveAnchorGranteeUserIdsAsync("sprk_matter", MatterX, It.IsAny<CancellationToken>()), Times.Never);
+        _membershipDerivation.Verify(
+            m => m.DeriveAuthorizedSetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GrantMessageAccessAsync_ThreadFlippedToRecordAnchoredAfterADirectJoin_StillGrantsTheTwoParties()
+    {
+        // The reverse flip: a Direct join keeps its two-party audience; no record membership is derived.
+        SetupThread(ThreadId, ThreadTypeRecordAnchored, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
+
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, DirectJoin);
+
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+        _membershipDerivation.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GrantMessageAccessAsync_RecordThreadWhenDerivationThrows_SwallowsAndGrantsNothing()
     {
         SetupThread(ThreadId, ThreadTypeRecordAnchored, ownerId: Caller);
         _membershipDerivation
-            .Setup(m => m.DeriveAuthorizedSetAsync(ThreadId, It.IsAny<CancellationToken>()))
+            .Setup(m => m.DeriveAnchorGranteeUserIdsAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("derivation boom"));
 
-        var act = () => BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
+        var act = () => BuildSut().GrantMessageAccessAsync(CommunicationId, AnchoredJoin(MatterA));
 
         await act.Should().NotThrowAsync(); // best-effort (NFR-02) — a derivation failure never fails ingest/send
         _accessGrant.Verify(
             g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    // ── #1629 F-A: the grant never expands the anchor's owning team (real derivation, evaluating mocks) ──
+
+    [Fact]
+    public async Task GrantMessageAccessAsync_TeamOwnedMatter_GrantsTheLookupNamedUserAndNoTeamMember()
+    {
+        // An ordinary matter owned by the business unit's default team (N members) with an assigned attorney (a user). The
+        // team's members already read the team-owned message; only the lookup-named user is granted — one share, not N+1.
+        var ownerTeam = Guid.Parse("99999999-0000-0000-0000-000000000009");
+        var attorney = Guid.Parse("aaaaaaaa-0000-0000-0000-00000000000a");
+        var teamMembers = Enumerable.Range(1, 174).Select(i => Guid.Parse($"bbbbbbbb-0000-0000-0000-{i:D12}")).ToArray();
+
+        var discovery = new Mock<Sprk.Bff.Api.Services.Ai.Membership.IMembershipFieldDiscoveryService>();
+        discovery
+            .Setup(d => d.DiscoverAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Sprk.Bff.Api.Services.Ai.Membership.DiscoveryResult(
+                "sprk_matter", DateTimeOffset.UtcNow,
+                new[]
+                {
+                    new Sprk.Bff.Api.Services.Ai.Membership.Models.MembershipDescriptor("ownerid", "ownerid", "systemuser", "systemuser", "auto"),
+                    new Sprk.Bff.Api.Services.Ai.Membership.Models.MembershipDescriptor("ownerid", "ownerid", "team", "team", "auto"),
+                    new Sprk.Bff.Api.Services.Ai.Membership.Models.MembershipDescriptor("owningteam", "owningteam", "team", "team", "auto"),
+                    new Sprk.Bff.Api.Services.Ai.Membership.Models.MembershipDescriptor("sprk_assignedattorney", "sprk_assignedattorney", "systemuser", "systemuser", "auto"),
+                },
+                Array.Empty<Sprk.Bff.Api.Services.Ai.Membership.IgnoredField>(),
+                Array.Empty<Sprk.Bff.Api.Services.Ai.Membership.IgnoredField>()));
+        _entityService
+            .Setup(s => s.RetrieveAsync("sprk_matter", MatterA, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter")
+            {
+                Id = MatterA,
+                ["ownerid"] = new EntityReference("team", ownerTeam),
+                ["owningteam"] = new EntityReference("team", ownerTeam),
+                ["sprk_assignedattorney"] = new EntityReference("systemuser", attorney),
+            });
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "teammembership"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(teamMembers.Select(m => new Entity("teammembership") { ["systemuserid"] = m }).ToList()));
+
+        var derivation = new ThreadMembershipDerivationService(
+            _entityService.Object, discovery.Object, Mock.Of<IThreadExplicitParticipantReader>(),
+            Mock.Of<ILogger<ThreadMembershipDerivationService>>());
+        var sut = new DirectThreadAccessService(
+            _entityService.Object, _accessGrant.Object,
+            new Lazy<IThreadMembershipDerivationService>(() => derivation),
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
+            Mock.Of<ILogger<DirectThreadAccessService>>());
+
+        await sut.GrantMessageAccessAsync(CommunicationId, AnchoredJoin(MatterA));
+
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(attorney), "ReadAccess", It.IsAny<CancellationToken>()),
+            Times.Once);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        _entityService.Verify(
+            s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "teammembership"), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
