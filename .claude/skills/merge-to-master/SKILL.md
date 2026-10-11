@@ -5,7 +5,7 @@ techStack: [all]
 appliesTo: ["merge to master", "ship to master", "promote to master", "open merge PR", "auto-merge to master", "check unmerged branches", "reconcile branches", "sync master"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-05-16
+last-reviewed: 2026-10-10
 ---
 
 # merge-to-master
@@ -62,7 +62,7 @@ Ensure completed project branch work is merged back into master so new projects 
 ## Prerequisites
 
 - Git repository with `origin` remote configured
-- `master` branch exists locally and on origin
+- `origin/master` reachable after `git fetch origin` (no local `master` checkout is needed — a project worktree cannot have one)
 - User has push access to origin/master
 
 ---
@@ -151,9 +151,14 @@ CHECK 3 - Divergence analysis:
   REPORT: "Master is {master_ahead} commits ahead, branch has {branch_ahead} to merge"
 
 CHECK 4 - Conflict preview (read-only; touches no working tree, no checkout needed):
-  git merge-tree --write-tree --name-only origin/master HEAD
-  → exit 0 = clean; exit 1 = conflicts — the lines after the first (the tree id) up to the
-    first blank line are the conflicted files. Needs git ≥ 2.38.
+  git merge-tree --write-tree --name-only origin/master {branch_ref}
+    # {branch_ref} = HEAD when merging the current branch (the normal case; Step 2.5a requires it)
+    #              = work/{branch} when previewing a branch this worktree is not on
+    #                ("merge {branch} to master", Full Reconciliation) — branch refs are shared
+  → exit 0 = clean (the output is the single tree id); exit 1 = conflicts — the lines after the
+    first (the tree id) up to the first blank line are the conflicted files, one per line.
+    Sanity: line 1 must be a 40-hex tree id — an unknown ref ALSO exits 1, with
+    "merge-tree: {ref} - not something we can merge" as its only line. Needs git ≥ 2.38.
   (Previously a trial `git merge --no-commit` on a checked-out master, then `--abort` —
   impossible from a worktree; see CHECK 2.)
 
@@ -171,7 +176,7 @@ CHECK 4 - Conflict preview (read-only; touches no working tree, no checkout need
 > Added 2026-08-29 by owner direction: *"whenever we invoke `/merge-to-master` we always want the
 > worktree to first update and check for conflicts to ensure no issues."*
 
-Step 2's CHECK 4 only *previews* conflicts by trial-merging on master and aborting. That is detection,
+Step 2's CHECK 4 only *previews* conflicts (a read-only `git merge-tree`). That is detection,
 not resolution — it leaves the branch unchanged and defers the real merge to a moment when the
 resolution lands **on master**. This step inverts that: bring master INTO the branch, resolve there,
 and let master only ever receive an already-reconciled branch.
@@ -334,13 +339,24 @@ STEP A.5 — Wait for auto-merge:
   IF auto-merge fails (e.g., new master commits cause conflicts): rebase + force-push the
   branch (with-lease), then auto-merge resumes.
 
-STEP A.6 — Post-merge cleanup:
-  Operator's main repo aligns with the new master — fast-forward only:
-    git -C {main-repo-path} pull --ff-only origin master
-  IF it refuses (local changes or divergence in the main checkout): STOP and report it.
-  NEVER `git reset --hard` / `git stash` / `git checkout --` there: the main checkout can hold
-  ANOTHER session's uncommitted work, and those commands destroy it silently. The merge already
-  happened on GitHub; a stale main checkout is an inconvenience, lost work is not recoverable.
+STEP A.6 — Post-merge cleanup (main checkout; fast-forward only, never over someone's state):
+  main_repo = dirname(git rev-parse --git-common-dir)        # ONE dirname — see worktree-sync Step 4
+  main_head = git -C {main_repo} symbolic-ref -q --short HEAD # empty / exit 1 = detached HEAD
+
+  IF main_head == "master":
+    git -C {main_repo} pull --ff-only origin master
+    IF it refuses (dirty files master also touched, untracked files master adds, or local
+    commits on master): STOP and report it. The merge already happened on GitHub.
+  ELSE (detached HEAD, or another branch checked out in the main repo):
+    REPORT: "Main checkout is on '{main_head or detached HEAD}' — not touching its working tree."
+    git -C {main_repo} fetch origin master:master   # ff-only ref update, no working-tree change;
+                                                     # refused if local master diverged → report
+  NEVER `git reset --hard` / `git stash` / `git checkout --` / `git checkout master` there: the main
+  checkout can hold ANOTHER session's uncommitted work, and those commands destroy it silently.
+  The merge already happened on GitHub; a stale main checkout is an inconvenience, lost work is not
+  recoverable. Why the HEAD guard: `pull --ff-only origin master` fast-forwards WHATEVER is checked
+  out — on a detached HEAD it moves HEAD and leaves `master` stale while reporting success; on another
+  branch it moves that branch's tip to origin/master (verified git 2.51, 2026-10-10).
   (Corrected 2026-10-10; this step used to run `git checkout master && git reset --hard origin/master`.)
 
 REPORT: "PR {N} created (URL). Auto-merge enabled. GitHub will merge when CI green."
@@ -423,10 +439,8 @@ IF build succeeds:
 GitHub handles the merge via auto-merge once required CI checks pass (Step A.5 above).
 Do NOT `git push origin master` on this path — direct push is rejected by branch protection.
 
-After the auto-merge fires, run **Step A.6 post-merge cleanup** on the operator's main repo:
-```
-git -C {main-repo-path} pull --ff-only origin master   # refuses rather than discards; never reset --hard
-```
+After the auto-merge fires, run **Step A.6** exactly as written there (HEAD guard + fast-forward only;
+never `reset --hard`).
 
 #### Path B (Direct Local Merge) — push to master
 
@@ -518,7 +532,7 @@ CHECK 4: Build compiles
 | Situation | Response |
 |-----------|----------|
 | Working tree dirty | STOP — ask user to commit or stash first |
-| Master diverged from origin | Pull origin/master first, then proceed |
+| Main checkout `master` diverged from origin / A.6 refuses | STOP and report. Never pull-merge, reset, stash or checkout there — the owner resolves it in the main checkout. The GitHub merge is already done; a stale main checkout is only an inconvenience. (Previously: "Pull origin/master first, then proceed" — that creates an unpushable merge commit on a protected master.) |
 | Build fails after merge | Fix errors before pushing; never push broken code |
 | Merge conflicts in >20 files | Warn user, suggest doing one branch at a time |
 | Branch doesn't exist | Report error, list available branches |
