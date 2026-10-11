@@ -2,7 +2,6 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Membership;
-using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 
 namespace Sprk.Bff.Api.Services.Communication.Membership;
@@ -114,10 +113,11 @@ public sealed class ThreadMembershipDerivationService : IThreadMembershipDerivat
         // participant (membership thrashing). Only a genuinely not-found thread returns null (→ empty set).
         // NOTE: sprk_communicationthread has NO 'sprk_regardingrecordtype' text attribute — requesting it in a
         // ColumnSet raised the create-time FaultException that surfaced as a 500 on POST /api/communications/threads
-        // (RB R3 UAT 2026-07-27, membership-derivation path). The anchor TYPE comes from the TYPED ADR-024 lookups
-        // (RegardingFieldMap); the denormalized sprk_regardingrecordid carries the id. Mirrors ThreadResolver.
+        // (RB R3 UAT 2026-07-27, membership-derivation path). Nor does it have 'sprk_regardingreportcard', so the
+        // typed lookups read are the thread's own (ThreadResolver.ThreadRegardingColumns): selecting a column the table
+        // lacks faults the whole read (#1629). sprk_regardingrecordid is read only to log a pair no lookup repeats.
         var columns = new List<string> { "sprk_threadtype", "sprk_privacystate", "sprk_regardingrecordid" };
-        columns.AddRange(RegardingFieldMap.AllRegardingFields);
+        columns.AddRange(ThreadResolver.ThreadRegardingColumns);
 
         var thread = await _entityService.RetrieveAsync(ThreadEntity, threadId, columns.ToArray(), ct);
 
@@ -132,18 +132,29 @@ public sealed class ThreadMembershipDerivationService : IThreadMembershipDerivat
             ? ThreadPrivacyState.Private
             : ThreadPrivacyState.Open;
 
-        // Resolve the anchor entity type from the first populated typed lookup (ADR-024 priority order). The id
-        // prefers the denormalized sprk_regardingrecordid, falling back to the typed lookup's own id.
-        var anchorRecordId = thread.GetAttributeValue<string>("sprk_regardingrecordid");
-        string? anchorRecordType = null;
-        foreach (var (entityLogicalName, field) in RegardingFieldMap.All)
+        // #1629: the anchor is the record the thread's TYPED regarding lookup names (the one thread-anchor rule,
+        // ThreadResolver.ThreadAnchorOf), never the plain-text sprk_regardingrecordid. Spaarke Basic/Core User hold Write on
+        // their own threads, so the pair is whatever the owner typed through the Web API: it was preferred here, and a
+        // user who pointed it at a secure matter while the lookup named their own matter had the secure matter's members
+        // derived into their thread (ACS participants, message read grants, notifications). Dataverse checks AppendTo on
+        // the lookup, so it is the anchor; the pair counts only when a typed lookup repeats it (#1628's rule), and a pair
+        // with no typed lookup anchors nothing: no member is derived from it (fail closed).
+        var anchor = ThreadResolver.ThreadAnchorOf(thread);
+        if (anchor.Pair == ThreadResolver.ThreadPairAgreement.NotRepeated)
         {
-            if (thread.GetAttributeValue<EntityReference>(field) is { } er && er.Id != Guid.Empty)
+            if (anchor.HasAnchor)
             {
-                anchorRecordType = string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName;
-                if (string.IsNullOrWhiteSpace(anchorRecordId))
-                    anchorRecordId = er.Id.ToString();
-                break;
+                _logger.LogWarning(
+                    "Thread {ThreadId}: its regarding pair '{PairId}' is not repeated by a typed regarding lookup; membership is " +
+                    "derived from the typed lookup's record {AnchorType}:{AnchorId}, never from the pair (#1629).",
+                    threadId, anchor.PairText, anchor.RecordType, anchor.RecordId);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Thread {ThreadId}: its regarding pair '{PairId}' is not repeated by a typed regarding lookup and nothing " +
+                    "else anchors it; no record membership is derived (fail closed, #1629).",
+                    threadId, anchor.PairText);
             }
         }
 
@@ -152,8 +163,8 @@ public sealed class ThreadMembershipDerivationService : IThreadMembershipDerivat
             ThreadId = threadId,
             Topology = topology,
             Privacy = privacy,
-            AnchorRecordId = anchorRecordId,
-            AnchorRecordType = anchorRecordType,
+            AnchorRecordId = anchor.RecordId?.ToString(),
+            AnchorRecordType = anchor.RecordType,
         };
     }
 

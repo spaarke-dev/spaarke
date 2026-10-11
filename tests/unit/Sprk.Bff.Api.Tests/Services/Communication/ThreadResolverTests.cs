@@ -320,6 +320,109 @@ public class ThreadResolverTests
         VerifyAssigned(request.CommunicationId, existingDefault, Times.Once());
     }
 
+    /// <summary>
+    /// The Tier-2 find query evaluated against <paramref name="rows"/> the way Dataverse would: a row is returned only when
+    /// every condition of the query holds on it (equality conditions; the only kind the find uses).
+    /// </summary>
+    private void SetupDefaultThreadRows(params DataverseEntity[] rows) =>
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+            {
+                var matches = rows.Where(row => q.Criteria.Conditions.All(c =>
+                {
+                    var value = row.Contains(c.AttributeName) ? row[c.AttributeName] : null;
+                    var actual = value switch
+                    {
+                        EntityReference er => (object)er.Id,
+                        OptionSetValue os => os.Value,
+                        _ => value,
+                    };
+                    return c.Operator == ConditionOperator.Equal && Equals(actual, c.Values[0]);
+                }));
+                return new EntityCollection(matches.Take(q.TopCount ?? int.MaxValue).ToList());
+            });
+
+    [Fact]
+    public async Task ResolveAndAssignThreadAsync_Tier2_NeverJoinsAThreadWhosePairAloneNamesTheRecord()
+    {
+        // #1629: a user marked their own thread as a default and set its pair (plain text) to matter X while its typed
+        // lookup names their own matter A. A message filed under X must not be drawn into that thread.
+        var request = Request(CommunicationType.Message, acsThreadId: null);
+        var matterX = Guid.NewGuid();
+        var matterA = Guid.NewGuid();
+        var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
+        SetMessageRegarding(communication, "sprk_matter", matterX, "Secure matter");
+        SetupRegardingRead(request.CommunicationId, communication);
+        var forged = Thread(Guid.NewGuid(), regardingType: "sprk_matter", regardingId: matterA.ToString(),
+            isDefault: true, threadType: ThreadTypeRecordAnchored);
+        forged["sprk_regardingrecordid"] = matterX.ToString();
+        var pairOnly = Thread(Guid.NewGuid(), isDefault: true, threadType: ThreadTypeRecordAnchored);
+        pairOnly["sprk_regardingrecordid"] = matterX.ToString();
+        SetupDefaultThreadRows(forged, pairOnly);
+        var newThreadId = SetupThreadCreateCapture(out var created);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Message, ThreadKeyResolution.Skip));
+
+        var result = await sut.ResolveAndAssignThreadAsync(request, CancellationToken.None);
+
+        result.Should().Be(newThreadId);
+        created.Should().ContainSingle();
+        created[0].GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(matterX);
+        VerifyAssigned(request.CommunicationId, forged.Id, Times.Never());
+        VerifyAssigned(request.CommunicationId, pairOnly.Id, Times.Never());
+        VerifyAssigned(request.CommunicationId, newThreadId, Times.Once());
+    }
+
+    [Fact]
+    public async Task ResolveAndAssignThreadAsync_Tier2_JoinsTheDefaultWhoseTypedLookupRepeatsThePair()
+    {
+        // The legitimate per-record default (typed lookup + the same pair) is still found and joined.
+        var request = Request(CommunicationType.Message, acsThreadId: null);
+        var matterX = Guid.NewGuid();
+        var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
+        SetMessageRegarding(communication, "sprk_matter", matterX);
+        SetupRegardingRead(request.CommunicationId, communication);
+        var legit = Thread(Guid.NewGuid(), regardingType: "sprk_matter", regardingId: matterX.ToString(),
+            isDefault: true, threadType: ThreadTypeRecordAnchored);
+        legit["sprk_regardingrecordid"] = matterX.ToString();
+        SetupDefaultThreadRows(legit);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Message, ThreadKeyResolution.Skip));
+
+        var result = await sut.ResolveAndAssignThreadAsync(request, CancellationToken.None);
+
+        result.Should().Be(legit.Id);
+        _entity.Verify(e => e.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+        VerifyAssigned(request.CommunicationId, legit.Id, Times.Once());
+    }
+
+    [Fact]
+    public void ThreadAnchorOf_AnchorsOnTheTypedLookupAndReportsThePairsStanding()
+    {
+        var matterA = Guid.NewGuid();
+        var matterX = Guid.NewGuid();
+
+        var disagreeing = Thread(Guid.NewGuid(), regardingType: "sprk_matter", regardingId: matterA.ToString());
+        disagreeing["sprk_regardingrecordid"] = matterX.ToString();
+        var anchor = ThreadResolver.ThreadAnchorOf(disagreeing);
+        (anchor.RecordType, anchor.RecordId, anchor.Pair).Should().Be(("sprk_matter", (Guid?)matterA, ThreadResolver.ThreadPairAgreement.NotRepeated));
+
+        var pairOnly = Thread(Guid.NewGuid());
+        pairOnly["sprk_regardingrecordid"] = matterX.ToString();
+        anchor = ThreadResolver.ThreadAnchorOf(pairOnly);
+        anchor.HasAnchor.Should().BeFalse();
+        anchor.Pair.Should().Be(ThreadResolver.ThreadPairAgreement.NotRepeated);
+
+        var repeated = Thread(Guid.NewGuid(), regardingType: "sprk_matter", regardingId: matterA.ToString());
+        repeated["sprk_regardingrecordid"] = matterA.ToString().ToUpperInvariant();
+        anchor = ThreadResolver.ThreadAnchorOf(repeated);
+        (anchor.RecordType, anchor.RecordId, anchor.Pair).Should().Be(("sprk_matter", (Guid?)matterA, ThreadResolver.ThreadPairAgreement.RepeatedByTypedLookup));
+
+        var none = Thread(Guid.NewGuid());
+        ThreadResolver.ThreadAnchorOf(none).Should().Be(new ThreadResolver.ThreadAnchor(null, null, ThreadResolver.ThreadPairAgreement.NoPair, null));
+    }
+
     [Fact]
     public async Task ResolveAndAssignThreadAsync_WhenTier1MissesWithNoRegarding_CreatesPerUserMaster()
     {

@@ -192,7 +192,7 @@ public sealed class ThreadResolver : IThreadResolver
     /// <summary>The message's thread lookup — the column a JOIN writes (and a failed owner assignment puts back).</summary>
     internal const string ThreadLookupOnCommunication = "sprk_communicationthread";
 
-    private static readonly string[] ThreadRegardingColumns = RegardingFieldMap.All
+    internal static readonly string[] ThreadRegardingColumns = RegardingFieldMap.All
         .Where(x => x.RegardingField != "sprk_regardingreportcard")
         .Select(x => x.RegardingField)
         .ToArray();
@@ -717,7 +717,7 @@ public sealed class ThreadResolver : IThreadResolver
     private async Task<Guid> FindOrCreateDefaultThreadAsync(
         string keyType, string keyId, RegardingAnchor? anchor, CancellationToken ct)
     {
-        if (await FindDefaultThreadAsync(keyId, ct) is { } existing)
+        if (await FindDefaultThreadAsync(keyType, keyId, ct) is { } existing)
             return existing;
 
         // Task 146 / S6: a Tier-2 per-record default thread is owned by its record's team; the Tier-3 per-user master
@@ -767,7 +767,17 @@ public sealed class ThreadResolver : IThreadResolver
     /// or null when none exists yet (→ lazy create). The idempotency query that keeps Tier 2/Tier 3 to at
     /// most one thread per record / per user.
     /// </summary>
-    private async Task<Guid?> FindDefaultThreadAsync(string keyId, CancellationToken ct)
+    /// <remarks>
+    /// #1629: <c>sprk_regardingrecordid</c> and <c>sprk_isdefaultthread</c> are plain columns any user with Write on a
+    /// thread can set through the Web API, so on their own they say nothing about which record a thread is for. A Tier-2
+    /// per-record default is therefore found only when it is Record-Anchored and its TYPED regarding lookup for
+    /// <paramref name="keyType"/> (the one Dataverse checks AppendTo on) repeats the key: the rule #1628 applies to a
+    /// work assignment's pair, and the anchor rule of <see cref="ThreadAnchorOf"/>. A thread whose pair names the record
+    /// without that lookup is never joined, so a message filed under a record is not drawn into a thread its owner pointed
+    /// at that record by text alone. The Tier-3 master (key "systemuser", not an ADR-024 family) has no typed lookup to
+    /// repeat its key and keeps the marker + pointer match (#1637).
+    /// </remarks>
+    private async Task<Guid?> FindDefaultThreadAsync(string keyType, string keyId, CancellationToken ct)
     {
         var query = new QueryExpression("sprk_communicationthread")
         {
@@ -786,6 +796,23 @@ public sealed class ThreadResolver : IThreadResolver
                 },
             },
         };
+
+        if (!string.Equals(keyType, MasterThreadOwnerKeyType, StringComparison.OrdinalIgnoreCase))
+        {
+            // Tier 2 (#1629): the typed lookup must repeat the key. A record type with no typed lookup on the thread, or a
+            // key that is not a record id, names no default thread: none is joined (one is created, as before).
+            var typedField = RegardingFieldMap.FieldFor(keyType);
+            if (typedField is null
+                || !ThreadRegardingColumns.Contains(typedField, StringComparer.OrdinalIgnoreCase)
+                || !Guid.TryParse(keyId, out var recordId)
+                || recordId == Guid.Empty)
+            {
+                return null;
+            }
+
+            query.Criteria.Conditions.Add(new ConditionExpression("sprk_threadtype", ConditionOperator.Equal, ThreadTypeRecordAnchored));
+            query.Criteria.Conditions.Add(new ConditionExpression(typedField, ConditionOperator.Equal, recordId));
+        }
 
         var result = await _entityService.RetrieveMultipleAsync(query, ct);
         return result.Entities.Count > 0 ? result.Entities[0].Id : null;
@@ -914,4 +941,61 @@ public sealed class ThreadResolver : IThreadResolver
     }
 
     private sealed record RegardingAnchor(string RecordId, string RecordType, string? RecordName, string? RecordUrl);
+
+    /// <summary>How a thread's denormalized <c>sprk_regardingrecordid</c> stands against its typed regarding lookups.</summary>
+    internal enum ThreadPairAgreement
+    {
+        /// <summary>The pair is empty.</summary>
+        NoPair,
+
+        /// <summary>A typed regarding lookup on the thread names the same record.</summary>
+        RepeatedByTypedLookup,
+
+        /// <summary>The pair names a record no typed regarding lookup on the thread names, or is not a record id.</summary>
+        NotRepeated,
+    }
+
+    /// <summary>A thread's anchor: the record its typed regarding lookup names (both null when none), and its pair's standing.</summary>
+    internal readonly record struct ThreadAnchor(string? RecordType, Guid? RecordId, ThreadPairAgreement Pair, string? PairText)
+    {
+        /// <summary>A typed regarding lookup anchors the thread.</summary>
+        public bool HasAnchor => RecordType is not null && RecordId is not null;
+    }
+
+    /// <summary>
+    /// The ONE thread-anchor rule (#1629): a thread is anchored to the record its TYPED ADR-024 regarding lookup names, the
+    /// first populated in <see cref="RegardingFieldMap"/> priority order: the anchor its owner is derived from (task 146)
+    /// and its name re-derived from. Dataverse checks AppendTo on a lookup; the denormalized <c>sprk_regardingrecordid</c>
+    /// is text any user with Write on the thread can set through the Web API, so it never anchors a thread on its own. It
+    /// counts only when a typed lookup on the thread repeats it (#1628's rule), and then it adds nothing that lookup does
+    /// not already say. A thread with a pair and no typed lookup has NO anchor (fail closed). <see cref="ThreadAnchor.Pair"/>
+    /// reports the pair's standing so a reader can log a pair that is not repeated.
+    /// </summary>
+    internal static ThreadAnchor ThreadAnchorOf(DataverseEntity thread)
+    {
+        ArgumentNullException.ThrowIfNull(thread);
+
+        var typed = ReadTypedRegardingAnchorFromThread(thread);
+        Guid? anchorId = typed is not null && Guid.TryParse(typed.RecordId, out var parsed) && parsed != Guid.Empty ? parsed : null;
+        var pairText = thread.GetAttributeValue<string>("sprk_regardingrecordid");
+
+        ThreadPairAgreement pair;
+        if (string.IsNullOrWhiteSpace(pairText))
+        {
+            pair = ThreadPairAgreement.NoPair;
+        }
+        else if (Guid.TryParse(pairText.Trim(), out var pairId)
+                 && pairId != Guid.Empty
+                 && RegardingFieldMap.All.Any(x =>
+                     thread.GetAttributeValue<EntityReference>(x.RegardingField) is { } er && er.Id == pairId))
+        {
+            pair = ThreadPairAgreement.RepeatedByTypedLookup;
+        }
+        else
+        {
+            pair = ThreadPairAgreement.NotRepeated;
+        }
+
+        return new ThreadAnchor(anchorId is null ? null : typed!.RecordType, anchorId, pair, pairText);
+    }
 }

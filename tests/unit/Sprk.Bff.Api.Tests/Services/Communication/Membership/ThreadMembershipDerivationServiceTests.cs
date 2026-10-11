@@ -151,6 +151,84 @@ public class ThreadMembershipDerivationServiceTests
         set.Participants.Should().BeEmpty();
     }
 
+    // ── #1629: the anchor is the TYPED regarding lookup, never the plain-text pair on its own ──
+
+    [Fact]
+    public async Task DeriveAuthorizedSetAsync_PairNamesAnotherMatter_AnchorsOnTheTypedLookupAndNeverAddsThePairsMembers()
+    {
+        // The thread owner set sprk_regardingrecordid (plain text, Write is enough) to a SECURE matter X while the typed
+        // lookup (AppendTo-checked) names their own matter A. Membership comes from A; X's members are never added.
+        var ownMember = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+        var secureMember = Guid.Parse("cccccccc-0000-0000-0000-000000000003");
+        var secureMatterId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        SetupThreadRow(ThreadTopology.RecordAnchored, ThreadPrivacyState.Open, typedMatter: MatterId, pair: secureMatterId.ToString());
+        SetupDiscovery(("ownerid", "systemuser"));
+        SetupAnchor(new Dictionary<string, EntityReference> { ["ownerid"] = new EntityReference("systemuser", ownMember) });
+        SetupMatter(secureMatterId, new Dictionary<string, EntityReference> { ["ownerid"] = new EntityReference("systemuser", secureMember) });
+
+        var set = await BuildSut().DeriveAuthorizedSetAsync(ThreadId);
+
+        set.Participants.Select(p => p.Participant.RecordId).Should().Equal(ownMember);
+        set.Participants.Should().NotContain(p => p.Participant.RecordId == secureMember);
+        _entityService.Verify(
+            s => s.RetrieveAsync(AnchorEntity, secureMatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task DeriveAuthorizedSetAsync_PairOnlyThread_DerivesNoMembers()
+    {
+        // A pair with no typed lookup to repeat it anchors nothing: no record membership is derived (fail closed).
+        var secureMatterId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        SetupThreadRow(ThreadTopology.RecordAnchored, ThreadPrivacyState.Open, typedMatter: null, pair: secureMatterId.ToString());
+        SetupDiscovery(("ownerid", "systemuser"));
+        SetupMatter(secureMatterId, new Dictionary<string, EntityReference>
+        {
+            ["ownerid"] = new EntityReference("systemuser", Guid.Parse("cccccccc-0000-0000-0000-000000000003")),
+        });
+
+        var set = await BuildSut().DeriveAuthorizedSetAsync(ThreadId);
+
+        set.Participants.Should().BeEmpty();
+        _discovery.Verify(s => s.DiscoverAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _entityService.Verify(
+            s => s.RetrieveAsync(AnchorEntity, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task DeriveAuthorizedSetAsync_TypedLookupRepeatedByThePair_DerivesTheRecordsMembersAsBefore()
+    {
+        // The legitimate shape every BFF thread create writes: the typed lookup and the same id in the pair.
+        var owner = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+        SetupThreadRow(ThreadTopology.RecordAnchored, ThreadPrivacyState.Open, typedMatter: MatterId, pair: MatterId.ToString());
+        SetupDiscovery(("ownerid", "systemuser"));
+        SetupAnchor(new Dictionary<string, EntityReference> { ["ownerid"] = new EntityReference("systemuser", owner) });
+
+        var set = await BuildSut().DeriveAuthorizedSetAsync(ThreadId);
+
+        set.Participants.Should().ContainSingle(p =>
+            p.Participant.RecordId == owner && p.Reason == AuthorizationReason.RecordMembership);
+    }
+
+    [Fact]
+    public async Task DeriveAuthorizedSetAsync_ReadsOnlyColumnsTheThreadHas()
+    {
+        // sprk_communicationthread has no sprk_regardingreportcard (nor a text sprk_regardingrecordtype): selecting a
+        // column the table lacks faults the whole read, so the derivation never ran against a real thread.
+        string[]? requested = null;
+        _entityService
+            .Setup(s => s.RetrieveAsync("sprk_communicationthread", ThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, string[], CancellationToken>((_, _, columns, _) => requested = columns)
+            .ReturnsAsync(new Entity("sprk_communicationthread"));
+
+        await BuildSut().DeriveAuthorizedSetAsync(ThreadId);
+
+        requested.Should().NotBeNull();
+        requested.Should().NotContain("sprk_regardingreportcard").And.NotContain("sprk_regardingrecordtype");
+        requested.Should().Contain("sprk_regardingmatter");
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private void SetupThread(ThreadTopology topology, ThreadPrivacyState privacy, Guid? anchorId, string? anchorType)
@@ -171,6 +249,35 @@ public class ThreadMembershipDerivationServiceTests
         _entityService
             .Setup(s => s.RetrieveAsync("sprk_communicationthread", ThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(thread);
+    }
+
+    /// <summary>A thread row with an explicit typed matter lookup and an explicit pair (either may be absent).</summary>
+    private void SetupThreadRow(ThreadTopology topology, ThreadPrivacyState privacy, Guid? typedMatter, string? pair)
+    {
+        var thread = new Entity("sprk_communicationthread")
+        {
+            Id = ThreadId,
+            ["sprk_threadtype"] = new OptionSetValue((int)topology),
+            ["sprk_privacystate"] = new OptionSetValue((int)privacy),
+        };
+        if (typedMatter is { } matter) thread["sprk_regardingmatter"] = new EntityReference(AnchorEntity, matter);
+        if (pair is not null) thread["sprk_regardingrecordid"] = pair;
+
+        _entityService
+            .Setup(s => s.RetrieveAsync("sprk_communicationthread", ThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(thread);
+    }
+
+    /// <summary>Another matter's membership lookups (the record a forged pair names).</summary>
+    private void SetupMatter(Guid matterId, Dictionary<string, EntityReference> lookups)
+    {
+        var matter = new Entity(AnchorEntity) { Id = matterId };
+        foreach (var (field, reference) in lookups)
+            matter[field] = reference;
+
+        _entityService
+            .Setup(s => s.RetrieveAsync(AnchorEntity, matterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(matter);
     }
 
     private void SetupDiscovery(params (string field, string target)[] fields)
