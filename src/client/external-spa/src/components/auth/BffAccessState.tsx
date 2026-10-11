@@ -16,7 +16,12 @@
 import * as React from 'react';
 import { Button, MessageBar, MessageBarActions, MessageBarBody, MessageBarTitle } from '@fluentui/react-components';
 import { useMsal } from '@azure/msal-react';
-import { TeamsWorkforceAuthError, captureReturnTo, getActiveLoginScope } from '../../auth/msal-auth';
+import {
+  SignInRequiredError,
+  TeamsWorkforceAuthError,
+  captureReturnTo,
+  getActiveLoginScope,
+} from '../../auth/msal-auth';
 import { ApiError } from '../../types';
 import { useTeamsHost } from './TeamsHostContext';
 
@@ -25,10 +30,14 @@ export type BffAccessFailure = 'signin' | 'denied';
 
 /**
  * 401 → 'signin', 403 → 'denied', a failed Teams workforce token acquisition → 'signin' (the host could not sign the
- * caller in; "Sign in again" re-runs the Teams sign-in), anything else → null (the caller's own error handling applies).
+ * caller in; "Sign in again" re-runs the Teams sign-in), a token redirect that already failed this page load
+ * (`SignInRequiredError`, so none was started) → 'signin', anything else → null (the caller's own error handling
+ * applies).
  */
 export function accessFailureOf(err: unknown): BffAccessFailure | null {
   if (err instanceof TeamsWorkforceAuthError) return 'signin';
+  // A token redirect already failed this page load, so none was started: the user signs in again by clicking.
+  if (err instanceof SignInRequiredError) return 'signin';
   if (!(err instanceof ApiError)) return null;
   if (err.statusCode === 401) return 'signin';
   if (err.statusCode === 403) return 'denied';

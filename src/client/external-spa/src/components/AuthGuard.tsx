@@ -23,7 +23,6 @@ import { Spinner } from '@fluentui/react-components';
 import {
   accountsForActivePlane,
   captureReturnTo,
-  clearSignInFailure,
   consumeReturnTo,
   getActiveLoginScope,
   getSignInFailure,
@@ -117,13 +116,11 @@ const MsalAccountGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
     }
   }, [isAuthenticated, inProgress, instance, signInFailure]);
 
-  // A signed-in gate holds no failure: a stale one (e.g. from a token redirect that failed for a working session) must
-  // never surface later, and must not suppress a future sign-in.
+  // Signed in: the gate has no failure of its own to show. A failure RECORDED for the instance stays (a failed token
+  // redirect, which `acquireStandaloneBffToken` reads so it does not redirect again); it is only ever shown above while
+  // there is no account.
   React.useEffect(() => {
-    if (isAuthenticated) {
-      clearSignInFailure();
-      setAutoStartFailure(null);
-    }
+    if (isAuthenticated) setAutoStartFailure(null);
   }, [isAuthenticated]);
 
   // "Try again" on the failure screen: the one place a user gesture starts another redirect.

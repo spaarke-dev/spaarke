@@ -163,7 +163,7 @@ export function syncActiveAccountOnInteractiveSignIn(instance: IPublicClientAppl
       event.interactionType === InteractionType.Redirect || event.interactionType === InteractionType.Popup;
     const success = event.eventType === EventType.LOGIN_SUCCESS || event.eventType === EventType.ACQUIRE_TOKEN_SUCCESS;
     if (!interactive || !success) return;
-    clearSignInFailure();
+    clearSignInFailure(instance);
     const account = (event.payload as AuthenticationResult | null)?.account;
     if (account) instance.setActiveAccount(account);
   });
@@ -213,11 +213,14 @@ export function getSignInFailure(instance?: IPublicClientApplication): SignInFai
 }
 
 /**
- * Forget the failure: on any successful interactive sign-in (the event callback above) and when the gate sees an
- * authenticated account. A reload also clears it (module state), so a reload is a fresh attempt.
+ * Forget the failure: on a successful interactive sign-in or a successful token acquisition (below), for the instance
+ * that succeeded (no argument: whichever instance holds it). A reload also clears it (module state), so a reload is a
+ * fresh attempt. The gate does NOT clear it for a signed-in user: a failed token redirect is recorded precisely so that
+ * `acquireStandaloneBffToken` does not start the same redirect again.
  */
-export function clearSignInFailure(): void {
+export function clearSignInFailure(instance?: IPublicClientApplication): void {
   if (!signInFailureState) return;
+  if (instance !== undefined && signInFailureState.owner !== instance) return;
   signInFailureState = null;
   signInFailureListeners.forEach(listener => listener());
 }
@@ -265,6 +268,26 @@ function chooseAccount(instance: IPublicClientApplication, candidates: AccountIn
 }
 
 /**
+ * A sign-in redirect for this instance already FAILED in this page load (the user cancelled the prompt or MFA, declined
+ * consent, or Entra returned an error), so no further redirect is started automatically. Surfaced to the pages like a
+ * 401: `accessFailureOf` maps it to the `signin` state, whose "Sign in again" button (a user gesture) starts the next
+ * redirect. Without this, every BFF call after a failed token redirect started the same redirect again, indefinitely.
+ * Carries the safe error code only.
+ */
+export class SignInRequiredError extends Error {
+  constructor(public readonly failure: SignInFailure) {
+    super(`Sign-in did not complete (${failure.errorCode}); sign in again to continue.`);
+    this.name = 'SignInRequiredError';
+  }
+}
+
+/** Throws {@link SignInRequiredError} when a redirect for this instance already failed (see there). */
+function assertRedirectAllowed(instance: IPublicClientApplication): void {
+  const failure = getSignInFailure(instance);
+  if (failure) throw new SignInRequiredError(failure);
+}
+
+/**
  * Acquire a BFF access token from a standalone collaboration-host MSAL instance.
  *
  * Broker-only (A1/A2 invariant): the returned token is used ONLY to call the BFF as a
@@ -280,7 +303,8 @@ function chooseAccount(instance: IPublicClientApplication, candidates: AccountIn
  *   2. Workforce only: if that fails with an error msal itself would resolve by iframe (expired / invalid
  *      refresh token, no tokens found), retry once with `CacheLookupPolicy.Skip` and
  *      `redirectUri: options.silentRedirectUri` — a hidden iframe answered by the bridge page.
- *   3. On InteractionRequiredAuthError or a timed-out silent iframe renewal, trigger a redirect login.
+ *   3. On InteractionRequiredAuthError or a timed-out silent iframe renewal, trigger a redirect login — unless a
+ *      redirect for this instance already failed in this page load: then throw `SignInRequiredError` (no redirect).
  *   4. Throw after initiating redirect so callers abort the current request.
  *
  * MSAL handles token caching internally — no manual cache management needed.
@@ -299,7 +323,8 @@ export async function acquireStandaloneBffToken(
   const accounts = accountsFor(instance, options.tenantId);
 
   if (accounts.length === 0) {
-    // No authenticated account — trigger login redirect (preserving the current route)
+    // No authenticated account — trigger login redirect (preserving the current route), unless one already failed
+    assertRedirectAllowed(instance);
     captureReturnTo();
     await instance.acquireTokenRedirect({ scopes: [bffScope] });
     // acquireTokenRedirect navigates away; this throw aborts the current call chain
@@ -309,11 +334,22 @@ export async function acquireStandaloneBffToken(
   const account = chooseAccount(instance, accounts);
 
   try {
-    return await acquireSilent(instance, bffScope, account, options.silentRedirectUri, options.forceRefresh === true);
+    const token = await acquireSilent(
+      instance,
+      bffScope,
+      account,
+      options.silentRedirectUri,
+      options.forceRefresh === true
+    );
+    // A token again: any earlier failed redirect for this instance is over.
+    clearSignInFailure(instance);
+    return token;
   } catch (err) {
     if (isInteractionNeeded(err)) {
       // Token expired, consent needed, MFA required, silent renewal timed out, etc. — fall back to
-      // the interactive redirect (preserving the route).
+      // the interactive redirect (preserving the route) — unless a redirect already FAILED in this page load
+      // (cancelled / declined / MFA abandoned): then answer with the `signin` state instead of redirecting again.
+      assertRedirectAllowed(instance);
       captureReturnTo();
       await instance.acquireTokenRedirect({
         scopes: [bffScope],

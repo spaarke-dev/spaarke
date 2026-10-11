@@ -337,17 +337,18 @@ describe('Sign-in gate: a failure is scoped and short-lived', () => {
     expect(screen.queryByTestId('signin-failed')).toBeNull();
   });
 
-  it('a signed-in gate drops a stale failure (e.g. a token redirect that failed for a working session)', async () => {
+  it('a signed-in gate renders the app over a recorded failure (a failed token redirect) and starts no redirect', async () => {
     const { msal, msalAuth, emit, view } = await load();
     await emit(failureEvent(msal, msal.EventType.ACQUIRE_TOKEN_FAILURE));
     h.accounts = [{ homeAccountId: 'a', tenantId: 't' }];
     render(view());
 
-    // Authenticated: children render, never the failure screen, and the failure is forgotten.
+    // Authenticated: children render, never the failure screen, and no redirect starts.
     expect(await screen.findByTestId('app')).toBeTruthy();
     expect(screen.queryByTestId('signin-failed')).toBeNull();
-    await waitFor(() => expect(msalAuth.getSignInFailure()).toBeNull());
     expect(h.loginRedirect).not.toHaveBeenCalled();
+    // The record stays: the token path reads it so it does not start the same redirect again (token-redirect-loop.test.ts).
+    expect(msalAuth.getSignInFailure(h.instance as never)).not.toBeNull();
   });
 });
 
