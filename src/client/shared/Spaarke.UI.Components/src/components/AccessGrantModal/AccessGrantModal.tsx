@@ -1390,7 +1390,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   }
 
   /** The additive fields `/grant`, `/invite-and-grant` and `/share-user` return (task 139; task 181's
-   * `notificationFailed`, which `/invite-and-grant` never sets — its external contact is told by the CIAM email). */
+   * `notificationFailed`; on `/invite-and-grant` it is set only for an already-onboarded contact's grant email —
+   * a contact onboarded by the request is told by the CIAM email, R3 task 036). */
   interface IGrantWriteResponseBody {
     grantedAccessLevel?: number | null;
     narrowed?: boolean;
