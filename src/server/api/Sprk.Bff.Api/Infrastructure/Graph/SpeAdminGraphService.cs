@@ -1649,16 +1649,29 @@ public sealed class SpeAdminGraphService
     /// <summary>
     /// The business-unit binding of <paramref name="containerId"/> (owner round 20 item 2), read with the config's
     /// client from the active container (<paramref name="deleted"/> false) or from the recycle bin. Null when the
-    /// container does not exist there. A read fault throws <see cref="SpaarkeStorageException"/> — the caller must
-    /// refuse, never treat it as "unbound".
+    /// container does not exist there OR is not this stamp's (the ownership guard's refusal, task 227d — the guard
+    /// answers a foreign and a nonexistent id alike, and so does this). A read fault throws
+    /// <see cref="SpaarkeStorageException"/> — the caller must refuse, never treat it as "unbound".
     /// </summary>
     public async Task<Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead?> GetContainerBindingForConfigAsync(
         ContainerTypeConfig config, string containerId, bool deleted, CancellationToken ct = default)
     {
         // One container: refused (404, as for a missing one) unless this stamp owns it (task 227d).
-        var client = deleted
-            ? await GetClientForDeletedContainerAsync(config, containerId, ct).ConfigureAwait(false)
-            : await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
+        GraphServiceClient client;
+        try
+        {
+            client = deleted
+                ? await GetClientForDeletedContainerAsync(config, containerId, ct).ConfigureAwait(false)
+                : await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
+        }
+        catch (SdapProblemException ex) when (ex.Code == SpeContainerOwnershipGuard.NotOwnedErrorCode)
+        {
+            // F-165-RB: the guard's "not this stamp's" is a final answer about the id, not a fault. Thrown on, the
+            // per-container rule read it as an unreadable binding and answered 503 "try again" for every foreign,
+            // unmarked or nonexistent container; as "not there" it is the ONE uniform 404 (task 165 §11.3).
+            return null;
+        }
+
         try { return await GetContainerBindingAsync(client, containerId, deleted, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetContainerBinding({containerId})"); }
     }
