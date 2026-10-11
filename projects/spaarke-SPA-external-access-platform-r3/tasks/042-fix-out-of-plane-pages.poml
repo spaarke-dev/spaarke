@@ -43,6 +43,7 @@
     <constraint source="project">No page under src/client/external-spa calls a route outside /api/v1/external/**; no page builds its own token-acquiring fetch — all calls go through bffApiCall/bffApiBlob.</constraint>
     <constraint source="project">The production build fails (or strips the branch) if VITE_DEV_MOCK is 'true' with mode production; no mock user can render in production.</constraint>
     <constraint source="project">A 401 shows the sign-in state and a 403 shows a denied state; neither shows a mock or default user.</constraint>
+    <constraint source="owner 2026-10-11">DECIDED: option (a). Hide the playbook page and SemanticSearch on the external plane. Add no BFF task for them.</constraint>
   </constraints>
 
   <knowledge>

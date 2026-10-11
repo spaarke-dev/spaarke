@@ -21,3 +21,13 @@ Full owner clarifications live in `spec.md` §Owner Clarifications; the auth pat
 ## 2026-10-11 — Task 036 scope (owner)
 
 - **No email on message post (option A).** The 036 POML asked for an email to member contacts on each message post, which contradicted the 2026-10-08 decision (spec :42, :64, :391, :402). The implementation (`4a2a767a2`) was reverted for that path in `38e565453`. The owner confirmed option A on 2026-10-11. Members learn of new messages through the in-portal feed (task 037). Task 036 delivers the grant email (FR-07) only.
+
+## 2026-10-11 — Owner answers to the open questions
+
+- **020 (schema):** approved in principle for dev. `sprk_intakedata` follows the `sprk_createdbyperson` settings, which means it is field-secured with the same two profiles ("BFF-Managed Field Readers" read-only, "BFF-Managed Field Writers" read/create/update). The source XML is changed to match. The live import still runs only after the owner sees the exact commands and the rollback and says go.
+- **032 (delete-own):** option (b), widened. A contact caller matches `sprk_createdbycontact`. A systemuser caller matches `sprk_createdbyperson` OR `sprk_createdbycontact` = its server-resolved linked contact.
+- **003 (FR-12 self-registration):** Option B, a custom join page plus a shared registration service. The spike's sub-questions Q2–Q5 are still open.
+- **060 (registration service):** built in R3, not handed off to R4. The host is still to be chosen under ADR-052 (spike Q5).
+- **031 (containers):** one SPE container per customer business unit. The only exception is secure records (secure project, matter or work assignment), which have their own container. There are no containers per record type, so none for invoices or service requests. This matches `RecordContainerResolver`, where children of a secure root use that root's container and everything else uses the owning business unit's container. R3 creates no containers. Still open: the invoice access rule (A/B/C), and whether a service request that regards a secure matter puts its documents in that matter's container.
+- **042:** option (a). Hide the playbook page and SemanticSearch on the external plane.
+

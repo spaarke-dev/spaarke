@@ -253,7 +253,7 @@ az rest --method GET --url "https://graph.microsoft.com/v1.0/groups?\$filter=sta
 
 ## 10. Owner decision
 
-- **Decision:** _pending_ (to be recorded by the main session with the date and the owner's words).
+- **Decision:** Option B, owner, 2026-10-11 ("yes option B"). The registration service (task 060) is built in R3, not R4. Q2–Q5 are still open.
 - **Mirror in:** `notes/decisions.md`.
 
 ## 11. Findings in existing docs (for the main session)

@@ -37,6 +37,7 @@
     <constraint source="project">Approval is automatic only when the caller's verified token shows home tid ∈ that customer's CustomerTenantIds and acct = 0; the allow-list comes from Spaarke-owned data, never from the request. Invites are sent with sendInvitationMessage = false. A re-registration returns success without a second guest or a duplicate group membership.</constraint>
     <constraint source="project">Any live tenant change (app/identity creation, Graph permission grant, deployment) needs owner approval and a stated rollback.</constraint>
     <constraint source="review 012 K2">The BFF member test (task 012) admits any B2B guest of Spaarke's tenant whose idp home tenant is listed, and email-binds it using the guest object's mail in Spaarke's tenant. Its safety depends on this service: the invite address MUST come from the verified home-tenant token (never the request body), and this service MUST be the only guest-creation path for customer contacts (document any admin-invite path as out of policy). Review checks both.</constraint>
+    <constraint source="owner 2026-10-11">DECIDED: the registration service is built in R3. There is no R4 hand-off, so goal (b) is withdrawn. Option B (task 003) is approved. The host is still chosen under ADR-052 (spike Q5) before any code, and spike Q2–Q4 must be answered first.</constraint>
   </constraints>
 
   <knowledge>
