@@ -118,6 +118,15 @@ public sealed record RegardingReadResult(
     int MessageCount);
 
 /// <summary>
+/// The app-only by-regarding read for the external plane (spaarke-SPA-external-access-platform-r3 task 033 / FR-04):
+/// the record's access-filtered messages, oldest→newest, and whether the read stopped at its row bound with more rows
+/// remaining (<see cref="Truncated"/>). Attachments are never loaded on this path (empty on every message).
+/// </summary>
+public sealed record AppOnlyRegardingReadResult(
+    IReadOnlyList<ThreadMessageDto> Messages,
+    bool Truncated);
+
+/// <summary>
 /// One thread summary row for the left-pane thread list (R3 task 003 / FR-16). Minimal by construction — the list
 /// pane renders a label + type; opening a thread fetches its messages via the existing thread-read. Every item here
 /// was returned by the IMPERSONATED <c>sprk_communicationthreads</c> query, so the caller may see the thread record

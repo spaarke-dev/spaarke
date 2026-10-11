@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Services.Communication;
@@ -63,6 +64,15 @@ public sealed class CommunicationThreadReadService
     // sprk_communication and sprk_communicationthread carry the OOB `statecode` attribute.
     private const string StateCodeField = "statecode";
     private const string ActiveOnlyClause = "statecode eq 0";
+    // External-plane status allow-list (task 033 review F1). A message reaches an external reader ONLY when its Status
+    // Reason says it was actually sent or received: Send (659490002) and Delivered (659490003 — also what every inbound
+    // ingest path stamps). Draft/Queued/Failed/Bounded/Deleted/Recalled never qualify. An ALLOW-list, so a status added
+    // later is hidden from the external plane until it is consciously admitted here. Applies to the app-only read only.
+    private const string StatusCodeAttribute = "statuscode";
+    private const int StatusSend = (int)CommunicationStatus.Send;
+    private const int StatusDelivered = (int)CommunicationStatus.Delivered;
+    private static readonly string ExternalStatusClause =
+        $"({StatusCodeAttribute} eq {StatusSend} or {StatusCodeAttribute} eq {StatusDelivered})";
     private const string BodyField = "sprk_body";
     private const string BodyFormatField = "sprk_bodyformat";
     private const string TypeField = "sprk_communicationtype";
@@ -112,6 +122,7 @@ public sealed class CommunicationThreadReadService
     private const int MaxParticipantAddressLength = 400; // matches sprk_addresstext Text(400) field max length
 
     private readonly IImpersonatedCommunicationQuery _query;
+    private readonly IAppOnlyCommunicationQuery? _appOnlyQuery;
     private readonly ICommunicationAccessFilter _accessFilter;
     private readonly ICallerSystemUserResolver _callerResolver;
     private readonly ISystemUserIdentityResolver _identityResolver;
@@ -122,9 +133,14 @@ public sealed class CommunicationThreadReadService
         ICommunicationAccessFilter accessFilter,
         ICallerSystemUserResolver callerResolver,
         ISystemUserIdentityResolver identityResolver,
-        ILogger<CommunicationThreadReadService> logger)
+        ILogger<CommunicationThreadReadService> logger,
+        IAppOnlyCommunicationQuery? appOnlyQuery = null)
     {
         _query = query ?? throw new ArgumentNullException(nameof(query));
+        // Optional so the impersonated-only callers and their tests construct the service unchanged. Only
+        // ReadRegardingAppOnlyAsync uses it, and it refuses (throws) when the seam is absent — never an impersonated or
+        // unscoped substitute. CommunicationModule registers it, so DI always supplies it.
+        _appOnlyQuery = appOnlyQuery;
         _accessFilter = accessFilter ?? throw new ArgumentNullException(nameof(accessFilter));
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
         _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
@@ -313,6 +329,102 @@ public sealed class CommunicationThreadReadService
 
         return new RegardingReadResult(entityType, recordId, threadResults, threadResults.Count, messageCount);
     }
+
+    // ── app-only by-regarding read for the EXTERNAL plane (spaarke-SPA-external-access-platform-r3 task 033 / FR-04) ──
+
+    /// <summary>
+    /// The messages filed regarding one record, read APP-ONLY for the external plane, oldest→newest (newest last).
+    /// Same row parsing, the same shared <see cref="ICommunicationAccessFilter"/> and the same DTO as the impersonated
+    /// reads above; only the query identity differs, because a contact caller has no <c>systemuser</c> to impersonate
+    /// and the external plane forbids OBO (ADR-028, NFR-01).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Record access is the caller's job, and must already be done.</b> This method makes NO record-level
+    /// decision: the external endpoint (<c>ExternalMessageEndpoints</c>) checks <paramref name="recordId"/> against the
+    /// caller's composed accessible set first, and the query here is keyed on that one record through the typed
+    /// <see cref="RegardingFieldMap"/> lookup on <c>sprk_communication</c> (the same column the filtered query's
+    /// <c>regarding=</c> facet uses). Every returned row is re-checked: a row whose regarding value is not
+    /// <paramref name="recordId"/> is dropped, so a query that drifted cannot widen the result.</para>
+    /// <para><b>Internal-only.</b> Shown only to an internal <c>systemuser</c>: <paramref name="callerSystemUserId"/> is
+    /// set AND <see cref="ISystemUserIdentityResolver.IsExternalAsync"/> says internal (the same per-caller bit the
+    /// impersonated reads use, #675). A contact caller (CIAM or workforce contact) passes <c>null</c> and never receives
+    /// an internal-only row; an unreadable flag hides the row (the filter fails closed).</para>
+    /// <para><b>Columns.</b> An explicit projection — no attachments, no recipient addresses — so nothing beyond what
+    /// the external DTO needs is read. Bounded to <see cref="MaxRegardingScan"/> rows; <c>Truncated</c> says when the
+    /// bound was reached with more rows remaining.</para>
+    /// </remarks>
+    /// <param name="entityType">The regarding entity logical name (an ADR-024 family member, e.g. <c>sprk_matter</c>).</param>
+    /// <param name="recordId">The record the caller has already been authorized to read.</param>
+    /// <param name="callerSystemUserId">The caller's <c>systemuserid</c> when the caller is a systemuser; <c>null</c> for a contact.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<AppOnlyRegardingReadResult> ReadRegardingAppOnlyAsync(
+        string entityType,
+        Guid recordId,
+        Guid? callerSystemUserId,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(entityType))
+            throw BadRequest("A regarding entity type is required.");
+
+        var regardingField = RegardingFieldMap.FieldFor(entityType);
+        if (regardingField is null)
+            throw BadRequest($"'{entityType}' is not a supported regarding entity type (ADR-024 family).");
+
+        if (recordId == Guid.Empty)
+            throw BadRequest("A regarding record id is required.");
+
+        var appOnlyQuery = _appOnlyQuery
+            ?? throw new InvalidOperationException(
+                "IAppOnlyCommunicationQuery is not registered; the external-plane message read cannot run (fail closed).");
+
+        var regardingValue = $"_{regardingField}_value";
+        var select = string.Join(',', new[]
+        {
+            PkField, BodyField, BodyFormatField, SubjectField, DirectionField, SentByValue, CreatedOnField,
+            InternalOnlyField, PrivilegeField, StatusCodeAttribute, regardingValue,
+        });
+        // Newest first with one over-fetched row (detects a cut-short list without a COUNT query): when the record has
+        // more rows than the bound, the NEWEST ones are kept and the oldest dropped; the page is reversed to oldest→newest
+        // below. Active AND sent/received only (ExternalStatusClause) — a Draft/Queued/Failed/Bounded/Recalled row is
+        // never read for the external plane.
+        var odata =
+            $"$select={select}&$filter={regardingValue} eq {recordId} and {ActiveOnlyClause} and {ExternalStatusClause}" +
+            $"&$orderby={CreatedOnField} desc,{PkField} desc&$top={MaxRegardingScan + 1}";
+        var rows = await appOnlyQuery.QueryAsync(CommunicationSet, odata, ct);
+
+        var truncated = rows.Count > MaxRegardingScan;
+        var bounded = rows.Take(MaxRegardingScan).Reverse().ToList();
+        // Re-check every row (defence in depth — the query is not the only gate): it must regard THIS record and carry a
+        // sent/received status. A row with a missing or unreadable status is dropped (fail closed).
+        var scoped = bounded
+            .Where(r => TryGuid(r, regardingValue) == recordId && IsExternallyReadableStatus(TryInt(r, StatusCodeAttribute)))
+            .ToList();
+
+        var isInternal = callerSystemUserId is { } systemUserId
+            && systemUserId != Guid.Empty
+            && !await _identityResolver.IsExternalAsync(systemUserId, ct);
+        var context = new CommunicationAccessContext(
+            CallerSystemUserId: callerSystemUserId ?? Guid.Empty, IsInternalUser: isInternal);
+
+        var parsed = scoped.Select(ParseMessageRow).Where(p => p.MessageId != Guid.Empty).ToList();
+        var filtered = _accessFilter.FilterMessages(context, parsed.Select(p => p.Entity).ToList());
+        var byId = parsed.ToDictionary(p => p.MessageId);
+        var messages = filtered.Decisions
+            .Where(d => d.Decision.IsVisible)
+            .Select(d => BuildDto(byId[d.Message.Id], d.Decision, EmptyAttachments))
+            .ToList();
+
+        _logger.LogDebug(
+            "[BY-REGARDING-APPONLY] {EntityType}={RecordId} internalCaller={Internal} returned={Returned} " +
+            "(read={Read}, dropped-regarding-or-status={Dropped}, truncated={Truncated})",
+            entityType, recordId, isInternal, messages.Count, rows.Count, bounded.Count - scoped.Count, truncated);
+
+        return new AppOnlyRegardingReadResult(messages, truncated);
+    }
+
+    /// <summary>True only for a Status Reason that means the message was actually sent or received (see the allow-list).</summary>
+    private static bool IsExternallyReadableStatus(int? statusCode)
+        => statusCode is StatusSend or StatusDelivered;
 
     // ── list all threads (R3 task 003 / FR-16) ───────────────────────────────────────────────────────
 

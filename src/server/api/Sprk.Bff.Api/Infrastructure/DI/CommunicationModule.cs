@@ -277,6 +277,11 @@ public static class CommunicationModule
         //   • ICallerSystemUserResolver — REUSED (§11) for oid→systemuserid; TryAdd so this module is self-contained
         //     even if the AI module (its usual registrant) is not composed, without clobbering that registration.
         services.AddSingleton<IImpersonatedCommunicationQuery, DataverseImpersonatedCommunicationQuery>();
+        // The app-only twin for the EXTERNAL-plane message read only (spaarke-SPA-external-access-platform-r3 task 033,
+        // FR-04): a contact has no systemuser to impersonate and the external plane forbids OBO. Consumed solely by
+        // CommunicationThreadReadService.ReadRegardingAppOnlyAsync, after ExternalMessageEndpoints has checked the record
+        // against the caller's accessible set. Same singleton pass-through shape as the impersonated seam above.
+        services.AddSingleton<IAppOnlyCommunicationQuery, DataverseAppOnlyCommunicationQuery>();
         services.TryAddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver,
                               Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
         services.AddScoped<CommunicationThreadReadService>();

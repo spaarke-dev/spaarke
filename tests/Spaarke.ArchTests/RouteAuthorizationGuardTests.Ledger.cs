@@ -338,6 +338,11 @@ public partial class RouteAuthorizationGuardTests
         new GovernedFile("Api/ExternalAccess/ExternalModuleDataEndpoints.cs", Scope.GroupGated,
             "scoped module reads (Tier2ScopeFilterInjector, IsRecordAccessible) and schema/view passthrough, under the nested "
             + "/api/dataverse group of /api/v1/external."),
+        new GovernedFile("Api/ExternalAccess/ExternalMessageEndpoints.cs", Scope.GroupGated,
+            "GET /api/v1/external/{root}/{id}/messages (spaarke-SPA-external-access-platform-r3 task 033, FR-04) on the "
+            + "COLLABORATION group: the record is gated against the caller principal's accessible set through the module "
+            + "registry (IsRecordAccessible; ScopeRows for invoices and the requester-scoped service requests) before the "
+            + "app-only message read; an absent record and a foreign one are the same 403."),
         new GovernedFile("Api/ExternalAccess/GrantExternalAccessEndpoint.cs", Scope.GroupGated,
             "POST /grant under the DelegationRuleFilter admin group."),
         new GovernedFile("Api/ExternalAccess/RevokeExternalAccessEndpoint.cs", Scope.GroupGated,
@@ -690,7 +695,15 @@ public partial class RouteAuthorizationGuardTests
     //            Read; task 153's banner) and, for a caller who also holds Write, the covering entries (task 067). Governed
     //            RouteLevelGate: each of its three routes carries RecordRouteAccessAuthorizationFilter on a constant entity
     //            set. Pinned through the real pipeline by tests/integration/auth/UnifiedAccessControl/RecordNoAccessEndpointTests.cs.
-    private const int ExpectedEndpointFileCount = 118;
+    //
+    // 118 -> 119 (2026-10-10, spaarke-SPA-external-access-platform-r3 task 033, FR-04):
+    //
+    //   033  +1  Api/ExternalAccess/ExternalMessageEndpoints.cs ADDED — GET /api/v1/external/{root}/{id}/messages, the
+    //            message thread regarding a project / matter / work assignment / invoice / own service request, on the
+    //            COLLABORATION group. Governed GroupGated with a HandlerDecision (IsRecordAccessible through
+    //            GetMessagesCoreAsync -> IsRootRecordReadableAsync). Pinned by
+    //            tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalMessageEndpointsTests.cs.
+    private const int ExpectedEndpointFileCount = 119;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1510,6 +1523,12 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/v1/external/api/dataverse/record/{entityLogicalName}/{id:guid}", "GetScopedRecordAsync", "IsRecordAccessible", Array.Empty<string>(),
             "Refused unless the record is in the caller principal's accessible set (module.IsRecordAccessible, "
             + "ExternalModuleDataEndpoints.cs:372)."),
+        new HandlerDecision("GET /api/v1/external/{root}/{id:guid}/messages", "GetMessagesAsync", "IsRecordAccessible",
+            new[] { "ExternalMessageEndpoints.GetMessagesCoreAsync", "ExternalMessageEndpoints.IsRootRecordReadableAsync" },
+            "403 unless the route record is in the caller principal's accessible set, decided by the registered module "
+            + "(module.IsRecordAccessible for project / matter / work assignment; the module's ScopeRows over the record's "
+            + "own scope lookups for an invoice or the caller's own service request), before the app-only message read "
+            + "(ExternalMessageEndpoints.cs:134, :210, :242); an unsupported root is a 404 with no read."),
         new HandlerDecision("GET /api/office/communications/by-message-id/{internetMessageId}", "FindByMessageIdAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Reads through IDataverseUserClient under the CALLER's Dataverse security (task 127, "
             + "CommunicationsEndpoints.cs:145, :179); an unreadable communication 404s like a missing one."),
