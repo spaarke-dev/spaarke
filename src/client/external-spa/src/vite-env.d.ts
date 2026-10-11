@@ -17,6 +17,10 @@ interface ImportMetaEnv {
   readonly VITE_TEAMS_MSAL_BFF_SCOPE?: string;
   /** Spaarke's tenant id (a GUID) — the workforce authority is pinned to it (ADR-028 A7, task 040). */
   readonly VITE_TEAMS_MSAL_TENANT_ID?: string;
+  /** 'true' turns on the /join self-registration page (task 056, FR-13). Default off in every environment until task 060. */
+  readonly VITE_JOIN_ENABLED?: string;
+  /** The FIXED registration service start URL (https, no query) — task 056/060. Never read from a link. */
+  readonly VITE_REGISTRATION_SERVICE_URL?: string;
 }
 
 interface ImportMeta {
