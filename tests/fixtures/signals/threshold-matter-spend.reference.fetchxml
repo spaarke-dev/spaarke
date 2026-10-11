@@ -1,0 +1,9 @@
+<fetch distinct="true">
+  <entity name="sprk_matter">
+    <attribute name="sprk_matterid" />
+    <order attribute="sprk_matterid" />
+    <filter type="and">
+      <condition attribute="sprk_totalspendtodate" operator="ge" value="20000" />
+    </filter>
+  </entity>
+</fetch>

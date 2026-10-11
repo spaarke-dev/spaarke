@@ -59,6 +59,13 @@ public class SignalReevaluationJobTests
     private const string PolicyCode = "POL-COMMIT-BUDGET";
     private const string TodoPolicyCode = "POL-TODO-OVERDUE";
     private const int Existence = 100000002;
+    private const int Threshold = 100000000;
+
+    /// <summary>Task 025: a spend threshold, the same compiled-predicate contract as Existence (D-16).</summary>
+    private const string UtilizationBody =
+        """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_budgetutilizationpercent","operator":">=","value":90}}""";
+
+    private const string UtilizationTemplate = "Budget utilization has reached {{sprk_budgetutilizationpercent}} percent.";
 
     /// <summary>The live Path B shape (dev policy POL-COMMIT-BUDGET v2), with a one-value category list so its token pins.</summary>
     private const string PathBBody = """
@@ -975,6 +982,82 @@ public class SignalReevaluationJobTests
     }
 
     // =====================================================================================
+    // Task 025: a Threshold policy runs through the unchanged job and evaluator (D-16)
+    // =====================================================================================
+
+    [Fact]
+    public async Task Run_ThresholdPolicy_WritesASignalForTheMatterOverTheThreshold_AndNoneForTheMatterUnder()
+    {
+        var h = new Harness().WithThresholdPolicy()
+            .WithMatterUtilization(MatterId, 94.5m, "MAT-OVER")
+            .WithMatterUtilization(OtherMatterId, 62m, "MAT-UNDER");
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        var created = h.Org.CreatedPayloads.Should().ContainSingle("only the matter at 94.5 meets >= 90").Subject;
+        created.GetAttributeValue<string>("sprk_dedupekey").Should().Be($"{PolicyCode}|sprk_matter|{Lower(MatterId)}|1");
+        created.GetAttributeValue<string>("sprk_sentence").Should().Be("Budget utilization has reached 94.5 percent.",
+            "the sentence states the subject own value of the column the rule compared (section 0.3)");
+
+        // The compiled query is the same contract Existence uses: one subject query, one condition for the comparison.
+        var fetch = XElement.Parse(h.Sysadmin.Fetches.Should().ContainSingle().Subject);
+        var condition = fetch.Descendants("condition").Should().ContainSingle().Subject;
+        (condition.Attribute("attribute")!.Value, condition.Attribute("operator")!.Value, condition.Attribute("value")!.Value)
+            .Should().Be(("sprk_budgetutilizationpercent", "ge", "90"));
+        fetch.Descendants("link-entity").Should().BeEmpty("a threshold reads only its subject");
+    }
+
+    [Fact]
+    public async Task Run_ThresholdPolicy_ReadsACurrencyColumnAsAPlainNumber_AndEqualsTheDeclaredValueCounts()
+    {
+        const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_totalspendtodate","operator":">=","value":50000}}""";
+        var h = new Harness().WithThresholdPolicy(body, "Spend to date is {{sprk_totalspendtodate}}.");
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId)
+        {
+            ["sprk_matterid"] = MatterId, ["sprk_totalspendtodate"] = new Money(50000m),
+        });
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", OtherMatterId)
+        {
+            ["sprk_matterid"] = OtherMatterId, ["sprk_totalspendtodate"] = new Money(49999.99m),
+        });
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        h.Org.CreatedPayloads.Should().ContainSingle()
+            .Which.GetAttributeValue<string>("sprk_sentence").Should().Be("Spend to date is 50000.");
+    }
+
+    [Fact]
+    public async Task Run_ThresholdPolicy_WhenTheMatterFallsBelow_ClosesTheOpenSignalAsConditionCleared()
+    {
+        var h = new Harness().WithThresholdPolicy().WithMatterUtilization(MatterId, 71m, "MAT-OVER");
+        var signalId = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        var update = h.Org.ConditionalUpdates.Should().ContainSingle().Subject;
+        update.Id.Should().Be(signalId);
+        update.Fields["sprk_resolutiontype"].Should().BeEquivalentTo(new OptionSetValue(SignalWriter.ResolutionConditionCleared));
+        h.Org.CreateCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Run_ThresholdPolicyWhoseTemplateNamesAFieldItDoesNotRead_IsRefusedAtEvaluation_AndWritesNothing()
+    {
+        var h = new Harness()
+            .WithThresholdPolicy(template: "Utilization {{sprk_budgetutilizationpercent}} on {{sprk_matterstatus}}.")
+            .WithMatterUtilization(MatterId, 94.5m, "MAT-OVER");
+
+        await h.RunAsync();
+
+        h.Org.WriteCalls.Should().Be(0, "section 0.3: a template may not assert a field the rule did not read");
+        h.Log.Should().Contain(e => e.EventId.Id == OntologyWriterEvents.PolicyVersionInvalid.Id);
+    }
+
+    // =====================================================================================
     // Fixtures
     // =====================================================================================
 
@@ -1048,6 +1131,24 @@ public class SignalReevaluationJobTests
         public Harness WithPathBPolicy(bool enabled = true)
         {
             Sysadmin.AddPolicy(PolicyCode, SignalWriter.LaneDecide, enabled, PathBBody, PathBTemplate);
+            return this;
+        }
+
+        public Harness WithThresholdPolicy(string body = UtilizationBody, string template = UtilizationTemplate)
+        {
+            Sysadmin.AddPolicy(PolicyCode, SignalWriter.LaneDecide, true, body, template, ruleType: Threshold);
+            return this;
+        }
+
+        public Harness WithMatterUtilization(Guid matterId, decimal percent, string number)
+        {
+            Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", matterId)
+            {
+                ["sprk_matterid"] = matterId,
+                ["sprk_mattername"] = "Matter " + number,
+                ["sprk_matternumber"] = number,
+                ["sprk_budgetutilizationpercent"] = percent,
+            });
             return this;
         }
 
@@ -1209,7 +1310,7 @@ public class SignalReevaluationJobTests
             return this;
         }
 
-        public void AddPolicy(string code, int lane, bool enabled, string body, string template, string? tenant = null)
+        public void AddPolicy(string code, int lane, bool enabled, string body, string template, string? tenant = null, int ruleType = Existence)
         {
             var versionId = Guid.NewGuid();
             var policy = new Entity("sprk_policy", Guid.NewGuid())
@@ -1226,7 +1327,7 @@ public class SignalReevaluationJobTests
             _policies.Add(policy);
             Stub(new Entity("sprk_policyversion", versionId)
             {
-                ["sprk_ruletype"] = new OptionSetValue(Existence),
+                ["sprk_ruletype"] = new OptionSetValue(ruleType),
                 ["sprk_rulebody"] = body,
                 ["sprk_messagetemplate"] = template,
             });
@@ -1300,6 +1401,33 @@ public class SignalReevaluationJobTests
             return Task.FromResult(result);
         }
 
+        /// <summary>
+        /// The subject's OWN numeric comparisons (task 025): a root-filter <c>ge/gt/le/lt/eq</c> condition with a numeric
+        /// value must hold for the row's value (a Money or decimal; a null never satisfies it, as in Dataverse). Every other
+        /// condition (dates, ids, joins) is left to the test's rows, as before this task.
+        /// </summary>
+        private static bool HoldsNumericConditions(Entity row, XElement entity) =>
+            (entity.Element("filter")?.Elements("condition") ?? Enumerable.Empty<XElement>())
+            .Where(c => c.Attribute("entityname") is null
+                        && decimal.TryParse((string?)c.Attribute("value"), System.Globalization.NumberStyles.Number,
+                            System.Globalization.CultureInfo.InvariantCulture, out _))
+            .All(c =>
+            {
+                var expected = decimal.Parse((string)c.Attribute("value")!, System.Globalization.CultureInfo.InvariantCulture);
+                decimal? actual = row.Attributes.TryGetValue((string)c.Attribute("attribute")!, out var v)
+                    ? v switch { Money m => m.Value, decimal d => d, _ => null }
+                    : null;
+                return actual is { } a && (string?)c.Attribute("operator") switch
+                {
+                    "ge" => a >= expected,
+                    "gt" => a > expected,
+                    "le" => a <= expected,
+                    "lt" => a < expected,
+                    "eq" => a == expected,
+                    _ => true,
+                };
+            });
+
         private static bool Matches(Entity row, string attribute, object expected) => row.Attributes.TryGetValue(attribute, out var actual) && actual switch
         {
             OptionSetValue o => Equals(o.Value, expected),
@@ -1314,7 +1442,7 @@ public class SignalReevaluationJobTests
             var result = new EntityCollection();
             if (SubjectRows.TryGetValue(name, out var subjects))
             {
-                foreach (var row in subjects) result.Entities.Add(row);
+                foreach (var row in subjects.Where(r => HoldsNumericConditions(r, entity))) result.Entities.Add(row);
             }
             else if (WitnessRows.TryGetValue(name, out var witnesses))
             {
