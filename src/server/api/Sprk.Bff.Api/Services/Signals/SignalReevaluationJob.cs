@@ -124,6 +124,30 @@ public sealed class SignalReevaluationJob : IScheduledJob
             ResultJson: JsonSerializer.Serialize(counts.ToResult(context.Attempt), ResultJsonOptions));
     }
 
+    /// <summary>
+    /// Task 033 / task 101 contract: runs the SAME single-policy pass the nightly job runs (supersede the Signals citing an older
+    /// version, plan, raise the new version's episodes), for one policy, now. Task 101's publish calls this after it has stamped
+    /// the old version's <c>sprk_inforceto</c> and moved <c>sprk_currentversion</c>. A policy that is Off or Retired closes its
+    /// Signals through <see cref="SignalClosureService.ClosePolicyRetiredNowAsync"/> instead and is not evaluated. The result
+    /// reports success exactly as the nightly run would (any refusal or invalid policy is a failure); callers MUST check it.
+    /// </summary>
+    public async Task<PolicyReevaluationResult> ReevaluatePolicyAsync(Guid policyId, CancellationToken cancellationToken = default)
+    {
+        if (policyId == Guid.Empty) throw new ArgumentException("policyId must not be Guid.Empty.", nameof(policyId));
+        var row = await _entities.RetrieveAsync("sprk_policy", policyId, PolicyColumns, cancellationToken).ConfigureAwait(false);
+        var enabled = row.GetAttributeValue<bool?>("sprk_enabled") ?? false;
+        var active = row.GetAttributeValue<OptionSetValue>("statecode")?.Value is null or 0;
+        if (!enabled || !active)
+        {
+            throw new InvalidOperationException(
+                $"Policy {policyId} is Off or Retired; it is not evaluated. Close its Signals with SignalClosureService.ClosePolicyRetiredNowAsync.");
+        }
+
+        var counts = new RunCounts();
+        await EvaluatePolicyAsync(ToPolicyRow(row), counts, cancellationToken).ConfigureAwait(false);
+        return new PolicyReevaluationResult(counts.IsSuccess, counts.SupersededClosed, counts.Written + counts.Reraised, counts.FailureSummary());
+    }
+
     private async Task EvaluatePolicyAsync(PolicyRow policy, RunCounts counts, CancellationToken ct)
     {
         if (policy.IsScoped)
@@ -152,7 +176,19 @@ public sealed class SignalReevaluationJob : IScheduledJob
             var lane = policy.Lane.Value;
 
             var version = await _entities.RetrieveAsync(
-                "sprk_policyversion", versionId, new[] { "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate" }, ct).ConfigureAwait(false);
+                "sprk_policyversion", versionId, new[] { "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_inforceto" }, ct)
+                .ConfigureAwait(false);
+            if (version.GetAttributeValue<DateTime?>("sprk_inforceto") is { } inForceTo && inForceTo <= _timeProvider.GetUtcNow().UtcDateTime)
+            {
+                // No version is in force: the pointer is behind a publish, or the data is inconsistent. Superseding would reopen
+                // the same version every night, so nothing is evaluated or closed for this policy and the run is failed (visible).
+                counts.PolicyFailures++;
+                _logger.LogError(OntologyWriterEvents.PolicyVersionNotInForce,
+                    "Policy {PolicyCode}: its current version {VersionId} ended in force at {InForceTo:o}; nothing was evaluated, " +
+                    "closed or raised for it. Fix sprk_currentversion or sprk_inforceto.", policy.Code, versionId, inForceTo);
+                return;
+            }
+
             var spec = new SignalEvaluationPolicy(
                 policy.Id, policy.Code, lane, versionId,
                 version.GetAttributeValue<OptionSetValue>("sprk_ruletype")?.Value.ToString(CultureInfo.InvariantCulture),
@@ -179,6 +215,15 @@ public sealed class SignalReevaluationJob : IScheduledJob
             existing = superseded.Existing;
             counts.AddClosure(superseded.Outcome, retired: false);
             var plan = SignalEpisodePlanner.Plan(lane, evaluation.QuietWindowDays, _timeProvider.GetUtcNow(), evaluation.Hits, existing);
+            if (superseded.NotClosed.Count > 0)
+            {
+                // A supersede close that did not land (changed since read / failed) is already counted; the planner must not
+                // retry the same stale row in this pass. The next pass re-reads it.
+                plan.Closes.RemoveAll(c => superseded.NotClosed.Contains(c.Id));
+                plan.Reconciles.RemoveAll(r => superseded.NotClosed.Contains(r.Signal.Id));
+                plan.Reassigns.RemoveAll(r => superseded.NotClosed.Contains(r.Signal.Id));
+            }
+
             counts.Add(plan);
             LogRefusedCores(policy, plan);
             if (plan.Anomalies > 0)
@@ -352,12 +397,12 @@ public sealed class SignalReevaluationJob : IScheduledJob
         // THE HEARTBEAT (ADR-036 A1 rule 5) and the run-level last-evaluated (D-61): every attempt.
         _logger.Log(success ? LogLevel.Information : LogLevel.Warning, OntologyWriterEvents.EvaluatorHeartbeat,
             "[SIGNAL-EVALUATOR] heartbeat outcome={Outcome} lastEvaluated={LastEvaluated:o} policies={Policies} hits={Hits} " +
-            "written={Written} reraised={Reraised} updated={Updated} closed={Closed} reassigned={Reassigned} refused={Refused} " +
+            "written={Written} reraised={Reraised} updated={Updated} closed={Closed} supersededClosed={SupersededClosed} policyRetiredClosed={PolicyRetiredClosed} reassigned={Reassigned} refused={Refused} " +
             "unchanged={Unchanged} suppressed={Suppressed} quietWindow={QuietWindow} dateUnchanged={DateUnchanged} awaitingEvidence={AwaitingEvidence} noDatedEvidence={NoDatedEvidence} " +
             "invalidPolicies={InvalidPolicies} policyFailures={PolicyFailures} attempt={Attempt} durationMs={DurationMs} " +
             "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             success ? "succeeded" : "failed", now, counts.PoliciesEvaluated, counts.Hits, counts.Written, counts.Reraised,
-            counts.Updated, counts.Closed, counts.Reassigned, counts.Refused, counts.Unchanged, counts.Suppressed,
+            counts.Updated, counts.Closed, counts.SupersededClosed, counts.RetiredClosed, counts.Reassigned, counts.Refused, counts.Unchanged, counts.Suppressed,
             counts.QuietWindow, counts.DateUnchanged, counts.AwaitingEvidence, counts.NoDatedEvidence, counts.InvalidPolicies, counts.PolicyFailures, context.Attempt,
             (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
         return duration;
@@ -396,22 +441,30 @@ public sealed class SignalReevaluationJob : IScheduledJob
         query.AddOrder("sprk_policycode", OrderType.Ascending);
         var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
 
-        return rows.Entities.Select(row =>
-        {
-            var code = row.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
-            var headline = row.GetAttributeValue<string>("sprk_shortname") is { Length: > 0 } s ? s
-                : row.GetAttributeValue<string>("sprk_name") is { Length: > 0 } n ? n : code;
-            var version = row.GetAttributeValue<EntityReference>("sprk_currentversion");
-            return new PolicyRow(
-                row.Id,
-                code,
-                row.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value,
-                row.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
-                headline.Length > 200 ? headline[..200] : headline,
-                version is { Id: var id } && id != Guid.Empty ? id : null,
-                !string.IsNullOrWhiteSpace(row.GetAttributeValue<string>("sprk_tenant"))
-                    || row.GetAttributeValue<EntityReference>("sprk_matter") is { Id: var m } && m != Guid.Empty);
-        }).ToList();
+        return rows.Entities.Select(ToPolicyRow).ToList();
+    }
+
+    private static readonly string[] PolicyColumns =
+    {
+        "sprk_policycode", "sprk_lane", "sprk_severity", "sprk_shortname", "sprk_name", "sprk_currentversion", "sprk_tenant",
+        "sprk_matter", "sprk_enabled", "statecode",
+    };
+
+    private static PolicyRow ToPolicyRow(Entity row)
+    {
+        var code = row.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
+        var headline = row.GetAttributeValue<string>("sprk_shortname") is { Length: > 0 } s ? s
+            : row.GetAttributeValue<string>("sprk_name") is { Length: > 0 } n ? n : code;
+        var version = row.GetAttributeValue<EntityReference>("sprk_currentversion");
+        return new PolicyRow(
+            row.Id,
+            code,
+            row.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value,
+            row.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
+            headline.Length > 200 ? headline[..200] : headline,
+            version is { Id: var id } && id != Guid.Empty ? id : null,
+            !string.IsNullOrWhiteSpace(row.GetAttributeValue<string>("sprk_tenant"))
+                || row.GetAttributeValue<EntityReference>("sprk_matter") is { Id: var m } && m != Guid.Empty);
     }
 
     /// <summary>Every Signal of the policy, by the begins-with query D-13 names, keyed exactly by the parsed key. A key that
@@ -582,6 +635,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
         };
     }
 }
+
+/// <summary>What <see cref="SignalReevaluationJob.ReevaluatePolicyAsync"/> did for one policy (task 033 / 101 contract).</summary>
+/// <param name="Success">False when anything was refused, the policy was invalid or unreadable, or no version is in force.
+/// Callers MUST check it: the publish is not "done" while Signals are unreconciled.</param>
+/// <param name="SupersededClosed">Open Signals of older versions closed Superseded.</param>
+/// <param name="Raised">New Signals raised (first episodes and re-raised episodes, including those citing the new version).</param>
+public sealed record PolicyReevaluationResult(bool Success, int SupersededClosed, int Raised, string FailureSummary);
 
 /// <summary>One existing <c>sprk_signal</c> of a policy, as the planner needs it (task 031).</summary>
 internal sealed record ExistingSignal(

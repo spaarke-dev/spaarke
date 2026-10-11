@@ -10,9 +10,18 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <param name="ChangedSinceRead">Signals NOT closed because a person resolved them after they were read (row-version check).</param>
 /// <param name="Failed">Signals whose close threw; the writer already logged and metered each one.</param>
 /// <param name="PolicyFailures">Policies whose Signals could not be read or closed at all.</param>
+/// <remarks>
+/// <b>Callers MUST check <see cref="IsComplete"/>.</b> A caller that reads only <see cref="Closed"/> reports "closed" while
+/// Signals stay open (a failed close is counted here, not thrown, so one bad row cannot strand the rest).
+/// </remarks>
 public sealed record SignalClosureOutcome(int Closed, int ChangedSinceRead, int Failed, int PolicyFailures = 0)
 {
     public static SignalClosureOutcome None { get; } = new(0, 0, 0);
+
+    /// <summary>True only when every targeted Signal was closed: nothing failed and no Signal was skipped because a person
+    /// resolved it after it was read (benign, but the caller should re-run to confirm: the re-run finds it Resolved and is
+    /// then complete).</summary>
+    public bool IsComplete => Failed == 0 && ChangedSinceRead == 0 && PolicyFailures == 0;
 
     public SignalClosureOutcome Plus(SignalClosureOutcome other) =>
         new(Closed + other.Closed, ChangedSinceRead + other.ChangedSinceRead, Failed + other.Failed, PolicyFailures + other.PolicyFailures);
@@ -32,14 +41,15 @@ public sealed record SignalClosureOutcome(int Closed, int ChangedSinceRead, int 
 /// the Signal's policy, subject, core record, dedupe key or episode, so task 031 can find a <c>PolicyRetired</c> or
 /// <c>Superseded</c> episode and re-raise from it (D-32). A Signal already Resolved is never read as open here, so no
 /// closure path changes it.</para>
-/// <para><b>Callable.</b> <see cref="ClosePolicyRetiredNowAsync"/> is for task 100 (Retire closes immediately) and
-/// <see cref="CloseSupersededAsync"/> for task 101 (publish). The nightly job runs the same code, so the immediate and the
-/// next-pass closure cannot disagree. The new version's re-raise is the job's (episode n+1 citing the new version); the callable
-/// closes only.</para>
+/// <para><b>Callable.</b> <see cref="ClosePolicyRetiredNowAsync"/> is for task 100 (Retire closes immediately). Task 101
+/// (publish) calls <see cref="SignalReevaluationJob.ReevaluatePolicyAsync"/> instead, which supersedes AND raises the new
+/// episode in one pass (there is deliberately no close-only supersede: it would drop still-true items off the worklist until
+/// the nightly run). The nightly job runs the same code, so the immediate and next-pass closures cannot disagree.</para>
 /// <para><b>Superseded rule.</b> A Signal is superseded when the version it cites is not the policy's
-/// <c>sprk_currentversion</c>. <c>sprk_inforceto</c> is not consulted: publishing stamps it and moves the pointer together (D-14),
-/// so a cited version that is not current always has it set, while a CURRENT version with it set has no successor to
-/// re-raise under (closing it would reopen the same version every night).</para>
+/// <c>sprk_currentversion</c>. Publishing stamps the old version's <c>sprk_inforceto</c> and moves the pointer together (D-14), so a
+/// cited version that is not current always has it set. A CURRENT version whose <c>sprk_inforceto</c> has passed has no
+/// successor to re-raise under; the job refuses to evaluate such a policy (a failed run, nothing closed) rather than close
+/// its Signals and reopen them on the same version every night.</para>
 /// <para>§11: <i>Existing</i> — <see cref="SignalWriter.CloseAsync"/> closes one Signal; the job decides ConditionCleared only.
 /// <i>Extension</i> — no existing component reads Signals by policy or state across the Off/Retire/publish triggers; the
 /// writer and job are reused, not extended with admin-triggered callers. <i>Cost of doing nothing</i> — tasks 100 and 101
@@ -76,35 +86,15 @@ public sealed class SignalClosureService
     }
 
     /// <summary>
-    /// Task 101 (publish): closes every open Signal of the policy that cites a version other than its current one as
-    /// <c>Superseded</c>. Run it after the pointer has moved to the new version; the next pass raises the new episode.
-    /// </summary>
-    public async Task<SignalClosureOutcome> CloseSupersededAsync(Guid policyId, CancellationToken ct = default)
-    {
-        if (policyId == Guid.Empty) throw new ArgumentException("policyId must not be Guid.Empty.", nameof(policyId));
-        var policy = await _entities.RetrieveAsync("sprk_policy", policyId, new[] { "sprk_policycode", "sprk_currentversion" }, ct)
-            .ConfigureAwait(false);
-        var code = policy.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
-        if (policy.GetAttributeValue<EntityReference>("sprk_currentversion") is not { } current || current.Id == Guid.Empty)
-        {
-            throw new InvalidOperationException($"Policy {code} has no current version (sprk_currentversion is empty); nothing can be superseded.");
-        }
-
-        var open = await ReadOpenSignalsAsync(policyId, ct).ConfigureAwait(false);
-        return await CloseAsync(code, open.Where(s => IsSuperseded(s, current.Id)).ToList(), SignalWriter.ResolutionSuperseded, ct)
-            .ConfigureAwait(false);
-    }
-
-    /// <summary>
     /// The job's in-pass supersede: closes the open Signals in <paramref name="existing"/> that cite a version other than
     /// <paramref name="currentVersionId"/> and returns the list with each closed Signal shown as Resolved/Superseded, so the same
     /// pass's planner re-raises the subjects the current version still holds.
     /// </summary>
-    internal async Task<(IReadOnlyList<ExistingSignal> Existing, SignalClosureOutcome Outcome)> SupersedeInPassAsync(
+    internal async Task<(IReadOnlyList<ExistingSignal> Existing, SignalClosureOutcome Outcome, IReadOnlySet<Guid> NotClosed)> SupersedeInPassAsync(
         string policyCode, Guid currentVersionId, IReadOnlyList<ExistingSignal> existing, CancellationToken ct)
     {
         var superseded = existing.Where(s => IsSuperseded(s, currentVersionId)).ToList();
-        if (superseded.Count == 0) return (existing, SignalClosureOutcome.None);
+        if (superseded.Count == 0) return (existing, SignalClosureOutcome.None, new HashSet<Guid>());
 
         var closedIds = new HashSet<Guid>();
         var outcome = await CloseAsync(policyCode, superseded, SignalWriter.ResolutionSuperseded, ct, closedIds).ConfigureAwait(false);
@@ -114,7 +104,9 @@ public sealed class SignalClosureService
                 ? s with { Status = SignalWriter.SignalStatusResolved, Resolution = SignalWriter.ResolutionSuperseded, ResolvedOn = now }
                 : s)
             .ToList();
-        return (updated, outcome);
+        // Targeted but not closed (changed since read, or the close failed): the planner must leave them alone this pass, or it
+        // would retry the same stale row and count the same Signal twice. The next pass re-reads them.
+        return (updated, outcome, superseded.Where(s => !closedIds.Contains(s.Id)).Select(s => s.Id).ToHashSet());
     }
 
     /// <summary>

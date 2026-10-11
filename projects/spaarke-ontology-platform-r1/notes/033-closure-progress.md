@@ -8,7 +8,7 @@ not edited here.
 
 | File | What |
 |---|---|
-| `Services/Signals/SignalClosureService.cs` (new) | `ClosePolicyRetiredNowAsync(policyId)` (task 100), `CloseSupersededAsync(policyId)` (task 101), and two internal steps the nightly job runs: `SupersedeInPassAsync` and `ClosePoliciesNotInForceAsync`. Every close goes through `SignalWriter.CloseAsync` (system resolutions only, optimistic concurrency, never a Decision Record, never `sprk_resolvedby`, never `sprk_suppresseduntil`) |
+| `Services/Signals/SignalClosureService.cs` (new) | `ClosePolicyRetiredNowAsync(policyId)` (task 100) and two internal steps the nightly job runs: `SupersedeInPassAsync` and `ClosePoliciesNotInForceAsync`. Outcomes carry `IsComplete` (callers must check it). Every close goes through `SignalWriter.CloseAsync` (system resolutions only, optimistic concurrency, never a Decision Record, never `sprk_resolvedby`, never `sprk_suppresseduntil`) |
 | `Services/Signals/SignalReevaluationJob.cs` (shared, small edit) | New ctor param `SignalClosureService`; in-pass supersede right after the Signals are read, so the existing planner re-raises the subjects the new version holds in the SAME pass; a final Off/Retired step after the policy loop; `sprk_policyversion` read onto `ExistingSignal` (new optional trailing field `PolicyVersionId`); `supersededClosed` / `policyRetiredClosed` in the run result; closure refusals count as refused (the run fails, never silent) |
 | `Infrastructure/DI/SignalsModule.cs` (shared, one line) | `AddSingleton<SignalClosureService>()` |
 | `tests/unit/domain/Signals/SignalReevaluationJobTests.cs` | 10 new tests (harness extended: policy ids/versions, publish, Off/Retire, open-by-policy read) |
@@ -23,7 +23,7 @@ not edited here.
 - **PolicyRetired**: policies with `sprk_enabled = No` or `statecode` Inactive are read each night (two simple queries) and
   their open Signals closed. Nothing is evaluated for them. Idempotent: no open Signal, no write.
 - **Callables**: `ClosePolicyRetiredNowAsync` (no precondition check: the admin route that calls it owns authorization) and
-  `CloseSupersededAsync` (closes only; the job raises the new episode).
+  `SignalReevaluationJob.ReevaluatePolicyAsync(policyId)` (task 101: supersede AND raise the new episode in one pass; see the contract below).
 - **Negative cases**: Resolved Signals are never read as open by any closure path; a person's resolution after the read is
   refused by the row-version check (`changedSinceRead`); `sprk_decisionrecord`, `sprk_resolvedby`, `sprk_suppresseduntil` are
   never written; no Signal field other than status/resolution/resolvedon/lastevaluated changes, so Off-then-On re-raises from
@@ -34,12 +34,11 @@ not edited here.
 
 ## Decisions and deviations
 
-1. **`sprk_inforceto` is not read to decide supersession.** The rule is "the Signal cites a version other than the policy's
-   current version". Reason: publishing stamps `sprk_inforceto` and moves the pointer together (D-14), so a cited version that is
-   not current always has it set; and a CURRENT version with it set has no successor to re-raise under, so closing its Signals
-   would reopen them on the same version every night (episode inflation). The owner's amended constraint says "read
-   sprk_inforceto"; if task 101 can ever stamp before moving the pointer and calls `CloseSupersededAsync` between the two
-   writes, the call must come after the pointer moves. Needs owner awareness (see the PR).
+1. **`sprk_inforceto` guard (review round 1).** Supersession is decided by the pointer (a Signal cites a version other than
+   `sprk_currentversion`). `sprk_inforceto` is read on the CURRENT version as a guard: if it is set and `<= now`, no version is
+   in force, so the policy is not evaluated, nothing is closed or raised, `PolicyFailures` is counted (the run is not
+   successful) and EventId 50309 `PolicyVersionNotInForce` is logged. Closing would just reopen the same version every night.
+   Controls: a current version with no, or a future, `sprk_inforceto` runs normally.
 2. **"Deleted" policy is not handled.** FR-16 says "disabled or deleted". Retire (D-22) replaced deletion as the way a policy
    stops, and no role deletes `sprk_policy`; a hard-deleted policy would also orphan the `sprk_policy` lookup the closure reads
    by. Known limit, not filed: no path creates the state.
@@ -52,3 +51,28 @@ not edited here.
    place tasks 100/101 can call without injecting a scheduled job. Cost of doing nothing — Off/Retired/published policies'
    Signals stay Open in the worklist and 100/101 cannot close them immediately.
 6. **ADR-052 / ADR-036**: no new background work (the closure runs inside the existing `signal-reevaluation` job).
+
+## Task 101 contract (publish)
+
+Task 101 publishes in this order, then makes ONE call: (1) create the new `sprk_policyversion`; (2) stamp the old version's
+`sprk_inforceto`; (3) move `sprk_policy.sprk_currentversion` to the new version; (4) call
+`SignalReevaluationJob.ReevaluatePolicyAsync(policyId)` (the job is a concrete singleton, injectable directly).
+
+- It runs the same single-policy pass the nightly run runs: open Signals citing an older version close `Superseded`, and each
+  subject the new version still holds gets a new episode (`|n+1`) citing the new version, so still-true items do not leave
+  the worklist until 02:30. There is deliberately no close-only supersede.
+- The returned `PolicyReevaluationResult.Success` MUST be checked; false means something was refused or no version is in force
+  (step 2 before step 3, or a stamped current version), and the nightly run retries.
+- Not for an Off or Retired policy: it throws `InvalidOperationException`; use `SignalClosureService.ClosePolicyRetiredNowAsync`
+  (task 100) and check `IsComplete`.
+
+## Review round 1 (items fixed)
+
+1. Acceptance criterion 6: `CloseSupersededAsync` removed; `ReevaluatePolicyAsync` is the single path (supersede + raise).
+2. `SignalClosureOutcome.IsComplete` (Failed, ChangedSinceRead and PolicyFailures all zero) with tests; documented as mandatory.
+3. `sprk_inforceto` guard above, with a Theory (-1d, 0d fail; +30d, none run normally).
+4. Tests added: Off/Retired step closure failure fails the run; a supersede close skipped because a person resolved the Signal is
+   counted once (the planner no longer retries a stale row: `plan.Closes/Reconciles/Reassigns` drop the ids the supersede
+   targeted but did not close, `createsDeferred` covers a re-file); the aged-out test now seeds an old communication and the
+   fake honours the FetchXML link date bounds, so it fails without the window.
+5. Heartbeat line gained `supersededClosed` and `policyRetiredClosed`.

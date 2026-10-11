@@ -1014,20 +1014,23 @@ public class SignalReevaluationJobTests
         row.Contains("sprk_suppresseduntil").Should().BeFalse("an auto-closure never feeds suppression");
     }
 
-    [Fact]
-    public async Task Run_CommunicationAgedOutOfTheWindow_ClosesConditionCleared_AndTheWindowIsInTheQuery()
+    [Theory]
+    [InlineData("2026-08-01T09:15:00Z", true)]   // 70 days old: outside the 30-day window
+    [InlineData("2026-09-09T09:15:00Z", true)]   // just outside (window starts 2026-09-10)
+    [InlineData("2026-09-11T09:15:00Z", false)]  // just inside: the condition still holds
+    public async Task Run_CommunicationAgedOutOfTheWindow_ClosesConditionCleared(string received, bool closes)
     {
-        // The only communication is older than 30 days, so the rule's window excludes it: no hit (the fake returns the rows
-        // the FetchXML filter would keep, i.e. none). The window bound itself is asserted on the query text.
-        var h = new Harness().WithPathBPolicy();
+        // The communication exists, but the rule's now-30d bound (the fake honours the FetchXML link filter, as Dataverse does)
+        // excludes it once it is old. Without the window bound in the query this subject would still be a hit.
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId, DateTime.Parse(received, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal));
         var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId);
 
         var result = await h.RunAsync();
 
         result.Success.Should().BeTrue();
-        AssertSystemClosure(h.Org.Rows[id], SignalWriter.ResolutionConditionCleared);
-        h.Sysadmin.Fetches.Should().Contain(f => f.Contains("sprk_receiveddate") && f.Contains("2026-09-10"),
-            "now-30d is evaluated against the run time (2026-10-10), so an older communication does not match");
+        if (closes) AssertSystemClosure(h.Org.Rows[id], SignalWriter.ResolutionConditionCleared);
+        else h.Org.WriteCalls.Should().Be(0, "still a hit: nothing is written (D-61)");
     }
 
     [Fact]
@@ -1066,9 +1069,10 @@ public class SignalReevaluationJobTests
     }
 
     [Fact]
-    public async Task CloseSupersededAsync_Callable_ClosesOnlyTheOldVersionsOpenSignals_AndNeverAResolvedOne()
+    public async Task ReevaluatePolicyAsync_Callable_SupersedesAndRaisesTheNewEpisode_AndNeverTouchesAResolvedRow()
     {
-        var h = new Harness().WithPathBPolicy();
+        // The task 101 publish contract: stamp + move the pointer, then call this. One path: supersede AND re-raise.
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
         var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
         var v1 = h.Sysadmin.CurrentVersionOf(PolicyCode);
         var openOld = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
@@ -1077,17 +1081,118 @@ public class SignalReevaluationJobTests
             resolution: SignalWriter.ResolutionActed, resolvedOn: RunAt.UtcDateTime.AddDays(-2), coreId: OtherMatterId,
             policyId: policyId, versionId: v1);
         var v2 = h.Sysadmin.PublishNewVersion(PolicyCode, PathBBody, PathBTemplate);
-        var openNew = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", Guid.NewGuid(), 1), SignalWriter.SignalStatusOpen,
-            policyId: policyId, versionId: v2);
 
-        var outcome = await h.Closure.CloseSupersededAsync(policyId);
+        var result = await h.Job.ReevaluatePolicyAsync(policyId);
 
-        outcome.Should().Be(new SignalClosureOutcome(1, 0, 0));
+        result.Success.Should().BeTrue();
+        result.SupersededClosed.Should().Be(1);
+        result.Raised.Should().Be(1);
         AssertSystemClosure(h.Org.Rows[openOld], SignalWriter.ResolutionSuperseded);
+        var created = h.Org.CreatedPayloads.Should().ContainSingle("the new version still holds, so exactly one new episode").Subject;
+        created.GetAttributeValue<string>("sprk_dedupekey").Should().Be($"{PolicyCode}|sprk_matter|{Lower(MatterId)}|2");
+        created.GetAttributeValue<EntityReference>("sprk_policyversion")!.Id.Should().Be(v2);
         h.Org.Rows[actedOld].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value.Should().Be(SignalWriter.ResolutionActed);
-        h.Org.Rows[openNew].GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value.Should().Be(SignalWriter.SignalStatusOpen);
-        h.Org.ConditionalUpdates.Should().ContainSingle();
-        h.Org.CreateCalls.Should().Be(0, "the callable closes only; the job raises the new episode");
+        h.Org.ConditionalUpdates.Should().ContainSingle("only the open v1 Signal was closed");
+    }
+
+    [Fact]
+    public async Task ReevaluatePolicyAsync_OnAnOffPolicy_Throws_AndWritesNothing()
+    {
+        var h = new Harness().WithPathBPolicy(enabled: false);
+
+        await h.Job.Invoking(j => j.ReevaluatePolicyAsync(h.Sysadmin.PolicyIdOf(PolicyCode)))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*ClosePolicyRetiredNowAsync*");
+        h.Org.WriteCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ClosurePathsThatFail_ReportIsCompleteFalse_NotJustACount()
+    {
+        var h = new Harness().WithPathBPolicy();
+        var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
+        var failing = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: policyId, versionId: h.Sysadmin.CurrentVersionOf(PolicyCode));
+        h.Org.FailConditionalUpdates = true;
+
+        var failed = await h.Closure.ClosePolicyRetiredNowAsync(policyId);
+
+        failed.Should().Be(new SignalClosureOutcome(0, 0, 1));
+        failed.IsComplete.Should().BeFalse("a Signal is still open; a caller reading Closed alone would report success");
+        h.Org.Rows[failing].GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value.Should().Be(SignalWriter.SignalStatusOpen);
+
+        h.Org.FailConditionalUpdates = false;
+        h.Org.ResolveByPersonBeforeConditionalUpdate.Add(failing);
+        var changed = await h.Closure.ClosePolicyRetiredNowAsync(policyId);
+        changed.ChangedSinceRead.Should().Be(1);
+        changed.IsComplete.Should().BeFalse("a person resolved it after the read: re-run to confirm");
+
+        (await h.Closure.ClosePolicyRetiredNowAsync(policyId)).IsComplete.Should().BeTrue("the re-run finds nothing open");
+    }
+
+    [Fact]
+    public async Task Run_OffPolicyClosureFailure_MakesTheRunNotSuccessful_AndLeavesTheSignalOpen()
+    {
+        var h = new Harness().WithPathBPolicy(enabled: false);
+        var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: h.Sysadmin.PolicyIdOf(PolicyCode), versionId: h.Sysadmin.CurrentVersionOf(PolicyCode));
+        h.Org.FailConditionalUpdates = true;
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeFalse("a Signal of an Off policy could not be closed: never a quiet success");
+        result.ResultJson.Should().Contain("\"refused\":1").And.Contain("\"outcome\":\"failed\"");
+        h.Org.Rows[id].GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value.Should().Be(SignalWriter.SignalStatusOpen);
+        (await h.Cache.GetStringAsync(SignalReevaluationJob.LastSuccessCacheKey)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Run_SupersedeCloseSkippedBecauseAPersonResolvedIt_IsCountedOnce_AndNotRetriedByThePlanner()
+    {
+        var h = new Harness().WithPathBPolicy(); // no hit: the planner would also want to close it as ConditionCleared
+        var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: h.Sysadmin.PolicyIdOf(PolicyCode), versionId: h.Sysadmin.CurrentVersionOf(PolicyCode));
+        h.Sysadmin.PublishNewVersion(PolicyCode, PathBBody, PathBTemplate);
+        h.Org.ResolveByPersonBeforeConditionalUpdate.Add(id);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        result.ResultJson.Should().Contain("\"changedSinceRead\":1", "counted once, not once by the supersede and again by the planner")
+            .And.Contain("\"closed\":0");
+        h.Org.ConditionalUpdates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(-1, true)]
+    [InlineData(0, true)]
+    [InlineData(30, false)]
+    [InlineData(null, false)]
+    public async Task Run_CurrentVersionWhoseInForceToHasPassed_IsAFailure_NothingEvaluatedOrClosed(int? daysFromRun, bool refused)
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        h.Sysadmin.SetCurrentVersionInForceTo(PolicyCode, daysFromRun is { } d ? RunAt.UtcDateTime.AddDays(d) : null);
+        // An open Signal citing an older version: would be Superseded if the policy were evaluated.
+        var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen,
+            coreId: MatterId, policyId: h.Sysadmin.PolicyIdOf(PolicyCode), versionId: Guid.NewGuid());
+
+        var result = await h.RunAsync();
+
+        if (refused)
+        {
+            result.Success.Should().BeFalse();
+            result.ResultJson.Should().Contain("\"policyFailures\":1").And.Contain("\"policiesEvaluated\":0");
+            h.Org.WriteCalls.Should().Be(0, "nothing is closed or raised for a policy with no version in force");
+            h.Sysadmin.Fetches.Should().BeEmpty();
+            h.Log.Should().Contain(e => e.EventId.Id == OntologyWriterEvents.PolicyVersionNotInForce.Id);
+            h.Org.Rows[id].GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value.Should().Be(SignalWriter.SignalStatusOpen);
+        }
+        else
+        {
+            result.Success.Should().BeTrue("a current version with no (or a future) end runs normally");
+            h.Log.Should().NotContain(e => e.EventId.Id == OntologyWriterEvents.PolicyVersionNotInForce.Id);
+            AssertSystemClosure(h.Org.Rows[id], SignalWriter.ResolutionSuperseded);
+            h.Org.CreatedPayloads.Should().ContainSingle();
+        }
     }
 
     [Fact]
@@ -1142,6 +1247,7 @@ public class SignalReevaluationJobTests
         var outcome = await h.Closure.ClosePolicyRetiredNowAsync(policyId);
 
         outcome.Should().Be(new SignalClosureOutcome(1, 0, 0));
+        outcome.IsComplete.Should().BeTrue();
         AssertSystemClosure(h.Org.Rows[open], SignalWriter.ResolutionPolicyRetired);
         h.Org.Rows[acted].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value.Should().Be(SignalWriter.ResolutionActed);
         (await h.Closure.ClosePolicyRetiredNowAsync(policyId)).Should().Be(SignalClosureOutcome.None, "idempotent: a second call writes nothing");
@@ -1285,7 +1391,7 @@ public class SignalReevaluationJobTests
             return this;
         }
 
-        public Harness WithMatterHit(Guid matterId)
+        public Harness WithMatterHit(Guid matterId, DateTime? received = null)
         {
             Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", matterId)
             {
@@ -1298,7 +1404,7 @@ public class SignalReevaluationJobTests
                 ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
                 ["sprk_subject"] = "Rate increase from Firm LLP",
                 ["sprk_from"] = "partner@firm.example",
-                ["sprk_receiveddate"] = new DateTime(2026, 10, 5, 9, 15, 0, DateTimeKind.Utc),
+                ["sprk_receiveddate"] = received ?? new DateTime(2026, 10, 5, 9, 15, 0, DateTimeKind.Utc),
             });
             return this;
         }
@@ -1438,6 +1544,12 @@ public class SignalReevaluationJobTests
         }
 
         public Guid PolicyIdOf(string code) => _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code).Id;
+
+        public void SetCurrentVersionInForceTo(string code, DateTime? inForceTo)
+        {
+            var version = _rows[("sprk_policyversion", CurrentVersionOf(code))];
+            if (inForceTo is { } value) version["sprk_inforceto"] = value; else version.Attributes.Remove("sprk_inforceto");
+        }
 
         public Guid CurrentVersionOf(string code) =>
             _policies.Single(p => p.GetAttributeValue<string>("sprk_policycode") == code).GetAttributeValue<EntityReference>("sprk_currentversion").Id;
@@ -1584,7 +1696,7 @@ public class SignalReevaluationJobTests
             var result = new EntityCollection();
             if (SubjectRows.TryGetValue(name, out var subjects))
             {
-                foreach (var row in subjects) result.Entities.Add(row);
+                foreach (var row in subjects.Where(r => InnerLinksSatisfied(entity, r))) result.Entities.Add(row);
             }
             else if (WitnessRows.TryGetValue(name, out var witnesses))
             {
@@ -1595,6 +1707,37 @@ public class SignalReevaluationJobTests
             }
 
             return Task.FromResult(result);
+        }
+
+        /// <summary>An inner link-entity keeps a subject only when a linked witness row satisfies the link's date bounds (what the
+        /// FetchXML join does in Dataverse); other link conditions are not modelled.</summary>
+        private bool InnerLinksSatisfied(XElement entity, Entity subject)
+        {
+            foreach (var link in entity.Elements("link-entity").Where(l => l.Attribute("link-type")?.Value == "inner"))
+            {
+                if (!WitnessRows.TryGetValue(link.Attribute("name")!.Value, out var witnesses)) continue;
+                var from = link.Attribute("from")!.Value;
+                var bounds = (link.Element("filter")?.Elements("condition") ?? Enumerable.Empty<XElement>())
+                    .Where(c => c.Attribute("value") is not null && c.Attribute("operator")!.Value is "ge" or "gt" or "le" or "lt")
+                    .ToList();
+                var any = witnesses.Any(w => w.GetAttributeValue<EntityReference>(from)?.Id == subject.Id && bounds.All(c =>
+                {
+                    var actual = w.GetAttributeValue<DateTime?>(c.Attribute("attribute")!.Value);
+                    if (actual is null) return false;
+                    var expected = DateTime.Parse(c.Attribute("value")!.Value, System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal);
+                    return c.Attribute("operator")!.Value switch
+                    {
+                        "ge" => actual >= expected,
+                        "gt" => actual > expected,
+                        "le" => actual <= expected,
+                        _ => actual < expected,
+                    };
+                }));
+                if (!any) return false;
+            }
+
+            return true;
         }
 
         private Exception Write()
