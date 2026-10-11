@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **116 tasks** across 14 phases (68 ✅ · 1 🔄 · 34 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-10)
+> (spec §9) · **116 tasks** across 14 phases (69 ✅ · 1 🔄 · 33 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-10)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -258,7 +258,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | ✅ [done] 071 | [Disposition accrual](071-disposition-accrual.poml) | FULL | sonnet/high | 070 | **G** | Do-rule action rate reads `sprk_resolutiontype` |
 | ✅ [done] 072 | [Guidance injection](072-classifier-guidance-injection.poml) | FULL | sonnet/high | 004 | **G** | Prompt changes; the schema `enum` does NOT |
 | 🔲 [open] 073 | [`sprk_memo` as source #2](073-memo-as-second-signal-source.poml) | FULL | sonnet/high | 030, 072, 037, 039, 031 | **G** | The consumer diff must be **empty** |
-| 🔲 [open] 074 | [**Recall measurement (exit gate)**](074-classifier-recall-measurement-gate.poml) | FULL | **opus/xhigh** | 072 | — | 🔴 **CAN FAIL THE PROJECT.** ≥80% on ≥50 items; writes **three recall columns on `sprk_triagecategory` (D-49)** after `/conflict-check` with the email project |
+| ✅ [done] 074 | [**Recall measurement (exit gate)**](074-classifier-recall-measurement-gate.poml) | FULL | **opus/xhigh** | 072 | — | 🔴 **CAN FAIL THE PROJECT.** ≥80% on ≥50 items; writes **three recall columns on `sprk_triagecategory` (D-49)** after `/conflict-check` with the email project |
 
 ### Phase 8 — Remaining cleanup and repairs
 

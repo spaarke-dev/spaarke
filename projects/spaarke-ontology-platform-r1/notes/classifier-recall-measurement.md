@@ -563,9 +563,9 @@ False positives lower precision, not recall, so counting them does not help the 
 The live environment, not master, carries the pass. Until both PRs merge to master, a fresh deploy does not reproduce it:
 
 - **#1610** (rung 5 reads the editable triage taxonomy): the BFF code. Without it rung 5 keeps its fixed vocabulary and the
-  classifier is back to the run 2 anchoring problem (§8.4). Not merged when this was written.
-- **#1602** (TRIAGE-EMAIL mirror, to master): the dev row already matches it (§9.2), but master's mirror does not until it
-  merges, and a redeploy from master would overwrite the row.
+  classifier is back to the run 2 anchoring problem (§8.4). **Merged into docs/ontology-platform-design 2026-10-10 (049ca6db9); reaches master with #1111.**
+- **#1602** (TRIAGE-EMAIL mirror, to master): the dev row already matches it (§9.2), but master's mirror did not until it
+  merged. **Merged to master 2026-10-10 (e61bc0892).**
 
 The run 3 / run 4 code is #1610 merged into a throwaway local branch (`tmp/074-run3-local`), so this note proves "this
 fixture and harness, against spaarkedev1, with those two changes live" and no more. Re-run the harness after both merge if
@@ -591,5 +591,5 @@ Same semantics as §6.5: strict per-category recall (24/27 and 25/28); the gate 
 ### 11.6 Verdict
 
 **GATE PASSES (D-10, FR-40, criterion 11): predicate recall 49/55 = 89.1% (Wilson 95% 78.2-94.9%) on 55 fee-or-scope
-positives, run 4, 2026-10-10, synthetic set and AI-labelled key (D-64, D-116). Run 3 (81.8%) is invalid and not counted. The
-pass depends on #1610 and #1602 merging to master. The 074 POML and TASK-INDEX are not marked complete here.**
+positives, run 4, 2026-10-10, synthetic set and AI-labelled key (D-64, D-116). Run 3 (81.8%) is invalid and not counted. #1602
+is on master and #1610 on the project branch (reaches master with #1111). 074 marked complete 2026-10-10.**
