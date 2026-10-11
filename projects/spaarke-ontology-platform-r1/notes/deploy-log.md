@@ -183,3 +183,10 @@ Spaarke Basic User +`prvReadsprk_BudgetRevision` Deep (16:06:59Z, 648 -> 649). S
 - **Why:** task 046 live proof (#1609 notes §F.1, issue #1607): ordinary users holding Create on `sprk_workassignment` (Spaarke Core User, Deep) could not create a work assignment when their business unit names an AI search index — the wizard binds `sprk_AI_Search_Index` and the role had Read but not AppendTo on `sprk_aisearchindex` (UserOwned). Same bind in the Matter/Project/Event/Invoice wizards. Needed for Assign Work as a decision next step (043/046).
 - **What:** `AddPrivilegesRole` on the root **Spaarke Core User** (`75e1b627-2ab6-f111-aaad-0022482913fc`): `prvAppendTosprk_AISearchIndex` at **Deep** (matching its Read). Standing approval D-110 (CRUD-class privilege on Core User for users to work).
 - **Read-back:** 743 → 744 privileges; exactly one added (`748d407e-3d88-4ba4-86bc-1245bbe00862`, Deep); none removed or changed. Repo role XML updated to match.
+
+## 2026-10-10 - Task 074 D-49: write run 4 recall to the triage category rows (spaarkedev1, fix round for PR #1585)
+
+- **Why:** 074 acceptance criterion: each measured category row holds measured recall, set size and date. The rows still held run 2 values.
+- **What:** PATCH (`If-Match: *`) on `sprk_triagecategory` `8b62dd84-1fbc-f111-aaaf-3833c5e9614d` (Fee / rate change) and `8d62dd84-1fbc-f111-aaaf-3833c5e9614d` (Scope / budget change) at 2026-10-10T21:18Z, HTTP 204 each: `sprk_measuredrecall`, `sprk_labelledsetsize`, `sprk_recallmeasuredon` only. `sprk_recallmeasuredon` is DateOnly, written as `2026-10-10`. Guidance and every other column untouched.
+- **Before (read back first):** Fee 25.93 / 92 / 2026-10-10; Scope 39.29 / 92 / 2026-10-10 (run 2, as expected).
+- **After (read back):** Fee **88.89** / 92 / 2026-10-10 (`modifiedon` 21:18:20Z); Scope **89.29** / 92 / 2026-10-10 (`modifiedon` 21:18:21Z). Strict per-category recall from run 4 (24/27, 25/28).
