@@ -70,7 +70,7 @@ Status: see `tasks/TASK-INDEX.md` and `current-task.md`. Spec: `spec.md` (source
 Full table: `spec.md` §Owner Clarifications. These still constrain work:
 
 **Scope decisions**
-- 2026-10-08 — C6 = thread post + notify members; no outbound email; no attachments.
+- 2026-10-08 — C6 = thread post + notify members; no outbound email; no attachments. Reaffirmed 2026-10-11 (option A): no email on message post; members are told through the in-portal feed (task 037). Task 036 is the grant email only.
 - 2026-10-08 — the in-portal feed is derived from existing grant and message rows; no new table.
 - 2026-10-10 — Front Door submitters:
   - workforce by default;
