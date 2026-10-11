@@ -202,14 +202,23 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
     private async Task ApplyAsync(PolicyRow policy, SignalEvaluationPolicy spec, EpisodePlan plan, RunCounts counts, CancellationToken ct)
     {
+        // Ids of the Signals this pass actually closed. A re-file's new episode is created only when its predecessor closed.
+        var closedIds = new HashSet<Guid>();
         foreach (var signal in plan.Closes)
         {
             await GuardAsync(policy, "close", signal.SubjectId, counts, writerLogged: true, async () =>
             {
                 var outcome = await _writer.CloseAsync(signal.Id, signal.RowVersion, SignalWriter.ResolutionConditionCleared, policy.Code, ct)
                     .ConfigureAwait(false);
-                if (outcome == SignalCloseOutcome.Closed) counts.Closed++;
-                else counts.ChangedSinceRead++;
+                if (outcome == SignalCloseOutcome.Closed)
+                {
+                    counts.Closed++;
+                    closedIds.Add(signal.Id);
+                }
+                else
+                {
+                    counts.ChangedSinceRead++;
+                }
             }).ConfigureAwait(false);
         }
 
@@ -234,6 +243,19 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
         foreach (var create in plan.Creates)
         {
+            if (create.ReplacesSignalId is { } replaced && !closedIds.Contains(replaced))
+            {
+                // A re-file's episode n+1 must not open beside a still-open n (two open Signals for one subject, the old one
+                // visible to the old core's members). The close was refused (changed since read) or failed (already counted
+                // and logged); the next pass re-reads the subject and retries.
+                counts.CreatesDeferred++;
+                _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "Policy {PolicyCode}: episode {Episode} for {SubjectEntity} {SubjectId} was NOT created because the Signal it " +
+                    "replaces ({ReplacedSignalId}) was not closed; the next pass retries.",
+                    policy.Code, create.Episode, create.Hit.SubjectEntity, create.Hit.SubjectId, replaced);
+                continue;
+            }
+
             await GuardAsync(policy, "create", create.Hit.SubjectId, counts, writerLogged: false, async () =>
             {
                 var result = await _writer.WriteAsync(BuildRequest(policy, spec, create.Hit, create.Episode), ct).ConfigureAwait(false);
@@ -388,8 +410,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
                     continue; // BeginsWith is a LIKE: '_' or '%' in a code can match another policy's keys
                 }
 
-                if (!SignalWriter.TryParseDedupeKey(key, out var code, out var subjectEntity, out var subjectId, out var episode)
-                    || !string.Equals(code, policyCode, StringComparison.Ordinal))
+                if (SignalWriter.TryParseDedupeKey(key, out var parsedCode, out _, out _, out _)
+                    && !string.Equals(parsedCode, policyCode, StringComparison.Ordinal))
+                {
+                    continue; // another policy's key under the same prefix (a code containing '|', e.g. POL vs POL|ODD)
+                }
+
+                if (!SignalWriter.TryParseDedupeKey(key, out var code, out var subjectEntity, out var subjectId, out var episode))
                 {
                     counts.UnparseableKeys++;
                     unparseable++;
@@ -441,9 +468,11 @@ public sealed class SignalReevaluationJob : IScheduledJob
     {
         public int PoliciesEvaluated, DecideLanePolicies, DoLanePolicies, InvalidPolicies, PolicyFailures, ScopedNotEvaluated;
         public int Hits, Written, Reraised, Updated, Closed, Reassigned, Refused, ChangedSinceRead;
-        public int Unchanged, Suppressed, QuietWindow, DateUnchanged, UnparseableKeys, Anomalies;
+        public int Unchanged, Suppressed, QuietWindow, DateUnchanged, UnparseableKeys, Anomalies, CreatesDeferred;
 
-        public bool IsSuccess => Refused == 0 && InvalidPolicies == 0 && PolicyFailures == 0 && UnparseableKeys == 0;
+        /// <summary>A scoped policy that is silently skipped, or a Signal left untouched as an anomaly, is not a healthy run.</summary>
+        public bool IsSuccess =>
+            Refused == 0 && InvalidPolicies == 0 && PolicyFailures == 0 && UnparseableKeys == 0 && Anomalies == 0 && ScopedNotEvaluated == 0;
 
         public void Add(EpisodePlan plan)
         {
@@ -456,7 +485,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
         }
 
         public string FailureSummary() =>
-            $"refused={Refused}, invalidPolicies={InvalidPolicies}, policyFailures={PolicyFailures}, unparseableKeys={UnparseableKeys}";
+            $"refused={Refused}, invalidPolicies={InvalidPolicies}, policyFailures={PolicyFailures}, unparseableKeys={UnparseableKeys}, " +
+            $"anomalies={Anomalies}, scopedNotEvaluated={ScopedNotEvaluated}";
 
         public IReadOnlyDictionary<string, long> ByAction() => new Dictionary<string, long>(StringComparer.Ordinal)
         {
@@ -491,6 +521,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             dateUnchanged = DateUnchanged,
             unparseableKeys = UnparseableKeys,
             anomalies = Anomalies,
+            createsDeferred = CreatesDeferred,
             attempt,
         };
     }
@@ -518,7 +549,9 @@ internal sealed record ExistingSignal(
 }
 
 /// <summary>A Signal to create: episode 1 for a first detection, n+1 for a re-raise.</summary>
-internal sealed record PlannedCreate(SignalHit Hit, int Episode);
+/// <param name="ReplacesSignalId">The open Signal this episode replaces (a re-file to another core record): the create runs only
+/// when that Signal's close returned <see cref="SignalCloseOutcome.Closed"/>.</param>
+internal sealed record PlannedCreate(SignalHit Hit, int Episode, Guid? ReplacesSignalId = null);
 
 /// <summary>What one policy's pass will write, and what it counted without writing (task 031).</summary>
 internal sealed class EpisodePlan
@@ -597,7 +630,7 @@ internal static class SignalEpisodePlanner
                 {
                     plan.Closes.Add(latest);
                     if (Suppressed(grain)) plan.Suppressed++;
-                    else plan.Creates.Add(new PlannedCreate(hit, latest.Episode + 1));
+                    else plan.Creates.Add(new PlannedCreate(hit, latest.Episode + 1, latest.Id));
                     continue;
                 }
 
@@ -634,13 +667,19 @@ internal static class SignalEpisodePlanner
             {
                 plan.Creates.Add(new PlannedCreate(hit, latest.Episode + 1));
             }
+            else if (CoreChanged(latest, core) && !InDecideQuietWindow(lane, latest, quietWindowDays, now))
+            {
+                // The latest episode belongs to a different core record: a re-file whose old episode was closed here (so a
+                // failed n+1 create left the subject with no open Signal), or a Signal resolved by the old core's members.
+                // The new core's members have never seen it, so the Do-lane date rule does not apply (D-13, D-34).
+                plan.Creates.Add(new PlannedCreate(hit, latest.Episode + 1));
+            }
             else if (lane == SignalWriter.LaneDo)
             {
                 if (latest.DueDate?.Date != hit.DueDate?.Date) plan.Creates.Add(new PlannedCreate(hit, latest.Episode + 1));
                 else plan.DateUnchanged++;
             }
-            else if (latest.Resolution == SignalWriter.ResolutionDismissed
-                     && (latest.ResolvedOn is not { } resolvedOn || resolvedOn.AddDays(quietWindowDays) > now))
+            else if (InDecideQuietWindow(lane, latest, quietWindowDays, now))
             {
                 plan.QuietWindow++;
             }
@@ -660,6 +699,11 @@ internal static class SignalEpisodePlanner
 
         return plan;
     }
+
+    private static bool InDecideQuietWindow(int lane, ExistingSignal latest, int quietWindowDays, DateTime now) =>
+        lane == SignalWriter.LaneDecide
+        && latest.Resolution == SignalWriter.ResolutionDismissed
+        && (latest.ResolvedOn is not { } resolvedOn || resolvedOn.AddDays(quietWindowDays) > now);
 
     private static Grain GrainOf(SignalHit hit, SignalCoreRecord core) =>
         core.IsNoCore ? new Grain(null, Guid.Empty, hit.SubjectEntity, hit.SubjectId) : new Grain(core.TypeRefId, core.Id, null, Guid.Empty);

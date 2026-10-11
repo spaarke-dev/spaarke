@@ -99,7 +99,8 @@ public class SignalReevaluationJobTests
     {
         var h = new Harness();
         var request = new SignalWriteRequest(PolicyId, PolicyCode, VersionId, "sprk_matter", MatterId, null, "Headline",
-            SignalWriter.LaneDecide, null, "Text.", new Dictionary<string, object?>()) { Episode = 0 };
+            SignalWriter.LaneDecide, null, "Text.", new Dictionary<string, object?>())
+        { Episode = 0 };
 
         await h.Writer.Invoking(w => w.WriteAsync(request)).Should().ThrowAsync<ArgumentException>().WithMessage("*Episode 0*");
         h.Org.WriteCalls.Should().Be(0);
@@ -179,12 +180,16 @@ public class SignalReevaluationJobTests
     {
         var h = new Harness().WithPathBPolicy();
         var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId);
-        h.Org.BumpVersionAfterRead = id; // a person resolves it between the job's read and its close
+        h.Org.ResolveByPersonBeforeConditionalUpdate.Add(id); // a person dismisses it between the job's read and its close
 
         var result = await h.RunAsync();
 
         result.Success.Should().BeTrue();
-        h.Org.Rows[id].GetAttributeValue<OptionSetValue>("sprk_resolutiontype").Should().BeNull("the conditional update was refused");
+        result.ResultJson.Should().Contain("\"changedSinceRead\":1").And.Contain("\"closed\":0");
+        h.Org.ConditionalUpdates.Should().BeEmpty("the row-version check refused the conditional update");
+        h.Org.Updates.Should().BeEmpty("the close is never retried unconditionally");
+        h.Org.Rows[id].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value
+            .Should().Be(SignalWriter.ResolutionDismissed, "the person's resolution is untouched");
     }
 
     [Fact]
@@ -397,6 +402,112 @@ public class SignalReevaluationJobTests
         created.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(MatterId));
     }
 
+    private static Harness RefiledToDoHarness()
+    {
+        var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), project: ProjectId);
+        h.RunAsync().GetAwaiter().GetResult();
+        h.Sysadmin.Stub(new Entity("sprk_todo", TodoId) { ["sprk_regardingproject"] = null!, ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) });
+        h.Org.ResetCounts();
+        return h;
+    }
+
+    [Fact]
+    public async Task Run_RefileWhoseCloseIsChangedSinceRead_CreatesNoNewEpisode_SoNoSubjectHasTwoOpenSignals()
+    {
+        var h = RefiledToDoHarness();
+        var oldId = h.Org.Rows.Keys.Single();
+        h.Org.ResolveByPersonBeforeConditionalUpdate.Add(oldId);
+
+        var result = await h.RunAsync();
+
+        result.ResultJson.Should().Contain("\"changedSinceRead\":1");
+        h.Org.CreateCalls.Should().Be(0, "episode 2 must not open while episode 1 was not closed");
+        h.Org.Rows.Values.Count(r => r.GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value == SignalWriter.SignalStatusOpen)
+            .Should().Be(0);
+
+        // the next pass reads the person's resolution and re-raises under the new core (the old Signal is Resolved, in another core)
+        var next = await h.RunAsync();
+        next.Success.Should().BeTrue();
+        h.Org.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(MatterId));
+    }
+
+    [Fact]
+    public async Task Run_RefileWhoseCloseThrows_CreatesNoNewEpisode_AndTheRunFails()
+    {
+        var h = RefiledToDoHarness();
+        h.Org.FailConditionalUpdates = true;
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeFalse();
+        h.Org.CreateCalls.Should().Be(0, "the old episode is still open: a second open Signal must not be created beside it");
+        h.Org.Rows.Should().ContainSingle().Which.Value.GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value
+            .Should().Be(SignalWriter.SignalStatusOpen);
+    }
+
+    [Fact]
+    public async Task Run_RefileWhoseCreateFailsAfterTheOldEpisodeClosed_IsReRaisedOnTheNextPass()
+    {
+        var h = RefiledToDoHarness();
+        h.Org.FailCreates = true;
+
+        var failed = await h.RunAsync();
+
+        failed.Success.Should().BeFalse();
+        h.Org.Rows.Should().ContainSingle().Which.Value.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value
+            .Should().Be(SignalWriter.ResolutionConditionCleared);
+
+        h.Org.FailCreates = false;
+        h.Org.ResetCounts();
+        var retry = await h.RunAsync();
+
+        retry.Success.Should().BeTrue();
+        var created = h.Org.CreatedPayloads.Should().ContainSingle("the Do-lane date rule must not strand a re-filed subject").Subject;
+        created.GetAttributeValue<string>("sprk_dedupekey").Should().EndWith("|2");
+        created.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(MatterId));
+    }
+
+    [Fact]
+    public async Task Run_AnOlderEpisodeStillOpenBesideANewerOne_IsAnAnomaly_AndTheRunFails()
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId);
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 2), SignalWriter.SignalStatusOpen, coreId: MatterId);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeFalse("a Signal left untouched as an anomaly is not a healthy run");
+        result.ResultJson.Should().Contain("\"anomalies\":1");
+    }
+
+    [Fact]
+    public async Task Run_ATenantScopedPolicyThatIsSkipped_MakesTheRunNotSuccessful_AndStillWarns()
+    {
+        var h = new Harness();
+        h.Sysadmin.AddPolicy(PolicyCode, SignalWriter.LaneDecide, true, PathBBody, PathBTemplate, tenant: "tenant-a");
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeFalse("a silently skipped policy must not leave the health check Healthy");
+        result.ResultJson.Should().Contain("\"scopedNotEvaluated\":1");
+        h.Log.Should().Contain(e => e.Level == LogLevel.Warning && e.EventId.Id == OntologyWriterEvents.EvaluatorPolicyFailed.Id);
+        (await h.Cache.GetStringAsync(SignalReevaluationJob.LastSuccessCacheKey)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Run_AnotherPoliciesKeyUnderTheSamePrefix_PolicyCodeContainingAPipe_IsNotUnparseable()
+    {
+        var h = new Harness().WithPathBPolicy();
+        var otherId = h.Org.SeedSignal($"{PolicyCode}|ODD|sprk_matter|{Lower(MatterId)}|1", SignalWriter.SignalStatusOpen, coreId: MatterId);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue("the key belongs to policy POL|ODD, not to a malformed Signal of this policy");
+        result.ResultJson.Should().Contain("\"unparseableKeys\":0");
+        h.Org.WriteCalls.Should().Be(0, "POL's pass must not close POL|ODD's Signal");
+        h.Org.Rows[otherId].GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value.Should().Be(SignalWriter.SignalStatusOpen);
+    }
+
     [Fact]
     public async Task Run_OpenToDoSignalWhoseDueDateMoved_IsReconciled_NotDuplicated()
     {
@@ -502,6 +613,37 @@ public class SignalReevaluationJobTests
             plan.Creates.Should().BeEmpty();
             plan.QuietWindow.Should().Be(1);
         }
+    }
+
+    [Fact]
+    public void Plan_RefiledWhileOpen_TheCreateNamesTheSignalItReplaces()
+    {
+        var hit = TodoHit(TodoId, due: new DateTime(2026, 10, 1), project: ProjectId);
+        var open = Existing(hit, 1, SignalWriter.SignalStatusOpen, due: new DateTime(2026, 10, 1)) with { CoreRecordId = OtherMatterId };
+
+        var plan = SignalEpisodePlanner.Plan(SignalWriter.LaneDo, 14, RunAt, new[] { hit }, new[] { open });
+
+        plan.Closes.Should().ContainSingle().Which.Id.Should().Be(open.Id);
+        plan.Creates.Should().ContainSingle().Which.ReplacesSignalId.Should().Be(open.Id);
+    }
+
+    [Theory]
+    [InlineData(SignalWriter.LaneDo, SignalWriter.ResolutionConditionCleared, 1, true)]
+    [InlineData(SignalWriter.LaneDo, SignalWriter.ResolutionActed, 1, true)]
+    [InlineData(SignalWriter.LaneDecide, SignalWriter.ResolutionDismissed, 3, false)]   // inside the quiet window: still held back
+    [InlineData(SignalWriter.LaneDecide, SignalWriter.ResolutionDismissed, 20, true)]
+    public void Plan_ResolvedLatestInAnotherCoreRecord_IsReRaisable_EvenWhenTheDueDateIsUnchanged(
+        int lane, int resolution, int daysSinceResolved, bool raised)
+    {
+        var hit = TodoHit(TodoId, due: new DateTime(2026, 10, 1), project: ProjectId);
+        var resolved = Existing(hit, 1, SignalWriter.SignalStatusResolved, resolution,
+            resolvedOn: RunAt.UtcDateTime.AddDays(-daysSinceResolved), due: new DateTime(2026, 10, 1)) with
+        { CoreRecordId = OtherMatterId };
+
+        var plan = SignalEpisodePlanner.Plan(lane, 14, RunAt, new[] { hit }, new[] { resolved });
+
+        if (raised) plan.Creates.Should().ContainSingle().Which.Episode.Should().Be(2);
+        else plan.Creates.Should().BeEmpty();
     }
 
     [Fact]
@@ -918,7 +1060,8 @@ public class SignalReevaluationJobTests
         public WriterOrg Org { get; set; } = null!;
         public Dictionary<string, List<Entity>> SubjectRows { get; } = new(StringComparer.Ordinal)
         {
-            ["sprk_matter"] = new(), ["sprk_todo"] = new(),
+            ["sprk_matter"] = new(),
+            ["sprk_todo"] = new(),
         };
         public Dictionary<string, List<Entity>> WitnessRows { get; } = new(StringComparer.Ordinal)
         {
@@ -941,10 +1084,10 @@ public class SignalReevaluationJobTests
             return this;
         }
 
-        public void AddPolicy(string code, int lane, bool enabled, string body, string template)
+        public void AddPolicy(string code, int lane, bool enabled, string body, string template, string? tenant = null)
         {
             var versionId = Guid.NewGuid();
-            _policies.Add(new Entity("sprk_policy", Guid.NewGuid())
+            var policy = new Entity("sprk_policy", Guid.NewGuid())
             {
                 ["sprk_policycode"] = code,
                 ["sprk_enabled"] = enabled,
@@ -953,7 +1096,9 @@ public class SignalReevaluationJobTests
                 ["sprk_severity"] = new OptionSetValue(SignalWriter.SeverityWarning),
                 ["sprk_shortname"] = code + " short name",
                 ["sprk_currentversion"] = new EntityReference("sprk_policyversion", versionId),
-            });
+            };
+            if (tenant is not null) policy["sprk_tenant"] = tenant;
+            _policies.Add(policy);
             Stub(new Entity("sprk_policyversion", versionId)
             {
                 ["sprk_ruletype"] = new OptionSetValue(Existence),
@@ -1090,7 +1235,13 @@ public class SignalReevaluationJobTests
         public List<(Guid Id, Dictionary<string, object> Fields)> ConditionalUpdates { get; } = new();
         public int CreateCalls { get; private set; }
         public int WriteCalls => CreateCalls + Updates.Count + ConditionalUpdates.Count;
-        public Guid? BumpVersionAfterRead { get; set; }
+
+        /// <summary>Signals a person resolves (Dismissed, version bumped) just before the writer's conditional update reaches
+        /// Dataverse, i.e. after the job read them: the row-version check, not a status guard, must refuse the close.</summary>
+        public HashSet<Guid> ResolveByPersonBeforeConditionalUpdate { get; } = new();
+
+        public bool FailConditionalUpdates { get; set; }
+        public bool FailCreates { get; set; }
 
         public void ResetCounts()
         {
@@ -1100,18 +1251,7 @@ public class SignalReevaluationJobTests
             ConditionalUpdates.Clear();
         }
 
-        public string VersionOf(Guid id)
-        {
-            var version = _versions[id].ToString();
-            if (BumpVersionAfterRead == id)
-            {
-                _versions[id]++;
-                Rows[id]["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved);
-                Rows[id]["sprk_resolutiontype"] = null!;
-            }
-
-            return version;
-        }
+        public string VersionOf(Guid id) => _versions[id].ToString();
 
         public Guid SeedSignal(string key, int status, int? resolution = null, DateTime? resolvedOn = null, Guid? coreId = null,
             DateTime? suppressedUntil = null, DateTime? due = null)
@@ -1142,6 +1282,11 @@ public class SignalReevaluationJobTests
         public Task<Guid> CreateAsync(Entity entity, CancellationToken cancellationToken)
         {
             CreateCalls++;
+            if (FailCreates)
+            {
+                throw new InvalidOperationException("Simulated Dataverse failure on the create.");
+            }
+
             var key = entity.GetAttributeValue<string>("sprk_dedupekey")!;
             if (_byKey.ContainsKey(key))
             {
@@ -1182,6 +1327,18 @@ public class SignalReevaluationJobTests
                     return Task.FromResult<OrganizationResponse>(response);
                 case UpdateRequest { ConcurrencyBehavior: ConcurrencyBehavior.IfRowVersionMatches } update:
                     var target = update.Target;
+                    if (FailConditionalUpdates)
+                    {
+                        throw new InvalidOperationException("Simulated Dataverse failure on the conditional update.");
+                    }
+
+                    if (ResolveByPersonBeforeConditionalUpdate.Remove(target.Id))
+                    {
+                        Rows[target.Id]["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved);
+                        Rows[target.Id]["sprk_resolutiontype"] = new OptionSetValue(SignalWriter.ResolutionDismissed);
+                        _versions[target.Id]++;
+                    }
+
                     if (target.RowVersion != _versions[target.Id].ToString())
                     {
                         throw new FaultException<OrganizationServiceFault>(

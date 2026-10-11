@@ -285,7 +285,13 @@ public sealed class SignalEvaluator
                         {
                             var mapped = op.Name switch
                             {
-                                ">=" => "ge", ">" => "gt", "<=" => "le", "<" => "lt", "<>" => "ne", "=" => "eq", _ => null,
+                                ">=" => "ge",
+                                ">" => "gt",
+                                "<=" => "le",
+                                "<" => "lt",
+                                "<>" => "ne",
+                                "=" => "eq",
+                                _ => null,
                             };
                             if (mapped is not null)
                             {

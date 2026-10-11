@@ -32,18 +32,25 @@ after independent review.
    - Suppression grain: (policy, `sprk_corerecordtype`, `sprk_corerecordid`) for every core type; (policy, item) with no
      core record. Suppression blocks a FIRST episode too (FR-17 "no new Signal for that pairing surfaces").
    - Latest Open/Acknowledged: same episode. Core re-derived and different → close the old one as `ConditionCleared`, raise
-     n+1 under the new core (037 hand-off (2)). No-core item reassigned → reassign the Signal, logged once (037 hand-off
+     n+1 under the new core (037 hand-off (2)); **the n+1 create runs only when that close returned `Closed`** (a
+     `changedSinceRead` or failed close defers the create to the next pass, counted `createsDeferred`, so one subject never has
+     two open Signals). No-core item reassigned → reassign the Signal, logged once (037 hand-off
      (1)). Due date changed → reconcile through the writer. Otherwise **no write at all** (D-61).
    - Latest Resolved: never closed again. Superseded / PolicyRetired → n+1 (FR-16, D-32); Do lane → n+1 only when the
      subject's date differs from the resolved Signal's `sprk_duedate`; Decide lane → n+1 unless Dismissed less than the
-     quiet window ago. **Decide-lane Acted / ConditionCleared re-raise on the next pass when the predicate still holds**
+     quiet window ago. **A Resolved latest whose core record differs from the hit's current core is re-raisable** (not
+     Superseded: that resolution means a newer policy version, FR-16), except a Decide-lane Dismissed inside the quiet window:
+     it keeps a failed re-file create from stranding the subject behind the Do-lane date rule. **Decide-lane Acted / ConditionCleared re-raise on the next pass when the predicate still holds**
      (FR-03 literal: only a dismissal has a waiting period). A Dismissed Signal with no `sprk_resolvedon` is held, not
      re-raised.
    - Not a hit → every open Signal closes `ConditionCleared`. A hit whose core record the writer refused is still a hit:
      neither written nor closed, counted refused (D-38).
 4. **Closures** use the writer's dedicated identity with an optimistic-concurrency update: a Signal a person resolved
    after the read is not closed (`changedSinceRead`). Superseded and PolicyRetired closures stay with task 033.
-5. **Run outcome.** `failed` when anything was refused, a policy was invalid or unreadable, or a key was unparseable. A
+5. **Run outcome.** `failed` when anything was refused, a policy was invalid or unreadable, a key was unparseable, an
+   anomaly was left untouched (an older episode open beside a newer one, or an unreadable status), or a scoped policy was
+   skipped (`scopedNotEvaluated`, the Warning log stays). A key whose parsed policy code differs from the policy being
+   evaluated (a code containing `|`) is another policy's and is skipped, not counted unparseable. A
    policy with a non-episode-scoped key is not written at all that run (a duplicate episode 1 would otherwise be raised).
    Only a successful run stores the last-success time (distributed cache, shared across instances).
 6. **Per-item today (D-25).** Each relative bound on a Date Only `when` field is widened by 2 days in the query and
