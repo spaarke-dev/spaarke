@@ -655,5 +655,11 @@
     <RolePrivilege name="prvWriteUserSettings" level="Local" />
     <RolePrivilege name="prvWriteWorkflow" level="Basic" />
     <RolePrivilege name="prvWriteWorkflowSession" level="Basic" />
+    <RolePrivilege name="prvReadappnotification" level="Basic" />
+    <RolePrivilege name="prvCreateAppUserSetting" level="Global" />
+    <RolePrivilege name="prvReadAppUserSetting" level="Global" />
+    <RolePrivilege name="prvWriteAppUserSetting" level="Global" />
+    <RolePrivilege name="prvAppendAppUserSetting" level="Global" />
+    <RolePrivilege name="prvAppendToSettingDefinition" level="Global" />
   </RolePrivileges>
 </Role>

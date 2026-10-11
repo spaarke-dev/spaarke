@@ -475,11 +475,8 @@
     <RolePrivilege name="prvSharesprk_EmailArtifact" level="Basic" />
     <RolePrivilege name="prvSharesprk_Event" level="Deep" />
     <RolePrivilege name="prvSharesprk_Invoice" level="Deep" />
-    <RolePrivilege name="prvSharesprk_Matter" level="Deep" />
     <RolePrivilege name="prvSharesprk_Memo" level="Deep" />
     <RolePrivilege name="prvSharesprk_ProcessingJob" level="Basic" />
-    <RolePrivilege name="prvSharesprk_Project" level="Deep" />
-    <RolePrivilege name="prvSharesprk_WorkAssignment" level="Deep" />
     <RolePrivilege name="prvShareSyncError" level="Basic" />
     <RolePrivilege name="prvShareUserEntityInstanceData" level="Basic" />
     <RolePrivilege name="prvShareUserEntityUISettings" level="Basic" />
