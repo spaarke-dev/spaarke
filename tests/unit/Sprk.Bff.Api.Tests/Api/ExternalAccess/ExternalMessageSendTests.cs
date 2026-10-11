@@ -751,7 +751,60 @@ public class ExternalMessageSendTests
 
         var result = await Post("projects", project, Ciam(project: project));
 
-        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        // The pass-through uses the same extension key as the endpoint's own 400/404/500 answers (review fix): errorCode.
+        problem.ProblemDetails.Extensions.Should().ContainKey("errorCode").And.NotContainKey("code");
+        problem.ProblemDetails.Extensions["errorCode"].Should().BeOfType<string>().Which.Should().NotBeNullOrWhiteSpace();
         ShouldHaveWrittenNothing();
+    }
+
+    // ── review fix: isMine on the 201, and the thread request carries the row's direction ─────────────────────────
+
+    [Fact]
+    public async Task TheCreatedResponse_IsMine_ForAContactAndForASystemUser()
+    {
+        var project = Guid.NewGuid();
+        var systemUserId = Guid.NewGuid();
+
+        Created(await Post("projects", project, Ciam(project: project))).IsMine.Should().BeTrue();
+        Created(await Post("projects", project, SystemUser(systemUserId, project))).IsMine.Should().BeTrue();
+        JsonSerializer.Serialize(Created(await Post("projects", project, Ciam(project: project))))
+            .Should().Contain("\"isMine\":true");
+    }
+
+    [Fact]
+    public async Task ContactPost_ThreadRequestIsIncoming_MatchingTheRow()
+    {
+        var project = Guid.NewGuid();
+        ThreadResolutionRequest? seen = null;
+        _threads
+            .Setup(t => t.ResolveAndAssignThreadAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<ThreadResolutionRequest, CancellationToken>((r, _) => seen = r)
+            .ReturnsAsync(_threadId);
+
+        Created(await Post("projects", project, Ciam(project: project)));
+
+        TheRow().GetAttributeValue<OptionSetValue>("sprk_direction").Value.Should().Be(Incoming);
+        seen.Should().NotBeNull();
+        seen!.Direction.Should().Be(CommunicationDirection.Incoming, "the resolver request matches the row's direction");
+        seen.Message.Direction.Should().Be(CommunicationDirection.Incoming);
+    }
+
+    [Fact]
+    public async Task SystemUserPost_ThreadRequestIsOutgoing_MatchingTheRow()
+    {
+        var project = Guid.NewGuid();
+        ThreadResolutionRequest? seen = null;
+        _threads
+            .Setup(t => t.ResolveAndAssignThreadAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<ThreadResolutionRequest, CancellationToken>((r, _) => seen = r)
+            .ReturnsAsync(_threadId);
+
+        Created(await Post("projects", project, SystemUser(Guid.NewGuid(), project)));
+
+        TheRow().GetAttributeValue<OptionSetValue>("sprk_direction").Value.Should().Be(Outgoing);
+        seen!.Direction.Should().Be(CommunicationDirection.Outgoing);
+        seen.Message.Direction.Should().Be(CommunicationDirection.Outgoing);
     }
 }

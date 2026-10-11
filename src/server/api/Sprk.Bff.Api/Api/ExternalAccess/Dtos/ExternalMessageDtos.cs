@@ -6,7 +6,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <summary>
 /// One message on a record's thread, as the external plane returns it (spaarke-SPA-external-access-platform-r3
 /// task 033, FR-04). An explicit allow-list: id, subject, body (with its format, so the client renders HTML as HTML),
-/// sender display name, created on and direction. Nothing else crosses this surface — not the sender's systemuser id,
+/// sender display name, created on, direction and a caller-relative isMine flag. Nothing else crosses this surface — not the sender's systemuser id,
 /// not the From/To addresses, not the privilege classification, not the internal-only flag, not attachments. JSON names
 /// follow the other external DTOs (Dataverse logical names).
 /// </summary>
@@ -40,6 +40,14 @@ public sealed class ExternalMessageDto
     /// <summary><c>createdon</c> (ISO-8601, UTC); the thread is ordered by it, oldest first.</summary>
     [JsonPropertyName("createdon")]
     public DateTimeOffset? Createdon { get; init; }
+
+    /// <summary>
+    /// Whether the CALLER authored this message (task 034, for own-vs-other rendering): a contact caller's own
+    /// <c>sprk_createdbycontact</c> post, or a systemuser caller's own <c>sprk_sentby</c> message. A boolean only —
+    /// no contact or systemuser id crosses this surface.
+    /// </summary>
+    [JsonPropertyName("isMine")]
+    public bool IsMine { get; init; }
 }
 
 /// <summary>

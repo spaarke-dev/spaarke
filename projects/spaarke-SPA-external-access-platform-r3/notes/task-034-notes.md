@@ -217,7 +217,7 @@ This is the same ordering task 030 already imposes (TASK-INDEX row 038: "020 col
 - There is no member notification on a post (task 036). The notification spine's communication-arrived event and the participant index are not written for external posts.
 - An invoice under two roots: Create on either parent admits a post, mirroring the read's OR rule (task 033 K1).
 - A multipart upload is 415 from the framework, not the coded 400.
-- `PersonBearingWriters` in `RecordOwnerAssignmentCensusTests` does not list `PostToRecordThreadAsync`. The guard did not require it, because the person stamp goes through `ExternalDataService.StampCreator`, not `RecordCreatorPersonColumn` in this file. A reviewer may want it added for completeness.
+- (Resolved in the review fix round, item 4.) `PersonBearingWriters` in `RecordOwnerAssignmentCensusTests` did not list `PostToRecordThreadAsync`. The guard did not require it, because the person stamp goes through `ExternalDataService.StampCreator`, not `RecordCreatorPersonColumn` in this file. A reviewer may want it added for completeness.
 
 ## Files
 
@@ -232,3 +232,25 @@ This is the same ordering task 030 already imposes (TASK-INDEX row 038: "020 col
 - `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs`, `tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs`.
 
 `TASK-INDEX.md`, `current-task.md` and the POML status are left to the main session (wave rule).
+
+## Review fix round
+
+Two adversarial reviews found no F-class defects; this round applies the agreed follow-ups.
+
+### Fixed
+
+1. **Throttle.** `POST /api/v1/external/{root}/{id}/messages` now carries `.RequireRateLimiting("dataverse-query")` (50/min per user, sliding window), an existing policy — no new policy added (CLAUDE.md §11: nothing new to justify). The partition key was checked for a CIAM token: `RateLimitingModule.GetUserId` uses `CallerResolution.ResolveOpaqueCallerKey` (oid in either claim form, then `sub`, then `NameIdentifier`, then the IP), all of which a CIAM token carries. `UseRateLimiter` runs after `UseAuthorization`, and the `ExternalCollaboration` policy's own authentication populates `HttpContext.User`, so the key is the CIAM caller and not a shared IP bucket. `ProducesProblem` now lists 415, 429 and 502 as well. Test: `ExternalMessageRouteTests.PostRoute_IsRateLimited_OnAPerUserPolicy`.
+2. **`isMine` (for tasks 037/051).** `ThreadMessageDto` gains `CreatedByContactId` (parsed from `_sprk_createdbycontact_value`; `JsonIgnore`, so the internal wire contract is unchanged). `ExternalMessageDto` gains a boolean `isMine` only — no contact or systemuser id crosses the external surface. Rule (`ExternalMessageEndpoints.IsAuthoredBy`), the same kind decision the creator stamp makes: a systemuser principal owns a message when `SentBy == SystemUserId`; any other principal owns it when `CreatedByContactId == ContactId`. An empty id never matches. The 201 returns `isMine: true`. Tests: own contact post true, another contact's false, a systemuser post false, a contact-plane workforce caller the same; systemuser caller own true, colleague false, contact post false (even one by the caller's linked contact); no ids in the serialized body.
+3. **ProblemDetails key.** The `SdapProblemException` pass-through writes `errorCode` (was `code`), like the 400/404/500 paths. `ProducesProblem(502)` added (and 415/429). Test: `AnOwnerRefusal_Is409_AndCreatesNoRow` asserts `errorCode` present and `code` absent.
+4. **Census guard.** `PersonBearingWriters` lists `CommunicationService.cs / PostToRecordThreadAsync`; `PersonToken` counts `StampCreator` and `EnsureCanStampCreator`. Must-fire control: with both calls removed from `PostToRecordThreadAsync` the census test fails ("PostToRecordThreadAsync: creates … a row for the external-plane author (StampCreator) without naming them"); restored, 30/30 pass. The removal was not committed.
+5. **Direction.** `ResolveOutboundMessageThreadAsync` takes an optional `direction` (default Outgoing, so every SendAsync path is unchanged); `PostToRecordThreadAsync` passes its computed direction, so the resolver request and envelope match the row (Incoming for a contact author, Outgoing for a systemuser). Tests: `ContactPost_ThreadRequestIsIncoming_MatchingTheRow`, `SystemUserPost_ThreadRequestIsOutgoing_MatchingTheRow`.
+6. **HTTP-level POST tests.** New `ExternalMessagePostContractTests` (`tests/integration/contract/Api/ExternalAccess/`, on the existing `ExternalAccessContractFixture`): unauthenticated 401; JSON with an `attachments` / `attachmentDocumentIds` / `Files` key is 400 `EXT_MESSAGES_ATTACHMENTS_NOT_SUPPORTED` through the real body binding; `multipart/form-data` is 415 (the framework's answer — the route accepts `application/json` only); an empty JSON body and a blank text are 400 `EXT_MESSAGES_INVALID_BODY`.
+
+### Recorded known limits (owner decisions / follow-ups; not fixed)
+
+- K-dual-root: an invoice post propagates `sprk_regardingproject` to a root the caller may not see, and threads under the matter's default thread (owner decision, tied to the 031 invoice question; intersection is a one-line change in `RightsThroughParents`).
+- K-contact author name: it is shown to every external reader of the record (consistent with the 033 decision; diverges from the versions route, which keeps `CreatedByName` null — owner call).
+- K-no idempotency: a double POST creates two rows (task 051 disables the send button while in flight).
+- K-length is counted in UTF-16 code units.
+- K-every external post is named `Message: (No Subject)`.
+- K-the 201 body has `sendername: null` and a server-time `createdon` (task 051 re-fetches after a 201).

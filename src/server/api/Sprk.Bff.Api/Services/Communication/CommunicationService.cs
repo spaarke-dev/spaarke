@@ -985,11 +985,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// ACS-thread find-or-create resolver below entirely (R1 has no live channel — see the field's doc
     /// comment; ACS-thread-session reuse is R2). <b>(2) Find-or-create</b> — otherwise, the task-040
     /// <see cref="IThreadResolver"/> groups by the authoritative ACS thread id. Both paths are best-effort /
-    /// non-fatal (NFR-02) — a resolve failure MUST NOT fail the send. Returns the resolved thread id (or null
+    /// non-fatal (NFR-02) — a resolve failure MUST NOT fail the send. <paramref name="direction"/> is the row's
+    /// direction (Outgoing for every send path; the external thread post passes its computed one). Returns the resolved thread id (or null
     /// on failure/no resolver) so the caller can chain the task-043 Direct-thread message access grant.
     /// </summary>
     private async Task<Guid?> ResolveOutboundMessageThreadAsync(
-        Guid communicationId, SendCommunicationRequest request, string? acsThreadId, string correlationId, CancellationToken ct)
+        Guid communicationId, SendCommunicationRequest request, string? acsThreadId, string correlationId, CancellationToken ct,
+        CommunicationDirection direction = CommunicationDirection.Outgoing)
     {
         if (request.ThreadId.HasValue)
         {
@@ -1003,7 +1005,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         {
             var envelope = new NormalizedMessage
             {
-                Direction = CommunicationDirection.Outgoing,
+                Direction = direction,
                 Subject = request.Subject,
             };
 
@@ -1012,7 +1014,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 {
                     CommunicationId = communicationId,
                     ChannelType = CommunicationType.Message,
-                    Direction = CommunicationDirection.Outgoing,
+                    Direction = direction,
                     Message = envelope,
                     AcsThreadId = string.IsNullOrWhiteSpace(acsThreadId) ? null : acsThreadId,
                 },
@@ -1212,7 +1214,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             communicationId, regardingEntityType, regardingId, fromContact ? "contact" : "systemuser", correlationId);
 
         // Best-effort (NFR-02): the record's default thread. Never fails the post.
-        var threadId = await ResolveOutboundMessageThreadAsync(communicationId, request, acsThreadId: null, correlationId, ct);
+        var threadId = await ResolveOutboundMessageThreadAsync(
+            communicationId, request, acsThreadId: null, correlationId, ct, direction);
 
         return new ThreadPostResult(communicationId, postedAt, subject, body, BodyFormat.PlainText, direction, threadId);
     }

@@ -112,6 +112,8 @@ public static class ExternalMessageEndpoints
                 "project, matter, work assignment, invoice or (own) service request, as the caller. No email is sent. 403 " +
                 "unless the record is in the caller's accessible set with Create (service requests: the caller's own); 404 " +
                 "for any other root.")
+            // A write path: per-user throttle on the caller key (oid/sub, present on a CIAM token as on a workforce one).
+            .RequireRateLimiting("dataverse-query")
             .Accepts<PostExternalMessageRequest>("application/json")
             .Produces<ExternalMessageDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -119,7 +121,10 @@ public static class ExternalMessageEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status502BadGateway);
 
         return externalGroup;
     }
@@ -241,6 +246,8 @@ public static class ExternalMessageEndpoints
                     // The display name is Dataverse's (the stamped lookup's name); the thread read returns it.
                     SenderName = null,
                     Createdon = posted.PostedAt,
+                    // The caller is, by construction, the author of the row just created.
+                    IsMine = true,
                 });
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -253,7 +260,7 @@ public static class ExternalMessageEndpoints
             logger.LogWarning(ex, "[EXT-MESSAGES] Post on {Entity} {RecordId} refused by the communication pipeline ({Code}).",
                 messageRoot.EntityLogicalName, id, ex.Code);
             return Results.Problem(statusCode: ex.StatusCode, title: ex.Title, detail: ex.Detail,
-                extensions: new Dictionary<string, object?> { ["code"] = ex.Code });
+                extensions: new Dictionary<string, object?> { ["errorCode"] = ex.Code });
         }
         catch (Exception ex)
         {
@@ -343,7 +350,7 @@ public static class ExternalMessageEndpoints
 
             return Results.Ok(new ExternalCollectionResponse<ExternalMessageDto>
             {
-                Value = read.Messages.Select(ToExternalDto).ToList(),
+                Value = read.Messages.Select(m => ToExternalDto(m, principal)).ToList(),
                 Truncated = read.Truncated,
             });
         }
@@ -524,7 +531,18 @@ public static class ExternalMessageEndpoints
         _ => null,
     };
 
-    private static ExternalMessageDto ToExternalDto(ThreadMessageDto message) => new()
+    /// <summary>
+    /// Whether <paramref name="principal"/> authored <paramref name="message"/>, decided by the same rule the post stamp
+    /// uses (<see cref="ExternalDataService.StampCreator(Microsoft.Xrm.Sdk.Entity, CallerPrincipal)"/>): a systemuser
+    /// principal authors as its systemuser (<c>sprk_sentby</c>), any other as its contact
+    /// (<c>sprk_createdbycontact</c>). An empty id never matches.
+    /// </summary>
+    internal static bool IsAuthoredBy(ThreadMessageDto message, CallerPrincipal principal) =>
+        principal.SystemUserId is { } systemUserId
+            ? systemUserId != Guid.Empty && message.SentBy == systemUserId
+            : principal.ContactId is { } contactId && contactId != Guid.Empty && message.CreatedByContactId == contactId;
+
+    private static ExternalMessageDto ToExternalDto(ThreadMessageDto message, CallerPrincipal principal) => new()
     {
         SprkCommunicationid = message.MessageId.ToString("D"),
         SprkSubject = message.Subject,
@@ -533,5 +551,6 @@ public static class ExternalMessageEndpoints
         SprkDirection = message.Direction,
         SenderName = message.SentByName,
         Createdon = message.CreatedOn,
+        IsMine = IsAuthoredBy(message, principal),
     };
 }

@@ -836,7 +836,8 @@ public sealed class CommunicationThreadReadService
             IsPrivate: parsed.IsPrivate,
             Attachments: attachmentsByMessage.TryGetValue(parsed.MessageId, out var atts)
                 ? atts
-                : Array.Empty<ThreadAttachmentRef>());
+                : Array.Empty<ThreadAttachmentRef>(),
+            CreatedByContactId: parsed.CreatedByContactId);
 
     private sealed record VisibleMessage(Guid ThreadId, ThreadMessageDto Dto);
 
@@ -1046,6 +1047,7 @@ public sealed class CommunicationThreadReadService
             To = SplitRecipients(TryString(row, ToField)),
             Direction = TryInt(row, DirectionField),
             SentBy = TryGuid(row, SentByValue),
+            CreatedByContactId = TryGuid(row, CreatedByContactValue),
             // The systemuser sender's name; else (task 034) the contact author's name — selected only by the external read.
             SentByName = TryString(row, SentByFormattedValue) ?? TryString(row, CreatedByContactFormattedValue),
             SentAt = TryDateTimeOffset(row, SentAtField),
@@ -1069,6 +1071,7 @@ public sealed class CommunicationThreadReadService
         public IReadOnlyList<string> To { get; init; } = Array.Empty<string>();
         public int? Direction { get; init; }
         public Guid? SentBy { get; init; }
+        public Guid? CreatedByContactId { get; init; }
         public string? SentByName { get; init; }
         public DateTimeOffset? SentAt { get; init; }
         public DateTimeOffset? CreatedOn { get; init; }
