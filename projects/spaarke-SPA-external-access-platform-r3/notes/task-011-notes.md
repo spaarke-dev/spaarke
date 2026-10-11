@@ -88,3 +88,19 @@ In the BFF, in the existing external-access module. Tier-1 entitlement and the T
 - Stale doc comments still describe the pre-A7 "workforce = App-Role map only" rule: `Api/ExternalAccess/MeEntitlementsEndpoint.cs:15-18`, `Api/ExternalAccess/ExternalAccessEndpoints.cs:79-89` (route summary/description), `Api/ExternalAccess/Dtos/MeEntitlementsResponse.cs:17`. Text only; behaviour is in the resolver.
 - FR-06's other halves (the intake endpoint accepting the CIAM plane when the switch is on; 403 when off) are not in this task; they should read the same `IOptions<ExternalAccessOptions>`.
 - Deployment: no stamp channel writes `ExternalAccess__PartnerServiceRequestsEnabled`; absent means off, which is the intended default. A customer that wants it on needs the App Service setting (provisioning / deployment guide entry).
+
+## Review results and fixes (2026-10-10)
+
+Two adversarial review passes; no F-class (fix-now) defects. Fixes applied in the review-fix commit (comments and tests only):
+
+- Startup on a blank or non-boolean switch value: `ExternalAccess:PartnerServiceRequestsEnabled` = `""` / `"yes"` / `"1"` throws at startup (fail-closed, verified). Added `PartnerSwitch_BlankOrNonBooleanValue_FailsStartup` (`""`, `"yes"`) to `ModuleEntitlementResolverTests`. `ExternalAccessModule.cs` and `appsettings.template.json` comments now say any non-boolean value, INCLUDING EMPTY, fails startup; remove the setting to turn it off.
+- Stale pre-A7 comments corrected to the A7 model (default Tier-1 modules by server-resolved principal kind: workforce -> legal-front-door + policy-library; CIAM -> assigned-work, + legal-front-door when the partner switch is on; `sprk_approlemodulemap` = extras; service requests = own `sprk_requestedby` rows for workforce, and for CIAM only when the switch is on): `MeEntitlementsEndpoint.cs`, `ExternalAccessEndpoints.cs` (route comment + description), `Dtos/MeEntitlementsResponse.cs`, `NoAccessListReader.cs` (dropped `ModuleEntitlementResolver` from the "no guards" precedent), `ExternalAccessModule.cs` (Service Requests label), and client comments in `widgetRegistry.ts`, `ServiceRequestsWidget.tsx`, `me-client.ts`. `planes: ['workforce']` is unchanged; widening the client plane is task 052.
+
+Known limits NOT fixed here:
+
+- (K1) App-only tokens that resolve as Workforce now receive default modules (no records are reachable). Fix planned after task 012 merges: deny when `CallerIdentity.FromPrincipal(user).Kind != UserDelegated` in `WorkforcePrincipalStrategy` / `CallerPrincipalAuthorizationFilter`.
+- (K2) Tier-1 is not enforced per module route; a task 035 constraint was added for a shared `IsEntitled`.
+- (K3) The client still hides service requests from CIAM; a task 052 constraint was added.
+- (K5) A systemuser without a linked contact sees 0 service requests (pre-existing, pinned by test).
+
+Provisioning F.5: `.claude/constraints/provisioning.md:290` per_env_settings step is N/A. `ExternalAccessOptions` demands no key (absent = off); an operator turns the switch on by adding the App Service setting `ExternalAccess__PartnerServiceRequestsEnabled=true`. No `ExternalAccess` key is catalogued anywhere today.

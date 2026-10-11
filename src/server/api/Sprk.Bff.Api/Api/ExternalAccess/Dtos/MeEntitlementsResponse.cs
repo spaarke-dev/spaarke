@@ -13,8 +13,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <param name="Plane">The identity plane: <c>"workforce"</c> (internal Entra) or <c>"ciam"</c> (external
 /// outside counsel). NOTE: <c>"admin"</c> is not a distinct server plane — an admin is a workforce caller
 /// whose App-Roles map to the <c>admin</c> module.</param>
-/// <param name="Entitlements">The flat list of module codes the caller is entitled to (Tier-1). Internal
-/// from <c>sprk_approlemodulemap</c> (App-Role → module); external the blanket outside-counsel set.</param>
+/// <param name="Entitlements">The flat list of module codes the caller is entitled to (Tier-1): the default
+/// modules for the server-resolved principal kind (A7) plus <c>sprk_approlemodulemap</c> (App-Role → module)
+/// extras.</param>
 public record MeEntitlementsResponse(
     string DisplayName,
     string Email,

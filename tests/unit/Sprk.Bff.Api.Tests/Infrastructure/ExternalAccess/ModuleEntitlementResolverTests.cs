@@ -339,6 +339,29 @@ public class ModuleEntitlementResolverTests
         module!.AccessibleRecordIds!(caller).Contains(caller.ContactId).Should().Be(expectedOn);
     }
 
+    // A blank or non-boolean switch value fails closed at startup (ValidateOnStart); an operator turns the switch
+    // off by REMOVING the setting, not by blanking it.
+    [Theory]
+    [InlineData("")]
+    [InlineData("yes")]
+    public void PartnerSwitch_BlankOrNonBooleanValue_FailsStartup(string configured)
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["ExternalAccess:PartnerServiceRequestsEnabled"] = configured,
+        };
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
+        services.AddExternalAccess();
+
+        using var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IOptions<ExternalAccessOptions>>().Value;
+
+        act.Should().Throw<Exception>();
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────
     private static ClaimsPrincipal UserWithRoles(params string[] roles) =>
         new(new ClaimsIdentity(roles.Select(r => new Claim("roles", r)), "test"));

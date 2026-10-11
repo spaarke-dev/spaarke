@@ -44,7 +44,7 @@ public static class ExternalAccessModule
         Guid.Parse("3ff4102c-1092-f111-b8dc-7ced8ddc4a05"), // Invoices
         Guid.Parse("42f4102c-1092-f111-b8dc-7ced8ddc4a05"), // Work Assignments
         Guid.Parse("583a2a33-1092-f111-b8dc-7ced8ddc4a05"), // Matters
-        Guid.Parse("403e5d37-cb94-f111-b8db-00224835447a"), // Service Requests (internal-only, task 028)
+        Guid.Parse("403e5d37-cb94-f111-b8db-00224835447a"), // Service Requests (workforce; CIAM only when the partner switch is on - task 028 / r3 task 011)
     };
 
     /// <summary>
@@ -91,8 +91,9 @@ public static class ExternalAccessModule
         // Per-customer external-access switches (external-access-platform-r3 task 011, spec FR-06 / FR-19, ADR-028
         // A7). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for
         // their own requests and adds legal-front-door to their default modules. Read by the entitlement resolver
-        // below and by the "service-requests" descriptor. ValidateOnStart so an unparseable value fails startup
-        // rather than the first external module read; no custom validator (a bound bool has no invalid value).
+        // below and by the "service-requests" descriptor. ValidateOnStart so an invalid value fails startup rather
+        // than the first external module read: ANY non-boolean value, INCLUDING EMPTY (""), fails startup - remove
+        // the setting to turn it off. No custom validator (a bound bool has no other invalid value).
         services.AddOptions<ExternalAccessOptions>()
             .BindConfiguration(ExternalAccessOptions.SectionName)
             .ValidateOnStart();
