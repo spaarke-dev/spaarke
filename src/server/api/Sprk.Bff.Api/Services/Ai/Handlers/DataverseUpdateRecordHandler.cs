@@ -252,8 +252,10 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             }
 
             // Task 158 (owner round 6): re-filing a work assignment or project — whether the record it will be filed under
-            // is secure must be readable, or nothing is written (an unreadable flag is never "not secure").
-            if (await _rootFiling.CheckAsync(tablename, recordId, OwnedChildWrite.WritesOf(mapped.Item!), cancellationToken)
+            // is secure must be readable, or nothing is written (an unreadable flag is never "not secure"). #1630: a secure
+            // matter or project reached only through an invoice or event this update sets costs AppendTo as the caller too.
+            if (await _rootFiling.CheckAsync(tablename, recordId, OwnedChildWrite.WritesOf(mapped.Item!), cancellationToken,
+                        OwnedChildWrite.CallerMayFileRootUnderSecure(_dataverse))
                     .ConfigureAwait(false) is { } rootRefusal)
             {
                 return LogOutcome(context, tablename, recordId,

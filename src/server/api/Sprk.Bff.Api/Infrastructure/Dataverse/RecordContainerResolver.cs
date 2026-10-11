@@ -692,7 +692,12 @@ public sealed partial class RecordContainerResolver
     /// <para>Still held (<see cref="AncestorUnverifiableCode"/>), unchanged from task 155: a <c>sprk_servicerequest</c>
     /// (a core record that cannot carry <c>sprk_issecure</c>, so nothing is ever copied from it), and an intermediate
     /// column on a record that carries no copy at all — a work assignment, a project, a contact, or an invoice / document /
-    /// agreement filed under another record (their typed roots are their OWN links, so there is nothing to compare).</para>
+    /// agreement filed under another record (their typed roots are their OWN links, so there is nothing to compare).
+    /// #1630 (owner Option A) excepts ONE case: a work assignment's invoice or event lookup
+    /// (<see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance.IntermediateFilingColumns"/>) is followed, read live
+    /// and verified as any intermediate is, to the matters and projects that record belongs to — the secure-root
+    /// inheritance's parents for it, so storage follows the same family. An invoice or event that names anything else (a
+    /// work assignment or service request root) keeps it held.</para>
     ///
     /// <para><b>The polymorphic regarding pair</b> is read on every row that carries it: see
     /// <see cref="ResolvePolymorphicRegardingAsync"/>.</para>
@@ -981,7 +986,18 @@ public sealed partial class RecordContainerResolver
         var sourceColumns = CoreAncestorResolver.StampSourceColumns.TryGetValue(rowEntity, out var sources)
             ? sources.Select(s => s.Column).ToHashSet(StringComparer.OrdinalIgnoreCase)
             : [];
-        var held = setIntermediates.Where(i => !sourceColumns.Contains(i.Column)).Select(i => i.Column).ToList();
+        //
+        // #1630 (owner Option A): EXCEPT a work assignment's invoice / event lookup, which files it under the matters and
+        // projects that record belongs to (SecureRootInheritance.IntermediateFilingColumns — the secure-root inheritance's one
+        // rule), so its storage follows the same family; it is followed below.
+        var filingThrough = Sprk.Bff.Api.Services.Access.SecureRootInheritance.IntermediateFilingColumns
+            .TryGetValue(rowEntity, out var filingColumns)
+            ? filingColumns.Select(f => f.Column).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : [];
+        var held = setIntermediates
+            .Where(i => !sourceColumns.Contains(i.Column) && !filingThrough.Contains(i.Column))
+            .Select(i => i.Column)
+            .ToList();
         if (held.Count > 0)
         {
             throw Unverifiable(
@@ -1010,6 +1026,31 @@ public sealed partial class RecordContainerResolver
                 // CoreAncestorResolver derives a copy from typed root columns only.
                 extra.Add(pairHop);
             }
+        }
+
+        // #1630: a work assignment filed under an invoice or event (no copy is compared — a work assignment carries none). The
+        // record is read LIVE and verified through the same rules as any intermediate (IntermediateRootsAsync: its own filing,
+        // a stale copy of its own, a loop, the bounds), and the matters and projects it belongs to are walked as this row's own
+        // roots — exactly the parents the inheritance names for it. Anything else it names (a work assignment or service
+        // request root, a record its pair alone names) is not that rule, so the column stays HELD, as before #1630.
+        var through = setIntermediates.Where(i => filingThrough.Contains(i.Column)).ToList();
+        foreach (var link in through)
+        {
+            var above = await IntermediateRootsAsync(link, rowEntity, viaPrefix, depth, walk, ct).ConfigureAwait(false);
+            if (above.Extra.Count > 0
+                || above.Own.Any(h => !Sprk.Bff.Api.Services.Access.SecureRootInheritance.IsParent(h.Entity)))
+            {
+                throw Unverifiable(
+                    walkRecordEntity, walkRecordId, Via(viaPrefix, rowEntity, link.Column),
+                    heldBy: viaPrefix is null ? null : rowEntity);
+            }
+
+            own.AddRange(above.Own);
+        }
+
+        if (through.Count > 0)
+        {
+            setIntermediates = setIntermediates.Except(through).ToList();
         }
 
         if (setIntermediates.Count == 0 && setCarriers.Count == 0)
@@ -1797,7 +1838,9 @@ public sealed partial class RecordContainerResolver
                     ("sprk_regardingagreement", "sprk_agreement"),
                 ]),
                 // A ROOT that is itself filed regarding a matter / project (live: 9 of 22 work assignments) or a
-                // communication / event / invoice (live: 1, held — a work assignment carries no copy).
+                // communication / event / invoice (live: 1). A work assignment carries no copy, so a communication stays
+                // held; #1630 (owner Option A): an invoice or event is FOLLOWED to the matters and projects it belongs to
+                // (SecureRootInheritance.IntermediateFilingColumns, NextHopsAsync) — the inheritance's own parent rule.
                 ["sprk_workassignment"] = new(polymorphic: true,
                 [
                     ("sprk_regardingproject", "sprk_project"), ("sprk_regardingmatter", "sprk_matter"),

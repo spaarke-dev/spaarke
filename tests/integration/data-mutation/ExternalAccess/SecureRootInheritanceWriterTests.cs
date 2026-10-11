@@ -1890,6 +1890,197 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         _writes.Should().BeEmpty("the caller's PATCH is never sent");
     }
 
+    // ── #1630 (owner Option A, 2026-10-11): filed under an INVOICE or EVENT of a secure matter or project ─────────────────
+
+    /// <summary>The Create Work Assignment wizard's shape for an intermediate: its typed lookup AND the same pair.</summary>
+    private Dictionary<string, object> UnderIntermediate(string column, string table, Guid intermediate) => new()
+    {
+        ["sprk_name"] = "Review the invoice",
+        [column] = new { relatedTable = table, recordId = intermediate },
+        ["sprk_regardingrecordid"] = intermediate.ToString("D"),
+        ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, table) },
+    };
+
+    /// <summary>
+    /// #1630: the wizard's shapes under an INVOICE of a secure matter and an EVENT of a secure project are created INTO
+    /// isolation (named team and flag in the create itself) and come out secure with the parent's sharee — exactly as if
+    /// filed directly under it. Before #1630 they were created ordinary in the caller's business unit.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_regardinginvoice", "sprk_invoice", "sprk_matter")]
+    [InlineData("sprk_regardingevent", "sprk_event", "sprk_project")]
+    public async Task ChatCreate_AWorkAssignmentUnderAnInvoiceOrEventOfASecureRecord_IsCreatedIntoIsolation_AndComesOutSecure(
+        string column, string table, string parentTable)
+    {
+        var parent = Guid.NewGuid();
+        if (parentTable == "sprk_matter")
+            SecureMatter(_fixture, parent, null, Colleague);
+        else
+            SecureProject(_fixture, parent, Colleague);
+        var intermediate = table == "sprk_invoice"
+            ? SecureRootInheritanceTests.InvoiceOf(_fixture, parent)
+            : SecureRootInheritanceTests.EventOf(_fixture, parentTable, parent);
+
+        var result = await ChatCreateWith("sprk_workassignment", UnderIntermediate(column, table, intermediate));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var (_, created, fields) = _writes.Should().ContainSingle().Subject;
+        BoundId(fields, "ownerid@odata.bind").Should().Be(SecureTeam, "created owned by the named team");
+        fields["sprk_issecure"].Should().Be(true, "flagged in the create itself");
+        ShouldBeSecure(created, $"created under a {table} of a secure {parentTable}");
+        _fixture.ShareMaskOf(created, Colleague).Should().Be(
+            RecordShareLevels.ChildMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)),
+            "the secure parent's sharee, as if filed directly under it");
+    }
+
+    /// <summary>
+    /// #1630, never broaden reach: AppendTo on the INVOICE does not let a caller file a work assignment under the secure
+    /// matter it belongs to — the plan asks AppendTo on that matter as the caller (create parity), nothing is created.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_UnderAnInvoiceOfASecureMatterTheCallerCannotAppendTo_IsDenied_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+        var invoice = SecureRootInheritanceTests.InvoiceOf(_fixture, secure);
+        var user = Scripted();
+        user.NoAppendTo.Add(secure);
+
+        var result = await ChatCreateWith("sprk_workassignment", UnderIntermediate("sprk_regardinginvoice", "sprk_invoice", invoice), user);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        _writes.Should().BeEmpty("nothing is created");
+    }
+
+    /// <summary>#1630: the creator's No Access check runs against the secure matter the invoice belongs to.</summary>
+    [Fact]
+    public async Task ChatCreate_UnderAnInvoiceOfASecureMatter_WhenTheCallerIsOnTheMattersNoAccessList_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+        var invoice = SecureRootInheritanceTests.InvoiceOf(_fixture, secure);
+        _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure);
+
+        var result = await ChatCreateWith("sprk_workassignment", UnderIntermediate("sprk_regardinginvoice", "sprk_invoice", invoice));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
+        _writes.Should().BeEmpty("nothing is created");
+    }
+
+    /// <summary>#1630, fail closed: an invoice whose row cannot be read refuses the create — never "filed under nothing".</summary>
+    [Fact]
+    public async Task ChatCreate_UnderAnInvoiceThatCannotBeRead_IsRefused_AndNothingIsCreated()
+    {
+        var (secure, _) = Matters();
+        var invoice = SecureRootInheritanceTests.InvoiceOf(_fixture, secure);
+        World.FailingRowReadsOf("sprk_invoice", invoice);
+
+        var result = await ChatCreateWith("sprk_workassignment", UnderIntermediate("sprk_regardinginvoice", "sprk_invoice", invoice));
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("sprk_invoice");
+        _writes.Should().BeEmpty("nothing is created");
+    }
+
+    /// <summary>#1630, the ordinary case is unchanged: under an invoice of an ORDINARY matter the work assignment is created
+    /// ordinary.</summary>
+    [Fact]
+    public async Task ChatCreate_UnderAnInvoiceOfAnOrdinaryMatter_StaysOrdinary()
+    {
+        var (_, ordinary) = Matters();
+        var invoice = SecureRootInheritanceTests.InvoiceOf(_fixture, ordinary);
+        _fixture.ChildWorld.MoveOwner("sprk_invoice", invoice, DataversePrincipalRef.User(Creator));
+
+        var result = await ChatCreateWith("sprk_workassignment", UnderIntermediate("sprk_regardinginvoice", "sprk_invoice", invoice));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var created = _writes.Should().ContainSingle().Subject.Id;
+        _fixture.IsSecureOf(created).Should().BeFalse("its invoice belongs to an ordinary matter");
+        _fixture.OwningTeamOf(created).Should().NotBe(SecureTeam);
+    }
+
+    /// <summary>The scripted caller reads the work assignment's pair and its invoice lookup from the world.</summary>
+    private void CallerReadsTheInvoiceFiling(SecureChildOwnershipAiToolTests.ScriptedUserClient user, Guid workAssignment)
+    {
+        CallerReadsTheRow(user, workAssignment);
+        user.RowValues[workAssignment]["_sprk_regardinginvoice_value"] =
+            World.ValueOf<EntityReference>("sprk_workassignment", workAssignment, "sprk_regardinginvoice")?.Id.ToString("D");
+    }
+
+    /// <summary>
+    /// #1630, re-file: a wizard-made work assignment under an invoice of an ORDINARY matter (typed invoice AND the same pair),
+    /// re-filed by the update tool to an invoice of a SECURE matter through the typed lookup only, has its pair moved with it
+    /// and is secured with the matter's sharee.
+    /// </summary>
+    [Fact]
+    public async Task ChatUpdate_ReFilingToAnInvoiceOfASecureMatter_MovesThePair_AndSecuresItWithTheSharee()
+    {
+        var (secure, ordinary) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, secure, null, Colleague);
+        _fixture.SeedMatter(ordinary, isSecure: false);
+        var (ordinaryInvoice, secureInvoice) = (SecureRootInheritanceTests.InvoiceOf(_fixture, ordinary),
+            SecureRootInheritanceTests.InvoiceOf(_fixture, secure));
+        var invoiceType = RecordTypeRef(_fixture, "sprk_invoice");
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardinginvoice", "sprk_invoice", ordinaryInvoice);
+        FilePair(_fixture, "sprk_workassignment", workAssignment, ordinaryInvoice, invoiceType);
+        var user = Scripted();
+        CallerReadsTheInvoiceFiling(user, workAssignment);
+
+        var result = await ChatRefileWith(workAssignment, user,
+            new() { ["sprk_regardinginvoice"] = new { relatedTable = "sprk_invoice", recordId = secureInvoice } });
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        World.ValueOf<object>("sprk_workassignment", workAssignment, SecureRootInheritance.PairIdColumn)?.ToString()
+            .Should().Be(secureInvoice.ToString("D"), "the pair moves with the invoice lookup it repeated");
+        ShouldBeSecure(workAssignment, "re-filed under an invoice of a secure matter");
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(
+            RecordShareLevels.ChildMirrorMask(RecordShareLevels.MaskForRightsCsv(ProvisionProjectEndpoint.CollaboratorAccessRights)));
+    }
+
+    /// <summary>
+    /// #1630, never broaden reach on a re-file: AppendTo on the invoice is not enough to move a work assignment under the
+    /// secure matter it belongs to — the update tool asks AppendTo on that matter as the caller before the gate says anything
+    /// about it (the creator's No Access wall would otherwise answer), and nothing is written.
+    /// </summary>
+    [Fact]
+    public async Task ChatUpdate_ReFilingToAnInvoiceOfASecureMatterTheCallerCannotAppendTo_IsDenied_AndNothingIsWritten()
+    {
+        var (secure, ordinary) = Matters();
+        var invoice = SecureRootInheritanceTests.InvoiceOf(_fixture, secure);
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+        _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure); // the gate alone would refuse with creator_no_access
+        var user = Scripted();
+        user.NoAppendTo.Add(secure);
+
+        var result = await ChatRefileWith(workAssignment, user,
+            new() { ["sprk_regardinginvoice"] = new { relatedTable = "sprk_invoice", recordId = invoice } });
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
+        _writes.Should().BeEmpty("the caller's PATCH is never sent");
+        _fixture.IsSecureOf(workAssignment).Should().BeFalse();
+    }
+
+    /// <summary>#1630: the re-file's creator wall checks the secure matter the invoice belongs to, before the PATCH.</summary>
+    [Fact]
+    public async Task ChatUpdate_ReFilingToAnInvoiceOfASecureMatter_WhenTheCreatorIsOnTheMattersNoAccessList_IsRefusedBeforeThePatch()
+    {
+        var (secure, ordinary) = Matters();
+        var invoice = SecureRootInheritanceTests.InvoiceOf(_fixture, secure);
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+        _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure);
+
+        var result = await ChatRefileWith(workAssignment, Scripted(),
+            new() { ["sprk_regardinginvoice"] = new { relatedTable = "sprk_invoice", recordId = invoice } });
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
+        _writes.Should().BeEmpty("the caller's PATCH is never sent");
+    }
+
     // ── (2) RE-FILE: the playbook output orchestrator's DataverseUpdateHandler ─────────────────────────────────────────
 
     private Task RefileThroughTheUpdateHandler(Guid workAssignment, Guid matter) =>

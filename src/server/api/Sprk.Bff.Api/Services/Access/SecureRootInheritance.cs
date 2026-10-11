@@ -310,7 +310,10 @@ public sealed record FiledRootsWalk(IReadOnlyList<FiledRootRef> Roots, bool Dept
 /// <para><b>"Filed under"</b> (the POML's goal, task 155's sweep): a work assignment's typed <c>sprk_regardingmatter</c> /
 /// <c>sprk_regardingproject</c>, or the polymorphic pair (<c>sprk_regardingrecordid</c> + <c>sprk_regardingrecordtype</c>)
 /// naming a matter or project; a project's pair (a project has no typed regarding lookup). Secure-if-ANY: one secure parent is
-/// enough. A pair naming any other type (an invoice, a contact, a work assignment) is not this rule.</para>
+/// enough. A pair naming any other type (an invoice, a contact, a work assignment) is not this rule. #1630 (owner Option A,
+/// 2026-10-11): a work assignment's typed <c>sprk_regardinginvoice</c> / <c>sprk_regardingevent</c> files it under the
+/// matters and projects THAT invoice or event belongs to (its own typed root columns, <see cref="IntermediateFilingColumns"/>
+/// — the core-ancestor stamp topology, read live); an intermediate that cannot be read is unverifiable.</para>
 /// <para><b>Fail closed (ADR-003).</b> A pair that cannot be resolved (an id that is not a GUID, no type, an unreadable type)
 /// or a parent whose flag cannot be read — or reads EMPTY (owner round 17 item 3) — is never "not secure". When no OTHER
 /// parent is readably secure the record is <see cref="SecureRootInheritOutcome.Unverifiable"/>: nothing is written, a BFF
@@ -400,6 +403,52 @@ public sealed partial class SecureRootInheritance
             [WorkAssignment] = new[] { ("sprk_regardingmatter", Matter), ("sprk_regardingproject", Project) },
             [Project] = Array.Empty<(string, string)>(),
         };
+
+    /// <summary>
+    /// #1630 (owner decision 2026-10-11, Option A): the typed lookups that file a work assignment under an INTERMEDIATE — an
+    /// invoice or an event, the two the Create Work Assignment wizard offers besides a matter or project. Such a work
+    /// assignment is filed under the matters and projects that intermediate belongs to
+    /// (<see cref="IntermediateParentColumns"/>), exactly as if it were filed under them directly: secured, owned by the
+    /// secure team, given their sharees, walled by their No Access lists, and listed under them in the child direction.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Reuse, not a new parent model.</b> What an intermediate belongs to is
+    /// <see cref="CoreAncestorResolver.IntermediateRootColumns"/> — the root columns every child filed under that intermediate
+    /// is stamped from (task 156), its matter and project columns only (a matter or project is the only parent this rule
+    /// knows, <see cref="IsParent"/>). Both columns are typed lookups Dataverse AppendTo-checks for whoever sets them; an
+    /// intermediate's polymorphic pair is never read here (#1616 / #1627: text any user with Write can set), and a work
+    /// assignment's pair naming an invoice or event still counts only by repeating the typed lookup (#1628).</para>
+    /// <para><b>Fail closed.</b> An intermediate that cannot be read is unverifiable, never "under nothing". One that does
+    /// not exist confers nothing (as a parent that does not exist). An intermediate whose root is a work assignment or a
+    /// service request names no matter or project, so it adds no parent — the shape stays as it was (filed issue).</para>
+    /// <para>The same two columns are <c>RecordContainerResolver.ChildAncestorLinks</c>' intermediate links of a work
+    /// assignment (followed there through the intermediate for storage); <c>sprk_regardingcommunication</c> is not in the
+    /// owner's decision and stays as it was (held by the storage resolver, not a filing here).</para>
+    /// </remarks>
+    internal static readonly IReadOnlyDictionary<string, IReadOnlyList<(string Column, string Intermediate)>> IntermediateFilingColumns =
+        new Dictionary<string, IReadOnlyList<(string, string)>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [WorkAssignment] = new[] { ("sprk_regardinginvoice", "sprk_invoice"), ("sprk_regardingevent", "sprk_event") },
+            [Project] = Array.Empty<(string, string)>(),
+        };
+
+    /// <summary>
+    /// #1630: the columns ON an intermediate (<see cref="IntermediateFilingColumns"/>) that name the matters and projects it
+    /// belongs to — <see cref="CoreAncestorResolver.IntermediateRootColumns"/> (the stamp topology), its matter and project
+    /// columns only. Empty for a type with none.
+    /// </summary>
+    internal static IReadOnlyList<(string Column, string ParentTable)> IntermediateParentColumns(string intermediate) =>
+        CoreAncestorResolver.IntermediateRootColumns.TryGetValue(intermediate, out var roots)
+            ? roots.Where(r => IsParent(r.RootEntity)).Select(r => (r.Column, r.RootEntity.Trim().ToLowerInvariant())).ToArray()
+            : Array.Empty<(string, string)>();
+
+    /// <summary>#1630: every typed lookup that decides what a row of <paramref name="table"/> is filed under — its parent
+    /// lookups (<see cref="TypedFilingColumns"/>) and its intermediate lookups (<see cref="IntermediateFilingColumns"/>) —
+    /// with the table each names.</summary>
+    internal static IReadOnlyList<(string Column, string Table)> TypedLookupsOf(string table) =>
+        (TypedFilingColumns.TryGetValue(table, out var typed) ? typed : Array.Empty<(string, string)>())
+            .Concat(IntermediateFilingColumns.TryGetValue(table, out var intermediates) ? intermediates : Array.Empty<(string, string)>())
+            .ToArray();
 
     /// <summary>
     /// #1616: the inheriting tables whose ADR-024 pair (<see cref="PairIdColumn"/> + <see cref="PairTypeColumn"/>) is
@@ -522,8 +571,7 @@ public sealed partial class SecureRootInheritance
     /// <summary>Every column that decides what a row of <paramref name="table"/> is filed under.</summary>
     internal static IReadOnlySet<string> FilingColumnsOf(string table) =>
         new HashSet<string>(
-            (TypedFilingColumns.TryGetValue(table, out var typed) ? typed.Select(t => t.Column) : Enumerable.Empty<string>())
-                .Append(PairIdColumn).Append(PairTypeColumn),
+            TypedLookupsOf(table).Select(t => t.Column).Append(PairIdColumn).Append(PairTypeColumn),
             StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The wire token for an inheriting table.</summary>
@@ -552,8 +600,14 @@ public sealed partial class SecureRootInheritance
     /// <param name="writes">The columns the write sets, by any spelling a BFF writer uses: the logical name, or the
     /// navigation property with <c>@odata.bind</c>; values as <see cref="EntityReference"/>, <see cref="Guid"/>, a bind path
     /// (<c>/sprk_matters(…)</c>), a GUID string, or <c>null</c> for a clear.</param>
+    /// <param name="callerMayFileUnder">#1630: the writer's own AS-THE-CALLER check on the SECURE matters and projects the
+    /// write files the row under only THROUGH an invoice or event it sets (<see cref="IntermediateFilingColumns"/>) — records
+    /// no lookup of the write names, so the writer's own lookup check never asked about them (create parity:
+    /// <see cref="PlanCreateAsync"/> asks the same of every secure parent). Asked once they are known and before anything else
+    /// about them is said; its refusal is returned. <c>null</c>: the writer asks nothing more.</param>
     public async Task<RecordOwnerResolution?> CheckRefileAsync(
-        string table, Guid? recordId, IEnumerable<KeyValuePair<string, object?>> writes, CancellationToken ct)
+        string table, Guid? recordId, IEnumerable<KeyValuePair<string, object?>> writes, CancellationToken ct,
+        Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>>? callerMayFileUnder = null)
     {
         ArgumentNullException.ThrowIfNull(writes);
         if (!Inherits(table))
@@ -604,7 +658,20 @@ public sealed partial class SecureRootInheritance
             return Refused(table, "the record could not be read, so what it would be filed under cannot be checked");
         }
 
-        var (answer, filedUnder) = await DecideParentsCoreAsync(_dataverse, _logger, after, _recordTypes, ct).ConfigureAwait(false);
+        var intermediates = new IntermediateReads();
+        var (answer, filedUnder) = await DecideParentsCoreAsync(_dataverse, _logger, after, _recordTypes, ct, intermediates)
+            .ConfigureAwait(false);
+
+        // #1630: AS THE CALLER, on the secure records this write files the row under only through an invoice or event it sets —
+        // before any refusal below says anything about them (a creator wall, a floor, an unreadable flag).
+        if (callerMayFileUnder is not null && answer.HasSecureParent)
+        {
+            var throughWrite = SecureParentsThroughWrittenIntermediates(after, filingWrites, intermediates, answer);
+            if (throughWrite.Count > 0
+                && await callerMayFileUnder(throughWrite, ct).ConfigureAwait(false) is { } callerRefusal)
+                return callerRefusal;
+        }
+
         if (setsLocked)
         {
             if (!answer.IsKnown)
@@ -638,6 +705,38 @@ public sealed partial class SecureRootInheritance
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// #1630: the secure matters and projects in <paramref name="answer"/> that the row reaches ONLY through an invoice or event
+    /// <paramref name="writes"/> sets — not through a typed parent lookup it has after the write (<paramref name="after"/>),
+    /// which the writer's lookup check covers or which it was filed under already. Read from the decision's own reads.
+    /// </summary>
+    private static IReadOnlyList<SecureFilingParent> SecureParentsThroughWrittenIntermediates(
+        FilingFacts after, IReadOnlyList<FilingWrite> writes, IntermediateReads intermediates, SecureParentsAnswer answer)
+    {
+        if (!IntermediateFilingColumns.TryGetValue(after.Table, out var intermediateColumns) || intermediateColumns.Count == 0)
+            return Array.Empty<SecureFilingParent>();
+
+        var direct = TypedFilingColumns[after.Table]
+            .Select(c => (Table: c.ParentTable, Id: after.Typed.TryGetValue(c.Column, out var id) ? id : null))
+            .Where(c => c.Id is { } i && i != Guid.Empty)
+            .Select(c => (c.Table, c.Id!.Value))
+            .ToHashSet();
+        var reached = new HashSet<(string Table, Guid Id)>();
+        foreach (var write in writes)
+        {
+            var intermediate = intermediateColumns.FirstOrDefault(
+                c => string.Equals(c.Column, write.Column, StringComparison.OrdinalIgnoreCase));
+            if (intermediate.Column is null || write.Id is not { } id || id == Guid.Empty)
+                continue;
+            if (intermediates.TryGetValue((intermediate.Intermediate, id), out var read) && read.Parents is { } parents)
+                reached.UnionWith(parents.Where(p => !direct.Contains(p)));
+        }
+
+        return answer.SecureParents
+            .Where(p => reached.Contains((p.Table.Trim().ToLowerInvariant(), p.Id)))
+            .ToList();
     }
 
     /// <summary>
@@ -2888,15 +2987,20 @@ public sealed partial class SecureRootInheritance
             return;
         }
 
-        var named = new List<(FilingFacts Row, IReadOnlyList<(string Table, Guid Id)> Parents, string? Unknown, string? Unrepeated)>();
+        // #1630: the intermediates every row is filed under, read in chunks first (chunk-granular faults, as below).
+        var intermediates = new IntermediateReads();
+        await ReadIntermediatesIntoAsync(dataverse, logger, rows.SelectMany(IntermediatesOf), intermediates, batched: true, ct)
+            .ConfigureAwait(false);
+
+        var named = new List<(FilingFacts Row, NamedParents Naming)>();
         foreach (var row in rows)
         {
-            var (parents, unknown, unrepeated) = await NameParentsAsync(dataverse, logger, row, recordTypes, ct, faultedTypes).ConfigureAwait(false);
-            named.Add((row, parents, unknown, unrepeated));
+            var naming = await NameParentsAsync(dataverse, logger, row, recordTypes, ct, faultedTypes, intermediates).ConfigureAwait(false);
+            named.Add((row, naming));
         }
 
         var reads = new Dictionary<(string Table, Guid Id), ParentRead>();
-        foreach (var group in named.SelectMany(n => n.Parents).Distinct().GroupBy(p => p.Table))
+        foreach (var group in named.SelectMany(n => n.Naming.Named).Distinct().GroupBy(p => p.Table))
         {
             foreach (var chunk in group.Chunk(IdsPerQuery))
             {
@@ -2916,8 +3020,8 @@ public sealed partial class SecureRootInheritance
             }
         }
 
-        foreach (var (row, parents, unknown, unrepeated) in named)
-            into[(row.Table, row.Id)] = DecideNamedParents(parents, unknown, unrepeated, reads);
+        foreach (var (row, naming) in named)
+            into[(row.Table, row.Id)] = DecideNamedParents(naming, reads);
     }
 
     /// <summary>
@@ -2928,8 +3032,9 @@ public sealed partial class SecureRootInheritance
     internal const int MaxFilingDepth = 4;
 
     /// <summary>
-    /// The work assignments and projects filed under any of <paramref name="parents"/> (typed lookups, and the pair), with
-    /// their flag. A pair match counts only when its TYPE names the matched record's table (a pair naming the id of a matter
+    /// The work assignments and projects filed under any of <paramref name="parents"/> (typed lookups, #1630 an invoice or
+    /// event that belongs to one — <see cref="IntermediateFilingColumns"/> — and the pair), with their flag. A pair match
+    /// counts only when its TYPE names the matched record's table (a pair naming the id of a matter
     /// with an invoice type is not filed under the matter); one whose type cannot be read is returned as an unconfirmed
     /// candidate (<see cref="FiledRootRef.Confirmed"/> false). One page per query; a read that cannot complete THROWS
     /// (nothing is decided on part of it).
@@ -3010,6 +3115,17 @@ public sealed partial class SecureRootInheritance
                 }
             }
 
+            // #1630 (owner Option A): filed through an INTERMEDIATE (an invoice or event) that belongs to an asked-for matter or
+            // project — the decision side's own rule (NameParentsAsync) read in the child direction. The rows filed under ANY
+            // intermediate are listed (few: a work assignment is rarely filed so), then their intermediates are read and kept
+            // only when one belongs to an asked-for record. Both are typed lookups, so such a row is Confirmed. A read that
+            // cannot complete throws, as every listing here does.
+            foreach (var row in await ListFiledThroughIntermediatesAsync(dataverse, table, columns, parents, ct).ConfigureAwait(false))
+            {
+                if (!(found.TryGetValue((table, row.Id), out var typedRow) && typedRow.Confirmed))
+                    found[(table, row.Id)] = Ref(table, row, nameColumn);
+            }
+
             // The pair: its id is TEXT. Every spelling the decision side accepts (Guid.TryParse of the trimmed text — "D",
             // "B", "P", "N", "X", padded, any case) must be found (task 158 r1), so the query matches the one fragment every
             // spelling carries verbatim — the first 8 hex digits — and each row is then parsed exactly as the decision side
@@ -3054,6 +3170,76 @@ public sealed partial class SecureRootInheritance
 
         static FiledRootRef Ref(string table, Entity row, string nameColumn) =>
             new(table, row.Id, row.GetAttributeValue<string>(nameColumn), row.GetAttributeValue<bool?>(IsSecureColumn) == true);
+    }
+
+    /// <summary>Pages of a listing of the rows filed under any intermediate (<see cref="ListFiledThroughIntermediatesAsync"/>).</summary>
+    private const int IntermediateListPageSize = 5000;
+
+    /// <summary>The page ceiling of that listing; past it the listing throws (nothing is decided on part of it).</summary>
+    private const int IntermediateListMaxPages = 20;
+
+    /// <summary>
+    /// #1630: the rows of <paramref name="table"/> filed by a typed intermediate lookup (<see cref="IntermediateFilingColumns"/>)
+    /// under an invoice or event that belongs to one of <paramref name="parents"/> (<see cref="IntermediateParentColumns"/>),
+    /// with <paramref name="columns"/>. Empty for a table with no intermediate lookups. Paged; a read that cannot complete —
+    /// a page past the ceiling, an intermediate chunk that faults or does not fit one page — THROWS.
+    /// </summary>
+    private static async Task<IReadOnlyList<Entity>> ListFiledThroughIntermediatesAsync(
+        IGenericEntityService dataverse, string table, string[] columns, IReadOnlyCollection<(string Table, Guid Id)> parents,
+        CancellationToken ct)
+    {
+        var intermediateColumns = IntermediateFilingColumns.TryGetValue(table, out var c) ? c : Array.Empty<(string, string)>();
+        var asked = parents.Where(p => IsParent(p.Table)).Select(p => (Table: p.Table.Trim().ToLowerInvariant(), p.Id)).ToHashSet();
+        if (intermediateColumns.Count == 0 || asked.Count == 0)
+            return Array.Empty<Entity>();
+
+        var query = Query(table, columns.Concat(intermediateColumns.Select(i => i.Column)).Distinct().ToArray());
+        var anyIntermediate = new FilterExpression(LogicalOperator.Or);
+        foreach (var (column, _) in intermediateColumns)
+            anyIntermediate.AddCondition(column, ConditionOperator.NotNull);
+        query.Criteria.AddFilter(anyIntermediate);
+        query.PageInfo = new PagingInfo { Count = IntermediateListPageSize, PageNumber = 1 };
+        var rows = new List<Entity>();
+        for (var page = 1; ; page++)
+        {
+            if (page > IntermediateListMaxPages)
+            {
+                throw new InvalidOperationException(
+                    $"{table} still had rows filed under an invoice or event to list after {IntermediateListMaxPages} pages; " +
+                    "nothing is decided on part of them.");
+            }
+
+            var result = await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            rows.AddRange(result.Entities);
+            if (!result.MoreRecords)
+                break;
+            query.PageInfo.PageNumber++;
+            query.PageInfo.PagingCookie = result.PagingCookie;
+        }
+
+        if (rows.Count == 0)
+            return rows;
+
+        IEnumerable<(string Table, Guid Id)> IntermediatesOfRow(Entity row) => intermediateColumns
+            .Select(i => (Table: i.Item2, Id: row.GetAttributeValue<EntityReference>(i.Item1)?.Id ?? Guid.Empty))
+            .Where(i => i.Id != Guid.Empty);
+
+        var belongsTo = new Dictionary<(string Table, Guid Id), IReadOnlyList<(string Table, Guid Id)>>();
+        foreach (var group in rows.SelectMany(IntermediatesOfRow).Distinct().GroupBy(i => i.Table))
+        {
+            foreach (var chunk in group.Chunk(IdsPerQuery))
+            {
+                var read = await ReadIntermediatesAsync(dataverse, group.Key, chunk.Select(i => i.Id).ToArray(), ct)
+                    .ConfigureAwait(false);
+                foreach (var (id, parentsOfIntermediate) in read)
+                    belongsTo[(group.Key, id)] = parentsOfIntermediate;
+            }
+        }
+
+        return rows
+            .Where(row => IntermediatesOfRow(row).Any(i =>
+                belongsTo.TryGetValue(i, out var ofIntermediate) && ofIntermediate.Any(asked.Contains)))
+            .ToList();
     }
 
     /// <summary>The table a listed row's pair type names, or <c>null</c> when it has none or it cannot be read.</summary>
@@ -3164,7 +3350,8 @@ public sealed partial class SecureRootInheritance
 
     // ── Reads ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>What a row says it is filed under, and its own isolation facts.</summary>
+    /// <summary>What a row says it is filed under, and its own isolation facts. <see cref="Typed"/> holds every typed filing
+    /// lookup (<see cref="TypedLookupsOf"/>): the parent lookups and, #1630, the intermediate lookups.</summary>
     private sealed record FilingFacts(
         string Table,
         Guid Id,
@@ -3180,7 +3367,7 @@ public sealed partial class SecureRootInheritance
 
     private static async Task<FilingFacts?> ReadFactsAsync(IGenericEntityService dataverse, string table, Guid id, CancellationToken ct)
     {
-        var typed = TypedFilingColumns[table];
+        var typed = TypedLookupsOf(table);
         var query = Query(table,
             typed.Select(t => t.Column).Concat(new[] { IsSecureColumn, OwningTeamColumn, ContainerColumn, PairIdColumn, PairTypeColumn })
                 .ToArray());
@@ -3196,7 +3383,7 @@ public sealed partial class SecureRootInheritance
         IGenericEntityService dataverse, string table, Guid[] ids, CancellationToken ct)
     {
         var query = Query(table,
-            TypedFilingColumns[table].Select(t => t.Column)
+            TypedLookupsOf(table).Select(t => t.Column)
                 .Concat(new[] { IsSecureColumn, OwningTeamColumn, ContainerColumn, PairIdColumn, PairTypeColumn })
                 .ToArray());
         query.Criteria.AddCondition(table + "id", ConditionOperator.In, ids.Cast<object>().ToArray());
@@ -3212,7 +3399,7 @@ public sealed partial class SecureRootInheritance
 
     private static FilingFacts ToFacts(string table, Guid id, Entity row)
     {
-        var typed = TypedFilingColumns[table];
+        var typed = TypedLookupsOf(table);
         return new FilingFacts(
             table,
             id,
@@ -3246,13 +3433,14 @@ public sealed partial class SecureRootInheritance
     /// level-by-level climb (round 61 item 1) continues from.</summary>
     private static async Task<(SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder)> DecideParentsCoreAsync(
         IGenericEntityService dataverse, ILogger logger, FilingFacts facts, ConcurrentDictionary<Guid, string?> recordTypes,
-        CancellationToken ct)
+        CancellationToken ct, IntermediateReads? intermediates = null)
     {
-        var (named, unknown, unrepeated) = await NameParentsAsync(dataverse, logger, facts, recordTypes, ct).ConfigureAwait(false);
+        var naming = await NameParentsAsync(dataverse, logger, facts, recordTypes, ct, intermediates: intermediates)
+            .ConfigureAwait(false);
 
         // Every named record is read on its own, even after one fails (secure-if-any).
         var reads = new Dictionary<(string Table, Guid Id), ParentRead>();
-        foreach (var (table, id) in named.Distinct())
+        foreach (var (table, id) in naming.Named.Distinct())
         {
             try
             {
@@ -3265,17 +3453,110 @@ public sealed partial class SecureRootInheritance
             }
         }
 
-        return DecideNamedParents(named, unknown, unrepeated, reads);
+        return DecideNamedParents(naming, reads);
     }
 
-    /// <summary>The records <paramref name="facts"/> names as what it is filed under (typed lookups, then the pair), and why
-    /// any could not be named. Reads only the pair's TYPE (cached in <paramref name="recordTypes"/>).</summary>
+    /// <summary>What <see cref="NameParentsAsync"/> answers for one row: the matters and projects it is filed under, why any
+    /// could not be named (<see cref="Unknown"/>; #1616's <see cref="Unrepeated"/> kept apart), and (#1630) those named ONLY
+    /// through an intermediate (<see cref="ViaIntermediateOnly"/>) — their names are not repeated to the record's readers, who
+    /// see the intermediate on the row, never the record it belongs to (task 174 verifier F1-d).</summary>
+    private sealed record NamedParents(
+        IReadOnlyList<(string Table, Guid Id)> Named, string? Unknown, string? Unrepeated,
+        IReadOnlySet<(string Table, Guid Id)> ViaIntermediateOnly);
+
+    /// <summary>#1630: an intermediate as read — the matters and projects it belongs to (<c>null</c> = it does not exist), or a
+    /// fault.</summary>
+    private readonly record struct IntermediateRead(IReadOnlyList<(string Table, Guid Id)>? Parents, bool Faulted);
+
+    /// <summary>#1630: the intermediate rows one call has read (a row reached by several records is read once).</summary>
+    private sealed class IntermediateReads : Dictionary<(string Table, Guid Id), IntermediateRead>
+    {
+    }
+
+    /// <summary>
+    /// #1630: the matters and projects each of <paramref name="ids"/> (rows of the intermediate <paramref name="table"/>)
+    /// belongs to, by its <see cref="IntermediateParentColumns"/> — one query (one id, or an id list of at most
+    /// <see cref="IdsPerQuery"/>); a row that does not exist is absent. A fault propagates.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<Guid, IReadOnlyList<(string Table, Guid Id)>>> ReadIntermediatesAsync(
+        IGenericEntityService dataverse, string table, Guid[] ids, CancellationToken ct)
+    {
+        var columns = IntermediateParentColumns(table);
+        var query = Query(table, columns.Select(c => c.Column).ToArray());
+        IReadOnlyList<Entity> rows;
+        if (ids.Length == 1)
+        {
+            query.TopCount = 1;
+            query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, ids[0]);
+            rows = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities;
+        }
+        else
+        {
+            query.Criteria.AddCondition(table + "id", ConditionOperator.In, ids.Cast<object>().ToArray());
+            rows = await ReadOnePageAsync(dataverse, query, ct).ConfigureAwait(false);
+        }
+
+        var found = new Dictionary<Guid, IReadOnlyList<(string Table, Guid Id)>>();
+        foreach (var row in rows)
+        {
+            if (!ids.Contains(row.Id))
+                continue;
+            found[row.Id] = columns
+                .Select(c => (Table: c.ParentTable, Id: row.GetAttributeValue<EntityReference>(c.Column)?.Id ?? Guid.Empty))
+                .Where(p => p.Id != Guid.Empty)
+                .Distinct()
+                .ToList();
+        }
+
+        return found;
+    }
+
+    /// <summary>#1630: reads every intermediate in <paramref name="refs"/> not already in <paramref name="into"/> — per table,
+    /// one row per query (<paramref name="batched"/> false) or in chunks of <see cref="IdsPerQuery"/>. Never throws a read
+    /// fault: a row (or chunk) that cannot be read is recorded as faulted.</summary>
+    private static async Task ReadIntermediatesIntoAsync(
+        IGenericEntityService dataverse, ILogger logger, IEnumerable<(string Table, Guid Id)> refs, IntermediateReads into,
+        bool batched, CancellationToken ct)
+    {
+        foreach (var group in refs.Where(r => !into.ContainsKey(r)).Distinct().GroupBy(r => r.Table))
+        {
+            foreach (var chunk in batched ? group.Chunk(IdsPerQuery) : group.Select(r => new[] { r }))
+            {
+                try
+                {
+                    var found = await ReadIntermediatesAsync(dataverse, group.Key, chunk.Select(r => r.Id).ToArray(), ct)
+                        .ConfigureAwait(false);
+                    foreach (var row in chunk)
+                        into[row] = new IntermediateRead(found.TryGetValue(row.Id, out var parents) ? parents : null, false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    logger.LogWarning(ex, "[SECURE-INHERIT] {Count} {Table} row(s) a record is filed under could not be read.",
+                        chunk.Length, group.Key);
+                    foreach (var row in chunk)
+                        into[row] = new IntermediateRead(null, true);
+                }
+            }
+        }
+    }
+
+    /// <summary>#1630: the intermediates <paramref name="facts"/> is filed under (its set intermediate lookups).</summary>
+    private static IEnumerable<(string Table, Guid Id)> IntermediatesOf(FilingFacts facts) =>
+        (IntermediateFilingColumns.TryGetValue(facts.Table, out var columns) ? columns : Array.Empty<(string, string)>())
+            .Select(c => (Table: c.Item2, Id: facts.Typed.TryGetValue(c.Item1, out var id) ? id : null))
+            .Where(c => c.Id is { } i && i != Guid.Empty)
+            .Select(c => (c.Table, c.Id!.Value));
+
+    /// <summary>The records <paramref name="facts"/> names as what it is filed under (typed lookups, #1630 the matters and
+    /// projects its intermediates belong to, then the pair), and why any could not be named. Reads only the pair's TYPE (cached
+    /// in <paramref name="recordTypes"/>) and each intermediate's parent columns (cached in <paramref name="intermediates"/>;
+    /// one not there yet is read on its own).</summary>
     /// <param name="faultedTypes">When given (the batched walk, #1410 F3), types whose read already faulted in this call are
     /// answered "could not be read" without reading again, and a new fault is added. <c>null</c>: every row reads (the
     /// one-record shape, as before).</param>
-    private static async Task<(IReadOnlyList<(string Table, Guid Id)> Named, string? Unknown, string? Unrepeated)> NameParentsAsync(
+    private static async Task<NamedParents> NameParentsAsync(
         IGenericEntityService dataverse, ILogger logger, FilingFacts facts, ConcurrentDictionary<Guid, string?> recordTypes,
-        CancellationToken ct, HashSet<Guid>? faultedTypes = null)
+        CancellationToken ct, HashSet<Guid>? faultedTypes = null, IntermediateReads? intermediates = null)
     {
         var named = new List<(string Table, Guid Id)>();
         string? unknown = null;
@@ -3286,14 +3567,45 @@ public sealed partial class SecureRootInheritance
                 named.Add((parentTable, parentId));
         }
 
+        // #1630 (owner Option A): an invoice or event the row is filed under by its typed lookup files it under the matters and
+        // projects THAT record belongs to — read live, never guessed (an unreadable one is unverifiable; a missing one confers
+        // nothing, like a missing parent).
+        var direct = named.ToHashSet();
+        var viaIntermediate = new HashSet<(string Table, Guid Id)>();
+        var filedIntermediates = IntermediatesOf(facts).ToList();
+        if (filedIntermediates.Count > 0)
+        {
+            intermediates ??= new IntermediateReads();
+            await ReadIntermediatesIntoAsync(dataverse, logger, filedIntermediates, intermediates, batched: false, ct)
+                .ConfigureAwait(false);
+            foreach (var intermediate in filedIntermediates)
+            {
+                var read = intermediates[intermediate];
+                if (read.Faulted)
+                {
+                    unknown ??= $"what the {intermediate.Table} it is filed under belongs to could not be read";
+                    continue;
+                }
+
+                foreach (var parent in read.Parents ?? Array.Empty<(string Table, Guid Id)>())
+                {
+                    named.Add(parent);
+                    if (!direct.Contains(parent))
+                        viaIntermediate.Add(parent);
+                }
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(facts.PairId))
         {
             if (!Guid.TryParse(facts.PairId.Trim(), out var pairId) || pairId == Guid.Empty)
             {
                 unknown ??= $"its {PairIdColumn} does not hold a record identifier";
             }
-            else if (!named.Any(n => n.Id == pairId))
+            else if (!direct.Any(n => n.Id == pairId) && !filedIntermediates.Any(i => i.Id == pairId))
             {
+                // (#1630: a pair repeating a typed intermediate lookup agrees by identity, as one repeating a typed parent does —
+                // the typed lookup, not the pair's label, says what the record is.)
                 if (facts.PairType is not { } typeRef)
                 {
                     unknown ??= $"it names a record in {PairIdColumn} without that record's type";
@@ -3330,16 +3642,16 @@ public sealed partial class SecureRootInheritance
             }
         }
 
-        return (named, unknown, unrepeated);
+        return new NamedParents(named, unknown, unrepeated, viaIntermediate);
     }
 
     /// <summary>The direct decision over <paramref name="named"/> as <paramref name="reads"/> read them (in order; the first
     /// reason wins): a faulted read or an EMPTY flag is unverifiable, a missing record confers nothing, a true flag is a
     /// secure parent. Also every named record that exists (secure or not) — what the climb continues from.</summary>
     private static (SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder) DecideNamedParents(
-        IReadOnlyList<(string Table, Guid Id)> named, string? unknown, string? unrepeated,
-        IReadOnlyDictionary<(string Table, Guid Id), ParentRead> reads)
+        NamedParents naming, IReadOnlyDictionary<(string Table, Guid Id), ParentRead> reads)
     {
+        var (named, unknown, unrepeated) = (naming.Named, naming.Unknown, naming.Unrepeated);
         var secure = new List<SecureFilingParent>();
         var existing = new List<FiledParent>();
         FilingPermission? strictest = null;
@@ -3352,8 +3664,12 @@ public sealed partial class SecureRootInheritance
                 continue;
             }
 
-            if (read.Row is not { } parent)
+            if (read.Row is not { } row)
                 continue; // a record that does not exist confers nothing
+
+            // #1630: a parent named only through an intermediate keeps its name to itself (task 174 verifier F1-d: the record's
+            // readers see the intermediate on its row, not what that record belongs to).
+            var parent = naming.ViaIntermediateOnly.Contains((table, id)) ? row with { Name = null } : row;
             existing.Add(new FiledParent(table, id, parent.Name, parent.Flag, parent.Permission));
 
             // Task 174 (owner round 84): the parent's Access Permission, from the same row (a null value is Standard).
@@ -3537,7 +3853,7 @@ public sealed partial class SecureRootInheritance
     {
         var logical = table.Trim().ToLowerInvariant();
         var typed = new Dictionary<string, Guid?>(
-            before?.Typed ?? TypedFilingColumns[logical].ToDictionary(t => t.Column, _ => (Guid?)null),
+            before?.Typed ?? TypedLookupsOf(logical).ToDictionary(t => t.Column, _ => (Guid?)null),
             StringComparer.OrdinalIgnoreCase);
         var pairId = before?.PairId;
         var pairType = before?.PairType;
