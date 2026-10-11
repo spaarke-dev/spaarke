@@ -28,8 +28,9 @@
       (p2) the reader profile is on EVERY business unit's default team;
       (p3) the writer profile's members are exactly the -BffApplicationIds application users (no human, no team);
       (p4) informational: how many projects carry a pair now (scripts/Repair-RegardingPairFiling.ps1 decides whether
-           each one was filed by someone allowed to; run its -Apply BEFORE this script's, so no pair set around the
-           check survives the lock);
+           each one was filed by someone allowed to; run its -Apply AFTER this script's — securing a column does not
+           clear what was written before, so only a repair after the lock catches a pair PATCHed up to the lock — and
+           its -Verify last, as the gate);
       (p5) -BffWritesProjectPair is passed: the BFF with #1616 is deployed. Before it, the chat create refuses a
            project with a pair (the column reads as field-secured) and the update tool's own PATCH of it is refused —
            both fail closed, but they fail;
@@ -47,8 +48,10 @@
       (c) report any OTHER profile that can create or update the column (FAIL); list System Administrator holders.
       (d) publish sprk_project.
 
-    LIVE ORDER: deploy the BFF (#1616) → Repair-RegardingPairFiling.ps1 -Apply → THIS SCRIPT -Apply → -Verify → import
-    of SpaarkeMaster carrying the same IsSecured and field permissions (src/dataverse/solutions/SpaarkeMaster).
+    LIVE ORDER: deploy the BFF (#1616) → THIS SCRIPT -Apply (the LOCK) → THIS SCRIPT -Verify →
+    Repair-RegardingPairFiling.ps1 -Apply → Repair-RegardingPairFiling.ps1 -Verify (the gate: nothing written before the
+    lock survives it) → import of SpaarkeMaster carrying the same IsSecured and field permissions
+    (src/dataverse/solutions/SpaarkeMaster).
 
 .PARAMETER EnvironmentUrl
     e.g. https://spaarkedev1.crm.dynamics.com
@@ -197,7 +200,7 @@ if ($writer) {
 
 $tableSet = (Invoke-DvGet "EntityDefinitions(LogicalName='$Table')?`$select=EntitySetName").EntitySetName
 $withPair = @((Invoke-DvGet "$tableSet`?`$select=$($Table)id&`$filter=$($Columns[0]) ne null").value).Count
-Report 'INFO' "(p4) $withPair $Table row(s) carry a pair — scripts/Repair-RegardingPairFiling.ps1 decides each (run its -Apply first)"
+Report 'INFO' "(p4) $withPair $Table row(s) carry a pair — scripts/Repair-RegardingPairFiling.ps1 decides each (run its -Apply AFTER this lock, then its -Verify)"
 
 if ($BffWritesProjectPair) { Report 'OK' '(p5) operator confirms the BFF with #1616 (app-only pair write after the caller check) is deployed' }
 elseif ($Apply) { Report 'FAIL' "(p5) -BffWritesProjectPair not passed: before that BFF, every chat create or update of a project's pair is refused" }

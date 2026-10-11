@@ -680,6 +680,13 @@ internal static class OwnedChildWrite
             };
         }
 
+        // The FULL pair the rule checked (CheckCallerMayRefileByPairAsync): the half this write leaves is completed from the
+        // row as the caller reads it — the same read the rule made — so the application writes both halves, never one half
+        // beside whatever the other holds by then.
+        if (await CompletePairFromTheRowAsync(user, table, entitySetName, recordId, PairOf(item), pairFields, ct)
+                .ConfigureAwait(false) is { } completion)
+            return completion;
+
         if (callerBody is not null)
         {
             // If-Match: * (update-only), AS THE CALLER — every column but the pair, authorized by Dataverse itself.
@@ -691,6 +698,67 @@ internal static class OwnedChildWrite
         await appOnly.UpdateExistingRecordFieldsAsync(table, recordId, pairFields, ct).ConfigureAwait(false);
         return new RefileOutcome { Written = true };
     }
+
+    /// <summary>
+    /// #1616: adds to <paramref name="pairFields"/> the pair half <paramref name="pair"/> does not set, as the row holds it
+    /// when the caller reads it (the read <see cref="CheckCallerMayRefileByPairAsync"/> completes the pair from): the id as
+    /// text, the type as its navigation property's bind (or null bind), mapped through the table's metadata as the caller.
+    /// <c>null</c> when the pair is complete; otherwise the failure, before anything is written.
+    /// </summary>
+    private static async Task<RefileOutcome?> CompletePairFromTheRowAsync(
+        IDataverseUserClient user, string table, string entitySetName, Guid recordId, PairWrite pair,
+        Dictionary<string, object?> pairFields, CancellationToken ct)
+    {
+        if (pair.SetsId && pair.SetsType)
+            return null;
+
+        var row = await user.GetAsync($"{entitySetName}({recordId:D})", ct).ConfigureAwait(false);
+        if (!row.IsSuccess)
+            return new RefileOutcome { ClientFailure = row };
+        if (row.Body is not { ValueKind: JsonValueKind.Object } body)
+        {
+            return new RefileOutcome
+            {
+                ClientFailure = DataverseUserResponse.Fail(row.StatusCode, DataverseUserClientErrorCodes.BadRequest,
+                    "The record could not be read, so what it is filed under cannot be checked."),
+            };
+        }
+
+        if (!pair.SetsId)
+        {
+            pairFields[SecureRootInheritance.PairIdColumn] =
+                body.TryGetProperty(SecureRootInheritance.PairIdColumn, out var id) && id.ValueKind == JsonValueKind.String
+                    ? id.GetString()
+                    : null;
+        }
+
+        if (!pair.SetsType)
+        {
+            Guid? type = body.TryGetProperty($"_{SecureRootInheritance.PairTypeColumn}_value", out var t)
+                         && t.ValueKind == JsonValueKind.String && Guid.TryParse(t.GetString(), out var parsed)
+                ? parsed
+                : null;
+            var typeItem = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+            {
+                [SecureRootInheritance.PairTypeColumn] = type is { } typeId
+                    ? new { relatedTable = RecordTypeTable, recordId = typeId }
+                    : null,
+            });
+            var mapped = await DataverseWriteItemMapper.MapAsync(user, table, typeItem, ct).ConfigureAwait(false);
+            if (mapped.ClientFailure is { } mapFailure)
+                return new RefileOutcome { ClientFailure = mapFailure };
+            if (mapped.Item is not { } typeBind)
+                return new RefileOutcome { Invalid = mapped.ValidationError ?? $"The record type of this {table} could not be written." };
+
+            using var bind = JsonDocument.Parse(typeBind.JsonBody);
+            foreach (var property in bind.RootElement.EnumerateObject())
+                pairFields[property.Name] = property.Value.Clone();
+        }
+
+        return null;
+    }
+
+    private const string RecordTypeTable = "sprk_recordtype_ref";
 
     /// <summary>The answer of <see cref="PairTargetAsync"/>: the record to check AppendTo on, or why the pair is refused.</summary>
     internal readonly record struct PairTarget(DataverseWriteItemMapper.MappedLookup? Lookup, Outcome? Refusal);
@@ -810,13 +878,15 @@ internal static class OwnedChildWrite
         if (string.IsNullOrEmpty(pairTable) || !LogicalName.IsMatch(pairTable))
             return Refuse($"The record type '{SecureRootInheritance.PairTypeColumn}' names no table, so what this row is filed under cannot be told.");
 
-        // #1616: on a work assignment (an inheriting table whose pair is NOT BFF-managed) the pair names a matter or project
-        // only by repeating a typed filing lookup — the readers' one rule (SecureRootInheritance.PairNamesAParentOnItsOwn),
-        // so this server never writes a filing they would read as undetermined. Decided from the payload, the row's kept
-        // lookups and the catalog only, never from the record the pair names.
+        // #1616: on a work assignment (an inheriting table whose pair is NOT BFF-managed) the pair names a root — a matter, a
+        // project or another work assignment — only by repeating a typed filing lookup: the readers' one rule
+        // (SecureRootInheritance.PairNamesAParentOnItsOwn; the container resolver refuses any other), so this server never
+        // writes a filing they would read as undetermined. A work assignment has no typed lookup to another work assignment,
+        // so such a pair is always refused. Decided from the payload, the row's kept lookups and the catalog only, never
+        // from the record the pair names.
         if (SecureRootInheritance.Inherits(table)
             && !SecureRootInheritance.PairNamesAParentOnItsOwn(table)
-            && SecureRootInheritance.IsParent(pairTable)
+            && (SecureRootInheritance.IsParent(pairTable) || SecureRootInheritance.Inherits(pairTable))
             && !RepeatsTypedFilingLookup(table, pairTable, pairId, lookups, keptOnTheRow))
         {
             return Refuse($"It was not written: {SecureRootInheritance.PairWithoutTypedLookupReason(table, pairTable)}. " +

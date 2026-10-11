@@ -1115,20 +1115,22 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
     }
 
     /// <summary>
-    /// Owner round 31 item 1, chat update: the re-file files the record under a SECURE matter while its pair names a matter
-    /// whose flag reads EMPTY — it would be secured (secure-if-any), but its creator cannot be checked against the unreadable
-    /// matter's No Access list: refused before the PATCH (<c>creator_no_access_unverifiable</c>).
+    /// Owner round 31 item 1, chat update: the re-file files the record under a SECURE matter while its typed PROJECT is a
+    /// record whose flag reads EMPTY — it would be secured (secure-if-any), but its creator cannot be checked against the
+    /// unreadable project's No Access list: refused before the PATCH (<c>creator_no_access_unverifiable</c>). (#1616 fix
+    /// round: on a typed filing — a pair no typed lookup repeats names nothing the walls are asked about, see
+    /// <see cref="ChatUpdate_ReFilingByTheTypedLookupUnderASecureMatter_WhileThePairStillNamesTheOldMatter_SecuresIt"/>.)
     /// </summary>
     [Fact]
-    public async Task ChatUpdate_UnderASecureMatterWhileItsPairNamesAMatterWhoseFlagCannotBeRead_IsRefusedBeforeThePatch()
+    public async Task ChatUpdate_UnderASecureMatterWhileItsTypedProjectsFlagCannotBeRead_IsRefusedBeforeThePatch()
     {
         var (secure, ordinary) = Matters();
         var unreadable = Guid.NewGuid();
-        _fixture.SeedMatter(unreadable, isSecure: false);
-        FlagUnreadable(unreadable);
+        _fixture.SeedProject(unreadable, isSecure: false);
+        World.Set("sprk_project", unreadable, "sprk_issecure", null);
         var workAssignment = Guid.NewGuid();
         FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
-        FilePair(_fixture, "sprk_workassignment", workAssignment, unreadable, RecordTypeRef(_fixture, "sprk_matter"));
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingproject", new EntityReference("sprk_project", unreadable));
 
         var result = await ChatRefile(workAssignment, secure);
 
@@ -1479,6 +1481,148 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
 
         result.Success.Should().BeTrue(result.ErrorMessage);
         ShouldBeSecure(workAssignment, "re-filed by its typed matter and the same pair under a secure matter");
+    }
+
+    // ── #1616 fix round ───────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>A chat create of <paramref name="table"/> with <paramref name="item"/> as the scripted caller.</summary>
+    private Task<ToolResult> ChatCreateWith(
+        string table, Dictionary<string, object> item, SecureChildOwnershipAiToolTests.ScriptedUserClient? user = null) =>
+        new DataverseCreateRecordHandler(user ?? Scripted(), CreateLogger<DataverseCreateRecordHandler>(),
+                new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+                new RecordOwnershipResolver(
+                    SecureChildShareWorld.EntitiesOver(() => _fixture.ChildWorld).Object, SecureChildShareWorld.Configuration(),
+                    NullLogger<RecordOwnershipResolver>.Instance),
+                AppCreatesIntoTheWorld().Object, IdentityNormalizationFixtures.NoLinkedContact(), _gate)
+            .ExecuteChatAsync(
+                BuildChatInvocationContext(toolArgumentsJson: JsonSerializer.Serialize(new { tablename = table, item })) with
+                { UserId = Guid.NewGuid().ToString() },
+                BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
+
+    /// <summary>
+    /// F-C, the stale pair after a typed re-file: a work assignment filed under an ordinary matter by its typed lookup AND the
+    /// same pair is re-filed (typed lookup only) under a SECURE matter — the pair still names the old matter. It is written and
+    /// secured under the secure matter (the creator's walls are decided over it); only the sharee mirror is held (fail
+    /// closed), reported as incomplete. Before the fix round the unrepeated pair made the creator check "unverifiable" and
+    /// the re-file was refused, nothing written (master writes and secures it).
+    /// </summary>
+    [Fact]
+    public async Task ChatUpdate_ReFilingByTheTypedLookupUnderASecureMatter_WhileThePairStillNamesTheOldMatter_SecuresIt()
+    {
+        var (secure, ordinary) = Matters();
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+        SecureRootInheritanceTests.FilePair(_fixture, "sprk_workassignment", workAssignment, ordinary, RecordTypeRef(_fixture, "sprk_matter"));
+
+        var result = await ChatRefile(workAssignment, secure);
+
+        _writes.Should().NotBeEmpty("the re-file is written (master writes it too)");
+        ShouldBeSecure(workAssignment, "re-filed by its typed lookup under a secure matter; the stale pair files it under nothing");
+        result.ErrorCode.Should().Be(SecureRootInheritance.ReasonParentUnverifiable,
+            "the secure matter's sharees are held while the unrepeated pair stands (the repair clears it)");
+    }
+
+    /// <summary>F-C, the walls still decide: the same stale-pair re-file with the creator walled off the secure matter is
+    /// <c>creator_no_access</c> (never "unverifiable"), before the PATCH.</summary>
+    [Fact]
+    public async Task ChatUpdate_ReFilingByTheTypedLookupWhileThePairStillNamesTheOldMatter_StillHonoursTheSecureMattersNoAccessList()
+    {
+        var (secure, ordinary) = Matters();
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+        SecureRootInheritanceTests.FilePair(_fixture, "sprk_workassignment", workAssignment, ordinary, RecordTypeRef(_fixture, "sprk_matter"));
+        _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure);
+
+        var result = await ChatRefile(workAssignment, secure);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
+        _writes.Should().BeEmpty("the caller's PATCH is never sent");
+    }
+
+    /// <summary>
+    /// F-A: a work assignment created with a pair naming ANOTHER work assignment (no typed lookup can repeat it) is refused
+    /// as invalid, nothing created — the container resolver would refuse it anyway. Before the fix round it was created, and
+    /// the resolver then stored its children in that other work assignment's container.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_AWorkAssignmentWhosePairNamesAnotherWorkAssignment_IsRefusedAsInvalid_AndNothingIsCreated()
+    {
+        var other = Guid.NewGuid();
+        _fixture.SeedWorkAssignment(other, isSecure: true);
+
+        var result = await ChatCreateWith("sprk_workassignment", new()
+        {
+            ["sprk_name"] = "Review the lease",
+            ["sprk_regardingrecordid"] = other.ToString("D"),
+            ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, "sprk_workassignment") },
+        });
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed);
+        _writes.Should().BeEmpty("nothing is created");
+    }
+
+    /// <summary>
+    /// F-A (coordinator constraint): the Create Work Assignment wizard's other shapes — a work assignment filed under an
+    /// INVOICE or an EVENT by its typed lookup AND the same pair — are created exactly as before (ordinary, nothing refused).
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_regardinginvoice", "sprk_invoice")]
+    [InlineData("sprk_regardingevent", "sprk_event")]
+    public async Task ChatCreate_AWorkAssignmentFiledUnderAnInvoiceOrAnEvent_WithTheSamePair_IsCreated(string column, string table)
+    {
+        var intermediate = Guid.NewGuid();
+        _fixture.ChildWorld.Add(table, intermediate);
+        _fixture.ChildWorld.MoveOwner(table, intermediate, DataversePrincipalRef.User(Creator)); // an owner (and its business unit)
+
+        var result = await ChatCreateWith("sprk_workassignment", new()
+        {
+            ["sprk_name"] = "Review the lease",
+            [column] = new { relatedTable = table, recordId = intermediate },
+            ["sprk_regardingrecordid"] = intermediate.ToString("D"),
+            ["sprk_regardingrecordtype"] = new { relatedTable = "sprk_recordtype_ref", recordId = RecordTypeRef(_fixture, table) },
+        });
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _fixture.IsSecureOf(_writes.Should().ContainSingle().Subject.Id).Should().BeFalse("an invoice or event is not a secure root");
+    }
+
+    /// <summary>
+    /// K-b: an update that moves only a project's pair ID (its type kept) has the application write the FULL pair it checked
+    /// — the id AND the row's type — never the id alone beside whatever the type holds by then.
+    /// </summary>
+    [Fact]
+    public async Task ChatUpdate_AProjectsPairIdAlone_TheApplicationWritesTheFullCheckedPair()
+    {
+        var (secure, ordinary) = Matters();
+        var project = Guid.NewGuid();
+        var matterType = RecordTypeRef(_fixture, "sprk_matter");
+        _fixture.SeedProject(project, isSecure: false);
+        SecureRootInheritanceTests.FilePair(_fixture, "sprk_project", project, ordinary, matterType);
+        var user = Scripted();
+        user.SecuredColumns.Add(SecureRootInheritance.PairIdColumn);
+        user.SecuredColumns.Add(SecureRootInheritance.PairTypeColumn);
+        user.RowValues[project] = new() // the row as the caller reads it (every user reads the pair)
+        {
+            [SecureRootInheritance.PairIdColumn] = ordinary.ToString("D"),
+            [$"_{SecureRootInheritance.PairTypeColumn}_value"] = matterType.ToString("D"),
+        };
+        var appOnly = AppUpdatesTheWorld();
+
+        var result = await ChatUpdateWith("sprk_project", project, user, new()
+        {
+            ["sprk_regardingrecordid"] = secure.ToString("D"),
+        }, appOnly: appOnly.Object);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        appOnly.Verify(s => s.UpdateExistingRecordFieldsAsync("sprk_project", project,
+            It.Is<Dictionary<string, object?>>(f => f.Count == 2
+                && f.ContainsKey(SecureRootInheritance.PairIdColumn)
+                && f.Keys.Any(k => SecureRootInheritance.NormalizeColumn(k) == SecureRootInheritance.PairTypeColumn
+                                   && f[k]!.ToString()!.Contains(matterType.ToString("D")))),
+            It.IsAny<CancellationToken>()), Times.Once);
+        ShouldBeSecure(project, "re-filed by its pair id under a secure matter, its type kept");
     }
 
     // ── Verifier round on #1612 (F1/F2): a lookup with the same id in ANOTHER table never stands in for the pair's record ──

@@ -1437,9 +1437,9 @@ public sealed partial class RecordContainerResolver
     /// set is a disagreement.</item>
     /// <item>The pair is the only thing naming a record → its type decides, read from <c>sprk_recordtype_ref</c>: a
     /// type the row's entry FOLLOWS (a root; the communication's invoice) is returned and walked like a typed link (a
-    /// record that does not exist refuses there, 409) — except a matter or project named by a WORK ASSIGNMENT's pair
-    /// alone (#1616: it is text any user with Write can set, and the secure-root inheritance reads it the same way), which
-    /// refuses (<see cref="AncestorUnresolvedCode"/>); an INTERMEDIATE is the held path
+    /// record that does not exist refuses there, 409) — except any root (matter, project or another work assignment) named
+    /// by a WORK ASSIGNMENT's pair alone (#1616: it is text any user with Write can set, and the secure-root inheritance
+    /// reads it the same way), which refuses (<see cref="AncestorUnresolvedCode"/>); an INTERMEDIATE is the held path
     /// (<see cref="AncestorUnverifiableCode"/>); a PARTY (contact, account, organization) is not ownership and adds
     /// nothing, exactly like the typed party columns; a missing type, an unreadable type row (503) or a type this
     /// table does not classify → refused (<see cref="AncestorUnresolvedCode"/>).</item>
@@ -1532,13 +1532,13 @@ public sealed partial class RecordContainerResolver
         if (rowLinks.Follows(pairEntity))
         {
             // #1616: on a work assignment the pair is text any user with Write can set through the Web API, bypassing the
-            // AppendTo check a lookup costs, so ALONE it names no matter or project there
-            // (SecureRootInheritance.PairNamesAParentOnItsOwn — the one rule the secure-root inheritance applies): refused,
-            // never walked. A project's pair is BFF-managed (field-secured), so it is walked. A pair naming any other table
-            // (another work assignment) is walked as before — the inheritance never reads it as a filing (#1627).
+            // AppendTo check a lookup costs, so ALONE it names no root there — no matter, no project, and no other work
+            // assignment (whose container and secure state it would otherwise reach): refused, never walked. A typed link
+            // that repeats it was taken above (rule 3). A project's pair is BFF-managed (field-secured —
+            // SecureRootInheritance.PairNamesAParentOnItsOwn, the one rule the secure-root inheritance applies), so it is
+            // walked. Rule 5 on the child tables is #1627.
             if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(rowEntity)
-                && !Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairNamesAParentOnItsOwn(rowEntity)
-                && Sprk.Bff.Api.Services.Access.SecureRootInheritance.IsParent(pairEntity))
+                && !Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairNamesAParentOnItsOwn(rowEntity))
             {
                 throw AncestorUnresolved(
                     normalizedEntity, recordId,

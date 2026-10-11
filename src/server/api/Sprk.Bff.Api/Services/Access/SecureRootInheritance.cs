@@ -189,6 +189,22 @@ public sealed record SecureParentsAnswer(IReadOnlyList<SecureFilingParent> Secur
     public bool HasSecureParent => SecureParents.Count > 0;
 
     /// <summary>
+    /// #1616: the answer is unknown (<see cref="Unverifiable"/> is set) ONLY because a work assignment's pair names a matter or
+    /// project that none of its typed lookups repeats (<see cref="SecureRootInheritance.PairNamesAParentOnItsOwn"/>) —
+    /// every record it IS filed under was read. That pair is text any user with Write can set, so it never files the record
+    /// anywhere: it still holds everything that would LOOSEN the record or give it a parent's sharees (it may be a stale
+    /// pair left beside a typed re-file, or a bypass), but it is not a record the creator's No Access walls are asked about.
+    /// </summary>
+    public bool UnknownOnlyThroughAnUnrepeatedPair { get; init; }
+
+    /// <summary>
+    /// #1616: whether the creator's No Access walls can be decided over <see cref="SecureParents"/>: every record it is filed
+    /// under was read, or the only gap is an unrepeated pair while a typed parent is readably secure (the record is secured
+    /// under that parent, and the pair names nothing it is filed under).
+    /// </summary>
+    public bool WallsDecidable => IsKnown || (UnknownOnlyThroughAnUnrepeatedPair && HasSecureParent);
+
+    /// <summary>
     /// Task 174 (owner round 84): the most restrictive <c>sprk_accesspermission</c> among the records the climb read above
     /// this one (Restricted over Limited), and the record that carries it — <c>null</c> when none of them is Limited or
     /// Restricted. Read in the SAME parent read as the Secure flag (no extra query). Only as deep as the climb went: the
@@ -396,8 +412,12 @@ public sealed partial class SecureRootInheritance
     /// <para>On every other inheriting table (<c>sprk_workassignment</c>) the pair is plain text that any user with Write
     /// can set through the Web API, so it names a parent ONLY by repeating one of the typed filing lookups
     /// (<see cref="TypedFilingColumns"/>) — which Dataverse itself AppendTo-checks for whoever sets them. A pair that names
-    /// a matter or project no typed lookup names is undetermined, never a filing (<see cref="PairNamesAParentOnItsOwn"/>).
-    /// Its writers send the typed lookup and the same pair (the Create Work Assignment wizard, the BFF).</para>
+    /// a matter or project no typed lookup names is undetermined, never a filing (<see cref="PairNamesAParentOnItsOwn"/>):
+    /// it holds the sharee mirror and every loosening, and is never listed as Confirmed in the child direction; beside a
+    /// typed parent that is readably secure it does not hold the securing or the creator's walls
+    /// (<see cref="SecureParentsAnswer.WallsDecidable"/>). The container resolver refuses such a pair naming any root
+    /// (a work assignment too). Its writers send the typed lookup and the same pair (the Create Work Assignment wizard —
+    /// a matter, project, invoice or event — and the BFF).</para>
     /// <para>Why not field security on the work assignment's pair too: the Create Work Assignment wizard and the Assign
     /// Work follow-on create the row through <c>Xrm.WebApi</c> AS THE USER with the pair in the payload, which a secured
     /// column would refuse.</para>
@@ -737,7 +757,7 @@ public sealed partial class SecureRootInheritance
     {
         var logical = table.Trim().ToLowerInvariant();
         var noun = logical == Project ? "project" : "work assignment";
-        if (!answer.IsKnown)
+        if (!answer.WallsDecidable)
         {
             return Refusal(ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable,
                 $"whether the person who created this {noun} may access every secure record it would be filed under could " +
@@ -921,7 +941,7 @@ public sealed partial class SecureRootInheritance
         }
 
         // Round 31 item 1: the creator honours every secure parent's No Access list AND the record's own — before the write.
-        if (!answer.IsKnown)
+        if (!answer.WallsDecidable)
         {
             return SecureRootCreatePlan.Refused(Refusal(ProvisionProjectEndpoint.ReasonCreatorNoAccessUnverifiable,
                 $"whether you may access every secure record this {noun} would be filed under could not be checked " +
@@ -2619,6 +2639,9 @@ public sealed partial class SecureRootInheritance
         public FilingPermission? Strictest { get; set; }
 
         public string? Unknown { get; set; }
+
+        /// <summary>#1616: the first unrepeated pair met on the way up (<see cref="SecureParentsAnswer.UnknownOnlyThroughAnUnrepeatedPair"/>).</summary>
+        public string? UnrepeatedPair { get; set; }
     }
 
     /// <summary>A row's filing as read: the facts (<c>null</c> = the row does not exist), or a fault.</summary>
@@ -2691,7 +2714,10 @@ public sealed partial class SecureRootInheritance
                     }
 
                     var (answer, filedUnder) = decisions[row];
-                    climb.Unknown ??= answer.Unverifiable;
+                    if (answer.UnknownOnlyThroughAnUnrepeatedPair)
+                        climb.UnrepeatedPair ??= answer.Unverifiable;
+                    else
+                        climb.Unknown ??= answer.Unverifiable;
                     climb.Strictest = FilingPermission.Stricter(climb.Strictest, answer.StrictestPermission);
                     foreach (var parent in answer.SecureParents)
                     {
@@ -2732,8 +2758,9 @@ public sealed partial class SecureRootInheritance
 
         return climbs.ToDictionary(
             c => c.Start.Id,
-            c => new SecureParentsAnswer(c.Secure, c.Unknown)
+            c => new SecureParentsAnswer(c.Secure, c.Unknown ?? c.UnrepeatedPair)
             {
+                UnknownOnlyThroughAnUnrepeatedPair = c.Unknown is null && c.UnrepeatedPair is not null,
                 StrictestPermission = c.Strictest,
                 DirectParents = decisions.TryGetValue(c.Start, out var own)
                     ? own.FiledUnder.Select(p => new FilingParentState(
@@ -2861,11 +2888,11 @@ public sealed partial class SecureRootInheritance
             return;
         }
 
-        var named = new List<(FilingFacts Row, IReadOnlyList<(string Table, Guid Id)> Parents, string? Unknown)>();
+        var named = new List<(FilingFacts Row, IReadOnlyList<(string Table, Guid Id)> Parents, string? Unknown, string? Unrepeated)>();
         foreach (var row in rows)
         {
-            var (parents, unknown) = await NameParentsAsync(dataverse, logger, row, recordTypes, ct, faultedTypes).ConfigureAwait(false);
-            named.Add((row, parents, unknown));
+            var (parents, unknown, unrepeated) = await NameParentsAsync(dataverse, logger, row, recordTypes, ct, faultedTypes).ConfigureAwait(false);
+            named.Add((row, parents, unknown, unrepeated));
         }
 
         var reads = new Dictionary<(string Table, Guid Id), ParentRead>();
@@ -2889,8 +2916,8 @@ public sealed partial class SecureRootInheritance
             }
         }
 
-        foreach (var (row, parents, unknown) in named)
-            into[(row.Table, row.Id)] = DecideNamedParents(parents, unknown, reads);
+        foreach (var (row, parents, unknown, unrepeated) in named)
+            into[(row.Table, row.Id)] = DecideNamedParents(parents, unknown, unrepeated, reads);
     }
 
     /// <summary>
@@ -3013,7 +3040,11 @@ public sealed partial class SecureRootInheritance
                     }
                     else if (parents.Any(p => p.Id == pairId && string.Equals(p.Table, pairTable, StringComparison.OrdinalIgnoreCase)))
                     {
-                        found[(table, row.Id)] = Ref(table, row, nameColumn);
+                        // #1616: a work assignment's pair alone files it under nothing (no typed lookup repeats it — a typed
+                        // one would have confirmed it above): a candidate the per-record decision reports, never "filed under".
+                        found[(table, row.Id)] = PairNamesAParentOnItsOwn(table)
+                            ? Ref(table, row, nameColumn)
+                            : Ref(table, row, nameColumn) with { Confirmed = false };
                     }
                 }
             }
@@ -3217,7 +3248,7 @@ public sealed partial class SecureRootInheritance
         IGenericEntityService dataverse, ILogger logger, FilingFacts facts, ConcurrentDictionary<Guid, string?> recordTypes,
         CancellationToken ct)
     {
-        var (named, unknown) = await NameParentsAsync(dataverse, logger, facts, recordTypes, ct).ConfigureAwait(false);
+        var (named, unknown, unrepeated) = await NameParentsAsync(dataverse, logger, facts, recordTypes, ct).ConfigureAwait(false);
 
         // Every named record is read on its own, even after one fails (secure-if-any).
         var reads = new Dictionary<(string Table, Guid Id), ParentRead>();
@@ -3234,7 +3265,7 @@ public sealed partial class SecureRootInheritance
             }
         }
 
-        return DecideNamedParents(named, unknown, reads);
+        return DecideNamedParents(named, unknown, unrepeated, reads);
     }
 
     /// <summary>The records <paramref name="facts"/> names as what it is filed under (typed lookups, then the pair), and why
@@ -3242,12 +3273,13 @@ public sealed partial class SecureRootInheritance
     /// <param name="faultedTypes">When given (the batched walk, #1410 F3), types whose read already faulted in this call are
     /// answered "could not be read" without reading again, and a new fault is added. <c>null</c>: every row reads (the
     /// one-record shape, as before).</param>
-    private static async Task<(IReadOnlyList<(string Table, Guid Id)> Named, string? Unknown)> NameParentsAsync(
+    private static async Task<(IReadOnlyList<(string Table, Guid Id)> Named, string? Unknown, string? Unrepeated)> NameParentsAsync(
         IGenericEntityService dataverse, ILogger logger, FilingFacts facts, ConcurrentDictionary<Guid, string?> recordTypes,
         CancellationToken ct, HashSet<Guid>? faultedTypes = null)
     {
         var named = new List<(string Table, Guid Id)>();
         string? unknown = null;
+        string? unrepeated = null; // #1616: kept apart — see SecureParentsAnswer.UnknownOnlyThroughAnUnrepeatedPair
         foreach (var (column, parentTable) in TypedFilingColumns[facts.Table])
         {
             if (facts.Typed.TryGetValue(column, out var id) && id is { } parentId)
@@ -3283,8 +3315,9 @@ public sealed partial class SecureRootInheritance
                         {
                             // #1616: the pair is text any user with Write can set through the Web API, bypassing the AppendTo
                             // check a lookup costs. On a table whose pair is not BFF-managed it files the row under nothing on
-                            // its own — undetermined, so nothing is secured, shared or un-secured from it (fail closed).
-                            unknown ??= PairWithoutTypedLookupReason(facts.Table, pairTable);
+                            // its own — undetermined, so nothing is shared or un-secured from it (fail closed); a typed parent
+                            // that is readably secure still secures it (SecureParentsAnswer.WallsDecidable).
+                            unrepeated ??= PairWithoutTypedLookupReason(facts.Table, pairTable);
                         }
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -3297,14 +3330,14 @@ public sealed partial class SecureRootInheritance
             }
         }
 
-        return (named, unknown);
+        return (named, unknown, unrepeated);
     }
 
     /// <summary>The direct decision over <paramref name="named"/> as <paramref name="reads"/> read them (in order; the first
     /// reason wins): a faulted read or an EMPTY flag is unverifiable, a missing record confers nothing, a true flag is a
     /// secure parent. Also every named record that exists (secure or not) — what the climb continues from.</summary>
     private static (SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder) DecideNamedParents(
-        IReadOnlyList<(string Table, Guid Id)> named, string? unknown,
+        IReadOnlyList<(string Table, Guid Id)> named, string? unknown, string? unrepeated,
         IReadOnlyDictionary<(string Table, Guid Id), ParentRead> reads)
     {
         var secure = new List<SecureFilingParent>();
@@ -3340,7 +3373,11 @@ public sealed partial class SecureRootInheritance
                 secure.Add(new SecureFilingParent(table, id, parent.Name));
         }
 
-        return (new SecureParentsAnswer(secure, unknown) { StrictestPermission = strictest }, existing);
+        return (new SecureParentsAnswer(secure, unknown ?? unrepeated)
+        {
+            UnknownOnlyThroughAnUnrepeatedPair = unknown is null && unrepeated is not null,
+            StrictestPermission = strictest,
+        }, existing);
     }
 
     /// <summary>A matter's or project's flag, name and Access Permission, or <c>null</c> when it does not exist.</summary>

@@ -1552,6 +1552,65 @@ public partial class ChildRecordContainerResolutionTests
         decision.ContainerId.Should().Be(RootContainer);
     }
 
+    [Fact(DisplayName = "#1616 F-A: a to-do under a work assignment whose pair ALONE names ANOTHER, SECURE work assignment is refused (409) — that work assignment's container is never reached and nothing about it is read")]
+    public async Task Todo_UnderAWorkAssignmentWhosePairNamesASecureWorkAssignment_IsRefused()
+    {
+        // Before the fix round the walk followed the pair to WA2 and stored the to-do's files in WA2's container (and its
+        // answers told whether WA2 exists and is secure) — a link Dataverse never AppendTo-checked.
+        var other = WorkAssignmentChain[5];
+        var world = new World()
+            .WithChild("sprk_todo", regardingWorkAssignment: WorkAssignmentId)
+            .WithRecordType(WorkAssignmentTypeRef, "sprk_workassignment")
+            .WithRoot("sprk_workassignment", WorkAssignmentId, isSecure: false, containerId: null,
+                pairId: other.ToString(), pairType: WorkAssignmentTypeRef)
+            .WithRoot("sprk_workassignment", other, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>(
+                "a work assignment's pair alone names no root, so the to-do's container cannot be determined")).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.Reads("sprk_workassignment").Should().Be(2, "only the to-do's own work assignment, once per call — never WA2");
+        world.Reads("businessunit").Should().Be(0, "undetermined is never 'not secure'");
+    }
+
+    [Theory(DisplayName = "#1616 F-A: a work assignment filed under an INVOICE or an EVENT with the SAME pair (the Create Work Assignment wizard's shape) is resolved exactly as with the typed lookup alone — the held path, never the new refusal")]
+    [InlineData("sprk_regardinginvoice", "sprk_invoice")]
+    [InlineData("sprk_regardingevent", "sprk_event")]
+    public async Task Todo_UnderAWorkAssignmentFiledUnderAnIntermediate_WithTheSamePair_IsUnchanged(string column, string table)
+    {
+        var intermediateId = Guid.Parse("16161616-0000-0000-0000-0000000000f1");
+        var typeRef = Guid.Parse("16161616-0000-0000-0000-0000000000f2");
+
+        async Task<SdapProblemException> Resolve(bool withPair)
+        {
+            var world = new World()
+                .WithChild("sprk_todo", regardingWorkAssignment: WorkAssignmentId)
+                .WithRecordType(typeRef, table)
+                .WithRoot("sprk_workassignment", WorkAssignmentId, isSecure: false, containerId: null,
+                    pairId: withPair ? intermediateId.ToString() : null, pairType: withPair ? typeRef : null,
+                    intermediate: (column, intermediateId))
+                .WithBusinessUnit(BusinessUnitContainer);
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            world.Reads("businessunit").Should().Be(0);
+            return ex;
+        }
+
+        var typedAlone = await Resolve(withPair: false);
+        var withThePair = await Resolve(withPair: true);
+
+        typedAlone.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode, "a work assignment under an intermediate is held");
+        (withThePair.Code, withThePair.StatusCode).Should().Be((typedAlone.Code, typedAlone.StatusCode),
+            "the pair repeating the typed lookup adds nothing — the wizard's shape resolves as before");
+    }
+
     [Fact(DisplayName = "Task 155 f4: a row two hops above the record that cannot be READ refuses with the retryable 503 — never read as non-secure")]
     public async Task Todo_WhoseRootTwoHopsUpCannotBeRead_IsThe503()
     {
@@ -1647,23 +1706,25 @@ public partial class ChildRecordContainerResolutionTests
         world.Reads("sprk_matter").Should().Be(1);
     }
 
-    [Fact(DisplayName = "Task 155 f4: a CYCLE (work assignments naming each other through the pair) is guarded — each row is read once, and the walk ends")]
+    [Fact(DisplayName = "Task 155 f4: a CYCLE (projects naming each other through their BFF-managed pair) is guarded — each row is read once, and the walk ends")]
     public async Task Cycle_IsGuarded_EachRowReadOnce()
     {
+        // #1616: on PROJECTS — a work assignment's pair naming another work assignment is refused (no typed lookup can
+        // repeat it), so the cycle is walked where the pair is a filing on its own.
         var (first, second) = (WorkAssignmentChain[0], WorkAssignmentChain[1]);
         var world = new World()
-            .WithChild("sprk_todo", regardingWorkAssignment: first)
-            .WithRecordType(WorkAssignmentTypeRef, "sprk_workassignment")
-            .WithRoot("sprk_workassignment", first, isSecure: false, containerId: null,
-                pairId: second.ToString(), pairType: WorkAssignmentTypeRef)
-            .WithRoot("sprk_workassignment", second, isSecure: false, containerId: null,
-                pairId: first.ToString(), pairType: WorkAssignmentTypeRef)
+            .WithChild("sprk_todo", regardingProject: first)
+            .WithRecordType(ProjectTypeRef, "sprk_project")
+            .WithRoot("sprk_project", first, isSecure: false, containerId: null,
+                pairId: second.ToString(), pairType: ProjectTypeRef)
+            .WithRoot("sprk_project", second, isSecure: false, containerId: null,
+                pairId: first.ToString(), pairType: ProjectTypeRef)
             .WithBusinessUnit(BusinessUnitContainer);
 
         var decision = await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
 
         decision.ContainerId.Should().Be(BusinessUnitContainer);
-        world.Reads("sprk_workassignment").Should().Be(2, "a record already on the walk is not read again");
+        world.Reads("sprk_project").Should().Be(2, "a record already on the walk is not read again");
     }
 
     [Fact(DisplayName = "Task 155 f4: a cycle back to the record ITSELF (a project whose pair names a work assignment that regards the project) is guarded")]
@@ -1687,19 +1748,20 @@ public partial class ChildRecordContainerResolutionTests
     [InlineData(RecordContainerResolver.MaxRootChainDepth + 1, true)]
     public async Task ChainDepth_IsBounded(int depth, bool refused)
     {
-        // to-do → WA[0] → (pair) WA[1] → … → WA[depth-1]; the LAST one is secure.
+        // to-do → project[0] → (pair) project[1] → … → project[depth-1]; the LAST one is secure. #1616: on projects, whose
+        // BFF-managed pair is a filing on its own (a work assignment's pair naming a work assignment is refused).
         var world = new World()
-            .WithChild("sprk_todo", regardingWorkAssignment: WorkAssignmentChain[0])
-            .WithRecordType(WorkAssignmentTypeRef, "sprk_workassignment")
+            .WithChild("sprk_todo", regardingProject: WorkAssignmentChain[0])
+            .WithRecordType(ProjectTypeRef, "sprk_project")
             .WithBusinessUnit(BusinessUnitContainer);
 
         for (var i = 0; i < depth; i++)
         {
             var isLast = i == depth - 1;
-            world.WithRoot("sprk_workassignment", WorkAssignmentChain[i], isSecure: isLast,
+            world.WithRoot("sprk_project", WorkAssignmentChain[i], isSecure: isLast,
                 isLast ? RootContainer : null,
                 pairId: isLast ? null : WorkAssignmentChain[i + 1].ToString(),
-                pairType: isLast ? null : WorkAssignmentTypeRef);
+                pairType: isLast ? null : ProjectTypeRef);
         }
 
         var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
@@ -1709,7 +1771,7 @@ public partial class ChildRecordContainerResolutionTests
             var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
             ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
             ex.StatusCode.Should().Be(409);
-            world.Reads("sprk_workassignment").Should().Be(RecordContainerResolver.MaxRootChainDepth,
+            world.Reads("sprk_project").Should().Be(RecordContainerResolver.MaxRootChainDepth,
                 "the row past the bound is never read");
             world.Reads("businessunit").Should().Be(0);
         }

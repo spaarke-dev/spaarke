@@ -746,6 +746,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
                 ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
                 ("sprk_assignedlawfirm1", "sprk_organization", "sprk_AssignedLawFirm1"),
+                // #1616 fix round: the Create Work Assignment wizard also files under an invoice or an event.
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
             },
             ["sprk_communication"] = new[]
             {
