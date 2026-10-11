@@ -118,7 +118,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             ResultJson: JsonSerializer.Serialize(counts.ToResult(context.Attempt), ResultJsonOptions));
     }
 
-    private async Task EvaluatePolicyAsync(PolicyRow policy, RunCounts counts, CancellationToken ct)
+    private async Task EvaluatePolicyAsync(PolicyRow policy, RunCounts counts, CancellationToken ct, SubjectScope? scope = null)
     {
         if (policy.IsScoped)
         {
@@ -153,11 +153,19 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 version.GetAttributeValue<string>("sprk_rulebody"),
                 version.GetAttributeValue<string>("sprk_messagetemplate"));
 
+            if (scope is { } only && RuleSubjectEntity(spec.RuleBody) is { } ruleSubject
+                && !string.Equals(ruleSubject, only.Entity, StringComparison.Ordinal))
+            {
+                // Task 032: an event trigger names ONE subject; a policy about another table cannot hold or clear for it.
+                counts.NotApplicable++;
+                return;
+            }
+
             counts.PoliciesEvaluated++;
             if (lane == SignalWriter.LaneDo) counts.DoLanePolicies++;
             else counts.DecideLanePolicies++;
 
-            var evaluation = await _evaluator.EvaluateAsync(spec, subjectId: null, ct).ConfigureAwait(false);
+            var evaluation = await _evaluator.EvaluateAsync(spec, scope?.Id, ct).ConfigureAwait(false);
             if (!evaluation.PolicyValid)
             {
                 // Logged and metered by the validator gate (50301). Nothing is closed on an unknown truth value.
@@ -166,7 +174,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }
 
             counts.Hits += evaluation.Hits.Count;
-            var existing = await ReadPolicySignalsAsync(policy.Code, counts, ct).ConfigureAwait(false);
+            var existing = await ReadPolicySignalsAsync(policy.Code, counts, ct, scope).ConfigureAwait(false);
             var plan = SignalEpisodePlanner.Plan(lane, evaluation.QuietWindowDays, _timeProvider.GetUtcNow(), evaluation.Hits, existing);
             counts.Add(plan);
             LogRefusedCores(policy, plan);
@@ -349,6 +357,69 @@ public sealed class SignalReevaluationJob : IScheduledJob
         }
     }
 
+    // ── Event triggers (task 032) ─────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The one subject an event trigger evaluates (task 032).</summary>
+    internal readonly record struct SubjectScope(string Entity, Guid Id);
+
+    /// <summary>
+    /// Task 032 (D-12, D-48): the event-triggered pass. Evaluates every enabled <b>Decide-lane</b> policy about
+    /// <paramref name="subjectEntity"/> for the ONE subject, through <see cref="EvaluatePolicyAsync"/> - the SAME evaluation,
+    /// episode planner and writer path as the nightly pass (a second path is how the two come to disagree). Do-lane policies
+    /// are not evaluated here (nightly only, cadence from <c>sprk_lane</c>). A tenant- or matter-scoped policy is skipped with the
+    /// nightly Warning (F-62) and does not fail the trigger. A Signal already Resolved is never closed again (FR-16), so a
+    /// revision recorded through a decision leaves its Acted Signal Acted.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The enabled policies could not be read; the caller must retry.</exception>
+    internal async Task<SubjectEvaluationResult> EvaluateSubjectAsync(string subjectEntity, Guid subjectId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subjectEntity);
+        if (subjectId == Guid.Empty) throw new ArgumentException("A subject id is required.", nameof(subjectId));
+
+        var counts = new RunCounts();
+        IReadOnlyList<PolicyRow> policies;
+        try
+        {
+            policies = await ReadEnabledPoliciesAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                "A signal trigger could not read the enabled policies for {SubjectEntity} {SubjectId}.", subjectEntity, subjectId);
+            throw new InvalidOperationException("Signal trigger could not read the enabled policies.", ex);
+        }
+
+        var scope = new SubjectScope(subjectEntity, subjectId);
+        foreach (var policy in policies.Where(p => p.Lane == SignalWriter.LaneDecide))
+        {
+            ct.ThrowIfCancellationRequested();
+            await EvaluatePolicyAsync(policy, counts, ct, scope).ConfigureAwait(false);
+        }
+
+        return new SubjectEvaluationResult(
+            counts.PoliciesEvaluated, counts.Hits, counts.Written + counts.Reraised, counts.Updated, counts.Closed,
+            counts.Refused, counts.PolicyFailures, counts.InvalidPolicies, counts.ScopedNotEvaluated);
+    }
+
+    /// <summary>The rule body's <c>subject</c> table, or null when the body cannot be read (the evaluator's gate then logs and
+    /// meters it; this is only a cheap pre-filter, never the validation).</summary>
+    private static string? RuleSubjectEntity(string? ruleBody)
+    {
+        try
+        {
+            using var doc = PredicateCompiler.ParseBounded(ruleBody);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("subject", out var subject)
+                   && subject.ValueKind == JsonValueKind.String
+                ? subject.GetString()
+                : null;
+        }
+        catch (Exception ex) when (ex is JsonException or PredicateCompilationException)
+        {
+            return null;
+        }
+    }
+
     // ── Reads ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
     internal sealed record PolicyRow(
@@ -388,9 +459,14 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
     /// <summary>Every Signal of the policy, by the begins-with query D-13 names, keyed exactly by the parsed key. A key that
     /// does not parse is an Error and fails the run (its subject's episode cannot be known).</summary>
-    private async Task<IReadOnlyList<ExistingSignal>> ReadPolicySignalsAsync(string policyCode, RunCounts counts, CancellationToken ct)
+    private async Task<IReadOnlyList<ExistingSignal>> ReadPolicySignalsAsync(
+        string policyCode, RunCounts counts, CancellationToken ct, SubjectScope? scope = null)
     {
-        var prefix = SignalWriter.DedupeKeyPolicyPrefix(policyCode);
+        // A scoped (event-trigger) pass reads only the one subject's episodes: the planner closes every open Signal whose
+        // subject is not a hit, so handing it the policy's other subjects would close them (task 032).
+        var prefix = scope is { } only
+            ? SignalWriter.DedupeKeySubjectPrefix(policyCode, only.Entity, only.Id.ToString("D", CultureInfo.InvariantCulture))
+            : SignalWriter.DedupeKeyPolicyPrefix(policyCode);
         var query = new QueryExpression("sprk_signal")
         {
             ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon",
@@ -476,7 +552,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     {
         public int PoliciesEvaluated, DecideLanePolicies, DoLanePolicies, InvalidPolicies, PolicyFailures, ScopedNotEvaluated;
         public int Hits, Written, Reraised, Updated, Closed, Reassigned, Refused, ChangedSinceRead;
-        public int Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred;
+        public int Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred, NotApplicable;
 
         /// <summary>A scoped policy that is silently skipped, or a Signal left untouched as an anomaly, is not a healthy run.</summary>
         public bool IsSuccess =>
@@ -773,4 +849,14 @@ internal static class SignalEpisodePlanner
         core.IsNoCore
             ? latest.CoreRecordId is not null
             : latest.CoreRecordId != core.Id || (latest.CoreTypeRefId is { } typeRef && typeRef != core.TypeRefId);
+}
+
+/// <summary>What one event-triggered pass did (task 032). <see cref="PolicyFailures"/> (a read or write that threw) and
+/// <see cref="Refused"/> (a write the writer refused) are the outcomes a retry can change; the rest were already logged by the
+/// code that found them.</summary>
+internal sealed record SubjectEvaluationResult(
+    int PoliciesEvaluated, int Hits, int Created, int Updated, int Closed, int Refused, int PolicyFailures, int InvalidPolicies,
+    int ScopedNotEvaluated)
+{
+    public bool NeedsRetry => PolicyFailures > 0 || Refused > 0;
 }

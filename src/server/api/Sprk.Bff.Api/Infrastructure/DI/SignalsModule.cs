@@ -1,6 +1,7 @@
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.HealthChecks;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
@@ -97,6 +98,12 @@ public static class SignalsModule
         services.AddSingleton<SignalEvaluator>();
         services.AddScheduledJob<SignalReevaluationJob>(SignalReevaluationJob.DefaultCronSchedule);
         services.AddSingleton<SignalEvaluatorHealthCheck>();
+
+        // Task 032 (D-12, D-48): the event triggers. ONE ADR-004 IJobHandler on the main queue that calls the nightly job's own
+        // scoped evaluate-plan-write path (no second evaluator), and the enqueue the classification path, the budget-revision
+        // create and the association-confirmed filing path call. Unconditional (bff-extensions.md F.1).
+        services.AddSingleton<SignalEvaluationTrigger>();
+        services.AddSingleton<IJobHandler, SignalEvaluationTriggerHandler>();
         services.AddHealthChecks()
             .AddCatalogCheck<SignalEvaluatorHealthCheck>(
                 "signal-reevaluation",

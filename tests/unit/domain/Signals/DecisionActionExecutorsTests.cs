@@ -220,6 +220,45 @@ public class DecisionActionExecutorsTests
             new DecisionRecordRef("sprk_budget", BudgetId));
     }
 
+    // Task 032 (D-12): the revision's creation queues the matter's Signal re-evaluation, so a Work Item asserting "no budget
+    // revision" clears in about a minute rather than at the next nightly pass.
+    [Fact]
+    public async Task ReviseBudget_QueuesTheMatterSignalTrigger_OnceTheRevisionExists()
+    {
+        var queue = new Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>(
+            MockBehavior.Loose, Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.ServiceBusOptions { QueueName = "test-jobs" }),
+            NullLogger<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>.Instance, new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+        var trigger = new Mock<SignalEvaluationTrigger>(queue.Object, new FakeTimeProvider(Now), NullLogger<SignalEvaluationTrigger>.Instance);
+        trigger.Setup(t => t.EnqueueAsync(It.IsAny<SignalTriggerKind>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+            It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var writer = new WriterHarness();
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, BudgetUser(MatterId), writer.Build(), Owner().Object, new FakeTimeProvider(Now),
+            NullLogger<ReviseBudgetExecutor>.Instance, trigger.Object);
+
+        var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        trigger.Verify(t => t.EnqueueAsync(SignalTriggerKind.BudgetRevision, "sprk_matter", MatterId, writer.RevisionId,
+            It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ReviseBudget_RefusedBeforeAnyWrite_QueuesNoTrigger()
+    {
+        var queue = new Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>(
+            MockBehavior.Loose, Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.ServiceBusOptions { QueueName = "test-jobs" }),
+            NullLogger<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>.Instance, new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
+        var trigger = new Mock<SignalEvaluationTrigger>(queue.Object, new FakeTimeProvider(Now), NullLogger<SignalEvaluationTrigger>.Instance);
+        var executor = new ReviseBudgetExecutor(Probe(ReadOnly).Object, BudgetUser(MatterId), new WriterHarness().Build(), Owner().Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance, trigger.Object);
+
+        var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        trigger.Verify(t => t.EnqueueAsync(It.IsAny<SignalTriggerKind>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+            It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never, "no revision exists, so there is nothing to re-evaluate");
+    }
+
     [Fact]
     public async Task ReviseBudget_CallerWithoutWriteOnTheBudget_WritesNothing_AndRefuses()
     {
