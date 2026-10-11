@@ -56,9 +56,10 @@ public interface IDirectThreadAccessService
     /// the impersonated read (task 050). The audience is <paramref name="assignment"/>'s, fixed when the message joined the
     /// thread (#1629: the thread's type and lookups are not re-read here, so its owner cannot redirect the grant):
     /// <b>Direct</b> → the thread's explicit two-party list (<c>ownerid</c> ∪ POA-shared principal, task 043);
-    /// <b>record</b> → the systemusers the anchor record's user lookups name, and the members of a non-owner team a lookup
-    /// names (task 052 / FR-11), never the record's owning team, whose members already read a team-owned message (#1629
-    /// F-A); <b>none</b> → nothing. Never on a secure message (task 149). Best-effort / non-fatal (NFR-02): failures are
+    /// <b>record</b> → the systemusers the anchor record's user lookups name, and the members of every team a lookup names
+    /// (task 052 / FR-11), EXCEPT the team that owns the MESSAGE, whose members already read it (#1629 F-A, F2); the
+    /// anchor's own owner team is expanded when it is not the message's owner; <b>none</b> → nothing. Never on a secure
+    /// message (task 149): a Secure-team-owned message is granted to nobody. Best-effort / non-fatal (NFR-02): failures are
     /// logged and swallowed — the message already persisted; a missed grant degrades to "not yet visible".
     /// </summary>
     Task GrantMessageAccessAsync(Guid communicationId, ThreadAssignment assignment, CancellationToken ct = default);

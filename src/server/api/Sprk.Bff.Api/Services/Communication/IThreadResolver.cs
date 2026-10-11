@@ -141,7 +141,11 @@ public enum ThreadGrantAudience
     /// <summary>A Direct 1:1 thread's two-party list (its owner and the user it is shared to).</summary>
     DirectParticipants,
 
-    /// <summary>The users the anchor record's user lookups name (and non-owner teams' members), never its owning team.</summary>
+    /// <summary>
+    /// The anchor record's members: the users its user lookups name, plus the members of every team a lookup names,
+    /// EXCEPT the team that owns the MESSAGE (its members already read it). The anchor's own owner team is expanded when it
+    /// is not the message's owner. A secure message is never granted.
+    /// </summary>
     AnchorRecordMembers,
 }
 

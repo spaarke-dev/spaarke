@@ -499,6 +499,56 @@ public class DirectThreadAccessServiceTests
             Times.Once);
     }
 
+    [Fact]
+    public async Task GrantMessageAccessAsync_MessageOwnedByALookalikeOfTheSecureTeam_IsGrantedAndSkipsThatTeam()
+    {
+        // The full secure-team resolution decides: a non-default Owner team carrying the Secure team's name, in another
+        // business unit, is NOT the Secure Record owner team. The message is ordinary, so it is granted, and the team that
+        // owns it is the one the derivation skips.
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+        var lookalike = Guid.Parse("9f9f9f9f-0000-0000-0000-00000000009f");
+        var secureTeam = Guid.Parse("5e5e5e5e-0000-0000-0000-00000000005e");
+        var secureBu = Guid.Parse("5b5b5b5b-0000-0000-0000-00000000005b");
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("sprk_communication") { Id = CommunicationId, ["owningteam"] = new EntityReference("team", lookalike) },
+            }));
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "team" && q.Criteria.Conditions.Any(c => c.AttributeName == "teamid")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("team")
+                {
+                    Id = lookalike,
+                    ["name"] = Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.OwnerTeamName(config),
+                    ["isdefault"] = false,
+                    ["teamtype"] = new OptionSetValue(Sprk.Bff.Api.Infrastructure.Dataverse.SecureRecordOwnerTeam.OwnerTeamType),
+                },
+            }));
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "businessunit"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { new("businessunit") { Id = secureBu } }));
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "team" && q.Criteria.Conditions.Any(c => c.AttributeName == "businessunitid")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { new("team") { Id = secureTeam } }));
+        SetupGrantees(MatterA, Other);
+
+        await BuildSut().GrantMessageAccessAsync(CommunicationId, AnchoredJoin(MatterA));
+
+        _membershipDerivation.Verify(
+            m => m.DeriveAnchorGranteeUserIdsAsync("sprk_matter", MatterA, lookalike, It.IsAny<CancellationToken>()), Times.Once);
+        _accessGrant.Verify(
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Other), "ReadAccess", It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     /// <summary>The message is owned by an ordinary (default, non-Secure) team.</summary>
     private void MessageOwnedByOrdinaryTeam(Guid teamId)
     {
