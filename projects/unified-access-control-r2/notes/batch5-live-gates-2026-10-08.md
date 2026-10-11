@@ -412,3 +412,10 @@ Final sweep 20:15Z: 0 `# gate17*` / `# gate18*` matters or events, 0 grant rows 
 **SPE container created: none.** Neither matter was made secure, and no provision call was made. `/grant` reported `speContainerMembershipGranted: false`.
 
 **Verdict.** **181 PASSES on dev**, delivery included. With `prvReadappnotification` at Basic on Spaarke Basic User / Core User, both internal routes (`/share-user`, and `/grant` to a contact linked to a user) create one correctly shaped row per recipient. Basic depth keeps each user's bell private. A same-level re-share sends nothing. This closes the 2026-10-10 181.1 / 181.3 environment failures.
+
+## 2026-10-11 #1630 rollout (PR #1643, master 848f63913)
+
+- **Reviews.** Correctness verifier PASS: full BFF unit suite 19,427 passed, 0 failed. Security verifier PASS. The known limits found are recorded on #1641.
+- **CI.** Router green. "Server tests (office scope)" was cancelled at its 20-minute job timeout with no test failure; it is advisory and does not block the merge.
+- **Deploy.** BFF deployed to dev from `C:\wtdep` (detached at 848f63913). The 4 critical-file SHA-256 hashes match and `healthz` returns 200.
+- **Repair.** `scripts/Repair-IntermediateFiledWorkAssignments.ps1` dry run found 1 candidate, ORDINARY `b10b7dab…`, and nothing to secure. `-Verify` PASS (exit 0). No `-Apply` was needed.
