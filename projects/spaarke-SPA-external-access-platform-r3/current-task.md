@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 020 (closing), 032 (agent running), 056 (re-check agent running) |
-| **Step** | 020: steps 1–4 and 6 done in dev and `-Verify` passes; step 5 (re-export and diff) is running |
-| **Status** | `7da765f96` (056 merge) is **not pushed**. The script Merge fix and the 020 notes are uncommitted |
-| **Next Action** | Diff the export (`notes/task-020-notes.md` step 5c), commit the script and notes, mark 020 done, then start 035 |
+| **Task** | 035 (implementer running), 032 (agent running), 056 (re-check agent running) |
+| **Step** | 020 done and committed (`460467c95`, `9cfa31e4c`). 035 implementation in an isolated worktree from `9cfa31e4c` |
+| **Status** | Not pushed since `e2b547352`: 056 merge + 020 commits wait for the 056 re-check |
+| **Next Action** | On each agent's completion: 056 → commit by path, push, mark done; 032/035 → two fable reviews for 035 (auth), one for 032, fix, merge `--no-ff`, verify |
 
 ### Critical Context
 - **Parallel pattern:**
@@ -33,15 +33,14 @@
 
 | Task | State |
 |---|---|
-| 020 Schema | Dev import done 2026-10-11 (approved). One deviation: Merge cascade is `Cascade`, because the platform forces it on contact relationships. Remaining: the step 5 export diff, the commit, marking it done, and updating TASK-INDEX 038 (the deploy-order rule is satisfied in dev) |
+| 035 Intake submit | FULL, auth. Implementer (opus) in an isolated worktree from `9cfa31e4c`. Then two fable adversarial passes, fix, merge, full verification, mark done. Escalation trigger: a licensed systemuser with no contact |
 | 032 Delete-own | Implementation agent `a26af84cc7df71a4f` (opus) is running in an isolated worktree from `db91ced2b`. Option (b), widened. Then one fable review, fix, merge, verify, mark done |
 | 056 Join page | Merged locally (`7da765f96`). Re-check agent `ad88a91167c15b722` (sonnet) is in the main worktree, uncommitted, working on the sign-in failure gate and AuthGuard `loginRedirect` with no `.catch`. Then commit by path, push, and mark done |
 
-Done: 001, 003, 010, 011, 012, 030, 033, 034, 036, 041 (code), 042, 050, 051.
+Done: 001, 003, 010, 011, 012, 020, 030, 033, 034, 036, 041 (code), 042, 050, 051.
 
 ## Next actions (in order)
-1. Finish 020 (above).
-2. Start 035 (intake submit); it is unblocked by 020. Then 037 and 052.
+1. After 035: 037 and 052.
 3. When 032 merges, start 054, then 055.
 4. Start 060 (the self-registration service is in R3, per the owner 2026-10-11).
 5. Before the BFF PR, run `/conflict-check` (`AuthorizationModule.cs`, `Api/ExternalAccess/**` shared with UAC-r2) and actionlint on both deploy workflows.
