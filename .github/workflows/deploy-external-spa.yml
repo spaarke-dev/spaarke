@@ -45,16 +45,22 @@ jobs:
           VITE_MSAL_CLIENT_ID: bd57e54e-b339-4500-b55c-e451009fd907
           VITE_MSAL_TENANT_ID: 7052feba-bfc4-43e0-b09e-65014b429131
           VITE_MSAL_BFF_SCOPE: api://4a4d5126-91b0-4865-8e3a-134b7209013e/SDAP.Access
-          # Teams collaboration host (teams-app-r1, ADR-028 A2) — workforce multitenant app (task 061).
-          # Non-secret identifiers; override the #{...}# placeholders in .env.production at build time so
-          # the Teams host's getTeamsWorkforceEnvConfig() resolves instead of throwing when run in Teams.
+          # Workforce plane (Teams host + browser "My organization") - ADR-028 Amendment A7 (task 040):
+          # ONE single-tenant Spaarke public client, authority pinned to Spaarke's tenant, scope
+          # api://{customer BFF app id}/user_impersonation. Non-secret identifiers (tenant ids are not secrets);
+          # these override the #{...}# placeholders in .env.production at build time.
+          # INTERIM: VITE_TEAMS_MSAL_CLIENT_ID is still the dev BFF app id until the owner registers the
+          # "Spaarke Workspace" client - see projects/spaarke-SPA-external-access-platform-r3/notes/task-040-notes.md
+          # (section 5 step 1 and section 5 step 3); then replace it with the new client id.
           VITE_TEAMS_MSAL_CLIENT_ID: 1e40baad-e065-4aea-a8d4-4b7ab273458c
-          VITE_TEAMS_MSAL_BFF_SCOPE: api://1e40baad-e065-4aea-a8d4-4b7ab273458c/access_as_user
+          VITE_TEAMS_MSAL_TENANT_ID: a221a95e-6abc-4434-aecc-e48338a1b2f2
+          VITE_TEAMS_MSAL_BFF_SCOPE: api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation
         run: npm run build
 
       # staticwebapp.config.json lives at the project root (source of truth) but the SWA
-      # runtime only reads it from the deployed content root. There is no public/ dir, so
-      # Vite does not copy it into dist — stage it here before upload (skip_app_build: true).
+      # runtime only reads it from the deployed content root. public/ holds only the static
+      # MSAL popup page (auth-callback.html), which Vite copies into dist; the SWA config is not
+      # in public/, so stage it here before upload (skip_app_build: true).
       - name: Stage SWA runtime config into build output
         working-directory: src/client/external-spa
         run: cp staticwebapp.config.json dist/staticwebapp.config.json

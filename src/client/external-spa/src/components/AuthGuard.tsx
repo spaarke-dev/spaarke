@@ -15,18 +15,18 @@
 
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useIsAuthenticated, useMsal } from '@azure/msal-react';
+import { useMsal } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
 import { Spinner } from '@fluentui/react-components';
-import { captureReturnTo, consumeReturnTo, getActiveLoginScope } from '../auth/msal-auth';
+import { accountsForActivePlane, captureReturnTo, consumeReturnTo, getActiveLoginScope } from '../auth/msal-auth';
 
 interface AuthGuardProps {
   children: React.ReactNode;
   /**
    * True when running inside the Teams host. In Teams, authentication is completed during bootstrap
-   * (TeamsHostAdapter.selectAuthStrategy acquires a BFF-valid workforce token — via NAA or the Teams
-   * SSO getAuthToken fallback — BEFORE <App> is rendered), so this guard must NOT run the MSAL
-   * account gate below. See the early return for the full rationale.
+   * (TeamsHostAdapter.selectAuthStrategy acquires a BFF-valid workforce token — via NAA, then the
+   * MSAL popup fallback (ADR-028 A7; no Teams SSO) — BEFORE <App> is rendered), so this guard must NOT
+   * run the MSAL account gate below. See the early return for the full rationale.
    */
   teamsHost?: boolean;
 }
@@ -39,13 +39,12 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children, teamsHost = fals
 
   // Inside the Teams host, the caller is already authenticated by the time this guard mounts:
   // main.tsx only renders <App> after TeamsHostAdapter.initialize() resolves, which means a
-  // BFF-valid workforce token was acquired and the active BFF token acquirer is wired. The Teams
-  // SSO fallback (authentication.getAuthToken) that desktop relies on returns a RAW bearer token
-  // that never lands in the MSAL account cache — so useIsAuthenticated() would be false here even
-  // though the user is fully authenticated. Running the MSAL gate below would then fire
-  // instance.loginRedirect(), and a full-page redirect inside the Teams iframe is blocked
-  // (NFR-04 — never redirect inside Teams), leaving a blank tab. So in Teams, render children
-  // directly. (On web, NAA populates the account and the standard gate below applies.)
+  // BFF-valid workforce token was acquired (NAA, else the MSAL popup fallback — ADR-028 A7) and the
+  // active BFF token acquirer is wired. Both paths leave the signed-in account in the MSAL cache of
+  // the instance handed to <MsalProvider>, but the MSAL account gate below must still never run in
+  // Teams: if it ever fired instance.loginRedirect(), a full-page redirect inside the Teams iframe is
+  // blocked (NFR-04 — never redirect inside Teams), leaving a blank tab. So in Teams, render children
+  // directly; bootstrap has already guaranteed authentication. (In a plain browser the gate applies.)
   if (teamsHost) {
     return <>{children}</>;
   }
@@ -59,8 +58,10 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children, teamsHost = fals
  * paths render children without MSAL, every other path runs exactly the gate below).
  */
 const MsalAccountGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { instance, inProgress } = useMsal();
-  const isAuthenticated = useIsAuthenticated();
+  const { instance, inProgress, accounts } = useMsal();
+  // Same rule as msal-react's useIsAuthenticated (an account exists once MSAL has started), but scoped to the
+  // selected plane: a CIAM account cached in this tab is not a workforce sign-in (accountsForActivePlane).
+  const isAuthenticated = inProgress !== InteractionStatus.Startup && accountsForActivePlane(accounts).length > 0;
   const navigate = useNavigate();
 
   React.useEffect(() => {

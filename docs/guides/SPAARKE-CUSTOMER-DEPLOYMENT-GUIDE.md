@@ -1065,7 +1065,7 @@ it once by hand:
 ```
 
 Both are idempotent and keep every other optional claim. Optional claims on the resource registration apply to
-every access token issued FOR it — Teams SSO included (`webApplicationInfo.id` is this registration) — see
+every access token issued FOR it — including the workforce tokens the External Access SPA and Teams tab acquire (the single-tenant Spaarke client, NAA then MSAL popup, scope `user_impersonation`; the Teams manifest declares no `webApplicationInfo` and there is no Teams-SSO path, ADR-028 A7) — see
 Microsoft's [optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference).
 Without it every Type-2 first sign-in is denied `sdap.access.deny.workforce_acct_claim_missing` (fail closed).
 

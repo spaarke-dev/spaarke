@@ -12,12 +12,19 @@
  */
 
 import {
+  BrowserAuthError,
+  BrowserAuthErrorCodes,
+  CacheLookupPolicy,
+  ClientAuthErrorCodes,
   InteractionRequiredAuthError,
+  InteractionRequiredAuthErrorCodes,
+  PublicClientApplication,
   createNestablePublicClientApplication,
+  type AccountInfo,
   type IPublicClientApplication,
 } from '@azure/msal-browser';
-import { app as teamsApp, authentication as teamsAuthentication } from '@microsoft/teams-js';
-import { msalInstance, workforceAuthorityConfig, buildMsalConfiguration } from './msal-config';
+import { app as teamsApp, nestedAppAuth } from '@microsoft/teams-js';
+import { msalInstance, workforceAuthorityConfig, buildMsalConfiguration, popupRedirectUri } from './msal-config';
 import { MSAL_BFF_SCOPE } from '../config';
 
 /**
@@ -89,28 +96,63 @@ export function captureTeamsDeepLink(subPageId: string | undefined | null): void
 }
 
 /**
+ * Options only the workforce browser plane supplies (standalone-plane.ts). The CIAM plane passes none,
+ * so its requests are byte-for-byte what they were before task 040.
+ */
+export interface StandaloneAcquireOptions {
+  /**
+   * Spaarke's tenant id. When set, only accounts whose tenant profile is this tenant are considered:
+   * MSAL's account list is not client-scoped, and both browser instances share the tab's sessionStorage,
+   * so without the filter a cached CIAM account would be treated as a workforce sign-in.
+   */
+  tenantId?: string;
+  /**
+   * Redirect URI (`{origin}/auth-callback.html`, the page that runs MSAL's redirect bridge) for the
+   * silent IFRAME retry only. The first silent attempt never carries a redirect URI: msal-browser
+   * forwards an explicitly provided one into the refresh-token grant body (SilentRefreshClient ->
+   * RefreshTokenClient `redirect_uri`), so supplying it on every silent call would change the wire request.
+   */
+  silentRedirectUri?: string;
+}
+
+/** The accounts of one instance, optionally scoped to a tenant (case-insensitive GUID). */
+function accountsFor(instance: IPublicClientApplication, tenantId?: string): AccountInfo[] {
+  return tenantId ? instance.getAllAccounts({ tenantId: tenantId.toLowerCase() }) : instance.getAllAccounts();
+}
+
+/**
  * Acquire a BFF access token from a standalone collaboration-host MSAL instance.
  *
  * Broker-only (A1/A2 invariant): the returned token is used ONLY to call the BFF as a
  * Bearer credential — it is NEVER exchanged for a downstream Graph/SPE/Dataverse token (no
  * OBO on the collaboration path). Parameterized by instance + scope so the SAME acquisition
  * path serves every authority — the CIAM SPA today (via `acquireBffToken`), the workforce
- * Teams host via tasks 011/012 — without forking the module.
+ * browser plane (via standalone-plane.ts) — without forking the module.
  *
  * Strategy:
- *   1. Try silent acquisition (MSAL cache / refresh token).
- *   2. On InteractionRequiredAuthError, trigger a redirect login.
- *   3. Throw after initiating redirect so callers abort the current request.
+ *   1. Try silent acquisition (MSAL cache / refresh token). CIAM: `{ scopes, account }` exactly as before.
+ *      Workforce (`options.silentRedirectUri` set): the same request with
+ *      `CacheLookupPolicy.AccessTokenAndRefreshToken` and NO redirect URI — msal never opens an iframe for it.
+ *   2. Workforce only: if that fails with an error msal itself would resolve by iframe (expired / invalid
+ *      refresh token, no tokens found), retry once with `CacheLookupPolicy.Skip` and
+ *      `redirectUri: options.silentRedirectUri` — a hidden iframe answered by the bridge page.
+ *   3. On InteractionRequiredAuthError or a timed-out silent iframe renewal, trigger a redirect login.
+ *   4. Throw after initiating redirect so callers abort the current request.
  *
  * MSAL handles token caching internally — no manual cache management needed.
  *
  * @param instance The standalone `PublicClientApplication` (from msal-config.ts) to acquire against.
  * @param bffScope The BFF API OAuth scope for the instance's authority.
+ * @param options Workforce-browser-only options (tenant account filter, iframe redirect URI).
  * @returns Access token string, ready for `Authorization: Bearer {token}` header.
  * @throws If silent acquisition fails for a non-interaction reason (network error, etc.).
  */
-export async function acquireStandaloneBffToken(instance: IPublicClientApplication, bffScope: string): Promise<string> {
-  const accounts = instance.getAllAccounts();
+export async function acquireStandaloneBffToken(
+  instance: IPublicClientApplication,
+  bffScope: string,
+  options: StandaloneAcquireOptions = {}
+): Promise<string> {
+  const accounts = accountsFor(instance, options.tenantId);
 
   if (accounts.length === 0) {
     // No authenticated account — trigger login redirect (preserving the current route)
@@ -120,24 +162,93 @@ export async function acquireStandaloneBffToken(instance: IPublicClientApplicati
     throw new Error('No authenticated account — redirecting to login');
   }
 
+  const account = accounts[0];
+
   try {
-    const result = await instance.acquireTokenSilent({
-      scopes: [bffScope],
-      account: accounts[0],
-    });
-    return result.accessToken;
+    return await acquireSilent(instance, bffScope, account, options.silentRedirectUri);
   } catch (err) {
-    if (err instanceof InteractionRequiredAuthError) {
-      // Token expired, consent needed, MFA required, etc. — trigger redirect (preserving route)
+    if (isInteractionNeeded(err)) {
+      // Token expired, consent needed, MFA required, silent renewal timed out, etc. — fall back to
+      // the interactive redirect (preserving the route).
       captureReturnTo();
       await instance.acquireTokenRedirect({
         scopes: [bffScope],
-        account: accounts[0],
+        account,
       });
       throw new Error('Interaction required — redirecting to login');
     }
     throw err;
   }
+}
+
+/**
+ * Silent acquisition. Without `silentRedirectUri` (CIAM): a single `acquireTokenSilent({ scopes, account })`.
+ * With it (workforce browser plane): a refresh-token attempt with no redirect URI, then — only for an
+ * error msal-browser treats as silently resolvable — one `Skip` retry through the redirect-bridge iframe.
+ */
+async function acquireSilent(
+  instance: IPublicClientApplication,
+  bffScope: string,
+  account: AccountInfo,
+  silentRedirectUri?: string
+): Promise<string> {
+  if (!silentRedirectUri) {
+    const result = await instance.acquireTokenSilent({ scopes: [bffScope], account });
+    return result.accessToken;
+  }
+
+  try {
+    const result = await instance.acquireTokenSilent({
+      scopes: [bffScope],
+      account,
+      cacheLookupPolicy: CacheLookupPolicy.AccessTokenAndRefreshToken,
+    });
+    return result.accessToken;
+  } catch (err) {
+    if (!isSilentlyResolvableByIframe(err)) throw err;
+  }
+
+  // msal-browser v5 completes a silent iframe renewal only when the redirect page runs MSAL's redirect
+  // bridge; the SPA's own index page does not, so the iframe lands on public/auth-callback.html.
+  const result = await instance.acquireTokenSilent({
+    scopes: [bffScope],
+    account,
+    cacheLookupPolicy: CacheLookupPolicy.Skip,
+    redirectUri: silentRedirectUri,
+  });
+  return result.accessToken;
+}
+
+/**
+ * Mirrors msal-browser 5.5.0 `checkIfRefreshTokenErrorCanBeResolvedSilently` (StandardController): the
+ * errors for which the default policy would have opened a silent iframe — an expired / invalid /
+ * missing refresh token (`invalid_grant`, `token_refresh_required`, `refresh_token_expired`,
+ * `no_tokens_found`; a `bad_token` interaction error counts as silently resolvable, other
+ * InteractionRequired errors do not). Everything else goes to the interactive fallback or rethrows.
+ */
+function isSilentlyResolvableByIframe(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const code = (err as { errorCode?: string }).errorCode;
+  const subError = (err as { subError?: string }).subError;
+  const interactionRequired =
+    err instanceof InteractionRequiredAuthError && subError !== InteractionRequiredAuthErrorCodes.badToken;
+  const refreshRequired = code === 'invalid_grant' || code === ClientAuthErrorCodes.tokenRefreshRequired;
+  return (
+    (!interactionRequired && refreshRequired) ||
+    code === InteractionRequiredAuthErrorCodes.noTokensFound ||
+    code === InteractionRequiredAuthErrorCodes.refreshTokenExpired
+  );
+}
+
+/**
+ * True when a silent acquisition failure should fall back to the interactive path: MSAL says
+ * interaction is required, or the silent iframe renewal timed out (`timed_out` — the redirect bridge
+ * never answered, e.g. `/auth-callback.html` is not yet registered as a redirect URI on the client).
+ * Everything else (network, config) still rethrows.
+ */
+function isInteractionNeeded(err: unknown): boolean {
+  if (err instanceof InteractionRequiredAuthError) return true;
+  return err instanceof BrowserAuthError && err.errorCode === BrowserAuthErrorCodes.timedOut;
 }
 
 /**
@@ -202,58 +313,81 @@ export function getActiveLoginScope(): string {
   return activeLoginScope;
 }
 
+/**
+ * Active account TENANT seam (same shape as the login-scope seam). Null for CIAM (every cached account
+ * belongs to the CIAM instance's authority, behaviour unchanged). The workforce browser plane sets
+ * Spaarke's tenant id so a CIAM account cached in the same tab's sessionStorage is never treated as a
+ * workforce sign-in by `AuthGuard` or the portal-user lookup.
+ */
+let activeAccountTenantId: string | null = null;
+
+export function setActiveAccountTenantId(tenantId: string | null): void {
+  activeAccountTenantId = tenantId;
+}
+
+/** The accounts that belong to the currently-selected browser plane (all of them for CIAM). */
+export function accountsForActivePlane<T extends { tenantId?: string }>(accounts: readonly T[]): T[] {
+  if (!activeAccountTenantId) return [...accounts];
+  const tenant = activeAccountTenantId.toLowerCase();
+  return accounts.filter(a => a.tenantId?.toLowerCase() === tenant);
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────────────────
- * Teams collaboration host — workforce SSO / NAA acquisition (tasks 011/012)
+ * Teams collaboration host — workforce NAA, then MSAL popup (ADR-028 A7; task 040 / FR-16)
  * ───────────────────────────────────────────────────────────────────────────────────────────
  *
  * A SECOND acquisition strategy inside this SAME shared module — the Teams host — added WITHOUT
- * forking the module or re-adding a CIAM path. It reuses task 010's pluggable-authority builders
- * (`workforceAuthorityConfig` + `buildMsalConfiguration`) against the WORKFORCE-MULTITENANT
- * authority, and silently yields a BFF-valid workforce token with no visible second login. The
- * CIAM path above is untouched (FR-15). Task 012 (host adapter) decides WHEN this strategy runs
- * vs the CIAM `acquireBffToken`; this module only makes it available + correct.
+ * forking the module or re-adding a CIAM path. It reuses the pluggable-authority builders
+ * (`workforceAuthorityConfig` + `buildMsalConfiguration`) against the WORKFORCE authority: the
+ * single-tenant Spaarke client, pinned to `https://login.microsoftonline.com/{Spaarke tenant id}`,
+ * requesting `api://{customer BFF app id}/user_impersonation`. The CIAM path above is untouched (FR-15).
+ * The host adapter decides WHEN this strategy runs; this module only makes it available + correct.
  *
- * Invariants (ADR-028 A2 / NFR-02 / NFR-04):
+ * Acquisition order — the Office add-in's working shape (`OfficeNaaStrategy`):
+ *   1. NAA: a nestable MSAL instance brokered by the Teams host (silent → ssoSilent → brokered popup).
+ *   2. If NAA fails: a standard `PublicClientApplication` for the same client, tenant and scope, run
+ *      through `OfficeNaaStrategy._tryAcquireWith`'s ladder — `acquireTokenSilent` with a cached
+ *      account, then `acquireTokenPopup`. The popup lands on `{origin}/auth-callback.html`, the
+ *      msal-browser v5 redirect-bridge page.
+ *   3. If both fail: `TeamsWorkforceAuthError` carrying `{ naaError, popupError }`.
+ *
+ * Invariants (ADR-028 A2 as amended by A7 / NFR-02 / NFR-04):
  *   - Broker-only (NFR-02): the token authenticates to the BFF ONLY — never exchanged downstream
- *     (no OBO on the collaboration path). NAA/getAuthToken both return a Bearer used only vs the BFF.
- *   - Non-redirect (NFR-04): acquisition is silent → NAA/SSO broker popup — NEVER
- *     `acquireTokenRedirect`. A full-page redirect inside the Teams iframe breaks framing. This is
- *     why the Teams path does NOT reuse `acquireStandaloneBffToken` (whose interaction fallback is
- *     a redirect — correct for the standalone SPA, wrong inside Teams).
- *   - Fail loud (acceptance criterion 4): an unauthenticated / consent-missing caller throws
- *     `TeamsWorkforceAuthError` — the failure is surfaced, never silently degraded or retried into
- *     a broken state.
- *
- * Authority decision (task 010 handoff — resolved): use the workforce-multitenant `/organizations`
- * DEFAULT, NOT a build-time tenant pin. The app registration is MULTITENANT with per-customer admin
- * consent (ADR-028 A2), so the customer tenant is unknown at build time — a static pin is impossible.
- * The Teams host BROKERS the already-signed-in workforce account (NAA / getAuthToken), so
- * `/organizations` resolves to the user's real home tenant with no disambiguation prompt. (INV-3's
- * "never `/organizations`" targets INTERNAL `@spaarke/auth` iframe-`ssoSilent` surfaces, where AAD
- * cannot disambiguate session cookies inside an iframe — that surface is A2-exempt and not used
- * here.) Task 012 MAY still pass a tenant-pinned `authority` (derived from Teams context `tid`) via
- * the optional `authority` field if a specific deployment requires it — the seam is preserved.
+ *     (no OBO on the collaboration path).
+ *   - Non-redirect (NFR-04): NAA → popup — NEVER `acquireTokenRedirect`. A full-page redirect inside
+ *     the Teams iframe breaks framing. This is why the Teams path does NOT reuse
+ *     `acquireStandaloneBffToken` (whose interaction fallback is a redirect — correct for the
+ *     standalone SPA, wrong inside Teams).
+ *   - No Teams SSO (A7 MUST NOT): `authentication.getAuthToken` is never called, and the Teams
+ *     manifest declares no `webApplicationInfo`. A Teams-SSO token's audience would be the one
+ *     resource the manifest names — wrong for a per-customer backend.
+ *   - Tenant-pinned (A7 MUST NOT `/organizations`/`/common`): a guest signed in through Spaarke's
+ *     tenant gets the guest `oid` its `systemuser` is keyed by; `/organizations` would sign the guest
+ *     into their home tenant (different `oid`, no `systemuser` match). `buildMsalConfiguration` refuses
+ *     any other workforce authority and any scope other than `…/user_impersonation`.
+ *   - Fail loud: an unauthenticated / consent-missing caller throws `TeamsWorkforceAuthError` — the
+ *     failure is surfaced, never silently degraded or retried into a broken state.
  */
 
-/** Config the Teams host supplies to select the workforce strategy (task 012 provides the values). */
+/** Config the Teams host supplies to select the workforce strategy (values from `getWorkforceEnvConfig()`). */
 export interface TeamsWorkforceAuthConfig {
-  /** Workforce (multitenant) SPA app-registration client id. */
+  /** The single-tenant Spaarke workforce public client id (A7). */
   clientId: string;
-  /** BFF API OAuth scope acquired for the workforce plane (broker-only — used only to call the BFF). */
+  /** Spaarke's tenant id (a GUID) — the authority is `https://login.microsoftonline.com/{tenantId}`. */
+  tenantId: string;
+  /** `api://{customer BFF app id}/user_impersonation` (broker-only — used only to call the BFF). */
   bffScope: string;
-  /** Optional tenant-pinned authority override; defaults to the multitenant `/organizations`. */
-  authority?: string;
 }
 
 /**
- * Raised when the Teams workforce strategy cannot yield a BFF-valid token (no NAA bridge AND no
- * Teams SSO, cancelled/blocked interaction, missing consent, or not inside a Teams host). The
- * caller MUST surface this as a sign-in/consent error — acceptance criterion 4 (fail loud).
+ * Raised when the Teams workforce strategy cannot yield a BFF-valid token (NAA and the MSAL popup
+ * fallback both failed — e.g. a blocked or cancelled popup, missing consent — or not inside a Teams
+ * host). The caller MUST surface this as a sign-in/consent error (fail loud).
  */
 export class TeamsWorkforceAuthError extends Error {
   constructor(
     message: string,
-    /** The underlying error(s) — e.g. `{ naaError, ssoError }` — preserved for diagnostics. */
+    /** The underlying error(s) — e.g. `{ naaError, popupError }` — preserved for diagnostics. */
     public readonly cause?: unknown
   ) {
     super(message);
@@ -274,43 +408,96 @@ function ensureTeamsInitialized(): Promise<void> {
 }
 
 /**
- * Build the Nested App Auth (NAA) MSAL instance for the Teams host against the workforce-multitenant
+ * MSAL `Configuration` for both Teams instances: the tenant-pinned workforce authority, and the
+ * redirect-bridge page as redirect URI. Under a live NAA bridge the redirect URI is not used (the
+ * broker owns the exchange); when the host offers no bridge, `createNestablePublicClientApplication`
+ * returns a standard instance, and its silent iframe and popup then land on the bridge page.
+ */
+function teamsWorkforceMsalConfiguration(cfg: TeamsWorkforceAuthConfig) {
+  const authorityConfig = workforceAuthorityConfig({
+    clientId: cfg.clientId,
+    tenantId: cfg.tenantId,
+    bffScope: cfg.bffScope,
+  });
+  return buildMsalConfiguration(authorityConfig, { redirectUri: popupRedirectUri() });
+}
+
+/**
+ * Build the Nested App Auth (NAA) MSAL instance for the Teams host against the Spaarke-tenant workforce
  * authority. Unlike the standalone SPA's `new PublicClientApplication`, NAA runs MSAL NESTED in the
- * Teams host broker (no iframe `ssoSilent`, no redirect) — the broker supplies the signed-in
- * workforce account, so token acquisition is silent for a consented user. Reuses task 010's config
- * builders; supplies no CIAM values (workforce plane only).
+ * Teams host broker (no redirect) — the broker supplies the signed-in workforce account, so token
+ * acquisition is silent for a consented user. Supplies no CIAM values (workforce plane only).
  */
 export async function createTeamsWorkforceMsalInstance(
   cfg: TeamsWorkforceAuthConfig
 ): Promise<IPublicClientApplication> {
-  const authorityConfig = workforceAuthorityConfig({
-    clientId: cfg.clientId,
-    bffScope: cfg.bffScope,
-    authority: cfg.authority,
-  });
-  return createNestablePublicClientApplication(buildMsalConfiguration(authorityConfig));
+  return createNestablePublicClientApplication(teamsWorkforceMsalConfiguration(cfg));
 }
 
 /**
  * Memoized Teams workforce NAA instance (task 012). A fresh `PublicClientApplication` has an empty
- * MSAL cache, so re-creating one on every call (as a naive per-call `createTeamsWorkforceMsalInstance`
- * would) would force a full `ssoSilent` broker round-trip on every single BFF request instead of
- * hitting `acquireTokenSilent`'s cache after the first. This getter makes `acquireTeamsWorkforceBffToken`
- * reuse ONE instance per session, AND gives the host adapter a stable instance to hand to
- * `MsalProvider` (`useMsal()` reflects the same account the acquisition path authenticated). Keyed by
- * clientId+authority so a config change safely rebuilds it. No acquisition LOGIC changes — same
- * silent → ssoSilent → popup → Teams-SSO-fallback sequence as before.
+ * MSAL cache, so re-creating one on every call would force a full broker round-trip on every single
+ * BFF request instead of hitting `acquireTokenSilent`'s cache after the first. Keyed by
+ * clientId+tenantId so a config change safely rebuilds it.
  */
 let teamsWorkforceInstancePromise: Promise<IPublicClientApplication> | null = null;
 let teamsWorkforceInstanceCacheKey: string | null = null;
 
 export async function getTeamsWorkforceMsalInstance(cfg: TeamsWorkforceAuthConfig): Promise<IPublicClientApplication> {
-  const key = `${cfg.clientId}|${cfg.authority ?? ''}`;
+  const key = `${cfg.clientId}|${cfg.tenantId}`;
   if (!teamsWorkforceInstancePromise || teamsWorkforceInstanceCacheKey !== key) {
     teamsWorkforceInstanceCacheKey = key;
     teamsWorkforceInstancePromise = createTeamsWorkforceMsalInstance(cfg);
   }
   return teamsWorkforceInstancePromise;
+}
+
+/**
+ * Memoized standard (non-nested) instance for the popup fallback — the counterpart of
+ * `OfficeNaaStrategy`'s fallback `PublicClientApplication`. Same client, tenant, scope, per-tab
+ * sessionStorage cache and bridge-page redirect URI as the NAA instance. A failed creation is not
+ * memoized, so a later call can retry it.
+ */
+let teamsWorkforcePopupInstancePromise: Promise<IPublicClientApplication> | null = null;
+let teamsWorkforcePopupInstanceCacheKey: string | null = null;
+
+export async function getTeamsWorkforcePopupMsalInstance(
+  cfg: TeamsWorkforceAuthConfig
+): Promise<IPublicClientApplication> {
+  const key = `${cfg.clientId}|${cfg.tenantId}`;
+  if (!teamsWorkforcePopupInstancePromise || teamsWorkforcePopupInstanceCacheKey !== key) {
+    teamsWorkforcePopupInstanceCacheKey = key;
+    const created = (async () => {
+      const pca = new PublicClientApplication(teamsWorkforceMsalConfiguration(cfg));
+      await pca.initialize();
+      return pca as IPublicClientApplication;
+    })();
+    teamsWorkforcePopupInstancePromise = created;
+    created.catch(() => {
+      if (teamsWorkforcePopupInstancePromise === created) {
+        teamsWorkforcePopupInstancePromise = null;
+        teamsWorkforcePopupInstanceCacheKey = null;
+      }
+    });
+  }
+  return teamsWorkforcePopupInstancePromise;
+}
+
+/**
+ * Which Teams path last yielded a token, and the instance it used. Once the popup fallback has
+ * signed the user in, later calls go straight to that instance's silent cache instead of failing NAA
+ * again on every BFF request. A failed popup path resets this, so the next call tries NAA first again.
+ */
+let teamsWorkforcePath: 'naa' | 'popup' | null = null;
+let teamsWorkforceSignedInInstance: IPublicClientApplication | null = null;
+
+/**
+ * The MSAL instance that holds the signed-in Teams workforce account (the NAA instance, or the popup
+ * fallback instance), or null before the first successful acquisition. The host adapter hands it to
+ * `<MsalProvider>` so `useMsal()` reflects the signed-in user whichever path signed them in.
+ */
+export function getTeamsWorkforceSignedInInstance(): IPublicClientApplication | null {
+  return teamsWorkforceSignedInInstance;
 }
 
 /**
@@ -346,28 +533,79 @@ async function acquireBffTokenViaNaa(instance: IPublicClientApplication, bffScop
 }
 
 /**
- * Acquire the BFF token via Teams SSO (`authentication.getAuthToken`). The token targets the app's
- * exposed API (manifest `webApplicationInfo` resource) and is used broker-only against the BFF. This
- * is the fallback for hosts that do not expose an NAA bridge; it is not a downstream exchange.
+ * The popup fallback ladder, mirroring `OfficeNaaStrategy._tryAcquireWith`: `acquireTokenSilent` with a
+ * cached account (a failure falls through), then `acquireTokenPopup` with the account as `loginHint`
+ * (or `prompt: 'select_account'` when there is none). Throws if the popup fails or yields no token.
  */
-async function acquireBffTokenViaTeamsSso(): Promise<string> {
-  const token = await teamsAuthentication.getAuthToken();
-  if (!token) {
-    throw new TeamsWorkforceAuthError('Teams SSO getAuthToken returned an empty token.');
+async function acquireBffTokenViaPopup(instance: IPublicClientApplication, bffScope: string): Promise<string> {
+  const scopes = [bffScope];
+  const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0] ?? null;
+
+  if (account) {
+    try {
+      const result = await instance.acquireTokenSilent({ scopes, account });
+      if (result.accessToken) return result.accessToken;
+    } catch {
+      // Fall through to the popup, as OfficeNaaStrategy._tryAcquireWith does.
+    }
   }
-  return token;
+
+  const result = await instance.acquireTokenPopup({
+    scopes,
+    loginHint: account?.username,
+    prompt: account ? undefined : 'select_account',
+  });
+  if (!result.accessToken) {
+    throw new TeamsWorkforceAuthError('The MSAL popup returned no access token.');
+  }
+  if (!instance.getActiveAccount() && result.account) {
+    instance.setActiveAccount(result.account);
+  }
+  return result.accessToken;
+}
+
+/**
+ * True when the Teams host recommends the NAA channel (`nestedAppAuth.isNAAChannelRecommended()`). On a
+ * bridge-less host `createNestablePublicClientApplication` returns a STANDARD instance, so the "NAA" step
+ * would really be `ssoSilent` in a hidden iframe with a 10 s timeout — pure latency before the popup. If
+ * the host cannot answer (the call throws), NAA is attempted as before.
+ */
+function isNaaChannelRecommended(): boolean {
+  try {
+    return nestedAppAuth.isNAAChannelRecommended();
+  } catch {
+    return true;
+  }
+}
+
+/** True when the user closed or dismissed the NAA sign-in (`user_cancelled`) — do not open a second popup. */
+function isUserCancelled(err: unknown): boolean {
+  return (err as { errorCode?: string } | null)?.errorCode === BrowserAuthErrorCodes.userCancelled;
+}
+
+/** The error a failed Teams workforce sign-in surfaces — the caller renders it (fail loud). */
+function teamsWorkforceFailure(naaError: unknown, popupError: unknown): TeamsWorkforceAuthError {
+  return new TeamsWorkforceAuthError(
+    'Teams workforce token acquisition failed (NAA primary + MSAL popup fallback). ' +
+      'The caller must surface a sign-in/consent error — do not silently degrade.',
+    { naaError, popupError }
+  );
 }
 
 /**
  * Acquire a BFF-valid workforce token inside the Teams host — the selectable strategy the host
- * adapter (task 012) invokes. Primary: NAA (directly targets `bffScope`, task 010 config reuse).
- * Fallback: Teams SSO `getAuthToken` (hosts without an NAA bridge). Both are broker-only (NFR-02)
- * and non-redirect (NFR-04). If BOTH fail, throws `TeamsWorkforceAuthError` — the caller surfaces a
- * sign-in/consent error rather than degrading silently (acceptance criterion 4).
+ * adapter invokes. Primary: NAA (skipped when the host does not recommend the NAA channel). Fallback: the
+ * MSAL popup on a standard instance for the same client (ADR-028 A7: NAA first, then the popup; never
+ * Teams SSO) — except after the user cancelled NAA's own sign-in, when no second popup is opened. Both are
+ * broker-only (NFR-02) and non-redirect (NFR-04). If both fail, throws `TeamsWorkforceAuthError` — the
+ * caller surfaces a sign-in/consent error rather than degrading silently.
  *
- * @param cfg Workforce app-registration values (client id, BFF scope, optional tenant-pin authority).
+ * The popup here runs without a user gesture (bootstrap); a blocked popup is recovered by the error
+ * screen's "Sign in" button, which calls {@link signInTeamsWorkforceViaPopup} on click.
+ *
+ * @param cfg The single-tenant client id, Spaarke tenant id and `…/user_impersonation` BFF scope.
  * @returns Access token string, ready for `Authorization: Bearer {token}` against the BFF.
- * @throws {TeamsWorkforceAuthError} When not in a Teams host, or neither NAA nor Teams SSO succeeds.
+ * @throws {TeamsWorkforceAuthError} When not in a Teams host, or neither NAA nor the popup succeeds.
  */
 export async function acquireTeamsWorkforceBffToken(cfg: TeamsWorkforceAuthConfig): Promise<string> {
   try {
@@ -378,22 +616,48 @@ export async function acquireTeamsWorkforceBffToken(cfg: TeamsWorkforceAuthConfi
     throw new TeamsWorkforceAuthError('Teams JS app.initialize() failed — not running inside a Teams host.', initError);
   }
 
-  let naaError: unknown;
-  try {
-    const instance = await getTeamsWorkforceMsalInstance(cfg);
-    return await acquireBffTokenViaNaa(instance, cfg.bffScope);
-  } catch (err) {
-    // NAA unavailable (no host bridge) or failed — fall through to the Teams SSO fallback.
-    naaError = err;
+  let naaError: unknown = null;
+  if (teamsWorkforcePath !== 'popup') {
+    if (isNaaChannelRecommended()) {
+      try {
+        const instance = await getTeamsWorkforceMsalInstance(cfg);
+        const token = await acquireBffTokenViaNaa(instance, cfg.bffScope);
+        teamsWorkforcePath = 'naa';
+        teamsWorkforceSignedInInstance = instance;
+        return token;
+      } catch (err) {
+        // NAA unavailable (no host bridge) or failed — fall through to the MSAL popup fallback.
+        naaError = err;
+      }
+    } else {
+      naaError = new Error('The Teams host does not recommend the NAA channel (isNAAChannelRecommended() is false).');
+    }
+    if (isUserCancelled(naaError)) {
+      // The user dismissed the sign-in: a second popup straight away would be hostile. The error screen's
+      // "Sign in" button lets them start it again on purpose.
+      teamsWorkforcePath = null;
+      throw teamsWorkforceFailure(naaError, null);
+    }
   }
 
   try {
-    return await acquireBffTokenViaTeamsSso();
-  } catch (ssoError) {
-    throw new TeamsWorkforceAuthError(
-      'Teams workforce token acquisition failed (NAA primary + Teams SSO fallback). ' +
-        'The caller must surface a sign-in/consent error — do not silently degrade.',
-      { naaError, ssoError }
-    );
+    return await signInTeamsWorkforceViaPopup(cfg);
+  } catch (popupError) {
+    teamsWorkforcePath = null;
+    throw teamsWorkforceFailure(naaError, popupError);
   }
+}
+
+/**
+ * The MSAL popup path on its own (ADR-028 A7 fallback). Called by `acquireTeamsWorkforceBffToken` after
+ * NAA, and directly by the Teams error screen's "Sign in" button so the popup opens from a USER GESTURE
+ * (bootstrap cannot guarantee one; Teams webviews and browsers may block a gesture-less `window.open`).
+ * Records the popup instance as the signed-in instance on success.
+ */
+export async function signInTeamsWorkforceViaPopup(cfg: TeamsWorkforceAuthConfig): Promise<string> {
+  const instance = await getTeamsWorkforcePopupMsalInstance(cfg);
+  const token = await acquireBffTokenViaPopup(instance, cfg.bffScope);
+  teamsWorkforcePath = 'popup';
+  teamsWorkforceSignedInInstance = instance;
+  return token;
 }

@@ -3,12 +3,13 @@
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": [
+      "/auth-callback.html",
       "/assets/*",
       "/*.{css,js,map,ico,png,svg,gif,jpg,jpeg,webp,json,txt,woff,woff2,ttf,eot}"
     ]
   },
   "globalHeaders": {
-    "Referrer-Policy": "no-referrer-or-same-origin",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
     "Content-Security-Policy": "frame-ancestors 'self' https://teams.microsoft.com https://*.cloud.microsoft",
     "X-Content-Type-Options": "nosniff"
   }

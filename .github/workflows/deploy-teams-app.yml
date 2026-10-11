@@ -88,8 +88,8 @@ jobs:
           jq -e '.id != null and .id != ""' manifest.json > /dev/null || { echo "::error::manifest.json missing id"; exit 1; }
           jq -e '.staticTabs != null and (.staticTabs | length) > 0' manifest.json > /dev/null || { echo "::error::manifest.json missing staticTabs"; exit 1; }
           jq -e '.validDomains != null and (.validDomains | length) > 0' manifest.json > /dev/null || { echo "::error::manifest.json missing validDomains"; exit 1; }
-          jq -e '.webApplicationInfo.id != null and .webApplicationInfo.id != ""' manifest.json > /dev/null || { echo "::error::manifest.json missing webApplicationInfo.id"; exit 1; }
-          jq -e '.webApplicationInfo.resource != null and .webApplicationInfo.resource != ""' manifest.json > /dev/null || { echo "::error::manifest.json missing webApplicationInfo.resource"; exit 1; }
+          # ADR-028 Amendment A7 (MUST NOT): the manifest declares NO webApplicationInfo (no Teams-SSO fallback).
+          jq -e 'has("webApplicationInfo") | not' manifest.json > /dev/null || { echo "::error::manifest.json must NOT declare webApplicationInfo (ADR-028 A7: NAA then MSAL popup, no Teams SSO)"; exit 1; }
           echo "Manifest validation passed."
 
       - name: Verify icon assets exist

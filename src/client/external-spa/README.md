@@ -35,8 +35,9 @@ Authentication is handled by MSAL against an Entra External ID (CIAM) tenant —
 | `VITE_MSAL_CLIENT_ID` | SPA public-client app registration ID (registered in the CIAM tenant) |
 | `VITE_MSAL_TENANT_ID` | CIAM external tenant ID |
 | `VITE_MSAL_BFF_SCOPE` | BFF API scope exposed in the CIAM tenant (must match BFF `Ciam:Audience`) |
-| `VITE_TEAMS_MSAL_CLIENT_ID` | Optional — workforce multitenant app client ID (Teams tab host only) |
-| `VITE_TEAMS_MSAL_BFF_SCOPE` | Optional — workforce BFF scope (Teams tab host only) |
+| `VITE_TEAMS_MSAL_CLIENT_ID` | Optional — the single-tenant Spaarke workforce public client ID (Teams tab host and browser "My organization"; ADR-028 A7) |
+| `VITE_TEAMS_MSAL_TENANT_ID` | Optional — Spaarke's tenant ID (GUID); the workforce authority is pinned to `https://login.microsoftonline.com/{tenant id}` (never `organizations`/`common`) |
+| `VITE_TEAMS_MSAL_BFF_SCOPE` | Optional — workforce BFF scope, `api://{customer BFF app id}/user_impersonation` |
 
 Copy `.env.example` to `.env.local` and set real values.
 `.env.local` is gitignored — never commit secrets.

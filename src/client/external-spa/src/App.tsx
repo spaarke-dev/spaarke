@@ -11,6 +11,7 @@ import {
 import { DataGridExternalHostProvider } from '@spaarke/ui-components/components/DataGrid/DataGridExternalHost';
 import { APP_VERSION } from './config';
 import { clearStoredRealm } from './auth/realm';
+import { accountsForActivePlane } from './auth/msal-auth';
 import { AppHeader } from './components/AppHeader';
 import { AuthGuard } from './components/AuthGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -198,7 +199,7 @@ export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) =>
           displayName: 'Jane Smith (Mock)',
           tenantId: 'mock',
         }
-      : accountToPortalUser(accounts[0]);
+      : accountToPortalUser(accountsForActivePlane(accounts)[0]);
 
   const isDark = theme === webDarkTheme;
 

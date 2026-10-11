@@ -4,10 +4,12 @@ import { MsalProvider } from '@azure/msal-react';
 import { Button, FluentProvider, Spinner, Text, tokens } from '@fluentui/react-components';
 import { resolveCodePageTheme } from '@spaarke/ui-components/utils/themeStorage';
 import { msalInstance } from './auth/msal-config';
-import { detectTeamsHost, createTeamsHostAdapter } from './host/TeamsHostAdapter';
+import { extractAuthDiagnostics } from './auth/auth-diagnostics';
+import { detectTeamsHost, createTeamsHostAdapter, type ITeamsHostAdapter } from './host/TeamsHostAdapter';
 import { getStoredRealm, setStoredRealm, clearStoredRealm, type Realm } from './auth/realm';
 import { resolveStandalonePlane, applyStandalonePlane, type StandalonePlane } from './auth/standalone-plane';
 import { RealmChooser } from './components/auth/RealmChooser';
+import { TeamsAuthError } from './components/auth/TeamsAuthError';
 import { App } from './App';
 
 // Power Pages Code Page SPA — React 18 with createRoot (bundled, not platform-provided).
@@ -194,10 +196,15 @@ async function bootstrapTeams(root: Root): Promise<void> {
     await adapter.initialize();
   } catch (err) {
     console.error('[SecureProjectWorkspace] Teams workforce authentication failed:', err);
-    renderTeamsAuthError(root, err);
+    renderTeamsAuthError(root, adapter, err);
     return;
   }
 
+  renderTeamsApp(root, adapter);
+}
+
+/** Render the SAME shared <App> under the Teams-signed-in MSAL instance (after bootstrap or after recovery). */
+function renderTeamsApp(root: Root, adapter: ITeamsHostAdapter): void {
   root.render(
     <React.StrictMode>
       <MsalProvider instance={adapter.getMsalInstance()}>
@@ -208,49 +215,12 @@ async function bootstrapTeams(root: Root): Promise<void> {
 }
 
 /**
- * Extracts the underlying NAA + Teams-SSO failure detail (error name / MSAL errorCode / subError /
- * any AADSTS code / message) from a TeamsWorkforceAuthError's `cause` ({ naaError, ssoError }), so the
- * on-screen error state can show the REAL diagnostic on hosts where dev tools aren't readily available
- * (e.g. the Teams desktop client). Diagnostic-only; contains no tokens or secrets.
- */
-function extractAuthDiagnostics(err: unknown): string {
-  const describe = (label: string, e: unknown): string => {
-    if (e == null) return `${label}: (none)`;
-    if (typeof e === 'string') return `${label}: ${e}`;
-    const any = e as Record<string, unknown>;
-    const parts: string[] = [];
-    if (any.name) parts.push(`name=${String(any.name)}`);
-    if (any.errorCode) parts.push(`errorCode=${String(any.errorCode)}`);
-    if (any.subError) parts.push(`subError=${String(any.subError)}`);
-    const msg = (any.errorMessage ?? any.message) as string | undefined;
-    if (msg) parts.push(`msg=${String(msg).slice(0, 600)}`);
-    const aadsts = `${String(any.message ?? '')} ${String(any.errorMessage ?? '')}`.match(/AADSTS\d+/);
-    if (aadsts) parts.push(`AADSTS=${aadsts[0]}`);
-    if (parts.length === 0) {
-      try {
-        return `${label}: ${JSON.stringify(any).slice(0, 400)}`;
-      } catch {
-        return `${label}: (unserializable)`;
-      }
-    }
-    return `${label}: ${parts.join('  ·  ')}`;
-  };
-  const cause = (err as { cause?: unknown } | null)?.cause as { naaError?: unknown; ssoError?: unknown } | undefined;
-  const lines = [describe('top', err)];
-  if (cause && typeof cause === 'object') {
-    lines.push(describe('NAA', cause.naaError));
-    lines.push(describe('SSO', cause.ssoError));
-  }
-  return lines.join('\n');
-}
-
-/**
  * Fail-loud error state for a Teams bootstrap failure (acceptance criterion 4 - never silently
- * degrade to a blank/broken tab). Minimal Fluent v9 markup styled exclusively with semantic tokens
- * (ADR-021); intentionally NOT a feature component - this is bootstrap-path infrastructure, shown
- * only when Teams workforce auth cannot be established at all.
+ * degrade to a blank/broken tab). The screen (components/auth/TeamsAuthError) has a "Sign in" button that
+ * runs the MSAL popup on click - a user gesture, which the bootstrap popup fallback does not have - and, on
+ * success, continues into the app without a reload.
  */
-function renderTeamsAuthError(root: Root, err: unknown): void {
+function renderTeamsAuthError(root: Root, adapter: ITeamsHostAdapter, err: unknown): void {
   const message = err instanceof Error ? err.message : 'Sign-in to the Spaarke collaboration tab failed.';
   const diagnostics = extractAuthDiagnostics(err);
   // The adapter writes the Teams-provided theme to localStorage BEFORE the auth step that can
@@ -260,51 +230,14 @@ function renderTeamsAuthError(root: Root, err: unknown): void {
   root.render(
     <React.StrictMode>
       <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100dvh',
-            rowGap: tokens.spacingVerticalM,
-            padding: tokens.spacingVerticalXXL,
-            textAlign: 'center',
-            backgroundColor: tokens.colorNeutralBackground1,
-            color: tokens.colorNeutralForeground1,
+        <TeamsAuthError
+          message={message}
+          diagnostics={diagnostics}
+          onSignIn={async () => {
+            await adapter.signInWithPopup();
+            renderTeamsApp(root, adapter);
           }}
-        >
-          <Text size={500} weight="semibold">
-            Sign-in failed
-          </Text>
-          <Text size={300} style={{ color: tokens.colorNeutralForeground3, maxWidth: '32rem' }}>
-            {message}
-          </Text>
-          <Text size={200} style={{ color: tokens.colorNeutralForeground4 }}>
-            Contact your Teams admin if this persists - your organization may not have consented to the Spaarke app yet.
-          </Text>
-          <pre
-            style={{
-              marginTop: tokens.spacingVerticalM,
-              maxWidth: '46rem',
-              maxHeight: '14rem',
-              overflow: 'auto',
-              textAlign: 'left',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              fontFamily: tokens.fontFamilyMonospace,
-              fontSize: tokens.fontSizeBase200,
-              lineHeight: tokens.lineHeightBase200,
-              color: tokens.colorNeutralForeground3,
-              backgroundColor: tokens.colorNeutralBackground3,
-              border: `1px solid ${tokens.colorNeutralStroke2}`,
-              borderRadius: tokens.borderRadiusMedium,
-              padding: tokens.spacingHorizontalM,
-            }}
-          >
-            {`Diagnostic detail (share this):\n${diagnostics}`}
-          </pre>
-        </div>
+        />
       </FluentProvider>
     </React.StrictMode>
   );
