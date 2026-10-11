@@ -224,12 +224,12 @@ async function authorizedFetch(path: string, options: RequestInit): Promise<Resp
   const backend = getActiveBackend();
   const url = bffRequestUrl(backend, path);
 
-  const token = await acquireActiveBffToken(backend.bffScope);
+  const token = await acquireActiveBffToken(backend);
   const response = await executeFetch(url, options, token);
 
   // On 401, acquire a fresh token (MSAL will refresh silently or redirect) and retry once
   if (response.status === 401) {
-    const freshToken = await acquireActiveBffToken(backend.bffScope);
+    const freshToken = await acquireActiveBffToken(backend);
     return executeFetch(url, options, freshToken);
   }
 

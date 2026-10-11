@@ -26,7 +26,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 038 | Deploy R3 BFF to dev + live probes | P3 | 🔲 [open] | 010, 011, 012, 032, 035, 036, 037, 039 + **020 columns live in dev first** (task 030 stamps sprk_createdbycontact; without it a contact create returns 400, after the upload bytes are already in SPE) | S/h | STANDARD | — (live deploy, owner-gated) |
 | 039 | Event reads for Matter and Work Assignment (FR-03 server) | P3 | 🔲 [open] | 032, 037 | S/h | FULL | Wave 7 |
 | 040 | Workforce client switch (FR-16) | P4 | 🔄 [wip] | 001 (+ owner client registration) | O/h | FULL | Wave 2 |
-| 041 | Run-time backend selection (FR-17) | P4 | 🔄 [wip] | 040 | O/h | FULL | Wave 3 |
+| 041 | Run-time backend selection (FR-17) | P4 | ✅ [done] | 040 | O/h | FULL | Wave 3 |
 | 042 | Out-of-plane pages + no production mock (FR-18) | P4 | 🔲 [open] | 041 | O/h | FULL | Wave 4 |
 | 043 | Production build + Teams package in CI (FR-20) | P4 | 🔲 [open] | 040 | S/h | STANDARD | Wave 3 |
 | 050 | Record detail view: fields, docs/invoices, events/tasks (FR-01–03) | P5 | ✅ [done] | none | S/h | FULL | Wave 1 |

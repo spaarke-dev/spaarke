@@ -51,13 +51,13 @@ function gridAuthenticatedFetchFor(backend: ActiveBackend): AuthenticatedFetchFn
     if (new URL(url).origin !== backend.bffBaseUrl) {
       throw new Error('[gridDataverseClient] The request URL is not on the active backend; the request was not sent.');
     }
-    const token = await acquireActiveBffToken(backend.bffScope);
+    const token = await acquireActiveBffToken(backend);
     const response = await executeWithToken(url, init, token);
     if (response.status !== 401) {
       return response;
     }
     // Single retry with a freshly-acquired token — same contract as bff-client.ts's bffApiCall.
-    const freshToken = await acquireActiveBffToken(backend.bffScope);
+    const freshToken = await acquireActiveBffToken(backend);
     return executeWithToken(url, init, freshToken);
   };
 }

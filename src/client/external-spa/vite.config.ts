@@ -120,8 +120,9 @@ export default defineConfig({
     port: 3000,
     proxy: {
       // Route BFF API calls through the dev server to avoid browser CORS restrictions.
-      // When VITE_BFF_API_URL is empty, bffApiCall uses relative /api/... paths
-      // which hit this proxy. Vite forwards server-to-server — no CORS needed.
+      // Only used when a configured backend's base URL is this dev server's own origin (relative
+      // /api/... requests). An empty VITE_BFF_API_URL fails closed since task 041 (backend-selection.ts);
+      // it no longer falls back to relative paths. Vite forwards server-to-server — no CORS needed.
       '/api': {
         target: 'https://spaarke-bff-dev.azurewebsites.net',
         changeOrigin: true,

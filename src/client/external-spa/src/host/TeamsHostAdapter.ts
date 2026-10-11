@@ -128,6 +128,36 @@ export async function detectTeamsHost(timeoutMs: number = TEAMS_INIT_DETECTION_T
 }
 
 // ---------------------------------------------------------------------------
+// Pre-auth host signals (task 041 — customer picker / "no organization" screens)
+// ---------------------------------------------------------------------------
+
+/**
+ * Tell Teams the tab has content to show, so the host's loading spinner stops while the pre-auth customer picker is
+ * on screen. `app.initialize()` already ran in `detectTeamsHost()`, so this does NOT initialize again; the adapter's
+ * own `initialize()` calls `notifyAppLoaded()` again after the choice (idempotent). Best-effort: a host error here
+ * must never stop the screen from rendering.
+ */
+export function notifyTeamsAppLoaded(): void {
+  try {
+    teamsApp.notifyAppLoaded();
+  } catch (err) {
+    console.warn('[TeamsHostAdapter] notifyAppLoaded failed:', err);
+  }
+}
+
+/**
+ * Tell Teams the tab failed to start for a non-auth reason (no customer backend could be resolved — fail closed),
+ * so the host does not keep spinning behind the explicit "No organization available" screen. Best-effort.
+ */
+export function notifyTeamsFailureOther(message: string): void {
+  try {
+    teamsApp.notifyFailure({ reason: teamsApp.FailedReason.Other, message });
+  } catch (err) {
+    console.warn('[TeamsHostAdapter] notifyFailure failed:', err);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Theme mapping
 // ---------------------------------------------------------------------------
 

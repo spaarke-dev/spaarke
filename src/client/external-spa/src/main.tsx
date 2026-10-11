@@ -5,7 +5,13 @@ import { Button, FluentProvider, Spinner, Text, tokens } from '@fluentui/react-c
 import { resolveCodePageTheme } from '@spaarke/ui-components/utils/themeStorage';
 import { msalInstance } from './auth/msal-config';
 import { extractAuthDiagnostics } from './auth/auth-diagnostics';
-import { detectTeamsHost, createTeamsHostAdapter, type ITeamsHostAdapter } from './host/TeamsHostAdapter';
+import {
+  detectTeamsHost,
+  createTeamsHostAdapter,
+  notifyTeamsAppLoaded,
+  notifyTeamsFailureOther,
+  type ITeamsHostAdapter,
+} from './host/TeamsHostAdapter';
 import { getStoredRealm, setStoredRealm, clearStoredRealm, type Realm } from './auth/realm';
 import { resolveStandalonePlane, applyStandalonePlane, type StandalonePlane } from './auth/standalone-plane';
 import {
@@ -64,9 +70,11 @@ async function bootstrapStandalone(root: Root): Promise<void> {
     // Dev mock: existing behavior — CIAM instance, no chooser, no MSAL initialize (AuthGuard
     // short-circuits in mock mode). Kept as a separate branch so StandaloneBootstrap's hooks stay
     // unconditional (rules of hooks). The configured CIAM backend is activated when it resolves to exactly one
-    // (task 041), so pages that read the active backend do not throw; otherwise mock mode runs without one.
+    // (task 041), so pages that read the active backend do not throw; with several configured backends the first is
+    // activated (mock mode has no picker); with none, mock mode runs without one.
     const selection = await resolveBackendSelection('ciam');
     if (selection.kind === 'selected') activateBackend('ciam', selection.backend);
+    else if (selection.kind === 'pick') activateBackend('ciam', selection.options[0]);
     root.render(
       <React.StrictMode>
         <MsalProvider instance={msalInstance}>
@@ -261,6 +269,8 @@ async function bootstrapTeams(root: Root): Promise<void> {
 
 /** Teams: the customer picker (several workforce backends, none active); the choice continues the bootstrap. */
 function renderTeamsCustomerPicker(root: Root, plane: BackendPlane, options: Backend[]): void {
+  // The host's spinner stops once there is a screen to show (app.initialize() already ran in detectTeamsHost()).
+  notifyTeamsAppLoaded();
   root.render(
     <React.StrictMode>
       <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
@@ -283,6 +293,10 @@ function renderTeamsCustomerPicker(root: Root, plane: BackendPlane, options: Bac
 
 /** Teams: no backend could be resolved — fail closed with an explicit screen (no token is requested). */
 function renderBackendUnavailable(root: Root, reason: string): void {
+  // Same signals as a failed start: loaded (a screen is showing) and failed (Other), so Teams stops its spinner and
+  // records the failure instead of waiting on a tab that will never authenticate.
+  notifyTeamsAppLoaded();
+  notifyTeamsFailureOther(reason);
   root.render(
     <React.StrictMode>
       <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>

@@ -25,7 +25,8 @@ import {
 } from '@azure/msal-browser';
 import { app as teamsApp, nestedAppAuth } from '@microsoft/teams-js';
 import { msalInstance, workforceAuthorityConfig, buildMsalConfiguration, popupRedirectUri } from './msal-config';
-import { activeBffScope } from './backend-selection';
+import { activeBffScope, BackendSelectionError, type ActiveBackend } from './backend-selection';
+import { isUserImpersonationScope } from '../config';
 
 /**
  * Deep-link preservation through the MSAL login/token redirect (task 012).
@@ -297,11 +298,24 @@ export function setActiveBffTokenAcquirer(acquirer: BffTokenAcquirer): void {
 }
 
 /**
- * Acquire a BFF token via whichever strategy is currently active (CIAM by default). `scope` is the active backend's
- * scope, passed by bff-client.ts from the SAME backend record whose URL the request goes to (task 041), so the token
- * and the host always belong to one backend; without it each strategy uses its plane's active backend scope.
+ * Acquire a BFF token via whichever strategy is currently active (CIAM by default). `backend` is the active-backend
+ * snapshot bff-client.ts / gridDataverseClient.ts read ONCE for the request whose URL they build (task 041), so the
+ * token and the host always belong to one backend; without it each strategy uses its plane's active backend scope.
+ *
+ * The seam takes the backend record, never a bare scope string, and refuses (rejects, no token request) a record whose
+ * scope is not `api://{app id}/user_impersonation` (ADR-028 A7) — so no caller can turn an arbitrary string into a
+ * scope for `acquireTokenSilent` / NAA.
  */
-export function acquireActiveBffToken(scope?: string): Promise<string> {
+export function acquireActiveBffToken(backend?: Pick<ActiveBackend, 'bffScope' | 'plane'>): Promise<string> {
+  if (backend === undefined) return activeBffTokenAcquirer(undefined);
+  const scope = typeof backend === 'object' && backend !== null ? backend.bffScope : undefined;
+  if (!isUserImpersonationScope(scope)) {
+    return Promise.reject(
+      new BackendSelectionError(
+        '[BackendSelection] The backend scope is not api://{app id}/user_impersonation; no token is requested.'
+      )
+    );
+  }
   return activeBffTokenAcquirer(scope);
 }
 

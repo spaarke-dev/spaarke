@@ -676,6 +676,37 @@ describe('Both planes acquire tokens for the active backend’s scope', () => {
     expectNothingEvil();
   });
 
+  it.each([
+    ['a bare scope string', 'User.Read'],
+    ['a user_impersonation scope as a string (the seam takes a backend record, not a string)', scopeOf('evil')],
+    ['null', null],
+    ['a record with no scope', { plane: 'ciam' }],
+    ['a record with a foreign scope', { plane: 'ciam', bffScope: 'api://evil/.default' }],
+    ['a record with the retired SDAP.Access scope', { plane: 'ciam', bffScope: 'api://evil/SDAP.Access' }],
+    [
+      'a record with a scope that only ends in user_impersonation',
+      { plane: 'ciam', bffScope: 'https://evil/user_impersonation' },
+    ],
+  ])('the token seam refuses %s: nothing reaches acquireTokenSilent / NAA', async (_label, arg) => {
+    stubTwoBackends();
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: 'x' }];
+    const { selection, msalAuth } = await load();
+    selection.activateBackend('ciam', { ...FABRIKAM });
+    const seam = msalAuth.acquireActiveBffToken as unknown as (a: unknown) => Promise<string>;
+    await expect(seam(arg)).rejects.toThrow(/no token is requested/);
+    expect(h.requests).toEqual([]);
+    expectNothingEvil();
+  });
+
+  it('the token seam passes a backend snapshot’s user_impersonation scope through to the acquirer (and only that)', async () => {
+    stubTwoBackends();
+    h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: 'x' }];
+    const { selection, msalAuth } = await load();
+    const active = selection.activateBackend('ciam', { ...FABRIKAM });
+    await expect(msalAuth.acquireActiveBffToken(active)).resolves.toBe(`token:${scopeOf(FABRIKAM.bffAppId)}`);
+    expect(h.requests.map(r => r.scopes)).toEqual([[scopeOf(FABRIKAM.bffAppId)]]);
+  });
+
   it('a backend resolved for the workforce plane never yields a CIAM token request (plane mismatch fails closed)', async () => {
     stubTwoBackends();
     h.accounts = [{ homeAccountId: 'c', username: 'c@partner.test', tenantId: 'x' }];
@@ -854,6 +885,32 @@ describe('Shipped configuration', () => {
     expect(fs.readFileSync(path.join(SPA_ROOT, '.env.development'), 'utf8')).toMatch(
       /^VITE_MSAL_BFF_SCOPE=api:\/\/[0-9a-f-]{36}\/user_impersonation\s*$/m
     );
+  });
+
+  it('EVERY workflow that builds this SPA: no SDAP.Access, and both BFF scopes (CIAM + workforce) are api://…/user_impersonation', () => {
+    const dir = path.join(REPO_ROOT, '.github/workflows');
+    const builders = fs
+      .readdirSync(dir)
+      .filter(name => /\.ya?ml$/.test(name))
+      .map(name => ({ name, text: fs.readFileSync(path.join(dir, name), 'utf8') }))
+      .filter(({ text }) => text.includes('src/client/external-spa') && /npm run build\b/.test(text));
+    // The two known builders: the SWA deploy and the Teams app package gate (a new builder is covered automatically).
+    expect(builders.map(b => b.name)).toEqual(
+      expect.arrayContaining(['deploy-external-spa.yml', 'deploy-teams-app.yml'])
+    );
+    for (const { name, text } of builders) {
+      expect(text, `${name} still references SDAP.Access`).not.toContain('SDAP.Access');
+      for (const key of ['VITE_MSAL_BFF_SCOPE', 'VITE_TEAMS_MSAL_BFF_SCOPE']) {
+        const values = [...text.matchAll(new RegExp(`^\\s*${key}:\\s*(\\S+)\\s*$`, 'gm'))].map(m => m[1]);
+        expect(values.length, `${name} sets no ${key}`).toBeGreaterThan(0);
+        for (const value of values) {
+          expect(value, `${name}: ${key}`).toMatch(/^api:\/\/[0-9a-f-]{36}\/user_impersonation$/);
+        }
+      }
+      for (const key of ['VITE_TEAMS_MSAL_CLIENT_ID', 'VITE_TEAMS_MSAL_TENANT_ID']) {
+        expect(text, `${name} sets no ${key}`).toMatch(new RegExp(`^\\s*${key}:\\s*[0-9a-f-]{36}\\s*$`, 'm'));
+      }
+    }
   });
 
   it('no source file reads the BFF URL env key except the backend selection module (no baked URL elsewhere)', () => {

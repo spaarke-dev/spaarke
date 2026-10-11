@@ -11,6 +11,7 @@ import {
 import { DataGridExternalHostProvider } from '@spaarke/ui-components/components/DataGrid/DataGridExternalHost';
 import { APP_VERSION } from './config';
 import { clearStoredRealm } from './auth/realm';
+import { clearActiveBackend } from './auth/backend-selection';
 import { accountsForActivePlane } from './auth/msal-auth';
 import { AppHeader } from './components/AppHeader';
 import { AuthGuard } from './components/AuthGuard';
@@ -226,6 +227,8 @@ export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) =>
   const handleSignOut = React.useCallback(() => {
     if (import.meta.env.VITE_DEV_MOCK === 'true') return;
     clearStoredRealm();
+    // The tab's active customer key goes with the realm, so the next sign-in re-selects the customer (task 041).
+    clearActiveBackend();
     void instance.logoutRedirect();
   }, [instance]);
 
