@@ -41,6 +41,7 @@
     <constraint source="project">Every BFF call this task adds goes through the external plane (/api/v1/external/**) via bffApiCall/bffApiBlob (src/client/external-spa/src/auth/bff-client.ts) and the active token acquirer (acquireActiveBffToken). No call uses a BFF URL or scope taken from a link or query string.</constraint>
     <constraint source="NFR-02">The deep link's customer key is resolved only through the task-041 seam; the record parameter must match ^(project|matter|workassignment|document|invoice|servicerequest):{guid}$ or it is ignored.</constraint>
     <constraint source="project">Poll the feed at most every 60 seconds while the tab is visible; no polling in the background.</constraint>
+    <constraint source="task 036">The grant email deep link is {PortalUrl}/?customer={key}&amp;record={type}:{id} with type one of project, matter, workassignment (URL-encoded values). The SPA parser accepts exactly these tokens, validates id as a GUID, and treats anything else as no deep link.</constraint>
   </constraints>
 
   <knowledge>

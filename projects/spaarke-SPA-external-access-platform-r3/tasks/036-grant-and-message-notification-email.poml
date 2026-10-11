@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="036" project="spaarke-SPA-external-access-platform-r3">
   <metadata>
-    <title>Email on subsequent grant + member notify on message send (FR-07, C6 notify)</title>
+    <title>Email on subsequent grant (FR-07). Scope-corrected 2026-10-11: no email on message post</title>
     <phase>3 BFF features</phase>
     <gate>after UAC-r2 PR #1583 merges and after 034</gate>
     <status>in-progress</status>
@@ -18,16 +18,15 @@
     <estimated-effort>2-4 hours</estimated-effort>
   </metadata>
 
-  <prompt>When /grant gives an already-onboarded external contact access to another record, email them a portal deep link; and when a C6 message is posted, email the record's other member contacts the same kind of link.</prompt>
+  <prompt>When /grant gives an already-onboarded external contact access to another record, email them a portal deep link. (A posted C6 message sends NO email; members learn of it through the in-portal feed, task 037. Spec :42, :64, :391, :402; owner 2026-10-08.)</prompt>
   <role>SPAARKE platform developer. ASP.NET Core developer. Follow ADRs strictly.</role>
-  <goal>GrantAccessNotifier (from UAC-r2 PR #1583) gains an external-contact email branch and a message-posted entry point; exactly one email per qualifying event per recipient, each with https://external.spaarke.com/?customer={key}&amp;record={type}:{id}, sent from the configured sender with no OBO.</goal>
+  <goal>GrantAccessNotifier (from UAC-r2 PR #1583) gains an external-contact email branch; exactly one email per qualifying grant per recipient, each with https://external.spaarke.com/?customer={key}&amp;record={type}:{id}, sent from the configured sender with no OBO.</goal>
 
   <context>
-    <background>R2 UAT 6A: /invite-and-grant emails only at first onboarding (InviteExternalUserEndpoint.cs:248 SendCiamOnboardingEmailAsync; InviteAndGrantExternalUserEndpoint.cs:70 RegistrationEmailService); a later /grant sends nothing. UAC-r2 PR #1583 (task 181) adds GrantAccessNotifier for internal users, firing only on GrantUpsertOutcome.AccessGained and never to the granter or external contacts. On stamps the sender is the per-customer shared mailbox (#1562). The deep link carries only the customer key and record (T240d), never a BFF URL or scope. Spec FR-11: message recipients are the record's members, told through this path.</background>
+    <background>R2 UAT 6A: /invite-and-grant emails only at first onboarding (InviteExternalUserEndpoint.cs:248 SendCiamOnboardingEmailAsync; InviteAndGrantExternalUserEndpoint.cs:70 RegistrationEmailService); a later /grant sends nothing. UAC-r2 PR #1583 (task 181) adds GrantAccessNotifier for internal users, firing only on GrantUpsertOutcome.AccessGained and never to the granter or external contacts. On stamps the sender is the per-customer shared mailbox (#1562). The deep link carries only the customer key and record (T240d), never a BFF URL or scope. Message posts are NOT emailed (spec C6; owner 2026-10-08); members see them in the task-037 feed.</background>
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalMessageEndpoints.cs</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteExternalUserEndpoint.cs</file>
       <file role="new-artifact">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/GrantAccessNotifierExternalTests.cs</file>
     </relevant-files>
@@ -40,7 +39,7 @@
     <constraint source="project">Build only on the net10 SDK (10.0.1xx). Run /conflict-check before opening the PR: Api/ExternalAccess/** and Infrastructure/ExternalAccess/** are shared with unified-access-control-r2.</constraint>
     <constraint source="project">Do not start until PR #1583 is merged to master and merged into this branch; build on its GrantAccessNotifier instead of adding a second notifier.</constraint>
     <constraint source="project">Grant email only on AccessGained to a contact that is already onboarded (has a CIAM/workforce identity binding); never on same-level re-grant, expiry-only change, lower level, organization grant, or to the granter.</constraint>
-    <constraint source="project">Message email goes to member contacts of the record (active grants), excluding the sender; best effort — a failed send is logged and never fails the grant or the post.</constraint>
+    <constraint source="spec C6 / owner 2026-10-08">No email on message post. ExternalMessageEndpoints.cs is not changed by this task.</constraint>
     <constraint source="project">The link is built from configuration (portal base URL + this stamp's customer key) and record type:id only; no BFF URL, scope or token in it. The email body and subject are drafts for owner approval (spec Assumptions).</constraint>
   </constraints>
 
@@ -67,9 +66,9 @@
     <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
     <step order="1">Merge master after #1583 lands; read GrantAccessNotifier and its tests.</step>
     <step order="2">Add the external-contact branch on the grant path using the existing email sender (the one SendCiamOnboardingEmailAsync uses).</step>
-    <step order="3">Add a MessagePosted entry point called from the task-034 send handler after the row is created.</step>
+    <step order="3">(Removed 2026-10-11: no message-post email; spec C6.)</step>
     <step order="4">Add configuration for the portal base URL and customer key (reuse ExternalAccess:PortalUrl if it exists; confirm in appsettings.template.json).</step>
-    <step order="5">Tests: onboarded contact gains access → one email with the right link; re-grant same level → none; not-yet-onboarded contact → none (invite path handles it); organization grant → none; message post → one email per other member contact, none to the sender; send failure → logged, grant/post still succeeds.</step>
+    <step order="5">Tests: onboarded contact gains access → one email with the right link; re-grant same level → none; not-yet-onboarded contact → none (invite path handles it); organization grant → none; send failure → logged, grant still succeeds.</step>
     <step order="6">Draft the email copy in the task notes for owner approval.</step>
     <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` (0 errors) and `dotnet test tests/unit/Sprk.Bff.Api.Tests/` (all pass); measure publish size per .claude/constraints/bff-extensions.md and record it in the task notes.</step>
     <step order="8">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
@@ -88,16 +87,15 @@
 
   <outputs>
     <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantAccessNotifier.cs</output>
-    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalMessageEndpoints.cs</output>
     <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/GrantAccessNotifierExternalTests.cs</output>
   </outputs>
 
   <acceptance-criteria>
     <criterion testable="true">A /grant that gives an already-onboarded contact access to a new record sends exactly one email whose link is &lt;portal&gt;/?customer={key}&amp;record={type}:{id}.</criterion>
     <criterion testable="true">A same-level re-grant, an expiry-only change, a lower level, an organization grant or a grant to a not-yet-onboarded contact sends no external email.</criterion>
-    <criterion testable="true">A posted message sends one email to each other member contact of the record and none to the sender.</criterion>
+    <criterion testable="true">A posted message sends no email (ExternalMessageEndpoints.cs unchanged from the 034 merge).</criterion>
     <criterion testable="true">No link contains a BFF URL, a scope or a token.</criterion>
-    <criterion testable="true">A failed email send is logged and does not fail the grant or the message post.</criterion>
+    <criterion testable="true">A failed email send is logged and does not fail the grant.</criterion>
     <criterion testable="true">The email copy is in the task notes, marked for owner approval.</criterion>
     <criterion testable="true">Build is green; all unit tests pass; publish size is recorded and at or under 60 MB with no new HIGH CVE.</criterion>
     <criterion testable="true">Test scope: cover the stated contract plus the negative and edge cases named in these criteria. Anything beyond that needs a one-line justification in the task notes.</criterion>
