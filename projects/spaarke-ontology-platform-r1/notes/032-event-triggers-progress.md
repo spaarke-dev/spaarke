@@ -30,5 +30,5 @@ Lane `task/ontology-032-event-triggers` (worktree `C:\wts-032`), from `origin/do
 
 ## Checks
 
-Publish size (Release, framework-dependent linux-x64, Compress-Archive Optimal over the publish folder, fresh detached worktrees at C:\wts-032m / C:\wts-032p, both 192 files): base 36.667 MB, branch 36.675 MB, delta +0.008 MB. `dotnet list package --vulnerable --include-transitive`: none.
+Publish size (Release, framework-dependent linux-x64, Compress-Archive Optimal over the publish folder, fresh detached worktrees at C:\wts-032m / C:\wts-032p, both 192 files): base 36.670 MB, branch 36.677 MB, delta +0.007 MB (re-measured after the review fix and the base merge). `dotnet list package --vulnerable --include-transitive`: none.
 Mutation control: removing the subject-prefix scope fails `Trigger_DoesNotCloseAnotherSubjectsOpenSignal`.
