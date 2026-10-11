@@ -8,7 +8,7 @@ completion after review.
 
 | File | What |
 |---|---|
-| `Services/Signals/SignalSuppressionService.cs` (new) | The ONE counter and stamp. `ApplyAsync` (count the grain, stamp `sprk_suppresseduntil` at 3), `ReconcileAsync` (nightly backstop, called by the 031 job), `GetStatusForSignalAsync` (the read). `SuppressionGrain`, `SuppressionStatus`, `SuppressionEvents` (50340/50341) |
+| `Services/Signals/SignalSuppressionService.cs` (new) | The ONE counter and stamp. `ApplyAsync` (count the grain, stamp `sprk_suppresseduntil` at 3), `ReconcileAsync` (nightly backstop, called by the 031 job), `GetStatusForSignalAsync` (the read). `SuppressionGrain`, `SuppressionStatus`, `SuppressionEvents` (50350/50351) |
 | `Api/Signals/DecisionPlanEndpoints.cs` | `GET /api/v1/signals/{signalId}/suppression` beside the decision-plan route (already a governed file, so the route-file count is unchanged); the 403 body extracted to one private helper |
 | `Services/Signals/SignalReevaluationJob.cs` | Shared with 031/033: constructor takes the service; ONE call after `ReadPolicySignalsAsync` hands the planner the stamps (`ReconcileAsync`); its failures count as policy failures so the run is not "healthy" |
 | `Infrastructure/DI/SignalsModule.cs` | `AddSingleton<SignalSuppressionService>()` |
@@ -36,7 +36,7 @@ completion after review.
    `sprk_countstowardsuppression = No` counts nothing; its dismissals show in `DismissalsRecorded`.
 6. **Quiet window (FR-17a) not implemented here.** It is 031's `SignalEpisodePlanner` re-raise rule (POML constraint).
 7. **Backstop in the nightly job.** `ReconcileAsync` only queries a grain with at least 3 DISTINCT dismissals (Decision Records) in the window and no live
-   stamp or a row missing it (partial-stamp repair); a policy that does not count is skipped; a fully stamped grain costs nothing. A failure is logged (50341), metered (`suppression_failed`) and fails the run, but
+   stamp or a row missing it (partial-stamp repair); a policy that does not count is skipped; a fully stamped grain costs nothing. A failure is logged (50351), metered (`suppression_failed`) and fails the run, but
    the planner still receives the in-memory stamp so a pairing at the threshold does not resurface that pass.
 8. **Read route.** Keyed by Signal (the wizard has one): `SignalCoreRecordAccess.AuthorizeAsync` decides as the caller (matter or
    any core type readable, no-core owner-only in the Do lane); only counts and the date are returned; an unreadable count is the
@@ -54,7 +54,7 @@ completion after review.
 
 ## Known limits (K class)
 
-- K1: a failed grain read or stamp write leaves that group unsuppressed (the stamp is applied in memory for the planner on a failed write) for that pass; the run fails visibly (policy failure + `suppression_failed` metric, EventId 50341) and the next night retries, including a partly written stamp.
+- K1: a failed grain read or stamp write leaves that group unsuppressed (the stamp is applied in memory for the planner on a failed write) for that pass; the run fails visibly (policy failure + `suppression_failed` metric, EventId 50351) and the next night retries, including a partly written stamp.
 - K2 (uac-r2 review): Decision-Record facts behind the caller's own readable rows are aggregated, so the counted / recorded split tells a caller a counting reason from a non-counting one on records Console users cannot read. Aggregate numbers on the caller's readable grain only; accepted as designed.
 - K3: in the Do lane a lapsed suppression re-raises only when the due date has changed (031's rule: an unchanged date is `dateUnchanged`).
 - A stamp written while a policy counted stays until it lapses if the policy is later switched to `countstowardsuppression = No` (at most 30 days).

@@ -43,10 +43,10 @@ public readonly record struct SuppressionGrain(Guid? CoreTypeRefId, Guid? CoreRe
 public static class SuppressionEvents
 {
     /// <summary>Information: a grain reached the threshold and its Signals were stamped. Properties: policy code, counts, until.</summary>
-    public static readonly EventId Stamped = new(50340, nameof(Stamped));
+    public static readonly EventId Stamped = new(50350, nameof(Stamped));
 
     /// <summary>Error: counting or stamping a grain failed; the next evaluation retries. Properties: policy code, exception type.</summary>
-    public static readonly EventId Failed = new(50341, nameof(Failed));
+    public static readonly EventId Failed = new(50351, nameof(Failed));
 }
 
 /// <summary>
