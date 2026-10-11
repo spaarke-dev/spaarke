@@ -74,7 +74,7 @@ export async function loadNeedsReviewCount(
     const countXml = buildCountFetchXml(source.fetchXml);
     if (!countXml) return null;
     const result = await client.retrieveMultipleRecords<Record<string, unknown>>(source.entityName, countXml);
-    const value = result.entities?.[0]?.[COUNT_ALIAS];
+    const value = result.entities[0]?.[COUNT_ALIAS];
     const n = typeof value === 'number' ? value : Number(value);
     return Number.isFinite(n) ? n : null;
   } catch {

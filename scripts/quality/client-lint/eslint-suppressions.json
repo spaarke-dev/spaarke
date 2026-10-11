@@ -504,11 +504,6 @@
       "count": 9
     }
   },
-  "src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts": {
-    "@typescript-eslint/no-unnecessary-condition": {
-      "count": 17
-    }
-  },
   "src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
       "count": 13
@@ -631,7 +626,7 @@
   },
   "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx": {
     "@typescript-eslint/no-unnecessary-condition": {
-      "count": 16
+      "count": 14
     }
   },
   "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGridPageShell.tsx": {

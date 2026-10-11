@@ -88,12 +88,15 @@ export async function resolveSource(
       name: configRecord.display?.title ?? 'Inline',
     };
   }
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- exhaustive today (the union narrows to 'savedquery-set' here); kept so a future source type falls through to `return null` instead of running the set branch.
   if (source.type === 'savedquery-set') {
     if (host === 'external') return null;
     try {
       const queries = await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName);
+      // Guard the empty list up front: `queries[0]` is typed non-undefined (no noUncheckedIndexedAccess), so a
+      // post-hoc `!def` check reads as dead to the type-aware lint.
+      if (queries.length === 0) return null;
       const def = queries.find(q => q.isDefault) ?? queries[0];
-      if (!def) return null;
       return await dataverseClient.retrieveSavedQuery(def.id);
     } catch {
       return null;
