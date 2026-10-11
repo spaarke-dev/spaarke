@@ -77,16 +77,18 @@ public static class ExternalAccessEndpoints
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         // GET /api/v1/external/me/entitlements — Tier-1 MODULE entitlement context (task 072, Option B).
-        // Returns the module-code list the external-spa widget registry gates tab visibility on: workforce
-        // from sprk_approlemodulemap (App-Role → module); CIAM blanket outside-counsel set. Distinct from
+        // Returns the module-code list the external-spa widget registry gates tab visibility on: default
+        // modules by server-resolved principal kind (A7: workforce → legal-front-door + policy-library; CIAM →
+        // assigned-work, + legal-front-door when the partner switch is on), plus sprk_approlemodulemap extras. Distinct from
         // /me above (Tier-2 record access). Same group → same dual-scheme policy + CallerPrincipal filter.
         externalGroup.MapGet("/me/entitlements", MeEntitlementsEndpoint.Handle)
             .WithName("GetExternalUserEntitlements")
             .WithSummary("Get the authenticated collaboration caller's Tier-1 module entitlement context")
             .WithDescription(
-                "Returns the caller's entitled module codes (Tier-1). Workforce callers resolve from the " +
-                "App-Role→module map (sprk_approlemodulemap); CIAM outside-counsel callers are blanket- " +
-                "entitled to the outside-counsel module set. Consumed by the external-spa widget registry " +
+                "Returns the caller's entitled module codes (Tier-1): default modules by server-resolved " +
+                "principal kind (workforce: legal-front-door + policy-library; CIAM: assigned-work, plus " +
+                "legal-front-door when the partner service-request switch is on), plus App-Role→module map " +
+                "(sprk_approlemodulemap) extras. Consumed by the external-spa widget registry " +
                 "to gate tab visibility. Record visibility within a module is governed by Tier-2 grants.")
             .Produces<MeEntitlementsResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)

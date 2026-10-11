@@ -137,10 +137,11 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     lazyLoader: placeholderLoader,
   },
   {
-    // Internal-only (task 028): the concrete data-backed read of the caller's OWN submitted service
-    // requests (sprk_requestedby == caller contact). planes:['workforce'] keeps it OFF the outside-
-    // counsel partner SPA; the BFF module additionally fail-closes to 0 rows for any non-workforce
-    // caller. (Distinct from the P3 'my-requests' placeholder, which will become the broader Legal
+    // Workforce tab for now (task 028): the concrete data-backed read of the caller's OWN submitted
+    // service requests (sprk_requestedby == caller contact). planes:['workforce'] currently keeps it OFF
+    // the outside-counsel partner SPA; the BFF (A7, r3 task 011) returns own rows for workforce and for
+    // CIAM only when ExternalAccess:PartnerServiceRequestsEnabled is on, so widening the client plane is
+    // task 052. (Distinct from the P3 'my-requests' placeholder, which will become the broader Legal
     // Front Door request tracker; they may reconcile in P3.)
     id: 'service-requests',
     title: 'Service Requests',

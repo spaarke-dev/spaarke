@@ -13,13 +13,27 @@
 //
 // The Dataverse read (GetActiveMapAsync) is overridden in a test subclass so the map is a fixture — the
 // resolution BEHAVIOR is tested, not the HTTP plumbing (ADR-038: no Mock<HttpMessageHandler>).
+//
+// spaarke-SPA-external-access-platform-r3 task 011 (spec FR-19 / FR-06, ADR-028 Amendment A7) — default modules by
+// server-resolved principal kind, and the per-customer partner switch ExternalAccess:PartnerServiceRequestsEnabled
+// (default off). Every case runs with the switch OFF and ON:
+//   (5) a workforce systemuser and a workforce contact each get legal-front-door + policy-library with NO map row;
+//   (6) map rows still add extras for workforce callers;
+//   (7) a CIAM caller gets assigned-work only (switch off) / assigned-work + legal-front-door (switch on);
+//   (8) the "service-requests" descriptor: switch off → a CIAM caller's accessible set is empty (today's behaviour);
+//       switch on → it is exactly the caller's own contact, so only rows whose sprk_requestedby is that contact survive
+//       — a CIAM caller never gets another contact's request rows. Workforce is unchanged by the switch.
 
 using System.Security.Claims;
 using Azure.Core;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using EntityReference = Microsoft.Xrm.Sdk.EntityReference;
+using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
@@ -127,38 +141,225 @@ public class ModuleEntitlementResolverTests
         ModuleEntitlementResolver.OutsideCounselEntitlements.Should().BeEquivalentTo(new[] { "assigned-work" });
     }
 
-    // ── ResolveAsync plane branch (end-to-end over a fixture map) ──────────────────────────────────
-    [Fact]
-    public async Task ResolveAsync_CiamPlane_ReturnsBlanketSet_AndNeverReadsTheMap()
+    // ── ResolveAsync: default modules by principal kind (r3 task 011, A7) ──────────────────────────
+    // (5) Workforce systemuser — legal-front-door + policy-library with NO sprk_approlemodulemap row, either setting.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveAsync_WorkforceSystemUser_NoRolesNoMapRow_GetsDefaultModules(bool partnerSwitch)
     {
-        var resolver = new TestResolver(SeededMap);
+        var resolver = new TestResolver(Array.Empty<AppRoleModuleMapping>(), partnerSwitch);
 
-        var result = await resolver.ResolveAsync(Ciam(), UserWithRoles("FrontDoorUser"));
-
-        result.Should().BeEquivalentTo(new[] { "assigned-work" });
-        resolver.MapReads.Should().Be(0, "the CIAM term is blanket — it must not read the App-Role map");
-    }
-
-    [Fact]
-    public async Task ResolveAsync_WorkforcePlane_FrontDoorUser_ReturnsMappedCodes()
-    {
-        var resolver = new TestResolver(SeededMap);
-
-        var result = await resolver.ResolveAsync(Workforce(), UserWithRoles("FrontDoorUser"));
+        var result = await resolver.ResolveAsync(WorkforceSystemUser(), UserWithRoles());
 
         result.Should().BeEquivalentTo(new[] { "legal-front-door", "policy-library" });
+        resolver.MapReads.Should().Be(0, "no App-Roles → no extras can apply → the map is not read");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveAsync_WorkforceSystemUser_RoleWithNoMapRow_GetsDefaultModules(bool partnerSwitch)
+    {
+        // The map is EMPTY: the defaults never depend on a map row.
+        var resolver = new TestResolver(Array.Empty<AppRoleModuleMapping>(), partnerSwitch);
+
+        var result = await resolver.ResolveAsync(WorkforceSystemUser(), UserWithRoles("SomeUnmappedRole"));
+
+        result.Should().BeEquivalentTo(new[] { "legal-front-door", "policy-library" });
+    }
+
+    // (5) Workforce contact (no systemuser) — the same defaults, and never the partner set.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveAsync_WorkforceContact_GetsDefaultModules_NotAssignedWork(bool partnerSwitch)
+    {
+        var resolver = new TestResolver(Array.Empty<AppRoleModuleMapping>(), partnerSwitch);
+
+        var result = await resolver.ResolveAsync(WorkforceContact(), UserWithRoles());
+
+        result.Should().BeEquivalentTo(new[] { "legal-front-door", "policy-library" });
+        result.Should().NotContain("assigned-work");
+    }
+
+    // (6) Map rows still add extras for workforce callers, on top of the defaults.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResolveAsync_WorkforceCaller_MapRowsAddExtrasOnTopOfDefaults(bool partnerSwitch)
+    {
+        var map = new[] { new AppRoleModuleMapping { AppRoleName = "AdminUser", ModuleCode = "admin" } };
+        var resolver = new TestResolver(map, partnerSwitch);
+
+        var result = await resolver.ResolveAsync(WorkforceSystemUser(), UserWithRoles("AdminUser"));
+
+        result.Should().BeEquivalentTo(new[] { "admin", "legal-front-door", "policy-library" });
         resolver.MapReads.Should().Be(1);
     }
 
     [Fact]
-    public async Task ResolveAsync_WorkforcePlane_NoRoles_ReturnsEmpty_AndNeverReadsTheMap()
+    public async Task ResolveAsync_WorkforceCaller_MapRowsOverlappingDefaults_AreNotDuplicated()
     {
+        // The seeded dev map grants FrontDoorUser exactly the defaults — the union carries each code once.
         var resolver = new TestResolver(SeededMap);
 
-        var result = await resolver.ResolveAsync(Workforce(), UserWithRoles());
+        var result = await resolver.ResolveAsync(WorkforceContact(), UserWithRoles("FrontDoorUser"));
 
-        result.Should().BeEmpty();
-        resolver.MapReads.Should().Be(0, "no App-Roles → no internal modules → no need to read the map");
+        result.Should().OnlyHaveUniqueItems();
+        result.Should().BeEquivalentTo(new[] { "legal-front-door", "policy-library" });
+    }
+
+    // (7) CIAM — assigned-work only with the switch off (today's behaviour), never reading the map.
+    [Fact]
+    public async Task ResolveAsync_Ciam_SwitchOff_AssignedWorkOnly_AndNeverReadsTheMap()
+    {
+        var resolver = new TestResolver(SeededMap, partnerSwitch: false);
+
+        // A role claim on a CIAM token must not leak workforce modules in.
+        var result = await resolver.ResolveAsync(Ciam(), UserWithRoles("FrontDoorUser"));
+
+        result.Should().BeEquivalentTo(new[] { "assigned-work" });
+        resolver.MapReads.Should().Be(0, "the CIAM term never reads the App-Role map");
+    }
+
+    // (7) CIAM — assigned-work + legal-front-door with the switch on; never policy-library.
+    [Fact]
+    public async Task ResolveAsync_Ciam_SwitchOn_AssignedWorkPlusLegalFrontDoor_NotPolicyLibrary()
+    {
+        var resolver = new TestResolver(SeededMap, partnerSwitch: true);
+
+        var result = await resolver.ResolveAsync(Ciam(), UserWithRoles("FrontDoorUser"));
+
+        result.Should().BeEquivalentTo(new[] { "assigned-work", "legal-front-door" });
+        result.Should().NotContain("policy-library");
+        resolver.MapReads.Should().Be(0, "the CIAM term never reads the App-Role map");
+    }
+
+    // ── (8) the "service-requests" descriptor predicate (FR-06 partner switch) ──────────────────────
+    [Fact]
+    public void ServiceRequests_CiamCaller_SwitchOff_AccessibleSetEmpty_AndNoRowSurvives()
+    {
+        var module = ExternalAccessModule.ServiceRequestsModule(partnerServiceRequestsEnabled: false);
+        var caller = Ciam();
+
+        module.AccessibleRecordIds!(caller).Should().BeEmpty();
+        module.ScopeRows(caller, new[] { RequestRow(caller.ContactId), RequestRow(Guid.NewGuid()) })
+            .Should().BeEmpty("with the switch off a CIAM caller sees 0 service-request rows, even its own");
+        module.IsRecordAccessible(caller, caller.ContactId).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ServiceRequests_CiamCaller_SwitchOn_AccessibleSetIsExactlyTheCallersContact()
+    {
+        var module = ExternalAccessModule.ServiceRequestsModule(partnerServiceRequestsEnabled: true);
+        var caller = Ciam();
+
+        module.AccessibleRecordIds!(caller).Should().BeEquivalentTo(new[] { caller.ContactId });
+    }
+
+    [Fact]
+    public void ServiceRequests_CiamCaller_SwitchOn_KeepsOnlyRowsRequestedByTheCaller()
+    {
+        var module = ExternalAccessModule.ServiceRequestsModule(partnerServiceRequestsEnabled: true);
+        var caller = Ciam();
+        var otherContact = Guid.NewGuid();
+        var own = RequestRow(caller.ContactId);
+
+        var scoped = module.ScopeRows(caller, new[] { own, RequestRow(otherContact), RequestRow(null) });
+
+        scoped.Should().ContainSingle().Which.Should().BeSameAs(own);
+        module.IsRecordAccessible(caller, otherContact).Should().BeFalse("a CIAM caller never gets another contact's requests");
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    public void ServiceRequests_WorkforceCaller_IsUnchangedByTheSwitch_OwnRequestsOnly(bool partnerSwitch, bool systemUser)
+    {
+        var module = ExternalAccessModule.ServiceRequestsModule(partnerSwitch);
+        var caller = systemUser ? WorkforceSystemUser() : WorkforceContact();
+        var own = RequestRow(caller.ContactId);
+
+        module.AccessibleRecordIds!(caller).Should().BeEquivalentTo(new[] { caller.ContactId });
+        module.ScopeRows(caller, new[] { own, RequestRow(Guid.NewGuid()) }).Should().ContainSingle().Which.Should().BeSameAs(own);
+    }
+
+    [Theory]
+    [InlineData(false, CallerPrincipalPlane.CiamContact)]
+    [InlineData(true, CallerPrincipalPlane.CiamContact)]
+    [InlineData(false, CallerPrincipalPlane.Workforce)]
+    [InlineData(true, CallerPrincipalPlane.Workforce)]
+    public void ServiceRequests_CallerWithNoContact_AccessibleSetEmpty(bool partnerSwitch, CallerPrincipalPlane plane)
+    {
+        // A systemuser with no linked contact (ContactId = Guid.Empty) — never matches a null/empty sprk_requestedby.
+        var module = ExternalAccessModule.ServiceRequestsModule(partnerSwitch);
+        var caller = new CallerPrincipal
+        {
+            Plane = plane,
+            ContactId = Guid.Empty,
+            SystemUserId = plane == CallerPrincipalPlane.Workforce ? Guid.NewGuid() : null,
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        };
+
+        module.AccessibleRecordIds!(caller).Should().BeEmpty();
+    }
+
+    // ── the switch is BOUND from ExternalAccess:PartnerServiceRequestsEnabled (default off) ─────────
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("false", false)]
+    [InlineData("true", true)]
+    public void PartnerSwitch_IsBoundFromTheExternalAccessSection_AndDrivesTheRegisteredDescriptor(
+        string? configured, bool expectedOn)
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            // A sibling key already in the section must not disturb the bind.
+            ["ExternalAccess:PortalUrl"] = "https://portal.example.test",
+        };
+        if (configured is not null)
+        {
+            settings["ExternalAccess:PartnerServiceRequestsEnabled"] = configured;
+        }
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
+        services.AddExternalAccess();
+
+        using var provider = services.BuildServiceProvider();
+        var caller = Ciam();
+
+        provider.GetRequiredService<IOptions<ExternalAccessOptions>>().Value.PartnerServiceRequestsEnabled
+            .Should().Be(expectedOn);
+        var module = provider.GetRequiredService<ExternalModuleRegistry>().FindByName("service-requests");
+        module.Should().NotBeNull("the factory-registered descriptor must still reach the registry");
+        module!.AccessibleRecordIds!(caller).Contains(caller.ContactId).Should().Be(expectedOn);
+    }
+
+    // A blank or non-boolean switch value fails closed at startup (ValidateOnStart); an operator turns the switch
+    // off by REMOVING the setting, not by blanking it.
+    [Theory]
+    [InlineData("")]
+    [InlineData("yes")]
+    public void PartnerSwitch_BlankOrNonBooleanValue_FailsStartup(string configured)
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            ["ExternalAccess:PartnerServiceRequestsEnabled"] = configured,
+        };
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
+        services.AddExternalAccess();
+
+        using var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IOptions<ExternalAccessOptions>>().Value;
+
+        act.Should().Throw<Exception>();
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────
@@ -173,12 +374,32 @@ public class ModuleEntitlementResolverTests
         ProjectAccess = Array.Empty<CallerProjectAccess>(),
     };
 
-    private static CallerPrincipal Workforce() => new()
+    /// <summary>A licensed workforce caller: a systemuser with its linked contact (task 141 link).</summary>
+    private static CallerPrincipal WorkforceSystemUser() => new()
     {
         Plane = CallerPrincipalPlane.Workforce,
         ContactId = Guid.NewGuid(),
+        SystemUserId = Guid.NewGuid(),
         Email = "staff@contoso.com",
         ProjectAccess = Array.Empty<CallerProjectAccess>(),
+    };
+
+    /// <summary>A licence-free workforce contact: contact only, no systemuser.</summary>
+    private static CallerPrincipal WorkforceContact() => new()
+    {
+        Plane = CallerPrincipalPlane.Workforce,
+        ContactId = Guid.NewGuid(),
+        SystemUserId = null,
+        Email = "staff@contoso.com",
+        ProjectAccess = Array.Empty<CallerProjectAccess>(),
+    };
+
+    /// <summary>A projected sprk_servicerequest row; sprk_requestedby carries the SDK's EntityReference shape.</summary>
+    private static IReadOnlyDictionary<string, object?> RequestRow(Guid? requestedBy) => new Dictionary<string, object?>
+    {
+        ["@logicalName"] = "sprk_servicerequest",
+        ["sprk_servicerequestid"] = Guid.NewGuid(),
+        ["sprk_requestedby"] = requestedBy is { } id ? new EntityReference("contact", id) : null,
     };
 
     /// <summary>Resolver whose Dataverse read is a fixture — exercises the plane branch + resolution
@@ -188,12 +409,13 @@ public class ModuleEntitlementResolverTests
         private readonly IReadOnlyList<AppRoleModuleMapping> _map;
         public int MapReads { get; private set; }
 
-        public TestResolver(IReadOnlyList<AppRoleModuleMapping> map)
+        public TestResolver(IReadOnlyList<AppRoleModuleMapping> map, bool partnerSwitch = false)
             : base(new HttpClient(),
                    new InMemoryTenantCache(),
                    new ConfigurationBuilder().Build(),
                    new FakeCredential(),
                    new HttpContextAccessor(),
+                   Options.Create(new ExternalAccessOptions { PartnerServiceRequestsEnabled = partnerSwitch }),
                    NullLogger<ModuleEntitlementResolver>.Instance)
         {
             _map = map;

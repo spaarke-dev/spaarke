@@ -17,8 +17,8 @@
  * client is never the enforcement boundary regardless).
  *
  * STATUS(task-073): `fetchMeEntitlements` now calls the REAL BFF endpoint
- * `GET /api/v1/external/me/entitlements` (task 072, Option B: workforce from sprk_approlemodulemap
- * App-Role→module; CIAM blanket outside-counsel set). The BFF derives the plane from the caller's token.
+ * `GET /api/v1/external/me/entitlements` (task 072; A7 / r3 task 011: default modules by
+ * server-resolved principal kind, plus sprk_approlemodulemap extras). The BFF derives the plane from the caller's token.
  *
  * Rollout safety: on ANY failure of the live call, `fetchMeEntitlements` degrades to the plane-derived
  * `MOCK_BY_PLANE` defaults (a console.warn is emitted) so a transient live-auth hiccup never leaves the
