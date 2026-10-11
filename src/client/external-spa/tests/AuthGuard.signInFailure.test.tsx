@@ -13,14 +13,15 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 const h = vi.hoisted(() => ({
   loginRedirect: vi.fn(),
-  callbacks: [] as Array<(event: unknown) => void>,
   inProgress: 'none',
   accounts: [] as unknown[],
+  // The MSAL instance the mounted gate is bound to (`useMsal().instance`); load() sets it.
+  instance: null as unknown,
 }));
 
 vi.mock('@azure/msal-react', () => ({
   useMsal: () => ({
-    instance: { loginRedirect: h.loginRedirect },
+    instance: h.instance,
     accounts: h.accounts,
     inProgress: h.inProgress,
   }),
@@ -35,7 +36,7 @@ const PII = 'jane.doe@contoso.example';
 beforeEach(() => {
   h.loginRedirect.mockReset();
   h.loginRedirect.mockResolvedValue(undefined);
-  h.callbacks.length = 0;
+  h.instance = null;
   h.inProgress = 'none';
   h.accounts = [];
   sessionStorage.clear();
@@ -54,15 +55,24 @@ async function load() {
   const msalAuth = await import('../src/auth/msal-auth');
   const { AuthGuard } = await import('../src/components/AuthGuard');
   msalAuth.setActiveLoginScope(SCOPE);
-  // The bootstrap registers this exact callback before initialize(); capture it the way MSAL would.
-  msalAuth.syncActiveAccountOnInteractiveSignIn({
-    addEventCallback: (cb: (event: unknown) => void) => {
-      h.callbacks.push(cb);
-      return 'cb';
-    },
-    setActiveAccount: () => undefined,
-  } as never);
-  const emit = (event: Record<string, unknown>) => act(() => h.callbacks.forEach(cb => cb(event)));
+  // The bootstrap registers this exact callback before initialize(); capture it the way MSAL would. The same object is
+  // what `useMsal()` hands the gate, as in the app (one MSAL instance per plane).
+  const makeInstance = () => {
+    const callbacks: Array<(event: unknown) => void> = [];
+    const instance = {
+      loginRedirect: h.loginRedirect,
+      addEventCallback: (cb: (event: unknown) => void) => {
+        callbacks.push(cb);
+        return 'cb';
+      },
+      setActiveAccount: () => undefined,
+    };
+    msalAuth.syncActiveAccountOnInteractiveSignIn(instance as never);
+    return { instance, emitOn: (event: Record<string, unknown>) => act(() => callbacks.forEach(cb => cb(event))) };
+  };
+  const first = makeInstance();
+  h.instance = first.instance;
+  const emit = first.emitOn;
   const view = () => (
     <FluentProvider theme={webLightTheme}>
       <MemoryRouter>
@@ -72,7 +82,7 @@ async function load() {
       </MemoryRouter>
     </FluentProvider>
   );
-  return { msal, msalAuth, emit, view };
+  return { msal, msalAuth, emit, view, makeInstance };
 }
 
 function failureEvent(
@@ -242,6 +252,102 @@ describe('Sign-in gate: a failed redirect sign-in', () => {
 
     await waitFor(() => expect(h.loginRedirect).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId('signin-failed')).toBeNull();
+  });
+});
+
+describe('Sign-in gate: the automatic redirect is rejected (no spinner that never ends)', () => {
+  const settle = () =>
+    act(async () => {
+      await new Promise(r => setTimeout(r, 20));
+    });
+
+  it('a network failure starting the redirect shows the failure screen with its retry, and does not retry on its own', async () => {
+    const { view } = await load();
+    h.loginRedirect.mockRejectedValue(
+      Object.assign(new Error(`fetch failed for ${PII}`), { errorCode: 'endpoints_resolution_error' })
+    );
+    render(view());
+
+    expect(await screen.findByTestId('signin-failed')).toBeTruthy();
+    expect(screen.queryByText('Redirecting to sign-in...')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+    await settle();
+    expect(h.loginRedirect).toHaveBeenCalledTimes(1);
+    // Safe code only: the message (which carries an address here) never reaches the DOM.
+    expect(screen.getByTestId('signin-failed-code').textContent).toBe('Error code: endpoints_resolution_error');
+    expect(document.body.textContent).not.toContain(PII);
+  });
+
+  it('interaction_in_progress rejects the start: the failure screen shows and nothing loops', async () => {
+    const { view } = await load();
+    h.loginRedirect.mockRejectedValue(
+      Object.assign(new Error('Interaction is currently in progress.'), { errorCode: 'interaction_in_progress' })
+    );
+    render(view());
+
+    expect(await screen.findByTestId('signin-failed')).toBeTruthy();
+    await settle();
+    expect(h.loginRedirect).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('signin-failed-code').textContent).toBe('Error code: interaction_in_progress');
+
+    // "Try again" is a user gesture: one more attempt, which reports honestly when it cannot start either.
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect((await screen.findByTestId('signin-failed-start-error')).textContent).toMatch(/could not be started/);
+    await settle();
+    expect(h.loginRedirect).toHaveBeenCalledTimes(2);
+  });
+
+  it('a redirect that throws synchronously (e.g. no active backend) shows the failure screen instead of crashing', async () => {
+    const { view } = await load();
+    h.loginRedirect.mockImplementation(() => {
+      throw new Error('No active backend');
+    });
+    render(view());
+
+    expect(await screen.findByTestId('signin-failed')).toBeTruthy();
+    expect(screen.getByTestId('signin-failed-code').textContent).toBe('Error code: unknown_error');
+    await settle();
+    expect(h.loginRedirect).toHaveBeenCalledTimes(1);
+  });
+
+  it('a redirect that starts normally (never resolves, the page navigates away) keeps the spinner', async () => {
+    const { view } = await load();
+    h.loginRedirect.mockReturnValue(new Promise(() => undefined));
+    render(view());
+
+    expect(await screen.findByText('Redirecting to sign-in...')).toBeTruthy();
+    await settle();
+    expect(screen.queryByTestId('signin-failed')).toBeNull();
+    expect(h.loginRedirect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Sign-in gate: a failure is scoped and short-lived', () => {
+  it('a failure recorded for one plane does not block the gate of the other plane', async () => {
+    const { msal, msalAuth, emit, view, makeInstance } = await load();
+    // Plane A (the first instance) failed its redirect sign-in.
+    await emit(failureEvent(msal, msal.EventType.ACQUIRE_TOKEN_FAILURE));
+    expect(msalAuth.getSignInFailure(h.instance as never)).not.toBeNull();
+    // The user is now on plane B, which has its own MSAL instance and no failure.
+    h.instance = makeInstance().instance;
+    expect(msalAuth.getSignInFailure(h.instance as never)).toBeNull();
+    render(view());
+
+    await waitFor(() => expect(h.loginRedirect).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId('signin-failed')).toBeNull();
+  });
+
+  it('a signed-in gate drops a stale failure (e.g. a token redirect that failed for a working session)', async () => {
+    const { msal, msalAuth, emit, view } = await load();
+    await emit(failureEvent(msal, msal.EventType.ACQUIRE_TOKEN_FAILURE));
+    h.accounts = [{ homeAccountId: 'a', tenantId: 't' }];
+    render(view());
+
+    // Authenticated: children render, never the failure screen, and the failure is forgotten.
+    expect(await screen.findByTestId('app')).toBeTruthy();
+    expect(screen.queryByTestId('signin-failed')).toBeNull();
+    await waitFor(() => expect(msalAuth.getSignInFailure()).toBeNull());
+    expect(h.loginRedirect).not.toHaveBeenCalled();
   });
 });
 

@@ -23,10 +23,13 @@ import { Spinner } from '@fluentui/react-components';
 import {
   accountsForActivePlane,
   captureReturnTo,
+  clearSignInFailure,
   consumeReturnTo,
   getActiveLoginScope,
   getSignInFailure,
+  safeSignInErrorCode,
   subscribeSignInFailure,
+  type SignInFailure,
 } from '../auth/msal-auth';
 import { SignInFailed } from './auth/SignInFailed';
 import { isDevMockEnabled } from '../dev-mock';
@@ -77,7 +80,16 @@ const MsalAccountGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const isAuthenticated = inProgress !== InteractionStatus.Startup && accountsForActivePlane(accounts).length > 0;
   const navigate = useNavigate();
   // A redirect sign-in that came back with an error (recorded by the MSAL event callback registered before initialize()).
-  const signInFailure = React.useSyncExternalStore(subscribeSignInFailure, getSignInFailure, getSignInFailure);
+  // Scoped to THIS gate's MSAL instance (= plane): a failure recorded for the other plane is not seen here.
+  const recordedFailure = React.useSyncExternalStore(
+    subscribeSignInFailure,
+    () => getSignInFailure(instance),
+    () => getSignInFailure(instance)
+  );
+  // The automatic redirect itself was rejected (interaction_in_progress, a network failure, no active backend…):
+  // the safe code only, same screen. Kept apart from the recorded one because it also covers a SYNCHRONOUS throw.
+  const [autoStartFailure, setAutoStartFailure] = React.useState<SignInFailure | null>(null);
+  const signInFailure = recordedFailure ?? autoStartFailure;
   const [startError, setStartError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -91,11 +103,28 @@ const MsalAccountGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
       // default (byte-for-byte unchanged), or the workforce scope when the browser realm chooser
       // picked "My organization". A CIAM instance cannot mint a workforce-audience token, so the
       // scope must track the plane the mounted MSAL instance was built for.
-      void instance.loginRedirect({
-        scopes: [getActiveLoginScope()],
-      });
+      // A rejected start (interaction_in_progress, network failure, …) must not leave the spinner up forever: show the
+      // failure screen with its retry. No automatic retry here — that is the loop the failure gate exists to stop.
+      try {
+        void Promise.resolve(
+          instance.loginRedirect({
+            scopes: [getActiveLoginScope()],
+          })
+        ).catch((error: unknown) => setAutoStartFailure(safeSignInErrorCode(error)));
+      } catch (error) {
+        setAutoStartFailure(safeSignInErrorCode(error));
+      }
     }
   }, [isAuthenticated, inProgress, instance, signInFailure]);
+
+  // A signed-in gate holds no failure: a stale one (e.g. from a token redirect that failed for a working session) must
+  // never surface later, and must not suppress a future sign-in.
+  React.useEffect(() => {
+    if (isAuthenticated) {
+      clearSignInFailure();
+      setAutoStartFailure(null);
+    }
+  }, [isAuthenticated]);
 
   // "Try again" on the failure screen: the one place a user gesture starts another redirect.
   const tryAgain = React.useCallback(() => {

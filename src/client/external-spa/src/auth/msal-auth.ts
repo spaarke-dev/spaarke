@@ -156,14 +156,14 @@ export function syncActiveAccountOnInteractiveSignIn(instance: IPublicClientAppl
   instance.addEventCallback((event: EventMessage) => {
     // Same single callback also records a FAILED redirect sign-in (see "Redirect sign-in failure" below).
     if (isRedirectSignInFailure(event)) {
-      setSignInFailure(safeSignInErrorCode(event.error));
+      setSignInFailure(instance, safeSignInErrorCode(event.error));
       return;
     }
     const interactive =
       event.interactionType === InteractionType.Redirect || event.interactionType === InteractionType.Popup;
     const success = event.eventType === EventType.LOGIN_SUCCESS || event.eventType === EventType.ACQUIRE_TOKEN_SUCCESS;
     if (!interactive || !success) return;
-    setSignInFailure(null);
+    clearSignInFailure();
     const account = (event.payload as AuthenticationResult | null)?.account;
     if (account) instance.setActiveAccount(account);
   });
@@ -192,22 +192,34 @@ export interface SignInFailure {
   aadsts: string | null;
 }
 
-let signInFailure: SignInFailure | null = null;
+// The failure belongs to the MSAL instance (= plane) whose redirect response produced it: each plane (CIAM / workforce) has
+// its own instance, and the gate reads the failure for ITS instance only, so a failure on one plane never blocks the other.
+let signInFailureState: { owner: IPublicClientApplication; failure: SignInFailure } | null = null;
 const signInFailureListeners = new Set<() => void>();
 
-function setSignInFailure(next: SignInFailure | null): void {
-  signInFailure = next;
+function setSignInFailure(owner: IPublicClientApplication, failure: SignInFailure): void {
+  signInFailureState = { owner, failure };
   signInFailureListeners.forEach(listener => listener());
 }
 
-/** The recorded failed redirect sign-in, or null. */
-export function getSignInFailure(): SignInFailure | null {
-  return signInFailure;
+/**
+ * The recorded failed redirect sign-in, or null. Pass the MSAL instance the caller is bound to (the gate passes
+ * `useMsal().instance`): a failure recorded for another instance is not returned. The result is referentially stable
+ * until the failure changes (a `useSyncExternalStore` snapshot).
+ */
+export function getSignInFailure(instance?: IPublicClientApplication): SignInFailure | null {
+  if (!signInFailureState) return null;
+  return instance === undefined || signInFailureState.owner === instance ? signInFailureState.failure : null;
 }
 
-/** Forget the failure (before another sign-in attempt, or when the user picks a different sign-in). */
+/**
+ * Forget the failure: on any successful interactive sign-in (the event callback above) and when the gate sees an
+ * authenticated account. A reload also clears it (module state), so a reload is a fresh attempt.
+ */
 export function clearSignInFailure(): void {
-  setSignInFailure(null);
+  if (!signInFailureState) return;
+  signInFailureState = null;
+  signInFailureListeners.forEach(listener => listener());
 }
 
 /** `useSyncExternalStore` subscription. */

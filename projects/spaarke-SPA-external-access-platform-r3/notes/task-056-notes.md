@@ -178,3 +178,26 @@ Two adversarial passes found no F-class defects; the items below were fixed in o
 4. **Accessibility.** Every join state renders a real `h1`. The shared `EmptyState` gained an optional `headingAs` prop (omitted: the unchanged `<span>`; one test pins it). Focus moves to the primary action, or to the heading when there is none, on every state change, and `document.title` follows the heading. The transient "Checking your link" spinner has no heading and only sets the title.
 5. **Teams terminal screen.** `renderJoin` in Teams now also calls the new best-effort wrapper `notifyTeamsSuccess()` (`TeamsHostAdapter.ts`, next to `notifyTeamsAppLoaded` / `notifyTeamsFailureOther`; no wrapper existed for `notifySuccess`).
 6. **Tests that proved less than their titles.** The dark-theme test is renamed to what it checks (a clean dark mount; token colours are covered by the source scan). The hand-off bootstrap test now also asserts the login scope the account gate would request. The wrong-state test now also renders the legitimate state afterwards and expects "start again" (a mismatched return consumes the stored state).
+
+## 10. Re-check after merge
+
+Scope: the 056 review-fix diff (`5757d95dc`) on the merged tree (`7da765f96`, which already contains task 042's removals). Evidence: `tests/AuthGuard.signInFailure.test.tsx` and the new `tests/AuthGuard.craftedUrl.test.ts` (the latter runs the real msal-browser 5.5).
+
+Findings:
+
+- **(a) Cross-plane / later success: one defect, fixed.** The failure was a module-level singleton, so a failure from one plane's MSAL instance was visible to a gate bound to the other instance.
+  - Fix: the failure now records its owning instance, and the gate reads `getSignInFailure(useMsal().instance)`. It is cleared on any successful interactive sign-in (as before) and whenever the gate sees an authenticated account. A reload clears it (module state), so a reload is a fresh attempt.
+  - "Try again" does not clear it, because the click navigates away; if the start fails, the screen stays with its error.
+- **(b) No raw description or PII: holds.** `safeSignInErrorCode` keeps only `^[A-Za-z0-9_]{1,64}$` and `AADSTS\d{3,7}`. Nothing else is stored or logged: there is no `loggerCallback` in `src/`, and the only event callback is the one in `msal-auth.ts`. Real MSAL clears the response hash. The new control test drives a real redirect that returns an error whose description carries an address, and asserts the address is in neither the DOM nor `sessionStorage`.
+- **(c) Normal path: holds.** No account, nothing in progress, no failure: exactly one `loginRedirect` with the active scope (test kept).
+- **(d) Teams: holds.** `AuthGuard` returns its children before the account gate; a test asserts no failure screen and no redirect, even with a recorded failure.
+- **(e) Crafted `#error=...`: harmless, and shown by test.** `StandardController.handleRedirectPromiseInternal` returns null at once unless this tab has an interaction in progress, so a URL someone crafts emits no event and records nothing. The real-MSAL test asserts this, with a positive control that the same hash is honoured after a real `loginRedirect`. Even if forced, the screen only offers a retry.
+- **(f) Token redirect for a signed-in user: no failure screen over a working session.** The gate shows the failure only when there is no account on the plane, and the gate now also drops the recorded failure once authenticated, so a stale one cannot surface later. A test covers it. The loop risk is a separate limit (below).
+
+Hanging spinner (fixed). `MsalAccountGate` called `loginRedirect` with `void` and no `.catch`, so a rejected start (`interaction_in_progress`, network failure) left "Redirecting to sign-in..." up forever, and a synchronous throw (e.g. `BackendSelectionError`) escaped the effect.
+- Fix: the call is wrapped in `try`/`.catch` and sets a local failure from `safeSignInErrorCode(error)`, so the same `SignInFailed` screen shows with its **Try again**. The effect does not fire again while a failure shows, so a rejection never loops.
+- `interaction_in_progress` from the automatic start shows the screen with that code; **Try again** then reports "could not be started" if it is rejected again.
+- In development, React StrictMode's double effect can make the second automatic call reject with `interaction_in_progress` and flash the screen until the first redirect navigates away. Production is not affected.
+- The `ACQUIRE_TOKEN_FAILURE` event for `interaction_in_progress` is still ignored by the event callback (another caller's in-flight redirect is not a sign-in failure).
+
+Remaining known limit. A signed-in user whose token redirect (`acquireStandaloneBffToken` -> `acquireTokenRedirect`, started by `bff-client`) comes back with an error is not stopped by the gate: the app stays up, and the next BFF call starts the same redirect again. A user who keeps declining that re-consent would loop. The fix belongs in `bff-client` / `msal-auth`: remember a failed token redirect for the page load and answer the request with the `signin` access state instead of redirecting. No evidence it is reachable today.
