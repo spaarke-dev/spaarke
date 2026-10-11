@@ -122,7 +122,10 @@ public sealed class BudgetInquiryExecutor(
     private const int NameMax = 850;
 
     private static readonly string[] BaseColumns =
-        ["sprk_name", "sprk_direction", "sprk_regardingmatter", "sprk_regardingrecordid", "sprk_regardingrecordtypelogicalname"];
+        ["sprk_name", "sprk_direction", "sprk_regardingmatter", "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordtypelogicalname"];
+
+    private const string RecordTypeSet = "sprk_recordtype_refs";
+    private const string MatterTable = "sprk_matter";
 
     /// <summary>
     /// Everything that can refuse the inquiry, WITHOUT writing or sending: confirmation, shape, the caller's Create on the
@@ -138,7 +141,11 @@ public sealed class BudgetInquiryExecutor(
         if (Validate(request) is { } invalid)
             return invalid;
 
-        var item = BuildItem(request);
+        var typed = await ResolveMatterTypeAsync(ct).ConfigureAwait(false);
+        if (typed.Refusal is not null)
+            return typed.Refusal;
+
+        var item = BuildItem(request, typed.TypeId);
         var me = await OwnedChildWrite.WhoAmIAsync(user, ct).ConfigureAwait(false);
         if (me.Failure is not null)
             return new(BudgetInquiryOutcome.Refused, Error: me.Failure.ErrorMessage ?? "The calling user could not be identified.");
@@ -179,11 +186,34 @@ public sealed class BudgetInquiryExecutor(
         return null;
     }
 
-    private static DataverseWriteItemMapper.MappedItem BuildItem(BudgetInquiryRequest request)
+    /// <summary>
+    /// The <c>sprk_recordtype_ref</c> catalog row for <c>sprk_matter</c>, read AS THE CALLER (the same read the pair rule makes
+    /// of the type row). A <c>sprk_servicerequest</c> is a core table with no pair agreement column, so the ADR-024 pair
+    /// (<c>sprk_regardingrecordid</c>) is accepted only TYPED (<see cref="OwnedChildWrite.PairTargetAsync"/>); an untyped pair
+    /// is refused 400 Invalid, however the lookup beside it agrees.
+    /// </summary>
+    private async Task<(Guid TypeId, BudgetInquiryResult? Refusal)> ResolveMatterTypeAsync(CancellationToken ct)
+    {
+        var rows = await user.GetAsync(
+            $"{RecordTypeSet}?$select=sprk_recordtype_refid&$filter=sprk_recordlogicalname eq '{MatterTable}' and statecode eq 0&$top=2", ct)
+            .ConfigureAwait(false);
+        if (!rows.IsSuccess)
+            return (Guid.Empty, new(BudgetInquiryOutcome.Refused, Error: rows.ErrorMessage ?? "The matter's record type could not be read."));
+
+        if (rows.Body is { } body && body.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array
+            && value.GetArrayLength() == 1
+            && value[0].TryGetProperty("sprk_recordtype_refid", out var id) && id.TryGetGuid(out var typeId) && typeId != Guid.Empty)
+            return (typeId, null);
+
+        return (Guid.Empty, new(BudgetInquiryOutcome.Refused, Error: "The matter's record type is not cataloged, so the inquiry cannot be filed. It was NOT created."));
+    }
+
+    private static DataverseWriteItemMapper.MappedItem BuildItem(BudgetInquiryRequest request, Guid matterTypeId)
     {
         var lookups = new List<DataverseWriteItemMapper.MappedLookup>
         {
-            new("sprk_regardingmatter", "sprk_matter", "sprk_matters", request.MatterId),
+            new("sprk_regardingmatter", MatterTable, "sprk_matters", request.MatterId),
+            new("sprk_regardingrecordtype", "sprk_recordtype_ref", RecordTypeSet, matterTypeId),
         };
         var columns = BaseColumns.ToList();
         if (request.OutsideFirmId is { } firm)
@@ -192,7 +222,7 @@ public sealed class BudgetInquiryExecutor(
             columns.Add("sprk_regardingorganization");
         }
 
-        return new DataverseWriteItemMapper.MappedItem(BuildBody(request), columns) { Lookups = lookups };
+        return new DataverseWriteItemMapper.MappedItem(BuildBody(request, matterTypeId), columns) { Lookups = lookups };
     }
 
     public async Task<BudgetInquiryResult> ExecuteAsync(BudgetInquiryRequest request, CancellationToken ct)
@@ -200,7 +230,11 @@ public sealed class BudgetInquiryExecutor(
         if (Validate(request) is { } invalid)
             return invalid;
 
-        var item = BuildItem(request);
+        var typed = await ResolveMatterTypeAsync(ct).ConfigureAwait(false);
+        if (typed.Refusal is not null)
+            return typed.Refusal;
+
+        var item = BuildItem(request, typed.TypeId);
 
         OwnedChildWrite.Outcome owned;
         try
@@ -237,7 +271,7 @@ public sealed class BudgetInquiryExecutor(
     }
 
     /// <summary>The service request body. Deliberately has no <c>sprk_responseduedate</c> (D-56) and no disposition.</summary>
-    internal static string BuildBody(BudgetInquiryRequest request)
+    internal static string BuildBody(BudgetInquiryRequest request, Guid matterTypeId)
     {
         var subject = request.Subject.Trim();
         var fields = new Dictionary<string, object>
@@ -246,6 +280,7 @@ public sealed class BudgetInquiryExecutor(
             ["sprk_direction"] = DirectionOutbound,
             ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({request.MatterId:D})",
             ["sprk_regardingrecordid"] = request.MatterId.ToString("D"),
+            ["sprk_RegardingRecordType@odata.bind"] = $"/{RecordTypeSet}({matterTypeId:D})",
             ["sprk_regardingrecordtypelogicalname"] = "sprk_matter",
         };
         if (request.OutsideFirmId is { } firm)
