@@ -38,6 +38,7 @@
     <constraint source="project">Every BFF call this task adds goes through the external plane (/api/v1/external/**) via bffApiCall/bffApiBlob (src/client/external-spa/src/auth/bff-client.ts) and the active token acquirer (acquireActiveBffToken). No call uses a BFF URL or scope taken from a link or query string.</constraint>
     <constraint source="project">Delete is shown only when the row's creator stamp matches the signed-in principal (as returned by the read); the confirmation dialog uses the shared modal system (ADR-050). The server remains the authority: a 403 is shown as an error.</constraint>
     <constraint source="project">No delete action for messages.</constraint>
+    <constraint source="review 031 K3/K4">Use the task 031 routes (/api/v1/external/{projects|matters|workassignments|servicerequests}/{id}/documents) for list/upload/download/versions. Service-request documents are reachable ONLY through the servicerequests route (the documents module ScopeDimensions lack sprk_relatedservicerequest), not the module fetch. Invoice documents depend on the pending owner decision (031) — amend AC 1 when it lands. The upload Location header points at a URL with no GET; do not follow it.</constraint>
   </constraints>
 
   <knowledge>
