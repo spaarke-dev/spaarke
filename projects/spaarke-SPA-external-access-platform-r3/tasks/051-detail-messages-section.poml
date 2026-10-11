@@ -4,7 +4,7 @@
     <title>Messages section in the detail view: read thread + compose/send (FR-04, FR-11 client)</title>
     <phase>5 SPA features</phase>
     <gate>after 050 and 034</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New frontend surface calling new write endpoint (tags frontend)</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -17,6 +17,8 @@
  *   - rollup:   POST /api/v1/external/api/dataverse/fetch on sprk_document / sprk_invoice filtered by this record's
  *               lookup. That is the SAME Tier-2-scoped module read the Documents and Invoices tabs run, so a row shows
  *               here exactly when the tab shows it for this record (FR-02).
+ *   - messages: GET/POST /api/v1/external/{root}/{id}/messages for project, matter, work assignment, invoice and
+ *               service request (`RecordMessages`, task 051; a document has no thread, so no section).
  *   - events/tasks: the existing `EventsCalendar` / `SmartTodo` (read-only: `AccessLevel.ViewOnly` hides create and
  *               toggle) for a Project. Matter and Work Assignment have no external event read yet (task 039 adds
  *               /matters/{id}/events and /workassignments/{id}/events), so their section shows an empty state.
@@ -36,6 +38,7 @@ import { ApiError, AccessLevel } from '../../types';
 import { EventsCalendar } from '../EventsCalendar';
 import { SmartTodo } from '../SmartTodo';
 import { TruncatedListNotice } from '../TruncatedListNotice';
+import { RecordMessages } from './RecordMessages';
 import {
   EMPTY_VALUE,
   RecordDetailFields,
@@ -508,6 +511,8 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
             {cfg.documentsBy && <DocumentsSection parentAttribute={cfg.documentsBy} parentId={id} />}
             {cfg.invoicesBy && <InvoicesSection parentAttribute={cfg.invoicesBy} parentId={id} />}
             {cfg.showsEventsAndTasks && <EventsAndTasksSection entity={cfg.entity} id={id} />}
+            {/* Messages (task 051): the record's thread + compose, for the entities the server has a thread for. */}
+            <RecordMessages entity={cfg.entity} recordId={id} />
           </React.Fragment>
         )}
       </div>

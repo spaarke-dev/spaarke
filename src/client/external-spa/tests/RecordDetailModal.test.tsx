@@ -256,6 +256,7 @@ function installNetwork(): void {
       if (body.entityName === 'sprk_document') return { entities: mocks.documents[key] ?? [], moreRecords: false };
       if (body.entityName === 'sprk_invoice') return { entities: mocks.invoices[key] ?? [], moreRecords: false };
     }
+    if (/\/messages$/.test(path)) return { value: [] };
     if (/\/projects\/[^/]+\/events$/.test(path)) return { value: mocks.events };
     if (/\/projects\/[^/]+\/todos$/.test(path)) return { value: mocks.todos };
     throw new Error(`unexpected BFF call ${options?.method ?? 'GET'} ${path}`);
@@ -276,6 +277,7 @@ function installDetailRead(entity: string, read: (id: string) => Record<string, 
       const { '@formattedValues': _dropped, ...unformatted } = read(rec[2]) ?? {};
       return unformatted;
     }
+    if (path.endsWith('/messages')) return { value: [] };
     if (!path.endsWith('/api/dataverse/fetch')) throw new Error(`unexpected ${path}`);
     const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
     const detail = detailReadOf(body);
@@ -333,9 +335,12 @@ describe.each(CASES)('$label grid', c => {
     await waitFor(() => expect(titleOf(dialog)).toBe(c.title));
     expect(within(dialog).getByTestId(c.fieldTestId).textContent).toBe(c.fieldValue);
 
-    // Read-only: no input of any kind in the modal.
-    expect(within(dialog).queryAllByRole('textbox')).toHaveLength(0);
-    expect(dialog.querySelectorAll('input, textarea, select')).toHaveLength(0);
+    // Read-only: no input of any kind in the record itself. The one input in the modal is the Messages compose box
+    // (task 051: posting to the thread is not editing the record), so it is the only thing excluded from the scan.
+    const outsideMessages = (selector: string): Element[] =>
+      Array.from(dialog.querySelectorAll(selector)).filter(el => !el.closest('[data-testid="record-detail-messages"]'));
+    expect(outsideMessages('input, textarea, select, [role="textbox"]')).toHaveLength(0);
+    expect(dialog.querySelectorAll('input[type="file"]')).toHaveLength(0);
 
     // In-app: no Xrm navigation and no new window — so it works the same in the browser host and the Teams host.
     expect(open).not.toHaveBeenCalled();
@@ -421,6 +426,7 @@ describe('browsing', () => {
 
     // The record read followed the paging: 202 (open), 203, 202 again, 201.
     const readIds = bffApiCall.mock.calls
+      .filter(call => String(call[0]).endsWith('/api/dataverse/fetch'))
       .map(call => JSON.parse(String((call[1] as RequestInit).body)) as { entityName: string; fetchXml: string })
       .filter(b => b.entityName === 'sprk_matter')
       .map(b => conditionOf(b.fetchXml).value);
@@ -593,9 +599,44 @@ describe('sections', () => {
     }
   );
 
+  it.each(['sprk_project', 'sprk_matter', 'sprk_workassignment', 'sprk_invoice', 'sprk_servicerequest'])(
+    '%s: shows the Messages section, read from that record thread on the external plane (task 051)',
+    async entity => {
+      const c = caseOf(entity);
+      renderWidget(c.Body);
+      fireEvent.click(gridRow(c, 1));
+      const dialog = await screen.findByRole('dialog');
+      await within(dialog).findByTestId('record-detail-messages');
+      await within(dialog).findByTestId('record-messages-empty');
+
+      const roots: Record<string, string> = {
+        sprk_project: 'projects',
+        sprk_matter: 'matters',
+        sprk_workassignment: 'workassignments',
+        sprk_invoice: 'invoices',
+        sprk_servicerequest: 'servicerequests',
+      };
+      const root = roots[entity];
+      const calls = bffApiCall.mock.calls.map(call => String(call[0]));
+      expect(calls).toContain(`/api/v1/external/${root}/${c.rowIds[0]}/messages`);
+    }
+  );
+
+  it('sprk_document: no Messages section and no thread read (a document has no thread)', async () => {
+    const c = caseOf('sprk_document');
+    renderWidget(c.Body);
+    fireEvent.click(gridRow(c, 1));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByTestId('record-detail-fields');
+
+    expect(within(dialog).queryByTestId('record-detail-messages')).toBeNull();
+    expect(bffApiCall.mock.calls.some(call => String(call[0]).endsWith('/messages'))).toBe(false);
+  });
+
   it('says a rollup was cut short instead of presenting it as complete', async () => {
     const c = caseOf('sprk_matter');
-    bffApiCall.mockImplementation(async (_path: string, options?: RequestInit) => {
+    bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path.endsWith('/messages')) return { value: [] };
       const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
       if (detailReadOf(body))
         return { entities: [{ sprk_matterid: guid(201), sprk_mattername: 'M' }], moreRecords: false };
@@ -612,7 +653,8 @@ describe('sections', () => {
 
   it('says a rollup failed instead of showing an empty list', async () => {
     const c = caseOf('sprk_matter');
-    bffApiCall.mockImplementation(async (_path: string, options?: RequestInit) => {
+    bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path.endsWith('/messages')) return { value: [] };
       const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
       if (detailReadOf(body))
         return { entities: [{ sprk_matterid: guid(201), sprk_mattername: 'M' }], moreRecords: false };

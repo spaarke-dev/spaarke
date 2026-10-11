@@ -21,7 +21,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 033 | External message read endpoint (FR-04) | P3 | ✅ [done] | 011 | O/h | FULL | Wave 3 |
 | 034 | External message send endpoint (FR-11) | P3 | 🔄 [wip] | 030, 033 | O/h | FULL | Wave 4 |
 | 035 | Intake submit endpoint (FR-05, FR-06) | P3 | 🔲 [open] | 011, 020, 033 | O/h | FULL | Wave 5 |
-| 036 | Email on subsequent grant + message notify (FR-07) | P3 | 🔲 [open] | 034 (UAC-r2 PR #1583 merged 2026-10-10, in branch) | S/h | FULL | Wave 5 |
+| 036 | Email on subsequent grant + message notify (FR-07) | P3 | 🔄 [wip] | 034 (UAC-r2 PR #1583 merged 2026-10-10, in branch) | S/h | FULL | Wave 5 |
 | 037 | Notification feed + last-seen (FR-08) | P3 | 🔲 [open] | 034, 035 | O/h | FULL | Wave 6 |
 | 038 | Deploy R3 BFF to dev + live probes | P3 | 🔲 [open] | 010, 011, 012, 032, 035, 036, 037, 039 + **020 columns live in dev first** (task 030 stamps sprk_createdbycontact; without it a contact create returns 400, after the upload bytes are already in SPE; tasks 033/034: the external message read selects _sprk_createdbycontact_value, so GET messages returns 500 and a contact POST fails until the column exists) | S/h | STANDARD | — (live deploy, owner-gated) |
 | 039 | Event reads for Matter and Work Assignment (FR-03 server) | P3 | 🔲 [open] | 032, 037 | S/h | FULL | Wave 7 |
@@ -30,7 +30,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 042 | Out-of-plane pages + no production mock (FR-18) | P4 | 🔄 [wip] | 041 | O/h | FULL | Wave 4 |
 | 043 | Production build + Teams package in CI (FR-20) | P4 | 🔄 [wip] code done, awaiting owner GitHub environments + prod Teams app id | 040 | S/h | STANDARD | Wave 3 |
 | 050 | Record detail view: fields, docs/invoices, events/tasks (FR-01–03) | P5 | ✅ [done] | none | S/h | FULL | Wave 1 |
-| 051 | Detail messages section: read + send (FR-04/FR-11 client) | P5 | 🔲 [open] | 050, 034 | S/h | FULL | Wave 5 |
+| 051 | Detail messages section: read + send (FR-04/FR-11 client) | P5 | 🔄 [wip] | 050, 034 | S/h | FULL | Wave 5 |
 | 052 | Intake wizards: wiring + NDA + Policy Question (FR-05) | P5 | 🔲 [open] | 035 | S/h | FULL | Wave 6 |
 | 053 | Intake wizards: Invention + Trademark (FR-05) | P5 | 🔲 [open] | 052 | S/h | FULL | Wave 7 |
 | 054 | Detail documents + delete-own actions (FR-24/FR-26 client) | P5 | 🔲 [open] | 051, 032 | S/h | FULL | Wave 6 |

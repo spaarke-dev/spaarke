@@ -22,6 +22,7 @@ import { ProjectPage } from './pages/ProjectPage';
 import { PlaybookLibraryPage } from './pages/PlaybookLibraryPage';
 import { DocumentUploadPage } from './pages/DocumentUploadPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { TeamsHostProvider } from './components/auth/TeamsHostContext';
 import type { PortalUser } from './types';
 
 const useStyles = makeStyles({
@@ -234,17 +235,19 @@ export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) =>
 
   return (
     <DataGridExternalHostProvider>
-      <FluentProvider theme={theme} style={{ height: '100%' }}>
-        <BrowserRouter>
-          <AppShell
-            isDark={isDark}
-            onToggleDark={handleToggleDark}
-            portalUser={portalUser}
-            teamsHost={teamsHost}
-            onSignOut={handleSignOut}
-          />
-        </BrowserRouter>
-      </FluentProvider>
+      <TeamsHostProvider teamsHost={teamsHost}>
+        <FluentProvider theme={theme} style={{ height: '100%' }}>
+          <BrowserRouter>
+            <AppShell
+              isDark={isDark}
+              onToggleDark={handleToggleDark}
+              portalUser={portalUser}
+              teamsHost={teamsHost}
+              onSignOut={handleSignOut}
+            />
+          </BrowserRouter>
+        </FluentProvider>
+      </TeamsHostProvider>
     </DataGridExternalHostProvider>
   );
 };

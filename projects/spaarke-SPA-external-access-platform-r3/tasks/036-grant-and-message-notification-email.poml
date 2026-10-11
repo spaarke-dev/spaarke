@@ -4,7 +4,7 @@
     <title>Email on subsequent grant + member notify on message send (FR-07, C6 notify)</title>
     <phase>3 BFF features</phase>
     <gate>after UAC-r2 PR #1583 merges and after 034</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF change on the grant write path (tags bff-api)</rigor-reason>
     <model-tier>sonnet</model-tier>

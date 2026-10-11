@@ -18,6 +18,7 @@ import { Button, MessageBar, MessageBarActions, MessageBarBody, MessageBarTitle 
 import { useMsal } from '@azure/msal-react';
 import { TeamsWorkforceAuthError, captureReturnTo, getActiveLoginScope } from '../../auth/msal-auth';
 import { ApiError } from '../../types';
+import { useTeamsHost } from './TeamsHostContext';
 
 /** The two refusals a page renders as a state of its own. */
 export type BffAccessFailure = 'signin' | 'denied';
@@ -39,14 +40,20 @@ const SIGN_IN_UNAVAILABLE =
 
 export interface BffAccessStateProps {
   failure: BffAccessFailure;
-  /** True inside the Teams host: sign-in again reloads the tab instead of redirecting. */
+  /**
+   * True inside the Teams host: sign-in again reloads the tab instead of redirecting. Optional OVERRIDE: when omitted,
+   * the host `App` provides through `TeamsHostProvider` applies (false when there is no provider).
+   */
   teamsHost?: boolean;
   /** Denied-state sentence naming what the caller cannot do (defaults to a generic one). */
   deniedMessage?: string;
 }
 
-export const BffAccessState: React.FC<BffAccessStateProps> = ({ failure, teamsHost = false, deniedMessage }) => {
+export const BffAccessState: React.FC<BffAccessStateProps> = ({ failure, teamsHost: teamsHostProp, deniedMessage }) => {
   const { instance } = useMsal();
+  const hostFromContext = useTeamsHost();
+  // An explicit prop wins; otherwise the host App provided; otherwise the browser (redirect) behaviour.
+  const teamsHost = teamsHostProp ?? hostFromContext ?? false;
 
   // Set when the sign-in could not be started (e.g. getActiveLoginScope() throws BackendSelectionError: no active
   // backend), so the button never does nothing.
