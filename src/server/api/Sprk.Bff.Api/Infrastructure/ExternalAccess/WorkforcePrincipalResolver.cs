@@ -6,15 +6,20 @@
 // PRINCIPAL — a systemuser (→ ADR-034 membership) or, for a non-systemuser, a contact
 // (→ contact-anchored membership) — else be DENIED.
 //
+//   (0) NOT a user token      : an app-only (or unclassifiable) token is denied before ANY lookup — its oid can be a
+//                               Dataverse application user's systemuser, which must never resolve as a person.
 //   (a) AAD oid → systemuser  : MembershipEndpoints.ResolveSystemUserIdAsync (existing; ADR-028), then the
 //                               systemuser's contact from IIdentityNormalizationService (its sprk_primarycontact
 //                               link, else the contact bound to its oid). A licensed user with NO linked contact
 //                               is linked INLINE here (ContactIdentityBinder, task 141) and the new link takes
 //                               effect on this request — the cached identity is invalidated. The inline link is
 //                               gated on the job's rollout switch (IdentityLink:Reconciliation:WritesEnabled).
+//                               A DISABLED systemuser (R3 task 012 review) is denied here and never reaches (b).
 //   (b) AAD oid → contact     : ContactIdentityBinder.ResolveWorkforceCallerAsync — the contact BOUND to the
 //                               caller's oid (contact.sprk_externalobjectid). A first sign-in by a MEMBER of a
-//                               configured customer workforce tenant (acct = 0) may bind by email (exactly one
+//                               configured customer workforce tenant (acct = 0) — or a registered workforce-contact
+//                               guest (R3 FR-15: acct = 1, tid = AzureAd:TenantId, idp home tenant on the customer
+//                               list) — may bind by email (exactly one
 //                               active, unbound match) or create a contact keyed by the oid. Everyone else
 //                               resolves only through an existing oid binding. Collisions are refused AND flagged.
 //   (c) neither                : explicit DENY with the binding decision's own deny code — never a silent fallback
@@ -25,6 +30,8 @@
 // call Microsoft Graph with the caller token.
 
 using System.Security.Claims;
+using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Api.Membership;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Membership;
@@ -60,6 +67,19 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
     // Deny codes (auth.md format: {domain}.{area}.{action}.{reason}).
     internal const string DenyMissingIdentityClaims = "sdap.access.deny.missing_identity_claims";
     internal const string DenyPrincipalNotResolved = "sdap.access.deny.principal_not_resolved";
+
+    /// <summary>
+    /// The oid names a systemuser that is DISABLED. Such a user is "no longer a valid principal"
+    /// (<c>MembershipEndpoints.ResolveSystemUserIdAsync</c>), so it must not fall through to the contact branch,
+    /// where a registered-guest (FR-15) or member token would otherwise be admitted as a contact.
+    /// </summary>
+    internal const string DenySystemUserDisabled = "sdap.access.deny.systemuser_disabled";
+
+    /// <summary>
+    /// The stamp's own tenant (the workforce JwtBearer scheme's tenant): a registered workforce-contact guest's
+    /// <c>tid</c> must equal it (R3 FR-15). Absent or unparseable = the guest branch never applies.
+    /// </summary>
+    internal const string StampTenantConfigKey = "AzureAd:TenantId";
 
     /// <summary>
     /// Cache resource for the "a link was attempted and could not be made" marker. Cached DATA, not an
@@ -120,6 +140,20 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
         var tenantId = MembershipEndpoints.ExtractTenantId(user);
         var callerOid = oid.Value;
 
+        // ── (0) user tokens only. An app-only token's oid is its service principal's — for a Dataverse application
+        //    user that is a systemuser row, which branch (a) would resolve as a person. The member test would refuse
+        //    it later, but only on branch (b); refuse it here, before any lookup (R3 task 011 review K1).
+        var callerKind = CallerIdentity.FromPrincipal(user).Kind;
+        if (callerKind != CallerKind.UserDelegated)
+        {
+            _logger.LogWarning(
+                "[WF-AUTH] Workforce caller is not a user-delegated token (kind: {Kind}) — denying ({DenyCode})",
+                callerKind, WorkforceMembershipTest.DenyNotUserToken);
+            LogGuestCandidateDeny(user, WorkforceMembershipTest.DenyNotUserToken);
+            return WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, WorkforceMembershipTest.DenyNotUserToken);
+        }
+
         // ── (a) systemuser branch — AAD oid → systemuser (existing conversion) ──
         var systemUserId = await MembershipEndpoints.ResolveSystemUserIdAsync(
                 callerOid, tenantId, _dataverse, _cache, _logger, ct)
@@ -169,11 +203,50 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
                 contactUnreadable: contactUnreadable);
         }
 
+        // ── (a-disabled) a DISABLED systemuser is not a valid principal — it must not fall through to (b) ──
+        // The lookup above filters isdisabled = false, so a disabled licensed user (including a licensed B2B guest
+        // whose home tenant FR-15 would now admit as a registered guest) arrives here as "no systemuser". Without
+        // this check the binder would admit the same token as a Member and hand it a contact. One extra query,
+        // only on this path. This also closes the pre-existing Model-2 analogue: a disabled systemuser carrying an
+        // acct = 0 member token fell through the same way.
+        bool hasSystemUserRow;
+        try
+        {
+            hasSystemUserRow = await SystemUserRowExistsAsync(callerOid, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Cannot rule a disabled systemuser out → fail closed, auditable (not an unhandled 500).
+            _logger.LogError(ex,
+                "[WF-AUTH] Systemuser existence check threw for workforce caller oid={CallerOid} — denying ({DenyCode})",
+                callerOid, DenyPrincipalNotResolved);
+            LogGuestCandidateDeny(user, DenyPrincipalNotResolved);
+            return WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, DenyPrincipalNotResolved);
+        }
+
+        if (hasSystemUserRow)
+        {
+            _logger.LogWarning(
+                "[WF-AUTH] Workforce caller oid={CallerOid} maps to a DISABLED systemuser — denying ({DenyCode})",
+                callerOid, DenySystemUserDisabled);
+            LogGuestCandidateDeny(user, DenySystemUserDisabled);
+            return WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, DenySystemUserDisabled);
+        }
+
         // ── (b) contact-only branch — the oid binding (task 141) ──
         ContactBindingResult binding;
         try
         {
-            binding = await _binder.ResolveWorkforceCallerAsync(user, callerOid, ct).ConfigureAwait(false);
+            // The stamp tenant comes from this deployment's own configuration, never from the token (R3 FR-15).
+            binding = await _binder.ResolveWorkforceCallerAsync(
+                    user, callerOid, _configuration[StampTenantConfigKey], ct)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -189,15 +262,18 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
             _logger.LogError(ex,
                 "[WF-AUTH] Contact binding threw for workforce caller oid={CallerOid} — denying ({DenyCode})",
                 callerOid, DenyPrincipalNotResolved);
+            LogGuestCandidateDeny(user, DenyPrincipalNotResolved);
             return WorkforcePrincipalResolution.Denied(
                 WorkforceDenyReason.PrincipalNotResolved, DenyPrincipalNotResolved);
         }
 
         if (binding.IsResolved)
         {
+            // A registered guest (FR-15) is told from a home-tenant member by its parsed home tenant.
             _logger.LogInformation(
-                "[WF-AUTH] Resolved workforce caller oid={CallerOid} to contact-only principal {ContactId} via {Action}",
-                callerOid, binding.ContactId, binding.Action);
+                "[WF-AUTH] Resolved workforce caller oid={CallerOid} to contact-only principal {ContactId} via {Action} " +
+                "(homeTenant: {HomeTenant})",
+                callerOid, binding.ContactId, binding.Action, GuestHomeTenantForLog(user));
             return WorkforcePrincipalResolution.ForContact(binding.ContactId!.Value, callerOid.ToString("D"), tenantId);
         }
 
@@ -205,8 +281,67 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
         _logger.LogWarning(
             "[WF-AUTH] Workforce caller oid={CallerOid} matched neither a systemuser nor a bound contact — denying ({DenyCode})",
             callerOid, binding.DenyCode);
+        LogGuestCandidateDeny(user, binding.DenyCode ?? DenyPrincipalNotResolved);
         return WorkforcePrincipalResolution.Denied(
             WorkforceDenyReason.PrincipalNotResolved, binding.DenyCode ?? DenyPrincipalNotResolved);
+    }
+
+    /// <summary>
+    /// Does ANY systemuser row carry this oid, regardless of <c>isdisabled</c>? Asked only after the enabled-only
+    /// lookup found none, so a row here is a disabled user (or a user enabled in the instant between the two
+    /// reads — which fails closed too). Same query shape as <c>MembershipEndpoints.ResolveSystemUserIdAsync</c>
+    /// minus its <c>isdisabled = false</c> condition. Not cached: it runs only on the contact path, and a stale
+    /// "disabled" must never outlive a re-enable by a cache TTL.
+    /// </summary>
+    private async Task<bool> SystemUserRowExistsAsync(Guid aadObjectId, CancellationToken ct)
+    {
+        var query = new QueryExpression("systemuser")
+        {
+            ColumnSet = new ColumnSet("systemuserid", "isdisabled"),
+            TopCount = 1,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition("azureactivedirectoryobjectid", ConditionOperator.Equal, aadObjectId);
+
+        var results = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return results.Entities.Count > 0;
+    }
+
+    /// <summary>The home tenant parsed from <c>idp</c>, for a guest only; otherwise a fixed placeholder (never a raw claim).</summary>
+    private static string GuestHomeTenantForLog(ClaimsPrincipal user)
+    {
+        var claims = WorkforceCallerClaims.From(user);
+        if (claims.Acct?.Trim() != "1")
+        {
+            return "n/a";
+        }
+
+        return WorkforceMembershipTest.TryParseHomeTenant(claims.Idp, out var home) ? home.ToString("D") : "unparsed";
+    }
+
+    /// <summary>
+    /// One warning on every <c>acct = 1</c> deny in this resolver (R3 task 012 review): the deny reason, whether the
+    /// stamp tenant parsed, and — only when <c>idp</c> parsed — its issuer host and home-tenant GUID. No other claim
+    /// values and no tokens are written. This is the line an operator reads when a guest "cannot get in".
+    /// </summary>
+    private void LogGuestCandidateDeny(ClaimsPrincipal user, string denyCode)
+    {
+        var claims = WorkforceCallerClaims.From(user);
+        if (claims.Acct?.Trim() != "1")
+        {
+            return;
+        }
+
+        var stampParsed = Guid.TryParse(_configuration[StampTenantConfigKey]?.Trim(), out var stamp) && stamp != Guid.Empty;
+        var idpParsed = WorkforceMembershipTest.TryParseHomeTenant(claims.Idp, out var home);
+        var idpHost = !idpParsed
+            ? "unparsed"
+            : Uri.TryCreate(claims.Idp, UriKind.Absolute, out var uri) ? uri.Host : "bare-guid";
+
+        _logger.LogWarning(
+            "[WF-AUTH] Guest (acct=1) workforce caller denied ({DenyCode}): stampTenantParsed={StampTenantParsed}, " +
+            "idpHost={IdpHost}, idpHomeTenant={IdpHomeTenant}",
+            denyCode, stampParsed, idpHost, idpParsed ? home.ToString("D") : "unparsed");
     }
 
     /// <summary>
