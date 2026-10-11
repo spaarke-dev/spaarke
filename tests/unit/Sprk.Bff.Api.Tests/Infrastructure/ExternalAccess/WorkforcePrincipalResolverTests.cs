@@ -373,27 +373,32 @@ public class WorkforcePrincipalResolverTests
     private const string Stamp = "22222222-bbbb-4bbb-8bbb-222222222222";
 
     /// <summary>
-    /// Dataverse as it behaves for a DISABLED systemuser: the enabled-only lookup (<c>isdisabled = false</c>) finds
-    /// nothing, but a lookup without that condition finds the row.
+    /// Dataverse as it behaves for a DISABLED systemuser: the one lookup by oid returns the row with
+    /// <c>isdisabled = true</c>.
     /// </summary>
     private static Mock<IDataverseService> DisabledSystemUserDataverse(Guid oid)
+        => SystemUserRowsDataverse(oid, (TestSystemUserId, true));
+
+    /// <summary>Dataverse returning exactly the supplied systemuser rows (id, isdisabled) for the oid lookup.</summary>
+    private static Mock<IDataverseService> SystemUserRowsDataverse(Guid oid, params (Guid Id, bool Disabled)[] rows)
     {
         var dataverse = new Mock<IDataverseService>();
         dataverse
             .Setup(x => x.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((QueryExpression q, CancellationToken _) =>
             {
-                var rows = new EntityCollection();
-                var enabledOnly = q.Criteria.Conditions.Any(c =>
-                    c.AttributeName == "isdisabled" && c.Values.Count == 1 && Equals(c.Values[0], false));
+                var result = new EntityCollection();
                 var byOid = q.Criteria.Conditions.Any(c =>
                     c.AttributeName == "azureactivedirectoryobjectid" && c.Values.Count == 1 && Equals(c.Values[0], oid));
-                if (q.EntityName == "systemuser" && byOid && !enabledOnly)
+                if (q.EntityName == "systemuser" && byOid)
                 {
-                    rows.Entities.Add(new Entity("systemuser") { Id = TestSystemUserId });
+                    foreach (var (id, disabled) in rows.Take(q.TopCount ?? int.MaxValue))
+                    {
+                        result.Entities.Add(new Entity("systemuser") { Id = id, ["isdisabled"] = disabled });
+                    }
                 }
 
-                return rows;
+                return result;
             });
         return dataverse;
     }
@@ -422,12 +427,11 @@ public class WorkforcePrincipalResolverTests
     }
 
     [Fact]
-    public async Task ResolveAsync_SystemUserExistenceCheckThrows_DeniesFailClosed()
+    public async Task ResolveAsync_SystemUserLookupThrows_DeniesFailClosed()
     {
         var dataverse = new Mock<IDataverseService>();
         dataverse
-            .SetupSequence(x => x.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection())
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("dataverse down"));
 
         var result = await CreateSut(dataverse.Object, new Mock<IIdentityNormalizationService>().Object)
@@ -436,6 +440,96 @@ public class WorkforcePrincipalResolverTests
 
         AssertDeniedWithNoWrites(result, WorkforcePrincipalResolver.DenyPrincipalNotResolved);
         _store.Reads.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_LookupCancelled_PropagatesAndIsNotADeny()
+    {
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException());
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var act = () => CreateSut(dataverse.Object, new Mock<IIdentityNormalizationService>().Object)
+            .ResolveAsync(BuildUser(TestOid, CustomerTenant, email: TestEmail), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ContactOnlyCaller_IssuesExactlyOneSystemUserQueryPerUncachedResolve()
+    {
+        // R3 task 012 re-check K2: the enabled-only lookup plus a separate existence check cost a contact-only
+        // caller two uncached systemuser reads per request. One query by oid (no isdisabled filter) answers both.
+        _store.AddContact(TestContactId, oid: TestOid.ToString("D"), plane: IdentityPlaneMarker.Workforce);
+        var dataverse = new Mock<IDataverseService>();
+        var queries = new List<QueryExpression>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback((QueryExpression q, CancellationToken _) => queries.Add(q))
+            .ReturnsAsync(new EntityCollection());
+        var sut = CreateSut(dataverse.Object, new Mock<IIdentityNormalizationService>().Object);
+        var user = BuildUser(TestOid, CustomerTenant, email: TestEmail, acct: "0");
+
+        var first = await sut.ResolveAsync(user, CancellationToken.None);
+        first.IsResolved.Should().BeTrue("the oid-bound contact resolves through the binder");
+        first.Principal!.Kind.Should().Be(WorkforcePrincipalKind.ContactOnly);
+        queries.Should().ContainSingle(q => q.EntityName == "systemuser");
+
+        queries.Clear();
+        await sut.ResolveAsync(user, CancellationToken.None);
+        queries.Should().ContainSingle(q => q.EntityName == "systemuser",
+            "a null result is never cached, so each uncached resolve is exactly one read - not two");
+        queries[0].Criteria.Conditions.Should().NotContain(c => c.AttributeName == "isdisabled",
+            "the one query must see disabled rows too");
+        queries[0].ColumnSet.Columns.Should().Contain("isdisabled");
+        queries[0].NoLock.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_EnabledAndDisabledDuplicateRows_ResolvesTheEnabledOne_InEitherRowOrder()
+    {
+        var enabledId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var disabledId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        foreach (var rows in new[]
+                 {
+                     new[] { (disabledId, true), (enabledId, false) },
+                     new[] { (enabledId, false), (disabledId, true) },
+                 })
+        {
+            var dataverse = SystemUserRowsDataverse(TestOid, rows);
+            var identity = new Mock<IIdentityNormalizationService>();
+            identity
+                .Setup(x => x.ResolveAsync(enabledId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PersonIdentity(enabledId, ContactId: TestContactId));
+
+            var result = await CreateSut(dataverse.Object, identity.Object)
+                .ResolveAsync(BuildUser(TestOid, CustomerTenant, email: TestEmail), CancellationToken.None);
+
+            result.IsResolved.Should().BeTrue();
+            result.Principal!.Kind.Should().Be(WorkforcePrincipalKind.SystemUser);
+            result.Principal.SystemUserId.Should().Be(enabledId, "an enabled row wins over a disabled duplicate");
+            _store.Reads.Should().BeEmpty("a systemuser never reaches the contact binder");
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_OnlyDisabledRows_DeniesSystemUserDisabledAndNeverCallsTheBinder()
+    {
+        var dataverse = SystemUserRowsDataverse(
+            GuestOid,
+            (Guid.Parse("33333333-3333-3333-3333-333333333333"), true),
+            (Guid.Parse("44444444-4444-4444-4444-444444444444"), true));
+
+        var result = await CreateSut(dataverse.Object, new Mock<IIdentityNormalizationService>().Object)
+            .ResolveAsync(BuildUser(GuestOid, CustomerTenant, email: GuestEmail, acct: "0"), CancellationToken.None);
+
+        AssertDeniedWithNoWrites(result, WorkforcePrincipalResolver.DenySystemUserDisabled);
+        _store.Reads.Should().BeEmpty("the binder is never called when only disabled rows exist");
+        dataverse.Verify(
+            x => x.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -683,7 +777,7 @@ public class WorkforcePrincipalResolverTests
         var collection = new EntityCollection();
         if (systemUserId is { } suid)
         {
-            collection.Entities.Add(new Entity("systemuser") { Id = suid });
+            collection.Entities.Add(new Entity("systemuser") { Id = suid, ["isdisabled"] = false });
         }
 
         dataverse

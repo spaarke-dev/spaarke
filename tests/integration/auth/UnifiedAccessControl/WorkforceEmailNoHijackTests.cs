@@ -598,7 +598,7 @@ public class WorkforceEmailNoHijackTests
             .ReturnsAsync(() =>
             {
                 var c = new EntityCollection();
-                if (systemUserId is { } id) c.Entities.Add(new Entity("systemuser") { Id = id });
+                if (systemUserId is { } id) c.Entities.Add(new Entity("systemuser") { Id = id, ["isdisabled"] = false });
                 return c;
             });
 

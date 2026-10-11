@@ -8,7 +8,8 @@
 //
 //   (0) NOT a user token      : an app-only (or unclassifiable) token is denied before ANY lookup — its oid can be a
 //                               Dataverse application user's systemuser, which must never resolve as a person.
-//   (a) AAD oid → systemuser  : MembershipEndpoints.ResolveSystemUserIdAsync (existing; ADR-028), then the
+//   (a) AAD oid → systemuser  : ResolveSystemUserAsync (one read; same query and cache entry as ADR-028's
+//                               MembershipEndpoints.ResolveSystemUserIdAsync, plus isdisabled), then the
 //                               systemuser's contact from IIdentityNormalizationService (its sprk_primarycontact
 //                               link, else the contact bound to its oid). A licensed user with NO linked contact
 //                               is linked INLINE here (ContactIdentityBinder, task 141) and the new link takes
@@ -70,7 +71,7 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
 
     /// <summary>
     /// The oid names a systemuser that is DISABLED. Such a user is "no longer a valid principal"
-    /// (<c>MembershipEndpoints.ResolveSystemUserIdAsync</c>), so it must not fall through to the contact branch,
+    /// (as in <c>MembershipEndpoints.ResolveSystemUserIdAsync</c>), so it must not fall through to the contact branch,
     /// where a registered-guest (FR-15) or member token would otherwise be admitted as a contact.
     /// </summary>
     internal const string DenySystemUserDisabled = "sdap.access.deny.systemuser_disabled";
@@ -143,6 +144,10 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
         // ── (0) user tokens only. An app-only token's oid is its service principal's — for a Dataverse application
         //    user that is a systemuser row, which branch (a) would resolve as a person. The member test would refuse
         //    it later, but only on branch (b); refuse it here, before any lookup (R3 task 011 review K1).
+        // The deny code (WorkforceMembershipTest.DenyNotUserToken, "...workforce_app_only_token") is returned for every
+        // non-UserDelegated kind - Application AND Indeterminate (a user-shaped token with no positive idtyp/scp
+        // evidence). It is a documented, shared member-test code (task-141 notes), not an assertion that the token
+        // is app-only; the log line below carries the actual kind.
         var callerKind = CallerIdentity.FromPrincipal(user).Kind;
         if (callerKind != CallerKind.UserDelegated)
         {
@@ -154,13 +159,32 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
                 WorkforceDenyReason.PrincipalNotResolved, WorkforceMembershipTest.DenyNotUserToken);
         }
 
-        // ── (a) systemuser branch — AAD oid → systemuser (existing conversion) ──
-        var systemUserId = await MembershipEndpoints.ResolveSystemUserIdAsync(
-                callerOid, tenantId, _dataverse, _cache, _logger, ct)
-            .ConfigureAwait(false);
-
-        if (systemUserId is { } suid && suid != Guid.Empty)
+        // ── (a) systemuser branch — AAD oid → systemuser. ONE uncached read answers all three cases (enabled /
+        //    disabled-only / none); see ResolveSystemUserAsync. A throw fails closed, auditable (not an unhandled 500).
+        SystemUserLookup lookup;
+        try
         {
+            lookup = await ResolveSystemUserAsync(callerOid, tenantId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Cannot rule a disabled systemuser out → fail closed.
+            _logger.LogError(ex,
+                "[WF-AUTH] Systemuser lookup threw for workforce caller oid={CallerOid} — denying ({DenyCode})",
+                callerOid, DenyPrincipalNotResolved);
+            LogGuestCandidateDeny(user, DenyPrincipalNotResolved);
+            return WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, DenyPrincipalNotResolved);
+        }
+
+        if (lookup.Kind == SystemUserLookupKind.Enabled)
+        {
+            var suid = lookup.Id;
+
             // ContactId MAY be null (a systemuser with no linked contact) — that is still a valid systemuser
             // principal; its accessible set comes from ADR-034 membership regardless (task 021/022).
             Guid? derivedContactId = null;
@@ -204,32 +228,10 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
         }
 
         // ── (a-disabled) a DISABLED systemuser is not a valid principal — it must not fall through to (b) ──
-        // The lookup above filters isdisabled = false, so a disabled licensed user (including a licensed B2B guest
-        // whose home tenant FR-15 would now admit as a registered guest) arrives here as "no systemuser". Without
-        // this check the binder would admit the same token as a Member and hand it a contact. One extra query,
-        // only on this path. This also closes the pre-existing Model-2 analogue: a disabled systemuser carrying an
-        // acct = 0 member token fell through the same way.
-        bool hasSystemUserRow;
-        try
-        {
-            hasSystemUserRow = await SystemUserRowExistsAsync(callerOid, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Cannot rule a disabled systemuser out → fail closed, auditable (not an unhandled 500).
-            _logger.LogError(ex,
-                "[WF-AUTH] Systemuser existence check threw for workforce caller oid={CallerOid} — denying ({DenyCode})",
-                callerOid, DenyPrincipalNotResolved);
-            LogGuestCandidateDeny(user, DenyPrincipalNotResolved);
-            return WorkforcePrincipalResolution.Denied(
-                WorkforceDenyReason.PrincipalNotResolved, DenyPrincipalNotResolved);
-        }
-
-        if (hasSystemUserRow)
+        // A disabled licensed user (including a licensed B2B guest whose home tenant FR-15 would now admit as a
+        // registered guest) would otherwise be admitted by the binder as a Member and handed a contact. This also
+        // closes the pre-existing Model-2 analogue: a disabled systemuser carrying an acct = 0 member token.
+        if (lookup.Kind == SystemUserLookupKind.Disabled)
         {
             _logger.LogWarning(
                 "[WF-AUTH] Workforce caller oid={CallerOid} maps to a DISABLED systemuser — denying ({DenyCode})",
@@ -286,25 +288,99 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
             WorkforceDenyReason.PrincipalNotResolved, binding.DenyCode ?? DenyPrincipalNotResolved);
     }
 
+    private enum SystemUserLookupKind { None, Enabled, Disabled }
+
+    private readonly record struct SystemUserLookup(SystemUserLookupKind Kind, Guid Id);
+
     /// <summary>
-    /// Does ANY systemuser row carry this oid, regardless of <c>isdisabled</c>? Asked only after the enabled-only
-    /// lookup found none, so a row here is a disabled user (or a user enabled in the instant between the two
-    /// reads — which fails closed too). Same query shape as <c>MembershipEndpoints.ResolveSystemUserIdAsync</c>
-    /// minus its <c>isdisabled = false</c> condition. Not cached: it runs only on the contact path, and a stale
-    /// "disabled" must never outlive a re-enable by a cache TTL.
+    /// The single systemuser read for a workforce caller (R3 task 012 re-check K2): ONE query by
+    /// <c>azureactivedirectoryobjectid</c> with no <c>isdisabled</c> filter, returning <c>isdisabled</c>, so the
+    /// enabled / disabled-only / none decision costs one uncached read — previously a contact-only caller paid two
+    /// (enabled-only lookup, then an existence check). Resolver-local on purpose: the enabled-only
+    /// <c>MembershipEndpoints.ResolveSystemUserIdAsync</c> keeps its behaviour for its other callers.
     /// </summary>
-    private async Task<bool> SystemUserRowExistsAsync(Guid aadObjectId, CancellationToken ct)
+    /// <remarks>
+    /// Semantics: any ENABLED row wins over a disabled duplicate (rows are ordered enabled-first and
+    /// <c>TopCount = 2</c> keeps a duplicate visible); only disabled rows → <see cref="SystemUserLookupKind.Disabled"/>;
+    /// no rows → <see cref="SystemUserLookupKind.None"/>. A row whose <c>isdisabled</c> is absent is treated as
+    /// disabled (fail closed). The positive result shares the existing <c>membership-currentuser</c> cache entry
+    /// (same key, version and 10 minute TTL as <c>MembershipEndpoints</c>); a cache failure is non-fatal. Nothing
+    /// negative is cached, so a stale "disabled" never outlives a re-enable.
+    /// </remarks>
+    private async Task<SystemUserLookup> ResolveSystemUserAsync(Guid aadObjectId, string tenantId, CancellationToken ct)
     {
+        var cacheId = aadObjectId.ToString("D");
+
+        try
+        {
+            var cached = await _cache.GetAsync<Guid>(
+                    tenantId, MembershipEndpoints.CurrentUserCacheResource, cacheId,
+                    MembershipEndpoints.CurrentUserCacheVersion, ct: ct)
+                .ConfigureAwait(false);
+            if (cached != Guid.Empty)
+            {
+                return new SystemUserLookup(SystemUserLookupKind.Enabled, cached);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[WF-AUTH] Current-user cache read failed for tenant={TenantId} id={CacheId}; falling through to live resolve",
+                tenantId, cacheId);
+        }
+
         var query = new QueryExpression("systemuser")
         {
             ColumnSet = new ColumnSet("systemuserid", "isdisabled"),
-            TopCount = 1,
+            TopCount = 2,
             NoLock = true,
         };
         query.Criteria.AddCondition("azureactivedirectoryobjectid", ConditionOperator.Equal, aadObjectId);
+        query.AddOrder("isdisabled", OrderType.Ascending);
 
         var results = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-        return results.Entities.Count > 0;
+
+        var sawRow = false;
+        foreach (var row in results.Entities)
+        {
+            if (row.Id == Guid.Empty)
+            {
+                continue;
+            }
+
+            sawRow = true;
+            if (row.GetAttributeValue<bool?>("isdisabled") != false)
+            {
+                continue;
+            }
+
+            try
+            {
+                await _cache.SetAsync(
+                        tenantId, MembershipEndpoints.CurrentUserCacheResource, cacheId,
+                        MembershipEndpoints.CurrentUserCacheVersion, row.Id,
+                        MembershipEndpoints.CurrentUserCacheTtl, ct: ct)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[WF-AUTH] Current-user cache write failed for tenant={TenantId} id={CacheId}; next call will re-resolve",
+                    tenantId, cacheId);
+            }
+
+            return new SystemUserLookup(SystemUserLookupKind.Enabled, row.Id);
+        }
+
+        return new SystemUserLookup(sawRow ? SystemUserLookupKind.Disabled : SystemUserLookupKind.None, Guid.Empty);
     }
 
     /// <summary>The home tenant parsed from <c>idp</c>, for a guest only; otherwise a fixed placeholder (never a raw claim).</summary>
