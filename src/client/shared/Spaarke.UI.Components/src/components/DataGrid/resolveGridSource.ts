@@ -5,7 +5,7 @@
  * a grid's rows - e.g. an aggregate count that points at the grid - call the SAME resolution instead of
  * re-reading the record a second way (spaarke-ontology-platform-r1 task 054, review round 2 F2).
  */
-import type { IDataverseClient, SavedQueryResult } from '../../services/IDataverseClient';
+import type { IDataverseClient, SavedQueryResult, SavedQuerySummary } from '../../services/IDataverseClient';
 import type { DataGridConfiguration } from '../../types/DataGridConfiguration';
 import { isValidDataGridConfiguration } from '../../types/DataGridConfiguration';
 
@@ -88,18 +88,18 @@ export async function resolveSource(
       name: configRecord.display?.title ?? 'Inline',
     };
   }
-  if (source.type === 'savedquery-set') {
-    if (host === 'external') return null;
-    try {
-      const queries = await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName);
-      const def = queries.find(q => q.isDefault) ?? queries[0];
-      if (!def) return null;
-      return await dataverseClient.retrieveSavedQuery(def.id);
-    } catch {
-      return null;
-    }
+  // Only 'savedquery-set' is left once 'savedquery' and 'inline' have returned. A new source type makes
+  // `source.entityLogicalName` fail to compile here, so the union stays exhaustive at compile time.
+  if (host === 'external') return null;
+  try {
+    const queries = await dataverseClient.retrieveSavedQueriesForEntity(source.entityLogicalName);
+    // `queries[0]` is typed non-undefined (no noUncheckedIndexedAccess) but an empty list really yields undefined.
+    const def = queries.find(q => q.isDefault) ?? (queries as Array<SavedQuerySummary | undefined>)[0];
+    if (!def) return null;
+    return await dataverseClient.retrieveSavedQuery(def.id);
+  } catch {
+    return null;
   }
-  return null;
 }
 
 export function extractEntityFromFetchXml(fetchXml: string): string | undefined {
@@ -118,6 +118,7 @@ export function extractEntityFromFetchXml(fetchXml: string): string | undefined 
         if (name) return name;
       }
     }
+    // eslint-disable-next-line no-restricted-syntax -- DOMParser failure is expected; the regex below is the fallback
   } catch {
     /* fall through to regex */
   }
