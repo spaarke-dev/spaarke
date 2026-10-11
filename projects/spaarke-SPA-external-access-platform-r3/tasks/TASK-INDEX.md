@@ -13,13 +13,13 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 003 | Spike: Entra B2B self-service sign-up vs custom join (FR-12) | P0 | 🔄 [wip] spike done, awaiting owner choice | none | O/h | STANDARD | Wave 1 |
 | 010 | Ciam audience forms + default-scheme CIAM guard (FR-22, FR-23) | P1 | ✅ [done] | none | O/h | FULL | Wave 1 |
 | 011 | Modules by user type + partner service-request switch (FR-19, FR-06) | P1 | ✅ [done] | 001 | O/h | FULL | Wave 2 |
-| 012 | Member-test branch for registered guests (FR-15) | P1 | 🔄 [wip] | 001 | O/h | FULL | Wave 2 |
+| 012 | Member-test branch for registered guests (FR-15) | P1 | ✅ [done] | 001 | O/h | FULL | Wave 2 |
 | 020 | R3 schema: sprk_createdbycontact + intake columns (FR-25, FR-05) | P2 | 🔄 [wip] source done + reviewed, awaiting owner dev import | none | S/h | FULL | Wave 1 (owner-gated import) |
 | 030 | Creator stamping on every external create (FR-25) | P3 | ✅ [done] | 020 | O/h | FULL | Wave 2 |
-| 031 | Document routes for Matter/WA/Invoice/Service Request (FR-24) | P3 | 🔄 [wip] | 030 | O/h | FULL | Wave 3 |
+| 031 | Document routes for Matter/WA/Invoice/Service Request (FR-24) | P3 | 🔄 [wip] matter/WA/SR routes merged; invoices await owner decision | 030 | O/h | FULL | Wave 3 |
 | 032 | DELETE own documents/to-dos/events/service requests (FR-26) | P3 | 🔲 [open] | 031 | O/h | FULL | Wave 4 |
-| 033 | External message read endpoint (FR-04) | P3 | 🔄 [wip] | 011 | O/h | FULL | Wave 3 |
-| 034 | External message send endpoint (FR-11) | P3 | 🔲 [open] | 030, 033 | O/h | FULL | Wave 4 |
+| 033 | External message read endpoint (FR-04) | P3 | ✅ [done] | 011 | O/h | FULL | Wave 3 |
+| 034 | External message send endpoint (FR-11) | P3 | 🔄 [wip] | 030, 033 | O/h | FULL | Wave 4 |
 | 035 | Intake submit endpoint (FR-05, FR-06) | P3 | 🔲 [open] | 011, 020, 033 | O/h | FULL | Wave 5 |
 | 036 | Email on subsequent grant + message notify (FR-07) | P3 | 🔲 [open] | 034 (UAC-r2 PR #1583 merged 2026-10-10, in branch) | S/h | FULL | Wave 5 |
 | 037 | Notification feed + last-seen (FR-08) | P3 | 🔲 [open] | 034, 035 | O/h | FULL | Wave 6 |
@@ -27,7 +27,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 039 | Event reads for Matter and Work Assignment (FR-03 server) | P3 | 🔲 [open] | 032, 037 | S/h | FULL | Wave 7 |
 | 040 | Workforce client switch (FR-16) | P4 | 🔄 [wip] | 001 (+ owner client registration) | O/h | FULL | Wave 2 |
 | 041 | Run-time backend selection (FR-17) | P4 | ✅ [done] | 040 | O/h | FULL | Wave 3 |
-| 042 | Out-of-plane pages + no production mock (FR-18) | P4 | 🔲 [open] | 041 | O/h | FULL | Wave 4 |
+| 042 | Out-of-plane pages + no production mock (FR-18) | P4 | 🔄 [wip] | 041 | O/h | FULL | Wave 4 |
 | 043 | Production build + Teams package in CI (FR-20) | P4 | 🔄 [wip] code done, awaiting owner GitHub environments + prod Teams app id | 040 | S/h | STANDARD | Wave 3 |
 | 050 | Record detail view: fields, docs/invoices, events/tasks (FR-01–03) | P5 | ✅ [done] | none | S/h | FULL | Wave 1 |
 | 051 | Detail messages section: read + send (FR-04/FR-11 client) | P5 | 🔲 [open] | 050, 034 | S/h | FULL | Wave 5 |

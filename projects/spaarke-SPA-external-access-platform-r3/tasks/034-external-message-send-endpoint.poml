@@ -4,7 +4,7 @@
     <title>External-plane message send endpoint — thread post, no email (FR-11)</title>
     <phase>3 BFF features</phase>
     <gate>after 030 and 033</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New external write endpoint with Tier-2 check on send (tags bff-api, auth)</rigor-reason>
     <model-tier>opus</model-tier>

@@ -4,7 +4,7 @@
     <title>External-plane message read endpoint (FR-04)</title>
     <phase>3 BFF features</phase>
     <gate>after 011</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New Tier-2-checked read endpoint (tags bff-api, auth)</rigor-reason>
     <model-tier>opus</model-tier>
