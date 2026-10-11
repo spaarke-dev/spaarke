@@ -4,7 +4,7 @@
     <title>The Secure Record Owner role must cover every child table that task 080 assigns to it, and the setup guide must stop removing that coverage</title>
     <phase>5 Remediation — authorization</phase>
     <gate>startable. Independent of the #1045 merge: the live role change and the guide fix do not depend on the code landing. It must be done before a secure-record To Do is expected to work.</gate>
-    <status>completed-with-escalation</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a live Dataverse security role that anchors secure-record isolation. Tags include auth + security + dataverse. May add a script and a test.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="129" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>An email filed to a record shows on that record's Messages panel (thread anchoring and ownership)</title>
+    <phase>8 — UAT findings, owner 2026-10-11</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code on the communication filing and read paths; record visibility (access); a Dataverse backfill.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting access/visibility change in another project's subsystem; design decisions.</model-tier-reason>
+    <effort>xhigh</effort>
+    <deps>none</deps>
+    <tags>bff-api, communication, access-control, dataverse, unit-test</tags>
+  </metadata>
+  <prompt>Owner UAT 2026-10-11: communication `b22bb67e-9dc1-f111-a05c-0022482913fc` is filed to matter PAT-444023 (typed regarding set, owner = Spaarke Business Unit 1 team) but never shows on the matter's Messages panel (CommunicationConversationPanel 1.18.2). The panel calls `GET /api/communications/by-regarding/{type}/{id}`; `CommunicationThreadReadService.ReadByRegardingAsync` (:252-315) finds THREADS by the thread's own typed regarding lookup and shows their messages. The email's thread `b62bb67e…` was created at ingest when the email was unfiled: no regarding, threadtype Direct, owned by the BFF app user `# mi-bff-api-dev` in the root BU. Filing (17:26, `PATCH /api/communications/{id}/filing` → `OwnedChildWrite.RefileAsync`) updated the email only. Map of every filing path (none touches the thread): `PATCH /filing` (OwnedChildWrite.cs:1058-1083), `IncomingAssociationResolver.ApplyDecisionAsync/ApplyToExistingRecordAsync` (:473-543), `ReconciledEmailFiling.FileIfUnfiledAsync` (add-in task 121), auto-file at ingest (IncomingCommunicationProcessor.cs:362-406). Thread regarding/owner are set only at creation (`ThreadResolver.CreateThreadAsync` :146-224). Recorded as a deferred gap in `projects/email-communication-solution-r5/design.md:125` and `ThreadResolver.cs:355-366`. Dev measurement (80 active threads): 9 unanchored threads hold emails filed to a record; 5 threads hold emails filed to more than one record; 27 of 35 anchored threads owned by BFF app users in root (invisible to child-BU users such as Test User 1).</prompt>
+  <goal>Every email a user can read that is filed to a record appears on that record's Messages panel, and opening its conversation works for that user — for existing data (backfill) and for every future filing path.</goal>
+  <constraints>
+    <constraint>Design first (`notes/129-filed-email-messages.md`): the invariant, the options (thread follows filing on write / read by the message's own regarding / both), multi-record threads, Direct and per-user master threads (no leak of a private thread to a record's users), and ownership of threads. Owner reviews the design before BFF code.</constraint>
+    <constraint>One server-side owner per invariant (DATAVERSE-WRITE-PATH-ARCHITECTURE.md, ADR-002): no plugins, no client-side thread writes; extend the existing re-file core rather than adding a parallel path (CLAUDE.md §11).</constraint>
+    <constraint>Access: impersonated reads stay the only visibility gate; nothing widens what a caller can see. Run conflict-check against active communication projects before editing their files.</constraint>
+    <constraint>BFF §10 obligations; dev BFF deploy and the backfill `-Apply` only with the owner's go; the backfill is dry-run by default and reversible (before-snapshot).</constraint>
+  </constraints>
+  <acceptance-criteria>
+    <criterion testable="true">Unit tests: filing a message whose thread is unanchored makes it appear in by-regarding for the filed record; a thread with messages filed to two records appears on both; a message the caller cannot read never appears; Model of existing anchored threads unchanged.</criterion>
+    <criterion testable="true">Backfill dry run lists exactly the affected threads in dev (today 9 unanchored-with-filed-messages, plus the app-owned anchored threads) with before/after; `-Apply` reads back.</criterion>
+    <criterion testable="false">Owner live check: b22bb67e shows on PAT-444023's Messages panel, and Test User 1 sees messages on a matter in their BU.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>`OwnedChildWrite.RefileAsync`, `IncomingAssociationResolver`, `ThreadResolver`, `RecordOwnershipResolver`, `CommunicationThreadReadService.ReadByRegardingAsync`.</existing>
+    <extension>Yes — extend the existing re-file core and/or the by-regarding read; no new service expected.</extension>
+    <cost-of-doing-nothing>Filed emails are invisible on their record; users in child BUs see no messages at all on most records.</cost-of-doing-nothing>
+  </justification>
+</task>
