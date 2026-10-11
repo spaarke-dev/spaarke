@@ -150,13 +150,12 @@ Full table: `spec.md` §Owner Clarifications. These still constrain work:
 ## 6. Gotchas — do not re-learn
 
 - **2026-10-11 — do not run the full BFF unit suite while other agents build or test on this machine.** Under that load, host-based contract tests time out (`TaskCanceledException`, about 100 s each): 7 false failures after the 032 merge, and the run took 47 min instead of 26. Run it when the machine is quiet, or re-run the failures in isolation before treating them as real.
-
 - **2026-10-11 — a POML can contradict the spec.** The 036 POML asked for an email on message post, which the 2026-10-08 decision forbids. Check each POML against §1 "Out of scope" and §3 before you implement it, and take any conflict to the owner first.
 - **2026-10-10 — `sprk_servicerequest` schema** (live describe, dev): it has `sprk_requestedby` (→ contact), the `sprk_regarding*` family, `sprk_name` (required), `sprk_direction` (required: Inbound/Outbound) and `sprk_recordsummary`. It has **no** `sprk_createdbyperson`, **no** request-type column and **no** intake-answers column (task 020 adds the last two). Documents link to a service request through the existing `sprk_document.sprk_relatedservicerequest` lookup.
 - **2026-10-10 — `WizardModal` and `WizardRegistry` no longer exist** (deleted 2026-10-03, reuse audit C-20; `Spaarke.UI.Components/src/components/index.ts:197`). The spec's "WizardModal" means the current framework: `Wizard/WizardShell.tsx` + `InAppWizardHost.tsx`, with `CreateRecordWizard` as the structural pattern.
 - **2026-10-10 — the Service Requests module descriptor is fail-closed for CIAM** (`ExternalAccessModule.cs:453-462, descriptor "service-requests"`, predicate `Plane == Workforce && ContactId != Guid.Empty`). FR-06's switch changes that predicate, so test both settings.
 - **2026-10-10 — `WorkforceMembershipTest.Evaluate`** (`WorkforceIdentityOptions.cs:199`) checks kind → list → tid → acct, and a guest is denied. FR-15 adds one branch: `acct = 1` AND `tid` = the stamp tenant AND home tenant (`idp`) ∈ `CustomerTenantIds` → Member. Keep the order and every existing deny code.
-- **2026-10-10 — there is no `MapDelete` anywhere under `Api/ExternalAccess`.** FR-26 adds the first ones.
+- **2026-10-11 — the external plane's only DELETE routes are task 032's three** (`/documents|/todos|/events/{id}`, `ExternalProjectDataEndpoints.cs`), pinned by `TheExternalPlane_MapsExactlyThreeDeleteRoutes`. Adding one, e.g. service-request delete after the owner decides, means updating that test and the route ledger. Their problem bodies use `reasonCode`.
 - **2026-10-08 — the guest token shape is proven live:** `tid` = Spaarke, `acct = 1`, `idp` = home tenant. Don't re-investigate it.
 - **2026-10-08 — `/organizations` signs a guest into their home tenant**, with a different `oid` and no systemuser match. The workforce authority must be the Spaarke tenant.
 
