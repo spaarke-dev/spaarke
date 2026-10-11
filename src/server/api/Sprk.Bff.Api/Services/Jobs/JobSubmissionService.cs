@@ -61,32 +61,6 @@ public class JobSubmissionService
     }
 
     /// <summary>
-    /// Submits a job that becomes visible to the consumer only at <paramref name="scheduledEnqueueTime"/> (Service Bus scheduled
-    /// enqueue). For a job that must run AFTER the request that raised it has finished its own writes (ontology task 032: the
-    /// budget-revision trigger runs after the decision commit has closed its Signal as Acted).
-    /// </summary>
-    /// <remarks>
-    /// A separate overload rather than an optional parameter on <see cref="SubmitJobAsync(JobContract, CancellationToken)"/>:
-    /// that method is mocked with expression trees across the test suites, and an expression tree cannot hold an optional argument.
-    /// </remarks>
-    public virtual async Task SubmitJobAsync(JobContract job, DateTimeOffset scheduledEnqueueTime, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(job);
-
-        if (job.JobId == Guid.Empty)
-        {
-            throw new ArgumentException("Job.JobId cannot be empty", nameof(job));
-        }
-
-        if (string.IsNullOrWhiteSpace(job.JobType))
-        {
-            throw new ArgumentException("Job.JobType cannot be null or empty", nameof(job));
-        }
-
-        await SubmitToQueueAsync(job, _queueName, ct, scheduledEnqueueTime);
-    }
-
-    /// <summary>
     /// Submits a communication job to the dedicated communication queue.
     /// Isolates email processing from the shared job queue to prevent cross-domain failures.
     /// </summary>
@@ -107,7 +81,7 @@ public class JobSubmissionService
         await SubmitToQueueAsync(job, _communicationQueueName, ct);
     }
 
-    private async Task SubmitToQueueAsync(JobContract job, string queueName, CancellationToken ct, DateTimeOffset? scheduledEnqueueTime = null)
+    private async Task SubmitToQueueAsync(JobContract job, string queueName, CancellationToken ct)
     {
         try
         {
@@ -142,11 +116,6 @@ public class JobSubmissionService
                     ["CreatedAt"] = job.CreatedAt.ToString("o")
                 }
             };
-
-            if (scheduledEnqueueTime is { } at)
-            {
-                message.ScheduledEnqueueTime = at;
-            }
 
             await sender.SendMessageAsync(message, ct);
 

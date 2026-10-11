@@ -32,6 +32,9 @@ public static class SignalTriggerEvents
 
     /// <summary>Information: one trigger finished. Counts only; no fact values, no sentence.</summary>
     public static readonly EventId HandlerCompleted = new(50342, nameof(HandlerCompleted));
+
+    /// <summary>Warning: an enqueue exceeded <see cref="SignalEvaluationTrigger.EnqueueTimeout"/> and was abandoned (the nightly pass covers it).</summary>
+    public static readonly EventId EnqueueTimedOut = new(50343, nameof(EnqueueTimedOut));
 }
 
 /// <summary>
@@ -47,8 +50,7 @@ public static class SignalTriggerEvents
 /// The handler is idempotent by construction (it writes only what changed, D-61), so a redelivered or repeated trigger is safe
 /// and is NOT marked processed: a second classification of the same communication must evaluate again.</para>
 /// <para>§11: <i>Existing</i> - <see cref="JobSubmissionService"/> queues jobs; nothing queues a Signal evaluation.
-/// <i>Extension</i> - it is reused as is (plus a scheduled-enqueue overload for the budget-revision settle delay); this class
-/// only fixes the payload shape for three callers. <i>Cost of doing nothing</i> - each caller would hand-roll the payload and
+/// <i>Extension</i> - it is reused as is; this class only fixes the payload shape for three callers. <i>Cost of doing nothing</i> - each caller would hand-roll the payload and
 /// the failure handling, and the three would drift.</para>
 /// </remarks>
 public class SignalEvaluationTrigger
@@ -56,20 +58,16 @@ public class SignalEvaluationTrigger
     /// <summary>The job type the main queue routes to <see cref="SignalEvaluationTriggerHandler"/>.</summary>
     public const string JobTypeName = "SignalEvaluationTrigger";
 
-    /// <summary>How long a budget-revision trigger waits before it runs. A revision recorded THROUGH a decision is created by the
-    /// executor, then the commit route closes the Signal as Acted a moment later in the same request; a trigger that ran in
-    /// between would close it as ConditionCleared instead. After the settle delay the Signal is already Resolved and is left
-    /// alone (FR-16). A revision recorded outside a decision still clears its Work Item within this delay, not the next night.</summary>
-    public static readonly TimeSpan BudgetRevisionSettleDelay = TimeSpan.FromSeconds(30);
+    /// <summary>The longest an enqueue may hold its caller. A degraded Service Bus must not stall a request (the classification
+    /// path, the decision commit route); on timeout the enqueue is logged at Warning and abandoned, and the nightly pass covers it.</summary>
+    public static readonly TimeSpan EnqueueTimeout = TimeSpan.FromSeconds(5);
 
     private readonly JobSubmissionService _jobs;
-    private readonly TimeProvider _time;
     private readonly ILogger<SignalEvaluationTrigger> _logger;
 
-    public SignalEvaluationTrigger(JobSubmissionService jobs, TimeProvider time, ILogger<SignalEvaluationTrigger> logger)
+    public SignalEvaluationTrigger(JobSubmissionService jobs, ILogger<SignalEvaluationTrigger> logger)
     {
         _jobs = jobs ?? throw new ArgumentNullException(nameof(jobs));
-        _time = time ?? throw new ArgumentNullException(nameof(time));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -95,13 +93,19 @@ public class SignalEvaluationTrigger
                 Payload = JsonSerializer.SerializeToDocument(new TriggerPayload(kindName, subjectEntity, subjectId, sourceId)),
             };
 
-            if (kind == SignalTriggerKind.BudgetRevision)
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(EnqueueTimeout);
+            try
             {
-                await _jobs.SubmitJobAsync(job, _time.GetUtcNow() + BudgetRevisionSettleDelay, ct).ConfigureAwait(false);
+                await _jobs.SubmitJobAsync(job, timeout.Token).ConfigureAwait(false);
             }
-            else
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested && timeout.IsCancellationRequested)
             {
-                await _jobs.SubmitJobAsync(job, ct).ConfigureAwait(false);
+                _logger.LogWarning(SignalTriggerEvents.EnqueueTimedOut,
+                    "[SIGNAL-TRIGGER] queuing the {Kind} trigger for {SubjectEntity} {SubjectId} (source {SourceId}) took longer than " +
+                    "{TimeoutSeconds} s and was abandoned; the nightly pass will pick it up.",
+                    kindName, subjectEntity, subjectId, sourceId, EnqueueTimeout.TotalSeconds);
+                return false;
             }
 
             return true;

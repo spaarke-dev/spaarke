@@ -382,19 +382,14 @@ public sealed class ReviseBudgetExecutor : IDecisionActionExecutor
     private readonly IRecordOwnershipResolver _ownership;
     private readonly TimeProvider _clock;
     private readonly ILogger<ReviseBudgetExecutor> _logger;
-    private readonly SignalEvaluationTrigger? _trigger;
 
-    /// <param name="trigger">Task 032 (D-12): queues the matter's Signal re-evaluation once the revision exists, so a Work Item
-    /// asserting "no budget revision" clears in about a minute instead of at the next nightly pass. Registered in production;
-    /// null only where a test builds the executor without it.</param>
     public ReviseBudgetExecutor(
         CallerRecordAccessProbe probe,
         IDataverseUserClient user,
         OntologyWriterDataverseClient writer,
         IRecordOwnershipResolver ownership,
         TimeProvider clock,
-        ILogger<ReviseBudgetExecutor> logger,
-        SignalEvaluationTrigger? trigger = null)
+        ILogger<ReviseBudgetExecutor> logger)
     {
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
         _dataverse = user ?? throw new ArgumentNullException(nameof(user));
@@ -402,7 +397,6 @@ public sealed class ReviseBudgetExecutor : IDecisionActionExecutor
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _trigger = trigger;
     }
 
     public string Code => "revise-budget";
@@ -455,15 +449,6 @@ public sealed class ReviseBudgetExecutor : IDecisionActionExecutor
                 : DecisionActionOutcome.Failed(Code, DecisionActionReasons.WriteFailed,
                     $"The budget revision ({revisionId:D}) did not confirm; it may have been recorded. The budget was not changed.",
                     possiblyWritten: [revisionRef]);
-        }
-
-        // Task 032 (D-12): the revision now exists, so the matter's Path B Signal may no longer hold. Queued with a settle delay:
-        // when this revision is recorded through a decision, the commit route closes the Signal as Acted right after this
-        // executor returns, and the trigger must find it already Resolved. Never throws; a failed enqueue is logged and the
-        // nightly pass is the backstop.
-        if (_trigger is not null)
-        {
-            await _trigger.EnqueueAsync(SignalTriggerKind.BudgetRevision, "sprk_matter", plan.MatterId, revisionId, ct: ct).ConfigureAwait(false);
         }
 
         // The new AMOUNT is the signed-in user's write (D-55). If it is refused, STOP and report the revision id.

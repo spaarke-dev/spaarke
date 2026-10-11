@@ -298,7 +298,6 @@ public partial class SignalReevaluationJobTests
             NullLogger<JobSubmissionService>.Instance, new Mock<ServiceBusClient>().Object);
 
         public List<JobContract> Plain { get; } = new();
-        public List<(JobContract Job, DateTimeOffset At)> Scheduled { get; } = new();
         public List<LogEntry> Log { get; } = new();
         public FakeTimeProvider Clock { get; } = new(RunAt);
 
@@ -306,11 +305,9 @@ public partial class SignalReevaluationJobTests
         {
             Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
                 .Callback<JobContract, CancellationToken>((job, _) => Plain.Add(job)).Returns(Task.CompletedTask);
-            Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-                .Callback<JobContract, DateTimeOffset, CancellationToken>((job, at, _) => Scheduled.Add((job, at))).Returns(Task.CompletedTask);
         }
 
-        public SignalEvaluationTrigger Trigger() => new(Jobs.Object, Clock, new SinkLogger<SignalEvaluationTrigger>(Log));
+        public SignalEvaluationTrigger Trigger() => new(Jobs.Object, new SinkLogger<SignalEvaluationTrigger>(Log));
     }
 
     [Fact]
@@ -324,7 +321,6 @@ public partial class SignalReevaluationJobTests
         job.JobType.Should().Be(SignalEvaluationTrigger.JobTypeName);
         job.IdempotencyKey.Should().Be($"signal-eval-classification-{MatterId:D}-{CommunicationId:D}");
         job.SubjectId.Should().Be(MatterId.ToString("D"));
-        q.Scheduled.Should().BeEmpty();
     }
 
     [Fact]
@@ -339,16 +335,67 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
-    public async Task Enqueue_BudgetRevision_IsScheduledAfterTheSettleDelay()
+    public async Task Enqueue_BudgetRevision_QueuesImmediately_ForTheCommitRouteToCall()
     {
         var q = new Queue();
 
         await q.Trigger().EnqueueAsync(SignalTriggerKind.BudgetRevision, "sprk_matter", MatterId, RevisionId);
 
-        var (job, at) = q.Scheduled.Should().ContainSingle().Subject;
-        at.Should().Be(RunAt + SignalEvaluationTrigger.BudgetRevisionSettleDelay);
-        job.IdempotencyKey.Should().Be($"signal-eval-budget-revision-{MatterId:D}-{RevisionId:D}");
-        q.Plain.Should().BeEmpty();
+        q.Plain.Should().ContainSingle().Which.IdempotencyKey.Should().Be($"signal-eval-budget-revision-{MatterId:D}-{RevisionId:D}");
+    }
+
+    [Fact]
+    public async Task Enqueue_WhenTheBusStalls_GivesUpAfterTheTimeout_WithAWarning_AndNeverThrows()
+    {
+        var q = new Queue();
+        q.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+            .Returns<JobContract, CancellationToken>(async (_, token) => await Task.Delay(Timeout.Infinite, token));
+
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        var queued = await q.Trigger().EnqueueAsync(SignalTriggerKind.Classification, "sprk_matter", MatterId, CommunicationId);
+
+        queued.Should().BeFalse();
+        started.Elapsed.Should().BeLessThan(SignalEvaluationTrigger.EnqueueTimeout + TimeSpan.FromSeconds(5));
+        q.Log.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.EventId == SignalTriggerEvents.EnqueueTimedOut);
+        q.Log.Should().NotContain(e => e.EventId == SignalTriggerEvents.EnqueueFailed);
+    }
+
+    [Fact]
+    public async Task Enqueue_WhenTheCallerCancels_IsNotReportedAsATimeout()
+    {
+        var q = new Queue();
+        q.Jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+            .Returns<JobContract, CancellationToken>(async (_, token) => await Task.Delay(Timeout.Infinite, token));
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
+
+        var act = () => q.Trigger().EnqueueAsync(SignalTriggerKind.Classification, "sprk_matter", MatterId, CommunicationId, ct: cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        q.Log.Should().NotContain(e => e.EventId == SignalTriggerEvents.EnqueueTimedOut);
+    }
+
+    // The message the producer really builds, serialised exactly as JobSubmissionService does and read back as
+    // ServiceBusJobProcessor does, must evaluate. Renaming a member of the payload record breaks this (the other handler tests
+    // build their payload by hand and would not notice).
+    [Theory]
+    [InlineData(SignalTriggerKind.Classification)]
+    [InlineData(SignalTriggerKind.BudgetRevision)]
+    [InlineData(SignalTriggerKind.AssociationConfirmed)]
+    public async Task TheMessageTheProducerBuilds_RoundTripsThroughTheWire_AndTheHandlerEvaluatesIt(SignalTriggerKind kind)
+    {
+        var q = new Queue();
+        await q.Trigger().EnqueueAsync(kind, "sprk_matter", MatterId, CommunicationId);
+        var produced = q.Plain.Should().ContainSingle().Subject;
+
+        var wire = JsonSerializer.Serialize(produced, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false });
+        var received = JsonSerializer.Deserialize<JobContract>(wire, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })!;
+
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var outcome = await TriggerHandler(h).ProcessAsync(received, default);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        h.Org.CreatedPayloads.Should().ContainSingle("the handler read the producer's payload and evaluated the matter");
     }
 
     [Fact]
@@ -388,7 +435,7 @@ public partial class SignalReevaluationJobTests
         public ConsumerHarness(Guid? matter, bool classified, bool trigger = true)
         {
             var queue = new Queue();
-            Trigger = new Mock<SignalEvaluationTrigger>(queue.Jobs.Object, queue.Clock, NullLogger<SignalEvaluationTrigger>.Instance);
+            Trigger = new Mock<SignalEvaluationTrigger>(queue.Jobs.Object, NullLogger<SignalEvaluationTrigger>.Instance);
             Trigger.Setup(t => t.EnqueueAsync(It.IsAny<SignalTriggerKind>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
                     It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
