@@ -48,6 +48,35 @@ Make the merge idempotent per options instance, for example by checking whether 
 
 ---
 
+### ISS-002 — ChatMessageStreamingContractTests mid-stream error test fails intermittently under full-suite load
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-10 |
+| **Source** | R3 task 031 full unit-suite run (19512 passed, 54 skipped, 1 failed) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1633 |
+
+**Description**
+
+`SendMessage_ModelThrowsAfterTwoTokens_EmitsTypingEndThenSafeErrorAndNothingAfter` failed once in a full `dotnet test tests/unit/Sprk.Bff.Api.Tests/` run on the R3 branch. It took 2 min 25 s under load and passes 6/6 alone. Task 031 does not touch AI chat code. A load-dependent contract-test failure fails CI at random. The failure message was not captured, so the cause is unconfirmed.
+
+**Entry-points**
+
+- `tests/integration/contract/Api/Ai/ChatMessageStreamingContractTests.cs:194`
+- `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~ChatMessageStreamingContractTests"` (passes alone)
+
+**Suggested fix**
+
+Capture the failure with `--logger trx` on a full run. Then check for a fixed SSE read timeout, or shared `_fixture.ChatClient` scripting across parallel tests.
+
+**Estimated effort**: 2–4 hours, mostly reproduction.
+**Blockers**: none.
+**Related**: AI chat area; not R3 scope.
+
+---
+
 ## Closed
 
 (none)
