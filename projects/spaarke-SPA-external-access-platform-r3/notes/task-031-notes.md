@@ -147,8 +147,27 @@ The old files cannot compile against the new seam signatures, so I used mutation
 ## Known limits
 
 - **Live checks are deferred to task 038.** Live checks need the deploy:
-  - The SR container decision on a request with no regarding root: `RecordContainerResolver` reads the request's ancestor links, then the business-unit fallback. A 422 is the documented refusal.
+  - The SR container decision: `RecordContainerResolver` has no `sprk_servicerequest` row in `ChildAncestorLinks` and the entity is not securable, so an SR document ALWAYS goes to the owning business unit's shared container (the `owningbusinessunit` fallback), whatever the request regards. No ancestor-link read happens. The live check is that the owning business unit has `sprk_containerid` stamped; without it the resolver returns no container and the upload is refused.
   - Owner resolution for `sprk_servicerequest`: it is in the resolver's table (`RecordOwnershipResolver.cs:756`).
   - The contact stamp needs task 020's `sprk_createdbycontact` import first. This is the task-030 deploy order.
 - **Only the primary lookups count.** A document linked to a parent only through the secondary "related" lookups (`sprk_relatedproject`, `sprk_relatedmatter`, `sprk_RelatedWorkAssignment`) is not listed or downloadable through these routes. Only the primary lookups named in the POML are used.
 - **Partner switch-on is not tested here.** With `PartnerServiceRequestsEnabled` on, a CIAM requester qualifies through the module's own predicate. That predicate is already tested by the module's switch tests (task 011).
+
+## Review results and fixes (2026-10-11)
+
+Two adversarial passes found no F-class defects. Four items were applied as fixes (test: `ExternalRecordDocumentRoutesTests`):
+
+1. **Test realism (pass 1 K3).** The container-resolver double answered "securable, secure, own container" for every entity, so the SR upload ran through the secure branch. Production takes the business-unit fallback. The double now answers `NotSecurable` for `sprk_servicerequest`, returns a row with `owningbusinessunit` for it, and a `businessunit` row with `sprk_containerid`. `Upload_ThenDownload_ReturnsTheSameBytes_AndListsTheDocument` now asserts the container of the SPE upload: the business unit's for `servicerequests`, the record's own for the other three. Fail-before: with the registry double reverted to "securable for all", the `servicerequests` case fails (1 failure). `RecordContainerResolver` is unchanged.
+2. **SR requester read faults (pass 1 K3).** `GetServiceRequestRequesterAsync` relied on `GetSingleAsync`, which turns a 404, any non-success and any exception into `default`, so a throttle or outage became 403 "no access". It now uses a new `GetSingleOrThrowAsync`: a genuine 404 is `null` (uniform 403, no oracle); any other failure throws `ExternalDataService.DataverseUnavailableException`, and the routes return 503 `sdap.access.service_request_unreadable` (the route handler `RightsForDocumentParentAsync` catches it). `GetSingleAsync` is unchanged for its other callers. Tests: `ServiceRequestRequesterRead_OnANon404Failure_ThrowsRatherThanReportingNoRequest` (500, 429, 503, 401), `ServiceRequestRequesterRead_OnATransportFault_Throws_AndOnA404ReturnsNull` (timeout, connection reset, 404 to null), `ServiceRequest_ARequesterRead_ThatFails_Is503_NotA403_AndTouchesNothing` (list, download, versions and upload all 503; no SPE call, no document read, no write; recovers when the fault clears), and the existing `ServiceRequest_ThatDoesNotExist_DeniesExactlyLikeAnotherRequestersOne` (404 is 403 identical to a foreign request). Fail-before: with the service reverted to `GetSingleAsync` and the catch disabled, 6 of these fail (the 4 theory cases, the transport/404 fact and the 503 route test).
+3. **Short-circuit (pass 1 K4).** `RightsForServiceRequestAsync` now denies before the requester read when the Service Requests module's accessible set is empty for the caller (a CIAM partner with `PartnerServiceRequestsEnabled` off, or a principal with no contact). Test: `ServiceRequest_ACiamPartnerRequester_WithThePartnerSwitchOff_Is403` now asserts `RequesterReads == 0`. Fail-before: with the check disabled it fails (1 read).
+4. **Notes.** The Known limits entry on the SR container decision said SR uploads read the request's ancestor links first. That was wrong and is corrected above.
+
+### Known limits and open items
+
+- **OWNER DECISION: SR documents land in the business unit's shared container, even when the SR regards a Secure matter.** Option A: add a `sprk_servicerequest` row to `ChildAncestorLinks` so a secure regarding root wins. Option B: keep them business-unit scoped and document it. `RecordContainerResolver` was not changed.
+- **OWNER DECISION: invoices.** Option A: inherit access from the matter or project. Option B: grantable on their own. Option C: defer.
+- **Document reads carry no creator stamp columns.** Task 054's delete-visibility rule needs them. Assigned to task 032.
+- **The Location header points at a URL with no GET** (`.../documents/{id}`). This shape is pre-existing.
+- **SR documents are reachable only through the new route.** The documents module's `ScopeDimensions` lack `sprk_relatedservicerequest`, so task 054 must use the route.
+- **`$select` keeps `_sprk_project_value`.** This is policy, consistent with the documents module.
+- **Dual-linked documents.** A document linked to both a Secure matter and a related SR is downloadable by the requester, as the POML specifies. Owner to confirm.

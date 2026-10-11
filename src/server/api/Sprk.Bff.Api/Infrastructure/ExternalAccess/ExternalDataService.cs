@@ -637,19 +637,28 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// The requester (<c>sprk_requestedby</c>, a contact) of a service request. Null when the request does not exist,
-    /// cannot be read, or names no requester. App-only Dataverse read.
+    /// The requester (<c>sprk_requestedby</c>, a contact) of a service request. Null when the request does not exist
+    /// (a genuine 404) or names no requester. App-only Dataverse read.
     /// </summary>
     /// <remarks>
     /// Task 031 (FR-24): a service request's document rights come from the submitter scope (the requester is the
-    /// caller), so this is the one fact that decision needs.
+    /// caller), so this is the one fact that decision needs. A read that FAILS (non-404 status, transport error, token
+    /// failure) throws <see cref="DataverseUnavailableException"/> rather than returning null: "could not tell" must not
+    /// be reported as "no such request", or a throttle would 403 the real requester.
     /// </remarks>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
     public virtual async Task<Guid?> GetServiceRequestRequesterAsync(Guid serviceRequestId, CancellationToken ct = default)
     {
         var url = $"{GetApiUrl()}/sprk_servicerequests({serviceRequestId})?$select=_sprk_requestedby_value";
 
-        var row = await GetSingleAsync<Dictionary<string, JsonElement>>(url, ct);
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
         return row is null ? null : GuidValue(row, "_sprk_requestedby_value");
+    }
+
+    /// <summary>An app-only Dataverse read could not be completed (not a 404): the caller reports it as a 503.</summary>
+    public sealed class DataverseUnavailableException : Exception
+    {
+        public DataverseUnavailableException(string message, Exception? inner = null) : base(message, inner) { }
     }
 
     /// <summary>A GUID-valued column of a dictionary row, or null when it is absent, null or not a GUID.</summary>
@@ -1770,6 +1779,49 @@ public class ExternalDataService
         {
             _logger.LogError(ex, "[EXT-DATA] Error fetching single record: {Url}", url);
             return default;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="GetSingleAsync{TRow}"/> for a caller that must tell "not there" from "could not read": a 404 is
+    /// <c>default</c>; any other non-success, transport error or token failure throws
+    /// <see cref="DataverseUnavailableException"/>. A cancelled caller still sees <see cref="OperationCanceledException"/>.
+    /// </summary>
+    private async Task<TRow?> GetSingleOrThrowAsync<TRow>(string url, CancellationToken ct)
+    {
+        try
+        {
+            var token = await GetAppOnlyTokenAsync(ct);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("OData-MaxVersion", "4.0");
+            request.Headers.Add("OData-Version", "4.0");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await _httpClient.SendAsync(request, ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                return default;
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[EXT-DATA] GET single failed: {Status} — {Url}", response.StatusCode, url);
+                throw new DataverseUnavailableException($"Dataverse answered {(int)response.StatusCode}.");
+            }
+
+            return await response.Content.ReadFromJsonAsync<TRow>(ct);
+        }
+        catch (DataverseUnavailableException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[EXT-DATA] Error fetching single record: {Url}", url);
+            throw new DataverseUnavailableException("Dataverse could not be read.", ex);
         }
     }
 

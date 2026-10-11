@@ -443,7 +443,8 @@ public static class ExternalProjectDataEndpoints
         if (callerContext is null) return MissingContextResult();
 
         // ADR-003: an inaccessible parent DENIES, never an empty list (task 136).
-        var rights = await RightsForDocumentParentAsync(callerContext, parentKind, parentId, dataService, modules, ct);
+        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, parentId, dataService, modules, ct);
+        if (upstreamFault is not null) return upstreamFault;
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return DenyDocumentParent(parentKind);
 
@@ -478,7 +479,8 @@ public static class ExternalProjectDataEndpoints
         // (1) Read on the parent (task 136 · C2). Presence in the caller's map is NOT enough: a Secure
         //     project reached only through an organization grant used to sit there with no rights, and this
         //     route then streamed its documents app-only.
-        var rights = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        if (upstreamFault is not null) return upstreamFault;
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
             logger.LogWarning("[EXT-DOWNLOAD] Contact {ContactId} denied — no access to {ParentKind} {ParentId}",
@@ -712,27 +714,49 @@ public static class ExternalProjectDataEndpoints
     /// <para><b>A service request is not a root.</b> It is authorized through the submitter scope, the Service
     /// Requests module's accessible set (<c>sprk_requestedby</c> = the caller's contact; CIAM partners only when
     /// <c>ExternalAccess:PartnerServiceRequestsEnabled</c> is on). The requester alone gets Read and Create; anyone
-    /// else, and a request that does not exist or cannot be read, gets None. Both deny identically, so an id cannot
-    /// be probed. A missing module descriptor also denies.</para>
+    /// else, and a request that does not exist, gets None. Both deny identically, so an id cannot be probed. A missing
+    /// module descriptor, or a module that grants the caller nothing, denies before any read. A requester read that
+    /// FAILS (throttle, outage) is a 503 <see cref="ServiceRequestUnreadableReasonCode"/>, never a 403.</para>
     /// </remarks>
-    private static async Task<Spaarke.Dataverse.AccessRights> RightsForDocumentParentAsync(
+    private static async Task<(Spaarke.Dataverse.AccessRights Rights, IResult? Fault)> RightsForDocumentParentAsync(
         CallerPrincipal caller,
         ExternalDataService.DocumentParentKind parentKind,
         Guid parentId,
         ExternalDataService dataService,
         ExternalModuleRegistry modules,
-        CancellationToken ct) => parentKind switch
+        CancellationToken ct)
+    {
+        switch (parentKind)
         {
-            ExternalDataService.DocumentParentKind.Project =>
-                RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, parentId),
-            ExternalDataService.DocumentParentKind.Matter =>
-                RightsForRoot(caller, ExternalDataService.TodoRootKind.Matter, parentId),
-            ExternalDataService.DocumentParentKind.WorkAssignment =>
-                RightsForRoot(caller, ExternalDataService.TodoRootKind.WorkAssignment, parentId),
-            ExternalDataService.DocumentParentKind.ServiceRequest =>
-                await RightsForServiceRequestAsync(caller, parentId, dataService, modules, ct),
-            _ => Spaarke.Dataverse.AccessRights.None,
-        };
+            case ExternalDataService.DocumentParentKind.Project:
+                return (RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, parentId), null);
+            case ExternalDataService.DocumentParentKind.Matter:
+                return (RightsForRoot(caller, ExternalDataService.TodoRootKind.Matter, parentId), null);
+            case ExternalDataService.DocumentParentKind.WorkAssignment:
+                return (RightsForRoot(caller, ExternalDataService.TodoRootKind.WorkAssignment, parentId), null);
+            case ExternalDataService.DocumentParentKind.ServiceRequest:
+                try
+                {
+                    return (await RightsForServiceRequestAsync(caller, parentId, dataService, modules, ct), null);
+                }
+                catch (ExternalDataService.DataverseUnavailableException)
+                {
+                    // The requester could not be READ — a fault, not an answer. "Could not tell" must never read as
+                    // "no access" (a throttle would 403 the real requester), and it must not read as access either.
+                    // Nothing has touched SPE or been written. The detail is generic, so it leaks nothing.
+                    return (Spaarke.Dataverse.AccessRights.None, Results.Problem(
+                        statusCode: StatusCodes.Status503ServiceUnavailable,
+                        title: "Service request unavailable",
+                        detail: "The service request could not be checked right now. Try again shortly.",
+                        extensions: new Dictionary<string, object?> { ["reasonCode"] = ServiceRequestUnreadableReasonCode }));
+                }
+            default:
+                return (Spaarke.Dataverse.AccessRights.None, null);
+        }
+    }
+
+    /// <summary>The 503 reason code when a service request's requester could not be read (task 031 review).</summary>
+    internal const string ServiceRequestUnreadableReasonCode = "sdap.access.service_request_unreadable";
 
     private static async Task<Spaarke.Dataverse.AccessRights> RightsForServiceRequestAsync(
         CallerPrincipal caller,
@@ -747,6 +771,13 @@ public static class ExternalProjectDataEndpoints
         if (module is null)
             return Spaarke.Dataverse.AccessRights.None;
 
+        // The module grants this caller nothing at all (a CIAM partner with PartnerServiceRequestsEnabled off, or a
+        // principal with no contact): deny BEFORE any Dataverse read. The read could not change the answer.
+        if (!module.EffectiveDimensions.Any(d => d.AccessibleIds(caller).Count > 0))
+            return Spaarke.Dataverse.AccessRights.None;
+
+        // A genuine "no such request" is null (uniform 403, no oracle); a read that failed throws
+        // DataverseUnavailableException, which the caller turns into 503.
         var requester = await dataService.GetServiceRequestRequesterAsync(serviceRequestId, ct);
         return requester is { } requesterId && module.IsRecordAccessible(caller, requesterId)
             ? Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Create
@@ -967,7 +998,8 @@ public static class ExternalProjectDataEndpoints
 
         // ── AUTHORIZATION FIRST — nothing below touches SPE, or writes Dataverse, until both checks pass ──
         // (A service request's rights need one app-only read of its requester; nothing is written.)
-        var rights = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        if (upstreamFault is not null) return upstreamFault;
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
             logger.LogWarning("[EXT-UPLOAD] Contact {ContactId} denied — no access to {ParentKind} {ParentId}",
@@ -1138,7 +1170,8 @@ public static class ExternalProjectDataEndpoints
         if (callerContext is null) return MissingContextResult();
 
         // ── AUTHORIZATION FIRST — nothing below reads SPE/Graph until BOTH checks pass ──
-        var rights = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        if (upstreamFault is not null) return upstreamFault;
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
             logger.LogWarning("[EXT-VERSIONS] Contact {ContactId} denied — no access to {ParentKind} {ParentId}",

@@ -86,6 +86,11 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         _fixture.Ownership.Requests.Should().ContainSingle()
             .Which.TargetEntityLogicalName.Should().Be(EntityOf(segment), "the owner is resolved from the route record");
 
+        // The REAL container resolver: a secure root's bytes go to its own container; a service request is not
+        // securable and has no ancestor-link row, so its bytes go to the owning business unit's shared container.
+        _fixture.Uploads.Should().ContainSingle().Which.Container.Should().Be(
+            segment == "servicerequests" ? Fixture.BusinessUnitContainer : Fixture.RecordContainer);
+
         using var download = await client.GetAsync(
             $"/api/v1/external/{segment}/{RecordA}/documents/{created.SprkDocumentid}/content");
         download.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -252,6 +257,41 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         list.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         upload.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.RequesterReads.Should().Be(0,
+            "the module grants this caller nothing, so the denial is decided before any Dataverse read");
+    }
+
+    [Fact]
+    public async Task ServiceRequest_ARequesterRead_ThatFails_Is503_NotA403_AndTouchesNothing()
+    {
+        // A throttle or outage on the requester read is "could not tell", not "no access": 503 on every route, with
+        // no SPE call, no document read and no write.
+        _fixture.Principal = WorkforceContact();
+        _fixture.Data.Requesters[RecordA] = CallerContact;
+        _fixture.Data.RequesterFault = new ExternalDataService.DataverseUnavailableException("Dataverse answered 429.");
+        var document = _fixture.Data.Seed(ExternalDataService.DocumentParentKind.ServiceRequest, RecordA, "sr.pdf", "b!c", "item-sr");
+        _fixture.Data.DocumentReads.Clear();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var basePath = $"/api/v1/external/servicerequests/{RecordA}/documents";
+        var responses = new[]
+        {
+            await client.GetAsync(basePath),
+            await client.GetAsync($"{basePath}/{document}/content"),
+            await client.GetAsync($"{basePath}/{document}/versions"),
+            await client.PostAsync(basePath, FileForm()),
+        };
+
+        responses.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.ServiceUnavailable);
+        (await responses[0].Content.ReadAsStringAsync()).Should().Contain("sdap.access.service_request_unreadable");
+        _fixture.Data.DocumentReads.Should().BeEmpty();
+        _fixture.Downloads.Should().BeEmpty();
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.Documents.Should().ContainSingle("nothing was written");
+
+        // The same request reads normally once Dataverse answers again.
+        _fixture.Data.RequesterFault = null;
+        (await client.GetAsync(basePath)).StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -348,6 +388,47 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         (await NewService(found).GetServiceRequestRequesterAsync(RecordA)).Should().Be(CallerContact);
         found.Urls.Should().ContainSingle().Which.Should().Contain($"/sprk_servicerequests({RecordA})?$select=_sprk_requestedby_value");
         (await NewService(missing).GetServiceRequestRequesterAsync(RecordA)).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    public async Task ServiceRequestRequesterRead_OnANon404Failure_ThrowsRatherThanReportingNoRequest(HttpStatusCode status)
+    {
+        var service = NewService(new StatusHandler(status));
+
+        var act = () => service.GetServiceRequestRequesterAsync(RecordA);
+
+        await act.Should().ThrowAsync<ExternalDataService.DataverseUnavailableException>();
+    }
+
+    [Fact]
+    public async Task ServiceRequestRequesterRead_OnATransportFault_Throws_AndOnA404ReturnsNull()
+    {
+        var timeout = NewService(new ThrowingHandler(new TaskCanceledException("timed out")));
+        var unreachable = NewService(new ThrowingHandler(new HttpRequestException("connection reset")));
+
+        await ((Func<Task>)(() => timeout.GetServiceRequestRequesterAsync(RecordA)))
+            .Should().ThrowAsync<ExternalDataService.DataverseUnavailableException>();
+        await ((Func<Task>)(() => unreachable.GetServiceRequestRequesterAsync(RecordA)))
+            .Should().ThrowAsync<ExternalDataService.DataverseUnavailableException>();
+
+        // A genuine 404 is still "no such request".
+        (await NewService(new StatusHandler(HttpStatusCode.NotFound)).GetServiceRequestRequesterAsync(RecordA)).Should().BeNull();
+    }
+
+    private sealed class StatusHandler(HttpStatusCode status) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            Task.FromResult(new HttpResponseMessage(status));
+    }
+
+    private sealed class ThrowingHandler(Exception fault) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            Task.FromException<HttpResponseMessage>(fault);
     }
 
     private static ExternalDataService NewService(HttpMessageHandler transport) => new(
@@ -465,7 +546,13 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     /// </summary>
     public sealed class Fixture : ExternalCollaborationTestFixture
     {
-        private const string Container = "b!record-container";
+        /// <summary>The container a project, matter or work assignment (secure) names on its own row.</summary>
+        public const string RecordContainer = "b!record-container";
+
+        /// <summary>The shared container of the business unit that owns every service request.</summary>
+        public const string BusinessUnitContainer = "b!business-unit-shared-container";
+
+        private static readonly Guid OwningBusinessUnitId = Guid.Parse("b0310000-0000-4000-8000-0000000000b1");
 
         private readonly ExternalTodoScopeTestFixture.StubCallerPrincipalResolver _principals = new();
         private readonly ConcurrentDictionary<string, byte[]> _spe = new();
@@ -508,16 +595,27 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
                 services.RemoveAll<IRecordOwnershipResolver>();
                 services.AddSingleton<IRecordOwnershipResolver>(Ownership);
 
-                // The REAL container resolver: every record is securable, secure, and carries its own container.
+                // The REAL container resolver, answering as production does: a project, matter and work assignment are
+                // securable, secure, and carry their own container; a service request is NOT securable and has no
+                // ChildAncestorLinks row, so its container is its owning business unit's (the fallback branch).
                 var registry = new Mock<ISecurableEntityRegistry>();
                 registry.Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                    .ReturnsAsync(EntitySecurability.Securable);
+                    .ReturnsAsync((string entity, CancellationToken _) =>
+                        entity == "sprk_servicerequest" ? EntitySecurability.NotSecurable : EntitySecurability.Securable);
                 var records = new Mock<IGenericEntityService>();
                 records.Setup(r => r.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                    .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) => new Entity(entity, id)
+                    .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) => entity switch
                     {
-                        ["sprk_issecure"] = true,
-                        ["sprk_containerid"] = Container,
+                        "businessunit" => new Entity(entity, id) { ["sprk_containerid"] = BusinessUnitContainer },
+                        "sprk_servicerequest" => new Entity(entity, id)
+                        {
+                            ["owningbusinessunit"] = new EntityReference("businessunit", OwningBusinessUnitId),
+                        },
+                        _ => new Entity(entity, id)
+                        {
+                            ["sprk_issecure"] = true,
+                            ["sprk_containerid"] = RecordContainer,
+                        },
                     });
                 services.RemoveAll<RecordContainerResolver>();
                 services.AddSingleton(new RecordContainerResolver(
@@ -583,6 +681,12 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         /// <summary>Service request id → requester contact. Absent = the request does not exist.</summary>
         public ConcurrentDictionary<Guid, Guid> Requesters { get; } = new();
 
+        /// <summary>Set to make the requester read fail the way a throttled or unreachable Dataverse does.</summary>
+        public Exception? RequesterFault { get; set; }
+
+        /// <summary>How many times a service request's requester was read.</summary>
+        public int RequesterReads;
+
         /// <summary>Every document read (list or scoping), so deny tests can assert none happened.</summary>
         public ConcurrentQueue<string> DocumentReads { get; } = new();
 
@@ -591,6 +695,8 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             lock (_documents) _documents.Clear();
             Requesters.Clear();
             DocumentReads.Clear();
+            RequesterFault = null;
+            Interlocked.Exchange(ref RequesterReads, 0);
         }
 
         /// <summary>Seeds a document filed to <paramref name="parentId"/> through <paramref name="kind"/>'s lookup.</summary>
@@ -652,8 +758,13 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             return Task.FromResult(new ExternalDocumentDto { SprkDocumentid = id.ToString(), SprkName = pointers.FileName });
         }
 
-        public override Task<Guid?> GetServiceRequestRequesterAsync(Guid serviceRequestId, CancellationToken ct = default) =>
-            Task.FromResult(Requesters.TryGetValue(serviceRequestId, out var requester) ? requester : (Guid?)null);
+        public override Task<Guid?> GetServiceRequestRequesterAsync(Guid serviceRequestId, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref RequesterReads);
+            if (RequesterFault is { } fault)
+                throw fault;
+            return Task.FromResult(Requesters.TryGetValue(serviceRequestId, out var requester) ? requester : (Guid?)null);
+        }
 
         internal sealed class TestCredential : TokenCredential
         {
