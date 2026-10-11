@@ -113,6 +113,12 @@ public static class ExternalAccessEndpoints
         // internal systemusers.
         externalGroup.MapExternalMessageEndpoints();
 
+        // POST /api/v1/external/servicerequests — the Legal Front Door intake submit (r3 task 035, FR-05/FR-06). Inherits this
+        // group's policy + CallerPrincipalAuthorizationFilter; gated server-side on the legal-front-door module entitlement
+        // (the one ModuleEntitlementResolver check /me/entitlements reports), and creates the request app-only with the
+        // caller's contact as sprk_requestedby.
+        externalGroup.MapExternalIntakeEndpoints();
+
         // Contact-side Grant Access (unified-access-control-r2 task 140, owner C4 / Q2): a contact holding Collaborate or
         // Full Access grants colleagues of their OWN organization, at or below their own level, never organization-wide.
         // On THIS group because a contact can authenticate nowhere else (ADR-028 A3: one ExternalCollaboration group);

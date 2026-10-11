@@ -684,6 +684,109 @@ public class ExternalDataService
         return row is null ? null : GuidValue(row, "_sprk_requestedby_value");
     }
 
+    // ---------------------------------------------------------------------------
+    // Legal Front Door intake (spaarke-SPA-external-access-platform-r3 task 035, FR-05 / FR-06)
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// The <c>sprk_servicerequest.sprk_requesttype</c> options (local choice, task 020; <c>Entity.xml</c> optionset
+    /// <c>sprk_servicerequest_sprk_requesttype</c>): one per intake wizard. Any other value is refused.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<int, string> ServiceRequestTypes = new Dictionary<int, string>
+    {
+        [100000000] = "NDA Assessment",
+        [100000001] = "Invention Submission",
+        [100000002] = "Policy Question",
+        [100000003] = "Trademark Search",
+    };
+
+    /// <summary><c>sprk_servicerequest.sprk_direction</c> = Inbound (<c>Entity.xml</c> optionset
+    /// <c>sprk_servicerequest_sprk_direction</c>: Inbound 100000000, Outbound 100000001). An intake is always inbound.</summary>
+    internal const int ServiceRequestDirectionInbound = 100000000;
+
+    /// <summary>The <c>sprk_requestedby</c> (→ contact) bind key. Navigation property <c>sprk_RequestedBy</c>
+    /// (<c>Other/Relationships/Contact.xml</c>, relationship <c>sprk_servicerequest_RequestedBy_contact</c>).</summary>
+    internal const string RequestedByBindKey = "sprk_RequestedBy@odata.bind";
+
+    /// <summary>
+    /// The COMPLETE create payload for an intake-submitted <c>sprk_servicerequest</c>: exactly the five columns the
+    /// intake writes. Pure so a test can read it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The requester is the resolved caller's contact</b>, passed in by the route from the principal — never from
+    /// the request (FR-25 / constraint "requester from the resolved principal"). The row carries no creator stamp:
+    /// <c>sprk_servicerequest</c> has neither <c>sprk_createdbyperson</c> nor <c>sprk_createdbycontact</c>; the requester
+    /// is its attribution and the Service Requests module's scope (<c>sprk_requestedby</c>).</para>
+    /// <para><b>No owner is set.</b> The row is created app-only with no <c>ownerid</c>, so the BFF application user owns
+    /// it. A service request is a root, so <see cref="RequireOwner"/>'s parent-derived owner does not apply, and no owner
+    /// decision exists yet for an unfiled intake row whose requester is a contact (task 035 notes, escalation 2).</para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">An empty requester, a blank name, or blank intake data.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A request type outside <see cref="ServiceRequestTypes"/>.</exception>
+    internal static Dictionary<string, object?> BuildServiceRequestCreatePayload(
+        Guid requesterContactId, int requestType, string name, string intakeDataJson)
+    {
+        if (requesterContactId == Guid.Empty)
+            throw new ArgumentException("A service request needs the requester's contact id.", nameof(requesterContactId));
+        if (!ServiceRequestTypes.ContainsKey(requestType))
+            throw new ArgumentOutOfRangeException(nameof(requestType), requestType, "Not a sprk_requesttype option.");
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("sprk_name is required.", nameof(name));
+        if (string.IsNullOrWhiteSpace(intakeDataJson))
+            throw new ArgumentException("sprk_intakedata is required.", nameof(intakeDataJson));
+
+        return new Dictionary<string, object?>
+        {
+            ["sprk_name"] = name,
+            ["sprk_requesttype"] = requestType,
+            ["sprk_intakedata"] = intakeDataJson,
+            ["sprk_direction"] = ServiceRequestDirectionInbound,
+            [RequestedByBindKey] = $"/contacts({requesterContactId:D})",
+        };
+    }
+
+    /// <summary>
+    /// Creates one <c>sprk_servicerequest</c> from a Legal Front Door submission, app-only (no OBO), and returns its id.
+    /// The payload is <see cref="BuildServiceRequestCreatePayload"/>'s. A non-success response throws.
+    /// </summary>
+    // `virtual` per ADR-038 §4 (substitution seam): the intake route tests record the payload and assert that a refused
+    // submission never reached Dataverse.
+    public virtual async Task<Guid> CreateServiceRequestAsync(
+        Guid requesterContactId, int requestType, string name, string intakeDataJson, CancellationToken ct = default)
+    {
+        var body = BuildServiceRequestCreatePayload(requesterContactId, requestType, name, intakeDataJson);
+
+        var token = await GetAppOnlyTokenAsync(ct);
+
+        // Echo only the id: sprk_intakedata is field-secured and the caller already holds the answers.
+        var url = $"{GetApiUrl()}/sprk_servicerequests?$select=sprk_servicerequestid";
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        httpRequest.Headers.Add("OData-MaxVersion", "4.0");
+        httpRequest.Headers.Add("OData-Version", "4.0");
+        httpRequest.Headers.Add("Prefer", "return=representation");
+        httpRequest.Content = new StringContent(
+            JsonSerializer.Serialize(body),
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await _httpClient.SendAsync(httpRequest, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogWarning(
+                "[EXT-DATA] Create service request (type {RequestType}) failed for contact {ContactId}: {Status} — {Body}",
+                requestType, requesterContactId, response.StatusCode, errorBody);
+            throw new InvalidOperationException($"Failed to create service request: {response.StatusCode}");
+        }
+
+        var row = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(ct);
+        return row is not null && GuidValue(row, "sprk_servicerequestid") is { } id
+            ? id
+            : throw new InvalidOperationException("Dataverse returned no service request id after create");
+    }
+
     /// <summary>An app-only Dataverse read could not be completed (not a 404): the caller reports it as a 503.</summary>
     public sealed class DataverseUnavailableException : Exception
     {

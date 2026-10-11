@@ -102,6 +102,29 @@ public class ModuleEntitlementResolver
     /// <summary>The workforce default entitlement set (A7) surfaced for tests.</summary>
     public static IReadOnlyList<string> WorkforceDefaultEntitlements => WorkforceDefaultModules;
 
+    /// <summary>The Legal Front Door module code: the four intake wizards and their submit route (r3 task 035, FR-05).</summary>
+    public const string LegalFrontDoorModule = "legal-front-door";
+
+    /// <summary>
+    /// THE server-side Tier-1 check for a module-gated route (r3 task 035; review 011 K2): whether
+    /// <paramref name="moduleCode"/> is in the set <see cref="ResolveAsync"/> returns for this caller — the same set
+    /// <c>/me/entitlements</c> reports, from the same <see cref="ExternalAccessOptions"/> value the module descriptors are
+    /// built from. A route asks this instead of re-deriving the rule from the plane or the partner switch, so the route,
+    /// <c>/me</c> and the descriptor cannot drift apart. Case-insensitive on the module code; fail-closed on a blank one.
+    /// </summary>
+    public async Task<bool> IsEntitledAsync(
+        CallerPrincipal principal, ClaimsPrincipal user, string moduleCode, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        if (string.IsNullOrWhiteSpace(moduleCode))
+        {
+            return false;
+        }
+
+        var entitlements = await ResolveAsync(principal, user, ct).ConfigureAwait(false);
+        return entitlements.Contains(moduleCode, StringComparer.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Resolves the caller's module entitlement codes by server-resolved principal kind (A7). CIAM → the
     /// outside-counsel set, plus <c>legal-front-door</c> when the partner switch is on; workforce → the
