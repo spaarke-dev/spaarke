@@ -344,6 +344,12 @@ public partial class RouteAuthorizationGuardTests
             + "registry (IsRecordAccessible; ScopeRows for invoices and the requester-scoped service requests) before the "
             + "app-only message read; an absent record and a foreign one are the same 403. POST (task 034, FR-11) runs the "
             + "same gate and also requires Create on the record (GetRecordRightsAsync) before the app-only thread post."),
+        new GovernedFile("Api/ExternalAccess/ExternalIntakeEndpoints.cs", Scope.GroupGated,
+            "POST /api/v1/external/servicerequests (spaarke-SPA-external-access-platform-r3 task 035, FR-05/FR-06) on the "
+            + "COLLABORATION group: 403 unless the caller principal is entitled to the legal-front-door module "
+            + "(ModuleEntitlementResolver.IsEntitledAsync — the /me/entitlements set, partner switch included) and has a "
+            + "contact; the one row it writes app-only names that contact as sprk_requestedby, so it lands only in the "
+            + "caller's own Service Requests set. Takes no record id."),
         new GovernedFile("Api/ExternalAccess/GrantExternalAccessEndpoint.cs", Scope.GroupGated,
             "POST /grant under the DelegationRuleFilter admin group."),
         new GovernedFile("Api/ExternalAccess/RevokeExternalAccessEndpoint.cs", Scope.GroupGated,
@@ -704,7 +710,14 @@ public partial class RouteAuthorizationGuardTests
     //            COLLABORATION group. Governed GroupGated with a HandlerDecision (IsRecordAccessible through
     //            GetMessagesCoreAsync -> IsRootRecordReadableAsync). Pinned by
     //            tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalMessageEndpointsTests.cs.
-    private const int ExpectedEndpointFileCount = 119;
+    //
+    // 119 -> 120 (2026-10-11, spaarke-SPA-external-access-platform-r3 task 035, FR-05/FR-06):
+    //
+    //   035  +1  Api/ExternalAccess/ExternalIntakeEndpoints.cs ADDED — POST /api/v1/external/servicerequests, the Legal
+    //            Front Door intake submit, on the COLLABORATION group. Governed GroupGated with a HandlerDecision (the
+    //            legal-front-door module entitlement, ModuleEntitlementResolver.IsEntitledAsync, before the app-only create).
+    //            Pinned by tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalIntakeEndpointsTests.cs.
+    private const int ExpectedEndpointFileCount = 120;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1579,6 +1592,11 @@ public partial class RouteAuthorizationGuardTests
             + "same 403 — and then Create on the record (the caller's rights on the root, on an invoice's parent root, or "
             + "the requester on their own service request; :206, :218) before CommunicationService.PostToRecordThreadAsync "
             + "writes app-only (:229). The body is validated and an unattributable sender refused before any read (:177, :195)."),
+        new HandlerDecision("POST /api/v1/external/servicerequests", "SubmitServiceRequestAsync", "IsEntitledAsync", Array.Empty<string>(),
+            "Task 035 (FR-05/FR-06): 403 unless the caller principal is entitled to legal-front-door "
+            + "(ModuleEntitlementResolver.IsEntitledAsync, ExternalIntakeEndpoints.cs:101 — a CIAM partner only with the partner "
+            + "switch on) and has a contact (:113), before the one app-only create, whose sprk_requestedby is that contact "
+            + "(:138). The route names no existing record."),
         new HandlerDecision("GET /api/office/communications/by-message-id/{internetMessageId}", "FindByMessageIdAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Reads through IDataverseUserClient under the CALLER's Dataverse security (task 127, "
             + "CommunicationsEndpoints.cs:145, :179); an unreadable communication 404s like a missing one."),
@@ -1698,6 +1716,9 @@ public partial class RouteAuthorizationGuardTests
                 "The caller principal's Read-filtered project set (ReadableProjects) — a list trimmed to the caller's rights."),
             ["IsRecordAccessible"] = ("Infrastructure/ExternalAccess/ExternalModuleRegistry.cs",
                 "Membership of a record in the caller principal's accessible set for a registered module."),
+            ["IsEntitledAsync"] = ("Infrastructure/ExternalAccess/ModuleEntitlementResolver.cs",
+                "The caller principal's Tier-1 module entitlement (r3 task 035): the same set /me/entitlements reports, from "
+                + "the server-resolved principal kind and the bound partner switch; false fails the route closed."),
             ["Tier2ScopeFilterInjector"] = ("Api/ExternalAccess/Tier2ScopeFilterInjector.cs",
                 "Rewrites the caller's FetchXML to their accessible-record set before it runs — the query is the gate."),
             ["DownloadFileAsUserAsync"] = ("Infrastructure/Graph/SpeFileStore.cs",
