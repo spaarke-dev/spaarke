@@ -438,9 +438,16 @@ public class ExternalDataService
         return new ExternalCollectionResponse<ExternalDocumentDto>
         {
             Value = readable.Select(MapDocument).ToList(),
-            Truncated = read.Truncated,
+            Truncated = read.Truncated || FlagReadCutListShort(flags, read.Rows.Count - readable.Count),
         };
     }
+
+    /// <summary>
+    /// Review of 039 option B (K2): a list that withheld rows while the secure-flag read was INCOMPLETE (a failed chunk, a
+    /// walk that could not decide, the lookup bound) may be missing rows only because of that, so it says
+    /// <see cref="ExternalCollectionResponse{T}.Truncated"/>. A complete read that withheld a genuinely secure row does not.
+    /// </summary>
+    private static bool FlagReadCutListShort(SecureRootFlags flags, int withheld) => withheld > 0 && !flags.IsComplete;
 
     private static DocumentRootLinks DocumentLinksOf(DocumentRow row) =>
         new(
@@ -1380,7 +1387,7 @@ public class ExternalDataService
         return new ExternalCollectionResponse<ExternalTodoDto>
         {
             Value = readable.Select(MapTodo).ToList(),
-            Truncated = read.Truncated,
+            Truncated = read.Truncated || FlagReadCutListShort(flags, read.Rows.Count - readable.Count),
         };
     }
 
@@ -1445,7 +1452,7 @@ public class ExternalDataService
 
         // Task 105: paged to the cap, and a cut-short list says so (see GetDocumentsAsync).
         var read = await GetCollectionAsync<EventRow>(url, ct);
-        var readable = await ReadableEventsAsync(read.Rows, caller, ct);
+        var (readable, flags) = await ReadableEventsAsync(read.Rows, caller, ct);
         if (readable.Count != read.Rows.Count)
         {
             _logger.LogInformation(
@@ -1456,7 +1463,7 @@ public class ExternalDataService
         return new ExternalCollectionResponse<ExternalEventDto>
         {
             Value = readable.Select(MapEvent).ToList(),
-            Truncated = read.Truncated,
+            Truncated = read.Truncated || FlagReadCutListShort(flags, read.Rows.Count - readable.Count),
         };
     }
 
@@ -1473,14 +1480,15 @@ public class ExternalDataService
     /// document, message and feed lists. The delete-own rule (<c>AuthorizeDeleteOwnAsync</c>) stays "Read on EVERY parent"
     /// (FR-26).</para>
     /// </remarks>
-    private async Task<List<EventRow>> ReadableEventsAsync(IReadOnlyList<EventRow> rows, CallerPrincipal caller, CancellationToken ct)
+    private async Task<(List<EventRow> Rows, SecureRootFlags Flags)> ReadableEventsAsync(
+        IReadOnlyList<EventRow> rows, CallerPrincipal caller, CancellationToken ct)
     {
         var stamps = rows
             .Select(r => ExternalMultiRootRule.Stamps(
                 r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue))
             .ToList();
         var flags = await ReadSecureRootFlagsAsync(caller, stamps, ct);
-        return rows.Where((_, i) => ExternalMultiRootRule.SecureRootsReadable(caller, flags, stamps[i])).ToList();
+        return (rows.Where((_, i) => ExternalMultiRootRule.SecureRootsReadable(caller, flags, stamps[i])).ToList(), flags);
     }
 
     /// <summary>
@@ -1512,15 +1520,20 @@ public class ExternalDataService
     /// ancestry the walk decided with no secure ancestor, opens a root. A failed chunk, a record not returned (missing, or
     /// invisible to the app identity), an absent or null <c>sprk_issecure</c> (a masked field-secured value reads empty), any
     /// non-boolean value, an ancestor read that faults or is missing or empty, a chain past the bound and a missing filing
-    /// reader all leave the root out of the answer, so it counts as secure. No cache: a staff change to the flag applies on
-    /// the next request.</para>
+    /// reader all leave the root out of the answer, so it counts as secure. A named filing parent the walk is not given back
+    /// is Unknown too (<c>absentParentIsUnknown</c>, the read path's opt-in; the write-time walk is unchanged). No cache: a
+    /// staff change to the flag applies on the next request.</para>
+    /// <para><b>Complete.</b> The answer says whether the read COMPLETED (<see cref="NonSecureRootsRead.Complete"/>): every
+    /// flag chunk succeeded and every walk decided. When it did not, a root may count as secure only because it could not be
+    /// read; the document, event and to-do lists that withheld a row then set <c>Truncated</c>.</para>
     /// <para><c>virtual</c> per ADR-038 section 4 (substitution seam); the tests drive the real read over a fake Web API.</para>
     /// </remarks>
-    public virtual async Task<IReadOnlySet<(ExternalGrantRootType Root, Guid Id)>> GetNonSecureRootsAsync(
+    public virtual async Task<NonSecureRootsRead> GetNonSecureRootsAsync(
         IReadOnlyCollection<(ExternalGrantRootType Root, Guid Id)> roots, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(roots);
         var notSecure = new HashSet<(ExternalGrantRootType Root, Guid Id)>();
+        var complete = true;
         foreach (var group in roots.Where(r => r.Id != Guid.Empty).Distinct().GroupBy(r => r.Root))
         {
             var idColumn = ExternalGrantRoot.LogicalNameFor(group.Key) + "id";
@@ -1545,6 +1558,7 @@ public class ExternalDataService
                 _logger.LogWarning(
                     "[EXT-DATA] secure-flag read for {Count} {Root} id(s) was incomplete ({Outcome}); the unread ones count as secure.",
                     asked.Count, group.Key, read.Outcome);
+                complete = false;
             }
 
             if (ownOpen.Count == 0)
@@ -1553,12 +1567,19 @@ public class ExternalDataService
             }
 
             // Effective status (task 174's rule): the ONE filing walk, batched for the own-open ids of this table; null for a
-            // matter (files under nothing). The fold makes an id with no decided ancestry secure.
+            // matter (files under nothing). The fold makes an id with no decided ancestry secure. Owner policy (review of
+            // 039 option B): a named filing parent the walk cannot find is Unknown, not "files under nothing"
+            // (absentParentIsUnknown), so it folds to secure on this read path; the write-time walk keeps its default.
             var ancestry = await EffectiveRootFlags.ReadAncestryAsync(
-                _filing, _logger, ExternalGrantRoot.LogicalNameFor(group.Key), ownOpen, ct);
+                _filing, _logger, ExternalGrantRoot.LogicalNameFor(group.Key), ownOpen, ct, absentParentIsUnknown: true);
             var effective = EffectiveRootFlags.Fold(ownOpen.ToDictionary(id => id, _ => RootRecordFlags.None), ancestry);
             foreach (var (id, flags) in effective)
             {
+                if (flags.IsUnreadable)
+                {
+                    complete = false; // a walk fault, an unreadable or missing ancestor, an empty ancestor flag, past the bound
+                }
+
                 if (!flags.IsSecure)
                 {
                     notSecure.Add((group.Key, id));
@@ -1566,7 +1587,7 @@ public class ExternalDataService
             }
         }
 
-        return notSecure;
+        return new NonSecureRootsRead(notSecure, complete);
     }
 
     /// <summary>The root records' secure flag (all three roots carry it).</summary>

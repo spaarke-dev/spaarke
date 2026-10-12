@@ -517,7 +517,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         public void Reset()
         {
             lock (_sets) _sets.Clear();
-            lock (_filing) _filing.Clear();
+            lock (_filing) { _filing.Clear(); _recordTypes.Clear(); }
             Urls.Clear();
             FilingReadLog.Clear();
             Fault = null;
@@ -542,6 +542,41 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             };
             lock (_filing) _filing[("sprk_workassignment", workAssignment)][column] = new EntityReference(table, parentId);
         }
+
+        /// <summary>
+        /// Files project <paramref name="project"/> under <paramref name="parent"/> through the POLYMORPHIC PAIR, the only way a
+        /// project files under anything (it has no typed regarding lookup): <c>sprk_regardingrecordid</c> holds the parent's id
+        /// as text and <c>sprk_regardingrecordtype</c> points at the <c>sprk_recordtype_ref</c> row whose
+        /// <c>sprk_recordlogicalname</c> names the parent's table, exactly the columns <c>SecureRootInheritance</c> reads
+        /// (<c>PairIdColumn</c>, <c>PairTypeColumn</c>, <c>RecordTypeLogicalNameColumn</c>). Seed the project with
+        /// <see cref="AddRoot"/> first; the parent need not exist (a named-but-absent parent).
+        /// </summary>
+        public void FileProjectUnderByPair(Guid project, ExternalGrantRootType parent, Guid parentId)
+        {
+            var parentTable = parent switch
+            {
+                ExternalGrantRootType.Matter => "sprk_matter",
+                ExternalGrantRootType.Project => "sprk_project",
+                _ => throw new NotSupportedException("A project files under a matter or a project."),
+            };
+            lock (_filing)
+            {
+                if (!_recordTypes.TryGetValue(parentTable, out var typeId))
+                {
+                    typeId = Guid.NewGuid();
+                    _recordTypes[parentTable] = typeId;
+                    var typeRow = new Entity("sprk_recordtype_ref", typeId);
+                    typeRow["sprk_recordlogicalname"] = parentTable;
+                    _filing[("sprk_recordtype_ref", typeId)] = typeRow;
+                }
+
+                var row = _filing[("sprk_project", project)];
+                row["sprk_regardingrecordid"] = parentId.ToString("D");
+                row["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", typeId);
+            }
+        }
+
+        private readonly Dictionary<string, Guid> _recordTypes = new();
 
         /// <summary>
         /// Seeds a root record (project, matter, work assignment) with its <c>sprk_issecure</c>. A <c>null</c> flag is OMITTED
@@ -661,6 +696,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                 {
                     "projects" => "_sprk_project_value",
                     "matters" => "_sprk_matter_value",
+                    "invoices" => "_sprk_invoice_value",
+                    "servicerequests" => "_sprk_relatedservicerequest_value",
                     _ => "_sprk_workassignment_value",
                 }] = record.ToString(),
             };
@@ -668,6 +705,23 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             Seed("sprk_documents", row);
             return id;
         }
+
+        /// <summary>Seeds an invoice with its parent matter and/or project (what <c>GetInvoiceParentsAsync</c> reads).</summary>
+        public void AddInvoice(Guid id, Guid? matter, Guid? project) =>
+            Seed("sprk_invoices", new Dictionary<string, object?>
+            {
+                ["sprk_invoiceid"] = id.ToString(),
+                ["_sprk_matter_value"] = matter?.ToString(),
+                ["_sprk_project_value"] = project?.ToString(),
+            });
+
+        /// <summary>Seeds a service request with its requester contact (what <c>GetServiceRequestRequesterAsync</c> reads).</summary>
+        public void AddServiceRequest(Guid id, Guid requester) =>
+            Seed("sprk_servicerequests", new Dictionary<string, object?>
+            {
+                ["sprk_servicerequestid"] = id.ToString(),
+                ["_sprk_requestedby_value"] = requester.ToString(),
+            });
 
         /// <summary><see cref="AddDocument"/> with a link column set to an arbitrary raw value (a malformed lookup).</summary>
         public string AddDocumentRaw(string segment, Guid record, string name, (string Column, object? Value) rawLink)
@@ -730,7 +784,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                 lock (_sets)
                 {
                     hit = _sets.TryGetValue(single.Groups[1].Value, out var seededRows)
-                        ? seededRows.FirstOrDefault(r => new[] { "sprk_documentid", "sprk_todoid", "sprk_eventid" }
+                        ? seededRows.FirstOrDefault(r => new[] { "sprk_documentid", "sprk_todoid", "sprk_eventid", "sprk_invoiceid", "sprk_servicerequestid" }
                             .Any(k => r.TryGetValue(k, out var v) && string.Equals(v as string, wanted, StringComparison.OrdinalIgnoreCase)))
                         : null;
                 }

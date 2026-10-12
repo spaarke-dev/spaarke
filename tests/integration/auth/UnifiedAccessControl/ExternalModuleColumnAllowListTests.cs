@@ -196,7 +196,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     /// it answers "none known not secure" (every unreadable root counts as secure, the fail-closed default).
     /// </summary>
     private static readonly NonSecureRootReader NoFlags = (_, _) =>
-        Task.FromResult<IReadOnlySet<(ExternalGrantRootType Root, Guid Id)>>(new HashSet<(ExternalGrantRootType Root, Guid Id)>());
+        Task.FromResult(new NonSecureRootsRead(new HashSet<(ExternalGrantRootType Root, Guid Id)>()));
 
     private static Task<IResult> Fetch(ExternalModuleRegistry registry, CallerPrincipal principal, string fetchXml, FetchDouble dataverse) =>
         ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(

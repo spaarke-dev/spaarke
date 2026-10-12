@@ -134,6 +134,7 @@ internal static class ExternalMultiRootRule
         if (distinct.Count == 0)
             return SecureRootFlags.None;
 
+        var complete = true;
         if (distinct.Count > MaxFlagLookups)
         {
             logger.LogWarning(
@@ -141,14 +142,15 @@ internal static class ExternalMultiRootRule
                 + "(fail closed) and their rows are withheld.",
                 distinct.Count, MaxFlagLookups);
             distinct = distinct.Take(MaxFlagLookups).ToList();
+            complete = false;
         }
 
         try
         {
-            var notSecure = await readNotSecure(distinct, ct).ConfigureAwait(false);
+            var read = await readNotSecure(distinct, ct).ConfigureAwait(false);
             var asked = distinct.ToHashSet();
             // Only what was asked can be opened: an answer the reader made up for another id is ignored.
-            return new SecureRootFlags(notSecure.Where(asked.Contains));
+            return new SecureRootFlags(read.NotSecure.Where(asked.Contains), complete && read.Complete);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -160,17 +162,26 @@ internal static class ExternalMultiRootRule
                 "[EXT-MULTIROOT] The secure-flag read for {Count} linked root(s) failed. Failing CLOSED: every one counts as "
                 + "secure, and rows filed to them are withheld.",
                 distinct.Count);
-            return SecureRootFlags.None;
+            return SecureRootFlags.ReadFailed;
         }
     }
 }
 
 /// <summary>
-/// The app-only secure-flag read the multi-root rule needs: of <paramref name="roots"/>, the ones whose
-/// <c>sprk_issecure</c> was read and is <c>false</c>. Anything not returned counts as secure.
+/// The app-only secure-flag read the multi-root rule needs: of <paramref name="roots"/>, the ones whose EFFECTIVE secure
+/// status was read and is not secure. Anything not returned counts as secure.
 /// </summary>
-public delegate Task<IReadOnlySet<(ExternalGrantRootType Root, Guid Id)>> NonSecureRootReader(
+public delegate Task<NonSecureRootsRead> NonSecureRootReader(
     IReadOnlyCollection<(ExternalGrantRootType Root, Guid Id)> roots, CancellationToken ct);
+
+/// <summary>
+/// What <see cref="NonSecureRootReader"/> answers: the roots KNOWN not to be secure, and whether the read COMPLETED.
+/// </summary>
+/// <param name="NotSecure">The roots read and found not (effectively) secure.</param>
+/// <param name="Complete"><c>false</c> when a flag chunk, page or filing walk failed or could not decide, so a root may
+/// count as secure only because it could not be read. The list readers use it to say a list may be missing rows
+/// (<c>Truncated</c>); the rule itself is unchanged (unknown is secure).</param>
+public sealed record NonSecureRootsRead(IReadOnlySet<(ExternalGrantRootType Root, Guid Id)> NotSecure, bool Complete = true);
 
 /// <summary>
 /// The secure flags one request read for the multi-root rule (<see cref="ExternalMultiRootRule.ReadFlagsAsync"/>): the
@@ -180,11 +191,23 @@ public sealed class SecureRootFlags
 {
     private readonly HashSet<(ExternalGrantRootType Root, Guid Id)> _notSecure;
 
-    internal SecureRootFlags(IEnumerable<(ExternalGrantRootType Root, Guid Id)> notSecure) =>
+    internal SecureRootFlags(IEnumerable<(ExternalGrantRootType Root, Guid Id)> notSecure, bool isComplete = true)
+    {
         _notSecure = new HashSet<(ExternalGrantRootType Root, Guid Id)>(notSecure);
+        IsComplete = isComplete;
+    }
 
     /// <summary>Nothing is known: every root the caller cannot read counts as secure.</summary>
     public static SecureRootFlags None { get; } = new(Array.Empty<(ExternalGrantRootType, Guid)>());
+
+    /// <summary>The read itself failed or was cut short: nothing is known, and a withheld row may be withheld only because
+    /// of that (<see cref="IsComplete"/> is <c>false</c>).</summary>
+    internal static SecureRootFlags ReadFailed { get; } = new(Array.Empty<(ExternalGrantRootType, Guid)>(), isComplete: false);
+
+    /// <summary><c>true</c> when every flag chunk and filing walk the request needed succeeded (or none was needed). When
+    /// <c>false</c> a root may count as secure only because it could not be read, so a list that withheld a row says
+    /// <c>Truncated</c>.</summary>
+    public bool IsComplete { get; }
 
     /// <summary>Whether <paramref name="id"/> was read and found NOT secure.</summary>
     public bool IsKnownNotSecure(ExternalGrantRootType root, Guid id) => _notSecure.Contains((root, id));

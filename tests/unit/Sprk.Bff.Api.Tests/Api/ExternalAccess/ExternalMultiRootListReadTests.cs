@@ -297,6 +297,59 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         (await ListIds(kind, "projects")).Should().Equal(plain);
     }
 
+    // ---- Review of 039 option B, K2: an INCOMPLETE flag read must not silently shrink a list ----
+
+    [Theory]
+    [InlineData("events", "throws")]
+    [InlineData("events", "fault")]
+    [InlineData("todos", "throws")]
+    [InlineData("todos", "fault")]
+    [InlineData("documents", "throws")]
+    [InlineData("documents", "fault")]
+    public async Task OptionB_AnIncompleteFlagRead_ThatWithholdsARow_SetsTruncated(string kind, string failure)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden);
+        if (failure == "throws") _fixture.Data.FlagReadThrows = true; else _fixture.Data.FlagFault = HttpStatusCode.InternalServerError;
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+        AddRow(kind, "projects", RecordA, "Withheld only because its matter could not be read", "matters", Hidden);
+
+        var (ids, truncated) = await ListIdsAndTruncated(kind, "projects");
+
+        ids.Should().Equal(plain);
+        truncated.Should().BeTrue("the row was withheld only because the secure-flag read failed, so the list may be short");
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task OptionB_ACompleteFlagRead_WithASecureRowWithheld_DoesNotSetTruncated(string kind)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, Hidden);
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+        AddRow(kind, "projects", RecordA, "Genuinely secure", "matters", Hidden);
+
+        var (ids, truncated) = await ListIdsAndTruncated(kind, "projects");
+
+        ids.Should().Equal(plain);
+        truncated.Should().BeFalse("a complete read that withheld a secure row is not a truncated list");
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task OptionB_AFaultedFlagRead_ThatWithholdsNothing_DoesNotSetTruncated(string kind)
+    {
+        // A fault only matters when it costs a row: a list with no linked unreadable root never reads a flag.
+        _fixture.Principal = Principal("projects", RecordA);
+        _fixture.Data.FlagFault = HttpStatusCode.InternalServerError;
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+
+        var (ids, truncated) = await ListIdsAndTruncated(kind, "projects");
+
+        ids.Should().Equal(plain);
+        truncated.Should().BeFalse();
+    }
+
     [Theory]
     [MemberData(nameof(Kinds))]
     public async Task OptionB_ManyRowsLinkedToTheSameUnreadableRoots_CostOneFlagQueryPerRootType(string kind)
@@ -899,6 +952,18 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         using var doc = System.Text.Json.JsonDocument.Parse(json);
         return doc.RootElement.GetProperty("value").EnumerateArray()
             .Select(v => v.GetProperty(idProperty).GetString()!).ToList();
+    }
+
+    /// <summary><see cref="ListIds"/>, and the list's <c>truncated</c> flag (omitted from the JSON when false).</summary>
+    private async Task<(IReadOnlyList<string> Ids, bool Truncated)> ListIdsAndTruncated(string kind, string segment)
+    {
+        using var client = _fixture.CreateAuthenticatedClient();
+        var json = await client.GetStringAsync($"/api/v1/external/{segment}/{RecordA}/{kind}");
+        var idProperty = kind switch { "events" => "sprk_eventid", "todos" => "sprk_todoid", _ => "sprk_documentid" };
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var ids = doc.RootElement.GetProperty("value").EnumerateArray().Select(v => v.GetProperty(idProperty).GetString()!).ToList();
+        var truncated = doc.RootElement.TryGetProperty("truncated", out var flag) && flag.GetBoolean();
+        return (ids, truncated);
     }
 
     private static IReadOnlyDictionary<string, object?> DocRow(
