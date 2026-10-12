@@ -232,6 +232,12 @@ public class ExternalMessageEndpointsTests
             .And.Contain("(statuscode eq 659490002 or statuscode eq 659490003)")
             .And.Contain("$orderby=createdon desc");
         _lastOData.Should().NotContain("sprk_from").And.NotContain("sprk_to,");
+        // Task 037 review K3: the thread read keeps its EXACT projection (body, format and subject included) — only the
+        // notification feed's read drops them.
+        _lastOData.Should().StartWith(
+            "$select=sprk_communicationid,sprk_body,sprk_bodyformat,sprk_subject,sprk_direction,_sprk_sentby_value," +
+            "_sprk_createdbycontact_value,createdon,sprk_isinternalonly,sprk_privilegeclassification,statuscode," +
+            "_sprk_regardingproject_value&");
         _impersonated.VerifyNoOtherCalls();
     }
 

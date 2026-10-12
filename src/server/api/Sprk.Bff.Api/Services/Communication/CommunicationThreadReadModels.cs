@@ -133,6 +133,19 @@ public sealed record AppOnlyRegardingReadResult(
     bool Truncated);
 
 /// <summary>
+/// The app-only RECENT read across many records for the external notification feed
+/// (<c>CommunicationThreadReadService.ReadRecentForRecordsAppOnlyAsync</c>, spaarke-SPA-external-access-platform-r3 task
+/// 037 / FR-08): the visible messages, newest first, each with the record it was matched to. <see cref="Truncated"/> is
+/// true when a bound (records scanned, or messages per read) cut the answer.
+/// </summary>
+public sealed record AppOnlyRecentReadResult(
+    IReadOnlyList<RecentRecordMessage> Messages,
+    bool Truncated);
+
+/// <summary>One recent message and the accessible record (entity logical name + id) it was matched to.</summary>
+public sealed record RecentRecordMessage(ThreadMessageDto Message, string EntityType, Guid RecordId);
+
+/// <summary>
 /// One thread summary row for the left-pane thread list (R3 task 003 / FR-16). Minimal by construction — the list
 /// pane renders a label + type; opening a thread fetches its messages via the existing thread-read. Every item here
 /// was returned by the IMPERSONATED <c>sprk_communicationthreads</c> query, so the caller may see the thread record

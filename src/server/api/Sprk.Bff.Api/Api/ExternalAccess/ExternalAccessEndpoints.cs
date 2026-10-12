@@ -119,6 +119,12 @@ public static class ExternalAccessEndpoints
         // caller's contact as sprk_requestedby.
         externalGroup.MapExternalIntakeEndpoints();
 
+        // GET /api/v1/external/notifications · POST /api/v1/external/notifications/seen — the derived in-portal feed (r3 task
+        // 037, FR-08). Inherits this group's policy + CallerPrincipalAuthorizationFilter; grants are re-checked against the
+        // caller's accessible set, messages come only from records in it under the external read rules (no privileged, no
+        // internal-only to a contact, not the caller's own), and the last-seen marker is Redis keyed by the principal id.
+        externalGroup.MapExternalNotificationFeedEndpoints();
+
         // Contact-side Grant Access (unified-access-control-r2 task 140, owner C4 / Q2): a contact holding Collaborate or
         // Full Access grants colleagues of their OWN organization, at or below their own level, never organization-wide.
         // On THIS group because a contact can authenticate nowhere else (ADR-028 A3: one ExternalCollaboration group);

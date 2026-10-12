@@ -849,6 +849,154 @@ public class ExternalDataService
         return row is null ? null : (GuidValue(row, "_sprk_matter_value"), GuidValue(row, "_sprk_project_value"));
     }
 
+    // ---------------------------------------------------------------------------
+    // In-portal notification feed (spaarke-SPA-external-access-platform-r3 task 037, FR-08)
+    //
+    // The feed is DERIVED from existing rows (owner 2026-10-08: no new table). These three reads supply its grant items,
+    // the caller's own service requests (whose messages it reports) and the record titles. None of them decides access:
+    // the feed endpoint gates every item against the caller principal's accessible set itself.
+    // ---------------------------------------------------------------------------
+
+    /// <summary>One grant row the feed reports: the row id, its single root and when it was granted.</summary>
+    public sealed record RecentGrant(Guid GrantId, ExternalGrantRootType RootType, Guid RootId, DateTimeOffset GrantedOn);
+
+    /// <summary>The recent-grants read: the rows, and whether it was cut short or failed (never silent).</summary>
+    public sealed record RecentGrantsRead(IReadOnlyList<RecentGrant> Grants, bool Truncated);
+
+    /// <summary>One service request the caller requested: its id, name and requester.</summary>
+    public sealed record RequestedServiceRequest(Guid Id, string? Name, Guid RequestedBy);
+
+    /// <summary>The caller's service requests, and whether the read was cut short or failed.</summary>
+    public sealed record RequestedServiceRequestsRead(IReadOnlyList<RequestedServiceRequest> Requests, bool Truncated);
+
+    /// <summary>
+    /// Record titles by id. <see cref="Complete"/> is true only when every chunk was read in full, so an id missing from
+    /// <see cref="Names"/> then means the record was deleted. The read has no <c>statecode</c> filter, so a deactivated
+    /// record is still returned (and kept); only a deleted one is dropped.
+    /// </summary>
+    public sealed record RecordNamesRead(IReadOnlyDictionary<Guid, string?> Names, bool Complete);
+
+    /// <summary>
+    /// The ACTIVE, unexpired grant rows naming <paramref name="contactId"/> as the grantee whose <c>sprk_granteddate</c>
+    /// is on or after <paramref name="since"/>, app-only. Organization grants (no contact) are not included. A row whose
+    /// root is not exactly one of project / matter / work assignment (e.g. its root was deleted, which empties the lookup)
+    /// is skipped. <see cref="RecentGrant.GrantedOn"/> is the row's <c>createdon</c> — <c>sprk_granteddate</c> is written
+    /// once, on create, as a date only — or that date at 00:00 UTC when <c>createdon</c> is unreadable.
+    /// </summary>
+    /// <remarks>Carries the enforcement paths' <see cref="ExternalParticipationService.ExpiryPredicate"/>, so a lapsed grant
+    /// is never announced. A failed read is returned empty and flagged truncated (the collection read's honesty rule).</remarks>
+    public virtual async Task<RecentGrantsRead> GetRecentGrantsAsync(
+        Guid contactId, DateOnly since, DateOnly today, CancellationToken ct = default)
+    {
+        if (contactId == Guid.Empty)
+            return new RecentGrantsRead(Array.Empty<RecentGrant>(), false);
+
+        var filter = Uri.EscapeDataString(
+            $"_sprk_contact_value eq {contactId} and statecode eq 0 and sprk_granteddate ge {since:yyyy-MM-dd} and "
+            + ExternalParticipationService.ExpiryPredicate(today));
+        var url = $"{GetApiUrl()}/sprk_externalrecordaccesses?$filter={filter}" +
+                  "&$select=sprk_externalrecordaccessid,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value," +
+                  "sprk_granteddate,createdon&$orderby=createdon desc,sprk_externalrecordaccessid desc";
+
+        var read = await GetCollectionAsync<Dictionary<string, JsonElement>>(url, ct);
+        var grants = new List<RecentGrant>();
+        foreach (var row in read.Rows)
+        {
+            if (GuidValue(row, "sprk_externalrecordaccessid") is not { } grantId)
+                continue;
+
+            var roots = new List<(ExternalGrantRootType Type, Guid Id)>();
+            if (GuidValue(row, "_sprk_project_value") is { } project) roots.Add((ExternalGrantRootType.Project, project));
+            if (GuidValue(row, "_sprk_matter_value") is { } matter) roots.Add((ExternalGrantRootType.Matter, matter));
+            if (GuidValue(row, "_sprk_workassignment_value") is { } wa) roots.Add((ExternalGrantRootType.WorkAssignment, wa));
+            if (roots.Count != 1)
+                continue;
+
+            if (GrantedOnValue(row) is not { } grantedOn)
+                continue;
+
+            grants.Add(new RecentGrant(grantId, roots[0].Type, roots[0].Id, grantedOn));
+        }
+
+        return new RecentGrantsRead(grants, read.Truncated);
+    }
+
+    /// <summary><c>createdon</c>, else <c>sprk_granteddate</c> (either wire shape) at 00:00 UTC; null when neither reads.</summary>
+    private static DateTimeOffset? GrantedOnValue(IReadOnlyDictionary<string, JsonElement> row)
+    {
+        if (row.TryGetValue("createdon", out var created) && created.ValueKind == JsonValueKind.String
+            && created.TryGetDateTimeOffset(out var createdOn))
+            return createdOn;
+
+        if (row.TryGetValue("sprk_granteddate", out var granted) && granted.ValueKind == JsonValueKind.String
+            && granted.GetString() is { Length: >= 10 } text
+            && DateOnly.TryParseExact(text[..10], "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var date))
+            return new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+
+        return null;
+    }
+
+    /// <summary>
+    /// The service requests whose <c>sprk_requestedby</c> is one of <paramref name="requesterIds"/>, app-only — the
+    /// rows the Service Requests module would scope to the caller. The caller re-applies the module's own predicate.
+    /// </summary>
+    public virtual async Task<RequestedServiceRequestsRead> GetServiceRequestsRequestedByAsync(
+        IReadOnlyCollection<Guid> requesterIds, CancellationToken ct = default)
+    {
+        var ids = requesterIds.Where(id => id != Guid.Empty).Distinct().Select(id => id.ToString("D")).ToList();
+        if (ids.Count == 0)
+            return new RequestedServiceRequestsRead(Array.Empty<RequestedServiceRequest>(), false);
+
+        var read = await GetByIdsAsync<Dictionary<string, JsonElement>>(
+            "sprk_servicerequests", "_sprk_requestedby_value", ids,
+            "sprk_servicerequestid,sprk_name,_sprk_requestedby_value", "createdon desc", ct);
+
+        var requests = read.Rows
+            .Where(r => GuidValue(r, "sprk_servicerequestid") is not null && GuidValue(r, "_sprk_requestedby_value") is not null)
+            .Select(r => new RequestedServiceRequest(
+                GuidValue(r, "sprk_servicerequestid")!.Value,
+                r.TryGetValue("sprk_name", out var name) && name.ValueKind == JsonValueKind.String ? name.GetString() : null,
+                GuidValue(r, "_sprk_requestedby_value")!.Value))
+            .ToList();
+
+        return new RequestedServiceRequestsRead(requests, read.Truncated);
+    }
+
+    /// <summary>
+    /// The display names of the given project / matter / work-assignment records (their primary name columns, the same
+    /// ones the to-do regarding stamp reads), app-only and chunked. An entity outside those three yields an empty,
+    /// incomplete answer.
+    /// </summary>
+    public virtual async Task<RecordNamesRead> GetRecordNamesAsync(
+        string entityLogicalName, IReadOnlyCollection<Guid> ids, CancellationToken ct = default)
+    {
+        var binding = RootBindings.Values.FirstOrDefault(
+            b => string.Equals(b.EntityLogicalName, entityLogicalName, StringComparison.OrdinalIgnoreCase));
+        var idList = ids.Where(id => id != Guid.Empty).Distinct().Select(id => id.ToString("D")).ToList();
+        if (binding is null)
+            return new RecordNamesRead(new Dictionary<Guid, string?>(), Complete: idList.Count == 0);
+        if (idList.Count == 0)
+            return new RecordNamesRead(new Dictionary<Guid, string?>(), Complete: true);
+
+        var idColumn = binding.EntityLogicalName + "id";
+        var read = await GetByIdsAsync<Dictionary<string, JsonElement>>(
+            binding.EntitySet, idColumn, idList, $"{idColumn},{binding.DisplayNameAttribute}", $"{idColumn} asc", ct);
+
+        var names = new Dictionary<Guid, string?>();
+        foreach (var row in read.Rows)
+        {
+            if (GuidValue(row, idColumn) is { } id)
+            {
+                names[id] = row.TryGetValue(binding.DisplayNameAttribute, out var value) && value.ValueKind == JsonValueKind.String
+                    ? value.GetString()
+                    : null;
+            }
+        }
+
+        return new RecordNamesRead(names, Complete: !read.Truncated);
+    }
+
     /// <summary>An app-only Dataverse read could not be completed (not a 404): the caller reports it as a 503.</summary>
     public sealed class DataverseUnavailableException : Exception
     {
