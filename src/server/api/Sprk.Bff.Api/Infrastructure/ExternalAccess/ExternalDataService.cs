@@ -254,16 +254,26 @@ public class ExternalDataService
     // Constructor
     // ---------------------------------------------------------------------------
 
+    /// <summary>
+    /// Task 039 section 12 (option B, effective status): the app-only reader the ONE filing walk
+    /// (<see cref="EffectiveRootFlags.ReadAncestryAsync"/>) reads through, so <see cref="GetNonSecureRootsAsync"/> answers a
+    /// root's EFFECTIVE secure status. Registered unconditionally (GraphModule), so the typed-client factory supplies it. A
+    /// null reader (a test double that passes none) makes every work assignment or project read as secure (fail closed).
+    /// </summary>
+    private readonly IGenericEntityService? _filing;
+
     public ExternalDataService(
         HttpClient httpClient,
         IConfiguration configuration,
         TokenCredential credential,
-        ILogger<ExternalDataService> logger)
+        ILogger<ExternalDataService> logger,
+        IGenericEntityService? filing = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _credential = credential;
         _logger = logger;
+        _filing = filing;
     }
 
     // ---------------------------------------------------------------------------
@@ -403,8 +413,10 @@ public class ExternalDataService
     /// is unchanged.
     /// <para>Fix round for task 039: a document carries typed links to a project, a matter and a work assignment (and a
     /// related twin of each), so one filed to a secure matter AND to a project the caller can read used to list on the
-    /// project route (name and AI summary). It is now listed only if the caller holds Read on every root it carries
-    /// (<see cref="ExternalMultiRootRule"/>). The caller has ALREADY been authorized for <paramref name="parentId"/>.</para>
+    /// project route (name and AI summary). It is now listed only if the caller holds Read on every SECURE root it carries
+    /// (<see cref="ExternalMultiRootRule"/>, owner decision 2026-10-12, option B); the secure flags of the linked roots the
+    /// caller cannot read are read once for the whole list. The caller has ALREADY been authorized for
+    /// <paramref name="parentId"/>.</para>
     /// </remarks>
     public virtual async Task<ExternalCollectionResponse<ExternalDocumentDto>> GetDocumentsAsync(
         DocumentParentKind parentKind, Guid parentId, CallerPrincipal caller, CancellationToken ct = default)
@@ -413,30 +425,39 @@ public class ExternalDataService
         var url = BuildDocumentListUrl(GetApiUrl(), parentKind, parentId);
 
         var read = await GetCollectionAsync<DocumentRow>(url, ct);
-        var readable = read.Rows.Where(r => DocumentRootsReadable(caller, r)).ToList();
+        var links = read.Rows.Select(DocumentLinksOf).ToList();
+        var flags = await ReadSecureRootFlagsAsync(caller, links.Select(l => l.Links), ct);
+        var readable = read.Rows.Where((_, i) => links[i].SecureRootsReadableBy(caller, flags)).ToList();
         if (readable.Count != read.Rows.Count)
         {
             _logger.LogInformation(
-                "[EXT-DATA] documents: {Withheld} of {Total} document(s) of {ParentKind} {ParentId} withheld - also filed to a record the caller cannot read",
+                "[EXT-DATA] documents: {Withheld} of {Total} document(s) of {ParentKind} {ParentId} withheld - also filed to a secure record the caller cannot read",
                 read.Rows.Count - readable.Count, read.Rows.Count, parentKind, parentId);
         }
 
         return new ExternalCollectionResponse<ExternalDocumentDto>
         {
             Value = readable.Select(MapDocument).ToList(),
-            Truncated = read.Truncated,
+            Truncated = read.Truncated || FlagReadCutListShort(flags, read.Rows.Count - readable.Count),
         };
     }
 
-    private static bool DocumentRootsReadable(CallerPrincipal caller, DocumentRow row) =>
-        new DocumentRootLinks(
+    /// <summary>
+    /// Review of 039 option B (K2): a list that withheld rows while the secure-flag read was INCOMPLETE (a failed chunk, a
+    /// walk that could not decide, the lookup bound) may be missing rows only because of that, so it says
+    /// <see cref="ExternalCollectionResponse{T}.Truncated"/>. A complete read that withheld a genuinely secure row does not.
+    /// </summary>
+    private static bool FlagReadCutListShort(SecureRootFlags flags, int withheld) => withheld > 0 && !flags.IsComplete;
+
+    private static DocumentRootLinks DocumentLinksOf(DocumentRow row) =>
+        new(
             row.SprkProjectidValue, row.SprkRelatedprojectValue,
             row.SprkMatterValue, row.SprkRelatedmatterValue,
-            row.SprkWorkassignmentValue, row.SprkRelatedworkassignmentValue).AllReadableBy(caller);
+            row.SprkWorkassignmentValue, row.SprkRelatedworkassignmentValue);
 
     /// <summary>
     /// The six root links of a <c>sprk_document</c> (a typed lookup and its related twin, per root: project, matter, work
-    /// assignment) as raw <c>_..._value</c> strings, and the one place the every-root rule is applied to them
+    /// assignment) as raw <c>_..._value</c> strings, and the one place the multi-root rule is applied to them
     /// (<see cref="ExternalMultiRootRule"/>). Shared by the document LIST (<see cref="GetDocumentsAsync"/>) and every
     /// single-document route (download, versions), so one document is not readable on one path and hidden on another.
     /// </summary>
@@ -457,16 +478,23 @@ public class ExternalDataService
             "_sprk_workassignment_value", "_sprk_relatedworkassignment_value",
         };
 
-        /// <summary>Whether <paramref name="caller"/> holds Read on EVERY root this document is filed to.</summary>
-        public bool AllReadableBy(CallerPrincipal caller) =>
-            ExternalMultiRootRule.AllRootsReadable(
-                caller,
-                (ExternalGrantRootType.Project, Project),
-                (ExternalGrantRootType.Project, RelatedProject),
-                (ExternalGrantRootType.Matter, Matter),
-                (ExternalGrantRootType.Matter, RelatedMatter),
-                (ExternalGrantRootType.WorkAssignment, WorkAssignment),
-                (ExternalGrantRootType.WorkAssignment, RelatedWorkAssignment));
+        /// <summary>The six links as multi-root rule input.</summary>
+        public (ExternalGrantRootType Root, string? LookupValue)[] Links => new[]
+        {
+            (ExternalGrantRootType.Project, Project),
+            (ExternalGrantRootType.Project, RelatedProject),
+            (ExternalGrantRootType.Matter, Matter),
+            (ExternalGrantRootType.Matter, RelatedMatter),
+            (ExternalGrantRootType.WorkAssignment, WorkAssignment),
+            (ExternalGrantRootType.WorkAssignment, RelatedWorkAssignment),
+        };
+
+        /// <summary>
+        /// Whether <paramref name="caller"/> holds Read on every SECURE root this document is filed to; <paramref name="flags"/>
+        /// are the secure flags read for the request (<see cref="ReadSecureRootFlagsAsync"/>).
+        /// </summary>
+        public bool SecureRootsReadableBy(CallerPrincipal caller, SecureRootFlags flags) =>
+            ExternalMultiRootRule.SecureRootsReadable(caller, flags, Links);
 
         /// <summary>The links a single-row read returned. A present value that is not a JSON string reads as malformed.</summary>
         internal static DocumentRootLinks From(IReadOnlyDictionary<string, JsonElement> row) => new(
@@ -481,7 +509,7 @@ public class ExternalDataService
             {
                 JsonValueKind.Null or JsonValueKind.Undefined => null,
                 JsonValueKind.String => value.GetString(),
-                _ => "malformed", // not a GUID: AllRootsReadable reads it as unreadable
+                _ => "malformed", // not a GUID: the multi-root rule withholds it (fail closed)
             };
         }
     }
@@ -501,12 +529,16 @@ public class ExternalDataService
             documentName = DocumentName;
         }
 
+        /// <summary>Whether the document is under <paramref name="routeParentId"/> through the route's lookup.</summary>
+        public bool IsUnder(Guid routeParentId) => ParentId is { } parent && parent == routeParentId;
+
         /// <summary>
         /// Whether the document is under <paramref name="routeParentId"/> through the route's lookup AND the caller holds
-        /// Read on every root it is filed to. False answers the route's one "not part of this record" response.
+        /// Read on every SECURE root it is filed to (<paramref name="flags"/>: the request's secure-flag read). False answers
+        /// the route's one "not part of this record" response.
         /// </summary>
-        public bool IsReadableUnder(Guid routeParentId, CallerPrincipal caller) =>
-            ParentId is { } parent && parent == routeParentId && Roots.AllReadableBy(caller);
+        public bool IsReadableUnder(Guid routeParentId, CallerPrincipal caller, SecureRootFlags flags) =>
+            IsUnder(routeParentId) && Roots.SecureRootsReadableBy(caller, flags);
     }
 
     /// <summary>The document list URL for one parent. Pure, so a test can read the filter (task 031).</summary>
@@ -774,7 +806,7 @@ public class ExternalDataService
     /// cannot be read, and a null parent when it is not linked through that lookup. Does NOT expose any Graph pointer
     /// (driveId/itemId).</para>
     /// <para>Fix round for task 039: the select also reads the six root links (<see cref="DocumentRootLinks"/>), so a
-    /// route can apply the every-root rule (<see cref="ExternalMultiRootRule"/>) to ONE document as the list does to many.
+    /// route can apply the multi-root rule (<see cref="ExternalMultiRootRule"/>) to ONE document as the list does to many.
     /// Without it a reader of project P who knew the id of a document filed to P AND to a secure matter M downloaded it
     /// through P's route.</para>
     /// </remarks>
@@ -1474,22 +1506,24 @@ public class ExternalDataService
 
         // Fix round for task 039: a to-do under an invoice of secure matter M and project P is stamped with BOTH roots, so
         // the project route used to list M's to-do to a reader of P alone. Listed only if the caller holds Read on every
-        // root the to-do carries (ExternalMultiRootRule); a single-root to-do lists exactly as before.
-        var readable = read.Rows
-            .Where(r => ExternalMultiRootRule.AllRootsReadable(
-                caller, r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue))
+        // SECURE root the to-do carries (ExternalMultiRootRule, owner option B); a single-root to-do lists exactly as before.
+        var stamps = read.Rows
+            .Select(r => ExternalMultiRootRule.Stamps(
+                r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue))
             .ToList();
+        var flags = await ReadSecureRootFlagsAsync(caller, stamps, ct);
+        var readable = read.Rows.Where((_, i) => ExternalMultiRootRule.SecureRootsReadable(caller, flags, stamps[i])).ToList();
         if (readable.Count != read.Rows.Count)
         {
             _logger.LogInformation(
-                "[EXT-DATA] todos: {Withheld} of {Total} to-do(s) regarding {RootKind} {RootId} withheld - also filed to a record the caller cannot read",
+                "[EXT-DATA] todos: {Withheld} of {Total} to-do(s) regarding {RootKind} {RootId} withheld - also filed to a secure record the caller cannot read",
                 read.Rows.Count - readable.Count, read.Rows.Count, rootKind, rootId);
         }
 
         return new ExternalCollectionResponse<ExternalTodoDto>
         {
             Value = readable.Select(MapTodo).ToList(),
-            Truncated = read.Truncated,
+            Truncated = read.Truncated || FlagReadCutListShort(flags, read.Rows.Count - readable.Count),
         };
     }
 
@@ -1554,38 +1588,160 @@ public class ExternalDataService
 
         // Task 105: paged to the cap, and a cut-short list says so (see GetDocumentsAsync).
         var read = await GetCollectionAsync<EventRow>(url, ct);
-        var readable = ReadableEvents(read.Rows, caller);
+        var (readable, flags) = await ReadableEventsAsync(read.Rows, caller, ct);
         if (readable.Count != read.Rows.Count)
         {
             _logger.LogInformation(
-                "[EXT-DATA] events: {Withheld} of {Total} event(s) regarding {RootKind} {RootId} withheld - also filed to a record the caller cannot read",
+                "[EXT-DATA] events: {Withheld} of {Total} event(s) regarding {RootKind} {RootId} withheld - also filed to a secure record the caller cannot read",
                 read.Rows.Count - readable.Count, read.Rows.Count, rootKind, rootId);
         }
 
         return new ExternalCollectionResponse<ExternalEventDto>
         {
             Value = readable.Select(MapEvent).ToList(),
-            Truncated = read.Truncated,
+            Truncated = read.Truncated || FlagReadCutListShort(flags, read.Rows.Count - readable.Count),
         };
     }
 
     /// <summary>
-    /// The events of <paramref name="rows"/> the caller may see: an event is listed only if the caller holds Read on EVERY
-    /// root it is filed to (<c>sprk_regardingproject</c>, <c>sprk_regardingmatter</c>, <c>sprk_regardingworkassignment</c>).
+    /// The events of <paramref name="rows"/> the caller may see: an event is listed only if the caller holds Read on every
+    /// SECURE root it is filed to (<c>sprk_regardingproject</c>, <c>sprk_regardingmatter</c>,
+    /// <c>sprk_regardingworkassignment</c>); owner decision 2026-10-12, option B.
     /// </summary>
     /// <remarks>
-    /// <para>This is the delete-own rule (<c>ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync</c>: "Read on EVERY parent
-    /// this plane authorizes") applied to the list, so one record cannot be readable on one route and hidden on another.
-    /// Without it an event filed to a secure matter AND to a project the caller can read is returned by the project route
-    /// to a caller who holds nothing on the matter: the matter's isolation (its rights come only from a direct grant) would
-    /// be bypassed by a second lookup. A row naming no other root is unaffected, so every single-parent event lists
-    /// exactly as before. The rule itself (fail-closed, and its interim status) is <see cref="ExternalMultiRootRule"/>,
-    /// shared with the to-do, document, message and feed lists.</para>
+    /// <para>Without it an event filed to a secure matter AND to a project the caller can read is returned by the project
+    /// route to a caller who holds nothing on the matter: the matter's isolation (its rights come only from a direct grant)
+    /// would be bypassed by a second lookup. A row naming no other root is unaffected, so every single-parent event lists
+    /// exactly as before. The rule itself (fail-closed) is <see cref="ExternalMultiRootRule"/>, shared with the to-do,
+    /// document, message and feed lists. The delete-own rule (<c>AuthorizeDeleteOwnAsync</c>) stays "Read on EVERY parent"
+    /// (FR-26).</para>
     /// </remarks>
-    private static List<EventRow> ReadableEvents(IReadOnlyList<EventRow> rows, CallerPrincipal caller) =>
-        rows.Where(r => ExternalMultiRootRule.AllRootsReadable(
-                caller, r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue))
+    private async Task<(List<EventRow> Rows, SecureRootFlags Flags)> ReadableEventsAsync(
+        IReadOnlyList<EventRow> rows, CallerPrincipal caller, CancellationToken ct)
+    {
+        var stamps = rows
+            .Select(r => ExternalMultiRootRule.Stamps(
+                r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue))
             .ToList();
+        var flags = await ReadSecureRootFlagsAsync(caller, stamps, ct);
+        return (rows.Where((_, i) => ExternalMultiRootRule.SecureRootsReadable(caller, flags, stamps[i])).ToList(), flags);
+    }
+
+    /// <summary>
+    /// The secure flags the multi-root rule needs for a set of rows (<see cref="ExternalMultiRootRule.ReadFlagsAsync"/> over
+    /// <see cref="GetNonSecureRootsAsync"/>): one app-only read for the distinct linked roots the caller cannot read, none
+    /// when there are none. Fails closed (see the rule).
+    /// </summary>
+    public Task<SecureRootFlags> ReadSecureRootFlagsAsync(
+        CallerPrincipal caller,
+        IEnumerable<IEnumerable<(ExternalGrantRootType Root, string? LookupValue)>> rowRoots,
+        CancellationToken ct = default) =>
+        ExternalMultiRootRule.ReadFlagsAsync(GetNonSecureRootsAsync, caller, rowRoots, _logger, ct);
+
+    /// <summary>
+    /// Of <paramref name="roots"/>, the ones whose EFFECTIVE secure status, read APP-ONLY, is not secure (owner decision
+    /// 2026-10-12, option B: only a SECURE linked root the caller cannot read withholds a row; main-session decision: secure
+    /// means effectively secure, task 174's rule).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Own flag.</b> One query per root entity per <see cref="IdFilterChunkSize"/> ids
+    /// (<see cref="GetByIdsAsync{TRow}"/>, an <c>or</c> filter on the ids), selecting only the id and <c>sprk_issecure</c>. All
+    /// three roots carry the column (live metadata, <c>SecureRecordRoot</c>).</para>
+    /// <para><b>Effective flag.</b> A work assignment or project whose own flag is <c>false</c> is still secure when anything it
+    /// is filed under is effectively secure (a child whose own flag has not caught up). Those ids, per table, go through the
+    /// ONE filing walk (<see cref="EffectiveRootFlags.ReadAncestryAsync"/>, batched level by level and bounded by
+    /// <see cref="SecureRootInheritance.MaxFilingDepth"/>) and its fold (<see cref="EffectiveRootFlags.Fold(IReadOnlyDictionary{Guid, RootRecordFlags}, IReadOnlyDictionary{Guid, SecureParentsAnswer}?)"/>).
+    /// A matter files under nothing; its own flag is its effective flag (no walk).</para>
+    /// <para><b>Fail closed.</b> Only an explicit JSON <c>false</c> on a returned row whose id was asked for, and then an
+    /// ancestry the walk decided with no secure ancestor, opens a root. A failed chunk, a record not returned (missing, or
+    /// invisible to the app identity), an absent or null <c>sprk_issecure</c> (a masked field-secured value reads empty), any
+    /// non-boolean value, an ancestor read that faults or is missing or empty, a chain past the bound and a missing filing
+    /// reader all leave the root out of the answer, so it counts as secure. A named filing parent the walk is not given back
+    /// is Unknown too (<c>absentParentIsUnknown</c>, the read path's opt-in; the write-time walk is unchanged). No cache: a
+    /// staff change to the flag applies on the next request.</para>
+    /// <para><b>Complete.</b> The answer says whether the read COMPLETED (<see cref="NonSecureRootsRead.Complete"/>): every
+    /// flag chunk succeeded, every asked root came back with a row and a boolean flag, and every walk decided. When it did not, a root may count as secure only because it could not be
+    /// read; the document, event and to-do lists that withheld a row then set <c>Truncated</c>.</para>
+    /// <para><c>virtual</c> per ADR-038 section 4 (substitution seam); the tests drive the real read over a fake Web API.</para>
+    /// </remarks>
+    public virtual async Task<NonSecureRootsRead> GetNonSecureRootsAsync(
+        IReadOnlyCollection<(ExternalGrantRootType Root, Guid Id)> roots, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(roots);
+        var notSecure = new HashSet<(ExternalGrantRootType Root, Guid Id)>();
+        var complete = true;
+        foreach (var group in roots.Where(r => r.Id != Guid.Empty).Distinct().GroupBy(r => r.Root))
+        {
+            var idColumn = ExternalGrantRoot.LogicalNameFor(group.Key) + "id";
+            var asked = group.Select(r => r.Id).ToHashSet();
+            var read = await GetByIdsAsync<Dictionary<string, JsonElement>>(
+                ExternalGrantRoot.BindFor(group.Key).EntitySet, idColumn,
+                asked.Select(id => id.ToString("D")).ToList(),
+                $"{idColumn},{SecureFlagColumn}", $"{idColumn} asc", ct);
+
+            var ownOpen = new HashSet<Guid>();
+            var resolved = new HashSet<Guid>(); // asked ids that came back with a row AND a boolean flag
+            foreach (var row in read.Rows)
+            {
+                if (GuidValue(row, idColumn) is { } id && asked.Contains(id)
+                    && row.TryGetValue(SecureFlagColumn, out var flag)
+                    && flag.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                {
+                    resolved.Add(id);
+                    if (flag.ValueKind == JsonValueKind.False)
+                    {
+                        ownOpen.Add(id);
+                    }
+                }
+            }
+
+            // F4: a chunk can succeed and still leave an asked root unresolved (no row: missing or invisible to the app
+            // identity; no sprk_issecure: field security; a non-boolean value). It still counts as secure, but the rows it
+            // withholds must say Truncated, so the read is not complete.
+            if (resolved.Count < asked.Count)
+            {
+                complete = false;
+            }
+
+            if (read.Outcome != CollectionReadOutcome.Complete)
+            {
+                _logger.LogWarning(
+                    "[EXT-DATA] secure-flag read for {Count} {Root} id(s) was incomplete ({Outcome}); the unread ones count as secure.",
+                    asked.Count, group.Key, read.Outcome);
+                complete = false;
+            }
+
+            if (ownOpen.Count == 0)
+            {
+                continue;
+            }
+
+            // Effective status (task 174's rule): the ONE filing walk, batched for the own-open ids of this table; null for a
+            // matter (files under nothing). The fold makes an id with no decided ancestry secure. Owner policy (review of
+            // 039 option B): a named filing parent the walk cannot find is Unknown, not "files under nothing"
+            // (absentParentIsUnknown), so it folds to secure on this read path; the write-time walk keeps its default.
+            var ancestry = await EffectiveRootFlags.ReadAncestryAsync(
+                _filing, _logger, ExternalGrantRoot.LogicalNameFor(group.Key), ownOpen, ct, absentParentIsUnknown: true);
+            var effective = EffectiveRootFlags.Fold(ownOpen.ToDictionary(id => id, _ => RootRecordFlags.None), ancestry);
+            foreach (var (id, flags) in effective)
+            {
+                if (flags.IsUnreadable)
+                {
+                    complete = false; // a walk fault, an unreadable or missing ancestor, an empty ancestor flag, past the bound
+                }
+
+                if (!flags.IsSecure)
+                {
+                    notSecure.Add((group.Key, id));
+                }
+            }
+        }
+
+        return new NonSecureRootsRead(notSecure, complete);
+    }
+
+    /// <summary>The root records' secure flag (all three roots carry it).</summary>
+    private const string SecureFlagColumn = "sprk_issecure";
 
     /// <summary>
     /// Creates a new <c>sprk_event</c> record associated with the supplied project via
@@ -2103,7 +2259,8 @@ public class ExternalDataService
         new Dictionary<DeletableKind, DeletableBinding>
         {
             // Fix round for task 039: plus the related twin of each root (sprk_relatedproject / _relatedmatter /
-            // _relatedworkassignment), the same six root links the list, download and versions apply the every-root rule to.
+            // _relatedworkassignment), the same six root links the list, download and versions apply the multi-root rule
+            // to. The delete itself stays Read on EVERY parent (FR-26), not the secure-roots rule.
             [DeletableKind.Document] = new(DeletableKind.Document, "sprk_document", "sprk_documents",
                 DocumentParents.Values.Select(b => new DeletableParentLookup(b.Kind, b.LookupValueAttribute))
                     .Concat(new[]
@@ -2675,7 +2832,8 @@ public class ExternalDataService
     /// <para><b>A first-page failure</b> is truncated too: logged, and returned EMPTY AND FLAGGED, never as an empty list
     /// (before task 105 it was an unflagged empty list, so a Dataverse fault read as "nothing here"). The display lists
     /// surface the flag; the one create-payload reader (<see cref="ResolveRecordTypeRefAsync"/>) fails its request on
-    /// it. No reader makes an access decision from this method.</para>
+    /// it. The one access decision made from it is the secure-flag read (<see cref="GetNonSecureRootsAsync"/>), and only in
+    /// the closing direction: a row it did not read leaves its root counted as secure.</para>
     /// <para><b>A <c>nextLink</c> is used unchanged</b> and with the same <c>Prefer</c> value (Microsoft Learn, "Page
     /// results"), and only when it points at this service's own Web API base: the bearer token is never sent to another
     /// host. One that does not is treated as a failed later page.</para>

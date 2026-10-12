@@ -2529,9 +2529,14 @@ public sealed partial class SecureRootInheritance
     /// The climb goes level by level through every work assignment or project the record is filed under — secure or not, a
     /// filing is a filing — with a visited set (a cycle ends the climb), and a chain still rising past the bound is
     /// <see cref="SecureParentsAnswer.Unverifiable"/> (fail closed), never "no more parents".</param>
+    /// <param name="absentIsUnknown">Opt-in for the READ path (default <c>false</c>, the write-time semantics UAC-r2 relies on:
+    /// a named record that does not exist confers nothing). <c>true</c>: a filing parent the row NAMES but the read did not
+    /// return (deleted in a race, or invisible to the reader), or a climbed row that is no longer there, makes the answer
+    /// <see cref="SecureParentsAnswer.Unverifiable"/>, so a caller that folds it counts the record as secure (owner policy:
+    /// unknown is secure).</param>
     internal static async Task<SecureParentsAnswer> ReadSecureParentsAsync(
         IGenericEntityService dataverse, ILogger logger, string table, Guid recordId, CancellationToken ct,
-        ConcurrentDictionary<Guid, string?>? recordTypes = null, int maxDepth = 1)
+        ConcurrentDictionary<Guid, string?>? recordTypes = null, int maxDepth = 1, bool absentIsUnknown = false)
     {
         if (!Inherits(table))
             return new SecureParentsAnswer(Array.Empty<SecureFilingParent>(), null);
@@ -2539,7 +2544,7 @@ public sealed partial class SecureRootInheritance
         // One record: every row and every parent is read on its own (one query each, as before #1410), so a fault on one
         // parent never hides a readable secure sibling (secure-if-any).
         var answers = await ClimbAsync(dataverse, logger, table.Trim().ToLowerInvariant(), new[] { recordId }, batched: false,
-            recordTypes ?? new ConcurrentDictionary<Guid, string?>(), maxDepth, ct).ConfigureAwait(false);
+            recordTypes ?? new ConcurrentDictionary<Guid, string?>(), maxDepth, ct, absentIsUnknown).ConfigureAwait(false);
         return answers[recordId];
     }
 
@@ -2554,7 +2559,8 @@ public sealed partial class SecureRootInheritance
     /// </summary>
     internal static async Task<IReadOnlyDictionary<Guid, SecureParentsAnswer>> ReadSecureParentsOfManyAsync(
         IGenericEntityService dataverse, ILogger logger, string table, IReadOnlyCollection<Guid> recordIds,
-        CancellationToken ct, ConcurrentDictionary<Guid, string?>? recordTypes = null, int maxDepth = 1)
+        CancellationToken ct, ConcurrentDictionary<Guid, string?>? recordTypes = null, int maxDepth = 1,
+        bool absentIsUnknown = false)
     {
         ArgumentNullException.ThrowIfNull(recordIds);
         var ids = recordIds.Distinct().ToList();
@@ -2562,7 +2568,7 @@ public sealed partial class SecureRootInheritance
             return ids.ToDictionary(id => id, _ => new SecureParentsAnswer(Array.Empty<SecureFilingParent>(), null));
 
         return await ClimbAsync(dataverse, logger, table.Trim().ToLowerInvariant(), ids, batched: true,
-            recordTypes ?? new ConcurrentDictionary<Guid, string?>(), maxDepth, ct).ConfigureAwait(false);
+            recordTypes ?? new ConcurrentDictionary<Guid, string?>(), maxDepth, ct, absentIsUnknown).ConfigureAwait(false);
     }
 
     /// <summary>One record's climb: what it has visited, what it reads next, and what it has found.</summary>
@@ -2605,7 +2611,7 @@ public sealed partial class SecureRootInheritance
     /// <c>true</c>: read in chunks (#1410).</param>
     private static async Task<Dictionary<Guid, SecureParentsAnswer>> ClimbAsync(
         IGenericEntityService dataverse, ILogger logger, string table, IReadOnlyList<Guid> starts, bool batched,
-        ConcurrentDictionary<Guid, string?> recordTypes, int maxDepth, CancellationToken ct)
+        ConcurrentDictionary<Guid, string?> recordTypes, int maxDepth, CancellationToken ct, bool absentIsUnknown = false)
     {
         var climbs = starts.Select(id => new ParentClimb((table, id))).ToList();
         var facts = new Dictionary<(string Table, Guid Id), FactsRead>();
@@ -2622,7 +2628,7 @@ public sealed partial class SecureRootInheritance
                     .Where(r => !decisions.ContainsKey(r) && facts[r].Facts is not null)
                     .Select(r => facts[r].Facts!)
                     .ToList();
-                await DecideParentsIntoAsync(dataverse, logger, undecided, recordTypes, faultedTypes, decisions, batched, ct)
+                await DecideParentsIntoAsync(dataverse, logger, undecided, recordTypes, faultedTypes, decisions, batched, ct, absentIsUnknown)
                     .ConfigureAwait(false);
             }
 
@@ -2641,7 +2647,13 @@ public sealed partial class SecureRootInheritance
                     }
 
                     if (read.Facts is not { } rowFacts)
-                        continue; // a record that does not exist confers nothing
+                    {
+                        // A record that does not exist confers nothing (write-time). The read path opts in: a row the climb
+                        // reached that is no longer there is unknown, not "files under nothing".
+                        if (absentIsUnknown)
+                            climb.Unknown ??= $"the {row.Table} the climb reached was not returned (missing, or not visible to the reader)";
+                        continue;
+                    }
 
                     if (level > maxDepth)
                     {
@@ -2813,12 +2825,13 @@ public sealed partial class SecureRootInheritance
         IGenericEntityService dataverse, ILogger logger, IReadOnlyList<FilingFacts> rows,
         ConcurrentDictionary<Guid, string?> recordTypes, HashSet<Guid> faultedTypes,
         Dictionary<(string Table, Guid Id), (SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder)> into,
-        bool batched, CancellationToken ct)
+        bool batched, CancellationToken ct, bool absentIsUnknown = false)
     {
         if (!batched)
         {
             foreach (var row in rows)
-                into[(row.Table, row.Id)] = await DecideParentsCoreAsync(dataverse, logger, row, recordTypes, ct).ConfigureAwait(false);
+                into[(row.Table, row.Id)] = await DecideParentsCoreAsync(dataverse, logger, row, recordTypes, ct, absentIsUnknown)
+                    .ConfigureAwait(false);
             return;
         }
 
@@ -2851,7 +2864,7 @@ public sealed partial class SecureRootInheritance
         }
 
         foreach (var (row, parents, unknown) in named)
-            into[(row.Table, row.Id)] = DecideNamedParents(parents, unknown, reads);
+            into[(row.Table, row.Id)] = DecideNamedParents(parents, unknown, reads, absentIsUnknown);
     }
 
     /// <summary>
@@ -3175,7 +3188,7 @@ public sealed partial class SecureRootInheritance
     /// level-by-level climb (round 61 item 1) continues from.</summary>
     private static async Task<(SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder)> DecideParentsCoreAsync(
         IGenericEntityService dataverse, ILogger logger, FilingFacts facts, ConcurrentDictionary<Guid, string?> recordTypes,
-        CancellationToken ct)
+        CancellationToken ct, bool absentIsUnknown = false)
     {
         var (named, unknown) = await NameParentsAsync(dataverse, logger, facts, recordTypes, ct).ConfigureAwait(false);
 
@@ -3194,7 +3207,7 @@ public sealed partial class SecureRootInheritance
             }
         }
 
-        return DecideNamedParents(named, unknown, reads);
+        return DecideNamedParents(named, unknown, reads, absentIsUnknown);
     }
 
     /// <summary>The records <paramref name="facts"/> names as what it is filed under (typed lookups, then the pair), and why
@@ -3258,7 +3271,7 @@ public sealed partial class SecureRootInheritance
     /// secure parent. Also every named record that exists (secure or not) — what the climb continues from.</summary>
     private static (SecureParentsAnswer Answer, IReadOnlyList<FiledParent> FiledUnder) DecideNamedParents(
         IReadOnlyList<(string Table, Guid Id)> named, string? unknown,
-        IReadOnlyDictionary<(string Table, Guid Id), ParentRead> reads)
+        IReadOnlyDictionary<(string Table, Guid Id), ParentRead> reads, bool absentIsUnknown = false)
     {
         var secure = new List<SecureFilingParent>();
         var existing = new List<FiledParent>();
@@ -3273,7 +3286,15 @@ public sealed partial class SecureRootInheritance
             }
 
             if (read.Row is not { } parent)
-                continue; // a record that does not exist confers nothing
+            {
+                // A record that does not exist confers nothing (the write-time guard's rule). The read path opts in
+                // (absentIsUnknown): a NAMED parent the read did not return - deleted in a race, or invisible to the reader -
+                // is not "not secure", it is unknown, so the answer is unverifiable and the fold counts the child as secure.
+                if (absentIsUnknown)
+                    unknown ??= $"the {table} it is filed under was not returned (missing, or not visible to the reader)";
+                continue;
+            }
+
             existing.Add(new FiledParent(table, id, parent.Name, parent.Flag, parent.Permission));
 
             // Task 174 (owner round 84): the parent's Access Permission, from the same row (a null value is Standard).

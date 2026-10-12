@@ -85,8 +85,12 @@ internal static class EffectiveRootFlags
     /// for one. <c>null</c> for a table that files under nothing (no read). Never throws a read fault: a walk that throws,
     /// or no reader, answers every id <see cref="SecureParentsAnswer.Unverifiable"/> (fail closed).
     /// </summary>
+    /// <param name="absentParentIsUnknown">Opt-in for the external READ path (default <c>false</c>: the write-time semantics,
+    /// where a named parent that does not exist confers nothing). <c>true</c>: a named parent the walk cannot find makes
+    /// the record's answer Unverifiable, so <see cref="Fold(RootRecordFlags, SecureParentsAnswer?)"/> counts it as secure.</param>
     internal static async Task<IReadOnlyDictionary<Guid, SecureParentsAnswer>?> ReadAncestryAsync(
-        IGenericEntityService? dataverse, ILogger logger, string entityType, IReadOnlyCollection<Guid> ids, CancellationToken ct)
+        IGenericEntityService? dataverse, ILogger logger, string entityType, IReadOnlyCollection<Guid> ids, CancellationToken ct,
+        bool absentParentIsUnknown = false)
     {
         if (!SecureRootInheritance.Inherits(entityType))
         {
@@ -112,13 +116,15 @@ internal static class EffectiveRootFlags
             if (distinct.Count == 1)
             {
                 var one = await SecureRootInheritance
-                    .ReadSecureParentsAsync(dataverse, logger, entityType, distinct[0], ct, maxDepth: SecureRootInheritance.MaxFilingDepth)
+                    .ReadSecureParentsAsync(dataverse, logger, entityType, distinct[0], ct, maxDepth: SecureRootInheritance.MaxFilingDepth,
+                        absentIsUnknown: absentParentIsUnknown)
                     .ConfigureAwait(false);
                 return new Dictionary<Guid, SecureParentsAnswer> { [distinct[0]] = one };
             }
 
             return await SecureRootInheritance
-                .ReadSecureParentsOfManyAsync(dataverse, logger, entityType, distinct, ct, maxDepth: SecureRootInheritance.MaxFilingDepth)
+                .ReadSecureParentsOfManyAsync(dataverse, logger, entityType, distinct, ct, maxDepth: SecureRootInheritance.MaxFilingDepth,
+                    absentIsUnknown: absentParentIsUnknown)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

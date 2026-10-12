@@ -165,17 +165,18 @@ public sealed class ExternalModuleDescriptor
     }
 
     /// <summary>
-    /// When true, a row is kept only if EVERY root it is filed to (<c>sprk_project</c>, <c>sprk_matter</c>,
-    /// <c>sprk_workassignment</c> among the scope dimensions) is one the caller holds Read on, as well as matching SOME
-    /// dimension (<see cref="ExternalMultiRootRule"/>, the rule every list on the plane shares). Default false: the OR
-    /// across dimensions is the module's visibility. Set for the documents module (fix round for r3 task 039): a
-    /// document filed to a secure matter AND an accessible project is not the project reader's to list. The invoices
-    /// module leaves it off: an invoice is reached through the UNION of its parents (owner decision 2026-10-11).
+    /// When true, a row is kept only if every SECURE root it is filed to (<c>sprk_project</c>, <c>sprk_matter</c>,
+    /// <c>sprk_workassignment</c> among the scope dimensions, plus <see cref="AdditionalRootLookups"/>) is one the caller
+    /// holds Read on, as well as matching SOME dimension (<see cref="ExternalMultiRootRule"/>, the rule every list on the
+    /// plane shares; owner decision 2026-10-12, option B; renamed from <c>RequireReadOnEveryRoot</c> with the rule change).
+    /// Default false: the OR across dimensions is the module's visibility. Set for the documents module (fix round for r3
+    /// task 039): a document filed to a secure matter AND an accessible project is not the project reader's to list.
+    /// The invoices module leaves it off: an invoice is reached through the UNION of its parents (owner decision 2026-10-11).
     /// </summary>
-    public bool RequireReadOnEveryRoot { get; init; }
+    public bool RequireReadOnSecureRoots { get; init; }
 
     /// <summary>
-    /// Root lookups the every-root rule (<see cref="RequireReadOnEveryRoot"/>) must also check, beyond the scope
+    /// Root lookups the multi-root rule (<see cref="RequireReadOnSecureRoots"/>) must also check, beyond the scope
     /// dimensions: for the documents module, the related twin of each typed root column (<c>sprk_relatedproject</c>,
     /// <c>sprk_relatedmatter</c>, <c>sprk_relatedworkassignment</c>). The fetch endpoint projects them server-side after the
     /// column guard (<c>Tier2ScopeFilterInjector.EnsureProjected</c>), so a grid's own FetchXML need not name them; they are
@@ -184,7 +185,7 @@ public sealed class ExternalModuleDescriptor
     public IReadOnlyList<RootLookup> AdditionalRootLookups { get; init; } = Array.Empty<RootLookup>();
 
     /// <summary>
-    /// Every row attribute the every-root rule (<see cref="RequireReadOnEveryRoot"/>) reads: the scope dimensions plus
+    /// Every row attribute the multi-root rule (<see cref="RequireReadOnSecureRoots"/>) reads: the scope dimensions plus
     /// <see cref="AdditionalRootLookups"/>. The fetch endpoint projects all of them server-side (a caller's FetchXML may
     /// name only some, and Dataverse omits a null attribute, so an unprojected link reads as "not filed" and the rule
     /// would fail open), then returns only the columns the caller requested. Fix round for r3 task 039, F1.
@@ -248,11 +249,18 @@ public sealed class ExternalModuleDescriptor
     /// with an empty accessible set across ALL dimensions receives an empty result — never the unscoped
     /// rows (NFR-08 negative case).
     /// </summary>
+    /// <param name="principal">The resolved caller.</param>
+    /// <param name="rows">The fetch result rows.</param>
+    /// <param name="secureRootFlags">For a module with <see cref="RequireReadOnSecureRoots"/>: the secure flags read for these
+    /// rows (<see cref="ExternalMultiRootRule.ReadFlagsAsync"/> over <see cref="RootLinks"/>; synchronous here, so the
+    /// caller pre-fetches them). <c>null</c> knows nothing: every linked root the caller cannot read counts as secure.</param>
     public IReadOnlyList<IReadOnlyDictionary<string, object?>> ScopeRows(
-        CallerPrincipal principal, IEnumerable<IReadOnlyDictionary<string, object?>> rows)
+        CallerPrincipal principal, IEnumerable<IReadOnlyDictionary<string, object?>> rows,
+        SecureRootFlags? secureRootFlags = null)
     {
         ArgumentNullException.ThrowIfNull(principal);
         ArgumentNullException.ThrowIfNull(rows);
+        var flags = secureRootFlags ?? SecureRootFlags.None;
 
         // Materialize each dimension's accessible set once. Fail-closed: if EVERY dimension is empty the
         // caller can see nothing in this module — return nothing.
@@ -275,8 +283,9 @@ public sealed class ExternalModuleDescriptor
             {
                 if (ids.Count > 0 && TryGetAttributeId(row, attribute, out var id) && ids.Contains(id))
                 {
-                    // OR across dimensions — one match is enough, unless the module also requires Read on every root.
-                    if (!RequireReadOnEveryRoot || AllRootsReadable(principal, row, resolved.Select(d => d.Attribute), AdditionalRootLookups))
+                    // OR across dimensions — one match is enough, unless the module also requires Read on every SECURE root
+                    // the row is filed to (ExternalMultiRootRule, owner decision 2026-10-12, option B).
+                    if (!RequireReadOnSecureRoots || ExternalMultiRootRule.SecureRootsReadable(principal, flags, RootLinks(row)))
                         scoped.Add(row);
                     break;
                 }
@@ -287,25 +296,20 @@ public sealed class ExternalModuleDescriptor
     }
 
     /// <summary>
-    /// The multi-root rule over a module row: each root-typed scope attribute the row populates must be a root the caller
-    /// holds Read on. A populated value that is not a GUID is unreadable (fail closed); an attribute that is not a root
-    /// (or is blank) is not part of the rule.
+    /// The multi-root rule's input for one module row: each root-typed scope attribute and each
+    /// <see cref="AdditionalRootLookups"/> entry as (root, raw lookup). An absent or null attribute is "not filed" (Dataverse
+    /// omits a null attribute); a populated value that is not a GUID is marked malformed, which the rule withholds (fail
+    /// closed). An attribute that is not a root is not part of the rule. The fetch endpoint passes these for every row to
+    /// <see cref="ExternalMultiRootRule.ReadFlagsAsync"/> before <see cref="ScopeRows"/>.
     /// </summary>
-    private static bool AllRootsReadable(
-        CallerPrincipal principal, IReadOnlyDictionary<string, object?> row, IEnumerable<string> attributes,
-        IReadOnlyList<RootLookup> additional)
+    public (ExternalGrantRootType Root, string? LookupValue)[] RootLinks(IReadOnlyDictionary<string, object?> row)
     {
-        foreach (var (attribute, rootType) in additional)
-        {
-            if (!row.TryGetValue(attribute, out var raw) || raw is null)
-                continue; // not filed to this root (Dataverse omits a null attribute)
+        ArgumentNullException.ThrowIfNull(row);
+        var links = new List<(ExternalGrantRootType Root, string? LookupValue)>();
+        foreach (var (attribute, rootType) in AdditionalRootLookups)
+            links.Add((rootType, LinkValue(row, attribute)));
 
-            var lookup = TryGetAttributeId(row, attribute, out var id) ? id.ToString() : "unreadable";
-            if (!ExternalMultiRootRule.AllRootsReadable(principal, (rootType, lookup)))
-                return false;
-        }
-
-        foreach (var attribute in attributes)
+        foreach (var attribute in EffectiveDimensions.Select(d => d.Attribute))
         {
             var rootType = attribute.ToLowerInvariant() switch
             {
@@ -314,15 +318,18 @@ public sealed class ExternalModuleDescriptor
                 "sprk_workassignment" => ExternalGrantRootType.WorkAssignment,
                 _ => null,
             };
-            if (rootType is null || !row.TryGetValue(attribute, out var raw) || raw is null)
-                continue;
-
-            var lookup = TryGetAttributeId(row, attribute, out var id) ? id.ToString() : "unreadable";
-            if (!ExternalMultiRootRule.AllRootsReadable(principal, (rootType.Value, lookup)))
-                return false;
+            if (rootType is not null)
+                links.Add((rootType.Value, LinkValue(row, attribute)));
         }
 
-        return true;
+        return links.ToArray();
+
+        static string? LinkValue(IReadOnlyDictionary<string, object?> row, string attribute)
+        {
+            if (!row.TryGetValue(attribute, out var raw) || raw is null)
+                return null; // not filed to this root
+            return TryGetAttributeId(row, attribute, out var id) ? id.ToString() : "unreadable";
+        }
     }
 
     /// <summary>

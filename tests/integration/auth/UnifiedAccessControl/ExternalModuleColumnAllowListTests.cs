@@ -191,10 +191,17 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         return row;
     }
 
+    /// <summary>
+    /// The secure-flag read (owner option B, r3 task 039): these column-guard tests decide nothing on the multi-root rule, so
+    /// it answers "none known not secure" (every unreadable root counts as secure, the fail-closed default).
+    /// </summary>
+    private static readonly NonSecureRootReader NoFlags = (_, _) =>
+        Task.FromResult(new NonSecureRootsRead(new HashSet<(ExternalGrantRootType Root, Guid Id)>()));
+
     private static Task<IResult> Fetch(ExternalModuleRegistry registry, CallerPrincipal principal, string fetchXml, FetchDouble dataverse) =>
         ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
             new FetchRequestDto(DocumentEntity, fetchXml, PagingCookie: null),
-            principal, registry, new FetchXmlEntityExtractor(), dataverse.Execute,
+            principal, registry, new FetchXmlEntityExtractor(), dataverse.Execute, NoFlags,
             NullLogger.Instance, CancellationToken.None);
 
     private static void ShouldBeProblem(IResult result, int status, string errorCode)
@@ -899,7 +906,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         var control = new FetchDouble();
         var allowed = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
             new FetchRequestDto(entity, gridFetch, PagingCookie: null), GrantedEverywhere(id), registry,
-            new FetchXmlEntityExtractor(), control.Execute, NullLogger.Instance, CancellationToken.None);
+            new FetchXmlEntityExtractor(), control.Execute, NoFlags, NullLogger.Instance, CancellationToken.None);
         allowed.Should().BeOfType<Ok<FetchResponseDto>>();
         control.Calls.Should().Be(1);
 
@@ -909,7 +916,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
 
         var result = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
             new FetchRequestDto(entity, withColumn, PagingCookie: null), GrantedEverywhere(id), registry,
-            new FetchXmlEntityExtractor(), dataverse.Execute, NullLogger.Instance, CancellationToken.None);
+            new FetchXmlEntityExtractor(), dataverse.Execute, NoFlags, NullLogger.Instance, CancellationToken.None);
 
         ShouldBeProblem(result, StatusCodes.Status400BadRequest, ExternalModuleDataEndpoints.ErrorFetchXmlColumnNotPermitted);
         dataverse.Calls.Should().Be(0);

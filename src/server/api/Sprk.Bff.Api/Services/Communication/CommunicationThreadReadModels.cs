@@ -154,6 +154,15 @@ public sealed record RecentRecordMessage(ThreadMessageDto Message, string Entity
 public sealed record MessageRootLookups(string? Project, string? Matter, string? WorkAssignment);
 
 /// <summary>
+/// The caller's multi-root rule for one external message read (r3 task 039; owner decision 2026-10-12, option B). The read
+/// service calls it ONCE with the stamps of every candidate row, so a rule that needs I/O (the secure flags of the linked
+/// roots the caller cannot read) reads them in one batch, and gets back the per-row predicate. A row the predicate refuses
+/// is withheld.
+/// </summary>
+public delegate Task<Func<MessageRootLookups, bool>> MessageRootsFilter(
+    IReadOnlyCollection<MessageRootLookups> candidates, CancellationToken ct);
+
+/// <summary>
 /// One thread summary row for the left-pane thread list (R3 task 003 / FR-16). Minimal by construction — the list
 /// pane renders a label + type; opening a thread fetches its messages via the existing thread-read. Every item here
 /// was returned by the IMPERSONATED <c>sprk_communicationthreads</c> query, so the caller may see the thread record

@@ -52,9 +52,10 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
 
     [Theory]
     [MemberData(nameof(Roots))]
-    public async Task Todos_AlsoFiledToARootTheCallerCannotRead_AreWithheld_OnAllThreeRoutes(string segment)
+    public async Task Todos_AlsoFiledToASecureRootTheCallerCannotRead_AreWithheld_OnAllThreeRoutes(string segment)
     {
         _fixture.Principal = Principal(segment, RecordA);
+        SeedHiddenAsSecure();
         var plain = _fixture.Data.AddTodo(segment, RecordA, "Single root");
         if (segment != "projects") _fixture.Data.AddTodo(segment, RecordA, "Also in a hidden project", project: Hidden);
         if (segment != "matters") _fixture.Data.AddTodo(segment, RecordA, "Also in a hidden matter", matter: Hidden);
@@ -132,9 +133,10 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
 
     [Theory]
     [MemberData(nameof(Roots))]
-    public async Task Documents_AlsoFiledToARootTheCallerCannotRead_AreWithheld_OnAllThreeRoutes(string segment)
+    public async Task Documents_AlsoFiledToASecureRootTheCallerCannotRead_AreWithheld_OnAllThreeRoutes(string segment)
     {
         _fixture.Principal = Principal(segment, RecordA);
+        SeedHiddenAsSecure();
         var plain = _fixture.Data.AddDocument(segment, RecordA, "Single root");
         if (segment != "projects") _fixture.Data.AddDocument(segment, RecordA, "Typed link to a hidden project", OtherThan("projects", Hidden));
         if (segment != "matters") _fixture.Data.AddDocument(segment, RecordA, "Typed link to a hidden matter", OtherThan("matters", Hidden));
@@ -191,6 +193,382 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         {
             url.Should().Contain($"_{field.LogicalName}_value", $"{field.LogicalName} is a root link of a document");
         }
+    }
+
+    // =====================================================================
+    // Owner decision 2026-10-12, option B: only a SECURE linked root the caller cannot read withholds a list row.
+    // Events, to-dos and documents, on the three root routes, through the real secure-flag read over FakeDataverse.
+    // =====================================================================
+
+    public static TheoryData<string, string> KindsAndRoots
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var kind in new[] { "events", "todos", "documents" })
+                foreach (var segment in new[] { "projects", "matters", "workassignments" })
+                    data.Add(kind, segment);
+            return data;
+        }
+    }
+
+    public static TheoryData<string> Kinds => new() { "events", "todos", "documents" };
+
+    [Theory]
+    [MemberData(nameof(KindsAndRoots))]
+    public async Task OptionB_ARowAlsoFiledToASecureRootTheCallerCannotRead_IsWithheld(string kind, string segment)
+    {
+        _fixture.Principal = Principal(segment, RecordA);
+        var other = OtherSegment(segment);
+        _fixture.Data.AddSecureRoot(RootOf(other), Hidden);
+        var plain = AddRow(kind, segment, RecordA, "Single root");
+        AddRow(kind, segment, RecordA, "Also in a secure record", other, Hidden);
+
+        (await ListIds(kind, segment)).Should().Equal(plain);
+    }
+
+    [Theory]
+    [MemberData(nameof(KindsAndRoots))]
+    public async Task OptionB_ARowAlsoFiledToANonSecureRootTheCallerCannotRead_IsListed(string kind, string segment)
+    {
+        _fixture.Principal = Principal(segment, RecordA);
+        var other = OtherSegment(segment);
+        _fixture.Data.AddOpenRoot(RootOf(other), Hidden);
+        var plain = AddRow(kind, segment, RecordA, "Single root");
+        var dual = AddRow(kind, segment, RecordA, "Also in a non-secure record", other, Hidden);
+
+        (await ListIds(kind, segment)).Should().BeEquivalentTo(new[] { plain, dual });
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task OptionB_ARowAlsoFiledToASecureRootTheCallerCanRead_IsListed_WithoutAFlagRead(string kind)
+    {
+        _fixture.Principal = PrincipalHolding(("projects", RecordA), ("matters", RecordB));
+        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, RecordB);
+        var dual = AddRow(kind, "projects", RecordA, "Project and readable secure matter", "matters", RecordB);
+
+        (await ListIds(kind, "projects")).Should().Equal(dual);
+        _fixture.Data.FlagReads.Should().BeEmpty("a root the caller can read never needs its secure flag");
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task OptionB_ARowFiledToOneRoot_CausesNoFlagRead(string kind)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+
+        (await ListIds(kind, "projects")).Should().Equal(plain);
+        _fixture.Data.FlagReads.Should().BeEmpty();
+    }
+
+    public static TheoryData<string, string> KindsAndFailures
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var kind in new[] { "events", "todos", "documents" })
+                foreach (var failure in new[] { "throws", "fault", "missing", "flag-null", "malformed" })
+                    data.Add(kind, failure);
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(KindsAndFailures))]
+    public async Task OptionB_TheOtherRootsSecureStateCannotBeRead_TheRowIsWithheld_FailClosed(string kind, string failure)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        switch (failure)
+        {
+            case "throws": _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden); _fixture.Data.FlagReadThrows = true; break;
+            case "fault": _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden); _fixture.Data.FlagFault = HttpStatusCode.InternalServerError; break;
+            case "flag-null": _fixture.Data.AddRoot(ExternalGrantRootType.Matter, Hidden, isSecure: null); break;
+            // "missing": the matter record does not exist; "malformed": the lookup is not a GUID.
+        }
+
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+        if (failure == "malformed")
+            AddMalformedMatterRow(kind, "projects", RecordA, "Garbled");
+        else
+            AddRow(kind, "projects", RecordA, "Unknown secure state", "matters", Hidden);
+
+        (await ListIds(kind, "projects")).Should().Equal(plain);
+    }
+
+    // ---- Review of 039 option B, K2: an INCOMPLETE flag read must not silently shrink a list ----
+
+    [Theory]
+    [InlineData("events", "throws")]
+    [InlineData("events", "fault")]
+    [InlineData("todos", "throws")]
+    [InlineData("todos", "fault")]
+    [InlineData("documents", "throws")]
+    [InlineData("documents", "fault")]
+    public async Task OptionB_AnIncompleteFlagRead_ThatWithholdsARow_SetsTruncated(string kind, string failure)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden);
+        if (failure == "throws") _fixture.Data.FlagReadThrows = true; else _fixture.Data.FlagFault = HttpStatusCode.InternalServerError;
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+        AddRow(kind, "projects", RecordA, "Withheld only because its matter could not be read", "matters", Hidden);
+
+        var (ids, truncated) = await ListIdsAndTruncated(kind, "projects");
+
+        ids.Should().Equal(plain);
+        truncated.Should().BeTrue("the row was withheld only because the secure-flag read failed, so the list may be short");
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task OptionB_AnUnresolvedRootInASucceededFlagRead_ThatWithholdsARow_SetsTruncated(string kind)
+    {
+        // F4: the chunk succeeds, but the linked matter has no row (missing, or invisible to the app identity).
+        _fixture.Principal = Principal("projects", RecordA);
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+        AddRow(kind, "projects", RecordA, "Withheld because its matter did not resolve", "matters", Hidden);
+
+        var (ids, truncated) = await ListIdsAndTruncated(kind, "projects");
+
+        ids.Should().Equal(plain);
+        truncated.Should().BeTrue("the row was withheld on an unresolved root, so the list may be short");
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task OptionB_ARootWithANonBooleanFlag_ThatWithholdsARow_SetsTruncated(string kind)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        _fixture.Data.AddRootWithRawFlag(ExternalGrantRootType.Matter, Hidden, "no");
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+        AddRow(kind, "projects", RecordA, "Withheld because its flag is not a boolean", "matters", Hidden);
+
+        var (ids, truncated) = await ListIdsAndTruncated(kind, "projects");
+
+        ids.Should().Equal(plain);
+        truncated.Should().BeTrue();
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task OptionB_AResolvedNonSecureRoot_ListsTheRow_WithoutTruncated(string kind)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden);
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+        var shown = AddRow(kind, "projects", RecordA, "Its matter resolved as non-secure", "matters", Hidden);
+
+        var (ids, truncated) = await ListIdsAndTruncated(kind, "projects");
+
+        ids.Should().BeEquivalentTo(new[] { plain, shown });
+        truncated.Should().BeFalse();
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task OptionB_ACompleteFlagRead_WithASecureRowWithheld_DoesNotSetTruncated(string kind)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, Hidden);
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+        AddRow(kind, "projects", RecordA, "Genuinely secure", "matters", Hidden);
+
+        var (ids, truncated) = await ListIdsAndTruncated(kind, "projects");
+
+        ids.Should().Equal(plain);
+        truncated.Should().BeFalse("a complete read that withheld a secure row is not a truncated list");
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task OptionB_AFaultedFlagRead_ThatWithholdsNothing_DoesNotSetTruncated(string kind)
+    {
+        // A fault only matters when it costs a row: a list with no linked unreadable root never reads a flag.
+        _fixture.Principal = Principal("projects", RecordA);
+        _fixture.Data.FlagFault = HttpStatusCode.InternalServerError;
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+
+        var (ids, truncated) = await ListIdsAndTruncated(kind, "projects");
+
+        ids.Should().Equal(plain);
+        truncated.Should().BeFalse();
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task OptionB_ManyRowsLinkedToTheSameUnreadableRoots_CostOneFlagQueryPerRootType(string kind)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        var secureMatter = Guid.Parse("a0390000-0000-4000-8000-0000000000ee");
+        var openWorkAssignment = Guid.Parse("a0390000-0000-4000-8000-0000000000ef");
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden);
+        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, secureMatter);
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, openWorkAssignment);
+        var listed = new List<string>();
+        for (var i = 0; i < 6; i++)
+        {
+            var id = AddRow(kind, "projects", RecordA, $"Row {i}", "matters", i % 3 == 0 ? secureMatter : Hidden);
+            if (i % 3 != 0) listed.Add(id);
+        }
+
+        listed.Add(AddRow(kind, "projects", RecordA, "Work assignment", "workassignments", openWorkAssignment));
+
+        (await ListIds(kind, "projects")).Should().BeEquivalentTo(listed);
+        var flagReads = _fixture.Data.FlagReads;
+        flagReads.Should().HaveCount(2, "one query per root entity for the whole list, never one per row");
+        flagReads.Should().ContainSingle(u => u.Contains("/sprk_matters?")).Which.Should()
+            .Contain(Hidden.ToString()).And.Contain(secureMatter.ToString()).And.Contain("$select=sprk_matterid,sprk_issecure");
+        flagReads.Should().ContainSingle(u => u.Contains("/sprk_workassignments?"));
+    }
+
+    // =====================================================================
+    // Main-session decision 2026-10-12 (stricter reading of option B): "secure" means EFFECTIVELY secure (UAC-r2 task 174).
+    // An unreadable work assignment W whose OWN flag is false but which is filed under a secure matter M is secure, even when
+    // the row carries no stamp for M. The own flag comes over the Web API; the filing chain over the fake filing reader.
+    // =====================================================================
+
+    private static readonly Guid FiledWorkAssignment = Guid.Parse("a0390000-0000-4000-8000-0000000000e1");
+    private static readonly Guid FilingMatter = Guid.Parse("a0390000-0000-4000-8000-0000000000e2");
+
+    /// <summary>W (own flag FALSE) filed under matter M, which is <paramref name="matterSecure"/>. The caller reads neither.</summary>
+    private void SeedWorkAssignmentUnderMatter(bool matterSecure)
+    {
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, FiledWorkAssignment);
+        _fixture.Data.AddRoot(ExternalGrantRootType.Matter, FilingMatter, matterSecure);
+        _fixture.Data.FileWorkAssignmentUnder(FiledWorkAssignment, ExternalGrantRootType.Matter, FilingMatter);
+    }
+
+    public static TheoryData<string, string> KindsAndProjectOrMatterRoutes
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var kind in new[] { "events", "todos", "documents" })
+                foreach (var segment in new[] { "projects", "matters" })
+                    data.Add(kind, segment);
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(KindsAndProjectOrMatterRoutes))]
+    public async Task Effective_ARowFiledToAWorkAssignmentWithAFalseOwnFlag_UnderASecureMatter_IsWithheld_EvenWithNoStampForTheMatter(
+        string kind, string segment)
+    {
+        _fixture.Principal = Principal(segment, RecordA);
+        SeedWorkAssignmentUnderMatter(matterSecure: true);
+        var plain = AddRow(kind, segment, RecordA, "Single root");
+        AddRow(kind, segment, RecordA, "Filed to W only; W is under a secure matter", "workassignments", FiledWorkAssignment);
+
+        (await ListIds(kind, segment)).Should().Equal(plain);
+    }
+
+    [Theory]
+    [MemberData(nameof(KindsAndProjectOrMatterRoutes))]
+    public async Task Effective_ARowFiledToAWorkAssignmentWithAFalseOwnFlag_UnderANonSecureMatter_IsListed(string kind, string segment)
+    {
+        _fixture.Principal = Principal(segment, RecordA);
+        SeedWorkAssignmentUnderMatter(matterSecure: false);
+        var plain = AddRow(kind, segment, RecordA, "Single root");
+        var dual = AddRow(kind, segment, RecordA, "Filed to W only; W is under a non-secure matter", "workassignments", FiledWorkAssignment);
+
+        (await ListIds(kind, segment)).Should().BeEquivalentTo(new[] { plain, dual });
+    }
+
+    public static TheoryData<string, string> KindsAndAncestryFailures
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var kind in new[] { "events", "todos", "documents" })
+                foreach (var failure in new[] { "walk-throws", "ancestor-read-throws", "ancestor-flag-empty" })
+                    data.Add(kind, failure);
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(KindsAndAncestryFailures))]
+    public async Task Effective_WhenTheFilingChainCannotBeRead_TheRowIsWithheld_FailClosed(string kind, string failure)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        SeedWorkAssignmentUnderMatter(matterSecure: false);
+        switch (failure)
+        {
+            case "walk-throws": _fixture.Data.FilingReadThrows = true; break;
+            case "ancestor-read-throws": _fixture.Data.FilingFaultEntity = "sprk_matter"; break;
+            case "ancestor-flag-empty": _fixture.Data.AddRoot(ExternalGrantRootType.Matter, FilingMatter, isSecure: null); break;
+        }
+
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+        AddRow(kind, "projects", RecordA, "Filed to W; its ancestry cannot be decided", "workassignments", FiledWorkAssignment);
+
+        (await ListIds(kind, "projects")).Should().Equal(plain);
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task Effective_ManyRowsLinkedToTheSameWorkAssignment_CostABoundedNumberOfReads(string kind)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        SeedWorkAssignmentUnderMatter(matterSecure: false);
+        var secondWorkAssignment = Guid.Parse("a0390000-0000-4000-8000-0000000000e3");
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, secondWorkAssignment);
+        _fixture.Data.FileWorkAssignmentUnder(secondWorkAssignment, ExternalGrantRootType.Matter, FilingMatter);
+        var listed = new List<string>();
+        for (var i = 0; i < 12; i++)
+            listed.Add(AddRow(kind, "projects", RecordA, $"Row {i}", "workassignments", i % 4 == 0 ? secondWorkAssignment : FiledWorkAssignment));
+
+        (await ListIds(kind, "projects")).Should().BeEquivalentTo(listed);
+        _fixture.Data.FlagReads.Should().ContainSingle("one own-flag query for the two work assignments, never one per row");
+        _fixture.Data.FilingReadLog.Should().Equal(
+            new[] { "sprk_workassignment", "sprk_matter" }, "one batched read of the two work assignments, one of their matter");
+    }
+
+    [Fact]
+    public async Task Effective_DocumentsModuleFetch_AWorkAssignmentWithAFalseOwnFlag_UnderASecureMatter_IsWithheld()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        SeedWorkAssignmentUnderMatter(matterSecure: true);
+
+        var (body, _) = await RunDocumentsFetchAsync(
+            caller, ProjectOnlyGridFetch,
+            new[]
+            {
+                DocRow("Project only", project: RecordA),
+                DocRow("W under a secure matter", project: RecordA, workAssignment: FiledWorkAssignment),
+                DocRow("W under a secure matter, through the twin", project: RecordA, extra: ("sprk_relatedworkassignment", FiledWorkAssignment)),
+            });
+
+        body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("Project only");
+    }
+
+    [Fact]
+    public async Task Effective_DocumentsModuleFetch_AWorkAssignmentWithAFalseOwnFlag_UnderANonSecureMatter_IsListed()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        SeedWorkAssignmentUnderMatter(matterSecure: false);
+
+        var (body, _) = await RunDocumentsFetchAsync(
+            caller, ProjectOnlyGridFetch,
+            new[] { DocRow("Project only", project: RecordA), DocRow("W under a non-secure matter", project: RecordA, workAssignment: FiledWorkAssignment) });
+
+        body.Entities.Select(r => r["sprk_documentname"]).Should().BeEquivalentTo(new[] { "Project only", "W under a non-secure matter" });
+    }
+
+    [Fact]
+    public async Task Effective_DocumentsModuleFetch_WhenTheFilingChainCannotBeRead_TheRowIsWithheld_FailClosed()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        SeedWorkAssignmentUnderMatter(matterSecure: false);
+        _fixture.Data.FilingFaultEntity = "sprk_matter";
+
+        var (body, _) = await RunDocumentsFetchAsync(
+            caller, ProjectOnlyGridFetch,
+            new[] { DocRow("Project only", project: RecordA), DocRow("W with an unreadable ancestry", project: RecordA, workAssignment: FiledWorkAssignment) });
+
+        body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("Project only");
     }
 
     // =====================================================================
@@ -294,7 +672,7 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
                 executed = request.FetchXml;
                 return Task.FromResult(new FetchResponseDto(rows, MoreRecords: false, PagingCookie: null));
             },
-            NullLogger.Instance, CancellationToken.None);
+            _fixture.Data.NewService().GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None);
 
         executed.Should().Contain("name=\"sprk_relatedproject\"").And.Contain("name=\"sprk_relatedmatter\"")
             .And.Contain("name=\"sprk_relatedworkassignment\"");
@@ -317,6 +695,7 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         // a pipeline that never asked for sprk_matter / sprk_workassignment / the twins would see the P+M row as project-only.
         var caller = PrincipalWith(
             projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        SeedHiddenAsSecure();
         var rows = new IReadOnlyDictionary<string, object?>[]
         {
             DocRow("Project only", project: RecordA),
@@ -349,11 +728,106 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         var dual = (Dictionary<string, object?>)DocRow("Project and readable matter", project: RecordA, matter: RecordB);
         dual["@formattedValues"] = new Dictionary<string, string> { ["sprk_matter"] = "Matter B", ["sprk_project"] = "Project A" };
 
+        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, RecordB);
+
         var (body, _) = await RunDocumentsFetchAsync(caller, ProjectOnlyGridFetch, new[] { dual });
 
         var row = body.Entities.Should().ContainSingle().Subject;
         row.Keys.Should().NotContain("sprk_matter");
         ((IReadOnlyDictionary<string, string>)row["@formattedValues"]!).Keys.Should().Equal("sprk_project");
+        _fixture.Data.FlagReads.Should().BeEmpty("a secure root the caller can read needs no flag read");
+    }
+
+    // ---- Owner decision 2026-10-12, option B: the grid's documents module ----
+
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_workassignment")]
+    [InlineData("sprk_relatedproject")]
+    [InlineData("sprk_relatedmatter")]
+    public async Task DocumentsModuleFetch_ARowAlsoFiledToANonSecureRootTheCallerCannotRead_IsListed_OptionB(string column)
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        foreach (var root in new[] { ExternalGrantRootType.Project, ExternalGrantRootType.Matter, ExternalGrantRootType.WorkAssignment })
+            _fixture.Data.AddOpenRoot(root, Hidden);
+
+        var (body, _) = await RunDocumentsFetchAsync(
+            caller, ProjectOnlyGridFetch,
+            new[] { DocRow("Project only", project: RecordA), DocRow("Also non-secure", project: RecordA, extra: (column, Hidden)) });
+
+        body.Entities.Select(r => r["sprk_documentname"]).Should().BeEquivalentTo(new[] { "Project only", "Also non-secure" });
+    }
+
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_relatedmatter")]
+    public async Task DocumentsModuleFetch_ARowAlsoFiledToASecureRootTheCallerCannotRead_IsWithheld_OptionB(string column)
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, Hidden);
+
+        var (body, _) = await RunDocumentsFetchAsync(
+            caller, ProjectOnlyGridFetch,
+            new[] { DocRow("Project only", project: RecordA), DocRow("Also secure", project: RecordA, extra: (column, Hidden)) });
+
+        body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("Project only");
+    }
+
+    [Theory]
+    [InlineData("throws")]
+    [InlineData("fault")]
+    [InlineData("missing")]
+    [InlineData("flag-null")]
+    [InlineData("malformed")]
+    public async Task DocumentsModuleFetch_TheOtherRootsSecureStateCannotBeRead_TheRowIsWithheld_FailClosed(string failure)
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        switch (failure)
+        {
+            case "throws": _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden); _fixture.Data.FlagReadThrows = true; break;
+            case "fault": _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden); _fixture.Data.FlagFault = HttpStatusCode.InternalServerError; break;
+            case "flag-null": _fixture.Data.AddRoot(ExternalGrantRootType.Matter, Hidden, isSecure: null); break;
+        }
+
+        var (body, _) = await RunDocumentsFetchAsync(
+            caller, ProjectOnlyGridFetch,
+            new[]
+            {
+                DocRow("Project only", project: RecordA),
+                failure == "malformed"
+                    ? DocRow("Garbled twin", project: RecordA, extra: ("sprk_relatedmatter", "not-a-guid"))
+                    : DocRow("Unknown secure state", project: RecordA, matter: Hidden),
+            });
+
+        body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("Project only");
+    }
+
+    [Fact]
+    public async Task DocumentsModuleFetch_ManyRowsLinkedToTheSameUnreadableRoot_CostOneFlagQuery()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden);
+        var rows = Enumerable.Range(1, 5)
+            .Select(i => DocRow($"Doc {i}", project: RecordA, matter: i % 2 == 0 ? Hidden : null, extra: ("sprk_relatedmatter", Hidden)))
+            .ToArray();
+
+        var (body, _) = await RunDocumentsFetchAsync(caller, ProjectOnlyGridFetch, rows);
+
+        body.Entities.Should().HaveCount(5);
+        _fixture.Data.FlagReads.Should().ContainSingle().Which.Should().Contain(Hidden.ToString())
+            .And.Contain("$select=sprk_matterid,sprk_issecure");
+    }
+
+    [Fact]
+    public void DocumentsModule_ScopeRows_WithoutFlags_CountsEveryUnreadableRootAsSecure()
+    {
+        // ScopeRows is synchronous: without the pre-fetched flags it knows nothing and fails closed.
+        var module = Registry().FindByEntity("sprk_document")!;
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        var rows = new[] { DocRow("Project only", project: RecordA), DocRow("Also elsewhere", project: RecordA, matter: Hidden) };
+
+        module.ScopeRows(caller, rows).Select(r => r["sprk_documentname"]).Should().Equal("Project only");
+        module.ScopeRows(caller, rows, SecureRootFlags.None).Select(r => r["sprk_documentname"]).Should().Equal("Project only");
     }
 
     [Fact]
@@ -376,8 +850,8 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
     public void EveryModuleWithTheEveryRootRule_ProjectsEveryAttributeTheRuleReads()
     {
         // "Projection covers every attribute the rule reads": the scope dimensions plus the declared extra root lookups.
-        // Every module that sets RequireReadOnEveryRoot is checked, so a new one cannot leave a root unprojected.
-        var modules = Registry().Modules.Where(m => m.RequireReadOnEveryRoot).ToList();
+        // Every module that sets RequireReadOnSecureRoots is checked, so a new one cannot leave a root unprojected.
+        var modules = Registry().Modules.Where(m => m.RequireReadOnSecureRoots).ToList();
         modules.Should().NotBeEmpty();
         foreach (var module in modules)
         {
@@ -397,7 +871,7 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
     /// handed the way Dataverse does: each row keeps <c>@logicalName</c> plus only the attributes named in the executed
     /// FetchXML, and a null attribute is omitted.
     /// </summary>
-    private static async Task<(FetchResponseDto Body, string Executed)> RunDocumentsFetchAsync(
+    private async Task<(FetchResponseDto Body, string Executed)> RunDocumentsFetchAsync(
         CallerPrincipal caller, string callerFetchXml, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows)
     {
         var executed = string.Empty;
@@ -410,6 +884,8 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
                 return Task.FromResult(new FetchResponseDto(
                     ProjectThroughFetch(request.FetchXml, rows), MoreRecords: false, PagingCookie: null));
             },
+            // Owner option B: the REAL secure-flag read over FakeDataverse (root-set queries through $select, nulls omitted).
+            _fixture.Data.NewService().GetNonSecureRootsAsync,
             NullLogger.Instance, CancellationToken.None);
         return (result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!, executed);
     }
@@ -470,6 +946,70 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
     // =====================================================================
     // Helpers
     // =====================================================================
+
+    /// <summary><see cref="Hidden"/> as a SECURE project, matter and work assignment (option B's must-fire case).</summary>
+    private void SeedHiddenAsSecure()
+    {
+        foreach (var root in new[] { ExternalGrantRootType.Project, ExternalGrantRootType.Matter, ExternalGrantRootType.WorkAssignment })
+            _fixture.Data.AddSecureRoot(root, Hidden);
+    }
+
+    private static string OtherSegment(string segment) => segment == "matters" ? "projects" : "matters";
+
+    private static ExternalGrantRootType RootOf(string segment) => segment switch
+    {
+        "projects" => ExternalGrantRootType.Project,
+        "matters" => ExternalGrantRootType.Matter,
+        _ => ExternalGrantRootType.WorkAssignment,
+    };
+
+    /// <summary>Seeds an event, to-do or document filed to <paramref name="segment"/>'s <paramref name="record"/>, and also
+    /// to <paramref name="otherSegment"/>'s <paramref name="otherRecord"/> when given (a typed link for a document).</summary>
+    private string AddRow(string kind, string segment, Guid record, string name, string? otherSegment = null, Guid? otherRecord = null)
+    {
+        Guid? project = otherSegment == "projects" ? otherRecord : null;
+        Guid? matter = otherSegment == "matters" ? otherRecord : null;
+        Guid? workAssignment = otherSegment == "workassignments" ? otherRecord : null;
+        return kind switch
+        {
+            "events" => _fixture.Data.Add(segment, record, name, project, matter, workAssignment),
+            "todos" => _fixture.Data.AddTodo(segment, record, name, project, matter, workAssignment),
+            _ => otherSegment is null
+                ? _fixture.Data.AddDocument(segment, record, name)
+                : _fixture.Data.AddDocument(segment, record, name, OtherThan(otherSegment, otherRecord!.Value)),
+        };
+    }
+
+    /// <summary>A row whose matter lookup is present but not a GUID.</summary>
+    private string AddMalformedMatterRow(string kind, string segment, Guid record, string name) => kind switch
+    {
+        "events" => _fixture.Data.Add(segment, record, name, rawMatterLookup: "not-a-guid"),
+        "todos" => _fixture.Data.AddTodo(segment, record, name, rawMatterLookup: "not-a-guid"),
+        _ => _fixture.Data.AddDocumentRaw(segment, record, name, ("_sprk_matter_value", "not-a-guid")),
+    };
+
+    /// <summary>The ids the list route returned, through the real host.</summary>
+    private async Task<IReadOnlyList<string>> ListIds(string kind, string segment)
+    {
+        using var client = _fixture.CreateAuthenticatedClient();
+        var json = await client.GetStringAsync($"/api/v1/external/{segment}/{RecordA}/{kind}");
+        var idProperty = kind switch { "events" => "sprk_eventid", "todos" => "sprk_todoid", _ => "sprk_documentid" };
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("value").EnumerateArray()
+            .Select(v => v.GetProperty(idProperty).GetString()!).ToList();
+    }
+
+    /// <summary><see cref="ListIds"/>, and the list's <c>truncated</c> flag (omitted from the JSON when false).</summary>
+    private async Task<(IReadOnlyList<string> Ids, bool Truncated)> ListIdsAndTruncated(string kind, string segment)
+    {
+        using var client = _fixture.CreateAuthenticatedClient();
+        var json = await client.GetStringAsync($"/api/v1/external/{segment}/{RecordA}/{kind}");
+        var idProperty = kind switch { "events" => "sprk_eventid", "todos" => "sprk_todoid", _ => "sprk_documentid" };
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        var ids = doc.RootElement.GetProperty("value").EnumerateArray().Select(v => v.GetProperty(idProperty).GetString()!).ToList();
+        var truncated = doc.RootElement.TryGetProperty("truncated", out var flag) && flag.GetBoolean();
+        return (ids, truncated);
+    }
 
     private static IReadOnlyDictionary<string, object?> DocRow(
         string name, Guid? project = null, Guid? matter = null, Guid? workAssignment = null,

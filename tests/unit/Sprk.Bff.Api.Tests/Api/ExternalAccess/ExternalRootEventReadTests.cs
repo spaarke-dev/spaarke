@@ -9,6 +9,9 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -219,6 +222,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
     public async Task ProjectEvents_AlsoFiledToASecureMatterTheCallerCannotRead_AreWithheld()
     {
         _fixture.Principal = Principal("projects", ExternalAccessLevel.Collaborate, RecordA);
+        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, Hidden); // F4: the matter genuinely resolves as secure
         _fixture.Data.Add("projects", RecordA, "Project only");
         _fixture.Data.Add("projects", RecordA, "Project and secure matter", matter: Hidden);
 
@@ -428,7 +432,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                         .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
                         .Build(),
                     new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
-                    NullLogger<ExternalDataService>.Instance));
+                    NullLogger<ExternalDataService>.Instance,
+                    Data.FilingReader));
             });
         }
     }
@@ -450,12 +455,188 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// <summary>When set, every request answers with this status.</summary>
         public HttpStatusCode? Fault { get; set; }
 
+        /// <summary>When set, only the secure-flag reads (a GET to a root entity set) answer with this status.</summary>
+        public HttpStatusCode? FlagFault { get; set; }
+
+        /// <summary>When true, the secure-flag reads throw (a transport fault).</summary>
+        public bool FlagReadThrows { get; set; }
+
+        /// <summary>The root entity sets and their primary keys: the secure-flag reads (owner option B) query these.</summary>
+        private static readonly IReadOnlyDictionary<string, string> RootSets = new Dictionary<string, string>
+        {
+            ["sprk_projects"] = "sprk_projectid",
+            ["sprk_matters"] = "sprk_matterid",
+            ["sprk_workassignments"] = "sprk_workassignmentid",
+        };
+
+        /// <summary>Every secure-flag query sent (a GET to a root entity set), unescaped.</summary>
+        public IReadOnlyList<string> FlagReads =>
+            Urls.Where(u => RootSets.Keys.Any(set => u.Contains($"/{set}?", StringComparison.Ordinal))).ToList();
+
+        public FakeDataverse()
+        {
+            // The filing walk's queries (the ONE walk, EffectiveRootFlags), answered from _filing by the id condition each one
+            // carries (Equal or In), like DocumentIndexParentResolverTests does.
+            _filingReader.Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((QueryExpression query, CancellationToken _) =>
+                {
+                    FilingReadLog.Enqueue(query.EntityName);
+                    if (FilingReadThrows || string.Equals(FilingFaultEntity, query.EntityName, StringComparison.OrdinalIgnoreCase))
+                        throw new TimeoutException("The filing read failed (test).");
+
+                    var ids = query.Criteria.Conditions
+                        .Where(c => string.Equals(c.AttributeName, query.EntityName + "id", StringComparison.OrdinalIgnoreCase))
+                        .SelectMany(c => c.Values.Select(v => (Guid)v))
+                        .ToHashSet();
+                    lock (_filing)
+                    {
+                        return new EntityCollection(_filing
+                            .Where(kv => string.Equals(kv.Key.Table, query.EntityName, StringComparison.OrdinalIgnoreCase) && ids.Contains(kv.Key.Id))
+                            .Select(kv => kv.Value)
+                            .ToList());
+                    }
+                });
+        }
+
+        // ---- The filing world (effective secure status: a work assignment filed under a secure matter is secure) ----
+
+        private readonly Dictionary<(string Table, Guid Id), Entity> _filing = new();
+        private readonly Mock<IGenericEntityService> _filingReader = new(MockBehavior.Strict);
+
+        /// <summary>The app-only reader the REAL <see cref="ExternalDataService"/> climbs the filing chain through.</summary>
+        public IGenericEntityService FilingReader => _filingReader.Object;
+
+        /// <summary>The entity name of every filing-walk query sent, in order.</summary>
+        public ConcurrentQueue<string> FilingReadLog { get; } = new();
+
+        /// <summary>When true, every filing-walk read throws (a transport fault).</summary>
+        public bool FilingReadThrows { get; set; }
+
+        /// <summary>When set (e.g. <c>sprk_matter</c>), only the filing-walk reads of that entity throw.</summary>
+        public string? FilingFaultEntity { get; set; }
+
         public void Reset()
         {
             lock (_sets) _sets.Clear();
+            lock (_filing) { _filing.Clear(); _recordTypes.Clear(); }
             Urls.Clear();
+            FilingReadLog.Clear();
             Fault = null;
+            FlagFault = null;
+            FlagReadThrows = false;
+            FilingReadThrows = false;
+            FilingFaultEntity = null;
         }
+
+        /// <summary>
+        /// Files work assignment <paramref name="workAssignment"/> under <paramref name="parent"/> (its typed
+        /// <c>sprk_regardingmatter</c> / <c>sprk_regardingproject</c>): the walk then reads the parent's own flag. Seed both
+        /// with <see cref="AddRoot"/> first; the HTTP side (each root's OWN flag) is unaffected.
+        /// </summary>
+        public void FileWorkAssignmentUnder(Guid workAssignment, ExternalGrantRootType parent, Guid parentId)
+        {
+            var (column, table) = parent switch
+            {
+                ExternalGrantRootType.Matter => ("sprk_regardingmatter", "sprk_matter"),
+                ExternalGrantRootType.Project => ("sprk_regardingproject", "sprk_project"),
+                _ => throw new NotSupportedException("A work assignment files under a matter or a project."),
+            };
+            lock (_filing) _filing[("sprk_workassignment", workAssignment)][column] = new EntityReference(table, parentId);
+        }
+
+        /// <summary>
+        /// Files project <paramref name="project"/> under <paramref name="parent"/> through the POLYMORPHIC PAIR, the only way a
+        /// project files under anything (it has no typed regarding lookup): <c>sprk_regardingrecordid</c> holds the parent's id
+        /// as text and <c>sprk_regardingrecordtype</c> points at the <c>sprk_recordtype_ref</c> row whose
+        /// <c>sprk_recordlogicalname</c> names the parent's table, exactly the columns <c>SecureRootInheritance</c> reads
+        /// (<c>PairIdColumn</c>, <c>PairTypeColumn</c>, <c>RecordTypeLogicalNameColumn</c>). Seed the project with
+        /// <see cref="AddRoot"/> first; the parent need not exist (a named-but-absent parent).
+        /// </summary>
+        public void FileProjectUnderByPair(Guid project, ExternalGrantRootType parent, Guid parentId)
+        {
+            var parentTable = parent switch
+            {
+                ExternalGrantRootType.Matter => "sprk_matter",
+                ExternalGrantRootType.Project => "sprk_project",
+                _ => throw new NotSupportedException("A project files under a matter or a project."),
+            };
+            lock (_filing)
+            {
+                if (!_recordTypes.TryGetValue(parentTable, out var typeId))
+                {
+                    typeId = Guid.NewGuid();
+                    _recordTypes[parentTable] = typeId;
+                    var typeRow = new Entity("sprk_recordtype_ref", typeId);
+                    typeRow["sprk_recordlogicalname"] = parentTable;
+                    _filing[("sprk_recordtype_ref", typeId)] = typeRow;
+                }
+
+                var row = _filing[("sprk_project", project)];
+                row["sprk_regardingrecordid"] = parentId.ToString("D");
+                row["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", typeId);
+            }
+        }
+
+        private readonly Dictionary<string, Guid> _recordTypes = new();
+
+        /// <summary>
+        /// Seeds a root record (project, matter, work assignment) with its <c>sprk_issecure</c>. A <c>null</c> flag is OMITTED
+        /// from the response, as Dataverse omits a null (or a field-security-masked) value. The row carries other columns too,
+        /// so a read that did not project through <c>$select</c> would be visible.
+        /// </summary>
+        public void AddRoot(ExternalGrantRootType root, Guid id, bool? isSecure)
+        {
+            var set = ExternalGrantRoot.BindFor(root).EntitySet;
+
+            // The same record in the filing world, as the walk reads it: filed under nothing until FileWorkAssignmentUnder.
+            var table = ExternalGrantRoot.LogicalNameFor(root);
+            var filingRow = new Entity(table, id);
+            if (isSecure is { } secure) filingRow["sprk_issecure"] = secure;
+            filingRow["sprk_accesspermission"] = new OptionSetValue(100000000);
+            if (root == ExternalGrantRootType.Matter) filingRow["sprk_mattername"] = $"root {id}";
+            if (root == ExternalGrantRootType.Project) filingRow["sprk_projectname"] = $"root {id}";
+            lock (_filing) _filing[(table, id)] = filingRow;
+
+            Seed(set, new Dictionary<string, object?>
+            {
+                [RootSets[set]] = id.ToString(),
+                ["sprk_issecure"] = isSecure,
+                ["sprk_name"] = $"root {id}",
+                ["sprk_accesspermission"] = 100000000,
+                ["statecode"] = 0,
+            });
+        }
+
+        /// <summary>
+        /// Seeds a root whose <c>sprk_issecure</c> comes back as a raw, NON-boolean JSON value (e.g. a string), the shape a
+        /// misconfigured or masked column could take. The filing world sees it as an absent flag.
+        /// </summary>
+        public void AddRootWithRawFlag(ExternalGrantRootType root, Guid id, object rawFlag)
+        {
+            AddRoot(root, id, isSecure: null);
+            var set = ExternalGrantRoot.BindFor(root).EntitySet;
+            lock (_sets)
+            {
+                _sets[set].Single(r => string.Equals(r[RootSets[set]] as string, id.ToString(), StringComparison.OrdinalIgnoreCase))
+                    ["sprk_issecure"] = rawFlag;
+            }
+        }
+
+        /// <summary>A secure root (<c>sprk_issecure = true</c>).</summary>
+        public void AddSecureRoot(ExternalGrantRootType root, Guid id) => AddRoot(root, id, isSecure: true);
+
+        /// <summary>A Standard, non-secure root (<c>sprk_issecure = false</c>).</summary>
+        public void AddOpenRoot(ExternalGrantRootType root, Guid id) => AddRoot(root, id, isSecure: false);
+
+        /// <summary>A REAL <see cref="ExternalDataService"/> over this fake, e.g. for its secure-flag read.</summary>
+        public ExternalDataService NewService(bool withFilingReader = true) => new(
+            new HttpClient(this),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
+                .Build(),
+            new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
+            NullLogger<ExternalDataService>.Instance,
+            withFilingReader ? FilingReader : null);
 
         private void Seed(string set, Dictionary<string, object?> row)
         {
@@ -531,6 +712,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                 {
                     "projects" => "_sprk_project_value",
                     "matters" => "_sprk_matter_value",
+                    "invoices" => "_sprk_invoice_value",
+                    "servicerequests" => "_sprk_relatedservicerequest_value",
                     _ => "_sprk_workassignment_value",
                 }] = record.ToString(),
             };
@@ -538,6 +721,23 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             Seed("sprk_documents", row);
             return id;
         }
+
+        /// <summary>Seeds an invoice with its parent matter and/or project (what <c>GetInvoiceParentsAsync</c> reads).</summary>
+        public void AddInvoice(Guid id, Guid? matter, Guid? project) =>
+            Seed("sprk_invoices", new Dictionary<string, object?>
+            {
+                ["sprk_invoiceid"] = id.ToString(),
+                ["_sprk_matter_value"] = matter?.ToString(),
+                ["_sprk_project_value"] = project?.ToString(),
+            });
+
+        /// <summary>Seeds a service request with its requester contact (what <c>GetServiceRequestRequesterAsync</c> reads).</summary>
+        public void AddServiceRequest(Guid id, Guid requester) =>
+            Seed("sprk_servicerequests", new Dictionary<string, object?>
+            {
+                ["sprk_servicerequestid"] = id.ToString(),
+                ["_sprk_requestedby_value"] = requester.ToString(),
+            });
 
         /// <summary><see cref="AddDocument"/> with a link column set to an arbitrary raw value (a malformed lookup).</summary>
         public string AddDocumentRaw(string segment, Guid record, string name, (string Column, object? Value) rawLink)
@@ -560,6 +760,36 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             if (Fault is { } fault)
                 return Task.FromResult(new HttpResponseMessage(fault));
 
+            // The secure-flag read: `sprk_matters?$filter=sprk_matterid eq {a} or sprk_matterid eq {b}&$select=...`. Answers the
+            // seeded rows whose key is one of the ids, projected through $select, a null value omitted (as Dataverse does).
+            var path = request.RequestUri!.AbsolutePath;
+            if (RootSets.TryGetValue(path[(path.LastIndexOf('/') + 1)..], out var rootKey))
+            {
+                if (FlagReadThrows)
+                    throw new HttpRequestException("The secure-flag read failed (test).");
+                if (FlagFault is { } flagFault)
+                    return Task.FromResult(new HttpResponseMessage(flagFault));
+
+                var ids = Regex.Matches(url, $@"{rootKey} eq ([0-9a-fA-F-]{{36}})")
+                    .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var rootSelect = Regex.Match(url, @"\$select=([^&]*)");
+                var rootColumns = rootSelect.Success ? rootSelect.Groups[1].Value.Split(',').ToHashSet(StringComparer.Ordinal) : null;
+                List<Dictionary<string, object?>> roots;
+                lock (_sets)
+                {
+                    roots = (_sets.TryGetValue(path[(path.LastIndexOf('/') + 1)..], out var seededRoots) ? seededRoots : new())
+                        .Where(r => r[rootKey] is string key && ids.Contains(key))
+                        .Select(r => r.Where(kv => kv.Value is not null && (rootColumns is null || rootColumns.Contains(kv.Key)))
+                            .ToDictionary(kv => kv.Key, kv => kv.Value))
+                        .ToList();
+                }
+
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new { value = roots }), System.Text.Encoding.UTF8, "application/json"),
+                });
+            }
+
             // A single-row read, `sprk_documents({id})?$select=...`: the row whose primary key is {id}, projected through
             // $select, as the document / delete scoping reads send it (fix round for task 039). 404 when there is none.
             var single = Regex.Match(request.RequestUri.AbsolutePath, @"/(\w+)\(([0-9a-fA-F-]{36})\)$");
@@ -570,7 +800,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                 lock (_sets)
                 {
                     hit = _sets.TryGetValue(single.Groups[1].Value, out var seededRows)
-                        ? seededRows.FirstOrDefault(r => new[] { "sprk_documentid", "sprk_todoid", "sprk_eventid" }
+                        ? seededRows.FirstOrDefault(r => new[] { "sprk_documentid", "sprk_todoid", "sprk_eventid", "sprk_invoiceid", "sprk_servicerequestid" }
                             .Any(k => r.TryGetValue(k, out var v) && string.Equals(v as string, wanted, StringComparison.OrdinalIgnoreCase)))
                         : null;
                 }

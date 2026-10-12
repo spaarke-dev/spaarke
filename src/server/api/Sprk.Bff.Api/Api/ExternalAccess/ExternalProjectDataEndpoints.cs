@@ -614,16 +614,17 @@ public static class ExternalProjectDataEndpoints
         //     that record type's own lookup. A mismatch OR a non-existent document is a uniform 403 (do not
         //     leak document existence). This is an app-only Dataverse authorization read — it resolves NO
         //     Graph pointer.
-        //     Fix round for task 039 (INTERIM, ExternalMultiRootRule): a document also filed to a root the caller cannot
-        //     read is withheld exactly as one not under this parent, with the SAME response, so the answer cannot be used
-        //     to tell whether such a document exists. Without it a reader of project P who knew the id of a document filed
-        //     to P and to secure matter M downloaded it through P's route.
+        //     Fix round for task 039 (ExternalMultiRootRule, owner decision 2026-10-12, option B): a document also filed to
+        //     a SECURE root the caller cannot read (or one whose secure state cannot be read) is withheld exactly as one not
+        //     under this parent, with the SAME response, so the answer cannot be used to tell whether such a document
+        //     exists. Without it a reader of project P who knew the id of a document filed to P and to secure matter M
+        //     downloaded it through P's route.
         var document = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
         var documentName = document.DocumentName;
-        if (!document.IsReadableUnder(id, callerContext))
+        if (!await IsDocumentReadableUnderAsync(document, id, callerContext, dataService, ct))
         {
             logger.LogWarning(
-                "[EXT-DOWNLOAD] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, or also filed to a record the caller cannot read",
+                "[EXT-DOWNLOAD] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, or also filed to a secure record the caller cannot read",
                 callerContext.ContactId, documentId, parentKind, id);
             return DenyDocumentNotUnderParent(parentKind);
         }
@@ -1005,9 +1006,25 @@ public static class ExternalProjectDataEndpoints
             detail: $"You do not have access to this {DocumentParentNoun(parentKind)}");
 
     /// <summary>
+    /// The single-document check (download, versions): the document is under the route parent AND the caller holds Read on
+    /// every SECURE root it is filed to (<see cref="ExternalMultiRootRule"/>, owner decision 2026-10-12, option B). The
+    /// secure flags of its unreadable linked roots are read app-only, only once the document is known to be under the
+    /// route parent; a document not under it is refused without that read.
+    /// </summary>
+    private static async Task<bool> IsDocumentReadableUnderAsync(
+        ExternalDataService.DocumentScopeRead document, Guid routeParentId, CallerPrincipal caller,
+        ExternalDataService dataService, CancellationToken ct)
+    {
+        if (!document.IsUnder(routeParentId))
+            return false;
+        var flags = await dataService.ReadSecureRootFlagsAsync(caller, new[] { document.Roots.Links }, ct);
+        return document.IsReadableUnder(routeParentId, caller, flags);
+    }
+
+    /// <summary>
     /// The ONE response for "this document is not (readably) under this record": not filed to the route's parent, absent, or
-    /// (fix round for task 039) also filed to a root the caller cannot read. A single body for all three, so the refusal
-    /// cannot be used to probe whether a document exists or where else it is filed.
+    /// (fix round for task 039) also filed to a secure root the caller cannot read. A single body for all three, so the
+    /// refusal cannot be used to probe whether a document exists or where else it is filed.
     /// </summary>
     private static IResult DenyDocumentNotUnderParent(ExternalDataService.DocumentParentKind parentKind) =>
         Results.Problem(statusCode: 403, title: "Forbidden",
@@ -1422,13 +1439,13 @@ public static class ExternalProjectDataEndpoints
             return DenyDocumentParent(parentKind);
         }
 
-        // Fix round for task 039 (INTERIM, ExternalMultiRootRule): as the download route, a document also filed to a root
-        // the caller cannot read is the same uniform 403 as one not under this parent.
+        // Fix round for task 039 (ExternalMultiRootRule, owner option B): as the download route, a document also filed to a
+        // SECURE root the caller cannot read is the same uniform 403 as one not under this parent.
         var document = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
-        if (!document.IsReadableUnder(id, callerContext))
+        if (!await IsDocumentReadableUnderAsync(document, id, callerContext, dataService, ct))
         {
             logger.LogWarning(
-                "[EXT-VERSIONS] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, or also filed to a record the caller cannot read",
+                "[EXT-VERSIONS] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, or also filed to a secure record the caller cannot read",
                 callerContext.ContactId, documentId, parentKind, id);
             return DenyDocumentNotUnderParent(parentKind);
         }

@@ -1508,8 +1508,8 @@ public partial class RouteAuthorizationGuardTests
             "Delegates to ListDocumentsForParent: 403 unless RightsForDocumentParentAsync gives Read on the route "
             + "project (RightsForRoot, ExternalProjectDataEndpoints.cs:446) before the document list."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents/{documentId:guid}/content", "DownloadDocumentContent", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Delegates to DownloadDocumentForParent: Read on the project (ExternalProjectDataEndpoints.cs:481) AND the "
-            + "document must belong to it through the project lookup (:623, IsReadableUnder: also Read on EVERY root the document is filed to, one uniform 403) before the app-only stream."),
+            "Delegates to DownloadDocumentForParent: Read on the project (ExternalProjectDataEndpoints.cs:606) AND the "
+            + "document must belong to it through the project lookup (:624, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the app-only stream."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/todos", "GetTodos", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListTodosForRoot, which requires Read from RightsForRoot on the route project "
             + "(ExternalProjectDataEndpoints.cs:411-412)."),
@@ -1532,47 +1532,47 @@ public partial class RouteAuthorizationGuardTests
             "Delegates to UploadDocumentForParent: requires Create on the route project from the caller principal's "
             + "rights before the upload (rights.HasFlag(AccessRights.Create), ExternalProjectDataEndpoints.cs:978)."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/documents/{documentId:guid}/versions", "GetDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Delegates to ListDocumentVersionsForParent: Read on the route project (ExternalProjectDataEndpoints.cs:1141) "
-            + "and the document's project scoping (:1403, IsReadableUnder: also Read on EVERY root the document is filed to, one uniform 403) before the version read."),
+            "Delegates to ListDocumentVersionsForParent: Read on the route project (ExternalProjectDataEndpoints.cs:1410) "
+            + "and the document's project scoping (:1420, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the version read."),
         // Task 031 (FR-24): documents on matters and work assignments — the same four handlers, rights from RightsForRoot.
         new HandlerDecision("GET /api/v1/external/matters/{id:guid}/documents", "GetMatterDocuments", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
             "Delegates to ListDocumentsForParent: Read on the route matter from RightsForRoot "
             + "(ExternalProjectDataEndpoints.cs:446) before the document list."),
         new HandlerDecision("GET /api/v1/external/matters/{id:guid}/documents/{documentId:guid}/content", "DownloadMatterDocumentContent", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Delegates to DownloadDocumentForParent: Read on the matter (ExternalProjectDataEndpoints.cs:481) AND the "
-            + "document must belong to it through the matter lookup (:623, IsReadableUnder: also Read on EVERY root the document is filed to, one uniform 403) before the app-only stream."),
+            "Delegates to DownloadDocumentForParent: Read on the matter (ExternalProjectDataEndpoints.cs:606) AND the "
+            + "document must belong to it through the matter lookup (:624, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the app-only stream."),
         new HandlerDecision("POST /api/v1/external/matters/{id:guid}/documents", "UploadMatterDocument", "AccessRights", Array.Empty<string>(),
             "Delegates to UploadDocumentForParent: Create on the route matter (rights.HasFlag(AccessRights.Create), "
             + "ExternalProjectDataEndpoints.cs:978) before any SPE write."),
         new HandlerDecision("GET /api/v1/external/matters/{id:guid}/documents/{documentId:guid}/versions", "GetMatterDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Delegates to ListDocumentVersionsForParent: Read on the matter (ExternalProjectDataEndpoints.cs:1141) and "
-            + "the document's matter scoping (:1403, IsReadableUnder: also Read on EVERY root the document is filed to, one uniform 403) before the version read."),
+            "Delegates to ListDocumentVersionsForParent: Read on the matter (ExternalProjectDataEndpoints.cs:1410) and "
+            + "the document's matter scoping (:1420, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the version read."),
         new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/documents", "GetWorkAssignmentDocuments", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
             "Delegates to ListDocumentsForParent: Read on the route work assignment from RightsForRoot "
             + "(ExternalProjectDataEndpoints.cs:446) before the document list."),
         new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/documents/{documentId:guid}/content", "DownloadWorkAssignmentDocumentContent", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Delegates to DownloadDocumentForParent: Read on the work assignment (ExternalProjectDataEndpoints.cs:481) "
-            + "AND the document's work-assignment scoping (:623, IsReadableUnder: also Read on EVERY root the document is filed to, one uniform 403) before the app-only stream."),
+            "Delegates to DownloadDocumentForParent: Read on the work assignment (ExternalProjectDataEndpoints.cs:606) "
+            + "AND the document's work-assignment scoping (:624, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the app-only stream."),
         new HandlerDecision("POST /api/v1/external/workassignments/{id:guid}/documents", "UploadWorkAssignmentDocument", "AccessRights", Array.Empty<string>(),
             "Delegates to UploadDocumentForParent: Create on the route work assignment (rights.HasFlag(AccessRights.Create), "
             + "ExternalProjectDataEndpoints.cs:978) before any SPE write."),
         new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/documents/{documentId:guid}/versions", "GetWorkAssignmentDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Delegates to ListDocumentVersionsForParent: Read on the work assignment (ExternalProjectDataEndpoints.cs:1141) "
-            + "and the document's work-assignment scoping (:1403, IsReadableUnder: also Read on EVERY root the document is filed to, one uniform 403) before the version read."),
+            "Delegates to ListDocumentVersionsForParent: Read on the work assignment (ExternalProjectDataEndpoints.cs:1410) "
+            + "and the document's work-assignment scoping (:1420, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the version read."),
         // Task 031 (FR-24): a service request is not a root — its rights are the submitter scope, the Service Requests
         // module's accessible set (sprk_requestedby = the caller's contact), decided by IsRecordAccessible.
         new HandlerDecision("GET /api/v1/external/servicerequests/{id:guid}/documents", "GetServiceRequestDocuments", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
             "Delegates to ListDocumentsForParent: Read only when the request's requester is in the Service Requests "
-            + "module's accessible set (module.IsRecordAccessible, ExternalProjectDataEndpoints.cs:751)."),
+            + "module's accessible set (module.IsRecordAccessible, ExternalProjectDataEndpoints.cs:964)."),
         new HandlerDecision("GET /api/v1/external/servicerequests/{id:guid}/documents/{documentId:guid}/content", "DownloadServiceRequestDocumentContent", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Delegates to DownloadDocumentForParent: the requester check (ExternalProjectDataEndpoints.cs:751) AND the "
-            + "document's sprk_relatedservicerequest scoping (:623, IsReadableUnder: also Read on EVERY root the document is filed to, one uniform 403) before the app-only stream."),
+            "Delegates to DownloadDocumentForParent: the requester check (ExternalProjectDataEndpoints.cs:964) AND the "
+            + "document's sprk_relatedservicerequest scoping (:624, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the app-only stream."),
         new HandlerDecision("POST /api/v1/external/servicerequests/{id:guid}/documents", "UploadServiceRequestDocument", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
             "Delegates to UploadDocumentForParent: Read and Create only for the requester (module.IsRecordAccessible, "
-            + "ExternalProjectDataEndpoints.cs:751) before any SPE write."),
+            + "ExternalProjectDataEndpoints.cs:964) before any SPE write."),
         new HandlerDecision("GET /api/v1/external/servicerequests/{id:guid}/documents/{documentId:guid}/versions", "GetServiceRequestDocumentVersions", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Delegates to ListDocumentVersionsForParent: the requester check (ExternalProjectDataEndpoints.cs:751) and the "
-            + "document's service-request scoping (:1403, IsReadableUnder: also Read on EVERY root the document is filed to, one uniform 403) before the version read."),
+            "Delegates to ListDocumentVersionsForParent: the requester check (ExternalProjectDataEndpoints.cs:964) and the "
+            + "document's service-request scoping (:1420, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the version read."),
         // Task 031 (FR-24, owner decision 2026-10-11 option A): an invoice is not a root and is not securable — its rights
         // are INHERITED, the union of the caller's RightsForRoot on the invoice's sprk_matter and sprk_project
         // (ExternalProjectDataEndpoints.RightsForInvoiceAsync), the rule ExternalMessageEndpoints.RightsThroughParents
@@ -1581,27 +1581,27 @@ public partial class RouteAuthorizationGuardTests
             "Delegates to ListDocumentsForParent: Read on the route invoice (ExternalProjectDataEndpoints.cs:531), the union "
             + "of RightsForRoot on its matter and project (RightsForInvoiceAsync, :886), before the document list."),
         new HandlerDecision("GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/content", "DownloadInvoiceDocumentContent", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Delegates to DownloadDocumentForParent: the inherited Read on the invoice (ExternalProjectDataEndpoints.cs:575) "
-            + "AND the document's sprk_invoice scoping (:623, IsReadableUnder: also Read on EVERY root the document is filed to, one uniform 403) before the app-only stream."),
+            "Delegates to DownloadDocumentForParent: the inherited Read on the invoice (ExternalProjectDataEndpoints.cs:606, RightsForInvoiceAsync :921) "
+            + "AND the document's sprk_invoice scoping (:624, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the app-only stream."),
         new HandlerDecision("POST /api/v1/external/invoices/{id:guid}/documents", "UploadInvoiceDocument", "AccessRights", Array.Empty<string>(),
             "Delegates to UploadDocumentForParent: Create on the route invoice, inherited from its matter or project "
             + "(rights.HasFlag(AccessRights.Create), ExternalProjectDataEndpoints.cs:1184) before any SPE write."),
         new HandlerDecision("GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/versions", "GetInvoiceDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Delegates to ListDocumentVersionsForParent: the inherited Read on the invoice (ExternalProjectDataEndpoints.cs:1350) "
-            + "and the document's invoice scoping (:1403, IsReadableUnder: also Read on EVERY root the document is filed to, one uniform 403) before the version read."),
+            "Delegates to ListDocumentVersionsForParent: the inherited Read on the invoice (ExternalProjectDataEndpoints.cs:1410, RightsForInvoiceAsync :921) "
+            + "and the document's invoice scoping (:1420, IsReadableUnder: also Read on every SECURE linked root, by effective status (ExternalMultiRootRule / ExternalDataService.GetNonSecureRootsAsync; unknown counts as secure), one uniform 403) before the version read."),
         // Task 039 (external-access-platform-r3, FR-03): the project event read is generalized over the root kind, as the
         // to-do read is; the matter and work-assignment routes are two more adapters on the same handler.
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/events", "GetEvents", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListEventsForRoot: 403 unless RightsForRoot gives Read on the route project "
-            + "(ExternalProjectDataEndpoints.cs:1469) before any Dataverse read."),
+            + "(ExternalProjectDataEndpoints.cs:1499) before any Dataverse read."),
         new HandlerDecision("GET /api/v1/external/matters/{id:guid}/events", "GetMatterEvents", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListEventsForRoot: 403 unless RightsForRoot gives Read on the route matter "
-            + "(ExternalProjectDataEndpoints.cs:1469) before any Dataverse read; an event also filed to a root the "
-            + "caller cannot read is withheld (ExternalDataService.ReadableEvents)."),
+            + "(ExternalProjectDataEndpoints.cs:1499) before any Dataverse read; an event also filed to a SECURE linked root the "
+            + "caller cannot read is withheld, by effective status (ExternalDataService.ReadableEventsAsync, ExternalMultiRootRule; unknown counts as secure)."),
         new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/events", "GetWorkAssignmentEvents", "RightsForRoot", Array.Empty<string>(),
             "Delegates to ListEventsForRoot: 403 unless RightsForRoot gives Read on the route work assignment "
-            + "(ExternalProjectDataEndpoints.cs:1469) before any Dataverse read; an event also filed to a root the "
-            + "caller cannot read is withheld (ExternalDataService.ReadableEvents)."),
+            + "(ExternalProjectDataEndpoints.cs:1499) before any Dataverse read; an event also filed to a SECURE linked root the "
+            + "caller cannot read is withheld, by effective status (ExternalDataService.ReadableEventsAsync, ExternalMultiRootRule; unknown counts as secure)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/events", "CreateEvent", "AccessRights", Array.Empty<string>(),
             "Requires Create on the route project (ExternalProjectDataEndpoints.cs:831) before the write."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/contacts", "GetContacts", "HoldsReadOnProject", Array.Empty<string>(),
@@ -1618,20 +1618,21 @@ public partial class RouteAuthorizationGuardTests
         // request; a to-do's or event's regarding project / matter / work assignment; other lookups on the row, such as
         // sprk_invoice or sprk_parentdocument, are not consulted), through RightsForDocumentParentAsync (RightsForRoot for
         // a project / matter / work assignment; the requester scope for a service request). Absent / not-own / unstamped
-        // / no-Read: one 403.
+        // / no-Read: one 403. A delete is a write, so it keeps the every-parent bar; the owner's option-B rule (2026-10-12:
+        // Read on every SECURE linked root, by effective status) governs the READ paths and does not touch this one.
         new HandlerDecision("DELETE /api/v1/external/documents/{id:guid}", "DeleteOwnDocument", "RightsForRoot",
             new[] { "ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Creator stamp + Read on every modelled parent (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1499-1546) before "
+            "Creator stamp + Read on every modelled parent (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1724-1771) before "
             + "DocumentCheckoutService.DeleteAsync deletes the verified-pointer SPE file, then the row "
-            + "(ExternalProjectDataEndpoints.cs:1576, DeleteOwnDocument)."),
+            + "(ExternalProjectDataEndpoints.cs:1820, DeleteOwnDocument)."),
         new HandlerDecision("DELETE /api/v1/external/todos/{id:guid}", "DeleteOwnTodo", "RightsForRoot",
             new[] { "ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Creator stamp + Read on every modelled root (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1499-1546) before "
-            + "the app-only row delete (ExternalProjectDataEndpoints.cs:1679, DeleteAuthorizedRowAsync)."),
+            "Creator stamp + Read on every modelled root (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1724-1771) before "
+            + "the app-only row delete (ExternalProjectDataEndpoints.cs:1966, DeleteAuthorizedRowAsync)."),
         new HandlerDecision("DELETE /api/v1/external/events/{id:guid}", "DeleteOwnEvent", "RightsForRoot",
             new[] { "ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Creator stamp + Read on every modelled root (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1499-1546) before "
-            + "the app-only row delete (ExternalProjectDataEndpoints.cs:1679, DeleteAuthorizedRowAsync)."),
+            "Creator stamp + Read on every modelled root (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1724-1771) before "
+            + "the app-only row delete (ExternalProjectDataEndpoints.cs:1966, DeleteAuthorizedRowAsync)."),
         // Owner decision 2026-10-11 (task 032 follow-up, FR-26), option A: the REQUESTER deletes a service request that has no
         // related row. Requester only through the same requester scope as the service-request document routes
         // (RightsForDocumentParentAsync -> the Service Requests module's IsRecordAccessible: sprk_requestedby = the caller's
@@ -1641,10 +1642,10 @@ public partial class RouteAuthorizationGuardTests
         // has_related_records. Absent / not-requester: the same 403 as the other delete routes.
         new HandlerDecision("DELETE /api/v1/external/servicerequests/{id:guid}", "DeleteOwnServiceRequest", "IsRecordAccessible",
             new[] { "ExternalProjectDataEndpoints.RightsForServiceRequestAsync" },
-            "Requester only (RightsForServiceRequestAsync -> module.IsRecordAccessible, ExternalProjectDataEndpoints.cs:988; the same "
+            "Requester only (RightsForServiceRequestAsync -> module.IsRecordAccessible, ExternalProjectDataEndpoints.cs:989; the same "
             + "row read returns statecode), then open only (a closed request is 409 service_request_closed, DeleteOwnServiceRequest), "
             + "then no related row in any of the 8 relationships (ExternalDataService.HasRelatedRecordsAsync, "
-            + "ExternalProjectDataEndpoints.cs:1985) before the app-only row delete (DeleteAuthorizedRowAsync, :2001)."),
+            + "ExternalProjectDataEndpoints.cs:2002) before the app-only row delete (DeleteAuthorizedRowAsync, :2018)."),
         new HandlerDecision("POST /api/v1/external/api/dataverse/fetch", "ExecuteScopedFetchAsync", "Tier2ScopeFilterInjector", Array.Empty<string>(),
             "The caller's FetchXML is rewritten to their accessible-record set before it runs "
             + "(Tier2ScopeFilterInjector.Inject, ExternalModuleDataEndpoints.cs:264), then ScopeRows trims the "
