@@ -130,53 +130,6 @@ public class Phase2RecordMatchingTests : IClassFixture<IntegrationTestFixture>
 
     #endregion
 
-    #region Document Intelligence Endpoints (Phase 1 - Prerequisite for Phase 2)
-
-    [Fact(Skip = "Endpoint /api/ai/document-intelligence/summarize/stream is not implemented")]
-    [Trait("Category", "Phase2")]
-    [Trait("Category", "RecordMatching")]
-    public async Task DocumentIntelligence_StreamEndpoint_Available()
-    {
-        // Verify Phase 1 prerequisite endpoints are available
-        // This is needed for entity extraction before matching
-        // NOTE: This endpoint does not exist in the current codebase.
-
-        // Act
-        var response = await _httpClient.GetAsync("/api/ai/document-intelligence/summarize/stream?documentId=test");
-
-        // Assert - Route should match
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
-    }
-
-    [Fact(Skip = "Endpoint /api/ai/document-intelligence/summarize/enqueue is not implemented")]
-    [Trait("Category", "Phase2")]
-    [Trait("Category", "RecordMatching")]
-    public async Task DocumentIntelligence_EnqueueEndpoint_Available()
-    {
-        // Verify Phase 1 prerequisite endpoints are available
-        // NOTE: This endpoint does not exist in the current codebase.
-
-        var request = new
-        {
-            DocumentId = Guid.NewGuid().ToString(),
-            ContainerId = Guid.NewGuid().ToString(),
-            FileName = "test.pdf"
-        };
-
-        var content = new StringContent(
-            JsonSerializer.Serialize(request),
-            Encoding.UTF8,
-            "application/json");
-
-        // Act
-        var response = await _httpClient.PostAsync("/api/ai/document-intelligence/summarize/enqueue", content);
-
-        // Assert
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
-    }
-
-    #endregion
-
     #region End-to-End Flow Validation
 
     [Fact]

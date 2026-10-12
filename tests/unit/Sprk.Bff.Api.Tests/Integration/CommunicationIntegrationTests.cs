@@ -167,7 +167,8 @@ public class CommunicationIntegrationTests
         Mock<IGraphClientFactory> graphFactoryMock,
         Mock<IDataverseService> dataverseMock,
         CommunicationOptions? options = null,
-        Mock<IGenericEntityService>? entityServiceMock = null)
+        Mock<IGenericEntityService>? entityServiceMock = null,
+        Mock<ICommunicationDataverseService>? communicationDataverseMock = null)
     {
         var opts = options ?? CreateDefaultOptions();
         var accountService = new CommunicationAccountService(
@@ -192,7 +193,7 @@ public class CommunicationIntegrationTests
         return new CommunicationService(
             CommunicationChannelTestFactory.CreateDispatcher(graphFactoryMock.Object),
             senderValidator,
-            Mock.Of<ICommunicationDataverseService>(),
+            communicationDataverseMock?.Object ?? Mock.Of<ICommunicationDataverseService>(),
             resolvedEntityService,
             Mock.Of<IDocumentDataverseService>(),
             null!, // CommunicationAccountService — not tested here
@@ -895,7 +896,7 @@ public class CommunicationIntegrationTests
             "Shared mailbox sends should not set sprk_sentby (no individual user context)");
     }
 
-    [Fact(Skip = "Requires fully mocked Graph SDK and Communication services")]
+    [Fact]
     public async Task UserMode_Send_CreatesRecord_WithUserFrom()
     {
         // Arrange: user mode send — sends as authenticated user via OBO
@@ -907,15 +908,22 @@ public class CommunicationIntegrationTests
         DataverseEntity? capturedEntity = null;
         var expectedRecordId = Guid.NewGuid();
         var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
+        var entityServiceMock = new Mock<IGenericEntityService>();
+        entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()))
             .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
             .ReturnsAsync(expectedRecordId);
 
-        var sut = BuildService(graphFactoryMock, dataverseMock);
-
         var userEmail = "jane.doe@lawfirm.com";
         var userObjectId = "aad-oid-abc-123";
+        var systemUserId = Guid.NewGuid();
+        var communicationDataverseMock = new Mock<ICommunicationDataverseService>();
+        communicationDataverseMock
+            .Setup(c => c.QuerySystemUserByAzureAdOidAsync(userObjectId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(systemUserId);
+
+        var sut = BuildService(graphFactoryMock, dataverseMock,
+            entityServiceMock: entityServiceMock, communicationDataverseMock: communicationDataverseMock);
         var httpContext = CreateMockHttpContext(email: userEmail, oid: userObjectId);
 
         var request = new SendCommunicationRequest
@@ -953,8 +961,11 @@ public class CommunicationIntegrationTests
         capturedEntity.Should().NotBeNull("Dataverse CreateAsync should have been called");
         capturedEntity!.GetAttributeValue<string>("sprk_from").Should().Be(userEmail,
             "sprk_from must be the user's email for User send mode");
-        capturedEntity.GetAttributeValue<string>("sprk_sentby").Should().Be(userObjectId,
-            "sprk_sentby must be the user's Azure AD object ID for User send mode");
+        // sprk_sentby is the systemuser lookup resolved from the caller's Azure AD oid claim
+        var sentBy = capturedEntity.GetAttributeValue<EntityReference>("sprk_sentby");
+        sentBy.Should().NotBeNull("sprk_sentby must be set for User send mode");
+        sentBy!.LogicalName.Should().Be("systemuser");
+        sentBy.Id.Should().Be(systemUserId, "sprk_sentby must be the systemuser matching the user's Azure AD object ID");
 
         // Verify other standard fields are still set correctly
         capturedEntity.LogicalName.Should().Be("sprk_communication");
