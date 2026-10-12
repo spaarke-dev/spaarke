@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Infrastructure.Caching;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api.Ai;
@@ -184,13 +185,13 @@ public static class HandlerEndpoints
         if (handler == null)
         {
             logger.LogWarning("[HANDLERS] Handler {HandlerId} not found or disabled", handlerId);
-            return Results.NotFound(new { error = $"Handler '{handlerId}' not found or is disabled." });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Handler '{handlerId}' not found or is disabled.");
         }
 
         var handlerInfo = registry.GetAllHandlerInfo().FirstOrDefault(h => h.HandlerId == handlerId);
         if (handlerInfo == null)
         {
-            return Results.NotFound(new { error = $"Handler info for '{handlerId}' not found." });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Handler info for '{handlerId}' not found.");
         }
 
         var dto = new HandlerDto(

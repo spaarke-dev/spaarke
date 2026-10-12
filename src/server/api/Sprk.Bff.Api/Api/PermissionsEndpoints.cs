@@ -3,8 +3,9 @@ using Microsoft.AspNetCore.Mvc;
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Auth;
-using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Models;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -130,14 +131,14 @@ public static class PermissionsEndpoints
         // Validate request
         if (request.DocumentIds == null || request.DocumentIds.Count == 0)
         {
-            return TypedResults.BadRequest(new { error = "DocumentIds cannot be empty" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "DocumentIds cannot be empty");
         }
 
         // Limit batch size to prevent abuse
         const int MaxBatchSize = 100;
         if (request.DocumentIds.Count > MaxBatchSize)
         {
-            return TypedResults.BadRequest(new { error = $"Maximum batch size is {MaxBatchSize} documents" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, $"Maximum batch size is {MaxBatchSize} documents");
         }
 
         // Identity comes from the validated token ONLY (task 006 / FR-05).

@@ -1,5 +1,6 @@
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Caching;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models;
 
 namespace Sprk.Bff.Api.Api;
@@ -92,7 +93,7 @@ public static class NavMapEndpoints
     {
         if (string.IsNullOrWhiteSpace(entityLogicalName))
         {
-            return TypedResults.BadRequest(new { error = "entityLogicalName cannot be empty" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "entityLogicalName cannot be empty");
         }
 
         var cacheKey = $"{CacheKeyPrefix}entityset:{entityLogicalName}";
@@ -146,7 +147,7 @@ public static class NavMapEndpoints
                 });
             }
 
-            return TypedResults.NotFound(new { error = $"Entity '{entityLogicalName}' not found in Dataverse metadata" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Entity '{entityLogicalName}' not found in Dataverse metadata");
         }
         catch (Exception ex)
         {
@@ -181,12 +182,12 @@ public static class NavMapEndpoints
     {
         if (string.IsNullOrWhiteSpace(childEntity))
         {
-            return TypedResults.BadRequest(new { error = "childEntity cannot be empty" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "childEntity cannot be empty");
         }
 
         if (string.IsNullOrWhiteSpace(relationship))
         {
-            return TypedResults.BadRequest(new { error = "relationship cannot be empty" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "relationship cannot be empty");
         }
 
         var cacheKey = $"{CacheKeyPrefix}lookup:{childEntity}:{relationship}";
@@ -255,7 +256,7 @@ public static class NavMapEndpoints
                 });
             }
 
-            return TypedResults.NotFound(new { error = $"Lookup navigation not found for {childEntity}.{relationship}" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Lookup navigation not found for {childEntity}.{relationship}");
         }
         catch (Exception ex)
         {
@@ -287,12 +288,12 @@ public static class NavMapEndpoints
     {
         if (string.IsNullOrWhiteSpace(parentEntity))
         {
-            return TypedResults.BadRequest(new { error = "parentEntity cannot be empty" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "parentEntity cannot be empty");
         }
 
         if (string.IsNullOrWhiteSpace(relationship))
         {
-            return TypedResults.BadRequest(new { error = "relationship cannot be empty" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "relationship cannot be empty");
         }
 
         var cacheKey = $"{CacheKeyPrefix}collection:{parentEntity}:{relationship}";
@@ -352,7 +353,7 @@ public static class NavMapEndpoints
                 });
             }
 
-            return TypedResults.NotFound(new { error = $"Collection navigation not found for {parentEntity}.{relationship}" });
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Collection navigation not found for {parentEntity}.{relationship}");
         }
         catch (Exception ex)
         {
