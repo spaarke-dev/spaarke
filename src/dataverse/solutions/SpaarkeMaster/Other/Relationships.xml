@@ -568,6 +568,8 @@
   <EntityRelationship Name="sprk_contactorganization_OrganizationType_sprk_organizationtype_ref" />
   <EntityRelationship Name="sprk_dataverseenvironment_registrationrequest" />
   <EntityRelationship Name="sprk_decisionrecord_Action_sprk_analysisaction" />
+  <EntityRelationship Name="sprk_decisionrecord_AssignedToExternal_contact" />
+  <EntityRelationship Name="sprk_decisionrecord_AssignedToInternal_contact" />
   <EntityRelationship Name="sprk_decisionrecord_confirmedby" />
   <EntityRelationship Name="sprk_decisionrecord_corerecordtype_recordtype_ref" />
   <EntityRelationship Name="sprk_decisionrecord_matter" />

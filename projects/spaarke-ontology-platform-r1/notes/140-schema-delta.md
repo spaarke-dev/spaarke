@@ -72,6 +72,20 @@ tables that are already lookups; `Services/Access/SecureChildLineage.cs` lists `
 on `sprk_signal` changed (the 9 subject lookups and `sprk_regardingrecordid` (50) / `name` (400) / `number` (100) / `url`
 (500) are as before). The recreate under the same name was accepted.
 
+### 2a. Source catch-up for two pre-existing columns (NOT part of the 14)
+
+The `sprk_decisionrecord` Entity.xml diff also carries `sprk_AssignedToExternal` and `sprk_AssignedToInternal` (Lookup -> `contact`).
+These two columns **already existed live** (the owner added them for D-129, team-ownership) and were absent from the repo
+source; this task did not create them and they are **not** among the 14 columns. They arrived in the source only because the
+Entity.xml was refreshed from the live export. The matching relationships `sprk_decisionrecord_AssignedToInternal_contact` and
+`sprk_decisionrecord_AssignedToExternal_contact` were missing too; they are now added to `Other/Relationships/Contact.xml` and
+`Other/Relationships.xml`, so the source matches live. Cascade values read from live metadata (`RelationshipDefinitions`,
+spaarkedev1, 2026-10-12): Assign NoCascade, Delete RemoveLink, Archive RemoveLink, Reparent NoCascade, Share NoCascade,
+Unshare NoCascade, RollupView NoCascade, Merge Cascade (Merge is not an export attribute); IsValidForAdvancedFind true;
+IsHierarchical false; menu behaviour UseCollectionName / Details / 10000. The relationship XML copies the shape of
+`sprk_event_AssignedToInternal_contact` / `sprk_event_AssignedToExternal_contact` (the repo has no
+`sprk_todo_AssignedToInternal_contact`; `sprk_todo` has only `sprk_todo_AssignedTo_contact`).
+
 Publish: `PublishXml` with `<entity>sprk_decisionrecord</entity><entity>sprk_signal</entity>` only.
 
 Note: the first metadata list read after the recreate (a few seconds later) still omitted the new lookup and its `*name`
@@ -138,6 +152,7 @@ dev drift does not enter this PR. See the PR description for the exact file list
 
 The SpaarkeMaster **version was not bumped** (a release step, `Assemble-SpaarkeMasterSolution.ps1 -Version`; per
 SPAARKE-SOLUTION-RELEASE-PROCESS.md Major = breaking schema change, which this is for any environment that already has the String column).
+The new components keep `IntroducedVersion` `1.0.0.0`; the bump belongs to the release step and must be **Major**, in two steps for managed environments (an intermediate version without the String column, applied with StageAndUpgrade, then the version with the lookup; see the deployment guide section 10.5.B).
 
 ## 5. Environments that have `sprk_signal` today
 
@@ -150,7 +165,7 @@ SPAARKE-SOLUTION-RELEASE-PROCESS.md Major = breaking schema change, which this i
 | Spaarke Inc. (default) | no Dataverse instance |
 
 The published packages `dataverse-solution-SpaarkeMaster-1.2.0.0` and `1.2.1.0` (provisioning store `sprkcpartifactsdev`) carry the old String
-column, so an environment provisioned from them would need the runbook; none exists today. Runbook:
+column, so an environment provisioned from them would need the runbook; none exists today. Runbook (unmanaged and managed variants):
 `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` section 10.5.
 
 ## 6. Redis metadata cache (affects the 146 live gate)
@@ -162,7 +177,10 @@ did not evict anything.
 
 ## 7. Noticed, not changed
 
-- `projects/spaarke-ontology-platform-r1/notes/schema-draft.md` and `docs/data-model` still describe the Signal pair type as text and
-  list no regarding columns on the Decision Record; refresh them with 141 or the 146 gate.
+- `projects/spaarke-ontology-platform-r1/notes/schema-draft.md` (Signal row, line 146) and `spec.md` FR-03 described the Signal pair
+  type as text / read by the writer; both are corrected in the fix round for this PR (D-132). `docs/data-model` has **no page that
+  describes the Signal pair type or the Decision Record regarding columns** (checked: no page documents `sprk_signal` or
+  `sprk_decisionrecord`; `sprk_spendsignal.md` is an unrelated table), so there is nothing to fix there; a new page is a 141/146
+  decision.
 - Both tables are in `Default` as well; no action.
 - The forms on `sprk_decisionrecord` / `sprk_signal` were not touched (no regarding picker was requested).
