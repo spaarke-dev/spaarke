@@ -165,7 +165,7 @@ public sealed class SignalSuppressionService
 
         // The count is the CALLER's: the grain's Signals are trimmed to those the caller's own read returns (a Signal owned by a Secure
         // team under a readable core record is not theirs to count), then Decision-Record facts are read app-only for those rows only.
-        var visible = await ReadVisibleSignalIdsAsync(caller, policyId, code, grain, ct).ConfigureAwait(false);
+        var visible = await ReadVisibleSignalIdsAsync(caller, policyId, code, grain, _timeProvider.GetUtcNow().UtcDateTime.AddDays(-WindowDays - 1), ct).ConfigureAwait(false);
         return (await AssessAsync(policyId, code, grain, policyCounts: null, visible, ct).ConfigureAwait(false)).Status;
     }
 
@@ -364,11 +364,11 @@ public sealed class SignalSuppressionService
 
     // ── Reads ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>The ids of the grain's Signals the CALLER can read: the same filter as the app-only read, asked through the caller's own
+    /// <summary>The ids of the grain's Signals the CALLER can read: the same filter (grain, open or dismissed in the window) as the app-only read, asked through the caller's own
     /// Dataverse client, which trims the result to rows that caller may see. A read that is not a success, or a result as large as the page
     /// cap, throws: a partial answer would be a wrong count.</summary>
     private static async Task<IReadOnlySet<Guid>> ReadVisibleSignalIdsAsync(
-        IDataverseUserClient caller, Guid policyId, string policyCode, SuppressionGrain grain, CancellationToken ct)
+        IDataverseUserClient caller, Guid policyId, string policyCode, SuppressionGrain grain, DateTime resolvedSince, CancellationToken ct)
     {
         const int cap = 4999;
         static string Quote(string s) => "'" + s.Replace("'", "''", StringComparison.Ordinal) + "'";
@@ -383,6 +383,10 @@ public sealed class SignalSuppressionService
             var prefix = SignalWriter.DedupeKeySubjectPrefix(policyCode, grain.SubjectEntity!, grain.SubjectId!.Value.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant());
             filter += $" and sprk_corerecordid eq null and startswith(sprk_dedupekey,{Quote(prefix)})";
         }
+
+        // The same status/window clause as the app-only read: without it the page cap would count every Signal of the policy on the record, of any age.
+        filter += $" and (sprk_signalstatus eq {SignalWriter.SignalStatusOpen} or sprk_signalstatus eq {SignalWriter.SignalStatusAcknowledged}"
+            + $" or (sprk_resolutiontype eq {SignalWriter.ResolutionDismissed} and sprk_resolvedon ge {resolvedSince.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture)}))";
 
         var response = await caller.GetAsync(
             $"sprk_signals?$select=sprk_signalid&$top={cap}&$filter={Uri.EscapeDataString(filter)}", ct).ConfigureAwait(false);

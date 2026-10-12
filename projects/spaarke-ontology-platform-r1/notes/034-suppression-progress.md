@@ -59,7 +59,7 @@ completion after review.
 - K3: in the Do lane a lapsed suppression re-raises only when the due date has changed (031's rule: an unchanged date is `dateUnchanged`).
 - A stamp written while a policy counted stays until it lapses if the policy is later switched to `countstowardsuppression = No` (at most 30 days).
 - A Resolved (Acted) Signal carrying a stamp is not read by the status call (the stamp is only written on open or dismissed rows).
-- Cross-wall stamp (uac-r2 K1) is filed, not fixed: defer row F-65, issue #1661 (owner decision).
+- Cross-wall stamp (uac-r2 K1) is filed, not fixed: defer row F-67, issue #1661 (owner decision).
 
 ## Fix round 1 (independent review + uac-r2 review of eccee0700)
 

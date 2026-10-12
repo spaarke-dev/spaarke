@@ -510,7 +510,9 @@ public class SignalSuppressionTests
         var listPath = Mock.Get(c.Users).Invocations.Select(i => (string)i.Arguments[0]).Single(p => p.StartsWith("sprk_signals?", StringComparison.Ordinal));
         var filter = Uri.UnescapeDataString(listPath);
         filter.Should().Contain($"_sprk_policy_value eq {PolicyId}").And.Contain($"sprk_corerecordid eq '{MatterId}'")
-            .And.Contain($"_sprk_corerecordtype_value eq {MatterType}");
+            .And.Contain($"_sprk_corerecordtype_value eq {MatterType}")
+            .And.Contain("sprk_signalstatus eq 100000000 or sprk_signalstatus eq 100000001")
+            .And.Contain("sprk_resolutiontype eq 100000001 and sprk_resolvedon ge ");
     }
 
     [Fact]
@@ -803,7 +805,7 @@ public class SignalSuppressionTests
                     x.GetAttributeValue<EntityReference>("sprk_corerecordtype")?.Id,
                     Guid.TryParse(x.GetAttributeValue<string>("sprk_corerecordid"), out var core) ? core : null,
                     new EntityReference("systemuser", Guid.NewGuid()),
-                    x.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id);
+                    DecisionRecordId: x.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id);
             }).ToList();
 
         private EntityCollection Run(QueryExpression q)

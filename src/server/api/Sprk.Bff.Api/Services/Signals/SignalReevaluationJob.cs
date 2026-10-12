@@ -20,7 +20,8 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <c>BackgroundService</c> is added. Hundreds of rows a night is not a scale problem; fewer moving parts wins.</para>
 /// <para><b>One component decides both directions.</b> A hit with no open Signal is raised; an open Signal whose subject is no
 /// longer a hit is closed as <c>ConditionCleared</c> (no Decision Record, FR-16); a Resolved Signal is never closed again. The
-/// Superseded and PolicyRetired closures are task 033's; this job re-raises their episodes.</para>
+/// Superseded and PolicyRetired closures are task 033's (<see cref="SignalClosureService"/>, run from this job); the planner
+/// re-raises their episodes.</para>
 /// <para><b>Re-raise rule (D-13, D-32, FR-03, FR-17a).</b> See <see cref="SignalEpisodePlanner"/>.</para>
 /// <para><b>No silent failure (owner 2026-10-04).</b> A heartbeat per attempt (<see cref="OntologyWriterEvents.EvaluatorHeartbeat"/>);
 /// <c>ontology.evaluator.runs</c> by outcome plus per-action counts; any refusal, unreadable policy or unparseable key makes
@@ -46,6 +47,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     private readonly SignalEvaluator _evaluator;
     private readonly SignalWriter _writer;
     private readonly SignalSuppressionService _suppression;
+    private readonly SignalClosureService _closure;
     private readonly IGenericEntityService _entities;
     private readonly IDistributedCache _cache;
     private readonly TimeProvider _timeProvider;
@@ -55,6 +57,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         SignalEvaluator evaluator,
         SignalWriter writer,
         SignalSuppressionService suppression,
+        SignalClosureService closure,
         IGenericEntityService entities,
         IDistributedCache cache,
         TimeProvider timeProvider,
@@ -63,6 +66,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _suppression = suppression ?? throw new ArgumentNullException(nameof(suppression));
+        _closure = closure ?? throw new ArgumentNullException(nameof(closure));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
@@ -106,6 +110,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
             await EvaluatePolicyAsync(policy, counts, cancellationToken).ConfigureAwait(false);
         }
 
+        await ClosePoliciesNotInForceAsync(counts, cancellationToken).ConfigureAwait(false);
+
         var success = counts.IsSuccess;
         var duration = Finish(context, counts, started, success);
         if (success)
@@ -121,7 +127,31 @@ public sealed class SignalReevaluationJob : IScheduledJob
             ResultJson: JsonSerializer.Serialize(counts.ToResult(context.Attempt), ResultJsonOptions));
     }
 
-    private async Task EvaluatePolicyAsync(PolicyRow policy, RunCounts counts, CancellationToken ct)
+    /// <summary>
+    /// Task 033 / task 101 contract: runs the SAME single-policy pass the nightly job runs (supersede the Signals citing an older
+    /// version, plan, raise the new version's episodes), for one policy, now. Task 101's publish calls this after it has stamped
+    /// the old version's <c>sprk_inforceto</c> and moved <c>sprk_currentversion</c>. A policy that is Off or Retired closes its
+    /// Signals through <see cref="SignalClosureService.ClosePolicyRetiredNowAsync"/> instead and is not evaluated. The result
+    /// reports success exactly as the nightly run would (any refusal or invalid policy is a failure); callers MUST check it.
+    /// </summary>
+    public async Task<PolicyReevaluationResult> ReevaluatePolicyAsync(Guid policyId, CancellationToken cancellationToken = default)
+    {
+        if (policyId == Guid.Empty) throw new ArgumentException("policyId must not be Guid.Empty.", nameof(policyId));
+        var row = await _entities.RetrieveAsync("sprk_policy", policyId, PolicyColumns, cancellationToken).ConfigureAwait(false);
+        var enabled = row.GetAttributeValue<bool?>("sprk_enabled") ?? false;
+        var active = row.GetAttributeValue<OptionSetValue>("statecode")?.Value is null or 0;
+        if (!enabled || !active)
+        {
+            throw new InvalidOperationException(
+                $"Policy {policyId} is Off or Retired; it is not evaluated. Close its Signals with SignalClosureService.ClosePolicyRetiredNowAsync.");
+        }
+
+        var counts = new RunCounts();
+        await EvaluatePolicyAsync(ToPolicyRow(row), counts, cancellationToken).ConfigureAwait(false);
+        return new PolicyReevaluationResult(counts.IsSuccess, counts.SupersededClosed, counts.Written + counts.Reraised, counts.FailureSummary());
+    }
+
+    private async Task EvaluatePolicyAsync(PolicyRow policy, RunCounts counts, CancellationToken ct, SubjectScope? scope = null)
     {
         if (policy.IsScoped)
         {
@@ -149,18 +179,38 @@ public sealed class SignalReevaluationJob : IScheduledJob
             var lane = policy.Lane.Value;
 
             var version = await _entities.RetrieveAsync(
-                "sprk_policyversion", versionId, new[] { "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate" }, ct).ConfigureAwait(false);
+                "sprk_policyversion", versionId, new[] { "sprk_ruletype", "sprk_rulebody", "sprk_messagetemplate", "sprk_inforceto" }, ct)
+                .ConfigureAwait(false);
+            if (version.GetAttributeValue<DateTime?>("sprk_inforceto") is { } inForceTo && inForceTo <= _timeProvider.GetUtcNow().UtcDateTime)
+            {
+                // No version is in force: the pointer is behind a publish, or the data is inconsistent. Superseding would reopen
+                // the same version every night, so nothing is evaluated or closed for this policy and the run is failed (visible).
+                counts.PolicyFailures++;
+                _logger.LogError(OntologyWriterEvents.PolicyVersionNotInForce,
+                    "Policy {PolicyCode}: its current version {VersionId} ended in force at {InForceTo:o}; nothing was evaluated, " +
+                    "closed or raised for it. Fix sprk_currentversion or sprk_inforceto.", policy.Code, versionId, inForceTo);
+                return;
+            }
+
             var spec = new SignalEvaluationPolicy(
                 policy.Id, policy.Code, lane, versionId,
                 version.GetAttributeValue<OptionSetValue>("sprk_ruletype")?.Value.ToString(CultureInfo.InvariantCulture),
                 version.GetAttributeValue<string>("sprk_rulebody"),
                 version.GetAttributeValue<string>("sprk_messagetemplate"));
 
+            if (scope is { } only && RuleSubjectEntity(spec.RuleBody) is { } ruleSubject
+                && !string.Equals(ruleSubject, only.Entity, StringComparison.Ordinal))
+            {
+                // Task 032: an event trigger names ONE subject; a policy about another table cannot hold or clear for it.
+                counts.NotApplicable++;
+                return;
+            }
+
             counts.PoliciesEvaluated++;
             if (lane == SignalWriter.LaneDo) counts.DoLanePolicies++;
             else counts.DecideLanePolicies++;
 
-            var evaluation = await _evaluator.EvaluateAsync(spec, subjectId: null, ct).ConfigureAwait(false);
+            var evaluation = await _evaluator.EvaluateAsync(spec, scope?.Id, ct).ConfigureAwait(false);
             if (!evaluation.PolicyValid)
             {
                 // Logged and metered by the validator gate (50301). Nothing is closed on an unknown truth value.
@@ -169,11 +219,24 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }
 
             counts.Hits += evaluation.Hits.Count;
-            var read = await ReadPolicySignalsAsync(policy.Code, counts, ct).ConfigureAwait(false);
+            var read = await ReadPolicySignalsAsync(policy.Code, counts, ct, scope).ConfigureAwait(false);
+            // Task 033 (FR-16, D-13): Signals citing an older version close Superseded first, so the planner below re-raises
+            // the subjects the current version still holds as new episodes in this same pass.
+            var superseded = await _closure.SupersedeInPassAsync(policy.Code, versionId, read, ct).ConfigureAwait(false);
+            counts.AddClosure(superseded.Outcome, retired: false);
             // Task 034 (FR-17): stamp a grain found at the dismissal threshold with no live stamp, so the planner below sees it.
-            var (existing, suppressionFailures) = await _suppression.ReconcileAsync(policy.Id, policy.Code, policy.CountsTowardSuppression, read, ct).ConfigureAwait(false);
+            var (existing, suppressionFailures) = await _suppression.ReconcileAsync(policy.Id, policy.Code, policy.CountsTowardSuppression, superseded.Existing, ct).ConfigureAwait(false);
             counts.PolicyFailures += suppressionFailures;
             var plan = SignalEpisodePlanner.Plan(lane, evaluation.QuietWindowDays, _timeProvider.GetUtcNow(), evaluation.Hits, existing);
+            if (superseded.NotClosed.Count > 0)
+            {
+                // A supersede close that did not land (changed since read / failed) is already counted; the planner must not
+                // retry the same stale row in this pass. The next pass re-reads it.
+                plan.Closes.RemoveAll(c => superseded.NotClosed.Contains(c.Id));
+                plan.Reconciles.RemoveAll(r => superseded.NotClosed.Contains(r.Signal.Id));
+                plan.Reassigns.RemoveAll(r => superseded.NotClosed.Contains(r.Signal.Id));
+            }
+
             counts.Add(plan);
             LogRefusedCores(policy, plan);
             if (plan.Anomalies > 0)
@@ -199,6 +262,23 @@ public sealed class SignalReevaluationJob : IScheduledJob
             _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
                 "Policy {PolicyCode} could not be re-evaluated this run ({ExceptionType}); its Signals were not changed.",
                 policy.Code, ex.GetType().Name);
+        }
+    }
+
+    /// <summary>Task 033 (FR-16, D-32): open Signals of a policy that is Off or Retired close PolicyRetired. A policy that is not
+    /// in force is not evaluated, so this is the only step that touches its Signals.</summary>
+    private async Task ClosePoliciesNotInForceAsync(RunCounts counts, CancellationToken ct)
+    {
+        try
+        {
+            counts.AddClosure(await _closure.ClosePoliciesNotInForceAsync(ct).ConfigureAwait(false), retired: true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            counts.PolicyFailures++;
+            _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                "Policies that are Off or Retired could not be read ({ExceptionType}); their open Signals were not closed this run.",
+                ex.GetType().Name);
         }
     }
 
@@ -330,12 +410,12 @@ public sealed class SignalReevaluationJob : IScheduledJob
         // THE HEARTBEAT (ADR-036 A1 rule 5) and the run-level last-evaluated (D-61): every attempt.
         _logger.Log(success ? LogLevel.Information : LogLevel.Warning, OntologyWriterEvents.EvaluatorHeartbeat,
             "[SIGNAL-EVALUATOR] heartbeat outcome={Outcome} lastEvaluated={LastEvaluated:o} policies={Policies} hits={Hits} " +
-            "written={Written} reraised={Reraised} updated={Updated} closed={Closed} reassigned={Reassigned} refused={Refused} " +
+            "written={Written} reraised={Reraised} updated={Updated} closed={Closed} supersededClosed={SupersededClosed} policyRetiredClosed={PolicyRetiredClosed} reassigned={Reassigned} refused={Refused} " +
             "unchanged={Unchanged} suppressed={Suppressed} quietWindow={QuietWindow} dateUnchanged={DateUnchanged} awaitingEvidence={AwaitingEvidence} noDatedEvidence={NoDatedEvidence} " +
             "invalidPolicies={InvalidPolicies} policyFailures={PolicyFailures} attempt={Attempt} durationMs={DurationMs} " +
             "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             success ? "succeeded" : "failed", now, counts.PoliciesEvaluated, counts.Hits, counts.Written, counts.Reraised,
-            counts.Updated, counts.Closed, counts.Reassigned, counts.Refused, counts.Unchanged, counts.Suppressed,
+            counts.Updated, counts.Closed, counts.SupersededClosed, counts.RetiredClosed, counts.Reassigned, counts.Refused, counts.Unchanged, counts.Suppressed,
             counts.QuietWindow, counts.DateUnchanged, counts.AwaitingEvidence, counts.NoDatedEvidence, counts.InvalidPolicies, counts.PolicyFailures, context.Attempt,
             (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
         return duration;
@@ -352,6 +432,69 @@ public sealed class SignalReevaluationJob : IScheduledJob
         {
             // The run itself succeeded; the health check will report it stale, which is the visible symptom.
             _logger.LogWarning(ex, "Signal re-evaluation succeeded but its last-success time could not be stored.");
+        }
+    }
+
+    // ── Event triggers (task 032) ─────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The one subject an event trigger evaluates (task 032).</summary>
+    internal readonly record struct SubjectScope(string Entity, Guid Id);
+
+    /// <summary>
+    /// Task 032 (D-12, D-48): the event-triggered pass. Evaluates every enabled <b>Decide-lane</b> policy about
+    /// <paramref name="subjectEntity"/> for the ONE subject, through <see cref="EvaluatePolicyAsync"/> - the SAME evaluation,
+    /// episode planner and writer path as the nightly pass (a second path is how the two come to disagree). Do-lane policies
+    /// are not evaluated here (nightly only, cadence from <c>sprk_lane</c>). A tenant- or matter-scoped policy is skipped with the
+    /// nightly Warning (F-62) and does not fail the trigger. A Signal already Resolved is never closed again (FR-16), so a
+    /// revision recorded through a decision leaves its Acted Signal Acted.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The enabled policies could not be read; the caller must retry.</exception>
+    internal async Task<SubjectEvaluationResult> EvaluateSubjectAsync(string subjectEntity, Guid subjectId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subjectEntity);
+        if (subjectId == Guid.Empty) throw new ArgumentException("A subject id is required.", nameof(subjectId));
+
+        var counts = new RunCounts();
+        IReadOnlyList<PolicyRow> policies;
+        try
+        {
+            policies = await ReadEnabledPoliciesAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
+                "A signal trigger could not read the enabled policies for {SubjectEntity} {SubjectId}.", subjectEntity, subjectId);
+            throw new InvalidOperationException("Signal trigger could not read the enabled policies.", ex);
+        }
+
+        var scope = new SubjectScope(subjectEntity, subjectId);
+        foreach (var policy in policies.Where(p => p.Lane == SignalWriter.LaneDecide))
+        {
+            ct.ThrowIfCancellationRequested();
+            await EvaluatePolicyAsync(policy, counts, ct, scope).ConfigureAwait(false);
+        }
+
+        return new SubjectEvaluationResult(
+            counts.PoliciesEvaluated, counts.Hits, counts.Written + counts.Reraised, counts.Updated, counts.Closed,
+            counts.Refused, counts.PolicyFailures, counts.InvalidPolicies, counts.ScopedNotEvaluated);
+    }
+
+    /// <summary>The rule body's <c>subject</c> table, or null when the body cannot be read (the evaluator's gate then logs and
+    /// meters it; this is only a cheap pre-filter, never the validation).</summary>
+    private static string? RuleSubjectEntity(string? ruleBody)
+    {
+        try
+        {
+            using var doc = PredicateCompiler.ParseBounded(ruleBody);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("subject", out var subject)
+                   && subject.ValueKind == JsonValueKind.String
+                ? subject.GetString()
+                : null;
+        }
+        catch (Exception ex) when (ex is JsonException or PredicateCompilationException)
+        {
+            return null;
         }
     }
 
@@ -374,34 +517,48 @@ public sealed class SignalReevaluationJob : IScheduledJob
         query.AddOrder("sprk_policycode", OrderType.Ascending);
         var rows = await _entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
 
-        return rows.Entities.Select(row =>
-        {
-            var code = row.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
-            var headline = row.GetAttributeValue<string>("sprk_shortname") is { Length: > 0 } s ? s
-                : row.GetAttributeValue<string>("sprk_name") is { Length: > 0 } n ? n : code;
-            var version = row.GetAttributeValue<EntityReference>("sprk_currentversion");
-            return new PolicyRow(
-                row.Id,
-                code,
-                row.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value,
-                row.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
-                headline.Length > 200 ? headline[..200] : headline,
-                version is { Id: var id } && id != Guid.Empty ? id : null,
-                !string.IsNullOrWhiteSpace(row.GetAttributeValue<string>("sprk_tenant"))
-                    || row.GetAttributeValue<EntityReference>("sprk_matter") is { Id: var m } && m != Guid.Empty,
-                row.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true);
-        }).ToList();
+        return rows.Entities.Select(ToPolicyRow).ToList();
+    }
+
+    private static readonly string[] PolicyColumns =
+    {
+        "sprk_policycode", "sprk_lane", "sprk_severity", "sprk_shortname", "sprk_name", "sprk_currentversion", "sprk_tenant",
+        "sprk_matter", "sprk_enabled", "statecode", "sprk_countstowardsuppression",
+    };
+
+    private static PolicyRow ToPolicyRow(Entity row)
+    {
+        var code = row.GetAttributeValue<string>("sprk_policycode") ?? string.Empty;
+        var headline = row.GetAttributeValue<string>("sprk_shortname") is { Length: > 0 } s ? s
+            : row.GetAttributeValue<string>("sprk_name") is { Length: > 0 } n ? n : code;
+        var version = row.GetAttributeValue<EntityReference>("sprk_currentversion");
+        return new PolicyRow(
+            row.Id,
+            code,
+            row.GetAttributeValue<OptionSetValue>("sprk_lane")?.Value,
+            row.GetAttributeValue<OptionSetValue>("sprk_severity")?.Value,
+            headline.Length > 200 ? headline[..200] : headline,
+            version is { Id: var id } && id != Guid.Empty ? id : null,
+            !string.IsNullOrWhiteSpace(row.GetAttributeValue<string>("sprk_tenant"))
+                || row.GetAttributeValue<EntityReference>("sprk_matter") is { Id: var m } && m != Guid.Empty,
+            row.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true);
     }
 
     /// <summary>Every Signal of the policy, by the begins-with query D-13 names, keyed exactly by the parsed key. A key that
     /// does not parse is an Error and fails the run (its subject's episode cannot be known).</summary>
-    private async Task<IReadOnlyList<ExistingSignal>> ReadPolicySignalsAsync(string policyCode, RunCounts counts, CancellationToken ct)
+    private async Task<IReadOnlyList<ExistingSignal>> ReadPolicySignalsAsync(
+        string policyCode, RunCounts counts, CancellationToken ct, SubjectScope? scope = null)
     {
-        var prefix = SignalWriter.DedupeKeyPolicyPrefix(policyCode);
+        // A scoped (event-trigger) pass reads only the one subject's episodes: the planner closes every open Signal whose
+        // subject is not a hit, so handing it the policy's other subjects would close them (task 032).
+        var prefix = scope is { } only
+            ? SignalWriter.DedupeKeySubjectPrefix(policyCode, only.Entity, only.Id.ToString("D", CultureInfo.InvariantCulture))
+            : SignalWriter.DedupeKeyPolicyPrefix(policyCode);
         var query = new QueryExpression("sprk_signal")
         {
             ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon",
-                "sprk_suppresseduntil", "sprk_duedate", "sprk_corerecordtype", "sprk_corerecordid", "ownerid", "versionnumber", "sprk_decisionrecord"),
+                "sprk_suppresseduntil", "sprk_duedate", "sprk_corerecordtype", "sprk_corerecordid", "ownerid", "versionnumber",
+                "sprk_policyversion", "sprk_decisionrecord"),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition("sprk_dedupekey", ConditionOperator.BeginsWith, prefix);
@@ -457,6 +614,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
                     CoreTypeRefId: row.GetAttributeValue<EntityReference>("sprk_corerecordtype")?.Id,
                     CoreRecordId: Guid.TryParse(row.GetAttributeValue<string>("sprk_corerecordid")?.Trim(), out var coreId) ? coreId : null,
                     Owner: row.GetAttributeValue<EntityReference>("ownerid"),
+                    PolicyVersionId: row.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id,
                     DecisionRecordId: row.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id));
             }
 
@@ -484,11 +642,23 @@ public sealed class SignalReevaluationJob : IScheduledJob
     {
         public int PoliciesEvaluated, DecideLanePolicies, DoLanePolicies, InvalidPolicies, PolicyFailures, ScopedNotEvaluated;
         public int Hits, Written, Reraised, Updated, Closed, Reassigned, Refused, ChangedSinceRead;
-        public int Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred;
+        public int SupersededClosed, RetiredClosed;
+        public int Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred, NotApplicable;
 
         /// <summary>A scoped policy that is silently skipped, or a Signal left untouched as an anomaly, is not a healthy run.</summary>
         public bool IsSuccess =>
             Refused == 0 && InvalidPolicies == 0 && PolicyFailures == 0 && UnparseableKeys == 0 && Anomalies == 0 && ScopedNotEvaluated == 0;
+
+        /// <summary>Task 033: a system closure by the closure service. A failed close is a refusal (the run fails); a Signal a
+        /// person resolved after the read is the same benign skip as the job's own closes.</summary>
+        public void AddClosure(SignalClosureOutcome outcome, bool retired)
+        {
+            Closed += outcome.Closed;
+            if (retired) RetiredClosed += outcome.Closed; else SupersededClosed += outcome.Closed;
+            ChangedSinceRead += outcome.ChangedSinceRead;
+            Refused += outcome.Failed;
+            PolicyFailures += outcome.PolicyFailures;
+        }
 
         public void Add(EpisodePlan plan)
         {
@@ -530,6 +700,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
             reraised = Reraised,
             updated = Updated,
             closed = Closed,
+            supersededClosed = SupersededClosed,
+            policyRetiredClosed = RetiredClosed,
             reassigned = Reassigned,
             refused = Refused,
             changedSinceRead = ChangedSinceRead,
@@ -547,6 +719,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
     }
 }
 
+/// <summary>What <see cref="SignalReevaluationJob.ReevaluatePolicyAsync"/> did for one policy (task 033 / 101 contract).</summary>
+/// <param name="Success">False when anything was refused, the policy was invalid or unreadable, or no version is in force.
+/// Callers MUST check it: the publish is not "done" while Signals are unreconciled.</param>
+/// <param name="SupersededClosed">Open Signals of older versions closed Superseded.</param>
+/// <param name="Raised">New Signals raised (first episodes and re-raised episodes, including those citing the new version).</param>
+public sealed record PolicyReevaluationResult(bool Success, int SupersededClosed, int Raised, string FailureSummary);
+
 /// <summary>One existing <c>sprk_signal</c> of a policy, as the planner needs it (task 031).</summary>
 internal sealed record ExistingSignal(
     Guid Id,
@@ -562,6 +741,7 @@ internal sealed record ExistingSignal(
     Guid? CoreTypeRefId,
     Guid? CoreRecordId,
     EntityReference? Owner,
+    Guid? PolicyVersionId = null,
     Guid? DecisionRecordId = null)
 {
     public bool IsOpen => Status is SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged;
@@ -782,4 +962,14 @@ internal static class SignalEpisodePlanner
         core.IsNoCore
             ? latest.CoreRecordId is not null
             : latest.CoreRecordId != core.Id || (latest.CoreTypeRefId is { } typeRef && typeRef != core.TypeRefId);
+}
+
+/// <summary>What one event-triggered pass did (task 032). <see cref="PolicyFailures"/> (a read or write that threw) and
+/// <see cref="Refused"/> (a write the writer refused) are the outcomes a retry can change; the rest were already logged by the
+/// code that found them.</summary>
+internal sealed record SubjectEvaluationResult(
+    int PoliciesEvaluated, int Hits, int Created, int Updated, int Closed, int Refused, int PolicyFailures, int InvalidPolicies,
+    int ScopedNotEvaluated)
+{
+    public bool NeedsRetry => PolicyFailures > 0 || Refused > 0;
 }

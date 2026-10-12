@@ -76,9 +76,9 @@ public static class DecisionPlanEndpoints
             return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
         }
 
-        // The caller may read this Signal and its core record, so the count is theirs to see. The count itself is read with the BFF's
-        // own reader (Decision Records are not readable to Console users), trimmed to the Signals the caller's own read returns, and only
-        // the numbers and the date are returned.
+        // The caller may read this Signal and its core record, so the count is theirs to see. The count is trimmed to the Signals the
+        // caller's own read returns; the Decision-Record facts for those rows (not readable to Console users) are read with the BFF's own
+        // reader, and only the numbers and the date are returned.
         SuppressionStatus? status;
         try
         {

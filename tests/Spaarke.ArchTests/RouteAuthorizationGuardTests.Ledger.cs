@@ -1598,13 +1598,14 @@ public partial class RouteAuthorizationGuardTests
             + "trimmed to that set before anything is counted; Decision-Record facts are read app-only for those rows only. Only the counts and the "
             + "suppressed-until date are returned. A fault after Allowed is a 503 problem with the trace id, never the 404 (that is for not-yours). Lives in the already-governed DecisionPlanEndpoints.cs, so the file count is unchanged."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
-            "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — the payload mapped with the "
-            + "caller's client (ChildRecordEndpoints.cs:194), then OwnedChildWrite.CreateAsync checks the table privilege and "
-            + "AppendTo on EVERY bound record before the app-only create (:199)."),
+            "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — WhoAmI first (a caller it "
+            + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.cs:229), the payload mapped with the "
+            + "caller's client (:243), then OwnedChildWrite.CreateAsync checks the table privilege and AppendTo on EVERY bound "
+            + "record before the app-only create (:258) — for a work assignment (task 046, D-113) with the secure-create plan."),
         new HandlerDecision("PATCH /api/v1/child-records/{table}/{id:guid}", "RefileAsync", "IDataverseUserClient", Array.Empty<string>(),
-            "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:241-256 → "
-            + "UpdateAsync, :271): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
-            + "secure record are asked as the caller (OwnedChildWrite.RefileAsync, :320)."),
+            "Task 147 r1: the re-file is the caller's own PATCH through IDataverseUserClient (ChildRecordEndpoints.cs:432-433 → "
+            + "UpdateAsync, :448): an unreadable row is the uniform 404, AppendTo on every new parent and F3 on a move out of a "
+            + "secure record are asked as the caller (OwnedChildWrite.RefileAsync, :988)."),
         new HandlerDecision("POST /api/memory/pins", "CreatePinAsync", "CallerRecordAccessProbe", Array.Empty<string>(),
             "Task 166 (sweep S-43): the matter a pin names is checked AppendTo (memory.pin_matter) AS THE CALLER through "
             + "CallerRecordAccessProbe before the repository write (PinnedMemoryEndpoints.cs:319-325, :725-760); unknown and "
