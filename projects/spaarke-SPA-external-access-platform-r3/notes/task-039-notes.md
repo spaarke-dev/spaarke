@@ -491,3 +491,9 @@ The test double: `ExternalRootEventReadTests.FakeDataverse` gains a filing world
 - `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
 - Unit, filter `SecureRoot|EffectiveRoot|ExternalMultiRoot|ExternalRootEventRead|NoAccess|SecureChild|DocumentIndexParent|ExternalParticipation|Inherit|AccessibleRecordSet|RecordContainer|Intermediate|1630`: **1965 passed, 0 failed** (1935 before the 30 new cases).
 - **Fail-before.** With the new branch disabled (`if (false && read.Parents is null && absentIsUnknown)`, restored afterwards), filter `ExternalMultiRootRuleTests|ExternalMultiRootSecureRootsTests` gives **12 failed, 75 passed**: the 6 route must-fire cases and, at rule level, the absent-intermediate must-fire, the batched one and the default-vs-opt-in one (2 tables each). The must-not-fire and exists-but-belongs-to-nothing tests pass under both behaviours, as do the default-path asserts.
+
+### 12.12a Scoped re-check of the merge + intermediate fix (fable, 2026-10-12)
+
+No F-class finding. Build 0 errors; 1733 passed on the access filter. Known limits, both inherited from master (#1630/#1616), recorded rather than changed:
+- **K2:** IntermediateParentColumns keeps only matter/project roots of an invoice or event, so a work assignment filed through an event whose own root is another work assignment W2 confers no parent. On the read path the row is judged by the platform's inheritance, which does not make W secure through W2; this is master's documented filed issue on IntermediateFilingColumns, identical at write time. Changing it on the read path alone would make the read rule stricter than inheritance. Owner call if wanted.
+- **K3:** an unrepeated pair on a work assignment makes the answer Unverifiable, so Fold (tests IsKnown) withholds the row and the list says Truncated. Fail-closed; a usability limit only.
