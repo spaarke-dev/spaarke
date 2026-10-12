@@ -709,22 +709,27 @@ public class ExternalDataService
     internal const string RequestedByBindKey = "sprk_RequestedBy@odata.bind";
 
     /// <summary>
-    /// The COMPLETE create payload for an intake-submitted <c>sprk_servicerequest</c>: exactly the five columns the
-    /// intake writes. Pure so a test can read it.
+    /// The COMPLETE create payload for an intake-submitted <c>sprk_servicerequest</c>: the six columns the intake writes —
+    /// the five of the request itself and the OWNER (task 035, owner decision 2026-10-11). Pure so a test can read it.
     /// </summary>
     /// <remarks>
     /// <para><b>The requester is the resolved caller's contact</b>, passed in by the route from the principal — never from
     /// the request (FR-25 / constraint "requester from the resolved principal"). The row carries no creator stamp:
     /// <c>sprk_servicerequest</c> has neither <c>sprk_createdbyperson</c> nor <c>sprk_createdbycontact</c>; the requester
     /// is its attribution and the Service Requests module's scope (<c>sprk_requestedby</c>).</para>
-    /// <para><b>No owner is set.</b> The row is created app-only with no <c>ownerid</c>, so the BFF application user owns
-    /// it. A service request is a root, so <see cref="RequireOwner"/>'s parent-derived owner does not apply, and no owner
-    /// decision exists yet for an unfiled intake row whose requester is a contact (task 035 notes, escalation 2).</para>
+    /// <para><b>The owner is passed in, and its absence refuses</b> (<see cref="RequireOwner"/>, the same rule as the
+    /// document, event and to-do creates). Owner decision 2026-10-11: an intake request is owned by the DEFAULT owner team
+    /// of the business unit that owns the requester's contact, so users whose role has business-unit-level access can see
+    /// it. The route resolves that team through <c>IRecordOwnershipResolver</c> (target = the requester's
+    /// <c>contact</c>) BEFORE this builder runs and refuses the submission when it cannot — I-6 "refuse when unresolved"
+    /// (<c>DATAVERSE-WRITE-PATH-ARCHITECTURE.md</c>). This create is app-only, so without <c>ownerid</c> Dataverse would make
+    /// the BFF application user the owner, in the root business unit.</para>
     /// </remarks>
     /// <exception cref="ArgumentException">An empty requester, a blank name, or blank intake data.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A request type outside <see cref="ServiceRequestTypes"/>.</exception>
+    /// <exception cref="InvalidOperationException">An empty owning team (<see cref="RequireOwner"/>).</exception>
     internal static Dictionary<string, object?> BuildServiceRequestCreatePayload(
-        Guid requesterContactId, int requestType, string name, string intakeDataJson)
+        Guid requesterContactId, Guid owningTeamId, int requestType, string name, string intakeDataJson)
     {
         if (requesterContactId == Guid.Empty)
             throw new ArgumentException("A service request needs the requester's contact id.", nameof(requesterContactId));
@@ -734,6 +739,7 @@ public class ExternalDataService
             throw new ArgumentException("sprk_name is required.", nameof(name));
         if (string.IsNullOrWhiteSpace(intakeDataJson))
             throw new ArgumentException("sprk_intakedata is required.", nameof(intakeDataJson));
+        RequireOwner(owningTeamId, "sprk_servicerequest");
 
         return new Dictionary<string, object?>
         {
@@ -742,6 +748,7 @@ public class ExternalDataService
             ["sprk_intakedata"] = intakeDataJson,
             ["sprk_direction"] = ServiceRequestDirectionInbound,
             [RequestedByBindKey] = $"/contacts({requesterContactId:D})",
+            [OwnerBindKey] = $"/teams({owningTeamId})",
         };
     }
 
@@ -754,9 +761,10 @@ public class ExternalDataService
     // `virtual` per ADR-038 §4 (substitution seam): the intake route tests record the payload and assert that a refused
     // submission never reached Dataverse.
     public virtual async Task<Guid> CreateServiceRequestAsync(
-        Guid requesterContactId, int requestType, string name, string intakeDataJson, CancellationToken ct = default)
+        Guid requesterContactId, Guid owningTeamId, int requestType, string name, string intakeDataJson,
+        CancellationToken ct = default)
     {
-        var body = BuildServiceRequestCreatePayload(requesterContactId, requestType, name, intakeDataJson);
+        var body = BuildServiceRequestCreatePayload(requesterContactId, owningTeamId, requestType, name, intakeDataJson);
 
         var token = await GetAppOnlyTokenAsync(ct);
 

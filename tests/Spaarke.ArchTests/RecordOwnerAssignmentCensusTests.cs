@@ -241,6 +241,10 @@ public class RecordOwnerAssignmentCensusTests
             "Owned by the parent matter/project's team; a refusal skips the snapshot."),
         new UnscannedWriter("ExternalProjectDataEndpoints.cs", "Web API POST to a computed URL (document, event, to-do)",
             "The external routes resolve the root's owner before the create; ExternalDataService refuses an empty team."),
+        new UnscannedWriter("ExternalIntakeEndpoints.cs", "Web API POST of a sprk_servicerequest (the Legal Front Door intake)",
+            "A service request is a root with no parent, so the owner is the default team of the business unit that owns the "
+            + "requester's contact (target = the contact; owner decision 2026-10-11, I-6), resolved before the create; "
+            + "unresolved refuses with 500 EXT_INTAKE_OWNER_UNRESOLVED and ExternalDataService refuses an empty team."),
         new UnscannedWriter("EventEndpoints.cs", "seam caller (CreateEventAsync, CreateEventLogAsync)",
             "Owner resolved from the regarding record. The re-file route (PUT /{id}) was deleted by task 159 (owner round 10 item 1)."),
         new UnscannedWriter("AnalysisEndpoints.cs", "seam caller (CreateAnalysisAsync)",
@@ -308,6 +312,7 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerSeam("ExternalDataService.cs", "BuildDocumentCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "BuildEventCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "BuildTodoCreatePayload", RefusesAndBindsTheOwner),
+        new OwnerSeam("ExternalDataService.cs", "BuildServiceRequestCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "RequireOwner", Refusal),
     };
 
@@ -385,6 +390,8 @@ public class RecordOwnerAssignmentCensusTests
             "The team the external route resolved from the project — RequireOwner refuses an empty one."),
         new OwnerWriteEntry("ExternalDataService.cs", "BuildTodoCreatePayload", 1, OwnerWriteKind.Seam,
             "The team the external route resolved from the root — RequireOwner refuses an empty one."),
+        new OwnerWriteEntry("ExternalDataService.cs", "BuildServiceRequestCreatePayload", 1, OwnerWriteKind.Seam,
+            "The team the intake route resolved from the requester's contact (its business unit's default team) — RequireOwner refuses an empty one."),
 
         new OwnerWriteEntry("DocumentCheckoutService.cs", "CreateFileVersionAsync", 1, OwnerWriteKind.Routed,
             "A file version is content of its document (ContentOf)."),

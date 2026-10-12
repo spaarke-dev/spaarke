@@ -15,8 +15,12 @@
 //      module (scope sprk_requestedby = caller contact) could never show it to them.
 //   3. Validation: requestType ∈ the four sprk_requesttype options; title required (→ sprk_name, ≤ 850); answers a JSON
 //      object of ≤ 100 KB (UTF-8) → sprk_intakedata. Anything else is a 400 with an errorCode.
-//   4. The create: app-only (no OBO) through ExternalDataService.CreateServiceRequestAsync — sprk_requestedby,
-//      sprk_requesttype, sprk_intakedata, sprk_name, sprk_direction = Inbound. A Dataverse transport failure, timeout,
+//   4. The owner (owner decision 2026-10-11, I-6): the default owner team of the business unit that owns the requester's
+//      contact, resolved through IRecordOwnershipResolver (target = the contact) BEFORE the create. A resolver read fault is a
+//      503 (EXT_INTAKE_DATAVERSE_UNAVAILABLE); a team that cannot be resolved REFUSES (500 EXT_INTAKE_OWNER_UNRESOLVED, no
+//      exception text, nothing created) - never an application-owned row.
+//   5. The create: app-only (no OBO) through ExternalDataService.CreateServiceRequestAsync — sprk_requestedby,
+//      sprk_requesttype, sprk_intakedata, sprk_name, sprk_direction = Inbound, ownerid = the team from step 4. A Dataverse transport failure, timeout,
 //      429 or 5xx is a 503 (EXT_INTAKE_DATAVERSE_UNAVAILABLE, nothing submitted); any other failure is a 500. The route caps the
 //      whole body at 256 KB (413 above it). The request DTO is closed, so a requester,
 //      owner or creator named in the body never binds.
@@ -27,6 +31,7 @@ using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -52,6 +57,12 @@ public static class ExternalIntakeEndpoints
 
     /// <summary>Error code for a caller whose derived contact could not be READ (a Dataverse fault): retry, not a final deny.</summary>
     public const string ErrorContactUnreadable = "EXT_INTAKE_CONTACT_UNREADABLE";
+
+    /// <summary>
+    /// Error code for a submission whose owning team could not be resolved (the requester's business unit has no single
+    /// default owner team, or the contact has no owning business unit): refused, nothing created (I-6).
+    /// </summary>
+    public const string ErrorOwnerUnresolved = "EXT_INTAKE_OWNER_UNRESOLVED";
 
     /// <summary>Error code for a create that Dataverse could not take right now (transport, timeout, 429, 5xx).</summary>
     public const string ErrorDataverseUnavailable = "EXT_INTAKE_DATAVERSE_UNAVAILABLE";
@@ -87,8 +98,10 @@ public static class ExternalIntakeEndpoints
                 "most 100 KB). The requester is the caller's contact. 403 unless the caller is entitled to the " +
                 "legal-front-door module (CIAM partners only when the partner service-request switch is on) and has a " +
                 "contact; 400 for an unknown type, a missing title or invalid answers; 413 for a request body over 256 KB " +
-                "(answers between 100 KB and that cap are a 400); 503 when the caller's contact cannot be read or Dataverse " +
-                "cannot take the create right now (nothing was submitted; try again).")
+                "(answers between 100 KB and that cap are a 400); 503 when the caller's contact cannot be read, the owning team " +
+                "cannot be read, or Dataverse cannot take the create right now (nothing was submitted; try again); 500 " +
+                "EXT_INTAKE_OWNER_UNRESOLVED when the requester's business unit has no resolvable default owner team " +
+                "(nothing was submitted).")
             // A write path: the same per-user throttle as the message post (task 034).
             .RequireRateLimiting("dataverse-query")
             .Accepts<SubmitServiceRequestRequest>("application/json")
@@ -109,6 +122,7 @@ public static class ExternalIntakeEndpoints
         HttpContext httpContext,
         ModuleEntitlementResolver entitlements,
         ExternalDataService dataService,
+        IRecordOwnershipResolver ownership,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -167,11 +181,49 @@ public static class ExternalIntakeEndpoints
         var title = request.Title!.Trim();
         var answersJson = request.Answers!.Value.GetRawText();
 
-        // 4. The create — app-only, the five intake columns.
+        // 4. The owner (owner decision 2026-10-11, I-6): the default owner team of the business unit that owns the requester's
+        //    contact, through the ONE resolver. Resolved before anything is written; unresolved REFUSES.
+        RecordOwnerResolution owner;
+        try
+        {
+            owner = await ownership
+                .ResolveOwnerAsync(
+                    new RecordOwnershipContext { TargetEntityLogicalName = "contact", TargetRecordId = principal.ContactId }, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // A Dataverse read fault is not an answer (the resolver propagates it): retryable, nothing was created, and no
+            // exception text leaves.
+            logger.LogWarning(ex,
+                "[EXT-INTAKE] Dataverse unavailable resolving the owning team for contact {ContactId}.", principal.ContactId);
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable, title: "Service Unavailable",
+                detail: "Nothing was submitted; try again.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorDataverseUnavailable });
+        }
+
+        if (!owner.IsOwned)
+        {
+            logger.LogError(
+                "[EXT-INTAKE] REFUSED submit for contact {ContactId}: no owning team could be resolved ({RefusalCode}: {Reason}).",
+                principal.ContactId, owner.RefusalCode, owner.Reason);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError, title: "Internal Server Error",
+                detail: "Your request could not be filed because its owning team could not be determined. " +
+                        "Nothing was submitted; contact your administrator.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorOwnerUnresolved });
+        }
+
+        // 5. The create — app-only, the five intake columns and the owner.
         try
         {
             var id = await dataService
-                .CreateServiceRequestAsync(principal.ContactId, requestType, title, answersJson, ct)
+                .CreateServiceRequestAsync(principal.ContactId, owner.OwningTeamId!.Value, requestType, title, answersJson, ct)
                 .ConfigureAwait(false);
 
             logger.LogInformation(

@@ -2,9 +2,12 @@
 
 Date: 2026-10-11. Rigor FULL (tags bff-api, auth, testing). An implementer agent built this in an isolated worktree. The review passes and the task bookkeeping (TASK-INDEX, POML status) belong to the main session.
 
-## Two findings for the owner (read first)
+## Two findings for the owner (read first) - BOTH DECIDED
 
-1. **POML escalation trigger fired: a licensed workforce systemuser CAN have no contact on a real path.**
+Decided by the owner on 2026-10-11. Finding 1 is option (a); finding 2 is implemented (see "Owner decision 2026-10-11: the intake row's owner" below). The original analysis follows unchanged.
+
+1. **DECIDED 2026-10-11: option (a).** Keep the 403 `sdap.external.intake.no_contact` for a systemuser with no contact. Every systemuser should have a matched contact, so contact linking (`IdentityLink:Reconciliation:WritesEnabled`) must be ON in every environment. No code change; this is a deployment requirement for the environments.
+   **POML escalation trigger fired: a licensed workforce systemuser CAN have no contact on a real path.**
    - `WorkforcePrincipalResolver.cs:190` starts the derived contact as null. `:218` tries the inline link (task 141). `TryLinkSystemUserAsync` returns null without linking whenever `IdentityLink:Reconciliation:WritesEnabled` is not `true` (`:438`; `ContactIdentityBinder.cs:147-154`, default off). It also returns null when a link attempt was refused within the last 10 minutes, or when the link throws.
    - `CallerPrincipalResolver.cs:672` then sets `ContactId = Guid.Empty`.
    - Such a caller **cannot submit**: the route answers 403 `sdap.external.intake.no_contact`, with the detail "Your account is not linked to a contact record, so a request cannot be filed in your name. Ask your administrator to link your account to a contact." This is the behaviour the constraints already require. The task does not decide whether licensed staff with no contact should be able to submit; that is the owner's call. The Service Requests module would not show such a row to them either (`ExternalAccessModule.cs` descriptor: `ContactId != Guid.Empty`).
@@ -12,7 +15,8 @@ Date: 2026-10-11. Rigor FULL (tags bff-api, auth, testing). An implementer agent
      - (a) keep the 403 and turn on the link writes in each environment;
      - (b) create or link a contact at submit time;
      - (c) give a systemuser requester another attribution column.
-2. **The intake row has no owner rule (new; not in the POML).**
+2. **DECIDED 2026-10-11 and implemented** (below): the owner is the default owner team of the business unit that owns the requester's contact; unresolved refuses.
+   **The intake row has no owner rule (new; not in the POML).** *(The next lines are the analysis as it stood before the decision.)*
    - The row is created app-only with no `ownerid`, so the BFF application user (root business unit) owns it.
    - Task 146's rule for this surface is that every create carries the owner derived from its parent (`ExternalDataService.RequireOwner`). A service request is a root and is filed under nothing, so that rule has no parent to derive from.
    - The resolver's "unfiled" fallback is the acting user's business-unit team (`RecordOwnershipResolver.cs`, `UnfiledOwnership.ActingUserTeam`). It **refuses** when there is no systemuser, which is every workforce contact and every CIAM partner. Applying it would therefore break FR-05/FR-06 for exactly the populations the owner named.
@@ -44,7 +48,7 @@ Date: 2026-10-11. Rigor FULL (tags bff-api, auth, testing). An implementer agent
      - `title` is required and may be at most 850 characters after trimming (`sprk_name` is NVARCHAR(850)). Otherwise `EXT_INTAKE_INVALID_TITLE`.
      - `answers` must be a JSON object of at most 100 KB (102,400 UTF-8 bytes of its raw text). Otherwise `EXT_INTAKE_INVALID_ANSWERS`.
   4. **Create.** `ExternalDataService.CreateServiceRequestAsync` makes one app-only Web API POST (no OBO). It sends `Prefer: return=representation` with `$select=sprk_servicerequestid`, so the field-secured answers are not echoed back. A Dataverse failure is 500 `EXT_INTAKE_INTERNAL_ERROR`.
-- **Payload.** `BuildServiceRequestCreatePayload` writes exactly five columns:
+- **Payload.** `BuildServiceRequestCreatePayload` writes exactly six columns (the five below, plus `ownerid@odata.bind = /teams({owning team})` since 2026-10-11):
   - `sprk_name`;
   - `sprk_requesttype`;
   - `sprk_intakedata` (the answers' raw JSON);
@@ -172,7 +176,7 @@ The entitlement rule, the bound switch and the `service-requests` descriptor are
 
 ## Review fix round
 
-Two adversarial reviews of `47fe1f7f6` returned four fix-now items (F1 fail-closed contact read, F2 Dataverse failure mapping, F3 body cap, F2 ledger hardening). I worked from the brief's statement of them, not the full review text. Ownership is unchanged: `BuildServiceRequestCreatePayload` still writes no `ownerid`, pending the owner decision. Fix 3 supersedes K1 above (there is now a per-route cap).
+Two adversarial reviews of `47fe1f7f6` returned four fix-now items (F1 fail-closed contact read, F2 Dataverse failure mapping, F3 body cap, F2 ledger hardening). I worked from the brief's statement of them, not the full review text. At the time, ownership was unchanged (`BuildServiceRequestCreatePayload` wrote no `ownerid`, pending the owner decision); the decision is implemented in the last section. Fix 3 supersedes K1 above (there is now a per-route cap).
 
 ### 1. Contact-read fault reported as "not linked" (F1, fail-closed)
 
@@ -220,3 +224,62 @@ Two adversarial reviews of `47fe1f7f6` returned four fix-now items (F1 fail-clos
 - `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~ExternalAccess|FullyQualifiedName~CallerPrincipal|FullyQualifiedName~WorkforcePrincipal"`: 2085 passed, 0 failed.
 - `dotnet test tests/Spaarke.ArchTests/`: 941 passed, 0 failed.
 - The full unit suite was not run (busy machine, per the brief).
+
+## Owner decision 2026-10-11: the intake row's owner (finding 2 implemented)
+
+**Decision.** An intake request (`sprk_servicerequest`) is owned by the **default owner team of the business unit that owns the requester contact** (`principal.ContactId`), so users whose role has business-unit-level access can see it. If that team cannot be resolved the submission is **refused** (I-6, `DATAVERSE-WRITE-PATH-ARCHITECTURE.md`: "refuse when unresolved"). The row is never application-owned.
+
+### Resolution path (reused, no new service)
+
+1. `ExternalIntakeEndpoints.SubmitServiceRequestAsync` (`Api/ExternalAccess/ExternalIntakeEndpoints.cs:~186-222`) calls `IRecordOwnershipResolver.ResolveOwnerAsync(new RecordOwnershipContext { TargetEntityLogicalName = "contact", TargetRecordId = principal.ContactId })` after validation and before any create. This is the same `ResolveOwnerAsync` call shape as `ExternalProjectDataEndpoints.ResolveChildOwnerAsync` (`:659`) uses for task 146's document, event and to-do creates, with the contact as the target record.
+2. `RecordOwnershipResolver.ResolveOwnerOnlyAsync` (`Services/Dataverse/RecordOwnershipResolver.cs:862`) takes the target path: `CollectParents` (`:1445-1452`) adds a target **without** the `IsOwnershipParent` filter, so a `contact` target needs **no resolver change**. (The filter applies only to `RecordOwnershipContext.Parents`. `contact` is deliberately not an ownership parent - a relationship, not a filing - so `OwnershipParentEntities` is untouched and no contact lookup on any other child starts to count as a parent.)
+3. `ResolveFromParentsAsync` (`:1477`) -> `ReadParentAsync` (`:1703`) reads the contact's `owningbusinessunit`; `ResolveDefaultOwnerTeamAsync` (`:1914`) returns that BU's default owner team (`isdefault = true AND teamtype = 0`, TOP 2, ambiguity refuses). The Secure Record BU rule (task 144) applies unchanged. A contact row that is missing or has no owning BU is `ParentUnresolved`; a BU with no single default owner team is `NoDefaultOwnerTeam`.
+4. The team id goes into `ExternalDataService.CreateServiceRequestAsync(requesterContactId, owningTeamId, ...)` -> `BuildServiceRequestCreatePayload` (`Infrastructure/ExternalAccess/ExternalDataService.cs:~726`), which calls `RequireOwner(owningTeamId, "sprk_servicerequest")` (`:510`) and binds `[OwnerBindKey] = $"/teams({owningTeamId})"` - the same bind key (`ownerid@odata.bind`, `:504`) and shape as `BuildDocumentCreatePayload`, `BuildEventCreatePayload` and `BuildTodoCreatePayload`.
+
+### Behaviour
+
+| Case | Result | Nothing created? |
+|---|---|---|
+| Team resolved | 201; payload has six columns incl. `ownerid@odata.bind = /teams({team})` | - |
+| Resolver answers a refusal (contact missing / no BU / no single default team / secure-BU team ambiguous) | **500** `errorCode` `EXT_INTAKE_OWNER_UNRESOLVED`; fixed detail, no exception text and no refusal reason/code in the body (both are logged at Error) | yes |
+| Resolver throws (a Dataverse read fault; the resolver propagates faults rather than refuse) | **503** `EXT_INTAKE_DATAVERSE_UNAVAILABLE`, "Nothing was submitted; try again." No exception text | yes |
+| Empty team reaches the builder (programming error) | `RequireOwner` throws "refusing to create it app-owned"; the route's catch makes it a 500 `EXT_INTAKE_INTERNAL_ERROR` | yes (nothing sent) |
+
+The resolver is asked only after entitlement, contact and validation pass, so a rejected submission costs no Dataverse read. The acting user's business unit never decides (`CallerSystemUserId` is not set): most callers have no systemuser.
+
+### BFF app user and the Assign privilege
+
+No role or solution change. Creating a row with a team as `ownerid` is what the other external creates (document, event, to-do) already do with the same app user, so the app user's existing privileges cover it, and `unified-access-control-r2` task 146 notes forbid widening user roles with `prvAssign`. **Not verified live here** for `sprk_servicerequest` specifically: a live dev submit should confirm the BFF application user holds Assign (or System Administrator) on that table. If it does not, the create returns 403/privilege error, which the route reports as a 500 `EXT_INTAKE_INTERNAL_ERROR` (nothing created).
+
+### Census
+
+`tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs` could not see the builder. Added:
+- `OwnerSeam("ExternalDataService.cs", "BuildServiceRequestCreatePayload", RefusesAndBindsTheOwner)` (must `RequireOwner(owningTeamId ...)` AND bind `[OwnerBindKey] = $"/teams({owningTeamId})"`);
+- `OwnerWriteEntry(..., "BuildServiceRequestCreatePayload", 1, OwnerWriteKind.Seam, ...)` in the owner-write census;
+- `UnscannedWriter("ExternalIntakeEndpoints.cs", ...)`: the file must call the resolver (`EveryUnscannedWriterRoutesThroughTheResolver`). The `ExternalProjectDataEndpoints.cs` waiver line is left as it was: it describes only that file's document, event and to-do creates and is still accurate; the intake route has its own entry rather than a widened shared one.
+- The route-guard ledger's citation lines for this route were moved (`:139`, `:152`, `:163`, `:210`, `:226`) and its reason now names the owner.
+
+### Tests
+
+- `ExternalIntakeEndpointsTests` (`IntakeFixture` gains the `RecordOwnershipResolverDouble`): the six-column payload (was "exactly five"), `TheRow_IsOwnedByTheDefaultTeamOfTheBusinessUnitThatOwnsTheRequestersContact` (also asserts the resolver was asked about target `contact` = the caller's contact and not the acting user), `AnUnresolvedOwningTeam_IsRefused500_...` (no create call, no reason leak), `AResolverReadFault_Gets503_...` (no create call, no exception text), `AnInvalidSubmission_NeverAsksTheResolver`; the body-named-owner test now asserts the owner is the resolver's team.
+- `ExternalDataServiceServiceRequestCreateTests`: payload carries the owner bind, empty team refuses (builder and create; nothing sent), the owner bind is on the wire.
+- `RecordOwnershipResolverTests` (real resolver over the in-memory directory): a `contact` target resolves to its BU's default owner team; a missing contact and a contact with no BU refuse `ParentUnresolved`. These two **pass before and after** the change: they characterise the existing resolver, which needed no change.
+
+### Fail-before evidence
+
+The signature change means the old tests do not compile against the new code, so the proof is by mutation on the finished code (build, then restore):
+- Mutation A: remove the `[OwnerBindKey]` line and the `RequireOwner` call from `BuildServiceRequestCreatePayload`. Mutation B: neuter the route's `if (!owner.IsOwned)` refusal. Run `ExternalIntakeEndpoints|ExternalDataServiceServiceRequestCreate|RecordOwnershipResolverTests`: **8 failed / 126 passed** (134). Failing: `Payload_CarriesTheOwnerBind...`, `Payload_WithNoOwningTeam_Refuses...`, `Create_WithNoOwningTeam_Refuses_AndNothingIsSent`, `Create_SendsTheOwnerBindOnTheWire`, `AnUnresolvedOwningTeam_IsRefused500...` (got `EXT_INTAKE_INTERNAL_ERROR`), `RequesterOwnerAndCreatorNamedInTheBody_...`, `TheRow_IsOwnedByTheDefaultTeam...`, `WorkforceSystemUser_...SixIntakeColumns`. The resolver-fault 503 test is a control that passes either way.
+- Same mutation A: `RecordOwnerAssignmentCensusTests` **2 failed / 28 passed** (30): `every owner write in the server is censused` (CENSUSED BUT ABSENT) and `every seam refuses a create with no resolved owner team` (no owner refusal).
+- Restored: all green (below).
+
+### Verification (this round)
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors.
+- `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~ExternalIntake|FullyQualifiedName~ExternalDataService|FullyQualifiedName~RecordOwnership|FullyQualifiedName~ExternalAccess"`: 2490 passed, 0 failed.
+- `dotnet test tests/Spaarke.ArchTests/`: 941 passed, 0 failed.
+- The full unit suite was not run (busy machine, per the brief).
+
+### Other consumers noted (not changed)
+
+- `GetServiceRequestRequesterAsync` and the service-request document routes (task 031) read the row app-only keyed on `sprk_requestedby`, so they are unaffected by the owner. Documents on a service request use the owning business unit's container, which for a new row is now the contact's BU rather than the root.
+- Rows created before this change remain application-owned in the root BU. No backfill is in scope.

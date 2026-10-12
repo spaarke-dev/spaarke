@@ -19,13 +19,14 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 public class ExternalDataServiceServiceRequestCreateTests
 {
     private static readonly Guid Contact = Guid.Parse("dddddddd-0000-0000-0000-000000000001");
+    private static readonly Guid Team = Guid.Parse("eeeeeeee-0000-0000-0000-000000000001");
 
     [Fact]
     public async Task TransportFailure_IsDataverseUnavailable()
     {
         var service = NewService(_ => throw new HttpRequestException("connection reset"));
 
-        var act = () => service.CreateServiceRequestAsync(Contact, 100000000, "t", "{}");
+        var act = () => service.CreateServiceRequestAsync(Contact, Team, 100000000, "t", "{}");
 
         (await act.Should().ThrowAsync<ExternalDataService.DataverseUnavailableException>())
             .And.InnerException.Should().BeOfType<HttpRequestException>();
@@ -36,7 +37,7 @@ public class ExternalDataServiceServiceRequestCreateTests
     {
         var service = NewService(_ => throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout"));
 
-        var act = () => service.CreateServiceRequestAsync(Contact, 100000000, "t", "{}", CancellationToken.None);
+        var act = () => service.CreateServiceRequestAsync(Contact, Team, 100000000, "t", "{}", CancellationToken.None);
 
         await act.Should().ThrowAsync<ExternalDataService.DataverseUnavailableException>();
     }
@@ -48,7 +49,7 @@ public class ExternalDataServiceServiceRequestCreateTests
         cts.Cancel();
         var service = NewService(_ => throw new TaskCanceledException("caller walked away"));
 
-        var act = () => service.CreateServiceRequestAsync(Contact, 100000000, "t", "{}", cts.Token);
+        var act = () => service.CreateServiceRequestAsync(Contact, Team, 100000000, "t", "{}", cts.Token);
 
         (await act.Should().ThrowAsync<OperationCanceledException>())
             .And.Should().NotBeOfType<ExternalDataService.DataverseUnavailableException>();
@@ -64,7 +65,7 @@ public class ExternalDataServiceServiceRequestCreateTests
     {
         var service = NewService(_ => new HttpResponseMessage(status) { Content = new StringContent("{}") });
 
-        var act = () => service.CreateServiceRequestAsync(Contact, 100000000, "t", "{}");
+        var act = () => service.CreateServiceRequestAsync(Contact, Team, 100000000, "t", "{}");
 
         await act.Should().ThrowAsync<ExternalDataService.DataverseUnavailableException>();
     }
@@ -77,7 +78,7 @@ public class ExternalDataServiceServiceRequestCreateTests
     {
         var service = NewService(_ => new HttpResponseMessage(status) { Content = new StringContent("{}") });
 
-        var act = () => service.CreateServiceRequestAsync(Contact, 100000000, "t", "{}");
+        var act = () => service.CreateServiceRequestAsync(Contact, Team, 100000000, "t", "{}");
 
         var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
         thrown.And.Should().NotBeOfType<ExternalDataService.DataverseUnavailableException>();
@@ -92,7 +93,69 @@ public class ExternalDataServiceServiceRequestCreateTests
             Content = new StringContent($"{{\"sprk_servicerequestid\":\"{id:D}\"}}", Encoding.UTF8, "application/json"),
         });
 
-        (await service.CreateServiceRequestAsync(Contact, 100000000, "t", "{}")).Should().Be(id);
+        (await service.CreateServiceRequestAsync(Contact, Team, 100000000, "t", "{}")).Should().Be(id);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Owner decision 2026-10-11 (I-6): the payload binds the owning team, and an empty team refuses
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Payload_CarriesTheOwnerBind_AlongsideTheFiveIntakeColumns()
+    {
+        var payload = ExternalDataService.BuildServiceRequestCreatePayload(Contact, Team, 100000001, "Idea", "{\"a\":1}");
+
+        payload.Should().BeEquivalentTo(new Dictionary<string, object?>
+        {
+            ["sprk_name"] = "Idea",
+            ["sprk_requesttype"] = 100000001,
+            ["sprk_intakedata"] = "{\"a\":1}",
+            ["sprk_direction"] = ExternalDataService.ServiceRequestDirectionInbound,
+            [ExternalDataService.RequestedByBindKey] = $"/contacts({Contact:D})",
+            [ExternalDataService.OwnerBindKey] = $"/teams({Team})",
+        });
+    }
+
+    [Fact]
+    public void Payload_WithNoOwningTeam_Refuses_NeverBuildsAnApplicationOwnedRow()
+    {
+        var act = () => ExternalDataService.BuildServiceRequestCreatePayload(Contact, Guid.Empty, 100000000, "t", "{}");
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*refusing to create it app-owned*");
+    }
+
+    [Fact]
+    public async Task Create_WithNoOwningTeam_Refuses_AndNothingIsSent()
+    {
+        var sent = 0;
+        var service = NewService(_ =>
+        {
+            sent++;
+            return new HttpResponseMessage(HttpStatusCode.Created);
+        });
+
+        var act = () => service.CreateServiceRequestAsync(Contact, Guid.Empty, 100000000, "t", "{}");
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        sent.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Create_SendsTheOwnerBindOnTheWire()
+    {
+        string? body = null;
+        var service = NewService(request =>
+        {
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = new StringContent($"{{\"sprk_servicerequestid\":\"{Guid.NewGuid():D}\"}}", Encoding.UTF8, "application/json"),
+            };
+        });
+
+        await service.CreateServiceRequestAsync(Contact, Team, 100000000, "t", "{}");
+
+        body.Should().Contain($"\"ownerid@odata.bind\":\"/teams({Team})\"");
     }
 
     private static ExternalDataService NewService(Func<HttpRequestMessage, HttpResponseMessage> respond)

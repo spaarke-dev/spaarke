@@ -21,8 +21,10 @@ using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
@@ -56,11 +58,11 @@ public sealed class ExternalIntakeEndpointsTests : IClassFixture<ExternalIntakeE
     }
 
     // =====================================================================
-    // AC 1: a workforce caller's valid NDA Assessment → 201 and the five columns
+    // AC 1: a workforce caller's valid NDA Assessment → 201 and the six columns (the five + the owner)
     // =====================================================================
 
     [Fact]
-    public async Task WorkforceSystemUser_SubmitsNdaAssessment_Gets201_AndTheRowCarriesTheFiveIntakeColumns()
+    public async Task WorkforceSystemUser_SubmitsNdaAssessment_Gets201_AndTheRowCarriesTheSixIntakeColumns()
     {
         var caller = IntakeTestData.SystemUser();
         _fixture.Principal = caller;
@@ -81,7 +83,8 @@ public sealed class ExternalIntakeEndpointsTests : IClassFixture<ExternalIntakeE
             ["sprk_intakedata"] = row.Payload["sprk_intakedata"],
             ["sprk_direction"] = Inbound,
             ["sprk_RequestedBy@odata.bind"] = $"/contacts({caller.ContactId:D})",
-        }, "the intake writes exactly these five columns — no owner, no creator stamp, nothing from the client");
+            [ExternalDataService.OwnerBindKey] = $"/teams({RecordOwnershipResolverDouble.DefaultTeamId})",
+        }, "the intake writes exactly these six columns - the five of the request and the owning team; no creator stamp, nothing from the client");
         JsonDocument.Parse((string)row.Payload["sprk_intakedata"]!).RootElement.GetProperty("counterparty").GetString()
             .Should().Be("Contoso Ltd", "sprk_intakedata stores the submitted answers as JSON");
     }
@@ -293,8 +296,9 @@ public sealed class ExternalIntakeEndpointsTests : IClassFixture<ExternalIntakeE
         var row = _fixture.Data.Created.Single();
         IntakeTestData.RequesterOf(row).Should().Be(caller.ContactId);
         row.Payload["sprk_direction"].Should().Be(Inbound);
-        row.Payload.Keys.Should().NotContain(k => k.StartsWith("ownerid", StringComparison.OrdinalIgnoreCase)
-            || k.StartsWith("sprk_createdby", StringComparison.OrdinalIgnoreCase));
+        row.Payload.Keys.Should().NotContain(k => k.StartsWith("sprk_createdby", StringComparison.OrdinalIgnoreCase));
+        row.Payload[ExternalDataService.OwnerBindKey].Should().Be($"/teams({RecordOwnershipResolverDouble.DefaultTeamId})",
+            "the owner is the resolver's team for the caller's contact, never one named in the body");
         row.Payload.Values.OfType<string>().Should().NotContain(v => v.Contains(someoneElse.ToString()));
     }
 
@@ -373,6 +377,80 @@ public sealed class ExternalIntakeEndpointsTests : IClassFixture<ExternalIntakeE
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, raw);
         (await IntakeTestData.ProblemCode(response, "errorCode")).Should().Be("EXT_INTAKE_INTERNAL_ERROR");
         raw.Should().NotContain("SECRET");
+    }
+
+    // =====================================================================
+    // Owner decision 2026-10-11 (I-6): owned by the default team of the BU that owns the requester's contact
+    // =====================================================================
+
+    [Fact]
+    public async Task TheRow_IsOwnedByTheDefaultTeamOfTheBusinessUnitThatOwnsTheRequestersContact()
+    {
+        var caller = IntakeTestData.WorkforceContact();
+        var contactBuTeam = Guid.Parse("0f0f0f0f-0035-4035-8035-000000000035");
+        _fixture.Principal = caller;
+        _fixture.Ownership.TeamId = contactBuTeam;
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route, IntakeTestData.Body(NdaAssessment, "NDA", "{}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        _fixture.Data.Created.Single().Payload[ExternalDataService.OwnerBindKey].Should().Be($"/teams({contactBuTeam})");
+
+        var asked = _fixture.Ownership.Requests.Should().ContainSingle().Subject;
+        asked.TargetEntityLogicalName.Should().Be("contact", "the record whose business unit decides is the requester's contact");
+        asked.TargetRecordId.Should().Be(caller.ContactId);
+        asked.CallerSystemUserId.Should().BeNull("the acting user's business unit never decides - most callers have no systemuser");
+    }
+
+    [Fact]
+    public async Task AnUnresolvedOwningTeam_IsRefused500_WithTheErrorCode_NothingIsCreated_AndNoReasonLeaks()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+        _fixture.Ownership.TeamId = null;
+        _fixture.Ownership.RefusalCode = RecordOwnerRefusal.NoDefaultOwnerTeam;
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route, IntakeTestData.Body(NdaAssessment, "NDA", "{}"));
+
+        var raw = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, raw);
+        using var problem = JsonDocument.Parse(raw);
+        problem.RootElement.GetProperty("errorCode").GetString().Should().Be(ExternalIntakeEndpoints.ErrorOwnerUnresolved);
+        raw.Should().NotContain(RecordOwnerRefusal.NoDefaultOwnerTeam, "the resolver's code and reason are logged, not returned");
+        _fixture.Data.Created.Should().BeEmpty("an unresolved owner refuses the create - never an application-owned row");
+        _fixture.Data.CreateCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AResolverReadFault_Gets503_WithTheDataverseUnavailableCode_NothingIsCreated_AndNoExceptionText()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+        _fixture.Ownership.Fault = new InvalidOperationException("SECRET-HOST-org1234.crm.dynamics.com answered 429");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route, IntakeTestData.Body(NdaAssessment, "NDA", "{}"));
+
+        var raw = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, raw);
+        using var problem = JsonDocument.Parse(raw);
+        problem.RootElement.GetProperty("errorCode").GetString().Should().Be(ExternalIntakeEndpoints.ErrorDataverseUnavailable);
+        problem.RootElement.GetProperty("detail").GetString().Should().Be("Nothing was submitted; try again.");
+        raw.Should().NotContain("SECRET");
+        _fixture.Data.Created.Should().BeEmpty();
+        _fixture.Data.CreateCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AnInvalidSubmission_NeverAsksTheResolver()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route, IntakeTestData.Json("""{"requestType":100000004,"title":"t","answers":{}}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _fixture.Ownership.Requests.Should().BeEmpty("no Dataverse read happens before the submission is valid");
     }
 
     // =====================================================================
@@ -499,6 +577,9 @@ public abstract class IntakeFixture : ExternalCollaborationTestFixture
 
     public InMemoryServiceRequestData Data { get; } = new();
 
+    /// <summary>The owner resolver, at the module boundary: the team every contact's business unit answers with.</summary>
+    public RecordOwnershipResolverDouble Ownership { get; } = new();
+
     public EntitlementOverride Entitlements { get; } = new();
 
     public CallerPrincipal? Principal
@@ -510,6 +591,10 @@ public abstract class IntakeFixture : ExternalCollaborationTestFixture
     public void Reset()
     {
         Data.Reset();
+        Ownership.TeamId = RecordOwnershipResolverDouble.DefaultTeamId;
+        Ownership.RefusalCode = RecordOwnerRefusal.SecureParentNotIsolated;
+        Ownership.Fault = null;
+        Ownership.Requests.Clear();
         Entitlements.Override = null;
         Principal = null;
     }
@@ -530,6 +615,8 @@ public abstract class IntakeFixture : ExternalCollaborationTestFixture
 
             services.AddScoped<ICallerPrincipalResolver>(_ => _principals);
             services.AddScoped(_ => (ExternalDataService)Data);
+            services.RemoveAll<IRecordOwnershipResolver>();
+            services.AddSingleton<IRecordOwnershipResolver>(Ownership);
             services.RemoveAll<ModuleEntitlementResolver>();
             services.AddScoped<ModuleEntitlementResolver>(sp => new FixtureEntitlementResolver(
                 sp.GetRequiredService<IOptions<ExternalAccessOptions>>(), Entitlements));
@@ -590,21 +677,29 @@ public sealed class InMemoryServiceRequestData : ExternalDataService
     /// <summary>When set, the next creates throw it (a Dataverse fault) instead of recording a row.</summary>
     public Exception? ThrowOnCreate { get; set; }
 
+    /// <summary>How many times the create was reached - zero proves a refused submission never got near Dataverse.</summary>
+    public int CreateCalls => Volatile.Read(ref _createCalls);
+
+    private int _createCalls;
+
     public void Reset()
     {
         _created.Clear();
         ThrowOnCreate = null;
+        Interlocked.Exchange(ref _createCalls, 0);
     }
 
     public override Task<Guid> CreateServiceRequestAsync(
-        Guid requesterContactId, int requestType, string name, string intakeDataJson, CancellationToken ct = default)
+        Guid requesterContactId, Guid owningTeamId, int requestType, string name, string intakeDataJson,
+        CancellationToken ct = default)
     {
+        Interlocked.Increment(ref _createCalls);
         if (ThrowOnCreate is { } fault)
         {
             throw fault;
         }
 
-        var payload = BuildServiceRequestCreatePayload(requesterContactId, requestType, name, intakeDataJson);
+        var payload = BuildServiceRequestCreatePayload(requesterContactId, owningTeamId, requestType, name, intakeDataJson);
         var id = Guid.NewGuid();
         _created.Enqueue(new CreatedServiceRequest(id, payload));
         return Task.FromResult(id);
