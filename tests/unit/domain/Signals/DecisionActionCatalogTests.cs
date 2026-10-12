@@ -482,33 +482,140 @@ public class DecisionActionCatalogTests
         (await access.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
     }
 
-    [Fact]
-    public async Task ANoCoreDoItem_IsAllowedToItsOwnerOnly_D35()
-    {
-        var row = SignalRow(withType: false, withId: false, lane: DecisionLane.Do);
-        var owner = Access(Users(signal: row, who: Ok(new { UserId = OwnerId })));
-        var other = Access(Users(signal: row, who: Ok(new { UserId = Guid.NewGuid() })));
+    // ---- No-core Do item (D-35 as amended by D-129): visible to whoever can read the SUBJECT row as themselves ------------------
 
-        (await owner.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.Allowed);
-        (await other.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+    private static readonly Guid SubjectId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    private static DataverseUserResponse NoCoreDoRow(string? subjectType = "sprk_todo", Guid? subjectId = null) =>
+        SignalRow(withType: false, withId: false, lane: DecisionLane.Do, subjectType: subjectType, subjectId: subjectId ?? SubjectId);
+
+    [Fact]
+    public async Task ANoCoreDoItem_IsAllowed_WhenTheCallerCanReadItsSubject_EvenWhenNobodyIsItsOwner_D129()
+    {
+        // The team-owned item: the caller is a team member, not the Signal's "owner" (the old equality test matched nobody).
+        var users = Users(signal: NoCoreDoRow(), core: Ok(new { createdon = "x" }), who: Ok(new { UserId = Guid.NewGuid() }));
+
+        var decision = await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SignalAccessOutcome.Allowed);
+        decision.Lane.Should().Be(DecisionLane.Do);
+        decision.CoreId.Should().BeNull("a no-core Signal has no core pair");
+        Mock.Get(users).Verify(u => u.GetAsync($"sprk_todos({SubjectId})?$select=createdon", It.IsAny<CancellationToken>()), Times.Once,
+            "the subject row is read AS THE CALLER");
+        Mock.Get(users).Verify(u => u.GetAsync("WhoAmI", It.IsAny<CancellationToken>()), Times.Never, "owner equality is gone");
+    }
+
+    [Theory]
+    [InlineData(404, DataverseUserClientErrorCodes.NotFound)]
+    [InlineData(403, DataverseUserClientErrorCodes.AccessDenied)]
+    public async Task ANoCoreDoItem_IsTheUniformNotFound_WhenTheCallerCannotReadItsSubject_EvenForTheSignalsOwner_D123(int status, string code)
+    {
+        // Includes a subject in a secure record family: a non-member's read of it is denied, so the Signal and its Decision Record
+        // are part of that family's access and invisible to everyone else.
+        var users = Users(signal: NoCoreDoRow(), core: Fail(status, code), who: Ok(new { UserId = OwnerId }));
+
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome
+            .Should().Be(SignalAccessOutcome.NotFound, "the caller IS the Signal's ownerid, which no longer decides anything");
     }
 
     [Fact]
-    public async Task ANoCoreDecideItem_IsDeniedEvenToItsOwner_D35()
+    public async Task ANoCoreDoItem_WhoseSignalTheCallerCannotRead_IsTheUniformNotFound_AndTheSubjectIsNeverAsked()
     {
-        var row = SignalRow(withType: false, withId: false, lane: DecisionLane.Decide);
-        var access = Access(Users(signal: row, who: Ok(new { UserId = OwnerId })));
+        var users = Users(signal: Fail(404, DataverseUserClientErrorCodes.NotFound), core: Ok(new { createdon = "x" }));
 
-        (await access.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+        Mock.Get(users).Verify(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_todos(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), Times.Never,
+            "BOTH reads must succeed: the Signal is read first");
+    }
+
+    [Fact]
+    public async Task ANoCoreDecideItem_IsDenied_EvenWhenTheCallerCanReadItsSubject_D35()
+    {
+        var row = SignalRow(withType: false, withId: false, lane: DecisionLane.Decide, subjectType: "sprk_todo", subjectId: SubjectId);
+        var users = Users(signal: row, core: Ok(new { createdon = "x" }), who: Ok(new { UserId = OwnerId }));
+
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+        Mock.Get(users).Verify(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_todos(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(null)]               // no subject type
+    [InlineData("sprk_signal")]      // a table that is not an ownership parent: a forged pointer, never read (the K2 rule)
+    [InlineData("systemuser")]
+    public async Task ANoCoreDoItem_WithNoUsableSubject_IsTheUniformNotFound_AndNothingIsRead(string? subjectType)
+    {
+        var users = Users(signal: NoCoreDoRow(subjectType), core: Ok(new { createdon = "x" }), who: Ok(new { UserId = OwnerId }));
+
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+        Mock.Get(users).Verify(u => u.GetAsync(It.Is<string>(p => !p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ANoCoreDoItem_WithNoSubjectId_IsTheUniformNotFound()
+    {
+        var row = SignalRow(withType: false, withId: false, lane: DecisionLane.Do, subjectType: "sprk_todo", subjectId: null);
+
+        (await Access(Users(signal: row, core: Ok(new { createdon = "x" })), coreSet: "sprk_todos")
+            .AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+    }
+
+    [Theory]
+    [InlineData(429, DataverseUserClientErrorCodes.RateLimited)]
+    [InlineData(500, DataverseUserClientErrorCodes.ServiceError)]
+    public async Task ANoCoreDoItem_WhoseSubjectReadFaults_IsUnavailable_NotTheUniformNotFound_F4b(int status, string code)
+    {
+        var users = Users(signal: NoCoreDoRow(), core: Fail(status, code));
+
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.Unavailable);
+    }
+
+    [Fact]
+    public async Task ANoCoreDoItem_WhoseSubjectEntitySetLookupFaults_IsUnavailable_F4b()
+    {
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new TimeoutException("no answer"));
+        var access = new SignalCoreRecordAccess(Users(signal: NoCoreDoRow(), core: Ok(new { createdon = "x" })), entities.Object, NullLogger<SignalCoreRecordAccess>.Instance);
+
+        (await access.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.Unavailable);
+    }
+
+    [Fact]
+    public async Task ANoCoreDoItem_WhoseSubjectReadThrows_IsUnavailable_NotTheUniformNotFound_F4b()
+    {
+        var users = Users(signal: NoCoreDoRow(), core: Ok(new { createdon = "x" }));
+        Mock.Get(users).Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_todos(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("no answer"));
+
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.Unavailable);
     }
 
     [Fact]
     public async Task ANoCoreDoItem_WhoseCallerCannotBeResolved_IsCallerUnresolved()
     {
-        var row = SignalRow(withType: false, withId: false, lane: DecisionLane.Do);
-        var access = Access(Users(signal: row, who: Fail(0, DataverseUserClientErrorCodes.UserContextRequired)));
+        var users = Users(signal: NoCoreDoRow(), core: Fail(0, DataverseUserClientErrorCodes.UserContextRequired));
 
-        (await access.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.CallerUnresolved);
+        (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.CallerUnresolved);
+    }
+
+    [Fact]
+    public async Task ANoCoreDoItem_WhoseSubjectIsDeniedToAValidTokenWithNoDataverseUser_IsCallerUnresolved_AndAKnownCallerIsNot()
+    {
+        var unknown = Users(signal: NoCoreDoRow(), core: Fail(403, DataverseUserClientErrorCodes.AccessDenied), who: Fail(403, DataverseUserClientErrorCodes.AccessDenied));
+        var known = Users(signal: NoCoreDoRow(), core: Fail(403, DataverseUserClientErrorCodes.AccessDenied), who: Ok(new { UserId = OwnerId }));
+
+        (await Access(unknown, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.CallerUnresolved);
+        (await Access(known, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+    }
+
+    [Fact]
+    public async Task TheRoute_Returns503_WhenANoCoreSubjectReadFaults_Not404()
+    {
+        var access = Access(Users(signal: NoCoreDoRow(), core: Fail(500, DataverseUserClientErrorCodes.ServiceError)), coreSet: "sprk_todos");
+        var plans = new DecisionPlanService(EntitiesReturningPlan(SeededPlan), NullLogger<DecisionPlanService>.Instance);
+
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(503);
     }
 
     // =================================================================================================
@@ -633,14 +740,24 @@ public class DecisionActionCatalogTests
         DataverseUserResponse.Fail(status, code, "test");
 
     private static DataverseUserResponse SignalRow(
-        bool withType = true, bool withId = true, DecisionLane lane = DecisionLane.Decide)
+        bool withType = true, bool withId = true, DecisionLane lane = DecisionLane.Decide,
+        string? subjectType = null, Guid? subjectId = null)
     {
         var row = new Dictionary<string, object?>
         {
             ["sprk_lane"] = (int)lane,
             ["_sprk_policyversion_value"] = VersionId,
-            ["_ownerid_value"] = OwnerId,
         };
+        if (subjectType is not null)
+        {
+            row["sprk_regardingrecordtype"] = subjectType;
+        }
+
+        if (subjectId is { } subject)
+        {
+            row["sprk_regardingrecordid"] = subject.ToString();
+        }
+
         if (withType)
         {
             row["_sprk_corerecordtype_value"] = CoreTypeId;

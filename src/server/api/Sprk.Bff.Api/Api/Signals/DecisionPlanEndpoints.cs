@@ -25,6 +25,7 @@ public static class DecisionPlanEndpoints
     internal const string CallerUnresolvedReasonCode = "sdap.access.deny.caller_unresolved";
     internal const string PlanRefusedReasonCode = "ontology.decisionplan.refused";
     internal const string SuppressionUnavailableReasonCode = "ontology.suppression.unavailable";
+    internal const string AccessUnavailableReasonCode = "ontology.signal.access_unavailable";
 
     public static void MapDecisionPlanEndpoints(this WebApplication app)
     {
@@ -72,6 +73,11 @@ public static class DecisionPlanEndpoints
             return CallerUnresolved(httpContext);
         }
 
+        if (decision.Outcome == SignalAccessOutcome.Unavailable)
+        {
+            return AccessUnavailable(httpContext);
+        }
+
         if (decision.Outcome != SignalAccessOutcome.Allowed)
         {
             return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
@@ -106,6 +112,18 @@ public static class DecisionPlanEndpoints
             : Results.Ok(SuppressionResponse.From(signalId, status));
     }
 
+    /// <summary>A no-core Signal's subject could not be read because of a fault: 503, never the uniform 404 (that is for "not yours").</summary>
+    private static IResult AccessUnavailable(HttpContext httpContext) =>
+        Results.Problem(
+            title: "Service Unavailable",
+            detail: "This item could not be checked right now. Try again.",
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = AccessUnavailableReasonCode,
+                ["correlationId"] = httpContext.TraceIdentifier,
+            });
+
     private static IResult CallerUnresolved(HttpContext httpContext) =>
         Results.Problem(
             title: "Forbidden",
@@ -130,6 +148,11 @@ public static class DecisionPlanEndpoints
         if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
         {
             return CallerUnresolved(httpContext);
+        }
+
+        if (decision.Outcome == SignalAccessOutcome.Unavailable)
+        {
+            return AccessUnavailable(httpContext);
         }
 
         if (decision.Outcome != SignalAccessOutcome.Allowed || decision.Lane is not { } lane || decision.PolicyVersionId is not { } versionId)

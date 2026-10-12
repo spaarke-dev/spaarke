@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -33,7 +34,7 @@ namespace Sprk.Bff.Api.Services.Signals;
 // =====================================================================================================================
 
 /// <summary>One review the decision wizard posts (task 043). Anything else in the body is ignored: in particular the core
-/// record and the item owner are derived on the server from the Signals (uac-r2 condition on #1600), never read from here.</summary>
+/// record and the item subject are derived on the server from the Signals (uac-r2 condition on #1600), never read from here.</summary>
 public sealed record DecisionReview
 {
     /// <summary>The client's id for this review. A repeat returns the first outcome and writes nothing.</summary>
@@ -253,8 +254,8 @@ public static class DecisionCommitEvents
 /// lists each write that landed. No compensating delete is attempted.</para>
 /// <para><b>Server-derived record facts (uac-r2 binding condition on #1600).</b> The core record comes from the Signal's own
 /// server-written <c>sprk_corerecordtype</c> / <c>sprk_corerecordid</c> (the pair <see cref="SignalWriter"/> derived through
-/// <see cref="CoreAncestorResolver"/>), its table from the record-type catalog; the no-core item owner is read app-only from the
-/// item row. Nothing in the request body can name either.</para>
+/// <see cref="CoreAncestorResolver"/>), its table from the record-type catalog; the no-core item's Decision Record owner is uac-r2's resolver answer for the
+/// Signal's subject record. Nothing in the request body can name either.</para>
 /// <para><b>Idempotent per review id.</b> A short-lived entry in the tenant cache (ADR-009: <see cref="ITenantCache"/>, keyed by
 /// tenant and caller) marks a review in progress and then holds its first outcome; once written, the record itself holds the
 /// review id in <c>sprk_steps</c> and is found by it when the cache has nothing. A cache that cannot be read fails closed.</para>
@@ -294,6 +295,7 @@ public sealed class DecisionCommitService
     private readonly OntologyWriterDataverseClient _writer;
     private readonly IGenericEntityService _entities;
     private readonly CallerRecordAccessProbe _probe;
+    private readonly IIdentityNormalizationService _identity;
     private readonly ITenantCache _ledger;
     private readonly DecisionCommitFollowUps _followUps;
     private readonly IScheduledJobLease _lease;
@@ -309,6 +311,7 @@ public sealed class DecisionCommitService
         OntologyWriterDataverseClient writer,
         IGenericEntityService entities,
         CallerRecordAccessProbe probe,
+        IIdentityNormalizationService identity,
         ITenantCache ledger,
         DecisionCommitFollowUps followUps,
         IScheduledJobLease lease,
@@ -323,6 +326,7 @@ public sealed class DecisionCommitService
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
+        _identity = identity ?? throw new ArgumentNullException(nameof(identity));
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _followUps = followUps ?? throw new ArgumentNullException(nameof(followUps));
         _lease = lease ?? throw new ArgumentNullException(nameof(lease));
@@ -376,6 +380,8 @@ public sealed class DecisionCommitService
     {
         Acted,
         Dismissed,
+
+        /// <summary>Only non-resolving actions were taken (D-119 the budget inquiry, D-128 the Do-lane reminder): the Signal is Acknowledged and linked, not closed.</summary>
         InquirySent,
     }
 
@@ -389,7 +395,6 @@ public sealed class DecisionCommitService
         IReadOnlyList<ExecStep> Steps,
         DecisionCoreRecord? Core,
         DecisionRecordCore? RecordCore,
-        Guid? ItemOwnerUserId,
         string? GateTier,
         string? DismissalText,
         Resolution Resolution);
@@ -425,6 +430,8 @@ public sealed class DecisionCommitService
             var decision = await _access.AuthorizeAsync(id, ct).ConfigureAwait(false);
             if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
                 return new DecisionCommitResult { Status = DecisionCommitStatus.CallerUnresolved, ReviewId = review.ReviewId };
+            if (decision.Outcome == SignalAccessOutcome.Unavailable)
+                return Unavailable(review.ReviewId);
             if (decision.Outcome != SignalAccessOutcome.Allowed)
                 return new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = review.ReviewId };
             lanes[id] = decision;
@@ -865,19 +872,17 @@ public sealed class DecisionCommitService
             };
         }
 
-        // ---- (1c'') F4-a (uac-r2): the no-core item's owner, read app-only only AFTER FR-51, so whether the subject row exists
-        // never shows through a different answer to a caller who may not act on it.
-        if (!p.Primary.HasCore)
-        {
-            var (owner, ownerFault) = await ItemOwnerAsync(p.Primary, ct).ConfigureAwait(false);
-            if (ownerFault)
-                return Unavailable(reviewId, DecisionCommitReasons.ItemOwnerUnsupported, "The item's owner could not be read; nothing was done.");
-            if (owner is null)
-                return Refused(reviewId, DecisionCommitReasons.ItemOwnerUnsupported, "The item's owner could not be resolved to a person, so its decision cannot be recorded.");
-            p = p with { ItemOwnerUserId = owner };
-        }
+        // ---- (1c'') F4-a (uac-r2): a no-core item's Decision Record owner is resolved only AFTER FR-51 (step 1f), so whether the
+        // subject row exists never shows through a different answer to a caller who may not act on it. Here, with no I/O: a
+        // no-core Signal that names no subject has nothing to file its record under.
+        if (!p.Primary.HasCore && SubjectOf(p.Primary) is null)
+            return Refused(reviewId, DecisionCommitReasons.ItemOwnerUnsupported, ItemOwnerUnsupportedDetail);
 
         progress.MatterId = p.Primary.MatterId;
+
+        // D-129: the deciding individual is the caller's linked internal contact (Assigned To Internal), never an owner. Resolved
+        // once, after FR-51; unresolvable leaves the column empty and never fails the commit.
+        var deciderContact = await DeciderContactAsync(confirmedBy, ct).ConfigureAwait(false);
 
         // ---- (1d) Every executor's preflight, as the caller. A resumed review skips the steps that already landed. ------
         var done = (resume?.Steps ?? []).Where(s => s.Status == nameof(DecisionActionStatus.Done)).ToDictionary(s => s.Key, StringComparer.Ordinal);
@@ -913,7 +918,7 @@ public sealed class DecisionCommitService
         // ---- (1e) The record writer's own no-I/O preflight on the projected record ----------------------------------------
         try
         {
-            _records.Preflight(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p), executed: null, hash));
+            _records.Preflight(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p), executed: null, hash, deciderContact));
         }
         catch (DecisionRecordRefusedException ex)
         {
@@ -921,19 +926,26 @@ public sealed class DecisionCommitService
         }
 
         // ---- (1f) The record's owner, resolved BEFORE the first write: an owner refusal refuses the decision, not the record
-        // after the sends. The answer is handed to the write at step 5.
+        // after the sends. The answer is handed to the write at step 5. The owner is uac-r2's answer for EVERY parent the record
+        // sits under (the core, if any, and the subject of every Signal it resolves: secure-if-any, uac-r2 F1; D-129), taken as
+        // returned; and (F4-b) a refusal is 422 (a fixed text for a no-core item) while a fault of the resolver is 503.
+        var noCore = p.RecordCore is null;
         RecordOwnerResolution? recordOwner;
         try
         {
-            recordOwner = await _records.ResolveOwnerAsync(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p), executed: null, hash), ct).ConfigureAwait(false);
+            recordOwner = await _records.ResolveOwnerAsync(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p), executed: null, hash, deciderContact), ct).ConfigureAwait(false);
         }
         catch (DecisionRecordRefusedException ex) when (ex.Reason == DecisionRecordRefusalReason.OwnerResolutionFailed)
         {
-            return Unavailable(reviewId, DecisionCommitReasons.RecordRefused, "The decision's owner could not be checked; nothing was done.");
+            return noCore
+                ? Unavailable(reviewId, DecisionCommitReasons.ItemOwnerUnsupported, "The item's owner could not be checked; nothing was done.")
+                : Unavailable(reviewId, DecisionCommitReasons.RecordRefused, "The decision's owner could not be checked; nothing was done.");
         }
         catch (DecisionRecordRefusedException ex)
         {
-            return Refused(reviewId, DecisionCommitReasons.RecordRefused, $"This decision cannot be recorded ({ex.Reason}); nothing was done.");
+            return noCore
+                ? Refused(reviewId, DecisionCommitReasons.ItemOwnerUnsupported, ItemOwnerUnsupportedDetail)
+                : Refused(reviewId, DecisionCommitReasons.RecordRefused, $"This decision cannot be recorded ({ex.Reason}); nothing was done.");
         }
 
         // ---- (2)(3)(4) The writes, in D-17 order ----------------------------------------------------------------------------
@@ -993,7 +1005,7 @@ public sealed class DecisionCommitService
         {
             try
             {
-                var written = await _records.WriteAsync(RecordRequest(review, p, confirmedBy, now, steps, followOns, executed, hash), recordOwner, writeCt).ConfigureAwait(false);
+                var written = await _records.WriteAsync(RecordRequest(review, p, confirmedBy, now, steps, followOns, executed, hash, deciderContact), recordOwner, writeCt).ConfigureAwait(false);
                 recordId = written.RecordId;
                 recordClass = written.RecordClass.ToString();
             }
@@ -1167,7 +1179,7 @@ public sealed class DecisionCommitService
             outcome = taken.Any(t => t.ResolvesSignal) ? Resolution.Acted : Resolution.InquirySent;
         }
 
-        // ---- Server-derived core record (uac-r2 binding condition). The no-core item's owner is read AFTER FR-51 (F4-a). A
+        // ---- Server-derived core record (uac-r2 binding condition). A no-core item's Decision Record owner is resolved AFTER FR-51 (F4-a). A
         // catalog row that is missing or not a core type is 422; a read that faulted is 503 (F4-b).
         DecisionCoreRecord? core = null;
         DecisionRecordCore? recordCore = null;
@@ -1204,7 +1216,7 @@ public sealed class DecisionCommitService
             steps.Add(new ExecStep($"action:{def.Code}", 4, def, false, values)); // the inquiry is always last (D-17)
 
         var gateTier = DecisionGateTier.Strictest(tiers) is { } strictest ? DecisionGateTier.ToText(strictest) : null;
-        return (null, new Prepared(primary, rows, lane, plan, offered, steps, core, recordCore, null, gateTier, dismissalText, outcome));
+        return (null, new Prepared(primary, rows, lane, plan, offered, steps, core, recordCore, gateTier, dismissalText, outcome));
     }
 
     /// <summary>The wizard's values as the executors take them. Unknown codes and non-scalar values are refused; a required
@@ -1372,32 +1384,37 @@ public sealed class DecisionCommitService
         }
     }
 
-    /// <summary>D-39: a no-core item's record is owned by the item's owner, read app-only from the item row. A team owner is not
-    /// supported by the record writer (it owns by systemuser), so it is refused before anything is written.</summary>
-    /// <returns>The owner, or null with <c>Fault</c> false when the row is missing or not owned by a person (422), or null with
-    /// <c>Fault</c> true when the read faulted (503; F4-b). Called only after FR-51 (F4-a).</returns>
-    private async Task<(Guid? Owner, bool Fault)> ItemOwnerAsync(SignalRow signal, CancellationToken ct)
+    /// <summary>Fixed text for a no-core item whose Decision Record owner cannot be resolved (nothing about the row or the resolver's
+    /// reason is echoed: F4-b).</summary>
+    private const string ItemOwnerUnsupportedDetail = "The item's decision cannot be filed under an owning team, so it cannot be recorded; nothing was done.";
+
+    /// <summary>A no-core Signal's subject record (<c>sprk_regardingrecordtype</c> / <c>sprk_regardingrecordid</c>), server-written;
+    /// null when it names none. D-39 / D-129: the Decision Record's owner is uac-r2's answer for THIS record as the parent, resolved
+    /// by <see cref="DecisionRecordWriter.ResolveOwnerAsync"/> only after FR-51 (F4-a).</summary>
+    private static DecisionRecordRef? SubjectOf(SignalRow signal) =>
+        signal.SubjectEntity is { Length: > 0 } entity && signal.SubjectId is { } subjectId ? new DecisionRecordRef(entity, subjectId) : null;
+
+    /// <summary>D-129: the deciding caller's linked internal contact, through the identity service task 141 feeds (the user's
+    /// <c>sprk_primarycontact</c> link, else the contact bound to their Entra oid). Null, with a warning, when there is none or the
+    /// read faulted: the Decision Record's <c>sprk_assignedtointernal</c> then stays empty and the commit goes on.</summary>
+    private async Task<Guid?> DeciderContactAsync(Guid systemUserId, CancellationToken ct)
     {
-        if (signal.SubjectEntity is not { Length: > 0 } entity || signal.SubjectId is not { } subjectId)
-            return (null, false);
         try
         {
-            var row = await _entities.RetrieveAsync(entity, subjectId, ["ownerid"], ct).ConfigureAwait(false);
-            return (row.GetAttributeValue<EntityReference>("ownerid") is { LogicalName: "systemuser", Id: var owner } && owner != Guid.Empty
-                ? owner
-                : null, false);
-        }
-        catch (Exception ex) when (IsNotFound(ex))
-        {
-            return (null, false);
+            var identity = await _identity.ResolveAsync(systemUserId, ct).ConfigureAwait(false);
+            if (identity.ContactId is { } contactId && contactId != Guid.Empty)
+                return contactId;
+
+            _logger.LogWarning("Decision commit: the deciding user has no linked internal contact; the Decision Record's Assigned To Internal is left empty.");
+            return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning("Decision commit: the item's owner could not be read ({ExceptionType}).", ex.GetType().Name);
-            return (null, true);
+            _logger.LogWarning("Decision commit: the deciding user's linked contact could not be read ({ExceptionType}); the Decision Record's Assigned To Internal is left empty.",
+                ex.GetType().Name);
+            return null;
         }
     }
-
     /// <summary>A by-id read that failed because the row does not exist (<c>0x80040217</c> anywhere in the chain).</summary>
     private static bool IsNotFound(Exception ex)
     {
@@ -1547,11 +1564,11 @@ public sealed class DecisionCommitService
     private static DecisionRecordRequest RecordRequest(
         DecisionReview review, Prepared p, Guid confirmedBy, DateTimeOffset now,
         IReadOnlyList<DecisionRecordStep> steps, IReadOnlyList<DecisionRecordFollowOn> followOns, IReadOnlyList<DecisionCommitStep>? executed,
-        string reviewHash) =>
+        string reviewHash, Guid? deciderContact) =>
         new(review.ReviewId,
             p.Primary.PolicyVersionId!.Value,
             p.RecordCore,
-            p.ItemOwnerUserId,
+            p.RecordCore is null ? SubjectOf(p.Primary) : null,
             confirmedBy,
             now,
             steps,
@@ -1570,7 +1587,11 @@ public sealed class DecisionCommitService
                 .Select(e => e.Code)
                 .ToList(),
             // F1: the record carries the review's content hash, so a repeat found by its review id can prove it is the same review.
-            ReviewHash: reviewHash);
+            ReviewHash: reviewHash,
+            DeciderContactId: deciderContact,
+            // uac-r2 F1: the record's owner is asked about EVERY Signal it resolves (primary and also-resolve), not just the core, so a
+            // Signal whose subject sits under a secure record makes the record secure-owned even under an ordinary matter.
+            SignalSubjects: p.Resolved.Select(SubjectOf).OfType<DecisionRecordRef>().Distinct().ToList());
 
     /// <summary>What the data said at decision time: each covered Signal's own server-written fact snapshot, by Signal id.</summary>
     internal static IReadOnlyDictionary<string, object?> FactValues(IEnumerable<SignalRow> rows)

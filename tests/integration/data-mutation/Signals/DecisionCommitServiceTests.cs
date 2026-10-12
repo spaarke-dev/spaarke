@@ -20,6 +20,8 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
@@ -67,9 +69,15 @@ public sealed class DecisionCommitServiceTests
     private static readonly Guid RecordId = Guid.Parse("c0430000-0000-4000-8000-000000000060");
     private static readonly Guid ItemTodo = Guid.Parse("c0430000-0000-4000-8000-000000000070");
     private static readonly Guid ItemOwner = Guid.Parse("c0430000-0000-4000-8000-000000000071");
+    private static readonly Guid CallerContactId = Guid.Parse("c0430000-0000-4000-8000-000000000072");
+    private static readonly Guid ItemTeam = Guid.Parse("c0430000-0000-4000-8000-000000000073");
+    private static readonly Guid SecureTeam = Guid.Parse("c0430000-0000-4000-8000-000000000074");
+    private static readonly Guid OrdinaryTeam = Guid.Parse("c0430000-0000-4000-8000-000000000076");
+    private static readonly Guid ReminderVersion = Guid.Parse("c0430000-0000-4000-8000-000000000075");
 
     private const string PathBPlan = "{\"actions\":[\"send-budget-inquiry\",\"revise-budget\",\"approve-variance\"],\"nextSteps\":[\"add-todo\",\"send-email\"]}";
     private const string DoPlan = "{\"actions\":[\"mark-complete\",\"reschedule\"],\"nextSteps\":[\"add-todo\"]}";
+    private const string ReminderPlan = "{\"actions\":[\"send-reminder\",\"mark-complete\"]}";
 
     private const int Open = SignalWriter.SignalStatusOpen;
     private const int Resolved = SignalWriter.SignalStatusResolved;
@@ -105,7 +113,29 @@ public sealed class DecisionCommitServiceTests
         /// <summary>The commit service's review ledger when a test wraps <see cref="Ledger"/>; the plan-read stamp keeps the plain one.</summary>
         public ITenantCache? LedgerStore { get; set; }
         public DecisionPlanReadStamp PlanReads { get; }
-        public RecordOwnerResolution Owner { get; set; } = RecordOwnerResolution.Unchanged("not a secure matter");
+        public RecordOwnerResolution Owner { get; set; } = RecordOwnerResolution.Owned(OrdinaryTeam);
+
+        /// <summary>When set, the REAL uac-r2 resolver (over an <c>OwnershipDirectory</c>) answers instead of <see cref="Owner"/>.</summary>
+        public IRecordOwnershipResolver? RealResolver { get; set; }
+
+        /// <summary>A fault of uac-r2's resolver (not an answer): thrown instead of <see cref="Owner"/>.</summary>
+        public Exception? OwnerFault { get; set; }
+
+        /// <summary>Every ownership question the resolver was asked, in order.</summary>
+        public List<RecordOwnershipContext> OwnerAsks { get; } = new();
+
+        /// <summary>The caller's linked internal contact (task 141 link); null: the caller has none.</summary>
+        public Guid? CallerContact { get; set; } = CallerContactId;
+
+        /// <summary>A fault of the identity service (the contact could not be read).</summary>
+        public Exception? IdentityFault { get; set; }
+
+        public Mock<IIdentityNormalizationService> Identity { get; } = new();
+
+        /// <summary>Subject rows the CALLER cannot read (the sprk_todos entity set), and a fault answer for any subject read.</summary>
+        public HashSet<Guid> CallerCannotReadSubject { get; } = new();
+
+        public DataverseUserResponse? SubjectReadFails { get; set; }
         public Dictionary<Guid, Guid> CallerSeesCore { get; } = new();
         public List<(string Set, Guid Id)> RightsAsked { get; } = new();
 
@@ -125,11 +155,13 @@ public sealed class DecisionCommitServiceTests
             Entities.Setup(e => e.GetEntitySetNameAsync("sprk_todo", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_todos");
             Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
-                    new Entity("sprk_policyversion", id) { ["sprk_decisionplan"] = id == DoVersion ? DoPlan : PathBPlan });
+                    new Entity("sprk_policyversion", id) { ["sprk_decisionplan"] = id == DoVersion ? DoPlan : id == ReminderVersion ? ReminderPlan : PathBPlan });
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => new EntityCollection(ExistingRecords.ToList()));
-            Entities.Setup(e => e.RetrieveAsync("sprk_todo", ItemTodo, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new Entity("sprk_todo", ItemTodo) { ["ownerid"] = new EntityReference("systemuser", ItemOwner) });
+
+            Identity.Setup(i => i.ResolveAsync(Caller, It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken _) =>
+                    IdentityFault is not null ? throw IdentityFault : Task.FromResult(new PersonIdentity(id, CallerContact)));
 
             User.Setup(u => u.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string path, CancellationToken _) => AnswerAsCaller(path));
@@ -256,7 +288,21 @@ public sealed class DecisionCommitServiceTests
                     body["sprk_corerecordid"] = CallerSeesCore.TryGetValue(id, out var seen) ? seen.ToString("D") : row.GetAttributeValue<string>("sprk_corerecordid");
                 }
 
+                if (row.Contains("sprk_regardingrecordtype")) body["sprk_regardingrecordtype"] = row.GetAttributeValue<string>("sprk_regardingrecordtype");
+                if (row.Contains("sprk_regardingrecordid")) body["sprk_regardingrecordid"] = row.GetAttributeValue<string>("sprk_regardingrecordid");
+
                 return Ok(body);
+            }
+
+            if (path.StartsWith("sprk_todos(", StringComparison.Ordinal))
+            {
+                // A no-core Signal's SUBJECT row, read AS THE CALLER (D-35 as amended by D-129).
+                var id = Guid.Parse(path["sprk_todos(".Length..path.IndexOf(')')]);
+                if (SubjectReadFails is { } fault)
+                    return fault;
+                return CallerCannotReadSubject.Contains(id)
+                    ? DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "no")
+                    : Ok(new Dictionary<string, object?> { ["createdon"] = "2026-01-01T00:00:00Z" });
             }
 
             if (path.StartsWith("sprk_matters(", StringComparison.Ordinal))
@@ -278,14 +324,29 @@ public sealed class DecisionCommitServiceTests
             var plans = new DecisionPlanService(Entities.Object, NullLogger<DecisionPlanService>.Instance);
             var ownership = new Mock<IRecordOwnershipResolver>();
             ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() =>
+                .Returns((RecordOwnershipContext context, CancellationToken _) =>
                 {
                     Log.Add("owner");
-                    return Owner;
+                    OwnerAsks.Add(context);
+                    return OwnerFault is not null ? throw OwnerFault : Task.FromResult(Owner);
                 });
-            var records = new DecisionRecordWriter(WriterClient(), ownership.Object, Clock, NullLogger<DecisionRecordWriter>.Instance);
+            IRecordOwnershipResolver resolver = ownership.Object;
+            if (RealResolver is { } real)
+            {
+                var recording = new Mock<IRecordOwnershipResolver>();
+                recording.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+                    .Returns((RecordOwnershipContext context, CancellationToken token) =>
+                    {
+                        Log.Add("owner");
+                        OwnerAsks.Add(context);
+                        return real.ResolveOwnerAsync(context, token);
+                    });
+                resolver = recording.Object;
+            }
+
+            var records = new DecisionRecordWriter(WriterClient(), resolver, Clock, NullLogger<DecisionRecordWriter>.Instance);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(Executors.Values), records, WriterClient(),
-                Entities.Object, Probe.Object, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
+                Entities.Object, Probe.Object, Identity.Object, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
         }
 
         public Task StampPlanRead(Guid signal, DateTimeOffset at) => PlanReads.StampAtAsync(Tenant, CallerOid.ToString("D"), signal, at, CancellationToken.None);
@@ -950,26 +1011,368 @@ public sealed class DecisionCommitServiceTests
         rig.Record.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Matter.ToString("D"));
         rig.Record.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id.Should().Be(TypeMatter);
         rig.Record.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(Matter);
-        rig.Record.Contains("ownerid").Should().BeFalse("a core-record item's record is owned by the resolver's answer, never the client");
+        rig.Record.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OrdinaryTeam, "the record is owned by the resolver's answer, never the client's");
     }
 
-    [Fact]
-    public async Task ANoCoreDoItem_IsOwnedByTheItemsOwner_ReadAppOnly()
+    private static Rig NoCoreRig()
     {
         var rig = new Rig();
         rig.AddSignal(DoSignal, DecisionLane.Do, null, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
-        rig.Signals[DoSignal]["ownerid"] = new EntityReference("systemuser", Caller); // D-35: the caller owns it
+        return rig;
+    }
 
-        var result = await rig.CommitAsync(new DecisionReview
-        {
-            ReviewId = Guid.NewGuid(),
-            Confirmed = true,
-            Actions = [Take("mark-complete"), Skip("reschedule")],
-        }, DoSignal);
+    private static DecisionReview MarkComplete() =>
+        new() { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] };
+
+    [Fact]
+    public async Task ATeamOwnedNoCoreItem_NowRecords_OwnedByTheTeamUac2sResolverNames_D129()
+    {
+        // Before D-129 the route read the item's ownerid and refused anything but a systemuser (item_owner_unsupported).
+        var rig = NoCoreRig();
+        rig.Owner = RecordOwnerResolution.Owned(ItemTeam);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
 
         result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
-        rig.Record.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(ItemOwner, "read from the item row, not the Signal or the body");
+        var owner = rig.Record.GetAttributeValue<EntityReference>("ownerid");
+        owner.LogicalName.Should().Be("team");
+        owner.Id.Should().Be(ItemTeam, "the resolver's answer exactly as returned");
+        rig.Record.Contains("owningbusinessunit").Should().BeFalse("it derives from ownerid; the route never sets it");
         rig.Executors["mark-complete"].Requests.Single().Subject.Should().Be(new DecisionRecordRef("sprk_todo", ItemTodo));
+        rig.Resolution(DoSignal).Should().Be(SignalWriter.ResolutionActed);
+        rig.Entities.Verify(e => e.RetrieveAsync("sprk_todo", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the item's ownerid is never read: nothing uses an owner as a person");
+    }
+
+    [Fact]
+    public async Task TheResolverIsAskedWithTheSubjectAsTheParent_AndNeverOptsIntoKeepCreator()
+    {
+        var rig = NoCoreRig();
+        rig.Owner = RecordOwnerResolution.Owned(ItemTeam);
+
+        await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        var asked = rig.OwnerAsks.Should().ContainSingle().Subject;
+        asked.TargetEntityLogicalName.Should().Be("sprk_todo");
+        asked.TargetRecordId.Should().Be(ItemTodo);
+        asked.Parents.Should().Equal(new RecordOwnershipParent("sprk_todo", ItemTodo));
+        asked.WhenUnfiled.Should().Be(UnfiledOwnership.ActingUserTeam);
+        asked.KeepCreatorUnlessTargetIsTeamOwned.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ANoCoreItemWithASecureSubject_IsOwnedByTheSecureRecordOwnersTeam_D123()
+    {
+        var rig = NoCoreRig();
+        rig.Owner = RecordOwnerResolution.Owned(SecureTeam) with { IsSecureOwner = true };
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Record.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(SecureTeam);
+    }
+
+    [Fact]
+    public async Task ANoCoreItemWithAUserOwnedSubject_GetsTheResolversAnswer_NeverAnOwnerTheRouteChooses()
+    {
+        // A personal To Do: the resolver answers a team (the BU's team) or refuses; there is no third answer.
+        var answered = NoCoreRig();
+        answered.Owner = RecordOwnerResolution.Owned(ItemTeam);
+        var refused = NoCoreRig();
+        refused.Owner = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, "the personal To Do has no owning business unit");
+
+        var ok = await answered.CommitAsync(MarkComplete(), DoSignal);
+        var no = await refused.CommitAsync(MarkComplete(), DoSignal);
+
+        ok.Status.Should().Be(DecisionCommitStatus.Recorded, ok.Detail);
+        answered.Record.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(ItemTeam);
+        no.Status.Should().Be(DecisionCommitStatus.Refused);
+        refused.Records.Should().BeEmpty("the route does not fall back to the user, the creator or the writer");
+    }
+
+    [Fact]
+    public async Task AResolverRefusal_Is422ItemOwnerUnsupported_WithFixedText_AndNothingIsWritten()
+    {
+        var rig = NoCoreRig();
+        rig.Owner = RecordOwnerResolution.Refused(RecordOwnerRefusal.SecureParentNotIsolated, "secret detail about the parent");
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.ItemOwnerUnsupported);
+        result.Detail.Should().NotContain("secret").And.NotContain(RecordOwnerRefusal.SecureParentNotIsolated, "the resolver's reason is not echoed");
+        rig.Writes.Should().BeEmpty("the refusal comes before the first write");
+        rig.Executors["mark-complete"].Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AResolverFault_Is503_NotA422_AndNothingIsWritten()
+    {
+        var rig = NoCoreRig();
+        rig.OwnerFault = new TimeoutException("no answer");
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.ItemOwnerUnsupported);
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ANoCoreSignalThatNamesNoSubject_IsTheUniform404_WithoutAskingTheResolver()
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, null, DoVersion);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        // The caller-scoped access check already refuses a no-core Signal with no subject (uniform 404), so the route never gets here.
+        result.Status.Should().Be(DecisionCommitStatus.NotFound);
+        rig.OwnerAsks.Should().BeEmpty();
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ANoCoreItem_WhoseSubjectTheCallerCannotRead_Is404_AndNeverReachesTheResolver()
+    {
+        var rig = NoCoreRig();
+        rig.Owner = RecordOwnerResolution.Owned(ItemTeam);
+        rig.CallerCannotReadSubject.Add(ItemTodo);   // e.g. a subject in a secure family, for a non-member (D-123)
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.NotFound);
+        rig.OwnerAsks.Should().BeEmpty();
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ANoCoreItem_WhoseSubjectReadFaults_Is503_NotThe404()
+    {
+        var rig = NoCoreRig();
+        rig.Owner = RecordOwnerResolution.Owned(ItemTeam);
+        rig.SubjectReadFails = DataverseUserResponse.Fail(500, DataverseUserClientErrorCodes.ServiceError, "boom");
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable);
+        rig.OwnerAsks.Should().BeEmpty();
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ANoCoreItem_WhoseSignalTheCallerCannotRead_Is404_AndTheSubjectIsNeverAsked()
+    {
+        var rig = NoCoreRig();
+        rig.CallerCannotRead.Add(DoSignal);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.NotFound);
+        rig.User.Verify(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_todos(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── uac-r2 F1: the record's owner is asked about EVERY Signal's subject, not only the core ───────────────────────────────
+
+    private static readonly Guid SecureProject = Guid.Parse("c0430000-0000-4000-8000-000000000080");
+    private static readonly Guid SubjectUnderSecure = Guid.Parse("c0430000-0000-4000-8000-000000000081");
+    private static readonly Guid SubjectOrdinary = Guid.Parse("c0430000-0000-4000-8000-000000000082");
+    private static readonly Guid SubjectOrdinary2 = Guid.Parse("c0430000-0000-4000-8000-000000000083");
+
+    /// <summary>The scenario: an ORDINARY matter (the core), a SECURE project, a To Do filed under both (its Signal is secure through
+    /// its subject, its core is the ordinary matter), and two To Dos filed under the matter only.</summary>
+    private static Tests.TestInfrastructure.OwnershipDirectory F1World()
+    {
+        var matter = new EntityReference("sprk_matter", Matter);
+        return Tests.TestInfrastructure.OwnershipDirectory.Standard()
+            .WithOrdinaryRoot("sprk_matter", Matter)
+            .WithSecureRoot("sprk_project", SecureProject)
+            .WithRecord("sprk_todo", SubjectUnderSecure, Tests.TestInfrastructure.OwnershipDirectory.GeneralBu,
+                extra: new() { ["sprk_regardingmatter"] = matter, ["sprk_regardingproject"] = new EntityReference("sprk_project", SecureProject) })
+            .WithRecord("sprk_todo", SubjectOrdinary, Tests.TestInfrastructure.OwnershipDirectory.GeneralBu, extra: new() { ["sprk_regardingmatter"] = matter })
+            .WithRecord("sprk_todo", SubjectOrdinary2, Tests.TestInfrastructure.OwnershipDirectory.GeneralBu, extra: new() { ["sprk_regardingmatter"] = matter });
+    }
+
+    private static Rig F1Rig(Guid primarySubject, Guid? secondSubject = null)
+    {
+        var rig = new Rig { RealResolver = F1World().Resolver() };
+        rig.AddSignal(Primary, DecisionLane.Decide, Matter, PathB, subjectEntity: "sprk_todo", subjectId: primarySubject);
+        if (secondSubject is { } subject)
+            rig.AddSignal(Second, DecisionLane.Decide, Matter, PathB, subjectEntity: "sprk_todo", subjectId: subject);
+        return rig;
+    }
+
+    [Fact]
+    public async Task F1_ASignalWhoseSubjectIsUnderASecureRecord_MakesTheRecordSecureOwned_EvenUnderAnOrdinaryCore()
+    {
+        var rig = F1Rig(SubjectUnderSecure);
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        var owner = rig.Record.GetAttributeValue<EntityReference>("ownerid");
+        owner.LogicalName.Should().Be("team");
+        owner.Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam,
+            "the core is an ordinary matter, but the Signal's subject sits under a secure project: secure-if-any");
+        rig.Record.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(Matter, "the core pair is unchanged");
+        var asked = rig.OwnerAsks.Should().ContainSingle().Subject;
+        asked.Parents.Should().Equal(new RecordOwnershipParent("sprk_matter", Matter), new RecordOwnershipParent("sprk_todo", SubjectUnderSecure));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task F1_AnAlsoResolveSetMixingASecureAndAnOrdinarySubject_IsSecureOwned_WhicheverIsThePrimary(bool secureIsPrimary)
+    {
+        var rig = secureIsPrimary ? F1Rig(SubjectUnderSecure, SubjectOrdinary) : F1Rig(SubjectOrdinary, SubjectUnderSecure);
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false, also: [Second]));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Record.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
+        rig.OwnerAsks.Single().Parents.Select(p => p.RecordId).Should().Contain([Matter, SubjectUnderSecure, SubjectOrdinary],
+            "the primary's and the also-resolved Signal's subjects are both asked about");
+    }
+
+    [Fact]
+    public async Task F1_AllOrdinarySubjects_GetTheResolversOrdinaryAnswer_TheCoresBusinessUnitTeam()
+    {
+        var rig = F1Rig(SubjectOrdinary, SubjectOrdinary2);
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false, also: [Second]));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        var owner = rig.Record.GetAttributeValue<EntityReference>("ownerid");
+        owner.LogicalName.Should().Be("team");
+        owner.Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.ChildTeam, "the ordinary matter's business-unit default team, exactly as returned");
+        rig.Record.Contains("owningbusinessunit").Should().BeFalse("it derives from the owner");
+    }
+
+    [Fact]
+    public async Task F1_ASubjectTheResolverCannotRead_RefusesTheWholeDecision_NotDroppedAsAParent()
+    {
+        var rig = F1Rig(Guid.NewGuid(), SubjectOrdinary);   // the first To Do is in no directory: unresolved, so it might be the secure one
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false, also: [Second]));
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.RecordRefused);
+        rig.Writes.Should().BeEmpty("nothing is sent, recorded or closed");
+        rig.SignalUpdates.Should().BeEmpty();
+        rig.Status(Primary).Should().Be(Open);
+        rig.Status(Second).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task F1_AResolverRefusal_OnACoreItem_Is422_WithNoWritesAndNoCloses()
+    {
+        var rig = new Rig { Owner = RecordOwnerResolution.Refused(RecordOwnerRefusal.SecureParentNotIsolated, "secret detail") };
+        rig.AddSignal(Primary, DecisionLane.Decide, Matter, PathB, subjectEntity: "sprk_todo", subjectId: SubjectOrdinary);
+        rig.AddSignal(Second, DecisionLane.Decide, Matter, PathB, subjectEntity: "sprk_todo", subjectId: SubjectUnderSecure);
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false, also: [Second]));
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused);
+        result.Detail.Should().NotContain("secret");
+        rig.Writes.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+        rig.OwnerAsks.Single().Parents.Select(p => p.RecordId).Should().Contain([Matter, SubjectOrdinary, SubjectUnderSecure]);
+    }
+
+    // ── D-129: the deciding individual is the caller's linked contact, never an owner ────────────────────────────────────
+
+    [Fact]
+    public async Task TheDecidersLinkedContact_IsAssignedToInternal_AndConfirmedByStaysTheCallersSystemUser()
+    {
+        var rig = new Rig();
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        var assigned = rig.Record.GetAttributeValue<EntityReference>("sprk_assignedtointernal");
+        assigned.LogicalName.Should().Be("contact");
+        assigned.Id.Should().Be(CallerContactId);
+        rig.Record.GetAttributeValue<EntityReference>("sprk_confirmedby").Id.Should().Be(Caller);
+        rig.Record.GetAttributeValue<EntityReference>("ownerid").LogicalName.Should().Be("team", "no person is an owner; the decider is Assigned To Internal");
+    }
+
+    [Fact]
+    public async Task ACallerWithNoLinkedContact_CommitsWithAssignedToInternalEmpty()
+    {
+        var rig = new Rig { CallerContact = null };
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Record.Contains("sprk_assignedtointernal").Should().BeFalse();
+        rig.Record.GetAttributeValue<EntityReference>("sprk_confirmedby").Id.Should().Be(Caller);
+    }
+
+    [Fact]
+    public async Task AContactReadThatFaults_DoesNotFailTheCommit_AndLeavesAssignedToInternalEmpty()
+    {
+        var rig = new Rig { IdentityFault = new TimeoutException("no answer") };
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Record.Contains("sprk_assignedtointernal").Should().BeFalse();
+    }
+
+    // ── D-128 Q18: send-reminder does not resolve the item ───────────────────────────────────────────────────────────────
+
+    private static readonly IReadOnlyDictionary<string, JsonElement> ReminderValues =
+        Values(("to", "client@example.test"), ("subject", "Reminder"), ("body", "Please send the response"));
+
+    private static Rig ReminderRig()
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, ReminderVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        return rig;
+    }
+
+    [Fact]
+    public async Task Q18_TheReminderAlone_LeavesTheItemOpen_AcknowledgedAndLinked_NotResolved()
+    {
+        var rig = ReminderRig();
+
+        var result = await rig.CommitAsync(
+            new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("send-reminder", ReminderValues), Skip("mark-complete")] }, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Records.Should().ContainSingle("the reminder's Decision Record is still written");
+        rig.Status(DoSignal).Should().Be(SignalWriter.SignalStatusAcknowledged, "the item stays open until the work is done or its due date moves");
+        rig.Resolution(DoSignal).Should().BeNull();
+        rig.LinkedRecord(DoSignal).Should().Be(RecordId);
+        result.Signals.Single().State.Should().Be("InquirySent");
+    }
+
+    [Fact]
+    public async Task Q18_ALaterActedDecision_ClosesTheAcknowledgedItem()
+    {
+        var rig = ReminderRig();
+        await rig.CommitAsync(
+            new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("send-reminder", ReminderValues), Skip("mark-complete")] }, DoSignal);
+        rig.Status(DoSignal).Should().Be(SignalWriter.SignalStatusAcknowledged);
+        rig.Records.Clear();
+
+        var later = await rig.CommitAsync(
+            new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Skip("send-reminder"), Take("mark-complete")] }, DoSignal);
+
+        later.Status.Should().Be(DecisionCommitStatus.Recorded, later.Detail);
+        rig.Status(DoSignal).Should().Be(Resolved);
+        rig.Resolution(DoSignal).Should().Be(SignalWriter.ResolutionActed);
+    }
+
+    [Fact]
+    public async Task Q18_AReminderTakenWithAResolvingAction_StillResolvesTheItem()
+    {
+        var rig = ReminderRig();
+
+        await rig.CommitAsync(
+            new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("send-reminder", ReminderValues), Take("mark-complete")] }, DoSignal);
+
+        rig.Status(DoSignal).Should().Be(Resolved);
         rig.Resolution(DoSignal).Should().Be(SignalWriter.ResolutionActed);
     }
 
@@ -1803,21 +2206,20 @@ public sealed class DecisionCommitServiceTests
     {
         var rig = new Rig();
         rig.AddSignal(DoSignal, DecisionLane.Do, null, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
-        rig.Signals[DoSignal]["ownerid"] = new EntityReference("systemuser", Caller);
         rig.Rights[("sprk_todos", ItemTodo)] = AccessRights.Read;
-        if (!ownerResolves)
-        {
-            rig.Entities.Setup(e => e.RetrieveAsync("sprk_todo", ItemTodo, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ThrowsAsync(new FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217) }, "missing"));
-        }
+        // Whether uac-r2's resolver would answer a team, refuse, or fault must not change what this caller is told.
+        if (ownerResolves)
+            rig.Owner = RecordOwnerResolution.Owned(ItemTeam);
+        else
+            rig.OwnerFault = new TimeoutException("no answer");
 
         var result = await rig.CommitAsync(new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] }, DoSignal);
 
         result.Status.Should().Be(DecisionCommitStatus.Forbidden);
         result.ReasonCode.Should().Be(DecisionCommitReasons.NotAuthorized);
         result.Detail.Should().Be("You do not have permission to change an item in this decision.");
-        rig.Entities.Verify(e => e.RetrieveAsync("sprk_todo", ItemTodo, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never(),
-            "the owner row is read only after FR-51");
+        rig.OwnerAsks.Should().BeEmpty("the resolver (and so any read of the subject row app-only) runs only after FR-51");
+        rig.Entities.Verify(e => e.RetrieveAsync("sprk_todo", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never());
     }
 
     [Fact]
@@ -1845,32 +2247,29 @@ public sealed class DecisionCommitServiceTests
     }
 
     [Fact]
-    public async Task UacF4b_AnItemOwnerReadFault_Is503_ATeamOwner_Is422()
+    public async Task UacF4b_ANoCoreOwnerResolverFault_Is503_ARefusal_Is422()
     {
         Rig NoCore()
         {
             var rig = new Rig();
             rig.AddSignal(DoSignal, DecisionLane.Do, null, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
-            rig.Signals[DoSignal]["ownerid"] = new EntityReference("systemuser", Caller);
             return rig;
         }
 
         var faulted = NoCore();
-        faulted.Entities.Setup(e => e.RetrieveAsync("sprk_todo", ItemTodo, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new TimeoutException("no answer"));
-        var team = NoCore();
-        team.Entities.Setup(e => e.RetrieveAsync("sprk_todo", ItemTodo, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Entity("sprk_todo", ItemTodo) { ["ownerid"] = new EntityReference("team", Guid.NewGuid()) });
+        faulted.OwnerFault = new TimeoutException("no answer");
+        var refused = NoCore();
+        refused.Owner = RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUnresolved, "the To Do has no owning business unit");
         DecisionReview Review() => new() { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] };
 
         var fault = await faulted.CommitAsync(Review(), DoSignal);
-        var unsupported = await team.CommitAsync(Review(), DoSignal);
+        var unsupported = await refused.CommitAsync(Review(), DoSignal);
 
         fault.Status.Should().Be(DecisionCommitStatus.Unavailable);
         unsupported.Status.Should().Be(DecisionCommitStatus.Refused);
         unsupported.ReasonCode.Should().Be(DecisionCommitReasons.ItemOwnerUnsupported);
         faulted.Writes.Should().BeEmpty();
-        team.Writes.Should().BeEmpty();
+        refused.Writes.Should().BeEmpty();
     }
 
     // ── The HTTP mapping ─────────────────────────────────────────────────────────────────────────────────────────

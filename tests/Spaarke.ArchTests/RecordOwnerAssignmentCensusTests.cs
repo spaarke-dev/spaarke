@@ -484,10 +484,9 @@ public class RecordOwnerAssignmentCensusTests
             "sprk_analysisplaybook — a playbook definition owned by the person who created it, so task 164's OwnerOnly "
             + "(caller systemuserid == _ownerid_value) admits its creator; never a business record's child (dev gate D-G6-2)."),
 
-        // spaarke-ontology-platform-r1 task 040 (owner D-39): needs uac-r2 review: ontology PR #1600 (listed PerUser; the no-core owner is the item's owner by D-39).
-        new OwnerWriteEntry("DecisionRecordWriter.cs", "WriteAsync", 1, OwnerWriteKind.PerUser,
-            "sprk_decisionrecord of an item with NO core record: owned by the item's own owner (a user), never by a team. A "
-            + "Decision Record WITH a core record takes the resolver's answer through ApplyTo (the censused resolver write)."),
+        // spaarke-ontology-platform-r1 task 043 (owner D-129): DecisionRecordWriter.WriteAsync no longer writes an owner of its own; both
+        // the core and the no-core Decision Record take the resolver's answer through ApplyTo (the censused resolver write), so the
+        // former PerUser entry for the no-core item's owner is gone.
         // spaarke-ontology-platform-r1 task 031 (task 037 hand-off, D-35): needs uac-r2 review (listed PerUser, as BuildEntity above).
         new OwnerWriteEntry("SignalWriter.cs", "ReassignNoCoreOwnerAsync", 1, OwnerWriteKind.PerUser,
             "A no-core Do-lane Signal follows its item's owner (D-35): when the To Do / event is reassigned, the nightly job "
