@@ -22,7 +22,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 034 | External message send endpoint (FR-11) | P3 | ✅ [done] | 030, 033 | O/h | FULL | Wave 4 |
 | 035 | Intake submit endpoint (FR-05, FR-06) | P3 | ✅ [done] | 011, 020, 033 | O/h | FULL | Wave 5 |
 | 036 | Email on subsequent grant (FR-07); no message email (spec C6) | P3 | ✅ [done] | 034 (UAC-r2 PR #1583 merged 2026-10-10, in branch) | S/h | FULL | Wave 5 |
-| 037 | Notification feed + last-seen (FR-08) | P3 | 🔲 [open] | 034, 035 | O/h | FULL | Wave 6 |
+| 037 | Notification feed + last-seen (FR-08) | P3 | 🔄 [wip] | 034, 035 | O/h | FULL | Wave 6 |
 | 038 | Deploy R3 BFF to dev + live probes | P3 | 🔲 [open] | 010, 011, 012, 032, 035, 036, 037, 039 + 020 columns live in dev first — **satisfied 2026-10-11** (task 030 stamps sprk_createdbycontact; without it a contact create returns 400, after the upload bytes are already in SPE; tasks 033/034: the external message read selects _sprk_createdbycontact_value, so GET messages returns 500 and a contact POST fails until the column exists) | S/h | STANDARD | — (live deploy, owner-gated) |
 | 039 | Event reads for Matter and Work Assignment (FR-03 server) | P3 | 🔲 [open] | 032, 037 | S/h | FULL | Wave 7 |
 | 040 | Workforce client switch (FR-16) | P4 | 🔄 [wip] | 001 (+ owner client registration) | O/h | FULL | Wave 2 |
