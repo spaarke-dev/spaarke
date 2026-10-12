@@ -328,6 +328,9 @@ public static class AnalysisEndpoints
                 return;
             }
 
+            // Declared outside the try: the catch below must know whether the pipeline already put its own error
+            // chunk on the wire, so the stream ends in exactly ONE terminal error (ADR-019).
+            var profileFailed = false;
             try
             {
                 await foreach (var chunk in ExecuteDocumentProfilePipelineAsync(
@@ -335,10 +338,20 @@ public static class AnalysisEndpoints
                     actionResolver, documentTextSource, actionRunner,
                     documentDataverseService, indexingEnqueuer, logger, cancellationToken))
                 {
+                    profileFailed |= chunk.Type == "error";
                     await WriteSSEAsync(response, chunk, cancellationToken);
                 }
                 await response.WriteAsync("data: [DONE]\n\n", cancellationToken);
                 await response.Body.FlushAsync(cancellationToken);
+
+                if (profileFailed)
+                {
+                    // The pipeline ended in its own error chunk (already on the wire): there is no completed profile
+                    // to announce.
+                    logger.LogWarning(
+                        "Linear Document Profile ended in an error chunk for TraceId={TraceId}", context.TraceIdentifier);
+                    return;
+                }
 
                 logger.LogInformation(
                     "Linear Document Profile completed for TraceId={TraceId}", context.TraceIdentifier);
@@ -346,7 +359,9 @@ public static class AnalysisEndpoints
                 _ = SendAnalysisCompleteNotificationAsync(
                     context.User, request, notificationService, entityService, logger, context.TraceIdentifier);
             }
-            catch (OperationCanceledException)
+            // Only the CLIENT going away is silent; any other cancellation (an upstream timeout the pipeline rethrows)
+            // is a failure and ends in the terminal error chunk below instead of a silently closed stream.
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 logger.LogInformation(
                     "Client disconnected during Linear Document Profile, TraceId={TraceId}",
@@ -355,7 +370,7 @@ public static class AnalysisEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error during Linear Document Profile, TraceId={TraceId}", context.TraceIdentifier);
-                if (!cancellationToken.IsCancellationRequested)
+                if (!cancellationToken.IsCancellationRequested && !profileFailed)
                 {
                     await TryWriteTerminalErrorAsync(response, context.TraceIdentifier, logger);
                 }
@@ -425,9 +440,11 @@ public static class AnalysisEndpoints
             Document = documentContext
         };
 
+        // Declared outside the try: the catch below must know whether the run already put its own error chunk on the
+        // wire, so the stream ends in exactly ONE terminal error (ADR-019).
+        var runFailed = false;
         try
         {
-            var runFailed = false;
             await foreach (var evt in playbookOrchestrationService.ExecuteAsync(playbookRequest, context, cancellationToken))
             {
                 var chunk = BridgePlaybookEventToAnalysisChunk(evt, request.PlaybookId.Value);
@@ -474,7 +491,7 @@ public static class AnalysisEndpoints
         {
             logger.LogError(ex, "Error during analysis execution, TraceId={TraceId}", context.TraceIdentifier);
 
-            if (!cancellationToken.IsCancellationRequested)
+            if (!cancellationToken.IsCancellationRequested && !runFailed)
             {
                 await TryWriteTerminalErrorAsync(response, context.TraceIdentifier, logger);
             }
@@ -524,12 +541,13 @@ public static class AnalysisEndpoints
 
             // RunFailed → error chunk; preserves the existing client error path.
             PlaybookEventType.RunFailed =>
-                AnalysisStreamChunk.FromError(evt.Error ?? "Playbook execution failed", evt.ErrorCode, evt.CorrelationId),
+                AnalysisStreamChunk.FromError(
+                    ProblemDetailsHelper.Redact(evt.Error) ?? "Playbook execution failed", evt.ErrorCode, evt.CorrelationId),
 
             // NodeFailed → error chunk (single-node failure terminates the run per orchestrator semantics).
             PlaybookEventType.NodeFailed =>
                 AnalysisStreamChunk.FromError(
-                    $"Node '{evt.NodeName ?? evt.NodeId?.ToString() ?? "unknown"}' failed: {evt.Error ?? "no detail"}"),
+                    $"Node '{evt.NodeName ?? evt.NodeId?.ToString() ?? "unknown"}' failed: {ProblemDetailsHelper.Redact(evt.Error) ?? "no detail"}"),
 
             // RunCancelled — client already saw the OperationCanceledException path or will see
             // the next [DONE]; no chunk to emit (mirrors legacy behavior which had no Cancelled
@@ -727,7 +745,7 @@ public static class AnalysisEndpoints
             await WriteSSEAsync(
                 response,
                 AnalysisStreamChunk.FromError(
-                    PlaybookRunEndpoints.RunFailedMessage, PlaybookRunEndpoints.RunFailedErrorCode, correlationId),
+                    PlaybookStreamEvent.RunFailedMessage, PlaybookStreamEvent.RunFailedErrorCode, correlationId),
                 CancellationToken.None);
         }
         catch (Exception writeEx)
@@ -802,7 +820,7 @@ public static class AnalysisEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to resolve Document Profile action");
-            actionError = $"Failed to resolve action: {ex.Message}";
+            actionError = ProblemDetailsHelper.Explain("Failed to resolve the Document Profile action.", ex);
         }
         if (actionError != null)
         {
@@ -822,7 +840,7 @@ public static class AnalysisEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to extract text for document {DocumentId}", documentId);
-            textError = $"Failed to extract document text: {ex.Message}";
+            textError = ProblemDetailsHelper.Explain("Failed to extract document text.", ex);
         }
         if (textError != null)
         {
@@ -848,7 +866,7 @@ public static class AnalysisEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "LLM call failed for document {DocumentId}", documentId);
-            llmError = $"AI analysis failed: {ex.Message}";
+            llmError = ProblemDetailsHelper.Explain("AI analysis failed.", ex);
         }
         if (llmError != null)
         {
@@ -891,7 +909,7 @@ public static class AnalysisEndpoints
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to update document {DocumentId} with profile fields", documentId);
-            updateError = $"Failed to update document record: {ex.Message}";
+            updateError = ProblemDetailsHelper.Explain("Failed to update document record.", ex);
         }
         if (updateError != null)
         {

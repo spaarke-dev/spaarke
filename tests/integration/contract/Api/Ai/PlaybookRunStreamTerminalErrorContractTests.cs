@@ -66,7 +66,7 @@ public class PlaybookRunStreamTerminalErrorContractTests
         // Terminal, safe and correlated.
         var error = frames.Last().Json;
         error.GetProperty("done").GetBoolean().Should().BeTrue();
-        error.GetProperty("error").GetString().Should().Be(PlaybookRunEndpoints.RunFailedMessage);
+        error.GetProperty("error").GetString().Should().Be(PlaybookStreamEvent.RunFailedMessage);
         error.GetProperty("errorCode").GetString().Should().Be("playbook.run-failed");
         error.GetProperty("correlationId").GetString().Should().NotBeNullOrWhiteSpace(
             "ADR-019: the user can quote the correlation id so support finds the server log entry");
@@ -172,7 +172,7 @@ public class PlaybookRunStreamTerminalErrorContractTests
         frames.Select(f => f.Type).Should().Equal(RunFailedType);
         var error = frames.Single().Json;
         error.GetProperty("done").GetBoolean().Should().BeTrue();
-        error.GetProperty("error").GetString().Should().Be(PlaybookRunEndpoints.RunFailedMessage);
+        error.GetProperty("error").GetString().Should().Be(PlaybookStreamEvent.RunFailedMessage);
         error.GetProperty("errorCode").GetString().Should().Be("playbook.run-failed");
         error.GetProperty("correlationId").GetString().Should().NotBeNullOrWhiteSpace();
         body.Should().NotContain("SENTINEL");

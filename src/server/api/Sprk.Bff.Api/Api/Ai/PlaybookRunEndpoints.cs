@@ -23,28 +23,6 @@ public static class PlaybookRunEndpoints
     /// </summary>
     public const string DocumentIdsRequiredMessage = "DocumentIds is required and must not be empty";
 
-    /// <summary>
-    /// The ONE text of the RunFailed SSE event when execution throws (ADR-019): the exception is logged server-side
-    /// only, never echoed to the caller (unified-access-control-r2 task 164).
-    /// </summary>
-    public const string RunFailedMessage = "The playbook run failed. See the server log for details.";
-
-    /// <summary>
-    /// The stable <c>errorCode</c> of the terminal run-failed event written when a run stream fails after it has
-    /// started (ADR-019).
-    /// </summary>
-    public const string RunFailedErrorCode = "playbook.run-failed";
-
-    /// <summary>
-    /// The ONE construction site for the terminal SSE error event of a playbook run stream that fails after it has
-    /// started (ADR-019). Takes NO exception input by design: the safe copy cannot regress into interpolating server
-    /// internals. The caller logs the exception; <paramref name="correlationId"/> (the request trace id) ties the
-    /// event to that log entry.
-    /// </summary>
-    internal static PlaybookStreamEvent BuildRunFailedEvent(Guid runId, Guid playbookId, string correlationId) =>
-        PlaybookStreamEvent.RunFailed(
-            runId, playbookId, RunFailedMessage, errorCode: RunFailedErrorCode, correlationId: correlationId);
-
     public static IEndpointRouteBuilder MapPlaybookRunEndpoints(this IEndpointRouteBuilder app)
     {
         var playbookGroup = app.MapGroup("/api/ai/playbooks/{id:guid}")
@@ -245,7 +223,7 @@ public static class PlaybookRunEndpoints
             if (!cancellationToken.IsCancellationRequested && !terminalWritten)
             {
                 await TryWriteTerminalErrorAsync(
-                    response, BuildRunFailedEvent(runId, id, context.TraceIdentifier), logger);
+                    response, PlaybookStreamEvent.BuildRunFailedEvent(runId, id, context.TraceIdentifier), logger);
             }
         }
     }
@@ -297,6 +275,7 @@ public static class PlaybookRunEndpoints
         var cancellationToken = context.RequestAborted;
         var response = context.Response;
         var knownPlaybookId = Guid.Empty;
+        var sseCommitted = false;
 
         try
         {
@@ -326,6 +305,7 @@ public static class PlaybookRunEndpoints
             response.Headers.CacheControl = "no-cache";
             response.Headers.Connection = "keep-alive";
             await response.StartAsync(cancellationToken);
+            sseCommitted = true;
 
             logger.LogInformation("Client reconnecting to run {RunId}", runId);
 
@@ -355,12 +335,12 @@ public static class PlaybookRunEndpoints
                 return;
             }
 
-            if (response.HasStarted)
+            if (sseCommitted)
             {
                 // The status and content type are already on the wire and cannot be changed: end the stream with
                 // the one terminal error event (ADR-019) rather than closing it silently.
                 await TryWriteTerminalErrorAsync(
-                    response, BuildRunFailedEvent(runId, knownPlaybookId, context.TraceIdentifier), logger);
+                    response, PlaybookStreamEvent.BuildRunFailedEvent(runId, knownPlaybookId, context.TraceIdentifier), logger);
             }
             else
             {

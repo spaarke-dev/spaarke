@@ -350,7 +350,7 @@ public class PlaybookRouteAuthorizationContractTests
         var response = await host.SendAsync(Execute(playbookId, documentId));
         var body = await response.Content.ReadAsStringAsync();
 
-        body.Should().Contain(PlaybookRunEndpoints.RunFailedMessage);
+        body.Should().Contain(PlaybookStreamEvent.RunFailedMessage);
         body.Should().NotContain("secret-internal-detail");
     }
 
