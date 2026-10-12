@@ -59,7 +59,7 @@ completion after review.
 - K3: in the Do lane a lapsed suppression re-raises only when the due date has changed (031's rule: an unchanged date is `dateUnchanged`).
 - A stamp written while a policy counted stays until it lapses if the policy is later switched to `countstowardsuppression = No` (at most 30 days).
 - A Resolved (Acted) Signal carrying a stamp is not read by the status call (the stamp is only written on open or dismissed rows).
-- Cross-wall stamp (uac-r2 K1) is filed, not fixed: defer row F-67, issue #1661 (owner decision).
+- Cross-wall stamp (uac-r2 K1): fixed by #1661 (owner decision D-123, option A). Secure-owned Signals are their own suppression grain, (policy, core, isSecureOwned) and (policy, item, isSecureOwned), in `ApplyAsync`, `ReconcileAsync`, the count read and the 031 planner's stamp read. Known limit: a FIRST episode of a Secure-owned subject (no episode yet, so partition unknown to the pure planner) is not muted by the Secure partition's stamp; the next nightly reconcile stamps it.
 
 ## Fix round 1 (independent review + uac-r2 review of eccee0700)
 

@@ -726,7 +726,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
 /// <param name="Raised">New Signals raised (first episodes and re-raised episodes, including those citing the new version).</param>
 public sealed record PolicyReevaluationResult(bool Success, int SupersededClosed, int Raised, string FailureSummary);
 
-/// <summary>One existing <c>sprk_signal</c> of a policy, as the planner needs it (task 031).</summary>
+/// <summary>One existing <c>sprk_signal</c> of a policy, as the planner needs it (task 031). <c>SecureOwned</c> (#1661, D-123): the Signal is
+/// owned by the Secure Record owner team; set by <see cref="SignalSuppressionService.ReconcileAsync"/> (the only reader of the owner team),
+/// so the planner reads a suppression stamp only within the partition it was written for.</summary>
 internal sealed record ExistingSignal(
     Guid Id,
     string? RowVersion,
@@ -742,7 +744,8 @@ internal sealed record ExistingSignal(
     Guid? CoreRecordId,
     EntityReference? Owner,
     Guid? PolicyVersionId = null,
-    Guid? DecisionRecordId = null)
+    Guid? DecisionRecordId = null,
+    bool SecureOwned = false)
 {
     public bool IsOpen => Status is SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged;
 
@@ -783,7 +786,9 @@ internal sealed class EpisodePlan
 /// <item><b>Grain (FR-17 as amended, D-34/D-36/D-39).</b> Suppression is read per (policy, core-record type, core-record id),
 /// from the generic <c>sprk_corerecordtype</c> + <c>sprk_corerecordid</c> pair, for EVERY core type alike; an item with no core
 /// record is its own grain (policy, item). A Signal of the pair with <c>sprk_suppresseduntil</c> in the future suppresses
-/// the pair: no first Signal and no re-raise.</item>
+/// the pair: no first Signal and no re-raise. <b>#1661 (D-123):</b> only within its secure partition: a stamp on a Secure-owned
+/// Signal mutes only a subject whose latest episode is Secure-owned, a stamp on an ordinary one only the rest (a subject with no
+/// episode yet counts as ordinary).</item>
 /// <item><b>No Signal yet</b>: episode 1, unless suppressed.</item>
 /// <item><b>Latest Open or Acknowledged</b>: the same episode. Its core record re-derived and different (re-filed), it is
 /// closed as ConditionCleared and episode n+1 opens under the new core (unless suppressed); a no-core Signal whose item has
@@ -811,7 +816,11 @@ internal static class SignalEpisodePlanner
             .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.Episode).ToList());
         var hitSubjects = new HashSet<(string, Guid)>();
 
-        bool Suppressed(Grain grain) => existing.Any(s => GrainOf(s) == grain && s.SuppressedUntil is { } until && until > now);
+        // #1661 (D-123): a stamp mutes only its own secure partition. A hit's partition is its subject's latest episode's; a subject with
+        // no episode yet is unknown, and is read as ordinary (a Secure-owned stamp never mutes a hit that may be readable; the nightly
+        // reconcile stamps a new Secure-owned Signal of a suppressed Secure partition the same night).
+        bool Suppressed(Grain grain, bool secureOwned) =>
+            existing.Any(s => s.SecureOwned == secureOwned && GrainOf(s) == grain && s.SuppressedUntil is { } until && until > now);
 
         foreach (var hit in hits)
         {
@@ -825,7 +834,7 @@ internal static class SignalEpisodePlanner
             var grain = GrainOf(hit, core);
             if (!bySubject.TryGetValue((hit.SubjectEntity, hit.SubjectId), out var episodes))
             {
-                if (Suppressed(grain)) plan.Suppressed++;
+                if (Suppressed(grain, secureOwned: false)) plan.Suppressed++;
                 else plan.Creates.Add(new PlannedCreate(hit, 1));
                 continue;
             }
@@ -838,7 +847,7 @@ internal static class SignalEpisodePlanner
                 if (CoreChanged(latest, core))
                 {
                     plan.Closes.Add(latest);
-                    if (Suppressed(grain)) plan.Suppressed++;
+                    if (Suppressed(grain, latest.SecureOwned)) plan.Suppressed++;
                     else plan.Creates.Add(new PlannedCreate(hit, latest.Episode + 1, latest.Id));
                     continue;
                 }
@@ -868,7 +877,7 @@ internal static class SignalEpisodePlanner
                 continue;
             }
 
-            if (Suppressed(grain))
+            if (Suppressed(grain, latest.SecureOwned))
             {
                 plan.Suppressed++;
             }

@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Telemetry;
 
@@ -63,6 +64,14 @@ public static class SuppressionEvents
 /// counted in <see cref="SuppressionStatus.DismissalsRecorded"/> but never in <see cref="SuppressionStatus.DismissalsCounted"/>.
 /// A code the catalog does not know counts (the switch is "declared non-counting", never "undeclared"). A policy whose
 /// <c>sprk_countstowardsuppression</c> is No counts nothing.</para>
+/// <para><b>The secure partition (#1661, owner decision D-123).</b> A Signal owned by the Secure Record owner team (a secure subject
+/// filed under a readable core record, task 039) can sit under a core record a non-member reads. Every grain is therefore split in
+/// two, (policy, core record, isSecureOwned) and (policy, item, isSecureOwned): the dismissals of Secure-owned Signals count toward,
+/// and stamp, only Secure-owned Signals of the same pairing; ordinary dismissals count toward and stamp only ordinary Signals. A
+/// stamp, or a count, on a readable row therefore never reflects a hidden dismissal. "Secure-owned" is the Signal's <c>ownerid</c>
+/// being the team uac-r2's <see cref="SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync"/> identifies (never an id of ours),
+/// looked up only when a team-owned Signal is among the rows. The partition is applied in every place the grain is computed:
+/// <see cref="ApplyAsync"/> (the commit route's follow-up), <see cref="ReconcileAsync"/> (nightly) and the count read.</para>
 /// <para><b>The stamp.</b> At the threshold, <c>sprk_suppresseduntil</c> = the most recent counted dismissal + 30 days is written on
 /// the grain's open Signals and on its dismissed Signals in the window (denormalized so the worklist query does not count Decision
 /// Records per load; task 031's planner reads it for the re-raise rule, D-13). Only rows whose stamp would change are written, so
@@ -100,18 +109,46 @@ public sealed class SignalSuppressionService
     private readonly IGenericEntityService _entities;
     private readonly OntologyWriterDataverseClient _writer;
     private readonly TimeProvider _timeProvider;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<SignalSuppressionService> _logger;
 
     public SignalSuppressionService(
         IGenericEntityService entities,
         OntologyWriterDataverseClient writer,
         TimeProvider timeProvider,
+        IConfiguration configuration,
         ILogger<SignalSuppressionService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    // ── The secure partition (#1661, owner decision D-123) ──────────────────────────────────────────────────────
+
+    /// <summary>The <c>logical name</c> of an owner that is a team: only a team can be the Secure Record owner team.</summary>
+    private const string TeamLogicalName = "team";
+
+    private static bool IsTeamOwned(EntityReference? owner) => owner is { LogicalName: TeamLogicalName };
+
+    /// <summary>True when <paramref name="owner"/> is the Secure Record owner team (and that team exists: <paramref name="secureTeamId"/>).</summary>
+    private static bool IsSecureOwned(EntityReference? owner, Guid? secureTeamId) =>
+        secureTeamId is { } team && team != Guid.Empty && IsTeamOwned(owner) && owner!.Id == team;
+
+    /// <summary>
+    /// The Secure Record owner team's id, identified by uac-r2's one rule (<see cref="SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync"/>:
+    /// the configured business unit and its NAMED, non-default Owner team, TOP 2 each); null when this environment has no such team,
+    /// so no Signal can be secure-owned. An ambiguous answer throws: a count that cannot be partitioned is never a guess (fail closed).
+    /// Not cached, as uac-r2's callers do not cache it; callers ask once per operation and only when a team-owned Signal is in hand.
+    /// </summary>
+    private async Task<Guid?> ResolveSecureTeamAsync(CancellationToken ct)
+    {
+        var (teamId, refusal) = await SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(_entities, _configuration, ct).ConfigureAwait(false);
+        return refusal is null
+            ? teamId
+            : throw new InvalidOperationException($"The Secure Record owner team cannot be identified, so suppression cannot be partitioned ({refusal}).");
     }
 
     /// <summary>True when <paramref name="reason"/> ("code - detail") names a catalog code that never counts toward suppression.</summary>
@@ -134,7 +171,7 @@ public sealed class SignalSuppressionService
     public async Task<SuppressionStatus?> GetStatusForSignalAsync(Guid signalId, IDataverseUserClient caller, CancellationToken ct)
     {
         var signal = await _entities.RetrieveAsync("sprk_signal", signalId,
-            ["sprk_policy", "sprk_corerecordtype", "sprk_corerecordid", "sprk_dedupekey"], ct).ConfigureAwait(false);
+            ["sprk_policy", "sprk_corerecordtype", "sprk_corerecordid", "sprk_dedupekey", "ownerid"], ct).ConfigureAwait(false);
 
         if (signal.GetAttributeValue<EntityReference>("sprk_policy") is not { Id: var policyId } || policyId == Guid.Empty)
         {
@@ -163,18 +200,31 @@ public sealed class SignalSuppressionService
             return null; // a no-core grain is keyed by the policy code: without it the count would be silently zero
         }
 
-        // The count is the CALLER's: the grain's Signals are trimmed to those the caller's own read returns (a Signal owned by a Secure
-        // team under a readable core record is not theirs to count), then Decision-Record facts are read app-only for those rows only.
+        // The count is the CALLER's: the grain's Signals are trimmed to those the caller's own read returns, then Decision-Record facts
+        // are read app-only for those rows only. And it is the anchor Signal's PARTITION's (#1661): a Secure-team-owned Signal is
+        // counted only with other Secure-team-owned Signals of the pairing, an ordinary one only with ordinary ones, so the answer
+        // never carries a number or a stamp from across the secure wall.
+        var anchorOwner = signal.GetAttributeValue<EntityReference>("ownerid");
+        var secureOwned = IsTeamOwned(anchorOwner) && IsSecureOwned(anchorOwner, await ResolveSecureTeamAsync(ct).ConfigureAwait(false));
         var visible = await ReadVisibleSignalIdsAsync(caller, policyId, code, grain, _timeProvider.GetUtcNow().UtcDateTime.AddDays(-WindowDays - 1), ct).ConfigureAwait(false);
-        return (await AssessAsync(policyId, code, grain, policyCounts: null, visible, ct).ConfigureAwait(false)).Status;
+        return (await AssessAsync(policyId, code, grain, policyCounts: null, visible, secureOwned, ct).ConfigureAwait(false)).Single().Assessment.Status;
     }
 
-    /// <summary>Counts the grain and, at the threshold, stamps <c>sprk_suppresseduntil</c>. Idempotent: a second call writes nothing.</summary>
-    public async Task<SuppressionStatus> ApplyAsync(Guid policyId, string policyCode, SuppressionGrain grain, CancellationToken ct)
+    /// <summary>
+    /// Counts the pairing and, at the threshold, stamps <c>sprk_suppresseduntil</c>. Idempotent: a second call writes nothing.
+    /// The pairing is counted in two partitions that never see each other (#1661, D-123): the Secure-team-owned Signals and the rest.
+    /// With <paramref name="secureOwned"/> null (what a caller that has just closed Signals of both kinds wants) both are applied; the
+    /// result is the ordinary partition's, the only one a non-member may be told about. Pass true or false to apply one partition and
+    /// get its status.
+    /// </summary>
+    public async Task<SuppressionStatus> ApplyAsync(
+        Guid policyId, string policyCode, SuppressionGrain grain, CancellationToken ct, bool? secureOwned = null)
     {
-        var assessment = await AssessAsync(policyId, policyCode, grain, policyCounts: null, visibleSignalIds: null, ct).ConfigureAwait(false);
-        await StampAsync(policyCode, assessment, ct).ConfigureAwait(false);
-        return assessment.Status with { SuppressedUntil = assessment.StampUntil ?? assessment.Status.SuppressedUntil };
+        var assessments = await AssessAsync(policyId, policyCode, grain, policyCounts: null, visibleSignalIds: null, secureOwned, ct).ConfigureAwait(false);
+        foreach (var (_, assessment) in assessments) await StampAsync(policyCode, assessment, ct).ConfigureAwait(false);
+
+        var reported = assessments.First(a => a.SecureOwned == (secureOwned ?? false)).Assessment;
+        return reported.Status with { SuppressedUntil = reported.StampUntil ?? reported.Status.SuppressedUntil };
     }
 
     /// <summary>
@@ -189,14 +239,32 @@ public sealed class SignalSuppressionService
     internal async Task<(IReadOnlyList<ExistingSignal> Signals, int Failures)> ReconcileAsync(
         Guid policyId, string policyCode, bool policyCountsTowardSuppression, IReadOnlyList<ExistingSignal> existing, CancellationToken ct)
     {
+        // #1661 (D-123): mark the Secure-owned Signals first, whatever the policy does (the planner reads the mark too, so a stamp on a
+        // Secure-owned row never mutes a readable subject). The Secure team is looked up only when a team-owned Signal is among the rows.
+        // A lookup that cannot be answered fails the pass for this policy (counted, retried tomorrow) and withholds the stamps of
+        // team-owned rows from the planner in memory: a pairing that cannot be partitioned is never counted or muted whole.
+        try
+        {
+            existing = await MarkSecureOwnedAsync(existing, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            LogFailure(policyCode, ex);
+            return (existing.Select(s => IsTeamOwned(s.Owner) && s.SuppressedUntil is not null ? s with { SuppressedUntil = null } : s).ToList(), 1);
+        }
+
         if (!policyCountsTowardSuppression) return (existing, 0);
 
         var now = _timeProvider.GetUtcNow().UtcDateTime;
         var windowStart = now.AddDays(-WindowDays);
-        static (Guid?, Guid?, string?, Guid?) Key(ExistingSignal s) =>
-            s.CoreRecordId is { } core ? (s.CoreTypeRefId, core, null, null) : (null, null, s.SubjectEntity, s.SubjectId);
 
-        bool NeedsWork(IGrouping<(Guid?, Guid?, string?, Guid?), ExistingSignal> g)
+        // The grain plus its secure partition: Secure-team-owned Signals are a grain of their own, apart from the ordinary ones of the pairing.
+        static (Guid?, Guid?, string?, Guid?, bool) Key(ExistingSignal s) =>
+            s.CoreRecordId is { } core
+                ? (s.CoreTypeRefId, core, null, null, s.SecureOwned)
+                : (null, null, s.SubjectEntity, s.SubjectId, s.SecureOwned);
+
+        bool NeedsWork(IGrouping<(Guid?, Guid?, string?, Guid?, bool), ExistingSignal> g)
         {
             var dismissed = g.Where(s => s.Resolution == SignalWriter.ResolutionDismissed && s.ResolvedOn is { } on && on >= windowStart.AddDays(-1)).ToList();
             if (dismissed.Select(s => s.DecisionRecordId ?? s.Id).Distinct().Count() < ThresholdDismissals) return false;
@@ -219,11 +287,12 @@ public sealed class SignalSuppressionService
         var failures = 0;
         foreach (var group in candidates)
         {
-            var (type, core, entity, subject) = group.Key;
+            var (type, core, entity, subject, secureOwned) = group.Key;
             var grain = new SuppressionGrain(type, core, entity, subject);
             try
             {
-                var assessment = await AssessAsync(policyId, policyCode, grain, policyCountsTowardSuppression, visibleSignalIds: null, ct).ConfigureAwait(false);
+                var assessment = (await AssessAsync(policyId, policyCode, grain, policyCountsTowardSuppression, visibleSignalIds: null, secureOwned, ct)
+                    .ConfigureAwait(false)).Single().Assessment;
                 if (assessment.StampUntil is { } until)
                 {
                     // In memory first: the planner must see the suppression this pass even when the write below fails.
@@ -244,6 +313,17 @@ public sealed class SignalSuppressionService
             : (existing.Select(s => stamped.TryGetValue(s.Id, out var until) ? s with { SuppressedUntil = until } : s).ToList(), failures);
     }
 
+    /// <summary>The rows with <see cref="ExistingSignal.SecureOwned"/> set from their owner. Looks the Secure team up only when a team owns
+    /// a row; the same list back when none does, or when this environment has no Secure Record owner team. An unanswerable lookup throws.</summary>
+    private async Task<IReadOnlyList<ExistingSignal>> MarkSecureOwnedAsync(IReadOnlyList<ExistingSignal> existing, CancellationToken ct)
+    {
+        if (!existing.Any(s => IsTeamOwned(s.Owner))) return existing;
+        var secureTeamId = await ResolveSecureTeamAsync(ct).ConfigureAwait(false);
+        return secureTeamId is null
+            ? existing
+            : existing.Select(s => IsSecureOwned(s.Owner, secureTeamId) ? s with { SecureOwned = true } : s).ToList();
+    }
+
     // ── Counting ────────────────────────────────────────────────────────────────────────────────────────────────
 
     private sealed record Assessment(
@@ -254,8 +334,14 @@ public sealed class SignalSuppressionService
 
     private sealed record DismissedSignal(Guid SignalId, DateTime ResolvedOn, Guid? DecisionRecordId);
 
-    private async Task<Assessment> AssessAsync(
-        Guid policyId, string policyCode, SuppressionGrain grain, bool? policyCounts, IReadOnlySet<Guid>? visibleSignalIds, CancellationToken ct)
+    /// <summary>
+    /// Counts one pairing, once per requested SECURE PARTITION (#1661, D-123): the grain's Signals are read once and split by whether
+    /// their owner is the Secure Record owner team, and each partition is counted, stamped and (for the route) reported from its own
+    /// rows only. <paramref name="secureOwned"/> null returns both partitions (ordinary first); true or false returns that one. The
+    /// Secure team is looked up only when a team-owned Signal is among the rows.
+    /// </summary>
+    private async Task<IReadOnlyList<(bool SecureOwned, Assessment Assessment)>> AssessAsync(
+        Guid policyId, string policyCode, SuppressionGrain grain, bool? policyCounts, IReadOnlySet<Guid>? visibleSignalIds, bool? secureOwned, CancellationToken ct)
     {
         var now = _timeProvider.GetUtcNow().UtcDateTime;
         var windowStart = now.AddDays(-WindowDays);
@@ -266,8 +352,26 @@ public sealed class SignalSuppressionService
             policyCounts = policy.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true;
         }
 
-        var signals = await ReadGrainSignalsAsync(policyId, policyCode, grain, windowStart.AddDays(-1), ct).ConfigureAwait(false);
-        if (visibleSignalIds is not null) signals = signals.Where(s => visibleSignalIds.Contains(s.Id)).ToList();
+        var all = await ReadGrainSignalsAsync(policyId, policyCode, grain, windowStart.AddDays(-1), ct).ConfigureAwait(false);
+        if (visibleSignalIds is not null) all = all.Where(s => visibleSignalIds.Contains(s.Id)).ToList();
+
+        var secureTeamId = all.Any(s => IsTeamOwned(s.GetAttributeValue<EntityReference>("ownerid")))
+            ? await ResolveSecureTeamAsync(ct).ConfigureAwait(false)
+            : null;
+
+        var results = new List<(bool, Assessment)>();
+        foreach (var partition in secureOwned is { } only ? [only] : new[] { false, true })
+        {
+            var rows = all.Where(s => IsSecureOwned(s.GetAttributeValue<EntityReference>("ownerid"), secureTeamId) == partition).ToList();
+            results.Add((partition, await AssessPartitionAsync(rows, policyCounts.Value, now, windowStart, ct).ConfigureAwait(false)));
+        }
+
+        return results;
+    }
+
+    private async Task<Assessment> AssessPartitionAsync(
+        IReadOnlyList<Entity> signals, bool policyCounts, DateTime now, DateTime windowStart, CancellationToken ct)
+    {
         var dismissed = signals
             .Where(s => s.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value == SignalWriter.ResolutionDismissed
                 && s.GetAttributeValue<DateTime?>("sprk_resolvedon") is not null)
@@ -304,7 +408,7 @@ public sealed class SignalSuppressionService
             events[key] = (on, counts);
         }
 
-        var counted = policyCounts.Value ? events.Values.Where(e => e.Counts).ToList() : new List<(DateTime On, bool Counts)>();
+        var counted = policyCounts ? events.Values.Where(e => e.Counts).ToList() : new List<(DateTime On, bool Counts)>();
         DateTime? liveStamp = null;
         foreach (var signal in signals)
         {
@@ -337,7 +441,7 @@ public sealed class SignalSuppressionService
         }
 
         var until = stampUntil is { } fresh && (liveStamp is null || fresh > liveStamp) ? fresh : liveStamp;
-        return new Assessment(new SuppressionStatus(counted.Count, events.Count, until, policyCounts.Value), stampUntil, targets);
+        return new Assessment(new SuppressionStatus(counted.Count, events.Count, until, policyCounts), stampUntil, targets);
     }
 
     private async Task StampAsync(string policyCode, Assessment assessment, CancellationToken ct)
@@ -416,7 +520,7 @@ public sealed class SignalSuppressionService
     {
         var query = new QueryExpression("sprk_signal")
         {
-            ColumnSet = new ColumnSet("sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon", "sprk_suppresseduntil", "sprk_decisionrecord"),
+            ColumnSet = new ColumnSet("sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon", "sprk_suppresseduntil", "sprk_decisionrecord", "ownerid"),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition("sprk_policy", ConditionOperator.Equal, policyId);

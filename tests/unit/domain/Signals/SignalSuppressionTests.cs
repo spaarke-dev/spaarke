@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.PowerPlatform.Dataverse.Client;
@@ -638,6 +639,272 @@ public class SignalSuppressionTests
     }
 
     // =====================================================================================
+    // The secure partition (#1661, owner decision D-123): a Secure-owned Signal is counted and muted only among Secure-owned Signals
+    // =====================================================================================
+
+    private static readonly Guid SecureTeamId = Store.SecureTeamId;
+
+    [Fact]
+    public async Task ThreeSecureDismissals_UnderAReadableMatter_StampOnlyTheSecureSignals_AndTheReadableOnesAreUntouched()
+    {
+        var s = new Store();
+        for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1, secure: true);
+        var secureOpen = s.Open(MatterId, Guid.NewGuid(), secure: true);
+        var readableDismissed = s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 1, secure: false);
+        var readableOpen = s.Open(MatterId, Guid.NewGuid(), secure: false);
+
+        var readable = await s.Service.ApplyAsync(PolicyId, Code, Matter(), default);
+
+        readable.DismissalsCounted.Should().Be(1, "only the ordinary partition's own dismissal is the readable pairing's count");
+        readable.SuppressedUntil.Should().BeNull("no hidden dismissal may show in what a non-member can read");
+        s.StampedIds.Should().NotContain([readableDismissed, readableOpen], "the readable Signals of the pairing are never stamped by hidden dismissals");
+        s.StampedIds.Should().HaveCount(4, "the three secure dismissals and the open secure Signal are stamped");
+        s.StampedIds.Should().Contain(secureOpen);
+        s.Signals.Where(x => x.GetAttributeValue<EntityReference>("ownerid").Id == SecureTeamId)
+            .Should().OnlyContain(x => x.GetAttributeValue<DateTime?>("sprk_suppresseduntil") != null);
+        s.Signals.Where(x => x.GetAttributeValue<EntityReference>("ownerid").Id != SecureTeamId)
+            .Should().OnlyContain(x => x.GetAttributeValue<DateTime?>("sprk_suppresseduntil") == null);
+        (await s.Service.ApplyAsync(PolicyId, Code, Matter(), default, secureOwned: true)).DismissalsCounted.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task ThreeReadableDismissals_DoNotStampTheSecureSignals_OfTheSamePairing()
+    {
+        var s = new Store();
+        for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1, secure: false);
+        var secureOpen = s.Open(MatterId, Guid.NewGuid(), secure: true);
+        var secureDismissed = s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 1, secure: true);
+
+        var readable = await s.Service.ApplyAsync(PolicyId, Code, Matter(), default);
+
+        readable.SuppressedUntil.Should().NotBeNull();
+        s.StampedIds.Should().HaveCount(3).And.NotContain([secureOpen, secureDismissed],
+            "the secure wall holds both ways: an ordinary mute never reaches a Secure-owned row");
+        (await s.Service.ApplyAsync(PolicyId, Code, Matter(), default, secureOwned: true)).DismissalsCounted
+            .Should().Be(1, "and the ordinary dismissals are not the secure partition's");
+    }
+
+    [Fact]
+    public async Task TwoSecureAndOneReadableDismissal_Mixed_StampNobody()
+    {
+        var s = new Store();
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 3, secure: true);
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 2, secure: true);
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 1, secure: false);
+        s.Open(MatterId, Guid.NewGuid(), secure: false);
+        s.Open(MatterId, Guid.NewGuid(), secure: true);
+
+        var readable = await s.Service.ApplyAsync(PolicyId, Code, Matter(), default);
+        var secure = await s.Service.ApplyAsync(PolicyId, Code, Matter(), default, secureOwned: true);
+
+        (readable.DismissalsCounted, secure.DismissalsCounted).Should().Be((1, 2), "three dismissals across the wall are 1 + 2, never 3");
+        s.StampedIds.Should().BeEmpty();
+        readable.SuppressedUntil.Should().BeNull();
+        secure.SuppressedUntil.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ATeamOwnedSignal_OfAnotherTeam_IsOrdinary_AndSoIsEverySignalWhenNoSecureTeamExists()
+    {
+        var s = new Store { SecureTeamExists = false };
+        // Owned by a team (Operations) in an environment that has no Secure Record owner team: nothing can be secure-owned.
+        for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1, secure: false);
+        var open = s.Open(MatterId, Guid.NewGuid(), secure: true); // a team id that is not any existing Secure team: still ordinary here
+
+        var status = await s.Service.ApplyAsync(PolicyId, Code, Matter(), default);
+
+        status.SuppressedUntil.Should().NotBeNull();
+        s.StampedIds.Should().Contain(open, "with no Secure team to identify, every Signal is in the one ordinary partition");
+    }
+
+    [Fact]
+    public async Task TheNoCoreGrain_IsPartitionedTheSameWay()
+    {
+        var s = new Store();
+        var item = Guid.NewGuid();
+        for (var i = 0; i < 3; i++) s.Dismiss(core: null, subject: item, daysAgo: i + 1, episode: i + 1, subjectEntity: "sprk_todo", secure: true);
+        var readableOpen = s.Open(core: null, subject: item, secure: false, subjectEntity: "sprk_todo");
+        var secureOpen = s.Open(core: null, subject: item, secure: true, subjectEntity: "sprk_todo");
+
+        var readable = await s.Service.ApplyAsync(PolicyId, Code, SuppressionGrain.ForItem("sprk_todo", item), default);
+
+        readable.SuppressedUntil.Should().BeNull();
+        s.StampedIds.Should().HaveCount(4).And.Contain(secureOpen).And.NotContain(readableOpen);
+
+        // The other way round, and mixed 2 + 1, for a second item.
+        var item2 = Guid.NewGuid();
+        s.StampedIds.Clear();
+        s.Dismiss(core: null, subject: item2, daysAgo: 3, subjectEntity: "sprk_todo", episode: 1, secure: true);
+        s.Dismiss(core: null, subject: item2, daysAgo: 2, subjectEntity: "sprk_todo", episode: 2, secure: true);
+        s.Dismiss(core: null, subject: item2, daysAgo: 1, subjectEntity: "sprk_todo", episode: 3, secure: false);
+        await s.Service.ApplyAsync(PolicyId, Code, SuppressionGrain.ForItem("sprk_todo", item2), default);
+        s.StampedIds.Should().BeEmpty("2 secure + 1 readable dismissal of one item is nobody's third");
+    }
+
+    [Fact]
+    public async Task Reconcile_StampsOnlyTheSecurePartition_AndHandsThePlannerNoStampOnAReadableRow()
+    {
+        var s = new Store();
+        for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1, secure: true);
+        var readableOpen = s.Open(MatterId, Guid.NewGuid(), secure: false);
+        var secureOpen = s.Open(MatterId, Guid.NewGuid(), secure: true);
+
+        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        failures.Should().Be(0);
+        s.StampedIds.Should().HaveCount(4).And.Contain(secureOpen).And.NotContain(readableOpen);
+        signals.Single(x => x.Id == readableOpen).SuppressedUntil.Should().BeNull("the nightly planner sees no stamp on a readable row");
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, Now, [Hit(MatterId, Guid.NewGuid())], signals).Creates
+            .Should().ContainSingle("the readable pairing is not suppressed by dismissals it cannot see");
+    }
+
+    [Fact]
+    public async Task Reconcile_PartitionsTheNoCoreGrainToo()
+    {
+        var s = new Store();
+        var item = Guid.NewGuid();
+        for (var i = 0; i < 3; i++) s.Dismiss(core: null, subject: item, daysAgo: i + 1, episode: i + 1, subjectEntity: "sprk_todo", secure: true);
+        var readableOpen = s.Open(core: null, subject: item, secure: false, subjectEntity: "sprk_todo");
+
+        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        failures.Should().Be(0);
+        s.StampedIds.Should().HaveCount(3).And.NotContain(readableOpen, "three Secure-owned dismissals of an item never mute its ordinary Signals");
+        signals.Single(x => x.Id == readableOpen).SuppressedUntil.Should().BeNull();
+    }
+    [Fact]
+    public async Task Reconcile_ReadsNothing_ForAMixedTwoPlusOne_AndDoesNotStampTheReadableThree()
+    {
+        var s = new Store();
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 3, secure: true);
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 2, secure: true);
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 1, secure: false);
+
+        var (_, failures) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        failures.Should().Be(0);
+        s.StampedIds.Should().BeEmpty();
+        s.Queries.Should().Be(2, "only the Secure team lookup (business unit, team): neither partition has three dismissals, so no grain is read");
+    }
+
+    [Fact]
+    public async Task Reconcile_CountsAFailureAndStampsNothing_WhenTheSecureTeamCannotBeIdentified()
+    {
+        var s = new Store { SecureBusinessUnitAmbiguous = true };
+        for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1, secure: true);
+        s.Open(MatterId, Guid.NewGuid(), secure: false);
+
+        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        failures.Should().Be(1, "a grain that cannot be partitioned is never counted whole: the run fails visibly and retries");
+        s.StampedIds.Should().BeEmpty();
+        signals.Should().OnlyContain(x => x.SuppressedUntil == null);
+    }
+
+    [Fact]
+    public async Task ThePlanner_ReadsAStampOnlyWithinItsPartition_ASecureStampMutesASecureSubject_NeverAReadableOne()
+    {
+        var s = new Store();
+        var secureSubjects = new[] { 3, 2, 1 }.Select(d => s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: d, secure: true)).ToList();
+        var readableDismissed = s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 20, secure: false); // out of the 14-day quiet window
+        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+        failures.Should().Be(0);
+
+        var plan = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, Now, [Hit(MatterId, s.SubjectOf(secureSubjects[0])), Hit(MatterId, s.SubjectOf(readableDismissed))], signals);
+
+        plan.Suppressed.Should().Be(1, "the Secure-owned subject is muted by the Secure partition's stamp");
+        plan.Creates.Should().ContainSingle().Which.Hit.SubjectId.Should().Be(s.SubjectOf(readableDismissed),
+            "the readable subject re-raises: hidden Secure dismissals never mute it");
+    }
+
+    [Fact]
+    public async Task ThePlanner_AReadableStamp_DoesNotMuteASecureSubjectEither()
+    {
+        var s = new Store();
+        for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1, secure: false);
+        var secureDismissed = s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 20, secure: true);
+        var (signals, _) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        var plan = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, Now, [Hit(MatterId, s.SubjectOf(secureDismissed))], signals);
+
+        plan.Suppressed.Should().Be(0);
+        plan.Creates.Should().ContainSingle("an ordinary mute never reaches a Secure-owned subject");
+    }
+
+    [Fact]
+    public async Task Reconcile_WithholdsATeamOwnedRowsStamp_FromThePlanner_WhenTheSecureTeamCannotBeIdentified()
+    {
+        var s = new Store { SecureBusinessUnitAmbiguous = true };
+        var teamOwned = s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 20, secure: true);
+        var ordinary = s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 20); // user-owned: cannot be the Secure team's
+        var stamp = Now.UtcDateTime.AddDays(10);
+        s.Stamp(teamOwned, stamp);
+        s.Stamp(ordinary, stamp);
+
+        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        failures.Should().Be(1);
+        signals.Single(x => x.Id == teamOwned).SuppressedUntil.Should().BeNull("a stamp that may be a Secure one is not read as an ordinary mute");
+        signals.Single(x => x.Id == ordinary).SuppressedUntil.Should().Be(stamp, "only team-owned rows are withheld (in memory; nothing is written): a user-owned row cannot be Secure-owned");
+        s.StampedIds.Should().BeEmpty();
+    }
+    [Fact]
+    public async Task Apply_Throws_WhenTheSecureTeamCannotBeIdentified_NeverCountingTheWallAsOneGrain()
+    {
+        var s = new Store { SecureBusinessUnitAmbiguous = true };
+        for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1, secure: true);
+
+        var act = () => s.Service.ApplyAsync(PolicyId, Code, Matter(), default);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Secure Record owner team*");
+        s.StampedIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TheRoute_ForAReadableSignal_NeverCountsSecureDismissals_EvenWhenTheCallerCanReadThem()
+    {
+        var s = new Store();
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 4, secure: false);
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 3, secure: false);
+        for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 2, secure: true, record: null);
+        var mine = s.Open(MatterId, Guid.NewGuid(), secure: false);
+
+        // No Signal is hidden from this caller (an owner of the Secure team's rows, say): the partition, not the trim, keeps them apart.
+        var result = await Route(mine, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })));
+
+        var body = result.Should().BeOfType<Ok<SuppressionResponse>>().Subject.Value!;
+        (body.DismissalCount, body.DismissalsRecorded).Should().Be((2, 2), "the five dismissals of the pairing are 2 readable and 3 secure");
+        body.SuppressedUntil.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TheRoute_ForASecureSignal_CountsOnlyTheSecurePartition()
+    {
+        var s = new Store();
+        for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1, secure: true);
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 1, secure: false);
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 1, secure: false);
+        var mine = s.Open(MatterId, Guid.NewGuid(), secure: true);
+        await s.Service.ApplyAsync(PolicyId, Code, Matter(), default);
+
+        var result = await Route(mine, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })));
+
+        var body = result.Should().BeOfType<Ok<SuppressionResponse>>().Subject.Value!;
+        (body.DismissalCount, body.DismissalsRecorded).Should().Be((3, 3), "a member who can read the secure Signals counts the secure partition only");
+        body.SuppressedUntil.Should().Be(Now.UtcDateTime.AddDays(-1).AddDays(30));
+    }
+
+    [Fact]
+    public async Task TheRoute_ForAReadableSignal_AsksNoSecureTeamLookup_WhenNoSignalIsTeamOwned()
+    {
+        var s = new Store();
+        var mine = s.Open(MatterId, Guid.NewGuid());
+
+        await Route(mine, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })));
+
+        s.TeamReads.Should().Be(0, "an owner that is a user cannot be the Secure team: no lookup");
+    }
+    // =====================================================================================
     // Fixtures
     // =====================================================================================
 
@@ -703,6 +970,35 @@ public class SignalSuppressionTests
         private int _writes;
         public bool FailReads { get; set; }
         public int Queries { get; private set; }
+
+        // uac-r2's identification of the Secure Record owner team: the configured BU (default name), and in it a NAMED, non-default Owner team.
+        public static readonly Guid SecureTeamId = Guid.Parse("5ec0be00-0000-4000-8000-000000000001");
+        public static readonly Guid OperationsTeamId = Guid.Parse("0e1a7100-0000-4000-8000-000000000002");
+        private static readonly Guid SecureBuId = Guid.Parse("5ec0be00-0000-4000-8000-0000000000b1");
+        public bool SecureTeamExists { get; set; } = true;
+        public bool SecureBusinessUnitAmbiguous { get; set; }
+
+        private List<Entity> SecureBusinessUnits() =>
+            !SecureTeamExists ? [] : Enumerable.Range(0, SecureBusinessUnitAmbiguous ? 2 : 1)
+                .Select(i => new Entity("businessunit", i == 0 ? SecureBuId : Guid.NewGuid()) { ["name"] = SecureRecordOwnerTeam.DefaultBusinessUnitName }).ToList();
+
+        public int TeamReads { get; private set; }
+
+        private List<Entity> CountTeamRead() { TeamReads++; return Teams(); }
+
+        private List<Entity> Teams() =>
+        [
+            new Entity("team", SecureTeamId)
+            {
+                ["businessunitid"] = new EntityReference("businessunit", SecureBuId), ["name"] = SecureRecordOwnerTeam.DefaultOwnerTeamName,
+                ["teamtype"] = new OptionSetValue(SecureRecordOwnerTeam.OwnerTeamType), ["isdefault"] = false,
+            },
+            new Entity("team", OperationsTeamId)
+            {
+                ["businessunitid"] = new EntityReference("businessunit", Guid.NewGuid()), ["name"] = "Operations",
+                ["teamtype"] = new OptionSetValue(SecureRecordOwnerTeam.OwnerTeamType), ["isdefault"] = true,
+            },
+        ];
         public SignalSuppressionService Service { get; }
 
         public Store()
@@ -729,7 +1025,7 @@ public class SignalSuppressionTests
                     return Task.CompletedTask;
                 });
             var writer = new OntologyWriterDataverseClient(() => org.Object, NullLogger<OntologyWriterDataverseClient>.Instance);
-            Service = new SignalSuppressionService(entities.Object, writer, clock, NullLogger<SignalSuppressionService>.Instance);
+            Service = new SignalSuppressionService(entities.Object, writer, clock, new ConfigurationBuilder().Build(), NullLogger<SignalSuppressionService>.Instance);
         }
 
         public Guid Record(RecordedDecisionClass cls, string? reason, int daysAgo)
@@ -746,14 +1042,14 @@ public class SignalSuppressionTests
 
         public Guid Dismiss(
             Guid? core, Guid subject, int daysAgo, string reason = Counts, RecordedDecisionClass recordClass = RecordedDecisionClass.Dismissal,
-            Guid? record = null, Guid? policy = null, Guid? coreType = null, int episode = 1, string subjectEntity = "sprk_communication") =>
-            Add(core, subject, SignalWriter.ResolutionDismissed, daysAgo, record ?? Record(recordClass, reason, daysAgo), policy, coreType, episode, subjectEntity);
+            Guid? record = null, Guid? policy = null, Guid? coreType = null, int episode = 1, string subjectEntity = "sprk_communication", bool? secure = null) =>
+            Add(core, subject, SignalWriter.ResolutionDismissed, daysAgo, record ?? Record(recordClass, reason, daysAgo), policy, coreType, episode, subjectEntity, secure);
 
         public Guid Closed(Guid core, int resolution, int daysAgo) =>
             Add(core, Guid.NewGuid(), resolution, daysAgo, null, null, null, 1, "sprk_communication");
 
-        public Guid Open(Guid core, Guid subject) =>
-            Add(core, subject, null, 0, null, null, null, 1, "sprk_communication");
+        public Guid Open(Guid? core, Guid subject, bool? secure = null, string subjectEntity = "sprk_communication") =>
+            Add(core, subject, null, 0, null, null, null, 1, subjectEntity, secure);
 
         public void Stamp(Guid signalId, DateTime until) => Signals.Single(x => x.Id == signalId)["sprk_suppresseduntil"] = until;
 
@@ -763,7 +1059,7 @@ public class SignalSuppressionTests
             return id;
         }
 
-        private Guid Add(Guid? core, Guid subject, int? resolution, int daysAgo, Guid? record, Guid? policy, Guid? coreType, int episode, string subjectEntity)
+        private Guid Add(Guid? core, Guid subject, int? resolution, int daysAgo, Guid? record, Guid? policy, Guid? coreType, int episode, string subjectEntity, bool? secure = null)
         {
             var id = Guid.NewGuid();
             var row = new Entity("sprk_signal", id)
@@ -772,6 +1068,8 @@ public class SignalSuppressionTests
                 ["sprk_dedupekey"] = SignalWriter.BuildDedupeKey(Code, subjectEntity, subject.ToString("D").ToLowerInvariant(), episode),
                 ["sprk_signalstatus"] = new OptionSetValue(resolution is null ? SignalWriter.SignalStatusOpen : SignalWriter.SignalStatusResolved),
             };
+            // secure: null = no owner on the row (every pre-#1661 test); false = an ordinary team (Operations); true = the Secure Record owner team.
+            if (secure is { } isSecure) row["ownerid"] = new EntityReference("team", isSecure ? SecureTeamId : OperationsTeamId);
             if (core is { } coreId)
             {
                 row["sprk_corerecordid"] = coreId.ToString("D").ToLowerInvariant();
@@ -804,7 +1102,7 @@ public class SignalSuppressionTests
                     null,
                     x.GetAttributeValue<EntityReference>("sprk_corerecordtype")?.Id,
                     Guid.TryParse(x.GetAttributeValue<string>("sprk_corerecordid"), out var core) ? core : null,
-                    new EntityReference("systemuser", Guid.NewGuid()),
+                    x.GetAttributeValue<EntityReference>("ownerid") ?? new EntityReference("systemuser", Guid.NewGuid()),
                     DecisionRecordId: x.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id);
             }).ToList();
 
@@ -816,6 +1114,8 @@ public class SignalSuppressionTests
             {
                 "sprk_signal" => Signals,
                 "sprk_decisionrecord" => Records,
+                "businessunit" => SecureBusinessUnits(),
+                "team" => CountTeamRead(),
                 _ => throw new NotSupportedException(q.EntityName),
             };
             var result = new EntityCollection();
