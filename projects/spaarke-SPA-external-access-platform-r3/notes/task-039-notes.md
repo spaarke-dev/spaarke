@@ -157,6 +157,8 @@ Command `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-pu
 
 ### 11.1 INTERIM main-session decision, pending the owner
 
+> **Superseded by section 12** (owner decision 2026-10-12, option B "secure roots only"). Kept for the record.
+
 On the external plane, a row filed to SEVERAL core roots (project / matter / work assignment) is listed only when the caller holds Read on EVERY root it carries. It is ONE function, `Infrastructure/ExternalAccess/ExternalMultiRootRule.AllRootsReadable`, called by every list below. `ExternalDataService.ParentReadable` is gone (extracted, not copied).
 
 - **What it applies to now**: events (039), to-dos (F1), documents, message threads, the notification feed, and the module grid's documents module (F2 audit, section 11.3).
@@ -261,3 +263,140 @@ On the external plane, a row filed to SEVERAL core roots (project / matter / wor
 - **K4**: invoice documents use the every-root rule (documents carry explicit typed links) while the invoice message thread uses any-parent (owner decision 2026-10-11). A caller who reaches an invoice through one parent sees its thread but not documents also filed to another parent. This is an over-hide, not a leak, pending the owner.
 
 **Evidence.** `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors. Unit, filter `External|Tier2Scope|CommunicationThread`: 2884 passed, 0 failed (plus `Tier2ScopeFilterInjectorTests` 14 passed after one more test). `tests/Spaarke.ArchTests`: 941 passed; no ledger cite moved.
+
+## 12. Owner decision 2026-10-12: option B (secure roots only)
+
+Supersedes the interim every-root rule of 11.1 (option A). Commit `d29fe0342`.
+
+### 12.1 The rule
+
+- The caller still reaches the row through a root it can read: the route parent, or the dimension it matched in a list or the grid. That part is unchanged.
+- In addition, the caller needs Read on every linked root that is **secure** (`sprk_issecure = true` on that root record).
+- A linked root the caller cannot read that is NOT secure no longer hides the row.
+- A linked root the caller CAN read never needs a flag lookup.
+- One implementation: `ExternalMultiRootRule.SecureRootsReadable(caller, flags, roots)`, renamed from `AllRootsReadable`. Every path calls it with flags from `ExternalMultiRootRule.ReadFlagsAsync`.
+  - `DocumentRootLinks.AllReadableBy` is now `SecureRootsReadableBy(caller, flags)`.
+  - `DocumentScopeRead.IsReadableUnder` takes the flags.
+  - The module flag `RequireReadOnEveryRoot` is renamed `RequireReadOnSecureRoots`.
+- **Which roots carry the flag.** All three: `sprk_project`, `sprk_matter` and `sprk_workassignment` (live metadata, recorded in `SecureRecordRoot` and `ExternalParticipationService.RootFlagSources`). No root entity lacks it, so there was no "unknown entity" case to decide. The rule only ever looks up these three; `sprk_regardingservicerequest` is still not consulted (11.2 K1).
+
+### 12.2 Fail-closed cases
+
+A linked root counts as SECURE, and the row is withheld, unless a successful read returned `sprk_issecure = false` for exactly that root:
+
+- the flag read fails (non-success status) or throws (transport fault, token failure). `GetCollectionAsync` logs it, and an exception escaping the reader is caught by `ReadFlagsAsync`, which logs it and returns `SecureRootFlags.None`;
+- the root record is not returned: it is missing, or invisible to the app identity;
+- `sprk_issecure` is absent or null. A field-security-masked value reads empty, matching `ExternalParticipationService.FlagsFrom` and `RecordContainerResolver`;
+- `sprk_issecure` is not a JSON boolean;
+- the lookup value is not a GUID (malformed). It is withheld without a lookup;
+- the root is past the per-request bound `MaxFlagLookups` = 500 distinct unreadable roots (logged);
+- the reader answers for an id that was not asked. That answer is ignored.
+
+### 12.3 Data access and batching
+
+- **Reader.** `ExternalDataService.GetNonSecureRootsAsync`.
+  - It reads app-only and reuses the existing `GetByIdsAsync` helper (chunked `or` filter on ids, `IdFilterChunkSize` = 100, paged, no new client).
+  - It sends one query per root entity per 100 ids, `$select={entity}id,sprk_issecure`.
+  - Only the distinct linked roots the caller cannot read are asked, across the whole page or row set: `ReadFlagsAsync` collects them before deciding any row.
+  - No unreadable root means no query at all.
+- **Why not `ExternalParticipationService.GetRootRecordFlagsAsync`.**
+  - It is the other app-only reader of the flag, and it also selects `sprk_accesspermission` and `statecode`.
+  - `ExternalDataService`, which runs the lists, does not hold it. Injecting it would change a constructor that about 70 test sites build.
+  - The brief asked for id + `sprk_issecure` only.
+  - Both readers fail closed on an empty flag.
+- **Cache.** No request-scoped cache. Each path makes exactly one batched read per request, so a cache would add a scoped DI registration and save nothing. There is no cross-request cache, so a staff change to `sprk_issecure` applies on the next request.
+- **Seams.**
+  - The message thread and the feed hand `CommunicationThreadReadService` a `MessageRootsFilter`. The service calls it once with every candidate row's stamps and gets the per-row predicate back. It still has no reference to the external-access layer.
+  - The grid fetch core and the message core take a `NonSecureRootReader`. The handlers pass `ExternalDataService.GetNonSecureRootsAsync`, now resolved from DI in `ExecuteScopedFetchAsync` and `GetMessagesAsync`.
+
+### 12.4 Per-path verdicts
+
+| Path | Rule now | Notes |
+|---|---|---|
+| `GET /{projects,matters,workassignments}/{id}/events` | Secure roots | One flag read per list (`ReadableEventsAsync`) |
+| `GET .../todos` x3 | Secure roots | One flag read per list |
+| `GET .../documents` x5 | Secure roots | Six links (typed + related twin); one flag read per list |
+| `GET .../documents/{docId}/content` and `/versions` (5 kinds each) | Secure roots | The flags are read only once the document is under the route parent (a misfiled or missing document is refused with no flag read). The deny is still `DenyDocumentNotUnderParent`, byte-identical for missing, misfiled, secure-linked and unknown-state (tested) |
+| `GET /{projects,matters,workassignments,servicerequests}/{id}/messages` | Secure roots | One flag read per thread |
+| `GET /invoices/{id}/messages` | **Exempt (any parent)** | Owner 2026-10-11, kept: no flag is read, and even a secure other parent does not withhold (tested) |
+| `GET /notifications` (message items) | Secure roots | One flag read per feed. Grant items are single-root (unchanged) |
+| Module grid documents module (`/data/fetch`) | Secure roots | `ScopeRows` stays synchronous. The endpoint pre-fetches the flags over `module.RootLinks(row)` for every returned row, then passes them in. `ScopeRows` without flags fails closed (tested) |
+| Module grid invoices module | Unchanged (union of parents) | Owner 2026-10-11 |
+| **`DELETE /documents|todos|events/{id}` (task 032)** | **Unchanged: Read on EVERY parent** | FR-26 requires Read on the parent. A delete is a write, and the creator stamp plus every-parent Read stays the bar. `AuthorizeDeleteOwnAsync` does not call the multi-root rule, and nothing in it changed |
+
+### 12.5 Tests
+
+All tests read the flags through the REAL `ExternalDataService.GetNonSecureRootsAsync` over `ExternalRootEventReadTests.FakeDataverse`, extended to serve the root entity sets:
+
+- the `or` filter on ids;
+- `$select`-projected;
+- a null value omitted;
+- `FlagFault` / `FlagReadThrows`;
+- `FlagReads` counts the queries.
+
+The feed's `FeedData` now has a test token, so its base flag read reaches the fake. `ExternalModuleColumnAllowListTests` (column guard only) passes a reader that knows nothing.
+
+| Path family | must-fire (secure, unreadable → hidden) | must-not-fire (non-secure unreadable → visible; secure readable → visible, no flag read) | fail-closed (throws / fault / missing / null flag / malformed → hidden) | batching (same unreadable root on N rows → one query per entity) |
+|---|---|---|---|---|
+| Lists (events, to-dos, documents x 3 routes), `ExternalMultiRootListReadTests` | `OptionB_ARowAlsoFiledToASecureRoot...` (9), `Todos_/Documents_AlsoFiledToASecureRoot...` | `OptionB_...NonSecureRoot..._IsListed` (9), `OptionB_...SecureRootTheCallerCanRead..._WithoutAFlagRead` (3), `OptionB_ARowFiledToOneRoot_CausesNoFlagRead` (3) | `OptionB_TheOtherRootsSecureStateCannotBeRead...` (15) | `OptionB_ManyRowsLinkedToTheSameUnreadableRoots_CostOneFlagQueryPerRootType` (3) |
+| Single document (content, versions x 3 routes), `ExternalMultiRootDocumentRouteTests` | `ADocumentAlsoFiledToASecureRoot..._IsRefused...` (6), identical-body test (6) | `..._NonSecureRoot..._IsServed_OptionB` (6), `..._SecureRootTheCallerCanRead_IsServed_WithoutAFlagRead` (6) | `ADocumentWhoseOtherRootsSecureStateCannotBeRead...` (8), malformed (6, existing) | `ADocumentLinkedToTheSameUnreadableRootTwice_CostsOneFlagQuery_AndAMisfiledOneNone` (2) |
+| Messages, `ExternalMessageEndpointsTests` | `AMessageAlsoFiledToASecureRoot..._IsWithheld_OnEveryRootRoute` (3) | `..._NonSecureRoot..._IsListed_OptionB` (3), `..._SecureRootTheCallerCanRead_IsListed_WithoutAFlagRead`, invoice exemption (secure parent, no read) | `AMessageWhoseOtherRootsSecureStateCannotBeRead...` (4), malformed / non-string stamps (existing) | `ManyMessagesStampedWithTheSameUnreadableRoots_CostOneFlagQueryPerRootType` |
+| Feed, `ExternalNotificationFeedTests` | `AMessageAlsoFiledToASecureRoot..._IsNotInTheFeed` (2) | `..._NonSecureRoot..._IsInTheFeed_OptionB` (2), `..._SecureRootTheCallerCanRead_..._WithoutAFlagRead` | `AMessageWhoseOtherRootsSecureStateCannotBeRead...` (5, incl. malformed) | `ManyFeedMessagesStampedWithTheSameUnreadableRoot_CostOneFlagQuery` |
+| Grid documents module, `ExternalMultiRootListReadTests` | `DocumentsModuleFetch_..._SecureRoot..._IsWithheld_OptionB` (2), existing withholding tests (now seeded secure) | `DocumentsModuleFetch_..._NonSecureRoot..._IsListed_OptionB` (4, typed + twin), readable-secure test asserts no flag read | `DocumentsModuleFetch_TheOtherRootsSecureStateCannotBeRead...` (5), `DocumentsModule_ScopeRows_WithoutFlags_...` | `DocumentsModuleFetch_ManyRowsLinkedToTheSameUnreadableRoot_CostOneFlagQuery` |
+| The rule itself, `ExternalMultiRootRuleTests` (new) | secure withholds | non-secure opens; a readable root is never asked | reader throws; an unasked answer opens nothing; malformed; past the bound | 20 rows, one id asked |
+
+**New tests: 100** (filtered unit run 2885 → 2985).
+
+**Fail-before** (mutations in `SecureRootsReadable`, one build and one filtered run each, restored with `git checkout`):
+
+- **(a) Old rule.** Every unreadable root withholds (option A). **34 of 2985 fail.** Every one is a must-not-fire or batching test across all five families plus the rule tests: lists 9 + 3, single document 6 + 2, grid 4 + 1, messages 3 + 1, feed 2 + 1, rule 2.
+- **(b) Secure check removed.** An unreadable root never withholds. **84 of 2985 fail.** These are every must-fire and fail-closed test (throws / fault / missing / null flag) in all five families, plus the existing event withholding tests and the rule tests.
+  - The malformed-lookup tests do not fail under (b). They are withheld by the rule's own non-GUID branch, before any flag is consulted, which is the intended structure.
+
+### 12.6 Evidence
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors. `tests/unit/Sprk.Bff.Api.Tests`: 0 warnings, 0 errors.
+- Unit, filter `External|Tier2Scope|CommunicationThread|Issue963`: **2985 passed, 0 failed, 0 skipped**.
+- `tests/Spaarke.ArchTests`: **941 passed**. No ledger cite moved.
+- Publish size: 12.7.
+
+### 12.7 Publish size (BFF hygiene item 4)
+
+The method of section 8, with one difference: each tree is exported with `git archive <rev> -- src/server config Directory.Build.props Directory.Packages.props global.json .editorconfig` into a short path (`C:\wt039bm`, `C:\wt039bh`, `C:\wt039bb`; removed afterwards) instead of a detached worktree.
+
+The publish is `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, then `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`, PDBs included.
+
+| Tree | Commit | Files | Zip |
+|---|---|---|---|
+| Fresh `origin/master` | `37470dacc` | 192 | 36.461 MB |
+| R3 head before this change | `b60f11898` | 192 | 36.524 MB |
+| This change | `d29fe0342` | 192 | 36.531 MB |
+
+- **Change delta** (vs R3 head): +0.007 MB.
+- **Delta vs fresh master** (all R3 BFF work so far): +0.070 MB.
+- File counts are equal. This is far under the +5 MB trigger, the 55 MB review and the 60 MB stop.
+- **No new HIGH CVE**: no package reference changed.
+
+### 12.8 Component justification (CLAUDE.md section 11)
+
+The new surface consists of:
+
+- `ExternalDataService.GetNonSecureRootsAsync` and `ReadSecureRootFlagsAsync`;
+- `ExternalMultiRootRule.ReadFlagsAsync`, `UnreadableRoots`, `Stamps` and `MaxFlagLookups`;
+- the `SecureRootFlags` type;
+- the `NonSecureRootReader` and `MessageRootsFilter` delegates;
+- `ExternalModuleDescriptor.RootLinks`.
+
+The three answers:
+
+1. **Existing.** `ExternalParticipationService.GetRootRecordFlagsAsync` reads the same flag; see 12.3 for why it was not reused here. `GetByIdsAsync` is reused, and the rule stays in the one existing class.
+2. **Extension.** Each item extends an existing component: the rule class, the data service, the module descriptor, the read service's existing required parameter (its type changed from a per-row predicate to a batch filter). There are no new DI registrations and no packages.
+3. **Cost of doing nothing.** Without the flag read the rule cannot tell a secure root from a non-secure one, so it either over-hides (option A, which the owner rejected) or leaks a secure root's rows (no check).
+
+### 12.9 Not settled
+
+- **Own flag vs effective flag.** The rule reads each root's OWN `sprk_issecure`, as the decision states. The codebase's `GetEffectiveRootRecordFlagsAsync` (UAC-r2 task 174) treats a work assignment or project filed under a secure record as secure before its own flag catches up, and its remarks say every access decision asks that.
+  - Case not covered: a row linked to readable P and to unreadable work assignment W, where W's own flag is false but W is filed under secure matter M. That row is listed unless the row also carries M's stamp.
+  - `CoreAncestorResolver` normally stamps M as well, which closes it.
+  - Switching to effective flags is a change in `GetNonSecureRootsAsync` alone. It costs the filing walk (batched per level). Owner to confirm.
+- K1, K2 and K4 of 11.8 are unchanged. Under option B, K4 (invoice documents use the multi-root rule, the invoice thread does not) over-hides only when the other parent is secure.
