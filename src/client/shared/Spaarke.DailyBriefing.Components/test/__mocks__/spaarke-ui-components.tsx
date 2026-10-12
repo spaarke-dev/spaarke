@@ -52,6 +52,11 @@ export interface ISendEmailDialogMockProps {
   [k: string]: any;
 }
 export const SendEmailDialog: React.FC<ISendEmailDialogMockProps> = () => null;
+// `describeSendFailure` — DailyBriefingApp.tsx imports it for the failed-send dialog copy.
+export const describeSendFailure: (...args: unknown[]) => { title: string; message: string; reference?: string } = () => ({
+  title: 'Email not sent',
+  message: '',
+});
 
 // ---------------------------------------------------------------------------
 // messaging-communication-app (task 092, 2026-10-04): `sectionRegistry.ts`
@@ -121,9 +126,7 @@ export const PanelSplitter: React.FC<any> = () => null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const useTwoPanelLayout: (...args: any[]) => any = () => ({});
 
-// `RichFilePreviewDialog` — also the originally-reported missing export for
-// DailyBriefingApp.smoke.test.tsx / CountReconciliation.smoke.test.tsx
-// (DailyBriefingApp.tsx itself imports it directly).
+// `RichFilePreviewDialog` — DailyBriefingApp.tsx imports it directly.
 export interface IRichFilePreviewDialogMockProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onOpenFile?: (mode: string) => any;
