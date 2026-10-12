@@ -117,14 +117,19 @@ public interface IThreadResolver
     /// detection as the filing reconcile's whole-thread move: <c>SecureChildShareSynchronizer</c> / <c>IsSecureOwner</c>) →
     /// <see cref="ThreadOwnerReconcileOutcome.SkippedSecure"/>, the thread is left (a secure record's mirrored shares are not
     /// written here);</item>
+    /// <item>the thread carries MORE than one typed regarding lookup (the anchor is then the first in priority order, which
+    /// is not necessarily the record the thread is for) → <see cref="ThreadOwnerReconcileOutcome.SkippedAmbiguousAnchor"/>,
+    /// the thread is left — a wrong re-own is worse than an unowned thread;</item>
     /// <item>already owned by that team → <see cref="ThreadOwnerReconcileOutcome.AlreadyCorrect"/>, no write;</item>
-    /// <item>otherwise the owner is assigned → <see cref="ThreadOwnerReconcileOutcome.Assigned"/>.</item>
+    /// <item>otherwise the owner is assigned → <see cref="ThreadOwnerReconcileOutcome.Assigned"/>, and the result carries the
+    /// owner it replaced (<see cref="ThreadOwnerReconcileResult.PreviousOwnerType"/> /
+    /// <see cref="ThreadOwnerReconcileResult.PreviousOwnerId"/>) so a wrong re-own can be reversed from the run history.</item>
     /// </list>
     /// With <paramref name="dryRun"/> the same answer is computed and NOTHING is written (<c>Assigned</c> then means "would
     /// be assigned"). Best-effort / non-fatal (NFR-02): never throws; a fault is logged and answers
     /// <see cref="ThreadOwnerReconcileOutcome.Failed"/>.
     /// </summary>
-    Task<ThreadOwnerReconcileOutcome> ReconcileAnchoredThreadOwnerAsync(
+    Task<ThreadOwnerReconcileResult> ReconcileAnchoredThreadOwnerAsync(
         Guid threadId, bool dryRun = false, CancellationToken ct = default);
 
     /// <summary>
@@ -208,6 +213,31 @@ public enum ThreadOwnerReconcileOutcome
 
     /// <summary>A fault (logged); left as it is.</summary>
     Failed,
+
+    /// <summary>
+    /// More than one typed regarding lookup is populated on the thread, so which record it is "for" cannot be told; left as it
+    /// is (never re-owned). Appended last so the values above keep their numbers.
+    /// </summary>
+    SkippedAmbiguousAnchor,
+}
+
+/// <summary>
+/// The answer of <see cref="IThreadResolver.ReconcileAnchoredThreadOwnerAsync"/>: the <see cref="Outcome"/>, and for an
+/// <see cref="ThreadOwnerReconcileOutcome.Assigned"/> thread the owner it replaced and the team it gets — the before-state a
+/// wrong re-own is reversed from. Converts implicitly from a bare outcome (every other answer carries nothing more).
+/// </summary>
+/// <param name="Outcome">What was (or, on a dry run, would be) done.</param>
+/// <param name="PreviousOwnerType">Logical name of the previous <c>ownerid</c> (<c>systemuser</c> / <c>team</c>); null when none was read.</param>
+/// <param name="PreviousOwnerId">Id of the previous <c>ownerid</c>; null when none was read.</param>
+/// <param name="NewOwnerTeamId">The team the thread is (or would be) given.</param>
+public sealed record ThreadOwnerReconcileResult(
+    ThreadOwnerReconcileOutcome Outcome,
+    string? PreviousOwnerType = null,
+    Guid? PreviousOwnerId = null,
+    Guid? NewOwnerTeamId = null)
+{
+    /// <summary>A bare outcome with no before-state.</summary>
+    public static implicit operator ThreadOwnerReconcileResult(ThreadOwnerReconcileOutcome outcome) => new(outcome);
 }
 
 /// <summary>Whose read grant a message gets from the thread it joined (#1629).</summary>

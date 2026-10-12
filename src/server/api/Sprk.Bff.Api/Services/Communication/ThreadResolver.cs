@@ -662,9 +662,13 @@ public sealed class ThreadResolver : IThreadResolver
     /// <see cref="AnchorThreadForFilingAsync"/> and the create paths use — and the Secure-team guard is
     /// <see cref="AnchorThreadForFilingAsync"/>'s (<c>ownership.IsSecureOwner || ThreadOwnerMayBeSecureAsync</c>). The one
     /// write is the owner; no other column of the thread, no message, and no grant is touched (a message's own owner is its
-    /// own, and its read grants do not depend on the thread's owner).
+    /// own, and its read grants do not depend on the thread's owner). A thread with more than one typed regarding lookup is
+    /// skipped (<see cref="ThreadOwnerReconcileOutcome.SkippedAmbiguousAnchor"/>): <see cref="ThreadAnchorOf"/> takes the first
+    /// in priority order, which need not be the record the thread is for, and the owner is derived from that anchor. The
+    /// write is the only place a thread's previous owner is lost, so the Apply log line and the result carry it (before-state
+    /// for reversing a wrong re-own).
     /// </remarks>
-    public async Task<ThreadOwnerReconcileOutcome> ReconcileAnchoredThreadOwnerAsync(
+    public async Task<ThreadOwnerReconcileResult> ReconcileAnchoredThreadOwnerAsync(
         Guid threadId, bool dryRun = false, CancellationToken ct = default)
     {
         try
@@ -691,6 +695,18 @@ public sealed class ThreadResolver : IThreadResolver
                     "Thread owner reconcile skipped: thread {ThreadId} is {Shape}", threadId,
                     !isActive ? "inactive" : !isOpen ? "not Open" : "not anchored to a record");
                 return ThreadOwnerReconcileOutcome.NotApplicable;
+            }
+
+            // More than one typed lookup: the anchor is only the first in priority order, so the owner derived from it may be
+            // the wrong record's team. Never re-own such a thread (owner decision: a wrong owner is worse than an old one).
+            var populatedLookups = ThreadRegardingColumns.Count(
+                c => thread.GetAttributeValue<EntityReference>(c) is { } er && er.Id != Guid.Empty);
+            if (populatedLookups > 1)
+            {
+                _logger.LogInformation(
+                    "Thread owner reconcile left thread {ThreadId}: {LookupCount} typed regarding lookups are set, so its anchor " +
+                    "is ambiguous", threadId, populatedLookups);
+                return ThreadOwnerReconcileOutcome.SkippedAmbiguousAnchor;
             }
 
             Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? ownership;
@@ -741,10 +757,15 @@ public sealed class ThreadResolver : IThreadResolver
                     ct);
             }
 
+            // The before-state: ownerid is overwritten, so the previous owner is logged here and returned for the run report.
+            var previousOwner = thread.GetAttributeValue<EntityReference>(OwnerIdField);
             _logger.LogInformation(
-                "Thread owner reconcile {Action} thread {ThreadId} (anchored to {RecordType}:{RecordId}) to team {TeamId}",
-                dryRun ? "would assign" : "assigned", threadId, anchor.RecordType, anchor.RecordId, teamId);
-            return ThreadOwnerReconcileOutcome.Assigned;
+                "Thread owner reconcile {Action} thread {ThreadId} (anchored to {RecordType}:{RecordId}) to team {TeamId}; " +
+                "previous owner {PreviousOwnerType}:{PreviousOwnerId}",
+                dryRun ? "would assign" : "assigned", threadId, anchor.RecordType, anchor.RecordId, teamId,
+                previousOwner?.LogicalName, previousOwner?.Id);
+            return new ThreadOwnerReconcileResult(
+                ThreadOwnerReconcileOutcome.Assigned, previousOwner?.LogicalName, previousOwner?.Id, teamId);
         }
         catch (Exception ex)
         {

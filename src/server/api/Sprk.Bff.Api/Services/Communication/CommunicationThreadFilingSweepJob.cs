@@ -26,8 +26,10 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// <para><b>Each run, two parts</b> (each reads a bounded slice, in id order, after a per-instance cursor):</para>
 /// <list type="number">
 /// <item><b>Filing follow.</b> Active <c>sprk_communication</c> rows of type Email that are FILED (any typed regarding
-/// lookup set) are read with their threads. A row whose thread is missing, inactive, or not anchored to a record the email
-/// is filed to (<see cref="ThreadResolver.IsFiledTo"/>, the reconcile's own test) is a candidate; each is handed to
+/// lookup set) are read with their threads. A row whose thread is missing, or not anchored to a record the email
+/// is filed to (<see cref="ThreadResolver.IsFiledTo"/>, the reconcile's own test) is a candidate; a row whose thread is
+/// INACTIVE is not — a deactivated thread is a user's delete (the thread delete leaves its emails filed) and the backfill
+/// must not undo it, so it is only counted (<c>skippedInactiveThread</c>); each candidate is handed to
 /// <see cref="IThreadResolver.ReconcileThreadForFilingAsync"/>, which owns every rule (whole-thread move, secure guards,
 /// default thread) and is a no-op when nothing is to be done. A private thread is skipped (the reconcile leaves it).
 /// Candidates are selected in the job, not by one query: the test compares columns of two tables (the email's lookups
@@ -35,14 +37,16 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// read with it.</item>
 /// <item><b>Anchored-thread owner.</b> Active, Open <c>sprk_communicationthread</c> rows with a typed regarding lookup are
 /// handed to <see cref="IThreadResolver.ReconcileAnchoredThreadOwnerAsync"/>, which resolves the owner S6 gives (the same
-/// step the reconcile uses), leaves a thread whose current owner or target is the Secure team (or cannot be told), and
-/// otherwise assigns the owner — nothing else on the thread changes.</item>
+/// step the reconcile uses), leaves a thread whose current owner or target is the Secure team (or cannot be told) or that
+/// carries more than one typed regarding lookup (<c>skippedAmbiguousAnchor</c>), and otherwise assigns the owner — nothing
+/// else on the thread changes. Each assigned thread is listed in the report with the owner it replaced
+/// (<c>previousOwnerType</c> / <c>previousOwnerId</c>), so a wrong re-own can be reversed from the run history.</item>
 /// </list>
 ///
 /// <para><b>Dry run by default.</b> The job writes only when <see cref="ApplyKey"/> is <c>true</c> (an App Service setting,
 /// <c>CommunicationThreadFilingSweep__Apply</c>; absent or unparseable = dry run). A dry run COUNTS and logs — per category:
-/// <c>noThread</c>, <c>unanchored</c>, <c>anchoredElsewhere</c>, <c>inactiveThread</c>, <c>ownerNotTeam</c>,
-/// <c>skippedSecure</c> — and calls nothing that writes (the owner part asks the resolver with <c>dryRun</c>, which
+/// <c>noThread</c>, <c>unanchored</c>, <c>anchoredElsewhere</c>, <c>skippedInactiveThread</c>, <c>ownerNotTeam</c>,
+/// <c>skippedSecure</c>, <c>skippedAmbiguousAnchor</c> — and calls nothing that writes (the owner part asks the resolver with <c>dryRun</c>, which
 /// computes the same answer and writes nothing). The summary is the run's <see cref="JobRunResult.ResultJson"/>, read at
 /// <c>GET /api/admin/jobs/{jobId}/status</c> and <c>/history</c>. <c>skippedSecure</c> is the owner part's count (the
 /// filing part's secure guards are inside the reconcile and are not visible to a dry run).</para>
@@ -67,7 +71,10 @@ namespace Sprk.Bff.Api.Services.Communication;
 ///
 /// <para><b>Known limits.</b> An email filed only to a party (account / contact / organization) whose thread is unanchored
 /// stays a candidate on every pass — the reconcile leaves that thread (a party owns no thread) — so it costs reads, not
-/// writes. The reconcile never throws, so a candidate it could not fix is not visible here; the next pass finds it again.</para>
+/// writes, and each such email is reported <c>unresolved</c> (so the run is <c>partial</c>) every time. The reconcile never
+/// throws, so an Apply run re-reads each candidate after it and re-applies <see cref="Classify"/>: <c>reconciled</c> counts
+/// only emails that are no longer candidates, <c>unresolved</c> those that still are (the next pass finds them again), and
+/// the status is <c>ok</c> only when nothing is unresolved or failed.</para>
 ///
 /// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): in the BFF on the in-process scheduler — BFF domain code
 /// (<see cref="ThreadResolver"/>) over BFF-owned tables, BFF identity, low volume, operator triggered. No new package,
@@ -152,8 +159,8 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
 
     /// <inheritdoc />
     public string Description =>
-        "Makes existing filed emails show on their records: finds filed emails whose thread is missing, inactive or not "
-        + "anchored to a record the email is filed to and asks the thread resolver to reconcile each, and gives threads "
+        "Makes existing filed emails show on their records: finds filed emails whose thread is missing or not "
+        + "anchored to a record the email is filed to (leaving deactivated threads alone) and asks the thread resolver to reconcile each, and gives threads "
         + "anchored to a record the owner S6 gives them (the record's team), leaving secure threads alone. Dry run unless "
         + ApplyKey + " is true. Disabled until enabled; run on demand with POST /api/admin/jobs/" + JobIdConstant
         + "/trigger.";
@@ -201,8 +208,8 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
             // ADR-003 for a writer: a slice that could not be read is a FAILED run, never "nothing to do".
             if (filing.EnumerationFailed || owners.EnumerationFailed)
                 status = StatusError;
-            else if (filing.Failed > 0 || owners.Failed > 0)
-                status = StatusPartial;
+            else if (filing.Failed > 0 || filing.Unresolved > 0 || owners.Failed > 0)
+                status = StatusPartial; // unresolved: the reconcile returned but the email is still a candidate (it never throws)
         }
 
         var duration = _timeProvider.GetElapsedTime(started);
@@ -215,18 +222,20 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
         _logger.Log(
             level,
             "{Prefix} heartbeat status={Status} mode={Mode} emailsExamined={EmailsExamined} noThread={NoThread} "
-            + "unanchored={Unanchored} anchoredElsewhere={AnchoredElsewhere} inactiveThread={InactiveThread} "
+            + "unanchored={Unanchored} anchoredElsewhere={AnchoredElsewhere} skippedInactiveThread={SkippedInactiveThread} "
             + "privateThread={PrivateThread} threadUnreadable={ThreadUnreadable} candidates={Candidates} reconciled={Reconciled} "
-            + "filingFailed={FilingFailed} emailPassComplete={EmailPassComplete} threadsExamined={ThreadsExamined} "
+            + "unresolved={Unresolved} filingFailed={FilingFailed} emailPassComplete={EmailPassComplete} "
+            + "threadsExamined={ThreadsExamined} "
             + "ownerNotTeam={OwnerNotTeam} ownerAssigned={OwnerAssigned} ownerAlreadyCorrect={OwnerAlreadyCorrect} "
             + "skippedSecure={SkippedSecure} ownerNotApplicable={OwnerNotApplicable} ownerRefused={OwnerRefused} "
+            + "skippedAmbiguousAnchor={SkippedAmbiguousAnchor} "
             + "ownerFailed={OwnerFailed} threadPassComplete={ThreadPassComplete} attempt={Attempt} durationMs={DurationMs} "
             + "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             LogPrefix, status, mode, filing.Examined, filing.NoThread, filing.Unanchored, filing.AnchoredElsewhere,
             filing.InactiveThread, filing.PrivateThread, filing.ThreadUnreadable, filing.Candidates, filing.Reconciled,
-            filing.Failed, filing.PassComplete, owners.Examined, owners.OwnerNotTeam, owners.Assigned,
-            owners.AlreadyCorrect, owners.SkippedSecure, owners.NotApplicable, owners.Refused, owners.Failed,
-            owners.PassComplete, context.Attempt, (long)duration.TotalMilliseconds, context.Trigger, context.RunId,
+            filing.Unresolved, filing.Failed, filing.PassComplete, owners.Examined, owners.OwnerNotTeam, owners.Assigned,
+            owners.AlreadyCorrect, owners.SkippedSecure, owners.NotApplicable, owners.Refused, owners.SkippedAmbiguousAnchor,
+            owners.Failed, owners.PassComplete, context.Attempt, (long)duration.TotalMilliseconds, context.Trigger, context.RunId,
             context.CorrelationId);
 
         return new JobRunResult(
@@ -304,13 +313,28 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
                 try
                 {
                     await resolver.ReconcileThreadForFilingAsync(email.Id, ct).ConfigureAwait(false);
-                    report.Reconciled++;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
                     // The reconcile does not throw (NFR-02); this is the run's own guard, so one row never stops the run.
                     report.Failed++;
                     _logger.LogWarning(ex, "{Prefix} Reconcile of {CommunicationId} failed; the run continues. correlationId={CorrelationId}",
+                        LogPrefix, email.Id, context.CorrelationId);
+                    continue;
+                }
+
+                // The reconcile never throws and logs its own faults, so "it returned" says nothing about the outcome. Re-read
+                // the email and its thread and apply the same test: only an email that no longer needs the reconcile counts as
+                // reconciled; one that still does is reported as unresolved (and makes the run partial).
+                if (await IsResolvedAsync(entityService, email.Id, context, ct).ConfigureAwait(false))
+                {
+                    report.Reconciled++;
+                }
+                else
+                {
+                    report.Unresolved++;
+                    _logger.LogWarning(
+                        "{Prefix} Reconcile of {CommunicationId} left it unresolved: it is still a candidate. correlationId={CorrelationId}",
                         LogPrefix, email.Id, context.CorrelationId);
                 }
             }
@@ -325,6 +349,38 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
         report.EndAt = last;
         report.PassComplete = passComplete;
         _emailCursor = passComplete ? null : last;
+    }
+
+    /// <summary>
+    /// After an Apply reconcile: <c>true</c> when the email, read afresh, is no longer a candidate (its thread is now
+    /// anchored to a record it is filed to), or it is no longer in scope (deactivated, or unfiled meanwhile). <c>false</c> when
+    /// it is still a candidate, or when that could not be read — an outcome that cannot be verified is not reported as done.
+    /// </summary>
+    private async Task<bool> IsResolvedAsync(
+        IGenericEntityService entityService, Guid emailId, JobRunContext context, CancellationToken ct)
+    {
+        try
+        {
+            var columns = new List<string> { ThreadLookup, StateField };
+            columns.AddRange(RegardingFieldMap.AllRegardingFields);
+            var email = await entityService.RetrieveAsync(EmailTable, emailId, columns.ToArray(), ct).ConfigureAwait(false);
+            if (email is null)
+                return false;
+
+            var filed = RegardingFieldMap.AllRegardingFields.Any(
+                f => email.GetAttributeValue<EntityReference>(f) is { } er && er.Id != Guid.Empty);
+            if (!filed || (email.GetAttributeValue<OptionSetValue>(StateField)?.Value ?? StateActive) != StateActive)
+                return true; // out of the sweep's scope now (unfiled or deactivated since): nothing left to reconcile
+
+            var threads = await ReadThreadsAsync(entityService, [email], ct).ConfigureAwait(false);
+            return !IsCandidate(Classify(email, threads));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "{Prefix} The result of reconciling {CommunicationId} could not be verified. correlationId={CorrelationId}",
+                LogPrefix, emailId, context.CorrelationId);
+            return false;
+        }
     }
 
     /// <summary>The next <paramref name="take"/> active, filed emails after <paramref name="after"/>, in id order.</summary>
@@ -392,7 +448,7 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
         /// <summary>The thread is not Open: the reconcile leaves a private thread's isolation alone.</summary>
         PrivateThread,
 
-        /// <summary>The thread is deactivated, so it is on no panel.</summary>
+        /// <summary>The thread is deactivated — a user's delete (their emails stay filed): counted, never a candidate.</summary>
         InactiveThread,
 
         /// <summary>The thread is anchored to no record.</summary>
@@ -427,9 +483,14 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
         return ThreadResolver.IsFiledTo(email, anchor) ? FilingVerdict.Ok : FilingVerdict.AnchoredElsewhere;
     }
 
+    /// <remarks>
+    /// <see cref="FilingVerdict.InactiveThread"/> is counted (<c>skippedInactiveThread</c>) but is NOT a candidate: the user
+    /// thread delete (<c>DeactivateThreadAsync</c>) only deactivates the thread — its emails stay active and filed — so an
+    /// inactive thread is a user's delete, and the backfill must not undo it by moving those emails into a live thread.
+    /// (A thread the reconcile itself retires when it empties holds no email, so it never reaches this test.)
+    /// </remarks>
     private static bool IsCandidate(FilingVerdict verdict) =>
-        verdict is FilingVerdict.NoThread or FilingVerdict.InactiveThread or FilingVerdict.Unanchored
-            or FilingVerdict.AnchoredElsewhere;
+        verdict is FilingVerdict.NoThread or FilingVerdict.Unanchored or FilingVerdict.AnchoredElsewhere;
 
     // ── Part 2: anchored-thread owner ────────────────────────────────────────────────────────────────────────────
 
@@ -468,21 +529,31 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
                     report.OwnerNotTeam++;
 
                 // Dry run asks the same question and writes nothing; the answer is the same either way.
-                ThreadOwnerReconcileOutcome outcome;
+                ThreadOwnerReconcileResult result;
                 try
                 {
-                    outcome = await resolver.ReconcileAnchoredThreadOwnerAsync(thread.Id, dryRun: !apply, ct).ConfigureAwait(false);
+                    result = await resolver.ReconcileAnchoredThreadOwnerAsync(thread.Id, dryRun: !apply, ct).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
                 {
                     // The resolver does not throw (NFR-02); this is the run's own guard, so one row never stops the run.
-                    outcome = ThreadOwnerReconcileOutcome.Failed;
+                    result = ThreadOwnerReconcileOutcome.Failed;
                     _logger.LogWarning(ex, "{Prefix} Owner reconcile of thread {ThreadId} failed; the run continues.", LogPrefix, thread.Id);
                 }
 
-                report.Count(outcome);
-                if (outcome == ThreadOwnerReconcileOutcome.Assigned && report.Sample.Count < MaxListedPerRun)
-                    report.Sample.Add(new { threadId = thread.Id, ownerIsTeam = IsTeamOwned(thread) });
+                report.Count(result.Outcome);
+                if (result.Outcome == ThreadOwnerReconcileOutcome.Assigned && report.Sample.Count < MaxListedPerRun)
+                {
+                    // The previous owner is the before-state: the write replaces it, so a wrong re-own is reversed from here.
+                    report.Sample.Add(new
+                    {
+                        threadId = thread.Id,
+                        ownerIsTeam = IsTeamOwned(thread),
+                        previousOwnerType = result.PreviousOwnerType,
+                        previousOwnerId = result.PreviousOwnerId,
+                        newOwnerTeamId = result.NewOwnerTeamId,
+                    });
+                }
             }
 
             if (threads.Count < take)
@@ -544,6 +615,7 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
         public int AnchoredElsewhere { get; private set; }
         public int Candidates { get; set; }
         public int Reconciled { get; set; }
+        public int Unresolved { get; set; }
         public int Failed { get; set; }
         public List<object> Sample { get; } = [];
 
@@ -571,11 +643,12 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
             noThread = NoThread,
             unanchored = Unanchored,
             anchoredElsewhere = AnchoredElsewhere,
-            inactiveThread = InactiveThread,
+            skippedInactiveThread = InactiveThread,
             privateThread = PrivateThread,
             threadUnreadable = ThreadUnreadable,
             candidates = Candidates,
             reconciled = Reconciled,
+            unresolved = Unresolved,
             failed = Failed,
             enumerationFailed = EnumerationFailed,
             sampleTotal = Candidates,
@@ -597,6 +670,7 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
         public int SkippedSecure { get; private set; }
         public int NotApplicable { get; private set; }
         public int Refused { get; private set; }
+        public int SkippedAmbiguousAnchor { get; private set; }
         public int Failed { get; private set; }
         public List<object> Sample { get; } = [];
 
@@ -607,6 +681,7 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
                 case ThreadOwnerReconcileOutcome.Assigned: Assigned++; break;
                 case ThreadOwnerReconcileOutcome.AlreadyCorrect: AlreadyCorrect++; break;
                 case ThreadOwnerReconcileOutcome.SkippedSecure: SkippedSecure++; break;
+                case ThreadOwnerReconcileOutcome.SkippedAmbiguousAnchor: SkippedAmbiguousAnchor++; break;
                 case ThreadOwnerReconcileOutcome.NotApplicable: NotApplicable++; break;
                 case ThreadOwnerReconcileOutcome.Refused: Refused++; break;
                 default: Failed++; break;
@@ -626,6 +701,7 @@ public sealed class CommunicationThreadFilingSweepJob : IScheduledJob
             skippedSecure = SkippedSecure,
             notApplicable = NotApplicable,
             refused = Refused,
+            skippedAmbiguousAnchor = SkippedAmbiguousAnchor,
             failed = Failed,
             enumerationFailed = EnumerationFailed,
             sampleListed = Sample.Count,

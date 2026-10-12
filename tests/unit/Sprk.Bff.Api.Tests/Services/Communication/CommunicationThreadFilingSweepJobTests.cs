@@ -44,17 +44,55 @@ public class CommunicationThreadFilingSweepJobTests
                 if (FailEmailRead && q.EntityName == "sprk_communication")
                     throw new InvalidOperationException("simulated email read fault");
 
-                var source = q.EntityName == "sprk_communication" ? _emails : _threads;
+                // The `In` read is the job's thread read for an email (before or after a reconcile): it also sees the threads the
+                // doubled reconcile "created". The owner part's slice (no `In`) does not, so its tests stay about the owner part.
+                var isThreadIdRead = q.Criteria.Conditions.Any(c => c.Operator == ConditionOperator.In);
+                var source = q.EntityName == "sprk_communication" ? _emails
+                    : isThreadIdRead ? _threads.Concat(_reconcileThreads).ToList()
+                    : _threads;
                 return new EntityCollection(
                     source.Where(r => Matches(r, q.Criteria)).OrderBy(r => r.Id).Take(q.TopCount ?? int.MaxValue).ToList());
             });
+
+        // The post-reconcile re-read of an email.
+        _entity
+            .Setup(e => e.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) => _emails.FirstOrDefault(e => e.Id == id)!);
+
+        // By default the doubled reconcile WORKS: it gives the email a thread anchored to the record it is filed to. A test
+        // that wants a reconcile that silently does nothing overrides this (NoOpReconcile).
+        _resolver
+            .Setup(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask)
+            .Callback<Guid, CancellationToken>((id, _) => FixEmail(id));
 
         _resolver
             .Setup(r => r.ReconcileAnchoredThreadOwnerAsync(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(ThreadOwnerReconcileOutcome.AlreadyCorrect);
     }
 
+    private readonly List<DataverseEntity> _reconcileThreads = [];
+
     private bool FailEmailRead { get; set; }
+
+    /// <summary>What a working reconcile leaves behind: the email's thread is anchored to a record the email is filed to.</summary>
+    private void FixEmail(Guid emailId)
+    {
+        var email = _emails.Single(e => e.Id == emailId);
+        var (_, field) = RegardingFieldMap.All.First(x => email.GetAttributeValue<EntityReference>(x.RegardingField) is not null);
+        var thread = new DataverseEntity("sprk_communicationthread") { Id = Id(900 + _reconcileThreads.Count) };
+        thread["sprk_privacystate"] = new OptionSetValue(PrivacyOpen);
+        thread["statecode"] = new OptionSetValue(0);
+        thread[field] = email.GetAttributeValue<EntityReference>(field);
+        _reconcileThreads.Add(thread);
+        email["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", thread.Id);
+    }
+
+    /// <summary>A reconcile that returns without changing anything — as the real one does when a step fails (NFR-02).</summary>
+    private void NoOpReconcile() =>
+        _resolver
+            .Setup(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
     /// <summary>
     /// Evaluates the query's filter against a row — only what the job's queries use: Equal, GreaterThan (the id cursor), In
@@ -157,8 +195,9 @@ public class CommunicationThreadFilingSweepJobTests
     }
 
     /// <summary>
-    /// One email per verdict: 1 ok, 2 no thread, 3 unanchored, 4 anchored elsewhere, 5 inactive, 6 private. The owner part
-    /// sees only the active, Open, anchored threads: 1 and 4 (3 is unanchored, 5 inactive, 6 private).
+    /// One email per verdict: 1 ok, 2 no thread, 3 unanchored, 4 anchored elsewhere, 5 inactive, 6 private. Candidates are
+    /// 2, 3 and 4 (5 is a user's delete, 6 is private). The owner part sees only the active, Open, anchored threads: 1 and 4
+    /// (3 is unanchored, 5 inactive, 6 private).
     /// </summary>
     private void SeedOneOfEach()
     {
@@ -199,11 +238,12 @@ public class CommunicationThreadFilingSweepJobTests
         filing.GetProperty("noThread").GetInt32().Should().Be(1);
         filing.GetProperty("unanchored").GetInt32().Should().Be(1);
         filing.GetProperty("anchoredElsewhere").GetInt32().Should().Be(1);
-        filing.GetProperty("inactiveThread").GetInt32().Should().Be(1);
+        filing.GetProperty("skippedInactiveThread").GetInt32().Should().Be(1);
         filing.GetProperty("privateThread").GetInt32().Should().Be(1);
-        filing.GetProperty("candidates").GetInt32().Should().Be(4);
+        filing.GetProperty("candidates").GetInt32().Should().Be(3, "an inactive thread is a user's delete, not a candidate");
         filing.GetProperty("reconciled").GetInt32().Should().Be(0);
-        filing.GetProperty("sample").GetArrayLength().Should().Be(4);
+        filing.GetProperty("unresolved").GetInt32().Should().Be(0, "a dry run attempts nothing");
+        filing.GetProperty("sample").GetArrayLength().Should().Be(3);
 
         _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         _resolver.Verify(r => r.ReconcileAnchoredThreadOwnerAsync(It.IsAny<Guid>(), false, It.IsAny<CancellationToken>()), Times.Never,
@@ -260,12 +300,12 @@ public class CommunicationThreadFilingSweepJobTests
         var result = await RunAsync(apply: true);
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        foreach (var candidate in new[] { 2, 3, 4, 5 })
+        foreach (var candidate in new[] { 2, 3, 4 })
             _resolver.Verify(r => r.ReconcileThreadForFilingAsync(Id(100 + candidate), It.IsAny<CancellationToken>()), Times.Once);
-        foreach (var fine in new[] { 1, 6 })
+        foreach (var fine in new[] { 1, 5, 6 })
             _resolver.Verify(r => r.ReconcileThreadForFilingAsync(Id(100 + fine), It.IsAny<CancellationToken>()), Times.Never,
-                "an email already on its record's panel, or in a private thread, is not handed to the reconcile");
-        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Exactly(4));
+                "an email already on its record's panel, in a user-deleted (inactive) thread, or in a private thread, is not handed to the reconcile");
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
 
         // The owner part: the Open, active, anchored threads (1, 4) — 5 is inactive, 3 is unanchored, 6 is private.
         _resolver.Verify(r => r.ReconcileAnchoredThreadOwnerAsync(Id(1), false, It.IsAny<CancellationToken>()), Times.Once);
@@ -275,7 +315,8 @@ public class CommunicationThreadFilingSweepJobTests
 
         var json = Result(result);
         json.GetProperty("mode").GetString().Should().Be("apply");
-        json.GetProperty("filing").GetProperty("reconciled").GetInt32().Should().Be(4);
+        json.GetProperty("filing").GetProperty("reconciled").GetInt32().Should().Be(3);
+        json.GetProperty("filing").GetProperty("unresolved").GetInt32().Should().Be(0);
     }
 
     [Fact]
@@ -291,6 +332,40 @@ public class CommunicationThreadFilingSweepJobTests
     }
 
     [Fact]
+    public async Task Apply_AnAssignedOwner_IsListedWithTheOwnerItReplaced_SoItCanBeReversed()
+    {
+        var previousOwner = Guid.NewGuid();
+        var team = Guid.NewGuid();
+        AddThread(1, "sprk_matter", Guid.NewGuid());
+        _resolver.Setup(r => r.ReconcileAnchoredThreadOwnerAsync(Id(1), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ThreadOwnerReconcileResult(ThreadOwnerReconcileOutcome.Assigned, "systemuser", previousOwner, team));
+
+        var owner = Result(await RunAsync(apply: true)).GetProperty("owner");
+
+        var sample = owner.GetProperty("sample").EnumerateArray().Should().ContainSingle().Subject;
+        sample.GetProperty("threadId").GetGuid().Should().Be(Id(1));
+        sample.GetProperty("previousOwnerType").GetString().Should().Be("systemuser");
+        sample.GetProperty("previousOwnerId").GetGuid().Should().Be(previousOwner);
+        sample.GetProperty("newOwnerTeamId").GetGuid().Should().Be(team);
+    }
+
+    [Fact]
+    public async Task AThreadWithAnAmbiguousAnchor_IsCountedSeparately_NotAsFailed()
+    {
+        AddThread(1, "sprk_matter", Guid.NewGuid());
+        _resolver.Setup(r => r.ReconcileAnchoredThreadOwnerAsync(Id(1), false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ThreadOwnerReconcileOutcome.SkippedAmbiguousAnchor);
+
+        var result = await RunAsync(apply: true);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var owner = Result(result).GetProperty("owner");
+        owner.GetProperty("skippedAmbiguousAnchor").GetInt32().Should().Be(1);
+        owner.GetProperty("failed").GetInt32().Should().Be(0);
+        owner.GetProperty("assigned").GetInt32().Should().Be(0);
+    }
+
+    [Fact]
     public async Task ARunWithNothingToDo_IsASuccess_WithAFullyZeroReport()
     {
         var matter = Guid.NewGuid();
@@ -302,6 +377,74 @@ public class CommunicationThreadFilingSweepJobTests
         result.Success.Should().BeTrue();
         Result(result).GetProperty("filing").GetProperty("candidates").GetInt32().Should().Be(0);
         _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Apply_NeverReconcilesAnEmailInADeactivatedThread_ItIsAUserDelete()
+    {
+        // The user thread delete only deactivates the thread; its emails stay active and filed. The backfill must not
+        // undo that by moving them into a live thread.
+        AddThread(1, "sprk_matter", Guid.NewGuid(), inactive: true);
+        AddEmail(1, 1, "sprk_matter");
+
+        var result = await RunAsync(apply: true);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var filing = Result(result).GetProperty("filing");
+        filing.GetProperty("skippedInactiveThread").GetInt32().Should().Be(1, "still reported");
+        filing.GetProperty("candidates").GetInt32().Should().Be(0);
+        _resolver.Verify(r => r.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Apply_WhenTheReconcileSilentlyDoesNothing_TheEmailsAreUnresolved_NotReconciled_AndTheRunIsPartial()
+    {
+        // ReconcileThreadForFilingAsync never throws (NFR-02): a failed step returns normally. Counting calls as outcomes
+        // reported reconciled=3 and status=ok here.
+        for (var n = 1; n <= 3; n++)
+            AddEmail(n, threadN: null, "sprk_matter");
+        NoOpReconcile();
+
+        var result = await RunAsync(apply: true);
+
+        result.Success.Should().BeFalse();
+        var json = Result(result);
+        json.GetProperty("status").GetString().Should().Be(CommunicationThreadFilingSweepJob.StatusPartial);
+        var filing = json.GetProperty("filing");
+        filing.GetProperty("candidates").GetInt32().Should().Be(3);
+        filing.GetProperty("unresolved").GetInt32().Should().Be(3, "every candidate is still a candidate after the reconcile");
+        filing.GetProperty("reconciled").GetInt32().Should().Be(0);
+        filing.GetProperty("failed").GetInt32().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Apply_CountsOnlyTheEmailsTheReconcileFixed_AsReconciled()
+    {
+        AddEmail(1, threadN: null, "sprk_matter");
+        AddEmail(2, threadN: null, "sprk_matter");
+        _resolver.Setup(r => r.ReconcileThreadForFilingAsync(Id(102), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask); // does nothing
+
+        var result = await RunAsync(apply: true);
+
+        var filing = Result(result).GetProperty("filing");
+        filing.GetProperty("reconciled").GetInt32().Should().Be(1);
+        filing.GetProperty("unresolved").GetInt32().Should().Be(1);
+        Result(result).GetProperty("status").GetString().Should().Be(CommunicationThreadFilingSweepJob.StatusPartial);
+    }
+
+    [Fact]
+    public async Task Apply_WhenTheResultCannotBeVerified_TheEmailIsUnresolved_NeverReconciled()
+    {
+        AddEmail(1, threadN: null, "sprk_matter");
+        _entity.Setup(e => e.RetrieveAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated re-read fault"));
+
+        var result = await RunAsync(apply: true);
+
+        var filing = Result(result).GetProperty("filing");
+        filing.GetProperty("reconciled").GetInt32().Should().Be(0);
+        filing.GetProperty("unresolved").GetInt32().Should().Be(1);
+        result.Success.Should().BeFalse();
     }
 
     // ── Paging and the per-run cap ────────────────────────────────────────────────────────────────────────────────
