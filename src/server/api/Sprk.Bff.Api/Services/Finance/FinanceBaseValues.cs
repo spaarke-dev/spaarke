@@ -46,13 +46,14 @@ public static class FinanceBaseValues
     public const string BudgetColumn = "sprk_totalbudget";
     public const string UtilizationColumn = "sprk_budgetutilizationpercent";
 
-    public const int InvoiceStatusConfirmed = 100000001;
-    public const int InvoiceStatusExtracted = 100000002;
-    public const int InvoiceStatusProcessed = 100000003;
+    /// <summary><c>sprk_invoicestatus</c> "Reviewed". The option set has exactly two values, <c>100000000</c> ToReview and
+    /// <c>100000001</c> Reviewed (live <c>spaarkedev1</c> and <c>OptionSets/sprk_invoicestatus.xml</c>, read 2026-10-12). Whether spend
+    /// should count ONLY Reviewed invoices is an owner business decision (pending); this is what the rollup has always been able to
+    /// match, since the other statuses it once named do not exist.</summary>
+    public const int InvoiceStatusReviewed = 100000001;
 
     /// <summary>The invoice statuses whose amount counts as spend.</summary>
-    public static readonly IReadOnlyList<int> CountedInvoiceStatuses =
-        new[] { InvoiceStatusConfirmed, InvoiceStatusExtracted, InvoiceStatusProcessed };
+    public static readonly IReadOnlyList<int> CountedInvoiceStatuses = new[] { InvoiceStatusReviewed };
 
     /// <summary>Parent ids per grouped query. Matches <c>PredicateCompiler.MaxInListLength</c>: the size of an <c>in</c> list
     /// the Signal code already sends to Dataverse.</summary>
@@ -178,27 +179,37 @@ public static class FinanceBaseValues
     }
 
     /// <summary>Parent id to summed amount, from the aliased columns of a grouped aggregate result.</summary>
+    /// <exception cref="InvalidOperationException">A parent or sum value of a shape this reader does not know. Fails closed: a row
+    /// read as "no spend" would let a Threshold Signal close as cleared on a number nobody computed. A NULL sum (a group of rows
+    /// whose amounts are all null) is 0, as <see cref="SumMoney"/> treats a null amount; a NULL parent is a row of no parent
+    /// (the filter names parents, so it is skipped).</exception>
     internal static Dictionary<Guid, decimal> ReadGroupedSums(EntityCollection rows)
     {
         var sums = new Dictionary<Guid, decimal>();
         foreach (var row in rows.Entities)
         {
-            var parent = Unwrap(row.Attributes.TryGetValue(ParentAlias, out var p) ? p : null) switch
+            var parentValue = Unwrap(row.Attributes.TryGetValue(ParentAlias, out var p) ? p : null);
+            var parent = parentValue switch
             {
+                null => Guid.Empty,
                 EntityReference reference => reference.Id,
                 Guid id => id,
-                _ => Guid.Empty,
+                _ => throw new InvalidOperationException(
+                    "Grouped aggregate row has a parent value of unexpected type " + parentValue.GetType().Name + "."),
             };
             if (parent == Guid.Empty)
             {
                 continue;
             }
 
-            var amount = Unwrap(row.Attributes.TryGetValue(SumAlias, out var s) ? s : null) switch
+            var sumValue = Unwrap(row.Attributes.TryGetValue(SumAlias, out var s) ? s : null);
+            var amount = sumValue switch
             {
+                null => 0m,
                 Money money => money.Value,
                 decimal value => value,
-                _ => 0m,
+                _ => throw new InvalidOperationException(
+                    "Grouped aggregate row has a sum value of unexpected type " + sumValue.GetType().Name + "."),
             };
             sums[parent] = sums.GetValueOrDefault(parent) + amount;
         }

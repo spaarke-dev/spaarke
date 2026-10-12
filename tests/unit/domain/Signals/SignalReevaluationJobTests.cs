@@ -1067,10 +1067,10 @@ public partial class SignalReevaluationJobTests
         const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_totalspendtodate","operator":">=","value":50000}}""";
         var h = new Harness().WithThresholdPolicy(body, "Spend to date is {{sprk_totalspendtodate}}.");
         h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId) { ["sprk_matterid"] = MatterId });
-        h.WithInvoice("sprk_matter", MatterId, 30000m, FinanceBaseValues.InvoiceStatusConfirmed)
-            .WithInvoice("sprk_matter", MatterId, 15000m, FinanceBaseValues.InvoiceStatusExtracted)
-            .WithInvoice("sprk_matter", MatterId, 4000m, FinanceBaseValues.InvoiceStatusProcessed)
-            .WithInvoice("sprk_matter", MatterId, 900000m, 100000000); // a status the rollup does not count: ignored
+        h.WithInvoice("sprk_matter", MatterId, 30000m, FinanceBaseValues.InvoiceStatusReviewed)
+            .WithInvoice("sprk_matter", MatterId, 15000m, FinanceBaseValues.InvoiceStatusReviewed)
+            .WithInvoice("sprk_matter", MatterId, 4000m, FinanceBaseValues.InvoiceStatusReviewed)
+            .WithInvoice("sprk_matter", MatterId, 900000m, 100000000); // ToReview: the other real status, not counted, ignored
 
         await h.RunAsync();
 
@@ -1102,6 +1102,68 @@ public partial class SignalReevaluationJobTests
         (missing.SubjectEntity, missing.SubjectId, missing.Field).Should().Be(("sprk_matter", MatterId, "sprk_budgetutilizationpercent"));
         missing.Reason.Should().Contain("no budget above zero");
         h.Log.Should().Contain(e => e.Level == LogLevel.Information && e.Message.Contains("could not be judged") && e.Message.Contains("missing input"));
+    }
+
+    // ---- D-120 (finding 1): a subject whose input is missing is neither a hit nor observed false ------------------------------
+
+    [Theory]
+    [InlineData(false, 0)]   // the budget row was removed
+    [InlineData(true, 0)]    // the budget was set to zero
+    public async Task Run_UtilizationThreshold_OpenSignal_WhoseBudgetIsGone_StaysOpen_AndIsCountedAsAMissingInput(bool zeroRow, decimal budget)
+    {
+        var h = new Harness().WithThresholdPolicy();
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId)
+        {
+            ["sprk_matterid"] = MatterId, ["sprk_mattername"] = "Matter MAT-GONE", ["sprk_matternumber"] = "MAT-GONE",
+        });
+        h.WithInvoice("sprk_matter", MatterId, 75000m);
+        if (zeroRow) h.WithBudget("sprk_matter", MatterId, budget);
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        h.Org.ConditionalUpdates.Should().BeEmpty("the condition was not observed false: with no budget the utilization is undefined, so the Signal is not closed as cleared");
+        h.Org.CreateCalls.Should().Be(0);
+        result.ResultJson.Should().Contain("\"missingInputs\":1").And.Contain("\"closed\":0");
+    }
+
+    [Fact]
+    public async Task Run_UtilizationThreshold_ActedSignal_WhoseBudgetIsGone_GetsNoClearedMarker()
+    {
+        var h = new Harness().WithThresholdPolicy();
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId)
+        {
+            ["sprk_matterid"] = MatterId, ["sprk_mattername"] = "Matter MAT-GONE", ["sprk_matternumber"] = "MAT-GONE",
+        });
+        h.WithInvoice("sprk_matter", MatterId, 75000m); // no budget row at all
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionActed, resolvedOn: ActedOn, coreId: MatterId, lastEvaluated: ActedOn);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        h.Org.ConditionalUpdates.Should().BeEmpty("an undefined utilization is not the condition observed false, so no cleared marker is stamped");
+        result.ResultJson.Should().Contain("\"clearedMarked\":0").And.Contain("\"missingInputs\":1");
+    }
+
+    [Fact]
+    public void Plan_UnjudgedSubject_IsNeitherClosedNorStamped_ButAJudgedOneIs()
+    {
+        var hit = CommHit(MatterId);
+        var other = CommHit(OtherMatterId);
+        var open = Existing(hit, 1, SignalWriter.SignalStatusOpen);
+        var acted = Existing(other, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed, resolvedOn: ActedOn);
+        var unjudged = new HashSet<(string, Guid)> { ("sprk_matter", MatterId), ("sprk_matter", OtherMatterId) };
+
+        var held = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { open, acted },
+            isThreshold: true, unjudged: unjudged);
+        held.Closes.Should().BeEmpty();
+        held.ClearedMarks.Should().BeEmpty();
+
+        var judged = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { open, acted }, isThreshold: true);
+        judged.Closes.Should().ContainSingle();
+        judged.ClearedMarks.Should().ContainSingle();
     }
 
     [Fact]
@@ -1780,7 +1842,7 @@ public partial class SignalReevaluationJobTests
             return this;
         }
 
-        public Harness WithInvoice(string parent, Guid parentId, decimal amount, int status = FinanceBaseValues.InvoiceStatusConfirmed)
+        public Harness WithInvoice(string parent, Guid parentId, decimal amount, int status = FinanceBaseValues.InvoiceStatusReviewed)
         {
             Sysadmin.InvoiceRows.Add(new Entity("sprk_invoice", Guid.NewGuid())
             {

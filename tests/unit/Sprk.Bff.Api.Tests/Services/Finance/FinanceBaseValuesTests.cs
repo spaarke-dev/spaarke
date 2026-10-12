@@ -19,9 +19,12 @@ public class FinanceBaseValuesTests
     private static readonly Guid MatterB = Guid.Parse("b68299c6-bafb-f011-8407-7c1e520aa4df");
 
     [Fact]
-    public void TheCountedInvoiceStatuses_AreConfirmedExtractedProcessed()
+    public void TheCountedInvoiceStatuses_AreOnlyValuesThatExistInTheOptionSet()
     {
-        FinanceBaseValues.CountedInvoiceStatuses.Should().Equal(100000001, 100000002, 100000003);
+        // sprk_invoicestatus has exactly 100000000 ToReview and 100000001 Reviewed (live spaarkedev1 + OptionSets/sprk_invoicestatus.xml).
+        FinanceBaseValues.CountedInvoiceStatuses.Should().Equal(FinanceBaseValues.InvoiceStatusReviewed);
+        FinanceBaseValues.InvoiceStatusReviewed.Should().Be(100000001);
+        FinanceBaseValues.CountedInvoiceStatuses.Should().BeSubsetOf(new[] { 100000000, 100000001 });
     }
 
     [Theory]
@@ -127,6 +130,51 @@ public class FinanceBaseValuesTests
         });
 
         FinanceBaseValues.ReadGroupedSums(result).Should().Equal(new Dictionary<Guid, decimal> { [MatterA] = 42m });
+    }
+
+    [Fact]
+    public void ReadGroupedSums_ANullSumIsZero_ANullParentIsSkipped()
+    {
+        var result = new EntityCollection();
+        result.Entities.Add(new Entity("sprk_invoice")
+        {
+            ["parent"] = new AliasedValue("sprk_invoice", "sprk_matter", new EntityReference("sprk_matter", MatterA)),
+            ["total"] = new AliasedValue("sprk_invoice", "sprk_totalamount", null),
+        });
+        result.Entities.Add(new Entity("sprk_invoice")
+        {
+            ["total"] = new AliasedValue("sprk_invoice", "sprk_totalamount", new Money(9m)),
+        });
+
+        FinanceBaseValues.ReadGroupedSums(result).Should().Equal(new Dictionary<Guid, decimal> { [MatterA] = 0m });
+    }
+
+    [Fact]
+    public void ReadGroupedSums_AParentOfAnUnexpectedShape_Throws_NotZeroSpend()
+    {
+        var result = new EntityCollection();
+        result.Entities.Add(new Entity("sprk_invoice")
+        {
+            ["parent"] = new AliasedValue("sprk_invoice", "sprk_matter", "not-a-guid"),
+            ["total"] = new AliasedValue("sprk_invoice", "sprk_totalamount", new Money(42m)),
+        });
+
+        FluentActions.Invoking(() => FinanceBaseValues.ReadGroupedSums(result)).Should().Throw<InvalidOperationException>()
+            .WithMessage("*parent*unexpected type*String*");
+    }
+
+    [Fact]
+    public void ReadGroupedSums_ASumOfAnUnexpectedShape_Throws_NotZeroSpend()
+    {
+        var result = new EntityCollection();
+        result.Entities.Add(new Entity("sprk_invoice")
+        {
+            ["parent"] = new AliasedValue("sprk_invoice", "sprk_matter", new EntityReference("sprk_matter", MatterA)),
+            ["total"] = new AliasedValue("sprk_invoice", "sprk_totalamount", "42"),
+        });
+
+        FluentActions.Invoking(() => FinanceBaseValues.ReadGroupedSums(result)).Should().Throw<InvalidOperationException>()
+            .WithMessage("*sum*unexpected type*String*");
     }
 
     [Theory]
