@@ -16,7 +16,12 @@ Write-Host ""
 
 $orgUrl = $DataverseUrl
 $webResourceName = "sprk_ThemeMenu.js"
-$jsFilePath = "C:\code_files\spaarke\src\client\webresources\js\sprk_ThemeMenu.js"
+# Canonical source, resolved relative to the repo root (this script lives in scripts/).
+$jsFilePath = Join-Path $PSScriptRoot "..\src\client\webresources\js\sprk_ThemeMenu.js"
+if (-not (Test-Path $jsFilePath)) {
+    Write-Host "Error: source file not found: $jsFilePath" -ForegroundColor Red
+    exit 1
+}
 
 Write-Host "[1/4] Using Dataverse environment: $orgUrl" -ForegroundColor Green
 Write-Host ""
