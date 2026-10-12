@@ -439,6 +439,72 @@ public class ExternalDataServiceTests
     }
 
     [Fact]
+    public async Task GetRecentGrants_WithModifiedSince_AlsoReturnsRowsModifiedInTheWindow_AndStillRequiresActiveUnexpired()
+    {
+        var (service, handler) = NewService();
+
+        await service.GetRecentGrantsAsync(
+            FeedContact, new DateOnly(2026, 9, 12), new DateOnly(2026, 10, 12),
+            modifiedSince: new DateTimeOffset(2026, 9, 12, 12, 0, 0, TimeSpan.Zero));
+
+        var decoded = Decoded(handler.GetUrls.Should().ContainSingle().Subject);
+        decoded.Should().Contain("(sprk_granteddate ge 2026-09-12 or modifiedon ge 2026-09-12T12:00:00Z)");
+        decoded.Should().Contain($"_sprk_contact_value eq {FeedContact} and statecode eq 0 and (");
+        decoded.Should().Contain("sprk_expiresdate ge 2026-10-12", "a lapsed grant is never announced, renewed or not");
+        decoded.Should().Contain("sprk_granteddate,createdon,modifiedon");
+    }
+
+    [Fact]
+    public async Task GetRecentGrants_WithoutModifiedSince_IsTheOriginalFilter()
+    {
+        var (service, handler) = NewService();
+
+        await service.GetRecentGrantsAsync(FeedContact, new DateOnly(2026, 9, 12), new DateOnly(2026, 10, 12));
+
+        Decoded(handler.GetUrls.Single()).Should().NotContain("modifiedon ge");
+    }
+
+    [Fact]
+    public async Task GetRecentGrants_Parse_RenewedOnIsModifiedOn_OnlyWhenTheRowWasChangedWellAfterItWasCreated()
+    {
+        var (service, handler) = NewService();
+        Guid created = Guid.NewGuid(), edited = Guid.NewGuid(), justAfter = Guid.NewGuid(), noCreated = Guid.NewGuid(), noModified = Guid.NewGuid();
+        string Row(Guid id, string? createdOn, string? modifiedOn)
+        {
+            var parts = new List<string>
+            {
+                $"\"sprk_externalrecordaccessid\":\"{id}\"",
+                $"\"_sprk_project_value\":\"{Guid.NewGuid()}\"",
+                "\"sprk_granteddate\":\"2026-08-01\"",
+            };
+            if (createdOn is not null) parts.Add($"\"createdon\":\"{createdOn}\"");
+            if (modifiedOn is not null) parts.Add($"\"modifiedon\":\"{modifiedOn}\"");
+            return "{" + string.Join(",", parts) + "}";
+        }
+
+        handler.GetResponder = _ => JsonOk("{\"value\":[" + string.Join(",",
+            Row(created, "2026-10-10T09:00:00Z", "2026-10-10T09:00:00Z"),       // never modified
+            Row(edited, "2026-08-01T09:00:00Z", "2026-10-09T15:30:00Z"),       // changed long after creation
+            Row(justAfter, "2026-10-10T09:00:00Z", "2026-10-10T09:01:30Z"),    // the creation's own follow-up write
+            Row(noCreated, null, "2026-10-09T15:30:00Z"),                       // no createdon: cannot tell, so no renewal
+            Row(noModified, "2026-08-01T09:00:00Z", null)) + "]}");
+
+        var read = await service.GetRecentGrantsAsync(
+            FeedContact, new DateOnly(2026, 9, 12), new DateOnly(2026, 10, 12),
+            modifiedSince: new DateTimeOffset(2026, 9, 12, 12, 0, 0, TimeSpan.Zero));
+
+        RenewedOf(read, created).Should().BeNull("modifiedon equals createdon");
+        RenewedOf(read, edited).Should().Be(DateTimeOffset.Parse("2026-10-09T15:30:00Z"));
+        RenewedOf(read, justAfter).Should().BeNull("within the creation gap: the grant's own follow-up write, not a renewal");
+        RenewedOf(read, noCreated).Should().BeNull("without a real createdon every row would look renewed");
+        RenewedOf(read, noModified).Should().BeNull();
+        read.Grants.Single(g => g.GrantId == edited).EventOn.Should().Be(DateTimeOffset.Parse("2026-10-09T15:30:00Z"));
+        read.Grants.Single(g => g.GrantId == created).EventOn.Should().Be(DateTimeOffset.Parse("2026-10-10T09:00:00Z"));
+
+        static DateTimeOffset? RenewedOf(ExternalDataService.RecentGrantsRead r, Guid id) => r.Grants.Single(g => g.GrantId == id).RenewedOn;
+    }
+
+    [Fact]
     public async Task GetRecentGrants_EmptyContact_ReadsNothing()
     {
         var (service, handler) = NewService();

@@ -224,6 +224,114 @@ public class ExternalNotificationFeedTests
             "the grant read is keyed on the caller's OWN contact, from the server-resolved principal, for the 30-day window");
     }
 
+    // ── Owner decision 2026-10-12: a grant renewed or restored in place produces a bell item ─────────────────────
+
+    [Fact]
+    public async Task ARenewedGrant_WithAnOldGrantedDate_Appears_AtTheRenewalTime()
+    {
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var caller = Ciam(me, project: project);
+        var grant = _data.AddGrant(me, ExternalGrantRootType.Project, project, Now.AddDays(-60), renewedOn: Now.AddDays(-2));
+        _data.Name(project, "Acme v. Widget");
+
+        var feed = Body(await Feed(caller));
+
+        var item = feed.Value.Should().ContainSingle().Subject;
+        item.Kind.Should().Be(ExternalNotificationDto.KindGrant);
+        item.Id.Should().Be(grant.ToString("D"));
+        item.RecordType.Should().Be("projects");
+        item.RecordTitle.Should().Be("Acme v. Widget");
+        item.OccurredOn.Should().Be(Now.AddDays(-2), "the item time is the renewal, not the original grant");
+        item.IsUnread.Should().BeTrue();
+        _data.ModifiedSinceReads.Should().ContainSingle().Which.Should().Be(Now.AddDays(-30),
+            "the read asks for rows modified inside the 30-day window");
+    }
+
+    [Fact]
+    public async Task AGrantCreatedInTheWindow_AndThenRenewed_IsOneItem_AtTheRenewalTime()
+    {
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var caller = Ciam(me, project: project);
+        var grant = _data.AddGrant(me, ExternalGrantRootType.Project, project, Now.AddDays(-20), renewedOn: Now.AddHours(-5));
+
+        var feed = Body(await Feed(caller));
+
+        var item = feed.Value.Should().ContainSingle("one row is one item, however many times it changed").Subject;
+        item.Id.Should().Be(grant.ToString("D"));
+        item.OccurredOn.Should().Be(Now.AddHours(-5));
+    }
+
+    [Fact]
+    public async Task AnOldGrant_NeverRenewed_DoesNotAppear()
+    {
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var caller = Ciam(me, project: project);
+        _data.AddGrant(me, ExternalGrantRootType.Project, project, Now.AddDays(-60));
+
+        Body(await Feed(caller)).Value.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ARenewalOutsideTheWindow_DoesNotAppear_EvenIfTheReadReturnsTheRow()
+    {
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var caller = Ciam(me, project: project);
+        _data.ReturnAllGrantRows = true; // the endpoint's own per-row re-check is the only gate here
+        _data.AddGrant(me, ExternalGrantRootType.Project, project, Now.AddDays(-60), renewedOn: Now.AddDays(-31));
+        var inside = _data.AddGrant(me, ExternalGrantRootType.Project, project, Now.AddDays(-60), renewedOn: Now.AddDays(-29));
+
+        Body(await Feed(caller)).Value.Select(i => i.Id).Should().Equal(inside.ToString("D"));
+    }
+
+    [Fact]
+    public async Task ARenewedGrant_OnARecordNoLongerAccessible_IsDropped()
+    {
+        var me = Guid.NewGuid();
+        var mine = Guid.NewGuid();
+        var caller = Ciam(me, project: mine);
+        _data.AddGrant(me, ExternalGrantRootType.Project, Guid.NewGuid(), Now.AddDays(-60), renewedOn: Now.AddDays(-1));
+        var kept = _data.AddGrant(me, ExternalGrantRootType.Project, mine, Now.AddDays(-60), renewedOn: Now.AddDays(-2));
+
+        Body(await Feed(caller)).Value.Select(i => i.Id).Should().Equal(kept.ToString("D"));
+    }
+
+    [Fact]
+    public async Task ASomeoneElsesRenewedGrant_DoesNotAppear()
+    {
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var caller = Ciam(me, project: project);
+        _data.AddGrant(Guid.NewGuid(), ExternalGrantRootType.Project, project, Now.AddDays(-60), renewedOn: Now.AddDays(-1));
+
+        Body(await Feed(caller)).Value.Should().BeEmpty("the read is keyed on the caller's own contact");
+    }
+
+    [Fact]
+    public async Task ARenewal_IsUnreadOnlyAfterTheSeenMarker()
+    {
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var caller = Ciam(me, project: project);
+        var before = _data.AddGrant(me, ExternalGrantRootType.Project, project, Now.AddDays(-60), renewedOn: Now.AddDays(-3));
+        await Seen(caller, Now.AddDays(-2));
+
+        var afterSeen = Body(await Feed(caller));
+        afterSeen.Value.Single().IsUnread.Should().BeFalse("it happened before the marker");
+        afterSeen.UnreadCount.Should().Be(0);
+
+        var renewedAgain = _data.AddGrant(me, ExternalGrantRootType.Matter, Guid.NewGuid(), Now.AddDays(-60), renewedOn: Now.AddHours(-1));
+        var caller2 = Ciam(me, project: project, matter: _data.LastRoot);
+        var later = Body(await Feed(caller2));
+
+        later.UnreadCount.Should().Be(1);
+        later.Value.Single(i => i.IsUnread).Id.Should().Be(renewedAgain.ToString("D"));
+        later.Value.Single(i => !i.IsUnread).Id.Should().Be(before.ToString("D"));
+    }
+
     // ── AC2: a message by someone else on an accessible record appears; the caller's own does not ──
 
     [Fact]
@@ -832,14 +940,23 @@ public class ExternalNotificationFeedTests
         }
 
         public List<(Guid Contact, DateOnly Since, DateOnly Today)> GrantReads { get; } = new();
+        public List<DateTimeOffset?> ModifiedSinceReads { get; } = new();
+
+        /// <summary>When true the read returns every row of the contact, unfiltered: the endpoint's own re-check is then the only gate.</summary>
+        public bool ReturnAllGrantRows { get; set; }
+
+        /// <summary>The root id of the last grant added (so a test can build a principal that can read it).</summary>
+        public Guid LastRoot { get; private set; }
         public List<IReadOnlyCollection<Guid>> ServiceRequestReads { get; } = new();
         public List<string> NameReads { get; } = new();
         public bool NamesReadFails { get; set; }
 
-        public Guid AddGrant(Guid contact, ExternalGrantRootType rootType, Guid rootId, DateTimeOffset grantedOn)
+        public Guid AddGrant(Guid contact, ExternalGrantRootType rootType, Guid rootId, DateTimeOffset grantedOn,
+            DateTimeOffset? renewedOn = null)
         {
             var id = Guid.NewGuid();
-            _grants.Add((contact, new RecentGrant(id, rootType, rootId, grantedOn)));
+            LastRoot = rootId;
+            _grants.Add((contact, new RecentGrant(id, rootType, rootId, grantedOn, renewedOn)));
             return id;
         }
 
@@ -856,12 +973,18 @@ public class ExternalNotificationFeedTests
         public void Delete(Guid id) => _deleted.Add(id);
 
         // As Dataverse would: the caller's contact, active, granted on/after the date (the expiry is not modelled here).
+        // `(granteddate ge since or modifiedon ge modifiedSince)`: a renewed row is returned by its modifiedon.
         public override Task<RecentGrantsRead> GetRecentGrantsAsync(
-            Guid contactId, DateOnly since, DateOnly today, CancellationToken ct = default)
+            Guid contactId, DateOnly since, DateOnly today, CancellationToken ct = default,
+            DateTimeOffset? modifiedSince = null)
         {
             GrantReads.Add((contactId, since, today));
+            ModifiedSinceReads.Add(modifiedSince);
             var rows = _grants
-                .Where(g => g.Contact == contactId && DateOnly.FromDateTime(g.Grant.GrantedOn.UtcDateTime) >= since)
+                .Where(g => g.Contact == contactId
+                            && (ReturnAllGrantRows
+                                || DateOnly.FromDateTime(g.Grant.GrantedOn.UtcDateTime) >= since
+                                || (modifiedSince is { } m && g.Grant.RenewedOn is { } renewed && renewed >= m)))
                 .Select(g => g.Grant)
                 .ToList();
             return Task.FromResult(new RecentGrantsRead(rows, false));

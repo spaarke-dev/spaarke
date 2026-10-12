@@ -8,8 +8,9 @@
 // resolved CallerPrincipal on HttpContext.Items and nothing else; the handlers never branch on plane (NFR-01).
 //
 // The feed is DERIVED (owner 2026-10-08: no new table; appnotification targets systemusers only) from two sources:
-//   (a) grants — ACTIVE, unexpired sprk_externalrecordaccess rows naming the caller's contact as grantee, granted in the
-//       last 30 days (ExternalDataService.GetRecentGrantsAsync). Each row's root is re-checked against the caller
+//   (a) grants — ACTIVE, unexpired sprk_externalrecordaccess rows naming the caller's contact as grantee, granted OR
+//       renewed in place in the last 30 days (ExternalDataService.GetRecentGrantsAsync; a renewal is the row's modifiedon,
+//       the only timestamp that moves — owner 2026-10-12, with the known false positives noted there). Each row's root is re-checked against the caller
 //       principal's accessible set (CallerPrincipal.RightsOn must carry Read): a grant row for a record no longer
 //       accessible is DROPPED (fail-closed);
 //   (b) messages — the newest messages of the last 30 days filed regarding a record IN the caller's accessible set (the
@@ -264,20 +265,22 @@ public static class ExternalNotificationFeedEndpoints
             // (a) Grants to the caller's contact — each root re-checked against the accessible set (fail-closed).
             if (principal.ContactId != Guid.Empty)
             {
+                // EventOn is the grant time, or the renewal time of a grant restored in place (owner 2026-10-12).
                 var grants = await dataService.GetRecentGrantsAsync(
-                        principal.ContactId, DateOnly.FromDateTime(cutoff.UtcDateTime), DateOnly.FromDateTime(now.UtcDateTime), ct)
+                        principal.ContactId, DateOnly.FromDateTime(cutoff.UtcDateTime), DateOnly.FromDateTime(now.UtcDateTime), ct,
+                        modifiedSince: cutoff)
                     .ConfigureAwait(false);
                 truncated |= grants.Truncated;
 
                 var kept = grants.Grants
-                    .Where(g => g.GrantedOn >= cutoff
+                    .Where(g => g.EventOn >= cutoff
                                 && principal.RightsOn(g.RootType, g.RootId).HasFlag(Spaarke.Dataverse.AccessRights.Read))
-                    .OrderByDescending(g => g.GrantedOn)
+                    .OrderByDescending(g => g.EventOn)
                     .ThenByDescending(g => g.GrantId)
                     .ToList();
                 truncated |= kept.Count > MaxItems;
                 items.AddRange(kept.Take(MaxItems).Select(g => new FeedItem(
-                    ExternalNotificationDto.KindGrant, g.GrantId, EntityFor(g.RootType), g.RootId, g.GrantedOn, null)));
+                    ExternalNotificationDto.KindGrant, g.GrantId, EntityFor(g.RootType), g.RootId, g.EventOn, null)));
             }
 
             // (b) The accessible records whose messages the feed reports.

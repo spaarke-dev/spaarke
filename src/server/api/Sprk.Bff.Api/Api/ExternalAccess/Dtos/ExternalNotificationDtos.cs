@@ -65,7 +65,7 @@ public sealed class ExternalNotificationDto
     [JsonPropertyName("recordTitle")]
     public string? RecordTitle { get; init; }
 
-    /// <summary>When it happened (ISO-8601, UTC): the grant row's creation, or the message's <c>createdon</c>.</summary>
+    /// <summary>When it happened (ISO-8601, UTC): the grant row's creation or in-place renewal, or the message's <c>createdon</c>.</summary>
     [JsonPropertyName("occurredOn")]
     public DateTimeOffset OccurredOn { get; init; }
 
