@@ -9,11 +9,7 @@
     "build:watch": "tsc --watch",
     "clean": "rm -rf dist",
     "lint": "eslint src --ext .ts,.tsx",
-    "lint:fix": "eslint src --ext .ts,.tsx --fix",
-    "test": "jest --passWithNoTests",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
-    "test:ci": "jest --ci --coverage --maxWorkers=2 --passWithNoTests"
+    "lint:fix": "eslint src --ext .ts,.tsx --fix"
   },
   "keywords": [
     "spaarke",
