@@ -2,18 +2,18 @@
 
 > **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas" (incl. "Multi-customer add-in (Model 1)" and "Guest sign-in, PCFs and telemetry" blocks). History: git log + `notes/handoff-history/` (do not load on recovery).
 
-> **Last Updated**: 2026-10-11 (tasks 128 + Reconciliation page fix deployed to dev; task 129 being implemented).
+> **Last Updated**: 2026-10-12 (task 129 code complete + reviewed, pushed at `46687a851`; awaiting owner deploy go).
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | 129 (filed email visible on the record's Messages panel) — an Opus implementer subagent is building `IThreadResolver.ReconcileThreadForFilingAsync` per `notes/129-filed-email-messages.md`, adapted to #1639's join-time grant audience. Owner-confirmed rules: first filing anchors the thread; a re-filed email that is the only filed email in its thread takes the thread with it; a mixed thread / master thread → only the email moves to the new record's Tier-2 default thread. |
-| **Status** | 128 done in code + deployed, awaiting owner retest. 129 implementation running (uncommitted BFF edits in this worktree). |
-| **Next Action** | When the implementer reports: review the diff, run 2 adversarial-verifier passes (security-adjacent: grants), measure BFF publish size (§10), commit, then ask the owner for the dev BFF deploy go and write/dry-run the backfill (`scripts/Backfill-ThreadFiling.ps1` + `sprk_communicationthread` in `Backfill-RecordOwnership.ps1`). Also send UAC-r2 the T126 message (Q3: `Set-ExternalFlagForB2BGuests.ps1` must exclude the customer workforce tenants before any Model-1 `-Apply`; Q2: provisioning customer record is canonical; Q4: Events type=Task carry documents, OOB task activity unused) — first confirm how a B2B guest's home tenant appears at sign-in (`tid` vs `idp`). |
+| **Task** | 129 (filed email visible on the record's Messages panel). Code complete: `IThreadResolver.ReconcileThreadForFilingAsync` (commits `48a2f8687`, `09397337f`, `cb9e10aac`), empty-thread retirement + backfill job `communication-thread-filing-sweep` (`fb9e0cdb3`), sweep review fixes (`46687a851`). Reviews: security, behaviour, re-check, sweep adversarial — no open F-class. BFF publish +25,916 B (36.46 → 36.49 MB), no vulnerable packages. |
+| **Status** | 128 deployed, awaiting owner retest. 129 NOT deployed. |
+| **Next Action** | Owner gives three separate goes: (1) dev BFF deploy (`bff-deploy`); (2) enable + trigger the sweep as a dry run — `POST /api/admin/jobs/communication-thread-filing-sweep/enable` then `/trigger`, read `/status` ResultJson with the owner (expect `unresolved` > 0 for party-only filings — documented); (3) set App Service `CommunicationThreadFilingSweep__Apply=true`, trigger, review. Then live-check PAT-444023 / communication `b22bb67e-9dc1-f111-a05c-0022482913fc`, then 129 → ✅ in TASK-INDEX + POML. T126: owner to say whether to send `notes/126-message-to-uac-r2.md` to the UAC-r2 session or relay it. |
 
 ### Unpushed / uncommitted
-- Task 129 BFF edits (implementer, in progress). Branch otherwise pushed at `a70019e3e`; no PR open.
+- None. Branch pushed at `46687a851`; no PR open.
 
 ## Live in dev (2026-10-08/11)
 - 2026-10-12 03:12 UTC (evening of 10-11 local): `sprk_communicationreconciliation` (fix: page loads again — `4fb7c8da6`) and `sprk_documentuploadwizard` (task 128 — `db37e6a31`) built from `a70019e3e`, published, read back byte-equal.
