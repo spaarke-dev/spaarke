@@ -10,8 +10,9 @@ namespace Spaarke.ArchTests;
 /// <para><b>Why a fitness function.</b> <c>src/dataverse/solutions/SpaarkeMaster/WebResources/</c> is an EXPORT from dev
 /// (the files that get packaged into the solution). The maintained sources live in <c>src/client/webresources/**</c>,
 /// <c>src/solutions/webresources/**</c>, <c>infrastructure/dataverse/ribbon/*/WebResources/**</c> and the top-level
-/// <c>src/solutions/*/sprk_*.js|css</c> files (a code page's own ribbon-command script, e.g.
-/// <c>src/solutions/EventCommands/sprk_event_ribbon_commands.js</c>). Nothing tied the two
+/// <c>src/solutions/*/**/sprk_*.js|css</c> files (a code page's own ribbon-command or bootstrap script, e.g.
+/// <c>src/solutions/EventCommands/sprk_event_ribbon_commands.js</c> or
+/// <c>src/solutions/NavigatorPane/bootstrap/sprk_SidePaneManager.js</c>). Nothing tied the two
 /// together, so they drifted silently: the mirror's <c>sprk_subgrid_parent_rollup.js</c> was 1.0.0 and called the BFF
 /// recalculate endpoints anonymously (now 401) while the source was 2.0.0 (MSAL bearer token). Anyone who imports the
 /// committed solution would have shipped the broken script.</para>
@@ -22,8 +23,14 @@ namespace Spaarke.ArchTests;
 /// <list type="bullet">
 /// <item><c>WebResources/sprk_/scripts/bff_auth.js</c> ↔ <c>sprk_bff_auth.js</c> or <c>bff_auth.js</c>;</item>
 /// <item><c>WebResources/sprk_/js/registrationribbon.js</c> ↔ <c>sprk_registrationribbon.js</c>;</item>
-/// <item><c>WebResources/sprk_foo.js</c> ↔ <c>sprk_foo.js</c> only (already prefixed, so no further prefix is tried).</item>
+/// <item><c>WebResources/sprk_foo.js</c> ↔ <c>sprk_foo.js</c> only (already prefixed, so no further prefix is tried);</item>
+/// <item>an EXTENSIONLESS mirror file (Dataverse exports a JScript resource without its extension, e.g.
+/// <c>WebResources/sprk_subgrid_commands</c>, <c>WebResources/sprk_SidePaneManager</c>) ↔ <c>&lt;name&gt;.js</c> or
+/// <c>sprk_&lt;name&gt;.js</c>. Most extensionless mirror files are HTML code pages with no <c>.js</c> source of that
+/// name, so they simply have no counterpart.</item>
 /// </list>
+/// <para>The legacy, unrelated <c>src/dataverse/webresources/spaarke_documents/DocumentOperations.js</c> (a different
+/// namespace) is NOT a source root and is never paired with <c>sprk_DocumentOperations.js</c>.</para>
 /// <para>A mirror file with no source counterpart in those trees is not a finding (a resource whose source lives
 /// elsewhere, or a resource authored in the maker portal).</para>
 ///
@@ -52,14 +59,16 @@ public sealed class WebResourceMirrorParityGuardTests
     ];
 
     /// <summary>
-    /// <c>src/solutions/*</c> directories are code pages, not web-resource folders; only a <c>sprk_*.js|css</c> file sitting
-    /// DIRECTLY in one of them (not in a subfolder: those are build inputs or bootstrap helpers) is a web-resource source.
+    /// <c>src/solutions/*</c> directories are code pages, not web-resource folders; a <c>sprk_*.js|css</c> file anywhere
+    /// below one of them (not in build output or a test folder, see <see cref="ExcludedSegments"/>) is a web-resource source:
+    /// the ribbon-command script sits at the top (<c>EventCommands/</c>), a bootstrap script in a subfolder
+    /// (<c>NavigatorPane/bootstrap/</c>).
     /// </summary>
     private const string SolutionsRoot = "src/solutions";
 
     private static readonly string[] ExcludedSegments =
     [
-        "node_modules", "dist", "out", "obj", "bin", "coverage", "__tests__", "__mocks__",
+        "node_modules", "dist", "out", "obj", "bin", "coverage", "__tests__", "__mocks__", "test", "tests", "spec",
     ];
 
     private const string BaselineFile = "tests/Spaarke.ArchTests/WebResourceMirrorParity.baseline.txt";
@@ -80,10 +89,18 @@ public sealed class WebResourceMirrorParityGuardTests
         return text.Replace("\r\n", "\n", StringComparison.Ordinal);
     }
 
-    /// <summary>The source basenames a mirror file corresponds to: its own basename, and that basename prefixed <c>sprk_</c>.</summary>
+    /// <summary>
+    /// The source basenames a mirror file corresponds to: its own basename, and that basename prefixed <c>sprk_</c>.
+    /// An extensionless mirror file (a JScript resource exported without its extension) gains <c>.js</c> first.
+    /// </summary>
     internal static IReadOnlyList<string> CandidateNames(string mirrorPath)
     {
         var name = mirrorPath[(mirrorPath.LastIndexOf('/') + 1)..];
+        if (!name.Contains('.', StringComparison.Ordinal))
+        {
+            name += ".js";
+        }
+
         return name.StartsWith("sprk_", StringComparison.OrdinalIgnoreCase) ? [name] : [name, "sprk_" + name];
     }
 
@@ -212,28 +229,42 @@ public sealed class WebResourceMirrorParityGuardTests
             .Where(i => IsRibbonWebResource(i.Path))
             .ToList();
 
-    private static IReadOnlyList<Item> MirrorFiles() => ReadItems(Walk(Repo(MirrorRoot)));
+    /// <summary>
+    /// The mirror's script files, plus its EXTENSIONLESS files that have a <c>.js</c> source of the same name (the extensionless
+    /// files are mostly large HTML code pages, so they are read only when a source counterpart exists).
+    /// </summary>
+    private static IReadOnlyList<Item> MirrorFiles(IReadOnlyList<Item> sources)
+    {
+        var sourceNames = sources.Select(s => s.Path[(s.Path.LastIndexOf('/') + 1)..]).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var files = Walk(Repo(MirrorRoot)).ToList();
+        var extensionless = files
+            .Where(f => !Path.GetFileName(f).Contains('.', StringComparison.Ordinal))
+            .Where(f => CandidateNames(RelativeSlash(f)).Any(sourceNames.Contains))
+            .Select(f => new Item(RelativeSlash(f), File.ReadAllText(f)));
 
-    /// <summary>Top-level <c>src/solutions/*/sprk_*.js|css</c> files — see <see cref="SolutionsRoot"/>.</summary>
-    private static IEnumerable<string> SolutionTopLevelScripts()
+        return [.. ReadItems(files), .. extensionless];
+    }
+
+    /// <summary><c>src/solutions/*/**/sprk_*.js|css</c> files — see <see cref="SolutionsRoot"/>.</summary>
+    private static IEnumerable<string> SolutionScripts()
     {
         var root = Repo(SolutionsRoot);
         return !Directory.Exists(root)
             ? []
             : Directory.EnumerateDirectories(root)
                 .Where(d => !ExcludedSegments.Contains(Path.GetFileName(d), StringComparer.OrdinalIgnoreCase))
-                .SelectMany(Directory.EnumerateFiles)
+                .SelectMany(Walk)
                 .Where(f => Path.GetFileName(f).StartsWith("sprk_", StringComparison.OrdinalIgnoreCase));
     }
 
     private static IReadOnlyList<Item> SourceFiles()
-        => ReadItems(SourceRoots.SelectMany(r => Walk(Repo(r))).Concat(SolutionTopLevelScripts()));
+        => ReadItems(SourceRoots.SelectMany(r => Walk(Repo(r))).Concat(SolutionScripts()).Distinct(StringComparer.OrdinalIgnoreCase));
 
     [Fact(DisplayName = "Issue #1651: every SpaarkeMaster web-resource mirror matches its maintained source, or is in the baseline")]
     public void MirrorMatchesSource_OrIsBaselined()
     {
-        var mirror = MirrorFiles();
         var sources = SourceFiles();
+        var mirror = MirrorFiles(sources);
 
         // An empty scan proves nothing — fail loudly if the roots moved.
         Assert.True(mirror.Count >= 20, $"only {mirror.Count} mirror files under {MirrorRoot} — the scan root is wrong");
@@ -257,21 +288,36 @@ public sealed class WebResourceMirrorParityGuardTests
     [Fact(DisplayName = "Issue #1651: the scan pairs real mirror files with real sources")]
     public void TheScanFindsPairs()
     {
-        var sourceNames = SourceFiles().Select(s => s.Path[(s.Path.LastIndexOf('/') + 1)..]).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var paired = MirrorFiles().Count(m => CandidateNames(m.Path).Any(sourceNames.Contains));
+        var sources = SourceFiles();
+        var mirror = MirrorFiles(sources);
+        var sourceNames = sources.Select(s => s.Path[(s.Path.LastIndexOf('/') + 1)..]).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var paired = mirror.Count(m => CandidateNames(m.Path).Any(sourceNames.Contains));
         Assert.True(paired >= 10, $"only {paired} mirror files have a source counterpart — the name rule or the roots are wrong");
 
         // the defect that motivated the guard: this pair exists and is compared
-        Assert.Contains(MirrorFiles(), m => m.Path == $"{MirrorRoot}/sprk_subgrid_parent_rollup.js");
-        Assert.Contains(SourceFiles(), s => s.Path == "src/solutions/webresources/sprk_subgrid_parent_rollup.js");
+        Assert.Contains(mirror, m => m.Path == $"{MirrorRoot}/sprk_subgrid_parent_rollup.js");
+        Assert.Contains(sources, s => s.Path == "src/solutions/webresources/sprk_subgrid_parent_rollup.js");
 
         // a code page's own top-level sprk_*.js (src/solutions/<page>/) is a source too — its mirror drifted unreported
-        Assert.Contains(MirrorFiles(), m => m.Path == $"{MirrorRoot}/sprk_event_ribbon_commands.js");
-        Assert.Contains(SourceFiles(), s => s.Path == "src/solutions/EventCommands/sprk_event_ribbon_commands.js");
-        // ...but not a nested one, and not an unprefixed file
-        Assert.DoesNotContain(SourceFiles(), s => s.Path.StartsWith("src/solutions/", StringComparison.Ordinal)
+        Assert.Contains(mirror, m => m.Path == $"{MirrorRoot}/sprk_event_ribbon_commands.js");
+        Assert.Contains(sources, s => s.Path == "src/solutions/EventCommands/sprk_event_ribbon_commands.js");
+
+        // extensionless mirror files pair with <name>.js (#1676): subgrid commands (top-level source) and SidePaneManager (nested source)
+        Assert.Contains(mirror, m => m.Path == $"{MirrorRoot}/sprk_subgrid_commands");
+        Assert.Contains(sources, s => s.Path == "src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js");
+        Assert.Contains(mirror, m => m.Path == $"{MirrorRoot}/sprk_SidePaneManager");
+        Assert.Contains(sources, s => s.Path == "src/solutions/NavigatorPane/bootstrap/sprk_SidePaneManager.js");
+
+        // ...but not an unprefixed file, test/spec files, or build output
+        Assert.DoesNotContain(sources, s => s.Path.StartsWith("src/solutions/", StringComparison.Ordinal)
             && !s.Path.StartsWith("src/solutions/webresources/", StringComparison.Ordinal)
-            && s.Path.Count(c => c == '/') != 3);
+            && !System.Text.RegularExpressions.Regex.IsMatch(s.Path[(s.Path.LastIndexOf('/') + 1)..], "^sprk_", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+        Assert.DoesNotContain(sources, s => s.Path.Split('/').Intersect(ExcludedSegments, StringComparer.OrdinalIgnoreCase).Any());
+
+        // the legacy spaarke_documents/DocumentOperations.js (a different namespace) is not a source root (#1676)
+        Assert.DoesNotContain(sources, s => s.Path.StartsWith("src/dataverse/webresources/", StringComparison.Ordinal));
+        Assert.DoesNotContain(sources, s => s.Path.EndsWith("/DocumentOperations.js", StringComparison.OrdinalIgnoreCase)
+            && !s.Path.EndsWith("/sprk_DocumentOperations.js", StringComparison.OrdinalIgnoreCase));
     }
 
     // ── Controls (synthetic inputs) ───────────────────────────────────────────────────────────
@@ -316,6 +362,51 @@ public sealed class WebResourceMirrorParityGuardTests
     [Fact(DisplayName = "Control (must not fire): no source counterpart")]
     public void DoesNotFire_WhenThereIsNoSource()
         => Assert.Empty(FindMismatches([M("anything")], [S("other", "src/solutions/webresources/sprk_bar.js")]));
+
+    // ── Issue #1676 controls: extensionless mirror files, nested solution sources, the legacy DocumentOperations ──
+
+    private const string ExtensionlessMirror = MirrorRoot + "/sprk_subgrid_commands";
+
+    [Fact(DisplayName = "Control (must fire): an extensionless mirror file differs from its <name>.js source")]
+    public void Fires_ExtensionlessMirror()
+    {
+        var line = Assert.Single(FindMismatches(
+            [M("old", ExtensionlessMirror)],
+            [S("new", "src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js")]));
+        Assert.Equal($"{ExtensionlessMirror} | src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js", line);
+    }
+
+    [Fact(DisplayName = "Control (must fire): an extensionless mirror file differs from a source that is not sprk_-prefixed")]
+    public void Fires_ExtensionlessMirror_UnprefixedSource()
+        => Assert.Single(FindMismatches(
+            [M("old", MirrorRoot + "/widget_commands")],
+            [S("new", "src/client/webresources/js/sprk_widget_commands.js")]));
+
+    [Fact(DisplayName = "Control (must fire): a mirror file differs from a source nested under src/solutions/<page>/<folder>/")]
+    public void Fires_NestedSolutionSource()
+    {
+        var mirror = M("old", MirrorRoot + "/sprk_SidePaneManager");
+        var line = Assert.Single(FindMismatches([mirror], [S("new", "src/solutions/NavigatorPane/bootstrap/sprk_SidePaneManager.js")]));
+        Assert.Equal($"{MirrorRoot}/sprk_SidePaneManager | src/solutions/NavigatorPane/bootstrap/sprk_SidePaneManager.js", line);
+    }
+
+    [Fact(DisplayName = "Control (must not fire): an extensionless mirror file differing only by CRLF and BOM")]
+    public void DoesNotFire_ExtensionlessMirror_CrlfOnly()
+        => Assert.Empty(FindMismatches(
+            [M("﻿a\r\nb\r\n", ExtensionlessMirror)],
+            [S("a\nb\n", "src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js")]));
+
+    [Fact(DisplayName = "Control (must not fire): an extensionless HTML code page does not pair with an unrelated .js")]
+    public void DoesNotFire_ExtensionlessMirror_WithoutJsSource()
+        => Assert.Empty(FindMismatches(
+            [M("<html/>", MirrorRoot + "/sprk_notepad")],
+            [S("x", "src/client/webresources/js/sprk_other.js")]));
+
+    [Fact(DisplayName = "Control (must not fire): the legacy namespace-different DocumentOperations.js is never paired with sprk_DocumentOperations.js")]
+    public void DoesNotFire_LegacyDocumentOperations()
+        => Assert.Empty(FindMismatches(
+            [M("new", MirrorRoot + "/sprk_DocumentOperations.js")],
+            [S("legacy", "src/dataverse/webresources/spaarke_documents/DocumentOperations.js")]));
 
     [Fact(DisplayName = "Name rule: nested mirror foo.js matches sprk_foo.js and foo.js, case-insensitively, and not bar.js")]
     public void NameRule_NestedMirror()
