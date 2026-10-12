@@ -849,6 +849,41 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     [Fact]
+    public async Task CommunicationFiling_AWrittenFiling_ReconcilesTheCommunicationsThread_AfterTheOwnerIsAssigned()
+    {
+        // spaarkeai-word-add-in-r1 task 129: the thread follows the filing, so the email shows on the record's Messages panel.
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+        threads
+            .Setup(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()))
+            .Callback(() => _world.Assignments.Should().NotBeEmpty("the reconcile runs after the filing and its owner are written"))
+            .Returns(Task.CompletedTask);
+
+        var result = await RefileCommunication(
+            communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }, threads.Object);
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
+    }
+
+    [Fact]
+    public async Task CommunicationFiling_ARefusedFiling_LeavesTheThreadAlone()
+    {
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        _user.NoAppendTo.Add(SecureMatter);
+        var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+
+        var result = await RefileCommunication(
+            communication, new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }, threads.Object);
+
+        Status(result).Should().Be(StatusCodes.Status404NotFound);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
+    }
+
+    [Fact]
     public async Task CommunicationFiling_WithTheAssociationStatus_Is400_TheStatusIsTheCallersOwnUpdate()
     {
         var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
@@ -1279,10 +1314,12 @@ public sealed partial class SecureChildOwnershipAiToolTests
             NullLogger<Program>.Instance, CancellationToken.None);
 
     /// <summary>PATCH /api/communications/{id}/filing's handler: the ONE re-file core, filing columns only.</summary>
-    private Task<IResult> RefileCommunication(Guid communication, Dictionary<string, object?> payload) =>
+    private Task<IResult> RefileCommunication(
+        Guid communication, Dictionary<string, object?> payload,
+        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null) =>
         ChildRecordEndpoints.UpdateAsync(
             "sprk_communication", communication, Payload(payload), _user, _world.Resolver(), Restamper(), Children(),
-            HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true);
+            HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true, threads: threads);
 
     private static CoreAncestorRestamper Restamper() =>
         new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper;

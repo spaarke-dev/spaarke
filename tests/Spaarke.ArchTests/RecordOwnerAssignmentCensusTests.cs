@@ -419,6 +419,8 @@ public class RecordOwnerAssignmentCensusTests
             "A thread created on request — the record's team for an ownership parent (409 on refusal), else the caller."),
         new OwnerWriteEntry("ThreadResolver.cs", "FindOrCreateDefaultThreadAsync", 1, OwnerWriteKind.Routed,
             "A record's default thread — its record's team; the per-user master thread keeps its user (E2)."),
+        new OwnerWriteEntry("ThreadResolver.cs", "AnchorThreadForFilingAsync", 1, OwnerWriteKind.Routed, // word-add-in-r1 task 129
+            "A thread that follows its email's filing — re-anchored to the record and owned by its team (S6); a refusal leaves it untouched."),
         new OwnerWriteEntry("TaskActionCore.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
             "AI create-task — ForChild over the stamped parents."),
         new OwnerWriteEntry("OwnedChildWrite.cs", "CreateAsync", 1, OwnerWriteKind.Routed,

@@ -677,6 +677,68 @@ public class IncomingAssociationResolverTests
                 },
             });
     }
+
+    // =========================================================================
+    // Task 129: after a filing is written, the email's thread follows it
+    // =========================================================================
+
+    private IncomingAssociationResolver FilingResolverWith(
+        IAssociationRung rung, Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble owners, IThreadResolver threads) => new(
+        new[] { rung },
+        _dataverseServiceMock.Object,
+        _dataverseServiceMock.Object,
+        AssociationTestSupport.Mapper(),
+        Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+        owners,
+        Mock.Of<ILogger<IncomingAssociationResolver>>(),
+        threads);
+
+    [Fact]
+    public async Task ResolveAsync_FilingAnExistingCommunication_ReconcilesItsThreadAfterTheWrite()
+    {
+        var matter = Guid.NewGuid();
+        var written = CaptureCommunicationUpdate();
+        var threads = new Mock<IThreadResolver>();
+        threads
+            .Setup(t => t.ReconcileThreadForFilingAsync(TestCommunicationId, It.IsAny<CancellationToken>()))
+            .Callback(() => written.Should().ContainSingle("the thread follows a filing that was written"))
+            .Returns(Task.CompletedTask);
+
+        await FilingResolverWith(new StubRegardingRung("sprk_regardingmatter", "sprk_matter", matter), new(), threads.Object)
+            .ResolveAsync(TestCommunicationId, CreateEnvelope("filing", "clerk@court.gov"), new AssociationContext(), CancellationToken.None);
+
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(TestCommunicationId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AFilingWhoseOwnerIsRefused_WritesNothing_AndLeavesTheThreadAlone()
+    {
+        var written = CaptureCommunicationUpdate();
+        var threads = new Mock<IThreadResolver>();
+        var refusing = new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble { TeamId = null };
+
+        var act = () => FilingResolverWith(new StubRegardingRung("sprk_regardingmatter", "sprk_matter", Guid.NewGuid()), refusing, threads.Object)
+            .ResolveAsync(TestCommunicationId, CreateEnvelope("filing", "clerk@court.gov"), new AssociationContext(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException>();
+        written.Should().BeEmpty();
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ApplyToNewRecordAsync_ARowJustCreated_HasNoThreadToReconcile()
+    {
+        var matter = Guid.NewGuid();
+        CaptureCommunicationUpdate();
+        var threads = new Mock<IThreadResolver>();
+        var rung = new StubRegardingRung("sprk_regardingmatter", "sprk_matter", matter);
+        var resolver = FilingResolverWith(rung, new(), threads.Object);
+        var decision = await resolver.EvaluateAsync(CreateEnvelope("filing", "clerk@court.gov"), new AssociationContext(), CancellationToken.None);
+
+        await resolver.ApplyToNewRecordAsync(TestCommunicationId, decision, CancellationToken.None);
+
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
     // =========================================================================
     // P2 (FR-12 UAT): the denormalized PRIMARY Regarding is substantive-only (never a fallback)
     // =========================================================================

@@ -1,4 +1,5 @@
 ## SharePoint Embedded + Graph
+- [B2B guest home-tenant classification (2026-10-12)](b2b-guest-home-tenant-classification-2026-10-12.md) — no documented home-tid claim/user prop; tid=resource tenant; idp GUID practice only; beta signIn.homeTenantId; bind at invite time
 - [SPE app-only per-container isolation (2026-10-06)](spe-apponly-per-container-isolation-2026-10-06.md) — app-only = ALL containers of CT; no per-container app scoping; CT-per-customer is the only hard boundary
 - [SPE container customProperties (2026-10-06)](spe-container-custom-properties.md) — not settable at create (PATCH …/customProperties after); `$select=id,containerTypeId,customProperties` reads type+marker in one app-only GET; any app with Write/Full on the CT and container Writers can edit; containerId == driveId (`b!`)
 - [SPE JIT membership vs item sharing (2026-10-06)](spe-jit-membership-item-sharing-office-edit-2026-10-06.md) — item invite to non-member documented; DELETE container perm also strips item perms; preview URL = caller rights

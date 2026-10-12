@@ -49,6 +49,12 @@ public sealed class IncomingAssociationResolver
 
     private readonly ILogger<IncomingAssociationResolver> _logger;
 
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 129: after an EXISTING communication is filed (a reparent), its thread follows the
+    /// filing. Optional, like <see cref="IncomingCommunicationProcessor"/>'s; best-effort (never throws).
+    /// </summary>
+    private readonly IThreadResolver? _threadResolver;
+
     /// <summary>Deterministic rungs (Kind 0–3), evaluated unconditionally, in ascending Order.</summary>
     private readonly IReadOnlyList<IAssociationRung> _deterministicRungs;
 
@@ -77,7 +83,8 @@ public sealed class IncomingAssociationResolver
         AssociationStatusMapper statusMapper,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
-        ILogger<IncomingAssociationResolver> logger)
+        ILogger<IncomingAssociationResolver> logger,
+        IThreadResolver? threadResolver = null)
     {
         _communicationService = communicationService;
         _genericEntityService = genericEntityService;
@@ -85,6 +92,7 @@ public sealed class IncomingAssociationResolver
         _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger;
+        _threadResolver = threadResolver;
 
         // Rungs are DI-registered (CommunicationModule). Partition into deterministic (0–3) and AI (4–5),
         // each ordered by Order. Deterministic rungs always run (reinforcement + always-run detectors);
@@ -503,6 +511,11 @@ public sealed class IncomingAssociationResolver
 
             if (reparent.IsRefused)
                 throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communication", reparent);
+
+            // Task 129: the filing was written — the email's thread follows it (best-effort; never throws). A NEW row (the
+            // branch above) has no thread yet: thread resolution after it anchors the thread it creates.
+            if (_threadResolver is not null)
+                await _threadResolver.ReconcileThreadForFilingAsync(communicationId, ct);
         }
 
         _logger.LogDebug(

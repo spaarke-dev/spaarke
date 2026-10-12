@@ -72,6 +72,29 @@ public interface IThreadResolver
     Task ReDeriveThreadNameAsync(Guid threadId, CancellationToken ct = default);
 
     /// <summary>
+    /// spaarkeai-word-add-in-r1 task 129: after an EMAIL was filed (its regarding written by a filing core — the
+    /// communication filing route or the association engine), its thread follows the filing so the email shows on the
+    /// record's Messages panel, which lists threads by the THREAD's typed regarding. Let R be the email's primary typed
+    /// regarding (ADR-024 priority) and T its thread:
+    /// <list type="bullet">
+    /// <item>the email is unfiled, is not an email, has no thread, T is already anchored to R, or T is not Open
+    /// (a private thread keeps its isolation) → nothing;</item>
+    /// <item>T is not a default thread (neither the per-user master nor a record's per-record default) and no OTHER active message in T is filed to a record other than R — whether T is
+    /// unanchored or anchored to a previous record (owner clarification 2026-10-11) → the whole of T follows: anchored to R
+    /// (its typed regarding and display fields, a previous record's lookup and display fields cleared, Record-Anchored),
+    /// owned by R's team (S6; a refusal, or a record that is not an ownership parent, leaves T untouched), its name
+    /// re-derived (marker-gated), and every active message in T filed to R is granted to R's members (unfiled messages are
+    /// not);</item>
+    /// <item>otherwise (T is a default thread, or holds another active message filed to a different record) → only the
+    /// email moves, to R's per-record default thread (Tier 2) through the S6 join, and is granted to R's members.</item>
+    /// </list>
+    /// The grant audience is always R — the email's own regarding, just validated by the filing write — never a re-read of
+    /// a thread column (#1629). Prior grants are not revoked. Best-effort / non-fatal (NFR-02): never throws; any failure is
+    /// logged and the filing stands.
+    /// </summary>
+    Task ReconcileThreadForFilingAsync(Guid communicationId, CancellationToken ct = default);
+
+    /// <summary>
     /// FR-17 rename (task 004): sets <c>sprk_name</c> AND flips the naming-edited marker
     /// (<c>sprk_nameisautoderived</c> → Edited/<c>false</c>) in ONE write, so a later
     /// <see cref="ReDeriveThreadNameAsync"/> short-circuits at the marker gate and never overwrites the

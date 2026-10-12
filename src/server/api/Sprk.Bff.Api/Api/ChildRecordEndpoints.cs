@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api;
@@ -272,6 +273,9 @@ public static class ChildRecordEndpoints
     /// (<c>sprk_RegardingMatter</c> → <c>sprk_regardingmatter</c>, live metadata, task 159 note §0.2(b)), so naming only
     /// <c>sprk_regarding…</c> properties writes only <c>sprk_regarding…</c> columns; an unknown navigation property is the
     /// mapper's 400.</param>
+    /// <param name="threads">The communication filing route's thread owner (spaarkeai-word-add-in-r1 task 129): after a
+    /// communication's filing is written, its thread follows it (<see cref="IThreadResolver.ReconcileThreadForFilingAsync"/>,
+    /// best-effort, never fails the filing). Not used for any other table.</param>
     internal static async Task<IResult> UpdateAsync(
         string entity,
         Guid id,
@@ -283,7 +287,8 @@ public static class ChildRecordEndpoints
         HttpContext httpContext,
         ILogger logger,
         CancellationToken ct,
-        bool filingOnly = false)
+        bool filingOnly = false,
+        IThreadResolver? threads = null)
     {
         if (filingOnly && FilingShapeProblem(body, entity) is { } shape)
             return shape;
@@ -375,6 +380,11 @@ public static class ChildRecordEndpoints
                 async () => GetString(row.Body, "_owningteam_value") is { } before && Guid.TryParse(before, out var beforeTeam)
                             && await children.IsSecureOwnerTeamAsync(beforeTeam, CancellationToken.None).ConfigureAwait(false),
                 CancellationToken.None).ConfigureAwait(false);
+
+            // Task 129: a filed communication's thread follows the filing, so it shows on the record's Messages panel (the
+            // panel lists threads by the thread's own regarding). Best-effort: it logs and returns, never fails the re-file.
+            if (threads is not null && string.Equals(entity, "sprk_communication", StringComparison.OrdinalIgnoreCase))
+                await threads.ReconcileThreadForFilingAsync(id, CancellationToken.None).ConfigureAwait(false);
         }
 
         return Results.NoContent();

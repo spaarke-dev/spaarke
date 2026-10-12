@@ -1607,6 +1607,66 @@ public class SecureChildShareMirrorTests
         _shares.WriteLog.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 129: an email filed to a project from an unanchored Direct thread is reconciled — the
+    /// thread is anchored to the project — and the message grant goes through THIS service, so a secure message is still
+    /// never granted (positive control below: an ordinary one is).
+    /// </summary>
+    private static Sprk.Bff.Api.Services.Communication.ThreadResolver FilingReconciler(
+        Guid communication, string regardingField, Guid project, DirectThreadAccessService access)
+    {
+        var thread = Guid.Parse("7e7e0000-0000-4000-8000-000000000129");
+        var entities = new Mock<IGenericEntityService>();
+        var email = new Microsoft.Xrm.Sdk.Entity("sprk_communication", communication)
+        {
+            ["sprk_communicationtype"] = new Microsoft.Xrm.Sdk.OptionSetValue(100000000), // Email
+            ["sprk_communicationthread"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_communicationthread", thread),
+            [regardingField] = new Microsoft.Xrm.Sdk.EntityReference("sprk_project", project),
+        };
+        entities
+            .Setup(e => e.RetrieveAsync("sprk_communication", communication, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(email);
+        entities
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", thread, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_communicationthread", thread)
+            {
+                ["sprk_threadtype"] = new Microsoft.Xrm.Sdk.OptionSetValue(100000001), // Direct, unanchored (ingested unfiled)
+                ["sprk_privacystate"] = new Microsoft.Xrm.Sdk.OptionSetValue(100000000), // Open
+            });
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection(new List<Microsoft.Xrm.Sdk.Entity> { email }));
+        return new Sprk.Bff.Api.Services.Communication.ThreadResolver(
+            Array.Empty<Sprk.Bff.Api.Services.Communication.Threads.IThreadKeyStrategy>(), entities.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            NullLogger<Sprk.Bff.Api.Services.Communication.ThreadResolver>.Instance, access);
+    }
+
+    [Fact]
+    public async Task FilingReconcile_ASecureEmailFiledFromADirectThread_GrantsNoParticipant()
+    {
+        var world = World();
+
+        await FilingReconciler(CommR, "sprk_regardingproject", ProjectR, MessageAccess(world, UserA, UserC))
+            .ReconcileThreadForFilingAsync(CommR, CancellationToken.None);
+
+        _shares.WriteLog.Should().BeEmpty("a secure message's shares are the secure-child synchronizer's alone");
+    }
+
+    [Fact]
+    public async Task FilingReconcile_AnOrdinaryEmailFiledFromADirectThread_IsGrantedToTheProjectsMembers()
+    {
+        var ordinaryComm = Guid.Parse("c0c00000-0000-4000-8000-0000000001a9");
+        var world = World().OrdinaryChild("sprk_communication", ordinaryComm,
+            ("sprk_regardingproject", "sprk_project", OrdinaryProject));
+
+        await FilingReconciler(ordinaryComm, "sprk_regardingproject", OrdinaryProject, MessageAccess(world, UserA, UserC))
+            .ReconcileThreadForFilingAsync(ordinaryComm, CancellationToken.None);
+
+        _shares.MaskOf("sprk_communication", ordinaryComm, User(UserA)).Should().Be(ViewOnly);
+        _shares.MaskOf("sprk_communication", ordinaryComm, User(UserC)).Should().Be(ViewOnly);
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // The scheduled reconcile
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════

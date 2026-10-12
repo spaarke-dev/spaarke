@@ -73,17 +73,27 @@ public sealed class ThreadResolver : IThreadResolver
     /// </summary>
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
 
+    /// <summary>
+    /// Task 129: the per-message read grant a filing reconcile issues for the thread the message now sits in (#1629's
+    /// join→grant sequence). Optional, like the other call sites' (<see cref="CommunicationService"/>,
+    /// <see cref="Channels.MessagingIngestor"/>): without it the reconcile still moves the thread, and the message stays
+    /// readable by its owner team.
+    /// </summary>
+    private readonly Access.IDirectThreadAccessService? _directThreadAccess;
+
     public ThreadResolver(
         IEnumerable<IThreadKeyStrategy> strategies,
         IGenericEntityService entityService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
-        ILogger<ThreadResolver> logger)
+        ILogger<ThreadResolver> logger,
+        Access.IDirectThreadAccessService? directThreadAccess = null)
     {
         _entityService = entityService;
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         // Fail fast on a duplicate channel registration (mirrors CommunicationChannelDispatcher's guard).
         _strategies = strategies.ToDictionary(s => s.SupportedType);
         _logger = logger;
+        _directThreadAccess = directThreadAccess;
     }
 
     public async Task<Guid?> ResolveAndAssignThreadAsync(ThreadResolutionRequest request, CancellationToken ct = default) =>
@@ -410,7 +420,9 @@ public sealed class ThreadResolver : IThreadResolver
                 "sprk_name", NameIsAutoDerivedField, "sprk_threadtype", DefaultThreadMarkerField,
                 "sprk_regardingrecordname", "sprk_regardingrecordurl",
             };
-            columns.AddRange(RegardingFieldMap.AllRegardingFields);
+            // Task 129: the THREAD's typed lookups only — sprk_regardingreportcard does not exist on the thread, and selecting
+            // it faulted the whole read (the same fix #1629 made to the membership derivation's thread read).
+            columns.AddRange(ThreadRegardingColumns);
             var thread = await _entityService.RetrieveAsync(
                 "sprk_communicationthread", threadId, columns.ToArray(), ct);
 
@@ -474,6 +486,247 @@ public sealed class ThreadResolver : IThreadResolver
             _logger.LogWarning(ex, "Thread name re-derive failed (non-fatal) | ThreadId: {ThreadId}", threadId);
         }
     }
+
+    // ── The thread follows the filing (spaarkeai-word-add-in-r1 task 129) ───────────────────────────────────────
+
+    private const string CommunicationTypeField = "sprk_communicationtype";
+    private const string PrivacyStateField = "sprk_privacystate";
+    private const string StateCodeFilterField = "statecode";
+    private const int StateActive = 0;
+
+    /// <summary>
+    /// Bounds the scan of a thread's messages when deciding whether it may be anchored (NFR-07). A thread with more active
+    /// messages than this is not proven unmixed, so its email moves to the record's default thread instead.
+    /// </summary>
+    internal const int MaxFilingReconcileMessageScan = 200;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para><b>Email only.</b> The defect and the design (task 129 note §3.1) are about filed emails. A chat thread is a
+    /// person-to-person or ACS conversation: anchoring it would re-own a 1:1 away from its participants and file every later
+    /// message that joins it (S6) under the record, granted to the record's members. Other channels are left as they are.</para>
+    /// <para><b>A private thread is left alone</b> (note §2: an email in a private thread without a grant is the invariant's
+    /// exception) — neither anchored nor emptied of the email.</para>
+    /// </remarks>
+    public async Task ReconcileThreadForFilingAsync(Guid communicationId, CancellationToken ct = default)
+    {
+        try
+        {
+            var columns = MessageRegardingColumns();
+            columns.Add(ThreadLookupOnCommunication);
+            columns.Add(CommunicationTypeField);
+            var email = await _entityService.RetrieveAsync("sprk_communication", communicationId, columns.ToArray(), ct);
+
+            if (email.GetAttributeValue<OptionSetValue>(CommunicationTypeField)?.Value != (int)CommunicationType.Email)
+            {
+                _logger.LogDebug("Filing reconcile skipped: {CommunicationId} is not an email", communicationId);
+                return;
+            }
+
+            if (email.GetAttributeValue<EntityReference>(ThreadLookupOnCommunication)?.Id is not { } threadId || threadId == Guid.Empty)
+            {
+                _logger.LogDebug("Filing reconcile skipped: {CommunicationId} has no thread", communicationId);
+                return;
+            }
+
+            // R — the email's primary typed regarding, the value the filing write just validated (AppendTo as the caller).
+            if (MessageRegardingAnchorOf(email) is not { } regarding
+                || !Guid.TryParse(regarding.RecordId, out var recordId) || recordId == Guid.Empty)
+            {
+                _logger.LogDebug("Filing reconcile skipped: {CommunicationId} is unfiled", communicationId);
+                return;
+            }
+
+            var thread = await _entityService.RetrieveAsync(
+                "sprk_communicationthread",
+                threadId,
+                ThreadRegardingColumns
+                    .Append("sprk_threadtype").Append(DefaultThreadMarkerField).Append(PrivacyStateField)
+                    .Append("sprk_regardingrecordid").Append("sprk_regardingrecordname").Append("sprk_regardingrecordurl")
+                    .ToArray(),
+                ct);
+            if (thread is null)
+            {
+                _logger.LogWarning(
+                    "Filing reconcile skipped: thread {ThreadId} of {CommunicationId} could not be read", threadId, communicationId);
+                return;
+            }
+
+            var current = ThreadAnchorOf(thread);
+            if (current.HasAnchor && current.RecordId == recordId
+                && string.Equals(current.RecordType, regarding.RecordType, StringComparison.OrdinalIgnoreCase))
+            {
+                return; // rule 1: already on R's panel
+            }
+
+            if (thread.GetAttributeValue<OptionSetValue>(PrivacyStateField)?.Value != PrivacyStateOpen)
+            {
+                _logger.LogInformation(
+                    "Filing reconcile left thread {ThreadId} as it is: it is not Open, so {CommunicationId} keeps the thread's " +
+                    "isolation (filed to {RecordType}:{RecordId})", threadId, communicationId, regarding.RecordType, recordId);
+                return;
+            }
+
+            // A DEFAULT thread — the per-user master (Tier 3) or a record's per-record default (Tier 2) — is a catch-all and is
+            // never moved whole (owner decision 2026-10-11): moving R_old's default would strip R_old of it and give R two.
+            var isDefaultThread = thread.GetAttributeValue<bool?>(DefaultThreadMarkerField) == true;
+
+            // Rule 2 (owner clarification 2026-10-11): any other thread — unanchored, or anchored to a previous record —
+            // follows the filing as a whole when no OTHER active message in it is filed to a different record.
+            if (!isDefaultThread
+                && await FiledToOnlyAsync(threadId, communicationId, regarding, recordId, ct) is { } filedToRecord)
+            {
+                await AnchorThreadForFilingAsync(threadId, thread, communicationId, regarding, recordId, filedToRecord, ct);
+                return;
+            }
+
+            await MoveToRecordDefaultThreadAsync(threadId, communicationId, regarding, ct);
+        }
+        catch (Exception ex)
+        {
+            // NFR-02: best-effort / non-fatal — the filing already stands.
+            _logger.LogWarning(ex, "Filing thread reconcile failed (non-fatal) | CommunicationId: {CommunicationId}", communicationId);
+        }
+    }
+
+    /// <summary>
+    /// The active messages of <paramref name="threadId"/> filed to R (always including the filed email), or <c>null</c> when
+    /// any active message in it is filed to another record — or the bounded scan could not see them all.
+    /// </summary>
+    private async Task<IReadOnlyList<Guid>?> FiledToOnlyAsync(
+        Guid threadId, Guid communicationId, RegardingAnchor regarding, Guid recordId, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_communication")
+        {
+            ColumnSet = new ColumnSet(MessageRegardingColumns().ToArray()),
+            TopCount = MaxFilingReconcileMessageScan + 1,
+            Criteria =
+            {
+                Conditions =
+                {
+                    new ConditionExpression(MessageThreadLookup, ConditionOperator.Equal, threadId),
+                    new ConditionExpression(StateCodeFilterField, ConditionOperator.Equal, StateActive),
+                },
+            },
+        };
+        var messages = (await _entityService.RetrieveMultipleAsync(query, ct)).Entities;
+        if (messages.Count > MaxFilingReconcileMessageScan)
+            return null;
+
+        var filedToRecord = new List<Guid> { communicationId };
+        foreach (var message in messages)
+        {
+            if (MessageRegardingAnchorOf(message) is not { } other)
+                continue; // unfiled: keeps its visibility (design K-b), never granted to R's members
+
+            var sameRecord = Guid.TryParse(other.RecordId, out var otherId) && otherId == recordId
+                && string.Equals(other.RecordType, regarding.RecordType, StringComparison.OrdinalIgnoreCase);
+            if (!sameRecord)
+                return null; // mixed: the thread cannot be anchored to R
+
+            if (message.Id != Guid.Empty && !filedToRecord.Contains(message.Id))
+                filedToRecord.Add(message.Id);
+        }
+
+        return filedToRecord;
+    }
+
+    /// <summary>
+    /// Rule 2: anchors the thread to R — the fields <see cref="CreateThreadAsync"/> writes for an anchored thread, owned by
+    /// R's team (S6) — re-derives its name, and grants R's members every message in it filed to R. A thread anchored to a
+    /// previous record loses that record's typed lookup (and its display fields when R has none), so the thread's one anchor
+    /// (<see cref="ThreadAnchorOf"/>) is R.
+    /// </summary>
+    private async Task AnchorThreadForFilingAsync(
+        Guid threadId, DataverseEntity thread, Guid communicationId, RegardingAnchor regarding, Guid recordId,
+        IReadOnlyList<Guid> filedToRecord, CancellationToken ct)
+    {
+        Guid? ownerTeamId;
+        try
+        {
+            ownerTeamId = await ResolveRecordThreadOwnerAsync(regarding, ct);
+        }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Filing reconcile left thread {ThreadId} unanchored: the owner of {RecordType}:{RecordId} could not be resolved " +
+                "(CommunicationId: {CommunicationId})", threadId, regarding.RecordType, recordId, communicationId);
+            return;
+        }
+
+        if (ownerTeamId is not { } teamId)
+        {
+            // Not an ownership parent (a party: account / contact / organization) — a record thread is owned by its record's
+            // team (S6), and there is none to give it, so the thread is left as it is.
+            _logger.LogInformation(
+                "Filing reconcile left thread {ThreadId} unanchored: {RecordType}:{RecordId} owns no thread (CommunicationId: " +
+                "{CommunicationId})", threadId, regarding.RecordType, recordId, communicationId);
+            return;
+        }
+
+        // The anchored-thread field set of CreateThreadAsync, written as one update.
+        var fields = new Dictionary<string, object>
+        {
+            ["sprk_threadtype"] = new OptionSetValue(ThreadTypeRecordAnchored),
+            ["sprk_regardingrecordid"] = TruncateTo(regarding.RecordId, 100),
+            ["ownerid"] = new EntityReference("team", teamId),
+        };
+        if (RegardingFieldMap.FieldFor(regarding.RecordType) is { } typedField)
+            fields[typedField] = new EntityReference(regarding.RecordType, recordId); // what SetTypedRegardingLookup writes
+        if (!string.IsNullOrWhiteSpace(regarding.RecordName))
+            fields["sprk_regardingrecordname"] = TruncateTo(regarding.RecordName, 400);
+        if (!string.IsNullOrWhiteSpace(regarding.RecordUrl))
+            fields["sprk_regardingrecordurl"] = TruncateTo(regarding.RecordUrl, 400);
+
+        // A re-file: clear what still names the previous record (DBNull.Value = clear, through the generic update) — every
+        // other typed lookup, and a display name/url R does not replace — so the thread's anchor, owner and name are R's.
+        foreach (var column in ThreadRegardingColumns)
+        {
+            if (!fields.ContainsKey(column) && thread.GetAttributeValue<EntityReference>(column) is not null)
+                fields[column] = DBNull.Value;
+        }
+        foreach (var column in new[] { "sprk_regardingrecordname", "sprk_regardingrecordurl" })
+        {
+            if (!fields.ContainsKey(column) && thread.Contains(column))
+                fields[column] = DBNull.Value;
+        }
+
+        await _entityService.UpdateAsync("sprk_communicationthread", threadId, fields, ct);
+        _logger.LogInformation(
+            "Filing reconcile anchored thread {ThreadId} to {RecordType}:{RecordId}, owned by team {TeamId} | CommunicationId: " +
+            "{CommunicationId}", threadId, regarding.RecordType, recordId, teamId, communicationId);
+
+        await ReDeriveThreadNameAsync(threadId, ct); // marker-gated; a user-renamed thread keeps its name
+
+        var assignment = ThreadAssignment.Anchored(threadId, regarding.RecordType, recordId);
+        foreach (var messageId in filedToRecord)
+            await GrantAsync(messageId, assignment, ct);
+    }
+
+    /// <summary>
+    /// Rule 3: moves the email to R's per-record default thread (Tier 2) through the S6 join, then grants it to R's
+    /// members — the Tier-2 audience, from the email's own regarding (#1629 F-C), never a re-read of the thread.
+    /// </summary>
+    private async Task MoveToRecordDefaultThreadAsync(
+        Guid fromThreadId, Guid communicationId, RegardingAnchor regarding, CancellationToken ct)
+    {
+        var recordThreadId = await FindOrCreateDefaultThreadAsync(regarding.RecordType, regarding.RecordId, regarding, ct);
+        if (recordThreadId == fromThreadId)
+            return;
+
+        await AssignThreadReconcilingOwnerAsync(communicationId, recordThreadId, ct);
+        _logger.LogInformation(
+            "Filing reconcile moved {CommunicationId} from thread {FromThreadId} to the default thread {ThreadId} of " +
+            "{RecordType}:{RecordId}", communicationId, fromThreadId, recordThreadId, regarding.RecordType, regarding.RecordId);
+
+        if (AssignmentFor(recordThreadId, regarding) is { } assignment)
+            await GrantAsync(communicationId, assignment, ct);
+    }
+
+    /// <summary>The #1629 grant for one message, when the grant service is wired (it never grants a secure message).</summary>
+    private Task GrantAsync(Guid communicationId, ThreadAssignment assignment, CancellationToken ct) =>
+        _directThreadAccess?.GrantMessageAccessAsync(communicationId, assignment, ct) ?? Task.CompletedTask;
 
     /// <inheritdoc />
     public async Task<string> RenameThreadAsync(Guid threadId, string name, CancellationToken ct = default)
@@ -884,14 +1137,26 @@ public sealed class ThreadResolver : IThreadResolver
     /// </summary>
     private async Task<RegardingAnchor?> ReadRegardingAnchorAsync(Guid communicationId, CancellationToken ct)
     {
+        var comm = await _entityService.RetrieveAsync(
+            "sprk_communication", communicationId, MessageRegardingColumns().ToArray(), ct);
+        return MessageRegardingAnchorOf(comm);
+    }
+
+    /// <summary>The message columns <see cref="MessageRegardingAnchorOf"/> reads.</summary>
+    private static List<string> MessageRegardingColumns()
+    {
         var columns = new List<string>
         {
             "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl",
         };
         columns.AddRange(RegardingFieldMap.AllRegardingFields);
+        return columns;
+    }
 
-        var comm = await _entityService.RetrieveAsync("sprk_communication", communicationId, columns.ToArray(), ct);
-
+    /// <summary>A message's primary regarding: its first typed ADR-024 lookup in priority order (see
+    /// <see cref="ReadRegardingAnchorAsync"/>); <c>null</c> when it carries none.</summary>
+    private static RegardingAnchor? MessageRegardingAnchorOf(DataverseEntity comm)
+    {
         // The record TYPE + specific record come from the TYPED ADR-024 lookup (RegardingFieldMap) — the
         // authoritative relational anchor, in ADR-024 priority order — plus the message's denormalized display
         // name/url. NOTE: sprk_regardingrecordtype on the MESSAGE is a LOOKUP to sprk_recordtype_ref (a
