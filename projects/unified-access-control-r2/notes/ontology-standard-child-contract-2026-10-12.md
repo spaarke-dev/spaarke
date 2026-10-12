@@ -68,9 +68,12 @@ Both come from having a second, ontology-only access path. Joining the standard 
 
 1. **Lineage rows (C4).**
    - Extend `SecureChildLineage` for the new DR subject lookups: 8 of the 9, excluding `sprk_regardingservicerequest`, the same as Signal's row. The typed core columns stay in the row until T5's backfill is verified.
-   - **Signal's pair type column is text, not a lookup** (live, deliberate; `SignalWriter.cs:238`). Aligning it is filed as `ontology-deferred`.
-   - T4 must make `CoreAncestorRestamper.cs:576` and `CoreAncestorStampReconciliationJob.OrphanClauseFor` treat a pair type column that isn't a lookup as absent.
-   - Signal re-files never go through `OwnedChildWrite`'s pair rule.
+   - **Signal's pair type column** was text (`SignalWriter.cs:238`). The ontology owner (2026-10-12) re-creates it in T1 as a lookup to `sprk_recordtype_ref`, keeping the same logical name. The dedupe key is now composed from the subject's logical name. So the restamper, `OrphanClauseFor` and `OwnedChildWrite`'s pair rule see the To Do shape on both tables.
+   - **T1 caveats:**
+     - the Redis entity-metadata cache `sdap:dv:entitymetadata:{entity}` lasts 6h, so the §5 gate waits for expiry or eviction;
+     - every other environment holding `sprk_signal` needs the same delete before importing;
+     - run `RetrieveDependenciesForDelete` first.
+   - **The writers use the shared regarding components** (`TodoRegardingBuilder` + `CoreAncestorResolver`), not private mirrors. Generalising the builder to any table is its own commit, reviewed by UAC; To Do behaviour stays byte-identical.
    - This lands **after** the columns are live on dev, because the lineage reads fail on a column that doesn't exist.
 2. **Census guard (C7, F4)**, including the solution↔lineage↔role tie.
 3. **F8:** review the budget-revision lineage and role entries when the ontology branch merges.
