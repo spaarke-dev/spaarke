@@ -4,7 +4,7 @@
     <title>Legal Front Door intake submit endpoint (FR-05 server, FR-06 intake half)</title>
     <phase>3 BFF features</phase>
     <gate>after 011, 020 and 033</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New external write endpoint (tags bff-api, auth)</rigor-reason>
     <model-tier>opus</model-tier>
