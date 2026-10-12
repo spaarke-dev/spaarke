@@ -36,11 +36,13 @@ import {
   DocumentFolderRegular,
   MoneyRegular,
   ShieldKeyholeRegular,
-  DocumentAddRegular,
   DocumentBulletListRegular,
 } from '@fluentui/react-icons';
 import type { Plane, MeEntitlementsResponse } from '../api/me-client';
 import type { WidgetBodyComponent } from './PlaceholderWidgetBody';
+// Leaf module (no React / wizard imports): the same intake-type rule the Quick Start cards use (review 052 F3).
+import { isIntakeTypeAvailable } from '../intake/intakeAvailability';
+import { INTAKE_REQUEST_TYPE } from '../api/intake-client';
 
 // ---------------------------------------------------------------------------
 // Descriptor shape
@@ -61,6 +63,8 @@ export interface WidgetDefinition {
   planes: Plane[];
   /** Module-level entitlement id required from `/me.entitlements`. Omit = entitled to all `planes`. */
   requiredEntitlement?: string;
+  /** Intake request type the caller must be offered (`EntitlementGate.requiredIntakeType`). Omit = no gate. */
+  requiredIntakeType?: number;
   /** Subset of `planes` for which this widget auto-opens as a default tab. */
   defaultForRoles: Plane[];
   /** Lazy factory resolving the widget body (task 016+ swaps this per-widget for the real body). */
@@ -103,8 +107,10 @@ const LEGAL_FRONT_DOOR_PLANES: Plane[] = ['workforce', 'ciam'];
  *   - workforce: My Requests · Inventions · Messages · Policy Library
  *   - ciam (outside counsel): Projects · Matters · Work Assignments · Documents · Invoices
  *   - admin (core-user): Access Admin (+ Messages)
- * `nda` is registered but NOT a default — it is opened via the Quick Start "NDA Assessment" card
- * ("NDA is accessed via the Quick Start card, not a default widget" — workspace-shell-foundation.md).
+ * There is no `nda` widget: NDA Assessment is the intake WIZARD opened from the Quick Start card (task 052,
+ * `src/intake/`), not a tab. The placeholder that used to be registered under that id promised an upload and an AI
+ * assessment the wizard does not do, so it was removed (review 052 F4); an unknown id is refused by the open path
+ * and rendered as "Widget unavailable".
  */
 export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
   // ── Workforce (internal employee) — Legal Front Door ──────────────────────
@@ -129,6 +135,9 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     description: 'Your invention disclosures and their review stage.',
     planes: LEGAL_FRONT_DOOR_PLANES,
     requiredEntitlement: 'legal-front-door',
+    // Review 052 F3: same visibility as the Invention Quick Start card - a partner whose Invention flag is off (the
+    // server omits the type from `intakeRequestTypes`) must not see this widget in the library either.
+    requiredIntakeType: INTAKE_REQUEST_TYPE.inventionSubmission,
     // R2 task 072 (owner tab set): entitled via legal-front-door but NOT an owner internal DEFAULT tab.
     defaultForRoles: [],
     lazyLoader: placeholderLoader,
@@ -161,19 +170,6 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     requiredEntitlement: 'legal-front-door',
     defaultForRoles: ['workforce', 'ciam'],
     lazyLoader: serviceRequestsLoader,
-  },
-  {
-    id: 'nda',
-    title: 'NDA Assessment',
-    icon: DocumentAddRegular,
-    ariaLabel: 'Open NDA Assessment — upload and assess an NDA',
-    description: 'Upload an NDA and get an AI compliance assessment.',
-    planes: LEGAL_FRONT_DOOR_PLANES,
-    requiredEntitlement: 'legal-front-door',
-    // Task 052: the Quick Start NDA card now opens the NDA Assessment WIZARD (intake/), not this placeholder; the
-    // widget stays registered (library only).
-    defaultForRoles: [],
-    lazyLoader: placeholderLoader,
   },
   // ── Cross-plane — available to workforce + admin (not a ciam default) ─────
   {
@@ -289,15 +285,22 @@ export interface EntitlementGate {
   planes: Plane[];
   /** Module-level entitlement id required from `/me.entitlements`. Omit = entitled to all `planes`. */
   requiredEntitlement?: string;
+  /**
+   * An intake `sprk_requesttype` the caller must be offered (`/me.intakeRequestTypes`, with the documented fallback
+   * when the server did not report it - see `intake/intakeAvailability.ts`). Omit = no intake-type gate.
+   */
+  requiredIntakeType?: number;
 }
 
 /**
  * Tier-1 entitlement check: the caller's plane must be in `gate.planes`, AND (if
- * `gate.requiredEntitlement` is set) the caller's `/me.entitlements` must include it.
+ * `gate.requiredEntitlement` is set) the caller's `/me.entitlements` must include it, AND (if
+ * `gate.requiredIntakeType` is set) that intake type must be available to the caller.
  */
 export function isEntitled(me: MeEntitlementsResponse, gate: EntitlementGate): boolean {
   if (!gate.planes.includes(me.plane)) return false;
   if (gate.requiredEntitlement && !me.entitlements.includes(gate.requiredEntitlement)) return false;
+  if (gate.requiredIntakeType !== undefined && !isIntakeTypeAvailable(me, gate.requiredIntakeType)) return false;
   return true;
 }
 

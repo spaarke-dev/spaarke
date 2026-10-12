@@ -106,6 +106,7 @@ export const PolicyQuestionWizard: React.FC<IntakeWizardProps> = ({ open, onClos
             <TextRow
               label="What topic?"
               required
+              hint="Appears in the request title; keep it generic."
               value={form.topicOther}
               onChange={v => set('topicOther', v)}
               maxLength={POLICY_LIMITS.topicOther.max}

@@ -8,24 +8,17 @@
  *      here and giving the matching Quick Start actions no other change. A request type with no entry has no wizard yet.
  *
  *   2. VISIBILITY. `isIntakeTypeAvailable(me, requestType)` decides whether an entry point (a Quick Start card, a More
- *      Services entry) is shown. It is driven by `/me/entitlements`, NOT by the plane (review 011 K3): with
- *      `ExternalAccess:PartnerServiceRequestsEnabled` on, a CIAM partner holds `legal-front-door` and sees the entry
- *      points; with it off, it does not. The server enforces the same rule on the submit route (the client is UX only).
- *
- *        - no `legal-front-door` entitlement                   -> hidden (whatever `intakeRequestTypes` says);
- *        - `intakeRequestTypes` is an array (the server spoke) -> shown iff it lists the type (`[]` = none);
- *        - `intakeRequestTypes` is `undefined` (an older server, or the rollout fallback in me-client.ts) -> TODAY'S RULE:
- *          NDA, Policy Question and Trademark Search are shown to any legal-front-door caller, Invention Submission only
- *          to a workforce caller. `undefined` is never read as "none" and never as "all".
+ *      Services entry) is shown. The rule itself lives in the leaf module `intakeAvailability.ts` (driven by
+ *      `/me/entitlements`, not the plane - review 011 K3), re-exported here; the widget registry imports the same rule
+ *      from there so the "Add widget" library cannot disagree with the Quick Start cards (review 052 F3).
  */
 import type * as React from 'react';
-import type { MeEntitlementsResponse } from '../api/me-client';
 import { INTAKE_REQUEST_TYPE } from '../api/intake-client';
 import { NdaAssessmentWizard } from './NdaAssessmentWizard';
 import { PolicyQuestionWizard } from './PolicyQuestionWizard';
 
-/** The module entitlement that gates every Legal Front Door entry point (`ModuleEntitlementResolver.LegalFrontDoorModule`). */
-export const LEGAL_FRONT_DOOR_ENTITLEMENT = 'legal-front-door';
+// The visibility rule lives in a leaf module (shared with widgetRegistry); re-exported so existing imports keep working.
+export { LEGAL_FRONT_DOOR_ENTITLEMENT, isIntakeTypeAvailable } from './intakeAvailability';
 
 /** What every intake wizard component takes. A wizard is mounted only while it is wanted, so each open starts fresh. */
 export interface IntakeWizardProps {
@@ -52,20 +45,4 @@ export const INTAKE_WIZARDS: readonly IntakeWizardDefinition[] = [
 /** The wizard for a request type, or `undefined` when none is built yet. */
 export function getIntakeWizard(requestType: number): IntakeWizardDefinition | undefined {
   return INTAKE_WIZARDS.find(w => w.requestType === requestType);
-}
-
-/** The types shown to a legal-front-door caller when the server did not report `intakeRequestTypes`. */
-const FALLBACK_TYPES_FOR_ANY_CALLER: readonly number[] = [
-  INTAKE_REQUEST_TYPE.ndaAssessment,
-  INTAKE_REQUEST_TYPE.policyQuestion,
-  INTAKE_REQUEST_TYPE.trademarkSearch,
-];
-
-/** Whether `me` may see the entry points for `requestType`. See the file header for the rule. */
-export function isIntakeTypeAvailable(me: MeEntitlementsResponse, requestType: number): boolean {
-  if (!me.entitlements.includes(LEGAL_FRONT_DOOR_ENTITLEMENT)) return false;
-  if (Array.isArray(me.intakeRequestTypes)) return me.intakeRequestTypes.includes(requestType);
-  // Not reported (older server / rollout fallback): today's rule.
-  if (requestType === INTAKE_REQUEST_TYPE.inventionSubmission) return me.plane === 'workforce';
-  return FALLBACK_TYPES_FOR_ANY_CALLER.includes(requestType);
 }

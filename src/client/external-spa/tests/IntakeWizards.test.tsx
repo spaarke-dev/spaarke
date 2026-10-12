@@ -21,12 +21,20 @@ vi.mock('../src/auth/bff-client', async () => {
 vi.mock('../src/components/detail/RecordOpener', () => ({ useOpenRecord: () => openRecord }));
 
 import { ApiError } from '../src/types';
+import { SignInRequiredError } from '../src/auth/msal-auth';
 import type { MeEntitlementsResponse } from '../src/api/me-client';
 import { QuickStartPane } from '../src/components/shell/QuickStartPane';
 import { INTAKE_WIZARDS, getIntakeWizard, isIntakeTypeAvailable } from '../src/intake/intakeRegistry';
 import { INTAKE_REQUEST_TYPE } from '../src/api/intake-client';
 import { addDaysIso, todayIso } from '../src/intake/intakeValidation';
-import { defaultWidgetIdsFor, isEntitledToWidgetId, libraryWidgetsFor } from '../src/registry/widgetRegistry';
+import {
+  WIDGET_DEFINITIONS,
+  defaultWidgetIdsFor,
+  getWidgetDefinition,
+  isEntitled,
+  isEntitledToWidgetId,
+  libraryWidgetsFor,
+} from '../src/registry/widgetRegistry';
 
 // ---------------------------------------------------------------------------
 // Fixtures + helpers
@@ -259,6 +267,38 @@ describe('entry-point visibility follows /me/entitlements, not the plane (review
   it('the Policy Question card is gated by legal-front-door (the submit route), not by policy-library', () => {
     expect(isIntakeTypeAvailable(workforce({ entitlements: ['legal-front-door'] }), POLICY)).toBe(true);
     expect(isIntakeTypeAvailable(workforce({ entitlements: ['policy-library'] }), POLICY)).toBe(false);
+  });
+
+  it('widgets: Inventions in the library follows the Invention flag, like its Quick Start card (review 052 F3)', () => {
+    const ids = (me: MeEntitlementsResponse): string[] => libraryWidgetsFor(me).map(w => w.id);
+    // Invention flag OFF: the server lists the other three types only - no Invention widget, for a partner or workforce
+    expect(ids(partner(true, { intakeRequestTypes: [NDA, POLICY, TRADEMARK] }))).not.toContain('inventions');
+    expect(ids(workforce({ intakeRequestTypes: [NDA, POLICY, TRADEMARK] }))).not.toContain('inventions');
+    expect(isEntitledToWidgetId(partner(true, { intakeRequestTypes: [NDA, POLICY, TRADEMARK] }), 'inventions')).toBe(
+      false
+    );
+    // Invention flag ON
+    expect(ids(partner(true, { intakeRequestTypes: [NDA, INVENTION, POLICY, TRADEMARK] }))).toContain('inventions');
+    // [] means none
+    expect(ids(workforce({ intakeRequestTypes: [] }))).not.toContain('inventions');
+    // intakeRequestTypes undefined: today's rule - a partner does not get it, a workforce caller does
+    expect(ids(partner(true))).not.toContain('inventions');
+    expect(ids(workforce())).toContain('inventions');
+    // no legal-front-door: never, whatever the list says
+    expect(ids(partner(false, { intakeRequestTypes: [INVENTION] }))).not.toContain('inventions');
+    // the gate is production `isEntitled`, and an un-gated widget is unaffected by intakeRequestTypes
+    const gate = getWidgetDefinition('inventions')!;
+    expect(gate.requiredIntakeType).toBe(INVENTION);
+    expect(isEntitled(workforce({ intakeRequestTypes: [] }), { planes: ['workforce'] })).toBe(true);
+    expect(ids(workforce({ intakeRequestTypes: [] }))).toContain('service-requests');
+  });
+
+  it('widgets: there is no "nda" placeholder widget (the wizard replaces it); a stale "nda" tab id is refused (review 052 F4)', () => {
+    expect(WIDGET_DEFINITIONS.map(d => d.id)).not.toContain('nda');
+    expect(getWidgetDefinition('nda')).toBeUndefined();
+    expect(isEntitledToWidgetId(workforce(), 'nda')).toBe(false);
+    expect(libraryWidgetsFor(workforce()).map(w => w.id)).not.toContain('nda');
+    expect(defaultWidgetIdsFor(workforce())).not.toContain('nda');
   });
 
   it('widgets: the Service Requests tab follows the entitlement in BOTH switch states', () => {
@@ -508,6 +548,27 @@ describe('NDA Assessment wizard', () => {
     expect(screen.getByText('Contoso Ltd')).toBeTruthy();
   });
 
+  it.each([
+    ['a 401 after the forced-refresh retry', () => new ApiError(401, problem(401))],
+    [
+      'a sign-in that could not be started',
+      () => new SignInRequiredError({ errorCode: 'user_cancelled', aadsts: null }),
+    ],
+  ])(
+    '%s says the session expired, not "could not be submitted", and keeps the answers (review 052 K3)',
+    async (_n, make) => {
+      bffApiCall.mockRejectedValueOnce(make());
+      fillNdaToTiming('review');
+      fireEvent.click(submitButton('Submit request'));
+      const text = (await screen.findByRole('alert')).textContent ?? '';
+      expect(text).toContain('Your session has expired. Sign in again, then submit.');
+      expect(text).not.toContain('could not be submitted');
+      expect(screen.queryByText('NDA request sent to Legal')).toBeNull();
+      expect(screen.getByText('Contoso Ltd')).toBeTruthy();
+      expect(submitButton('Submit request').disabled).toBe(false);
+    }
+  );
+
   it('Cancel closes the wizard without submitting', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByRole('dialog', { name: 'NDA Assessment' })).toBeNull();
@@ -553,6 +614,12 @@ describe('Policy Question wizard', () => {
     expect(labels.at(-1)).toBe('Other');
     change(/What is it about/, 'other');
     expect(screen.getByLabelText(/What topic/)).toBeTruthy();
+  });
+
+  it('the "Other" topic text warns that it appears in the (unsecured) request title (review 052 K2)', () => {
+    expect(screen.queryByText(/Appears in the request title/)).toBeNull();
+    change(/What is it about/, 'other');
+    expect(screen.getByText('Appears in the request title; keep it generic.')).toBeTruthy();
   });
 
   it('shows no incident channel, link or routing (owner decision 2026-10-12)', () => {

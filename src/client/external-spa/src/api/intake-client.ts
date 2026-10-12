@@ -18,6 +18,7 @@
  *     submitted, so a retry is safe).
  */
 import { bffApiCall } from '../auth/bff-client';
+import { accessFailureOf } from '../components/auth/BffAccessState';
 import { messageProblemOf } from './messages-client';
 
 /** The `sprk_requesttype` option values (`ExternalDataService.ServiceRequestTypes`). */
@@ -77,6 +78,10 @@ export function submitServiceRequest(input: SubmitServiceRequestInput): Promise<
   return bffApiCall<ServiceRequestCreated>('/api/v1/external/servicerequests', { method: 'POST', body });
 }
 
+/** Shown when the submit is refused for want of a valid session (review 052 K3); the answers stay in the wizard. */
+export const SESSION_EXPIRED_MESSAGE =
+  'Your session has expired. Sign in again, then submit. Your answers have been kept.';
+
 /** `ExternalIntakeEndpoints.DenyInventionNotAvailable` (also sent as `errorCode`). */
 export const DENY_TYPE_NOT_AVAILABLE = 'sdap.external.intake.invention_not_available';
 
@@ -86,6 +91,9 @@ export const DENY_TYPE_NOT_AVAILABLE = 'sdap.external.intake.invention_not_avail
  */
 export function intakeErrorMessage(err: unknown): string {
   if (err instanceof IntakeInputError) return err.message;
+  // A 401 (after bff-client's one forced-refresh retry), a failed Teams token or a sign-in that cannot be started: the
+  // session, not the request, is the problem. The wizard keeps the answers, so signing in again loses nothing.
+  if (accessFailureOf(err) === 'signin') return SESSION_EXPIRED_MESSAGE;
   const problem = messageProblemOf(err);
   switch (problem.status) {
     case 403:
