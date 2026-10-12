@@ -364,15 +364,18 @@ public sealed partial class RecordContainerResolver
             record = await ReadRecordAsync(normalizedEntity, recordId, [.. columns], ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (
-            isChild && ex is not SdapProblemException && !IsCallerCancellation(ex, ct))
+            (isChild || (ancestorLinks is not null && !isSecurable)) && ex is not SdapProblemException && !IsCallerCancellation(ex, ct))
         {
             // For a CHILD this read IS its link to its root, so an unreadable row is an unreadable ancestor link
             // (task 155 AC4). It already failed closed — nothing below ran — but as a raw fault the record-keyed
             // routes rendered it as a generic 500 "Upload failed" carrying the exception text. Same posture and
             // code as an unreadable ROOT: unknown never becomes "not secure", and 503 because a retry may succeed.
-            // Not-found (404) and the resolver's own refusals pass through untouched; a non-child (a root, a
-            // contact — including those that gained links in f3) keeps the original propagate-raw contract, which
-            // is equally fail-closed: nothing below runs.
+            // Not-found (404) and the resolver's own refusals pass through untouched. Task 031 review K4: this also
+            // covers a NON-securable record that carries ancestor links (the service request, whose regarding chain
+            // is read from its own row): a throttled read of that row reached the upload routes as a raw fault, and
+            // UploadDocumentForParent catches only SdapProblemException. A securable root (project, matter, work
+            // assignment) and a record with no links keep the original propagate-raw contract (task 075 pins it),
+            // which is equally fail-closed: nothing below runs.
             _logger.LogError(ex,
                 "[SECURE-CONTAINER] Could not read {Entity} {RecordId}, whose row carries its link to its project, "
                 + "matter or work assignment. Refusing rather than treating it as having no secure root ({Code}).",
@@ -972,7 +975,8 @@ public sealed partial class RecordContainerResolver
         var walkRecordEntity = walk.RecordEntity;
         var walkRecordId = walk.RecordId;
 
-        var setIntermediates = SetLinks(row, rowLinks.IntermediateColumns);
+        // Every link the row sets. The pair's identity rule (rule 3) still sees all of them, including a back-reference.
+        var allSetIntermediates = SetLinks(row, rowLinks.IntermediateColumns);
         var setCarriers = SetLinks(row, rowLinks.CarrierColumns);
 
         // HELD (task 155, unchanged): a column whose record cannot be compared from this row — a service request (core,
@@ -981,6 +985,18 @@ public sealed partial class RecordContainerResolver
         var sourceColumns = CoreAncestorResolver.StampSourceColumns.TryGetValue(rowEntity, out var sources)
             ? sources.Select(s => s.Column).ToHashSet(StringComparer.OrdinalIgnoreCase)
             : [];
+
+        // EXCEPT a link back to the record UNDER RESOLUTION (task 031 review F3): that is a cycle, not a filing, the same
+        // reasoning as Walk adding the record to Visited. A service request X that names a communication or to-do C is
+        // walked X -> C, and C names X back (the communication engine stamps sprk_regardingservicerequest; a to-do filed
+        // under X does too): held, it refused every upload to X. Only an EXACT back-reference (same entity AND id) on a
+        // column that would be HELD is dropped — a link to any other service request or record is held exactly as before,
+        // and a back-reference through a copy-SOURCE column (an event under an event under the first) is still the filing
+        // loop it always was (IntermediateRootsAsync refuses it).
+        var setIntermediates = allSetIntermediates
+            .Where(l => sourceColumns.Contains(l.Column) || !IsRecordUnderResolution(l, walkRecordEntity, walkRecordId))
+            .ToList();
+
         var held = setIntermediates.Where(i => !sourceColumns.Contains(i.Column)).Select(i => i.Column).ToList();
         if (held.Count > 0)
         {
@@ -1000,7 +1016,7 @@ public sealed partial class RecordContainerResolver
         if (rowLinks.HasPolymorphicRegarding)
         {
             var named = await ResolvePolymorphicRegardingAsync(
-                    row, rowEntity, rowLinks, viaPrefix, own, [.. setIntermediates, .. setCarriers],
+                    row, rowEntity, rowLinks, viaPrefix, own, [.. allSetIntermediates, .. setCarriers],
                     walkRecordEntity, walkRecordId, ct)
                 .ConfigureAwait(false);
 
@@ -1089,6 +1105,9 @@ public sealed partial class RecordContainerResolver
 
         return new RowHops(own, extra);
     }
+
+    private static bool IsRecordUnderResolution(StampSourceLink link, string recordEntity, Guid recordId)
+        => link.Id == recordId && string.Equals(link.Intermediate, recordEntity, StringComparison.OrdinalIgnoreCase);
 
     private static List<StampSourceLink> SetLinks(Entity row, IReadOnlyList<(string Column, string Target)> columns)
         => columns

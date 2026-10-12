@@ -563,6 +563,26 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     }
 
     [Fact]
+    public async Task ServiceRequest_WhoseRowCannotBeReadByTheContainerResolver_Is503_AndStoresAndWritesNothing()
+    {
+        // Review K4: the service request is a CORE record, so a throttled read of its own row (its regarding chain) used to
+        // reach the route as a raw fault; UploadDocumentForParent catches only SdapProblemException. Same typed 503 as
+        // every other route, with no exception text.
+        _fixture.Principal = CollaborateOn("servicerequests", RecordA);
+        _fixture.RowFaults[("sprk_servicerequest", RecordA)] = new TimeoutException("Dataverse timed out (secret-detail)");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var upload = await client.PostAsync($"/api/v1/external/servicerequests/{RecordA}/documents", FileForm());
+
+        upload.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var body = await upload.Content.ReadAsStringAsync();
+        body.Should().Contain(RecordContainerResolver.AncestorUnresolvedCode);
+        body.Should().NotContain("secret-detail").And.NotContain("timed out");
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Data.Documents.Should().BeEmpty("nothing was written");
+    }
+
+    [Fact]
     public async Task ServiceRequest_RegardingANonSecureMatter_StoresInTheBusinessUnitsContainer()
     {
         NonSecure("sprk_matter", MatterM);
@@ -950,11 +970,16 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         /// </summary>
         public ConcurrentDictionary<(string Entity, Guid Id), Entity> Rows { get; } = new();
 
+        /// <summary>Records whose container-resolver read FAILS (a throttle or outage), by (entity, id).</summary>
+        public ConcurrentDictionary<(string Entity, Guid Id), Exception> RowFaults { get; } = new();
+
         /// <summary>
         /// When set, the download and versions routes' pointer resolution runs the REAL document-pointer check
-        /// (<see cref="RecordContainerResolver.EnsureDocumentPointerContainerAsync"/>, the strict derived-container rule —
-        /// the rule the interim one also applies to a file the BFF uploaded app-only), as production's
-        /// <c>DocumentStorageResolver</c> and the delete-own route's <c>DocumentCheckoutService</c> do.
+        /// (<see cref="RecordContainerResolver.EnsureDocumentPointerContainerAsync"/>) with the STRICT derived-container
+        /// rule — so the route tests prove the STRICT pointer rule, as production's <c>DocumentStorageResolver</c> and the
+        /// delete-own route's <c>DocumentCheckoutService</c> will apply it once the strict rule is switched on. The
+        /// INTERIM rule (production's setting today) is not exercised here: it serves the legacy business-unit-container
+        /// service-request documents through the business-unit-subtree arm.
         /// </summary>
         public bool VerifyPointers { get; set; }
 
@@ -985,12 +1010,16 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             _spe.Clear();
             _itemDrives.Clear();
             Rows.Clear();
+            RowFaults.Clear();
             VerifyPointers = false;
         }
 
         /// <summary>The row the container resolver reads for (<paramref name="entity"/>, <paramref name="id"/>).</summary>
         private Entity RecordRow(string entity, Guid id)
         {
+            if (RowFaults.TryGetValue((entity, id), out var fault))
+                throw fault;
+
             if (Rows.TryGetValue((entity, id), out var row))
                 return row;
 

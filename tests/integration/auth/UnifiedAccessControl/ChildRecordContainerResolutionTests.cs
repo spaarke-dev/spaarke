@@ -1205,6 +1205,111 @@ public partial class ChildRecordContainerResolutionTests
         decision.ContainerId.Should().Be(RootContainer);
     }
 
+    // Task 031 review F3: the walk X -> C reads C's link back to X. A back-reference to the record under resolution is a
+    // cycle, not a filing; it must not take the held path (409 container_ancestor_unverifiable on every upload to X).
+    // A communication carries its back-reference as the typed lookup, usually with the pair; a to-do filed under X as the
+    // typed lookup alone.
+    private static readonly Guid BackReferencingTodoId = Guid.Parse("03103103-0000-0000-0000-000000000003");
+
+    private World ServiceRequestWithBackReferencingChild(string kind, bool withPair, Guid backReferenceTo)
+    {
+        var world = new World();
+        if (kind == "communication")
+        {
+            world.WithChild("sprk_servicerequest", regardingMatter: MatterId,
+                    intermediate: ("sprk_regardingcommunication", CommunicationId))
+                .WithRow("sprk_communication", CommunicationId,
+                    lookups: [("sprk_regardingservicerequest", "sprk_servicerequest", backReferenceTo)],
+                    pairId: withPair ? backReferenceTo.ToString() : null,
+                    pairType: withPair ? ServiceRequestTypeRef : null)
+                .WithRecordType(ServiceRequestTypeRef, "sprk_servicerequest");
+        }
+        else
+        {
+            world.WithChild("sprk_servicerequest", regardingMatter: MatterId,
+                    intermediate: ("sprk_regardingtodo", BackReferencingTodoId))
+                .WithRow("sprk_todo", BackReferencingTodoId,
+                    lookups: [("sprk_regardingservicerequest", "sprk_servicerequest", backReferenceTo)]);
+        }
+
+        return world;
+    }
+
+    [Theory(DisplayName = "Task 031 review F3: a service request whose communication / to-do names it back, regarding a NON-secure matter, resolves the business unit's container")]
+    [InlineData("communication", false)]
+    [InlineData("communication", true)]
+    [InlineData("todo", false)]
+    public async Task ServiceRequest_WhoseChildNamesItBack_RegardingANonSecureMatter_ResolvesTheBusinessUnitsContainer(
+        string kind, bool withPair)
+    {
+        var world = ServiceRequestWithBackReferencingChild(kind, withPair, backReferenceTo: ChildId)
+            .WithRoot("sprk_matter", MatterId, isSecure: false, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_servicerequest", ChildId);
+
+        decision.ContainerId.Should().Be(BusinessUnitContainer);
+    }
+
+    [Theory(DisplayName = "Task 031 review F3: the same shape regarding a SECURE matter resolves that matter's own container")]
+    [InlineData("communication", false)]
+    [InlineData("communication", true)]
+    [InlineData("todo", false)]
+    public async Task ServiceRequest_WhoseChildNamesItBack_RegardingASecureMatter_ResolvesTheMattersContainer(
+        string kind, bool withPair)
+    {
+        var world = ServiceRequestWithBackReferencingChild(kind, withPair, backReferenceTo: ChildId)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_servicerequest", ChildId);
+
+        decision.ContainerId.Should().Be(RootContainer);
+        world.Reads("businessunit").Should().Be(0, "a secure ancestor never falls back to the shared container");
+    }
+
+    [Theory(DisplayName = "Task 031 review F3 (must-not-fire): a communication / to-do filed under a DIFFERENT service request is still held — container_ancestor_unverifiable 409")]
+    [InlineData("communication", false)]
+    [InlineData("communication", true)]
+    [InlineData("todo", false)]
+    public async Task ServiceRequest_WhoseChildNamesADifferentServiceRequest_IsStillHeld(string kind, bool withPair)
+    {
+        var world = ServiceRequestWithBackReferencingChild(kind, withPair, backReferenceTo: ServiceRequestId)
+            .WithRoot("sprk_matter", MatterId, isSecure: false, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_servicerequest", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 031 review K4: an unreadable SERVICE REQUEST row refuses with container_ancestor_unresolved 503 — never a raw fault, no exception text")]
+    public async Task ServiceRequest_WhoseOwnRowCannotBeRead_IsRefusedWithAReasonCode()
+    {
+        var world = new World()
+            .WithRecordFault("sprk_servicerequest", new TimeoutException("Dataverse timed out"))
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_servicerequest", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+            ex.StatusCode.Should().Be(503, "a transient read failure is retryable, not a verdict");
+            ex.Detail.Should().NotContain("timed out");
+        }
+
+        world.Reads("businessunit").Should().Be(0);
+    }
+
     [Fact(DisplayName = "Task 155 f3: a pair naming a PARTY (contact) adds no root — the same as the typed party columns — and resolves the BU container")]
     public async Task Pair_NamingAParty_AddsNoRoot()
     {
