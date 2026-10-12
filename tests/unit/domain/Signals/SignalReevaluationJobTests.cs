@@ -1358,6 +1358,79 @@ public partial class SignalReevaluationJobTests
         h.Org.Rows.Values.Should().OnlyContain(r => r.GetAttributeValue<DateTime?>("sprk_suppresseduntil") == until, "a justified stamp is not rewritten (D-61)");
     }
 
+    /// <summary>#1661 round 2: the secure matter's family carries a live stamp from its three dismissals (each with a Decision Record), the
+    /// matter is a hit, and another subject's open Signal is not a hit (a normal pass would close it as ConditionCleared).</summary>
+    private static (Guid PolicyId, DateTime Until, Guid OtherOpen) SecureStampedMatterWithAnOpenNonHit(Harness h)
+    {
+        h.Sysadmin.SecureMatter(MatterId);
+        var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
+        var until = RunAt.UtcDateTime.AddDays(-16).AddDays(30);
+        foreach (var (episode, days) in new[] { (1, 20), (2, 18), (3, 16) })
+        {
+            var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, episode), SignalWriter.SignalStatusResolved,
+                SignalWriter.ResolutionDismissed, resolvedOn: RunAt.UtcDateTime.AddDays(-days), coreId: MatterId, suppressedUntil: until, policyId: policyId);
+            h.Org.Rows[id]["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId);
+            h.Org.Rows[id]["sprk_matter"] = new EntityReference("sprk_matter", MatterId);
+            h.Org.Rows[id]["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", Guid.NewGuid());
+        }
+
+        var otherMatter = Guid.Parse("2444af6d-e1f2-f011-8406-7ced8d1dc9aa");
+        var otherOpen = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", otherMatter, 1), SignalWriter.SignalStatusOpen,
+            coreId: otherMatter, policyId: policyId, versionId: h.Sysadmin.CurrentVersionOf(PolicyCode));
+        return (policyId, until, otherOpen);
+    }
+
+    private static void ShouldBeSkippedForPartitions(JobRunResult result, WriterOrg org, Guid policyId, Guid otherOpen, DateTime until)
+    {
+        result.Success.Should().BeFalse("a policy that was not planned is not a healthy run");
+        org.CreateCalls.Should().Be(0, "nothing is raised");
+        org.Updates.Should().BeEmpty("nothing is stamped, lowered or cleared");
+        org.ConditionalUpdates.Should().BeEmpty("nothing is closed, reconciled or reassigned");
+        org.Rows[otherOpen].GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value.Should().Be(SignalWriter.SignalStatusOpen,
+            "the WHOLE policy is skipped, not only the hits on stamped records");
+        org.Rows.Values.Where(r => r.Id != otherOpen).Should().OnlyContain(r => r.GetAttributeValue<DateTime?>("sprk_suppresseduntil") == until);
+
+        var json = System.Text.Json.JsonDocument.Parse(result.ResultJson!).RootElement;
+        json.GetProperty("policyFailures").GetInt32().Should().Be(1);
+        var skipped = json.GetProperty("partitionSkippedPolicies").EnumerateArray().Should().ContainSingle(
+            "the skipped policy is in the run result, not only in a log line").Subject;
+        skipped.GetProperty("policyId").GetGuid().Should().Be(policyId);
+        skipped.GetProperty("policyCode").GetString().Should().Be(PolicyCode);
+        skipped.GetProperty("failures").GetInt32().Should().Be(1);
+        result.ErrorMessage.Should().Contain("partitionSkippedPolicies=1");
+    }
+
+    [Fact]
+    public async Task Run_APartitioningFault_InTheSuppressionPass_SkipsThePolicyWhole_AndTheRunNamesIt_1661R2F3()
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var (policyId, until, otherOpen) = SecureStampedMatterWithAnOpenNonHit(h);
+        h.Sysadmin.FaultOn = q => q.EntityName == "businessunit" ? new TimeoutException("Dataverse timed out.") : null;
+
+        var result = await h.RunAsync();
+
+        ShouldBeSkippedForPartitions(result, h.Org, policyId, otherOpen, until);
+    }
+
+    [Fact]
+    public async Task Run_AFaultPlacingTheHits_SkipsThePolicyWhole_NeverAPerHitAnswer_1661R2F2()
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var (policyId, until, otherOpen) = SecureStampedMatterWithAnOpenNonHit(h);
+        // The suppression pass completes (its last read is the Decision Records' batch); the next placement, the hits', times out.
+        var reconciled = false;
+        h.Sysadmin.FaultOn = q =>
+        {
+            if (q.EntityName == "sprk_decisionrecord") reconciled = true;
+            return reconciled && q.EntityName == "businessunit" ? new TimeoutException("Dataverse timed out.") : null;
+        };
+
+        var result = await h.RunAsync();
+
+        reconciled.Should().BeTrue("precondition: the fault is in the hits' placement, after the suppression pass");
+        ShouldBeSkippedForPartitions(result, h.Org, policyId, otherOpen, until);
+    }
+
     private sealed class Harness
     {
         public FakeTimeProvider Clock { get; }
@@ -1676,8 +1749,12 @@ public partial class SignalReevaluationJobTests
             return Task.FromResult(entity);
         }
 
+        /// <summary>#1661 round 2: a read that faults (a Dataverse timeout), chosen per query.</summary>
+        public Func<QueryExpression, Exception?>? FaultOn { get; set; }
+
         public Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default)
         {
+            if (FaultOn?.Invoke(query) is { } fault) throw fault;
             object? Value(string attribute) => query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == attribute)?.Values[0];
             var result = new EntityCollection();
             switch (query.EntityName)

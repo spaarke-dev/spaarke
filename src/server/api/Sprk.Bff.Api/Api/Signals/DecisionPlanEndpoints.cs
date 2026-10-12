@@ -24,6 +24,7 @@ public static class DecisionPlanEndpoints
     internal const string CallerUnresolvedReasonCode = "sdap.access.deny.caller_unresolved";
     internal const string PlanRefusedReasonCode = "ontology.decisionplan.refused";
     internal const string SuppressionUnavailableReasonCode = "ontology.suppression.unavailable";
+    internal const string PartitionUndeterminedReasonCode = "ontology.signal.partition_undetermined";
 
     public static void MapDecisionPlanEndpoints(this WebApplication app)
     {
@@ -83,6 +84,21 @@ public static class DecisionPlanEndpoints
         try
         {
             status = await suppression.GetStatusForSignalAsync(signalId, caller, ct);
+        }
+        catch (SuppressionPartitionUndeterminedException)
+        {
+            // #1661 round 2 K5: a data condition, not a fault. A retry does not change it, so the caller is not told to retry; the
+            // Signal's secure family cannot be known, so its count is never answered (never one from across the wall).
+            logger.LogWarning("Suppression count withheld: the secure-family partition of Signal {SignalId} is undetermined; answering 503.", signalId);
+            return Results.Problem(
+                title: "Service Unavailable",
+                detail: "The suppression count is not available for this Signal because the secure records it belongs to cannot be determined.",
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["reasonCode"] = PartitionUndeterminedReasonCode,
+                    ["correlationId"] = httpContext.TraceIdentifier,
+                });
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

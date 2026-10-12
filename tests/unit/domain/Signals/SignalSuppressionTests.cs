@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
@@ -654,6 +655,7 @@ public class SignalSuppressionTests
     private static async Task<EpisodePlan> PlanWithTruth(Store s, IReadOnlyList<SignalHit> hits, IReadOnlyList<ExistingSignal> signals)
     {
         var partitions = await s.Service.PartitionsOfHitsAsync(Code, SignalEpisodePlanner.HitsOnStampedGrains(hits, signals, Now), default);
+        partitions.Should().NotBeNull("the job plans nothing for a policy whose hit partitions cannot be read");
         return SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, Now, hits, signals, partitions);
     }
 
@@ -845,7 +847,7 @@ public class SignalSuppressionTests
     }
 
     [Fact]
-    public async Task Reconcile_WithholdsEveryLiveStamp_FromThePlanner_WhenTheSecureTeamCannotBeIdentified()
+    public async Task Reconcile_ReportsThePartitionsUnavailable_AndWritesNothing_WhenTheSecureTeamCannotBeIdentified()
     {
         var s = new Store { SecureBusinessUnitAmbiguous = true };
         var teamOwned = s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 20, secure: true);
@@ -854,12 +856,26 @@ public class SignalSuppressionTests
         s.Stamp(teamOwned, stamp);
         s.Stamp(userOwned, stamp);
 
-        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+        var result = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
 
-        failures.Should().Be(1);
-        signals.Should().OnlyContain(x => x.SuppressedUntil == null,
-            "K1: a stamp whose partition cannot be known is not read as a mute (in memory; nothing is written). A user-owned row can be secure through its lineage");
-        s.StampedIds.Should().BeEmpty();
+        (result.PartitionsUnavailable, result.Failures).Should().Be((true, 1),
+            "K1 (round 2 F3): a stamp whose partition cannot be known is neither a mute nor no mute; the job plans nothing for the policy");
+        s.StampedIds.Should().BeEmpty("nothing is written that night");
+        result.Signals.Should().OnlyContain(x => x.SuppressedUntil == stamp, "the rows are handed back as read, never with stamps withheld");
+    }
+
+    [Fact]
+    public async Task R2F3_AGrainWhoseCountFails_LeavesThePolicyAsItWas_NoOtherGrainIsStamped_AndThePartitionsAreReportedUnavailable()
+    {
+        var s = new Store { FailSignalReadNumber = 2 };
+        for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1);
+        for (var i = 0; i < 3; i++) s.Dismiss(OtherMatterId, Guid.NewGuid(), daysAgo: i + 1);
+
+        var result = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        (result.PartitionsUnavailable, result.Failures).Should().Be((true, 1), "a per-grain count failure is handled as the partition failure is");
+        s.QueriesOf("sprk_signal").Should().Be(1, "the first grain was counted, the second grain's read timed out");
+        s.StampedIds.Should().BeEmpty("every worked grain is counted before anything is written: the first grain's stamps wait for the next run");
     }
 
     [Fact]
@@ -945,23 +961,30 @@ public class SignalSuppressionTests
         plan.Creates.Should().ContainSingle().Which.Hit.SubjectId.Should().Be(ordinary);
     }
 
-    [Fact]
-    public async Task R1_AHitOnAStampedRecord_WhosePartitionCannotBeDetermined_IsSkippedAndCounted_NeitherRaisedNorMuted()
+    [Theory]
+    [InlineData("none")]
+    [InlineData("secure")]
+    [InlineData("ordinary")]
+    public async Task R2F2_AnUndeterminedHit_PlansExactlyAsItWouldWithNoStampOnTheRecord(string stampOnTheRecord)
     {
         var s = new Store();
-        for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1, secure: true);
+        if (stampOnTheRecord != "none")
+        {
+            for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1, secure: stampOnTheRecord == "secure");
+        }
+
         var (signals, _) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+        signals.Any(x => x.SuppressedUntil is not null).Should().Be(stampOnTheRecord != "none", "the precondition: the record carries a live stamp or none");
         var unplaceable = Guid.NewGuid(); // no subject row: the walk reports a missing parent (undetermined)
 
         var plan = await PlanWithTruth(s, [Hit(MatterId, unplaceable)], signals);
 
-        plan.PartitionUnresolved.Should().Be(1);
-        plan.Creates.Should().BeEmpty();
-        plan.Suppressed.Should().Be(0);
+        (plan.Creates.Count, plan.Suppressed).Should().Be((1, 0),
+            "the undetermined bucket never mutes and is never muted: whether a non-member's To Do is raised says nothing about a hidden family's dismissals");
     }
 
     [Fact]
-    public async Task R1_AHitOnAStampedRecord_IsSkipped_WhenTheSecureTeamIsAmbiguous()
+    public async Task R2F2_ThePartitionsOfTheHits_AreNull_WhenTheyCannotBeRead_NeverAPartialAnswer()
     {
         var s = new Store();
         for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1, secure: false);
@@ -970,9 +993,28 @@ public class SignalSuppressionTests
         s.Subject(fresh);
         s.SecureBusinessUnitAmbiguous = true;
 
-        var plan = await PlanWithTruth(s, [Hit(MatterId, fresh)], signals);
+        var partitions = await s.Service.PartitionsOfHitsAsync(Code, SignalEpisodePlanner.HitsOnStampedGrains([Hit(MatterId, fresh)], signals, Now), default);
 
-        (plan.PartitionUnresolved, plan.Creates.Count, plan.Suppressed).Should().Be((1, 0, 0), "never a create or a mute on a guess");
+        partitions.Should().BeNull("a fault is never answered per hit: the job then plans nothing for the policy");
+    }
+
+    [Fact]
+    public async Task R2N2_AHitWhoseSubjectIsSecureOwnedWithNoSecureRoot_IsUndetermined_AndNotMutedByAnOrdinaryStamp()
+    {
+        var s = new Store();
+        for (var i = 0; i < 3; i++) s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: i + 1, secure: false);
+        var (signals, _) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+        var orphan = Guid.NewGuid();
+        s.Subject(orphan, owner: Store.SecureOwner); // owned by the Secure team but filed under no secure root: its family cannot be named
+        var ordinary = Guid.NewGuid();
+        s.Subject(ordinary);
+
+        var partitions = await s.Service.PartitionsOfHitsAsync(Code, [Hit(MatterId, orphan), Hit(MatterId, ordinary)], default);
+        var plan = await PlanWithTruth(s, [Hit(MatterId, orphan), Hit(MatterId, ordinary)], signals);
+
+        partitions![("sprk_communication", orphan)].Should().Be(SuppressionPartition.Undetermined, "the writer would give its Signal the Secure team");
+        plan.Suppressed.Should().Be(1, "control: the ordinary subject is muted by the ordinary stamp");
+        plan.Creates.Should().ContainSingle().Which.Hit.SubjectId.Should().Be(orphan, "an ordinary stamp never mutes a Signal that will be Secure-owned");
     }
 
     [Fact]
@@ -1140,7 +1182,108 @@ public class SignalSuppressionTests
 
         var result = await Route(signal, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })));
 
-        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(503);
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(503);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(DecisionPlanEndpoints.PartitionUndeterminedReasonCode,
+            "round 2 K5: a data condition has its own reason code, distinct from a transient fault's");
+        problem.ProblemDetails.Detail.Should().NotContainEquivalentOf("try again", "a retry never changes an undetermined placement");
+    }
+
+    // ── #1661 fix round 2 at 63e7a569 (second adversarial pass; uac-r2 re-check) ─────────────────────────────────
+
+    [Fact]
+    public async Task R2F1_AStamp_LivesItsFull30Days_AfterItsOldestDismissalLeavesTheTrailingCount_NightlyApplyAndRoute()
+    {
+        var s = new Store();
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 29);
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 20);
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 10);
+        var open = s.Open(MatterId, Guid.NewGuid());
+        var until = Now.UtcDateTime.AddDays(-10).AddDays(30);
+        (await s.Service.ApplyAsync(PolicyId, Code, Matter(), default)).SuppressedUntil.Should().Be(until);
+        s.StampedIds.Clear();
+
+        s.Clock.Advance(TimeSpan.FromDays(4)); // the 29-day-old dismissal is now 33 days old: the trailing count is 2, the stamp has 16 days left
+
+        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        failures.Should().Be(0);
+        s.StampedIds.Should().BeEmpty("FR-17: the suppression takes precedence while it lasts; its three dismissals still justify it");
+        signals.Should().OnlyContain(x => x.SuppressedUntil == until);
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, s.Clock.GetUtcNow(), [Hit(MatterId, Guid.NewGuid())], signals).Suppressed.Should().Be(1);
+
+        var applied = await s.Service.ApplyAsync(PolicyId, Code, Matter(), default);
+        (applied.DismissalsCounted, applied.SuppressedUntil).Should().Be((2, (DateTime?)until), "the count is the trailing 30 days; the date is the stamp's own");
+        s.StampedIds.Should().BeEmpty("the immediate apply keeps it too");
+
+        var body = (await Route(open, s, Caller(s, Ok(SignalRow()), Ok(new { createdon = "x" })))).Should().BeOfType<Ok<SuppressionResponse>>().Subject.Value!;
+        (body.DismissalCount, body.SuppressedUntil).Should().Be((2, (DateTime?)until), "the route keeps showing the date");
+
+        s.Clock.Advance(TimeSpan.FromDays(17)); // one day past the stamp
+        (await s.Service.ApplyAsync(PolicyId, Code, Matter(), default)).SuppressedUntil.Should().BeNull("it lapses on its own");
+        s.StampedIds.Should().BeEmpty("a lapsed stamp is not live: it is neither lowered nor written again");
+    }
+
+    [Fact]
+    public async Task R2F1_ThreeDismissalsFurtherThan30DaysApart_JustifyNoStamp()
+    {
+        var s = new Store();
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 45);
+        s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 20);
+        var latest = s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 10);
+        s.Stamp(latest, Now.UtcDateTime.AddDays(20)); // never justified: 45 and 10 days ago are 35 days apart
+
+        await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        s.Signals.Should().OnlyContain(x => x.GetAttributeValue<DateTime?>("sprk_suppresseduntil") == null, "three dismissals must fall within 30 days of each other");
+    }
+
+    [Fact]
+    public async Task R2N1_ACrossWallStamp_OnAnOrdinaryPartition_WhoseLatestDismissalDoesNotCount_IsClearedNightly()
+    {
+        var s = new Store();
+        // Family A: three counted dismissals. The ordinary partition: two counted and, latest, one that never counts.
+        var family = new[] { 5, 4, 3 }.Select(d => s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: d, secure: true)).ToList();
+        // The family's rows closed in the same second their record was decided, so ITS partition looks settled to any rule (resolved-on
+        // or decided-on): only the ordinary partition's own count can pull this grain into the exact assessment.
+        foreach (var (id, d) in family.Zip(new[] { 5, 4, 3 })) s.Signals.Single(x => x.Id == id)["sprk_resolvedon"] = Now.UtcDateTime.AddDays(-d);
+        var readable = new List<Guid>
+        {
+            s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 5, secure: false),
+            s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 4, secure: false),
+            s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 1, secure: false, reason: WrongMatter),
+            s.Open(MatterId, Guid.NewGuid(), secure: false),
+        };
+        var preFix = Now.UtcDateTime.AddDays(-3).AddDays(30); // the pre-#1661 whole-pairing stamp: family A's latest + 30
+        foreach (var id in s.Signals.Select(x => x.Id).ToList()) s.Stamp(id, preFix);
+
+        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        failures.Should().Be(0);
+        s.Signals.Where(x => readable.Contains(x.Id)).Should().OnlyContain(x => x.GetAttributeValue<DateTime?>("sprk_suppresseduntil") == null,
+            "two counted dismissals justify nothing; the non-counting one and the hidden family's three never help");
+        signals.Where(x => readable.Contains(x.Id)).Should().OnlyContain(x => x.SuppressedUntil == null, "the planner sees the withdrawal this pass");
+        s.Signals.Where(x => family.Contains(x.Id)).Should().OnlyContain(x => x.GetAttributeValue<DateTime?>("sprk_suppresseduntil") == preFix);
+        (await s.Service.ApplyAsync(PolicyId, Code, Matter(), default)).DismissalsCounted.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task R2K6_ALower_IsConditionalOnTheRowVersion_ARowChangedSinceItWasCountedIsNotLowered()
+    {
+        var s = new Store();
+        new[] { 3, 2, 1 }.Select(d => s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: d, secure: true)).ToList();
+        var readable = s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 1, secure: false);
+        var readableOpen = s.Open(MatterId, Guid.NewGuid(), secure: false);
+        var preFix = Now.UtcDateTime.AddDays(-1).AddDays(30);
+        foreach (var id in s.Signals.Select(x => x.Id).ToList()) s.Stamp(id, preFix);
+        s.ChangeBeforeConditionalWrite.Add(readableOpen); // e.g. the decision route stamped it again after the count
+
+        var (_, failures) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        failures.Should().Be(0, "a row that changed since it was read is the next pass's to count, not a failure");
+        s.Signals.Single(x => x.Id == readable).GetAttributeValue<DateTime?>("sprk_suppresseduntil").Should().BeNull();
+        s.Signals.Single(x => x.Id == readableOpen).GetAttributeValue<DateTime?>("sprk_suppresseduntil").Should().Be(preFix,
+            "a lower is never written over a row another writer changed after the count");
     }
 
     // =====================================================================================
@@ -1211,6 +1354,15 @@ public class SignalSuppressionTests
         public int FailWriteNumber { get; set; }
         private int _writes;
         public bool FailReads { get; set; }
+
+        /// <summary>The n-th <c>sprk_signal</c> query (a grain read) faults, like a Dataverse timeout (#1661 round 2 F3).</summary>
+        public int FailSignalReadNumber { get; set; }
+        private int _signalReads;
+
+        /// <summary>Rows another writer changes between the count and the conditional lower (#1661 round 2 K6).</summary>
+        public HashSet<Guid> ChangeBeforeConditionalWrite { get; } = new();
+
+        public FakeTimeProvider Clock { get; } = new(Now);
         public int Queries { get; private set; }
         private readonly Dictionary<string, int> _queriesOf = new(StringComparer.Ordinal);
 
@@ -1257,7 +1409,7 @@ public class SignalSuppressionTests
 
         public Store()
         {
-            var clock = new FakeTimeProvider(Now);
+            var clock = Clock;
             var configuration = new ConfigurationBuilder().Build();
             var entities = new Mock<IGenericEntityService>();
             entities.Setup(e => e.RetrieveAsync("sprk_policy", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
@@ -1270,14 +1422,36 @@ public class SignalSuppressionTests
                 .ReturnsAsync((QueryExpression q, CancellationToken _) => Run(q));
 
             var org = new Mock<IOrganizationServiceAsync2>();
+            Task Write(Entity update)
+            {
+                if (FailWrites || (FailWriteNumber > 0 && ++_writes == FailWriteNumber)) throw new InvalidOperationException("Simulated Dataverse failure on the update.");
+                update.Attributes.Keys.Should().Equal(["sprk_suppresseduntil"], "the stamp touches that one column and nothing else");
+                StampedIds.Add(update.Id);
+                var row = Signals.Single(x => x.Id == update.Id);
+                row["sprk_suppresseduntil"] = update["sprk_suppresseduntil"];
+                row["versionnumber"] = row.GetAttributeValue<long>("versionnumber") + 1;
+                return Task.CompletedTask;
+            }
+
             org.Setup(o => o.UpdateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-                .Returns((Entity update, CancellationToken _) =>
+                .Returns((Entity update, CancellationToken _) => Write(update));
+            // A lower is conditional on the row version it was counted at (#1661 round 2 K6), as Dataverse applies IfRowVersionMatches.
+            org.Setup(o => o.ExecuteAsync(It.IsAny<OrganizationRequest>(), It.IsAny<CancellationToken>()))
+                .Returns(async (OrganizationRequest request, CancellationToken _) =>
                 {
-                    if (FailWrites || (FailWriteNumber > 0 && ++_writes == FailWriteNumber)) throw new InvalidOperationException("Simulated Dataverse failure on the update.");
-                    update.Attributes.Keys.Should().Equal(["sprk_suppresseduntil"], "the stamp touches that one column and nothing else");
-                    StampedIds.Add(update.Id);
-                    Signals.Single(x => x.Id == update.Id)["sprk_suppresseduntil"] = update["sprk_suppresseduntil"];
-                    return Task.CompletedTask;
+                    var update = request.Should().BeOfType<UpdateRequest>().Subject;
+                    update.ConcurrencyBehavior.Should().Be(ConcurrencyBehavior.IfRowVersionMatches);
+                    var row = Signals.Single(x => x.Id == update.Target.Id);
+                    if (ChangeBeforeConditionalWrite.Remove(row.Id)) row["versionnumber"] = row.GetAttributeValue<long>("versionnumber") + 1;
+                    if (update.Target.RowVersion != row.GetAttributeValue<long>("versionnumber").ToString(System.Globalization.CultureInfo.InvariantCulture))
+                    {
+                        throw new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80060882), Message = "The version of the existing record doesn't match." },
+                            "The version of the existing record doesn't match.");
+                    }
+
+                    await Write(update.Target);
+                    return new UpdateResponse();
                 });
             var writer = new OntologyWriterDataverseClient(() => org.Object, NullLogger<OntologyWriterDataverseClient>.Instance);
 
@@ -1364,6 +1538,7 @@ public class SignalSuppressionTests
                 ["sprk_signalstatus"] = new OptionSetValue(resolution is null ? SignalWriter.SignalStatusOpen : SignalWriter.SignalStatusResolved),
                 // As SignalWriter writes it: the subject's regarding lookup (the walk's way up), and sprk_matter for a matter core.
                 [SignalWriter.RegardingLookupByEntity[subjectEntity]] = new EntityReference(subjectEntity, subject),
+                ["versionnumber"] = 1L,
             };
             // secure: null = no owner on the row (every pre-#1661 test); false = an ordinary team (Operations); true = the Secure Record owner team.
             if (secure is { } isSecure) row["ownerid"] = new EntityReference("team", isSecure ? SecureTeamId : OperationsTeamId);
@@ -1384,7 +1559,9 @@ public class SignalSuppressionTests
             if (resolution is { } r)
             {
                 row["sprk_resolutiontype"] = new OptionSetValue(r);
-                row["sprk_resolvedon"] = Now.UtcDateTime.AddDays(-daysAgo);
+                // As the decision route writes them (#1661 round 2 F4): the Signals close first and the Decision Record is written after,
+                // so its sprk_decidedon (Record: Now - daysAgo) is a few seconds LATER than the Signal's sprk_resolvedon.
+                row["sprk_resolvedon"] = Now.UtcDateTime.AddDays(-daysAgo).AddSeconds(-5);
             }
 
             if (record is { } rec) row["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", rec);
@@ -1399,7 +1576,7 @@ public class SignalSuppressionTests
             {
                 SignalWriter.TryParseDedupeKey(x.GetAttributeValue<string>("sprk_dedupekey"), out _, out var entity, out var subject, out var episode);
                 return new ExistingSignal(
-                    x.Id, "1", entity, subject, episode,
+                    x.Id, x.GetAttributeValue<long>("versionnumber").ToString(System.Globalization.CultureInfo.InvariantCulture), entity, subject, episode,
                     x.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value,
                     x.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value,
                     x.GetAttributeValue<DateTime?>("sprk_resolvedon"),
@@ -1415,6 +1592,7 @@ public class SignalSuppressionTests
         private EntityCollection Run(QueryExpression q)
         {
             if (FailReads) throw new InvalidOperationException("dataverse is down");
+            if (q.EntityName == "sprk_signal" && ++_signalReads == FailSignalReadNumber) throw new TimeoutException("Dataverse timed out on a grain read.");
             Queries++;
             _queriesOf[q.EntityName] = QueriesOf(q.EntityName) + 1;
             var source = q.EntityName switch

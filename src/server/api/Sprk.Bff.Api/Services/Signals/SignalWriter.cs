@@ -862,7 +862,7 @@ public sealed partial class SignalWriter
     internal static bool IsMeteredByWriter(Exception ex) =>
         ex is SignalWriterEscalationException or SignalSentenceTemplateException || IsDataverseAccessDenied(ex);
 
-    private static bool IsConcurrencyVersionMismatch(Exception ex)
+    internal static bool IsConcurrencyVersionMismatch(Exception ex)
     {
         for (Exception? e = ex; e is not null; e = e.InnerException)
         {
