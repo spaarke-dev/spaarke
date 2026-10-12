@@ -19,6 +19,10 @@
  *   - Collaborate (100000001): Can create to-dos and toggle status.
  *   - FullAccess  (100000002): Same as Collaborate plus invite rights (not relevant here).
  *
+ * Delete-own (task 054, FR-26): independent of the access level, a to-do the caller CREATED (creator stamp = the
+ * signed-in principal, passed as `caller`) shows Delete, which asks first. 204 removes it; a refusal shows an error and
+ * the to-do stays. With no `caller` there is no Delete.
+ *
  * Status values (FR-24):
  *   1         = Open
  *   659490001 = In Progress
@@ -57,11 +61,14 @@ import {
   CheckmarkCircleFilled,
   TaskListSquareLtrRegular,
   CalendarLtrRegular,
+  DeleteRegular,
   WarningRegular,
 } from '@fluentui/react-icons';
 import { daysBetweenLocalMidnight, parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 
-import { getProjectTodos, createTodo, updateTodo, type ODataTodo } from '../api/web-api-client';
+import { getProjectTodos, createTodo, updateTodo, deleteOwnTodo, type ODataTodo } from '../api/web-api-client';
+import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
+import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
 import { TruncatedListNotice } from './TruncatedListNotice';
 import { AccessLevel } from '../types';
 import { SectionCard } from './SectionCard';
@@ -306,9 +313,12 @@ interface TaskItemProps {
   accessLevel: AccessLevel;
   isToggling: boolean;
   onToggleStatus: (task: ODataTodo) => void;
+  /** Show Delete (the caller created this to-do). */
+  canDelete?: boolean;
+  onDelete?: (task: ODataTodo) => void;
 }
 
-const TaskItem: React.FC<TaskItemProps> = ({ task, accessLevel, isToggling, onToggleStatus }) => {
+const TaskItem: React.FC<TaskItemProps> = ({ task, accessLevel, isToggling, onToggleStatus, canDelete, onDelete }) => {
   const styles = useStyles();
 
   const isCompleted = isTerminalStatus(task.statuscode);
@@ -390,6 +400,19 @@ const TaskItem: React.FC<TaskItemProps> = ({ task, accessLevel, isToggling, onTo
           )}
         </div>
       </div>
+
+      {/* Delete: only a to-do the caller created (the server re-checks every delete). */}
+      {canDelete && onDelete && (
+        <Tooltip content="Delete" relationship="label">
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<DeleteRegular />}
+            onClick={() => onDelete(task)}
+            aria-label={`Delete task ${task.sprk_name}`}
+          />
+        </Tooltip>
+      )}
     </div>
   );
 };
@@ -557,6 +580,8 @@ export interface SmartTodoProps {
   projectId: string;
   /** The current user's access level — controls create/edit permissions. */
   accessLevel: AccessLevel;
+  /** The signed-in principal. With it, to-dos the caller created show Delete (task 054); without it, none do. */
+  caller?: CallerIdentity | null;
 }
 
 /**
@@ -567,7 +592,7 @@ export interface SmartTodoProps {
  * users can only read; Collaborate and Full Access users can create to-dos
  * and toggle their completion status.
  */
-export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) => {
+export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel, caller }) => {
   const styles = useStyles();
 
   // To-do list state
@@ -587,6 +612,13 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
   const [submitError, setSubmitError] = React.useState<string | null>(null);
 
   const allowEdit = canEdit(accessLevel);
+
+  // Delete-own (task 054): the to-do leaves the list on the server's 204; any refusal keeps it and is shown.
+  const del = useDeleteOwn<ODataTodo>({
+    noun: 'task',
+    remove: task => deleteOwnTodo(task.sprk_todoid),
+    onRemoved: task => setTasks(prev => prev.filter(t => t.sprk_todoid !== task.sprk_todoid)),
+  });
 
   // ---------------------------------------------------------------------------
   // Load to-dos
@@ -740,6 +772,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
               <MessageBarBody>{toggleError}</MessageBarBody>
             </MessageBar>
           )}
+          <DeleteFailureNotice del={del} />
           {!isLoading && <TruncatedListNotice truncated={truncated} shown={tasks.length} noun="tasks" />}
 
           {/* Loading state */}
@@ -781,6 +814,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
                         accessLevel={accessLevel}
                         isToggling={togglingTaskId === task.sprk_todoid}
                         onToggleStatus={handleToggleStatus}
+                        canDelete={isCreatedByCaller(task, caller)}
+                        onDelete={t => del.ask(t, t.sprk_name)}
                       />
                     ))}
 
@@ -800,6 +835,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
                         accessLevel={accessLevel}
                         isToggling={togglingTaskId === task.sprk_todoid}
                         onToggleStatus={handleToggleStatus}
+                        canDelete={isCreatedByCaller(task, caller)}
+                        onDelete={t => del.ask(t, t.sprk_name)}
                       />
                     ))}
                   </div>
@@ -809,6 +846,8 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel }) 
           )}
         </div>
       </SectionCard>
+
+      <DeleteOwnConfirm del={del} />
 
       {/* Create task dialog — only rendered when allowEdit */}
       {allowEdit && (

@@ -25,6 +25,7 @@
 import * as React from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
+import type { DocumentRoot } from '../../api/web-api-client';
 
 // ---------------------------------------------------------------------------
 // Per-entity description
@@ -52,8 +53,11 @@ export interface RecordDetailEntity {
   titleAttributes: readonly string[];
   /** The read-only field rows, in display order. */
   fields: readonly DetailFieldDef[];
-  /** `sprk_document` lookup that ties documents to this record; absent = no documents section. */
-  documentsBy?: string;
+  /**
+   * The task 031 route root (`/api/v1/external/{root}/{id}/documents`) that serves this record's documents; absent = no
+   * documents section. Invoice is absent on purpose: invoice documents wait on an owner decision (task 031 notes).
+   */
+  documentsRoot?: DocumentRoot;
   /** `sprk_invoice` lookup that ties invoices to this record; absent = no invoices section. */
   invoicesBy?: string;
   /** Project, Matter and Work Assignment only (notes/decisions.md): Document, Invoice and Service Request omit it. */
@@ -72,7 +76,7 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
       { attribute: 'statuscode', label: 'Status' },
       { attribute: 'modifiedon', label: 'Last modified', kind: 'date' },
     ],
-    documentsBy: 'sprk_project',
+    documentsRoot: 'projects',
     invoicesBy: 'sprk_project',
     showsEventsAndTasks: true,
   },
@@ -86,7 +90,7 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
       { attribute: 'sprk_matternumber', label: 'Number' },
       { attribute: 'statuscode', label: 'Status' },
     ],
-    documentsBy: 'sprk_matter',
+    documentsRoot: 'matters',
     invoicesBy: 'sprk_matter',
     showsEventsAndTasks: true,
   },
@@ -103,7 +107,7 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
       { attribute: 'statuscode', label: 'Status' },
       { attribute: 'sprk_regardingproject', label: 'Project', kind: 'lookup' },
     ],
-    documentsBy: 'sprk_workassignment',
+    documentsRoot: 'workassignments',
     // sprk_invoice has no work-assignment lookup (ExternalAccessModule.cs "invoices" dimensions: matter, project).
     showsEventsAndTasks: true,
   },
@@ -150,6 +154,8 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
       { attribute: 'createdon', label: 'Created', kind: 'date' },
       { attribute: 'sprk_requestedby', label: 'Requested by', kind: 'lookup' },
     ],
+    // A service request's documents are reachable ONLY through the servicerequests route (task 031 K3/K4).
+    documentsRoot: 'servicerequests',
     showsEventsAndTasks: false,
   },
 };

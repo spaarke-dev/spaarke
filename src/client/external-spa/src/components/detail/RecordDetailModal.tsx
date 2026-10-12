@@ -14,9 +14,16 @@
  * acquirer; the URL is the active backend's (task 041) — never a link or query string):
  *   - fields:   the id-filtered module fetch (POST …/fetch, `<idAttribute> = {id}`) for ALL six entities — one read path,
  *               which also carries `@formattedValues` (option-set labels); see RecordDetailFields.tsx for why.
- *   - rollup:   POST /api/v1/external/api/dataverse/fetch on sprk_document / sprk_invoice filtered by this record's
- *               lookup. That is the SAME Tier-2-scoped module read the Documents and Invoices tabs run, so a row shows
- *               here exactly when the tab shows it for this record (FR-02).
+ *   - invoices: POST /api/v1/external/api/dataverse/fetch on sprk_invoice filtered by this record's lookup. That is the
+ *               SAME Tier-2-scoped module read the Invoices tab runs, so a row shows here exactly when the tab shows it
+ *               for this record (FR-02).
+ *   - documents (task 054, FR-24): the shared `DocumentLibrary` over the task 031 routes
+ *               `/api/v1/external/{projects|matters|workassignments|servicerequests}/{id}/documents` - list, download,
+ *               version history and upload (Create). A service request's documents are reachable ONLY there. Invoice
+ *               documents wait on an owner decision (task 031), so an invoice shows no documents section.
+ *   - delete-own (task 054, FR-26): `GET /api/v1/external/me` says who the caller is; a document, to-do or event whose
+ *               creator stamp is that principal shows Delete (asks first, 204 removes it, a 403 shows an error). Messages
+ *               and service requests have no Delete: the server has no service-request delete yet (task 032 escalation).
  *   - messages: GET/POST /api/v1/external/{root}/{id}/messages for project, matter, work assignment, invoice and
  *               service request (`RecordMessages`, task 051; a document has no thread, so no section).
  *   - events/tasks: the existing `EventsCalendar` / `SmartTodo` (read-only: `AccessLevel.ViewOnly` hides create and
@@ -35,6 +42,12 @@ import { LockClosedRegular } from '@fluentui/react-icons';
 import { SprkModal } from '@spaarke/ui-components/components/SprkModal';
 import { bffApiCall } from '../../auth/bff-client';
 import { ApiError, AccessLevel } from '../../types';
+import { callerIdentityOf, type CallerIdentity } from '../../api/delete-own';
+import type { DocumentRoot } from '../../api/web-api-client';
+import type { ExternalUserContextResponse } from '../../auth/bff-client';
+import { useCallerContext } from '../../hooks/useCallerContext';
+import { canUpload as levelCanUpload, mapAccessLevelString } from '../../hooks/useAccessLevel';
+import { DocumentLibrary } from '../DocumentLibrary';
 import { EventsCalendar } from '../EventsCalendar';
 import { SmartTodo } from '../SmartTodo';
 import { TruncatedListNotice } from '../TruncatedListNotice';
@@ -165,7 +178,7 @@ type ListState =
 
 /** The Tier-2-scoped module read the matching tab runs, narrowed to the rows tied to this record. */
 function useRelatedRows(
-  childEntity: 'sprk_document' | 'sprk_invoice',
+  childEntity: 'sprk_invoice',
   attributes: readonly string[],
   parentAttribute: string | undefined,
   parentId: string,
@@ -335,7 +348,6 @@ const RelatedList: React.FC<RelatedListProps> = ({
   );
 };
 
-const DOCUMENT_COLUMNS = ['sprk_documentid', 'sprk_documentname', 'sprk_documenttype', 'createdon'] as const;
 const INVOICE_COLUMNS = [
   'sprk_invoiceid',
   'sprk_name',
@@ -344,27 +356,46 @@ const INVOICE_COLUMNS = [
   'sprk_invoicestatus',
   'sprk_totalamount',
 ] as const;
-const DOCUMENT_ORDER = { attribute: 'createdon', descending: true };
 const INVOICE_ORDER = { attribute: 'sprk_invoicedate', descending: true };
 
-const DocumentsSection: React.FC<{ parentAttribute: string; parentId: string }> = ({ parentAttribute, parentId }) => {
-  const state = useRelatedRows('sprk_document', DOCUMENT_COLUMNS, parentAttribute, parentId, DOCUMENT_ORDER);
+/**
+ * Whether the host decides the Upload control. Only a project does: its level is in `/me`. Every other record leaves it
+ * to `DocumentLibrary`, which follows the BFF's `canCreate` on that record's document list (the right the upload route
+ * checks - a ViewOnly reader of a matter or work assignment is not offered an upload that can only fail; a service
+ * request's requester always holds Create). The server still enforces Create on every upload.
+ */
+function uploadOverride(
+  root: DocumentRoot,
+  id: string,
+  context: ExternalUserContextResponse | null
+): boolean | undefined {
+  if (root !== 'projects') return undefined;
+  const entry = context?.projects.find(p => p.projectId.toLowerCase() === id.toLowerCase());
+  return levelCanUpload(mapAccessLevelString(entry?.accessLevel));
+}
+
+/**
+ * Documents (task 054): the shared `DocumentLibrary` on the record's task 031 route. Download needs only Read, which
+ * opening the detail already required; Upload follows `showsUpload`; Delete follows the creator stamp.
+ */
+const DocumentsSection: React.FC<{
+  root: DocumentRoot;
+  id: string;
+  context: ExternalUserContextResponse | null;
+  caller: CallerIdentity | null;
+}> = ({ root, id, context, caller }) => {
+  const styles = useStyles();
   return (
-    <RelatedList
-      testId="record-detail-documents"
-      idAttribute="sprk_documentid"
-      heading="Documents"
-      noun="documents"
-      emptyText="No documents for this record."
-      state={state}
-      primary={row => formatDetailValue(row, { attribute: 'sprk_documentname' })}
-      meta={row =>
-        [
-          formatDetailValue(row, { attribute: 'sprk_documenttype' }),
-          formatDetailValue(row, { attribute: 'createdon', kind: 'date' }),
-        ].join(' · ')
-      }
-    />
+    <section className={styles.section} aria-label="Documents" data-testid="record-detail-documents">
+      <h3 className={styles.heading}>Documents</h3>
+      <DocumentLibrary
+        root={root}
+        recordId={id}
+        canUpload={uploadOverride(root, id, context)}
+        canDownload
+        caller={caller}
+      />
+    </section>
   );
 };
 
@@ -393,18 +424,23 @@ const InvoicesSection: React.FC<{ parentAttribute: string; parentId: string }> =
 };
 
 /**
- * Events and tasks. A Project reads through the existing components, read-only. Matter and Work Assignment have no
+ * Events and tasks. A Project reads through the existing components, read-only (no create or toggle), except that an
+ * event or task the caller created shows Delete (task 054). Matter and Work Assignment have no
  * external event read until task 039, so they show the empty state rather than a section that cannot load.
  */
-const EventsAndTasksSection: React.FC<{ entity: string; id: string }> = ({ entity, id }) => {
+const EventsAndTasksSection: React.FC<{ entity: string; id: string; caller: CallerIdentity | null }> = ({
+  entity,
+  id,
+  caller,
+}) => {
   const styles = useStyles();
   return (
     <section className={styles.section} aria-label="Events and tasks" data-testid="record-detail-events">
       <h3 className={styles.heading}>Events and tasks</h3>
       {entity === 'sprk_project' ? (
         <>
-          <EventsCalendar projectId={id} accessLevel={AccessLevel.ViewOnly} />
-          <SmartTodo projectId={id} accessLevel={AccessLevel.ViewOnly} />
+          <EventsCalendar projectId={id} accessLevel={AccessLevel.ViewOnly} caller={caller} />
+          <SmartTodo projectId={id} accessLevel={AccessLevel.ViewOnly} caller={caller} />
         </>
       ) : (
         <div className={styles.empty} role="status" data-testid="record-detail-events-unavailable">
@@ -449,6 +485,11 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
   const id = recordIds[index];
 
   const state = useRecord(cfg, open ? id : undefined, attempt);
+  // Who the caller is (for Delete on their own rows) and their project level (for Upload): read once per opening. Identity
+  // does not change from record to record, so paging does not read it again; `caller` is memoised so the sections that
+  // take it as a prop see a new object only when the identity changes.
+  const callerContext = useCallerContext(open);
+  const caller = React.useMemo(() => callerIdentityOf(callerContext), [callerContext]);
   // `cfg` is undefined only for an entity with no detail view, which the opener never offers; render nothing then.
   if (!cfg) return null;
 
@@ -523,9 +564,13 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
           // Keyed by record so every section's state resets when the user pages to another row.
           <React.Fragment key={`${cfg.entity}:${id}`}>
             <RecordDetailFields cfg={cfg} record={state.record} />
-            {cfg.documentsBy && <DocumentsSection parentAttribute={cfg.documentsBy} parentId={id} />}
+            {cfg.documentsRoot && (
+              <DocumentsSection root={cfg.documentsRoot} id={id} context={callerContext} caller={caller} />
+            )}
             {cfg.invoicesBy && <InvoicesSection parentAttribute={cfg.invoicesBy} parentId={id} />}
-            {cfg.showsEventsAndTasks && <EventsAndTasksSection entity={cfg.entity} id={id} />}
+            {cfg.showsEventsAndTasks && <EventsAndTasksSection entity={cfg.entity} id={id} caller={caller} />}
+            {/* No Delete on a service request: the server has no service-request delete yet (task 032 escalation); add the
+                action here, with deleteOwnServiceRequest in web-api-client, when the owner decides. */}
             {/* Messages (task 051): the record's thread + compose, for the entities the server has a thread for. */}
             <RecordMessages entity={cfg.entity} recordId={id} onSendingChange={setMessageSending} />
           </React.Fragment>

@@ -11,6 +11,8 @@
  * Props:
  *   projectId   — Dataverse GUID of the sprk_project record
  *   accessLevel — The authenticated user's access level (determines create visibility)
+ *   caller      — The signed-in principal (task 054, FR-26): an event the caller CREATED shows Delete (asks first;
+ *                 a refusal shows an error and the event stays). Independent of accessLevel; none without `caller`.
  *
  * ADR-021: All styles use Fluent UI v9 makeStyles + tokens. No hard-coded colors.
  * ADR-022: React 18 component (bundled, not platform-provided).
@@ -39,9 +41,11 @@ import {
   MessageBar,
   MessageBarBody,
 } from '@fluentui/react-components';
-import { AddRegular, CalendarEmptyRegular } from '@fluentui/react-icons';
+import { AddRegular, CalendarEmptyRegular, DeleteRegular } from '@fluentui/react-icons';
 import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
-import { getEvents, createEvent, ODataEvent, CreateEventPayload } from '../api/web-api-client';
+import { getEvents, createEvent, deleteOwnEvent, ODataEvent, CreateEventPayload } from '../api/web-api-client';
+import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
+import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
 import { TruncatedListNotice } from './TruncatedListNotice';
 import { AccessLevel, ApiError } from '../types';
 
@@ -284,9 +288,12 @@ const EventDateColumn: React.FC<EventDateColumnProps> = ({ duedate }) => {
 interface EventRowProps {
   event: ODataEvent;
   isLast: boolean;
+  /** Show Delete (the caller created this event). */
+  canDelete?: boolean;
+  onDelete?: (event: ODataEvent) => void;
 }
 
-const EventRow: React.FC<EventRowProps> = ({ event, isLast }) => {
+const EventRow: React.FC<EventRowProps> = ({ event, isLast, canDelete, onDelete }) => {
   const styles = useStyles();
 
   return (
@@ -316,6 +323,17 @@ const EventRow: React.FC<EventRowProps> = ({ event, isLast }) => {
             <Text className={styles.eventMeta}>Added {parseDateParts(event.createdon)?.full ?? ''}</Text>
           )}
         </div>
+
+        {/* Delete: only an event the caller created (the server re-checks every delete). */}
+        {canDelete && onDelete && (
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<DeleteRegular />}
+            onClick={() => onDelete(event)}
+            aria-label={`Delete event ${event.sprk_name}`}
+          />
+        )}
       </div>
 
       {!isLast && <Divider className={styles.divider} />}
@@ -500,6 +518,8 @@ export interface EventsCalendarProps {
   projectId: string;
   /** The authenticated user's access level — determines create visibility */
   accessLevel: AccessLevel;
+  /** The signed-in principal. With it, events the caller created show Delete (task 054); without it, none do. */
+  caller?: CallerIdentity | null;
 }
 
 /**
@@ -514,7 +534,7 @@ export interface EventsCalendarProps {
  * Loading and empty states follow the SectionCard + PageContainer pattern
  * established by other SPA components.
  */
-export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, accessLevel }) => {
+export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, accessLevel, caller }) => {
   const styles = useStyles();
 
   // -------------------------------------------------------------------------
@@ -533,6 +553,13 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
   // -------------------------------------------------------------------------
 
   const canCreate = accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess;
+
+  // Delete-own (task 054): the event leaves the list on the server's 204; any refusal keeps it and is shown.
+  const del = useDeleteOwn<ODataEvent>({
+    noun: 'event',
+    remove: event => deleteOwnEvent(event.sprk_eventid),
+    onRemoved: event => setEvents(prev => prev.filter(e => e.sprk_eventid !== event.sprk_eventid)),
+  });
 
   // -------------------------------------------------------------------------
   // Data fetching
@@ -643,6 +670,7 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
       </div>
 
       <TruncatedListNotice truncated={truncated} shown={events.length} noun="events" />
+      <DeleteFailureNotice del={del} />
 
       {/* Event list or empty state */}
       {/* Task 105: an incomplete empty list is not "no events" — the notice says it could not be read. */}
@@ -663,10 +691,18 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
       ) : (
         <div className={styles.eventList}>
           {events.map((event, index) => (
-            <EventRow key={event.sprk_eventid} event={event} isLast={index === events.length - 1} />
+            <EventRow
+              key={event.sprk_eventid}
+              event={event}
+              isLast={index === events.length - 1}
+              canDelete={isCreatedByCaller(event, caller)}
+              onDelete={e => del.ask(e, e.sprk_name)}
+            />
           ))}
         </div>
       )}
+
+      <DeleteOwnConfirm del={del} />
 
       {/* Create event dialog — rendered only for Collaborate/Full Access */}
       {canCreate && (

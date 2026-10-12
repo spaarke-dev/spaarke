@@ -146,6 +146,13 @@ export interface ExternalUserContextResponse {
   contactId: string;
   /** The authenticated user's email */
   email: string;
+  /**
+   * The caller's OWN Dataverse systemuser id - a licensed workforce (systemuser) principal only. Optional: `null` (or
+   * absent, from a BFF that predates it) for a CIAM partner and for a workforce contact with no systemuser; the BFF
+   * never sends the empty GUID. The detail view compares it with a row's `sprk_createdbyperson` stamp to offer Delete
+   * (task 054); the server's delete check stays the authority.
+   */
+  systemUserId?: string | null;
   /** List of projects the user can access, with their current access level */
   projects: Array<{
     /** Secure Project record ID */

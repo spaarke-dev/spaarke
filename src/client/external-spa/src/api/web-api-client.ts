@@ -16,6 +16,11 @@
  *   POST  /api/v1/external/projects/{id}/events               → create event
  *   POST  /api/v1/external/projects/{id}/todos                → create to-do (NEW)
  *   PATCH /api/v1/external/todos/{id}                         → update to-do (NEW)
+ *   GET   /api/v1/external/{projects|matters|workassignments|servicerequests}/{id}/documents
+ *                                                              → a record's documents (task 031; service requests ONLY here)
+ *   DELETE /api/v1/external/documents/{id}                    → delete own document (task 032 / 054)
+ *   DELETE /api/v1/external/todos/{id}                        → delete own to-do (task 032 / 054)
+ *   DELETE /api/v1/external/events/{id}                       → delete own event (task 032 / 054)
  *
  * Contract change (R3 task 007): the legacy event-as-todo boolean toggle was
  * removed; to-dos are now first-class `sprk_todo` records with
@@ -25,6 +30,7 @@
  */
 
 import { bffApiCall } from '../auth/bff-client';
+import type { CreatorStamps } from './delete-own';
 
 // ---------------------------------------------------------------------------
 // Re-export ApiError for module consumers
@@ -63,7 +69,7 @@ export interface ODataProject {
  * A Document record (sprk_document EntitySet: sprk_documents).
  * Fields must be listed in the `Webapi/sprk_document/fields` site setting.
  */
-export interface ODataDocument {
+export interface ODataDocument extends CreatorStamps {
   /** Primary key — Dataverse GUID */
   sprk_documentid: string;
   /** Document display name */
@@ -89,7 +95,7 @@ export interface ODataDocument {
  *
  * Fields must be listed in the `Webapi/sprk_event/fields` site setting.
  */
-export interface ODataEvent {
+export interface ODataEvent extends CreatorStamps {
   /** Primary key — Dataverse GUID */
   sprk_eventid: string;
   /** Event display name — the BFF reads it from Dataverse `sprk_eventname` (sprk_event has no `sprk_name`; task 097). */
@@ -131,7 +137,7 @@ export interface ODataEvent {
  *   100000001 = Tomorrow
  *   100000002 = Future
  */
-export interface ODataTodo {
+export interface ODataTodo extends CreatorStamps {
   /** Primary key — Dataverse GUID */
   sprk_todoid: string;
   /** To-do display name (title) */
@@ -224,6 +230,11 @@ interface ODataCollectionResponse<T> {
    * task 105). Omitted for a complete list.
    */
   truncated?: boolean;
+  /**
+   * Document lists only (task 054 review): `true` when the caller holds Create on the parent, the right the upload route
+   * checks. The BFF always writes it on a document list; absent from every other collection.
+   */
+  canCreate?: boolean;
 }
 
 /**
@@ -407,7 +418,10 @@ export async function getProjectById(projectId: string, options: ODataQueryOptio
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param options    Optional OData query overrides
  */
-export async function getDocuments(projectId: string, options: ODataQueryOptions = {}): Promise<ListResult<ODataDocument>> {
+export async function getDocuments(
+  projectId: string,
+  options: ODataQueryOptions = {}
+): Promise<ListResult<ODataDocument>> {
   const defaults: ODataQueryOptions = {
     $select: 'sprk_documentid,sprk_name,sprk_documenttype,sprk_summary,_sprk_projectid_value,createdon',
     $filter: `_sprk_projectid_value eq '${projectId}'`,
@@ -422,7 +436,48 @@ export async function getDocuments(projectId: string, options: ODataQueryOptions
     merged.$filter = `(${defaults.$filter}) and (${options.$filter})`;
   }
 
-  return getCollection<ODataDocument>(`/api/v1/external/projects/${projectId}/documents`, merged);
+  return getCollection<ODataDocument>(documentsPath('projects', projectId), merged);
+}
+
+/**
+ * The record types whose documents the external plane serves (task 031): the `{root}` segment of
+ * `/api/v1/external/{root}/{id}/documents`. A service request's documents are reachable ONLY through the
+ * `servicerequests` route (the documents module's scope dimensions lack its lookup), never the module fetch. Invoice
+ * documents are not here: they wait on an owner decision (task 031 notes).
+ */
+export type DocumentRoot = 'projects' | 'matters' | 'workassignments' | 'servicerequests';
+
+/** `/api/v1/external/{root}/{id}/documents`: list (GET) and upload (POST). */
+export function documentsPath(root: DocumentRoot, recordId: string): string {
+  return `/api/v1/external/${root}/${encodeURIComponent(recordId)}/documents`;
+}
+
+/** The content (download) route of one document, scoped by the record it is filed to. */
+export function documentContentPath(root: DocumentRoot, recordId: string, documentId: string): string {
+  return `${documentsPath(root, recordId)}/${encodeURIComponent(documentId)}/content`;
+}
+
+/** The version-history route of one document, scoped by the record it is filed to. */
+export function documentVersionsPath(root: DocumentRoot, recordId: string, documentId: string): string {
+  return `${documentsPath(root, recordId)}/${encodeURIComponent(documentId)}/versions`;
+}
+
+/** A record's document list plus whether the caller may upload to it (`null` = the BFF did not say). */
+export interface DocumentListResult extends ListResult<ODataDocument> {
+  canCreate: boolean | null;
+}
+
+/**
+ * The documents of a project, matter, work assignment or service request (task 031 routes), and the BFF's `canCreate`:
+ * whether the caller holds Create on the record (so a ViewOnly reader is not offered an upload that can only fail).
+ */
+export async function getRecordDocuments(root: DocumentRoot, recordId: string): Promise<DocumentListResult> {
+  const response = await bffApiCall<ODataCollectionResponse<ODataDocument>>(documentsPath(root, recordId));
+  return {
+    items: response.value ?? [],
+    truncated: response.truncated === true,
+    canCreate: typeof response.canCreate === 'boolean' ? response.canCreate : null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -479,7 +534,10 @@ export async function getEvents(projectId: string, options: ODataQueryOptions = 
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param options    Optional OData query overrides
  */
-export async function getProjectTodos(projectId: string, options: ODataQueryOptions = {}): Promise<ListResult<ODataTodo>> {
+export async function getProjectTodos(
+  projectId: string,
+  options: ODataQueryOptions = {}
+): Promise<ListResult<ODataTodo>> {
   const defaults: ODataQueryOptions = {
     $orderby: 'sprk_duedate asc',
   };
@@ -506,7 +564,10 @@ export async function getProjectTodos(projectId: string, options: ODataQueryOpti
  * @param projectId  Dataverse GUID of the sprk_project record
  * @param options    Optional OData query overrides
  */
-export async function getContacts(projectId: string, options: ODataQueryOptions = {}): Promise<ListResult<ODataContact>> {
+export async function getContacts(
+  projectId: string,
+  options: ODataQueryOptions = {}
+): Promise<ListResult<ODataContact>> {
   const defaults: ODataQueryOptions = {
     $select: 'contactid,fullname,firstname,lastname,emailaddress1,telephone1,jobtitle,_parentcustomerid_value',
     // Filter contacts that have an active access record for this project.
@@ -686,6 +747,33 @@ export async function updateTodo(todoId: string, payload: UpdateTodoPayload): Pr
 }
 
 // ---------------------------------------------------------------------------
+// Delete-own (task 054, FR-26; server: task 032)
+// ---------------------------------------------------------------------------
+//
+// SERVICE REQUESTS: no delete exists server-side yet (escalated to the owner in task 032), so there is deliberately no
+// `deleteOwnServiceRequest` here and no Delete action on a service request. When the owner decides, add the call below
+// and its action in RecordDetailModal.
+//
+// Each call resolves on 204. The server decides (stamp + Read on the parent) and answers a uniform 403, 409 (checked out /
+// storage unverified), 503 (nothing deleted, retry) or 500, all as ProblemDetails with a `reasonCode`; see
+// `deleteFailureOf` (delete-own.ts) for what the user is told. The delete is by id alone: the server finds the parent.
+
+/** Hard-deletes a document the caller created (and its stored file). */
+export async function deleteOwnDocument(documentId: string): Promise<void> {
+  await bffApiCall<void>(`/api/v1/external/documents/${encodeURIComponent(documentId)}`, { method: 'DELETE' });
+}
+
+/** Hard-deletes a to-do the caller created. */
+export async function deleteOwnTodo(todoId: string): Promise<void> {
+  await bffApiCall<void>(`/api/v1/external/todos/${encodeURIComponent(todoId)}`, { method: 'DELETE' });
+}
+
+/** Hard-deletes an event the caller created. */
+export async function deleteOwnEvent(eventId: string): Promise<void> {
+  await bffApiCall<void>(`/api/v1/external/events/${encodeURIComponent(eventId)}`, { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------------------------
 // Singleton client object (convenience re-export)
 // ---------------------------------------------------------------------------
 
@@ -709,6 +797,8 @@ export const webApiClient = {
   getProjectById,
   // Documents
   getDocuments,
+  getRecordDocuments,
+  deleteOwnDocument,
   // Events
   getEvents,
   createEvent,
@@ -716,6 +806,8 @@ export const webApiClient = {
   getProjectTodos,
   createTodo,
   updateTodo,
+  deleteOwnTodo,
+  deleteOwnEvent,
   // Contacts
   getContacts,
   // Organizations

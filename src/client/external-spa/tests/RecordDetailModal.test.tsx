@@ -22,7 +22,13 @@ const { bffApiCall, gridSpecs } = vi.hoisted(() => ({
 
 vi.mock('../src/auth/bff-client', async () => {
   const actual = await vi.importActual<typeof import('../src/auth/bff-client')>('../src/auth/bff-client');
-  return { ...actual, bffApiCall, bffApiBlob: vi.fn() };
+  // `getExternalUserContext` (the caller's `/me`, task 054) calls the module's own bffApiCall: route it to the seam too.
+  return {
+    ...actual,
+    bffApiCall,
+    bffApiBlob: vi.fn(),
+    getExternalUserContext: () => bffApiCall('/api/v1/external/me'),
+  };
 });
 
 // jsdom has no matchMedia; the widget's ambient-theme helper reads it. The modal inherits the test's provider instead.
@@ -216,8 +222,12 @@ function setGrids(): void {
 interface Mocks {
   /** Entities whose detail read returns no row (the fetch seam's answer for a record outside the caller's set). */
   deny: Set<string>;
-  /** Rows the documents / invoices rollup returns, keyed by `${parentAttribute}:${parentId}`. */
+  /**
+   * Rows the task 031 document routes return, keyed by `${root}:${recordId}` (root = projects | matters | workassignments |
+   * servicerequests), in the DTO shape (`sprk_name`).
+   */
   documents: Record<string, Array<Record<string, unknown>>>;
+  /** Rows the invoices rollup (still the module fetch) returns, keyed by `${parentAttribute}:${parentId}`. */
   invoices: Record<string, Array<Record<string, unknown>>>;
   events: Array<Record<string, unknown>>;
   todos: Array<Record<string, unknown>>;
@@ -239,9 +249,26 @@ function detailReadOf(body: { entityName: string; fetchXml: string }): { c: Case
   return cond.attribute === c.idAttribute ? { c, id: cond.value } : undefined;
 }
 
+/**
+ * The reads every detail view makes besides the record itself, with an empty answer: who the caller is (`/me`, task 054)
+ * and the record's documents (the task 031 routes). `undefined` = not one of them.
+ */
+function sideReads(path: string): unknown {
+  if (path === '/api/v1/external/me') return { contactId: guid(7), email: 'me@example.test', projects: [] };
+  if (/^\/api\/v1\/external\/(projects|matters|workassignments|servicerequests)\/[^/]+\/documents$/.test(path)) {
+    return { value: [] };
+  }
+  return undefined;
+}
+
 function installNetwork(): void {
   bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-    // POST /fetch  (every entity's detail by id, and the documents / invoices rollup by parent lookup)
+    const docs = /^\/api\/v1\/external\/(projects|matters|workassignments|servicerequests)\/([^/]+)\/documents$/.exec(
+      path
+    );
+    if (docs) return { value: mocks.documents[`${docs[1]}:${docs[2]}`] ?? [] };
+    if (path === '/api/v1/external/me') return sideReads(path);
+    // POST /fetch  (every entity's detail by id, and the invoices rollup by parent lookup)
     if (path.endsWith('/api/dataverse/fetch')) {
       const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
       const read = detailReadOf(body);
@@ -253,7 +280,6 @@ function installNetwork(): void {
       }
       const cond = conditionOf(body.fetchXml);
       const key = `${cond.attribute}:${cond.value}`;
-      if (body.entityName === 'sprk_document') return { entities: mocks.documents[key] ?? [], moreRecords: false };
       if (body.entityName === 'sprk_invoice') return { entities: mocks.invoices[key] ?? [], moreRecords: false };
     }
     if (/\/messages$/.test(path)) return { value: [] };
@@ -278,6 +304,7 @@ function installDetailRead(entity: string, read: (id: string) => Record<string, 
       return unformatted;
     }
     if (path.endsWith('/messages')) return { value: [] };
+    if (sideReads(path) !== undefined) return sideReads(path);
     if (!path.endsWith('/api/dataverse/fetch')) throw new Error(`unexpected ${path}`);
     const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
     const detail = detailReadOf(body);
@@ -481,6 +508,7 @@ describe('browsing', () => {
       });
       bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
         if (path.endsWith('/messages')) return options?.method === 'POST' ? inFlight : { value: [] };
+        if (sideReads(path) !== undefined) return sideReads(path);
         const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
         const detail = detailReadOf(body);
         if (detail) {
@@ -561,19 +589,19 @@ describe('browsing', () => {
 // ---------------------------------------------------------------------------
 
 describe('sections', () => {
-  it('Project: documents and invoices are the module rollup filtered to this project; events and tasks are read-only', async () => {
+  it('Project: documents come from the project documents route and invoices from the module rollup; events and tasks are read-only', async () => {
     const c = caseOf('sprk_project');
     const projectId = ID.project[0];
-    mocks.documents[`sprk_project:${projectId}`] = [
+    mocks.documents[`projects:${projectId}`] = [
       {
         sprk_documentid: guid(901),
-        sprk_documentname: 'Engagement letter',
+        sprk_name: 'Engagement letter',
         sprk_documenttype: 'Letter',
         createdon: '2026-01-05T10:00:00Z',
       },
       {
         sprk_documentid: guid(902),
-        sprk_documentname: 'Term sheet',
+        sprk_name: 'Term sheet',
         sprk_documenttype: 'Sheet',
         createdon: '2026-01-06T10:00:00Z',
       },
@@ -594,12 +622,18 @@ describe('sections', () => {
     const invoices = within(dialog).getByTestId('record-detail-invoices');
     await within(invoices).findByText('INV-77');
 
-    // The rollup is the SAME module fetch the tabs run (POST …/fetch), narrowed by this record's lookup.
-    const fetches = bffApiCall.mock.calls.filter(call => String(call[0]).endsWith('/api/dataverse/fetch'));
-    const docFetch = fetches
-      .map(call => JSON.parse(String((call[1] as RequestInit).body)) as { entityName: string; fetchXml: string })
-      .find(b => b.entityName === 'sprk_document' && b.fetchXml.includes('sprk_project'));
-    expect(docFetch?.fetchXml).toContain(`<condition attribute="sprk_project" operator="eq" value="${projectId}"/>`);
+    // Documents are the task 031 route (GET), never the module fetch; invoices are still the module rollup narrowed by
+    // this record's lookup.
+    const calls = bffApiCall.mock.calls.map(call => String(call[0]));
+    expect(calls).toContain(`/api/v1/external/projects/${projectId}/documents`);
+    const fetches = bffApiCall.mock.calls
+      .filter(call => String(call[0]).endsWith('/api/dataverse/fetch'))
+      .map(call => JSON.parse(String((call[1] as RequestInit).body)) as { entityName: string; fetchXml: string });
+    expect(fetches.some(b => b.entityName === 'sprk_document')).toBe(false);
+    const invoiceFetch = fetches.find(b => b.entityName === 'sprk_invoice');
+    expect(invoiceFetch?.fetchXml).toContain(
+      `<condition attribute="sprk_project" operator="eq" value="${projectId}"/>`
+    );
 
     // Events and tasks, read-only: both lists show, and there is no create or toggle affordance.
     const events = within(dialog).getByTestId('record-detail-events');
@@ -615,19 +649,19 @@ describe('sections', () => {
     fireEvent.click(gridRow(c, 1));
     const dialog = await screen.findByRole('dialog');
 
-    await within(dialog).findByText('No documents for this record.');
+    await within(within(dialog).getByTestId('record-detail-documents')).findByText('No Documents');
     expect(within(dialog).getByText('No invoices for this record.')).toBeTruthy();
     await within(dialog).findByText(/No events yet/);
     await within(dialog).findByText('No tasks yet');
   });
 
-  it('Matter: documents and invoices roll up by the matter lookup; events/tasks show an empty state (reads arrive with task 039)', async () => {
+  it('Matter: documents come from the matter documents route, invoices roll up by the matter lookup; events/tasks show an empty state (reads arrive with task 039)', async () => {
     const c = caseOf('sprk_matter');
     const matterId = ID.matter[0];
-    mocks.documents[`sprk_matter:${matterId}`] = [
+    mocks.documents[`matters:${matterId}`] = [
       {
         sprk_documentid: guid(911),
-        sprk_documentname: 'Matter memo',
+        sprk_name: 'Matter memo',
         sprk_documenttype: 'Memo',
         createdon: '2026-02-01T10:00:00Z',
       },
@@ -653,10 +687,10 @@ describe('sections', () => {
   it('Work assignment: documents and the events section, but no invoices section (invoices have no work-assignment lookup)', async () => {
     const c = caseOf('sprk_workassignment');
     const waId = ID.wa[0];
-    mocks.documents[`sprk_workassignment:${waId}`] = [
+    mocks.documents[`workassignments:${waId}`] = [
       {
         sprk_documentid: guid(921),
-        sprk_documentname: 'WA brief',
+        sprk_name: 'WA brief',
         sprk_documenttype: 'Brief',
         createdon: '2026-02-02T10:00:00Z',
       },
@@ -674,8 +708,8 @@ describe('sections', () => {
     expect(invoiceFetches).toHaveLength(0);
   });
 
-  it.each(['sprk_document', 'sprk_invoice', 'sprk_servicerequest'])(
-    '%s: no events section, and no documents or invoices rollup',
+  it.each(['sprk_document', 'sprk_invoice'])(
+    '%s: no events section, and no documents or invoices section or read',
     async entity => {
       const c = caseOf(entity);
       renderWidget(c.Body);
@@ -687,9 +721,33 @@ describe('sections', () => {
       expect(within(dialog).queryByTestId('record-detail-documents')).toBeNull();
       expect(within(dialog).queryByTestId('record-detail-invoices')).toBeNull();
       const calls = bffApiCall.mock.calls.map(call => String(call[0]));
-      expect(calls.some(p => p.endsWith('/events') || p.endsWith('/todos'))).toBe(false);
+      expect(calls.some(p => p.endsWith('/events') || p.endsWith('/todos') || p.endsWith('/documents'))).toBe(false);
     }
   );
+
+  it('sprk_servicerequest: documents from the servicerequests route only; no events section, no invoices rollup', async () => {
+    const c = caseOf('sprk_servicerequest');
+    const srId = ID.sr[0];
+    mocks.documents[`servicerequests:${srId}`] = [
+      { sprk_documentid: guid(931), sprk_name: 'Request attachment', createdon: '2026-02-03T10:00:00Z' },
+    ];
+    renderWidget(c.Body);
+    fireEvent.click(gridRow(c, 1));
+    const dialog = await screen.findByRole('dialog');
+
+    await within(await within(dialog).findByTestId('record-detail-documents')).findByText('Request attachment');
+    expect(within(dialog).queryByTestId('record-detail-events')).toBeNull();
+    expect(within(dialog).queryByTestId('record-detail-invoices')).toBeNull();
+    const calls = bffApiCall.mock.calls.map(call => String(call[0]));
+    expect(calls).toContain(`/api/v1/external/servicerequests/${srId}/documents`);
+    // Never the module fetch for a service request's documents (task 031 K3/K4), never an events/to-do read.
+    const moduleDocumentReads = bffApiCall.mock.calls
+      .filter(call => String(call[0]).endsWith('/api/dataverse/fetch'))
+      .map(call => JSON.parse(String((call[1] as RequestInit).body)) as { entityName: string })
+      .filter(b => b.entityName === 'sprk_document');
+    expect(moduleDocumentReads).toHaveLength(0);
+    expect(calls.some(p => p.endsWith('/events') || p.endsWith('/todos'))).toBe(false);
+  });
 
   it.each(['sprk_project', 'sprk_matter', 'sprk_workassignment', 'sprk_invoice', 'sprk_servicerequest'])(
     '%s: shows the Messages section, read from that record thread on the external plane (task 051)',
@@ -729,12 +787,13 @@ describe('sections', () => {
     const c = caseOf('sprk_matter');
     bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path.endsWith('/messages')) return { value: [] };
+      if (path.endsWith('/documents'))
+        return { value: [{ sprk_documentid: guid(1), sprk_name: 'Only one' }], truncated: true };
+      if (sideReads(path) !== undefined) return sideReads(path);
       const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
       if (detailReadOf(body))
         return { entities: [{ sprk_matterid: guid(201), sprk_mattername: 'M' }], moreRecords: false };
-      return body.entityName === 'sprk_document'
-        ? { entities: [{ sprk_documentid: guid(1), sprk_documentname: 'Only one' }], moreRecords: true }
-        : { entities: [], moreRecords: false };
+      return { entities: [], moreRecords: false };
     });
     renderWidget(c.Body);
     fireEvent.click(gridRow(c, 1));
@@ -747,17 +806,19 @@ describe('sections', () => {
     const c = caseOf('sprk_matter');
     bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
       if (path.endsWith('/messages')) return { value: [] };
+      if (path.endsWith('/documents')) throw new ApiError(500, 'boom');
+      if (sideReads(path) !== undefined) return sideReads(path);
       const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
       if (detailReadOf(body))
         return { entities: [{ sprk_matterid: guid(201), sprk_mattername: 'M' }], moreRecords: false };
-      if (body.entityName === 'sprk_document') throw new ApiError(500, 'boom');
       return { entities: [], moreRecords: false };
     });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     renderWidget(c.Body);
     fireEvent.click(gridRow(c, 1));
     const dialog = await screen.findByRole('dialog');
-    await within(dialog).findByText(/documents could not be loaded just now/);
-    expect(within(dialog).queryByText('No documents for this record.')).toBeNull();
+    await within(dialog).findByText(/Failed to load documents/);
+    expect(within(dialog).queryByText('No Documents')).toBeNull();
   });
 });
 
@@ -842,7 +903,10 @@ describe('negative cases', () => {
     fireEvent.click(screen.getByRole('button', { name: 'bad row' }));
 
     const error = await screen.findByTestId('record-detail-error');
-    expect(bffApiCall).not.toHaveBeenCalled();
+    // The record read is never made, and the id appears in no call. The only BFF call the open dialog may make is the
+    // caller's own identity read (`/me`, task 054: once per opening, it carries no record id).
+    expect(bffApiCall.mock.calls.filter(c => c[0] !== '/api/v1/external/me')).toEqual([]);
+    expect(JSON.stringify(bffApiCall.mock.calls)).not.toContain('injected');
     // Retrying cannot succeed for a malformed id, so no "Try again" is offered (K4).
     expect(within(error).queryByRole('button', { name: 'Try again' })).toBeNull();
   });

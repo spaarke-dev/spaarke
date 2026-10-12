@@ -118,7 +118,7 @@ public static class ExternalProjectDataEndpoints
         group.MapGet("/projects/{id:guid}/documents", GetDocuments)
             .WithName("GetExternalProjectDocuments")
             .WithSummary("Get documents for a Secure Project")
-            .Produces<ExternalCollectionResponse<ExternalDocumentDto>>(StatusCodes.Status200OK)
+            .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
 
@@ -236,7 +236,7 @@ public static class ExternalProjectDataEndpoints
         group.MapGet("/matters/{id:guid}/documents", GetMatterDocuments)
             .WithName("GetExternalMatterDocuments")
             .WithSummary("Get documents for a matter the caller can read")
-            .Produces<ExternalCollectionResponse<ExternalDocumentDto>>(StatusCodes.Status200OK)
+            .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
 
@@ -272,7 +272,7 @@ public static class ExternalProjectDataEndpoints
         group.MapGet("/workassignments/{id:guid}/documents", GetWorkAssignmentDocuments)
             .WithName("GetExternalWorkAssignmentDocuments")
             .WithSummary("Get documents for a work assignment the caller can read")
-            .Produces<ExternalCollectionResponse<ExternalDocumentDto>>(StatusCodes.Status200OK)
+            .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
 
@@ -308,7 +308,7 @@ public static class ExternalProjectDataEndpoints
         group.MapGet("/servicerequests/{id:guid}/documents", GetServiceRequestDocuments)
             .WithName("GetExternalServiceRequestDocuments")
             .WithSummary("Get documents for a service request the caller submitted")
-            .Produces<ExternalCollectionResponse<ExternalDocumentDto>>(StatusCodes.Status200OK)
+            .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
 
@@ -487,7 +487,15 @@ public static class ExternalProjectDataEndpoints
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return DenyDocumentParent(parentKind);
 
-        return Results.Ok(await dataService.GetDocumentsAsync(parentKind, parentId, ct));
+        var documents = await dataService.GetDocumentsAsync(parentKind, parentId, ct);
+        return Results.Ok(new ExternalDocumentListResponse
+        {
+            Value = documents.Value,
+            Truncated = documents.Truncated,
+            // The upload route's own Create check, on the rights just used for Read (task 054 review: a ViewOnly reader
+            // must not be offered an upload that can only fail).
+            CanCreate = rights.HasFlag(Spaarke.Dataverse.AccessRights.Create),
+        });
     }
 
     /// <summary>

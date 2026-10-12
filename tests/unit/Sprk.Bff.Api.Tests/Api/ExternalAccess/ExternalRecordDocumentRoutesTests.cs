@@ -144,6 +144,54 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     }
 
     // =====================================================================
+    // Task 054 review: the list says whether the caller can upload (so the SPA offers Upload only to one who can)
+    // =====================================================================
+
+    [Theory]
+    [InlineData("projects", ExternalAccessLevel.ViewOnly, false)]
+    [InlineData("projects", ExternalAccessLevel.Collaborate, true)]
+    [InlineData("projects", ExternalAccessLevel.FullAccess, true)]
+    [InlineData("matters", ExternalAccessLevel.ViewOnly, false)]
+    [InlineData("matters", ExternalAccessLevel.Collaborate, true)]
+    [InlineData("matters", ExternalAccessLevel.FullAccess, true)]
+    [InlineData("workassignments", ExternalAccessLevel.ViewOnly, false)]
+    [InlineData("workassignments", ExternalAccessLevel.Collaborate, true)]
+    [InlineData("workassignments", ExternalAccessLevel.FullAccess, true)]
+    public async Task List_ReportsCanCreate_FromTheSameRightsTheUploadRouteChecks(
+        string segment, ExternalAccessLevel level, bool expectedCanCreate)
+    {
+        _fixture.Principal = Principal(segment, RecordA, level);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var list = await client.GetAsync($"/api/v1/external/{segment}/{RecordA}/documents");
+
+        list.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await list.Content.ReadFromJsonAsync<ExternalDocumentListResponse>();
+        body!.CanCreate.Should().Be(expectedCanCreate);
+
+        // The wire member is always written, camelCase, after the existing ones (a missing member would read as "cannot").
+        var raw = await client.GetStringAsync($"/api/v1/external/{segment}/{RecordA}/documents");
+        raw.Should().Contain($"\"canCreate\":{(expectedCanCreate ? "true" : "false")}");
+        raw.IndexOf("\"value\"", StringComparison.Ordinal).Should().BeLessThan(raw.IndexOf("\"canCreate\"", StringComparison.Ordinal));
+
+        // And the flag agrees with the upload route's own answer for the same caller.
+        using var upload = await client.PostAsync($"/api/v1/external/{segment}/{RecordA}/documents", FileForm());
+        upload.StatusCode.Should().Be(expectedCanCreate ? HttpStatusCode.Created : HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task List_OnAServiceRequest_ForItsRequester_ReportsCanCreate()
+    {
+        _fixture.Principal = CollaborateOn("servicerequests", RecordA);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var body = await client.GetFromJsonAsync<ExternalDocumentListResponse>(
+            $"/api/v1/external/servicerequests/{RecordA}/documents");
+
+        body!.CanCreate.Should().BeTrue("the requester always holds Read and Create on their own request");
+    }
+
+    // =====================================================================
     // AC 3: a record outside the caller's set is 403 on list, download, versions and upload
     // =====================================================================
 

@@ -58,6 +58,35 @@ public sealed class ExternalProjectDto
 }
 
 // ---------------------------------------------------------------------------
+// Document list envelope
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// The document list for one parent record: the same <c>value</c> / <c>truncated</c> members as
+/// <see cref="ExternalCollectionResponse{T}"/> (same names, same order, same omission rule) plus <see cref="CanCreate"/>
+/// (spaarke-SPA-external-access-platform-r3 task 054 review fix).
+/// </summary>
+public sealed class ExternalDocumentListResponse
+{
+    [JsonPropertyName("value")]
+    public IReadOnlyList<ExternalDocumentDto> Value { get; init; } = [];
+
+    /// <summary>See <see cref="ExternalCollectionResponse{T}.Truncated"/>.</summary>
+    [JsonPropertyName("truncated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Truncated { get; init; }
+
+    /// <summary>
+    /// <c>true</c> when the caller holds <c>Create</c> on this parent, i.e. the same right the upload route checks, so an
+    /// Upload control can be offered only to a caller who can use it. Always written (a missing member would read as
+    /// "cannot" to a client). The caller has just passed the Read check on this parent, so it discloses nothing new; the
+    /// upload route still decides every upload.
+    /// </summary>
+    [JsonPropertyName("canCreate")]
+    public bool CanCreate { get; init; }
+}
+
+// ---------------------------------------------------------------------------
 // Document DTO
 // ---------------------------------------------------------------------------
 
