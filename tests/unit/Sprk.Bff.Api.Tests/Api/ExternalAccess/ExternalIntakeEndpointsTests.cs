@@ -494,6 +494,121 @@ public sealed class ExternalIntakeEndpointsTests : IClassFixture<ExternalIntakeE
     // Fixture
     // =====================================================================
 
+    // =====================================================================
+    // Owner decision 2026-10-12: the requester's department comes from the contact record (system key)
+    // =====================================================================
+
+    private static JsonElement StoredAnswers(CreatedServiceRequest row) =>
+        JsonDocument.Parse((string)row.Payload["sprk_intakedata"]!).RootElement.Clone();
+
+    [Fact]
+    public async Task RequesterDepartment_PresentOnTheContact_IsStoredAsTheSystemKey_BesideTheClientAnswers()
+    {
+        var caller = IntakeTestData.WorkforceContact();
+        _fixture.Principal = caller;
+        _fixture.Data.Department = "Research & Development";
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route, IntakeTestData.Body(NdaAssessment, "NDA", """{"counterparty":"Contoso"}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var stored = StoredAnswers(_fixture.Data.Created.Single());
+        stored.GetProperty("requesterDepartment").GetString().Should().Be("Research & Development");
+        stored.GetProperty("counterparty").GetString().Should().Be("Contoso", "the client's own answers are kept");
+        _fixture.Data.DepartmentReads.Should().ContainSingle().Which.Should().Be(caller.ContactId,
+            "the department is read from the CALLER's contact and no other");
+    }
+
+    [Fact]
+    public async Task RequesterDepartment_AbsentOnTheContact_TheKeyIsOmitted_AndTheAnswersAreStoredVerbatim()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+        _fixture.Data.Department = null;
+        const string answers = """{"counterparty":"Contoso",  "term":{"years":2}}""";
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route, IntakeTestData.Body(NdaAssessment, "NDA", answers));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var row = _fixture.Data.Created.Single();
+        StoredAnswers(row).TryGetProperty("requesterDepartment", out _).Should().BeFalse("no department means no key");
+        row.Payload["sprk_intakedata"].Should().Be(answers, "with nothing to add the client's text is stored as sent");
+    }
+
+    [Theory]
+    [InlineData("requesterDepartment")]
+    [InlineData("RequesterDepartment")]
+    [InlineData("REQUESTERDEPARTMENT")]
+    public async Task RequesterDepartment_AClientSuppliedValue_IsIgnored_TheContactsValueWins(string clientKey)
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+        _fixture.Data.Department = "Legal";
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route,
+            IntakeTestData.Body(NdaAssessment, "NDA", $$"""{"{{clientKey}}":"Finance (forged)","counterparty":"Contoso"}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var stored = StoredAnswers(_fixture.Data.Created.Single());
+        stored.EnumerateObject().Where(p => p.Name.Equals("requesterDepartment", StringComparison.OrdinalIgnoreCase))
+            .Should().ContainSingle("exactly one department key survives").Which.Value.GetString().Should().Be("Legal");
+        stored.GetProperty("counterparty").GetString().Should().Be("Contoso");
+    }
+
+    [Fact]
+    public async Task RequesterDepartment_AClientSuppliedValue_WithNoDepartmentOnTheContact_IsDropped_NotKept()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+        _fixture.Data.Department = null;
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route,
+            IntakeTestData.Body(NdaAssessment, "NDA", """{"requesterDepartment":"Finance (forged)","counterparty":"Contoso"}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var stored = StoredAnswers(_fixture.Data.Created.Single());
+        stored.TryGetProperty("requesterDepartment", out _).Should().BeFalse("a forged value never survives");
+        stored.GetProperty("counterparty").GetString().Should().Be("Contoso");
+    }
+
+    [Fact]
+    public async Task RequesterDepartment_ADepartmentReadFault_Gets503_NothingIsCreated_AndNoExceptionText()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+        _fixture.Data.ThrowOnDepartmentRead = new ExternalDataService.DataverseUnavailableException("secret-detail-do-not-leak");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route, IntakeTestData.Body(NdaAssessment, "NDA", "{}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await IntakeTestData.ProblemCode(response, "errorCode")).Should().Be(ExternalIntakeEndpoints.ErrorDataverseUnavailable);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("secret-detail-do-not-leak");
+        _fixture.Data.Created.Should().BeEmpty();
+        _fixture.Data.CreateCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RequesterDepartment_AnInvalidSubmission_NeverReadsTheContact()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(Route, IntakeTestData.Json("""{"requestType":0,"title":"t","answers":{}}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _fixture.Data.DepartmentReads.Should().BeEmpty("a rejected submission costs no Dataverse read");
+    }
+
+    [Fact]
+    public void WithSystemKeys_KeepsDuplicateClientKeys_AndNeverThrowsOnThem()
+    {
+        using var doc = JsonDocument.Parse("""{"a":1,"a":2,"requesterDepartment":"x"}""");
+
+        var stored = ExternalIntakeEndpoints.WithSystemKeys(doc.RootElement, "Legal");
+
+        stored.Should().Be("""{"a":1,"a":2,"requesterDepartment":"Legal"}""");
+    }
+
     /// <summary>The external collaboration host, partner switch OFF (the default).</summary>
     public sealed class SwitchOffFixture : IntakeFixture
     {
@@ -564,16 +679,221 @@ public sealed class ExternalIntakeEndpointsPartnerSwitchOnTests
 }
 
 /// <summary>
+/// Owner decision 2026-10-12: Invention Submission is available to workforce callers, and to a CIAM partner only behind
+/// <c>ExternalAccess:PartnerInventionIntakeEnabled</c> (default off). Partner service requests are ON here (a partner is
+/// otherwise not entitled to the Legal Front Door at all), the invention flag OFF. The flag-ON cases are
+/// <see cref="ExternalIntakeInventionFlagOnTests"/>.
+/// </summary>
+[Trait("category", "external-access")]
+public sealed class ExternalIntakeInventionFlagOffTests : IClassFixture<ExternalIntakeInventionFlagOffTests.FlagOffFixture>
+{
+    private const int Invention = 100000001;
+    private readonly FlagOffFixture _fixture;
+
+    public ExternalIntakeInventionFlagOffTests(FlagOffFixture fixture)
+    {
+        _fixture = fixture;
+        _fixture.Reset();
+    }
+
+    [Fact]
+    public async Task Ciam_Invention_FlagOff_Gets403_WithTheDistinctCode_NothingIsReadOrCreated()
+    {
+        _fixture.Principal = IntakeTestData.Ciam();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(ExternalIntakeEndpointsTests.Route,
+            IntakeTestData.Body(Invention, "Idea", """{"title":"x"}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await IntakeTestData.ProblemCode(response, "errorCode")).Should().Be(ExternalIntakeEndpoints.DenyInventionNotAvailable);
+        (await IntakeTestData.ProblemCode(response, "reasonCode")).Should().Be(ExternalIntakeEndpoints.DenyInventionNotAvailable);
+        ExternalIntakeEndpoints.DenyInventionNotAvailable.Should().NotBe(ExternalIntakeEndpoints.DenyModuleNotEntitled,
+            "the partner may still use the other types, so the code is distinct from 'not entitled'");
+        _fixture.Data.Created.Should().BeEmpty();
+        _fixture.Data.DepartmentReads.Should().BeEmpty();
+        _fixture.Ownership.Requests.Should().BeEmpty("the type gate runs before any Dataverse read");
+    }
+
+    [Theory]
+    [InlineData(100000000)]
+    [InlineData(100000002)]
+    [InlineData(100000003)]
+    public async Task Ciam_TheOtherTypes_FlagOff_AreUnchanged_Gets201(int requestType)
+    {
+        _fixture.Principal = IntakeTestData.Ciam();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(ExternalIntakeEndpointsTests.Route, IntakeTestData.Body(requestType, "Request", "{}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        _fixture.Data.Created.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Workforce_Invention_FlagOff_IsAccepted()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(ExternalIntakeEndpointsTests.Route, IntakeTestData.Body(Invention, "Idea", "{}"));
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+
+        _fixture.Principal = IntakeTestData.SystemUser();
+        using var second = await client.PostAsync(ExternalIntakeEndpointsTests.Route, IntakeTestData.Body(Invention, "Idea", "{}"));
+        second.StatusCode.Should().Be(HttpStatusCode.Created, await second.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Me_Ciam_FlagOff_ListsEveryIntakeTypeExceptInvention()
+    {
+        _fixture.Principal = IntakeTestData.Ciam();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var me = await client.GetFromJsonAsync<MeEntitlementsResponse>("/api/v1/external/me/entitlements");
+
+        me!.IntakeRequestTypes.Should().Equal(100000000, 100000002, 100000003);
+    }
+
+    [Fact]
+    public async Task Me_Workforce_FlagOff_ListsAllFourIntakeTypes()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var me = await client.GetFromJsonAsync<MeEntitlementsResponse>("/api/v1/external/me/entitlements");
+
+        me!.IntakeRequestTypes.Should().Equal(100000000, 100000001, 100000002, 100000003);
+    }
+
+    [Fact]
+    public async Task Me_ACallerNotEntitledToTheFrontDoor_ListsNoIntakeTypes()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+        _fixture.Entitlements.Override = new[] { "policy-library" };
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var me = await client.GetFromJsonAsync<MeEntitlementsResponse>("/api/v1/external/me/entitlements");
+
+        me!.IntakeRequestTypes.Should().BeEmpty();
+    }
+
+    public sealed class FlagOffFixture : IntakeFixture
+    {
+        public FlagOffFixture() : base(partnerServiceRequestsEnabled: true, partnerInventionIntakeEnabled: false) { }
+    }
+}
+
+/// <summary>Task: <c>ExternalAccess:PartnerInventionIntakeEnabled</c> ON - a CIAM partner may submit Invention Submission.</summary>
+[Trait("category", "external-access")]
+public sealed class ExternalIntakeInventionFlagOnTests : IClassFixture<ExternalIntakeInventionFlagOnTests.FlagOnFixture>
+{
+    private const int Invention = 100000001;
+    private readonly FlagOnFixture _fixture;
+
+    public ExternalIntakeInventionFlagOnTests(FlagOnFixture fixture)
+    {
+        _fixture = fixture;
+        _fixture.Reset();
+    }
+
+    [Fact]
+    public async Task Ciam_Invention_FlagOn_IsAccepted_Gets201()
+    {
+        var caller = IntakeTestData.Ciam();
+        _fixture.Principal = caller;
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(ExternalIntakeEndpointsTests.Route,
+            IntakeTestData.Body(Invention, "Idea", """{"title":"x"}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        var row = _fixture.Data.Created.Should().ContainSingle().Subject;
+        row.Payload["sprk_requesttype"].Should().Be(Invention);
+        IntakeTestData.RequesterOf(row).Should().Be(caller.ContactId);
+    }
+
+    [Fact]
+    public async Task Workforce_Invention_FlagOn_IsAccepted()
+    {
+        _fixture.Principal = IntakeTestData.WorkforceContact();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(ExternalIntakeEndpointsTests.Route, IntakeTestData.Body(Invention, "Idea", "{}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Me_Ciam_FlagOn_ListsAllFourIntakeTypes()
+    {
+        _fixture.Principal = IntakeTestData.Ciam();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var me = await client.GetFromJsonAsync<MeEntitlementsResponse>("/api/v1/external/me/entitlements");
+
+        me!.IntakeRequestTypes.Should().Equal(100000000, 100000001, 100000002, 100000003);
+    }
+
+    public sealed class FlagOnFixture : IntakeFixture
+    {
+        public FlagOnFixture() : base(partnerServiceRequestsEnabled: true, partnerInventionIntakeEnabled: true) { }
+    }
+}
+
+/// <summary>
+/// The invention flag is INERT while the partner service-request switch is off: a partner has no Legal Front Door, so every
+/// type - invention included - is the module 403, and /me lists no intake types.
+/// </summary>
+[Trait("category", "external-access")]
+public sealed class ExternalIntakeInventionFlagWithoutPartnerSwitchTests
+    : IClassFixture<ExternalIntakeInventionFlagWithoutPartnerSwitchTests.InertFixture>
+{
+    private readonly InertFixture _fixture;
+
+    public ExternalIntakeInventionFlagWithoutPartnerSwitchTests(InertFixture fixture)
+    {
+        _fixture = fixture;
+        _fixture.Reset();
+    }
+
+    [Fact]
+    public async Task Ciam_InventionFlagOn_ButPartnerSwitchOff_StillGetsTheModule403()
+    {
+        _fixture.Principal = IntakeTestData.Ciam();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var response = await client.PostAsync(ExternalIntakeEndpointsTests.Route, IntakeTestData.Body(100000001, "Idea", "{}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await IntakeTestData.ProblemCode(response, "reasonCode")).Should().Be(ExternalIntakeEndpoints.DenyModuleNotEntitled);
+        _fixture.Data.Created.Should().BeEmpty();
+
+        var me = await client.GetFromJsonAsync<MeEntitlementsResponse>("/api/v1/external/me/entitlements");
+        me!.IntakeRequestTypes.Should().BeEmpty();
+    }
+
+    public sealed class InertFixture : IntakeFixture
+    {
+        public InertFixture() : base(partnerServiceRequestsEnabled: false, partnerInventionIntakeEnabled: true) { }
+    }
+}
+
+/// <summary>
 /// The external collaboration host for the intake route: the stub principal, an in-memory service-request create, the
 /// partner switch configured, and a <see cref="ModuleEntitlementResolver"/> whose App-Role map is an (empty) fixture.
 /// </summary>
 public abstract class IntakeFixture : ExternalCollaborationTestFixture
 {
     private readonly bool _partnerServiceRequestsEnabled;
+    private readonly bool _partnerInventionIntakeEnabled;
     private readonly ExternalTodoScopeTestFixture.StubCallerPrincipalResolver _principals = new();
 
-    protected IntakeFixture(bool partnerServiceRequestsEnabled) =>
+    protected IntakeFixture(bool partnerServiceRequestsEnabled, bool partnerInventionIntakeEnabled = false)
+    {
         _partnerServiceRequestsEnabled = partnerServiceRequestsEnabled;
+        _partnerInventionIntakeEnabled = partnerInventionIntakeEnabled;
+    }
 
     public InMemoryServiceRequestData Data { get; } = new();
 
@@ -611,7 +931,11 @@ public abstract class IntakeFixture : ExternalCollaborationTestFixture
         builder.ConfigureTestServices(services =>
         {
             // The switch, bound as production binds it: the descriptor factory and the resolver both read this value.
-            services.Configure<ExternalAccessOptions>(o => o.PartnerServiceRequestsEnabled = _partnerServiceRequestsEnabled);
+            services.Configure<ExternalAccessOptions>(o =>
+            {
+                o.PartnerServiceRequestsEnabled = _partnerServiceRequestsEnabled;
+                o.PartnerInventionIntakeEnabled = _partnerInventionIntakeEnabled;
+            });
 
             services.AddScoped<ICallerPrincipalResolver>(_ => _principals);
             services.AddScoped(_ => (ExternalDataService)Data);
@@ -682,11 +1006,34 @@ public sealed class InMemoryServiceRequestData : ExternalDataService
 
     private int _createCalls;
 
+    /// <summary>What the requester contact's <c>department</c> reads as (null: the contact has none).</summary>
+    public string? Department { get; set; }
+
+    /// <summary>When set, the department read throws it (a Dataverse fault).</summary>
+    public Exception? ThrowOnDepartmentRead { get; set; }
+
+    /// <summary>The contacts whose department was read, in order - proves the read targets the caller's contact only.</summary>
+    public ConcurrentQueue<Guid> DepartmentReads { get; } = new();
+
     public void Reset()
     {
         _created.Clear();
         ThrowOnCreate = null;
+        Department = null;
+        ThrowOnDepartmentRead = null;
+        DepartmentReads.Clear();
         Interlocked.Exchange(ref _createCalls, 0);
+    }
+
+    public override Task<string?> GetContactDepartmentAsync(Guid contactId, CancellationToken ct = default)
+    {
+        DepartmentReads.Enqueue(contactId);
+        if (ThrowOnDepartmentRead is { } fault)
+        {
+            throw fault;
+        }
+
+        return Task.FromResult(Department);
     }
 
     public override Task<Guid> CreateServiceRequestAsync(

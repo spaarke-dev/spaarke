@@ -1667,7 +1667,7 @@ public partial class RouteAuthorizationGuardTests
             + "writes app-only (:229). The body is validated and an unattributable sender refused before any read (:177, :195)."),
         new HandlerDecision("POST /api/v1/external/servicerequests", "SubmitServiceRequestAsync", "IsEntitledAsync", Array.Empty<string>(),
             "Task 035 (FR-05/FR-06): 403 unless the caller principal is entitled to legal-front-door "
-            + "(ModuleEntitlementResolver.IsEntitledAsync, ExternalIntakeEndpoints.cs:139 — a CIAM partner only with the partner "
+            + "(ModuleEntitlementResolver.IsEntitledAsync, ExternalIntakeEndpoints.cs:161 — a CIAM partner only with the partner "
             + "switch on) and has a contact (:152, :163), before the one app-only create, whose sprk_requestedby is that contact "
             + "(:226) and whose owner is the default team of that contact's business unit, resolved first and refused when it "
             + "cannot be (:210). The route names no existing record."),

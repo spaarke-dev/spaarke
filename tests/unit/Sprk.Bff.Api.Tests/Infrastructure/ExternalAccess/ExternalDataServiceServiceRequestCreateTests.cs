@@ -158,6 +158,71 @@ public class ExternalDataServiceServiceRequestCreateTests
         body.Should().Contain($"\"ownerid@odata.bind\":\"/teams({Team})\"");
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Owner decision 2026-10-12: the requester's department is the contact record's standard `department` column
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ContactDepartment_IsReadFromTheContactsDepartmentColumn_Trimmed()
+    {
+        Uri? requested = null;
+        var service = NewService(request =>
+        {
+            requested = request.RequestUri;
+            return Json(HttpStatusCode.OK, "{\"department\":\"  Research & Development \",\"contactid\":\"" + Contact + "\"}");
+        });
+
+        (await service.GetContactDepartmentAsync(Contact)).Should().Be("Research & Development");
+        requested!.AbsolutePath.Should().EndWith($"/contacts({Contact:D})");
+        requested.Query.Should().Be("?$select=department", "one app-only read that selects only the department column");
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"department\":null}")]
+    [InlineData("{\"department\":\"\"}")]
+    [InlineData("{\"department\":\"   \"}")]
+    public async Task ContactDepartment_MissingOrBlank_IsNull(string body)
+    {
+        var service = NewService(_ => Json(HttpStatusCode.OK, body));
+
+        (await service.GetContactDepartmentAsync(Contact)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ContactDepartment_ContactNotFound_IsNull()
+    {
+        var service = NewService(_ => Json(HttpStatusCode.NotFound, "{}"));
+
+        (await service.GetContactDepartmentAsync(Contact)).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task ContactDepartment_AReadThatFails_IsDataverseUnavailable_NeverNull(HttpStatusCode status)
+    {
+        var service = NewService(_ => Json(status, "{}"));
+
+        var act = () => service.GetContactDepartmentAsync(Contact);
+
+        await act.Should().ThrowAsync<ExternalDataService.DataverseUnavailableException>();
+    }
+
+    [Fact]
+    public async Task ContactDepartment_NoContactId_Refuses()
+    {
+        var service = NewService(_ => Json(HttpStatusCode.OK, "{}"));
+
+        var act = () => service.GetContactDepartmentAsync(Guid.Empty);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    private static HttpResponseMessage Json(HttpStatusCode status, string body) =>
+        new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+
     private static ExternalDataService NewService(Func<HttpRequestMessage, HttpResponseMessage> respond)
     {
         var config = new ConfigurationBuilder()

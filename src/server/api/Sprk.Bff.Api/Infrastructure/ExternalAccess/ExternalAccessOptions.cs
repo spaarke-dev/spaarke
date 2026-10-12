@@ -26,4 +26,16 @@ public sealed class ExternalAccessOptions
     /// <c>ExternalAccess__PartnerServiceRequestsEnabled</c>.
     /// </summary>
     public bool PartnerServiceRequestsEnabled { get; set; }
+
+    /// <summary>
+    /// When <c>true</c>, a CIAM partner may ALSO submit the Invention Submission intake type (owner decision 2026-10-12:
+    /// Invention Submission is available to workforce users - staff and workforce contacts - and to CIAM partners only
+    /// behind this flag). Default <c>false</c> - absent means off. It narrows nothing for workforce callers, and it is
+    /// INERT while <see cref="PartnerServiceRequestsEnabled"/> is off (a partner is then not entitled to the Legal Front
+    /// Door at all). Read through <see cref="ModuleEntitlementResolver.IsIntakeTypeAvailable"/> by the submit route and
+    /// <c>/me/entitlements</c>, so the two cannot drift. App Service form:
+    /// <c>ExternalAccess__PartnerInventionIntakeEnabled</c>. Bound and validated with the options above: a non-boolean
+    /// value, including empty, fails startup.
+    /// </summary>
+    public bool PartnerInventionIntakeEnabled { get; set; }
 }

@@ -276,6 +276,77 @@ public class ModuleEntitlementResolverTests
         (await resolver.IsEntitledAsync(WorkforceContact(), UserWithRoles("FrontDoorUser"), moduleCode)).Should().BeFalse();
     }
 
+    // ── (10) intake TYPE availability (owner decision 2026-10-12): Invention Submission is workforce-only, and a CIAM
+    //        partner gets it only behind ExternalAccess:PartnerInventionIntakeEnabled (default off). ───────────────────
+    private const int Nda = 100000000;
+    private const int Invention = 100000001;
+    private const int Policy = 100000002;
+    private const int Trademark = 100000003;
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void IsIntakeTypeAvailable_Workforce_EveryType_WhateverTheSwitches(bool partnerSwitch, bool inventionSwitch)
+    {
+        var resolver = new TestResolver(SeededMap, partnerSwitch, inventionSwitch);
+
+        foreach (var type in new[] { Nda, Invention, Policy, Trademark })
+        {
+            resolver.IsIntakeTypeAvailable(WorkforceSystemUser(), type).Should().BeTrue();
+            resolver.IsIntakeTypeAvailable(WorkforceContact(), type).Should().BeTrue();
+        }
+    }
+
+    [Fact]
+    public void IsIntakeTypeAvailable_Ciam_InventionSwitchOff_RefusesOnlyInvention()
+    {
+        var resolver = new TestResolver(SeededMap, partnerSwitch: true, inventionSwitch: false);
+
+        resolver.IsIntakeTypeAvailable(Ciam(), Invention).Should().BeFalse();
+        resolver.IsIntakeTypeAvailable(Ciam(), Nda).Should().BeTrue();
+        resolver.IsIntakeTypeAvailable(Ciam(), Policy).Should().BeTrue();
+        resolver.IsIntakeTypeAvailable(Ciam(), Trademark).Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsIntakeTypeAvailable_Ciam_InventionSwitchOn_AdmitsInvention()
+    {
+        var resolver = new TestResolver(SeededMap, partnerSwitch: true, inventionSwitch: true);
+
+        resolver.IsIntakeTypeAvailable(Ciam(), Invention).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(100000004)]
+    [InlineData(-1)]
+    public void IsIntakeTypeAvailable_UnknownType_IsNeverAvailable(int type)
+    {
+        var resolver = new TestResolver(SeededMap, partnerSwitch: true, inventionSwitch: true);
+
+        resolver.IsIntakeTypeAvailable(WorkforceContact(), type).Should().BeFalse();
+        resolver.IsIntakeTypeAvailable(Ciam(), type).Should().BeFalse();
+    }
+
+    [Fact]
+    public void IntakeRequestTypesFor_ReportsExactlyWhatIsIntakeTypeAvailableAllows()
+    {
+        new TestResolver(SeededMap, true, false).IntakeRequestTypesFor(Ciam())
+            .Should().Equal(Nda, Policy, Trademark);
+        new TestResolver(SeededMap, true, true).IntakeRequestTypesFor(Ciam())
+            .Should().Equal(Nda, Invention, Policy, Trademark);
+        new TestResolver(SeededMap, false, false).IntakeRequestTypesFor(WorkforceContact())
+            .Should().Equal(Nda, Invention, Policy, Trademark);
+    }
+
+    [Fact]
+    public void PartnerInventionIntakeEnabled_DefaultsOff()
+    {
+        new ExternalAccessOptions().PartnerInventionIntakeEnabled.Should().BeFalse();
+    }
+
     // ── (8) the "service-requests" descriptor predicate (FR-06 partner switch) ──────────────────────
     [Fact]
     public void ServiceRequests_CiamCaller_SwitchOff_AccessibleSetEmpty_AndNoRowSurvives()
@@ -449,13 +520,17 @@ public class ModuleEntitlementResolverTests
         private readonly IReadOnlyList<AppRoleModuleMapping> _map;
         public int MapReads { get; private set; }
 
-        public TestResolver(IReadOnlyList<AppRoleModuleMapping> map, bool partnerSwitch = false)
+        public TestResolver(IReadOnlyList<AppRoleModuleMapping> map, bool partnerSwitch = false, bool inventionSwitch = false)
             : base(new HttpClient(),
                    new InMemoryTenantCache(),
                    new ConfigurationBuilder().Build(),
                    new FakeCredential(),
                    new HttpContextAccessor(),
-                   Options.Create(new ExternalAccessOptions { PartnerServiceRequestsEnabled = partnerSwitch }),
+                   Options.Create(new ExternalAccessOptions
+                   {
+                       PartnerServiceRequestsEnabled = partnerSwitch,
+                       PartnerInventionIntakeEnabled = inventionSwitch,
+                   }),
                    NullLogger<ModuleEntitlementResolver>.Instance)
         {
             _map = map;

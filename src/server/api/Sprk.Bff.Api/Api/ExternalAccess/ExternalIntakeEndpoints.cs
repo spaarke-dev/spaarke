@@ -10,6 +10,9 @@
 //      ModuleEntitlementResolver.IsEntitledAsync — the ONE check that /me/entitlements reports and that reads the same
 //      ExternalAccessOptions value as the "service-requests" descriptor (review 011 K2). So a CIAM partner is refused
 //      (403) while ExternalAccess:PartnerServiceRequestsEnabled is off, and admitted when it is on, with no plane test here.
+//   1b. The intake TYPE (owner decision 2026-10-12): Invention Submission is workforce-only; a CIAM partner gets it only when
+//      ExternalAccess:PartnerInventionIntakeEnabled is on, else 403 (reasonCode = errorCode = DenyInventionNotAvailable).
+//      Asked of ModuleEntitlementResolver.IsIntakeTypeAvailable, the rule /me/entitlements reports as intakeRequestTypes.
 //   2. The requester: the resolved principal's contact. A caller whose contact could not be READ (ContactUnreadable) is told
 //      503 to retry. A caller with none (a licensed systemuser not linked to a contact) is refused 403 with a reason that says so — the row could not be filed in their name, and the Service Requests
 //      module (scope sprk_requestedby = caller contact) could never show it to them.
@@ -19,6 +22,9 @@
 //      contact, resolved through IRecordOwnershipResolver (target = the contact) BEFORE the create. A resolver read fault is a
 //      503 (EXT_INTAKE_DATAVERSE_UNAVAILABLE); a team that cannot be resolved REFUSES (500 EXT_INTAKE_OWNER_UNRESOLVED, no
 //      exception text, nothing created) - never an application-owned row.
+//   4b. The requester's department (owner decision 2026-10-12): the contact's standard department column, read app-only and
+//      stored in the answers as the SYSTEM key requesterDepartment (a client-sent key of that name is dropped; no value =
+//      key omitted; a read fault = 503, nothing created).
 //   5. The create: app-only (no OBO) through ExternalDataService.CreateServiceRequestAsync — sprk_requestedby,
 //      sprk_requesttype, sprk_intakedata, sprk_name, sprk_direction = Inbound, ownerid = the team from step 4. A Dataverse transport failure, timeout,
 //      429 or 5xx is a 503 (EXT_INTAKE_DATAVERSE_UNAVAILABLE, nothing submitted); any other failure is a 500. The route caps the
@@ -42,6 +48,20 @@ public static class ExternalIntakeEndpoints
 {
     /// <summary>Deny code for a caller not entitled to the legal-front-door module (incl. a CIAM partner, switch off).</summary>
     public const string DenyModuleNotEntitled = "sdap.external.intake.module_not_entitled";
+
+    /// <summary>
+    /// Deny code (also sent as <c>errorCode</c>) for a CIAM partner submitting Invention Submission while
+    /// <c>ExternalAccess:PartnerInventionIntakeEnabled</c> is off (owner decision 2026-10-12). Distinct from
+    /// <see cref="DenyModuleNotEntitled"/>: the partner may use the other intake types.
+    /// </summary>
+    public const string DenyInventionNotAvailable = "sdap.external.intake.invention_not_available";
+
+    /// <summary>
+    /// The SYSTEM key the route writes into the stored answers: the requester contact's <c>department</c> (owner decision
+    /// 2026-10-12). Never taken from the client - any key of this name the client sends is removed. Omitted when the contact
+    /// has no department.
+    /// </summary>
+    public const string RequesterDepartmentKey = "requesterDepartment";
 
     /// <summary>Deny code for a caller whose principal carries no contact, so no requester can be recorded.</summary>
     public const string DenyNoContact = "sdap.external.intake.no_contact";
@@ -96,7 +116,9 @@ public static class ExternalIntakeEndpoints
                 "Creates one sprk_servicerequest from a Legal Front Door wizard: the request type (NDA Assessment, " +
                 "Invention Submission, Policy Question or Trademark Search), a title and the answers (a JSON object of at " +
                 "most 100 KB). The requester is the caller's contact. 403 unless the caller is entitled to the " +
-                "legal-front-door module (CIAM partners only when the partner service-request switch is on) and has a " +
+                "legal-front-door module (CIAM partners only when the partner service-request switch is on), 403 " +
+                "sdap.external.intake.invention_not_available for a CIAM partner submitting Invention Submission while the " +
+                "partner invention switch is off, and 403 unless the caller has a " +
                 "contact; 400 for an unknown type, a missing title or invalid answers; 413 for a request body over 256 KB " +
                 "(answers between 100 KB and that cap are a 400); 503 when the caller's contact cannot be read, the owning team " +
                 "cannot be read, or Dataverse cannot take the create right now (nothing was submitted; try again); 500 " +
@@ -146,6 +168,26 @@ public static class ExternalIntakeEndpoints
                 DenyModuleNotEntitled, "You are not entitled to submit Legal Front Door requests.");
         }
 
+        // 1b. The intake TYPE (owner decision 2026-10-12): Invention Submission is for workforce callers, and for a CIAM
+        //     partner only behind ExternalAccess:PartnerInventionIntakeEnabled. The same rule /me/entitlements reports as
+        //     intakeRequestTypes. Only a KNOWN type is gated here; an unknown or missing one is the 400 below.
+        if (request?.RequestType is { } requestedType
+            && ExternalDataService.ServiceRequestTypes.ContainsKey(requestedType)
+            && !entitlements.IsIntakeTypeAvailable(principal, requestedType))
+        {
+            logger.LogWarning(
+                "[EXT-INTAKE] DENY submit of type {RequestType} for contact {ContactId}: the type is not available to this caller.",
+                requestedType, principal.ContactId);
+            return Results.Problem(
+                statusCode: StatusCodes.Status403Forbidden, title: "Forbidden",
+                detail: "This request type is not available to you.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["reasonCode"] = DenyInventionNotAvailable,
+                    ["errorCode"] = DenyInventionNotAvailable,
+                });
+        }
+
         // 2. The requester is the resolved principal's contact, never client input. A contact that could not be READ is
         //    unknown, not absent: ContactId is Guid.Empty in both cases, so the flag decides. A linked lawyer hit by a
         //    Dataverse 429 is told to retry, not that their account is unlinked (task 035 review F1, fail closed).
@@ -179,7 +221,7 @@ public static class ExternalIntakeEndpoints
 
         var requestType = request!.RequestType!.Value;
         var title = request.Title!.Trim();
-        var answersJson = request.Answers!.Value.GetRawText();
+        var clientAnswers = request.Answers!.Value;
 
         // 4. The owner (owner decision 2026-10-11, I-6): the default owner team of the business unit that owns the requester's
         //    contact, through the ONE resolver. Resolved before anything is written; unresolved REFUSES.
@@ -219,6 +261,30 @@ public static class ExternalIntakeEndpoints
                 extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorOwnerUnresolved });
         }
 
+        // 4b. The requester's department (owner decision 2026-10-12): read from the contact record app-only and stored as the
+        //     system key requesterDepartment - never from the client. A read FAULT is retryable (nothing was submitted); a
+        //     missing value just omits the key.
+        string? department;
+        try
+        {
+            department = await dataService.GetContactDepartmentAsync(principal.ContactId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "[EXT-INTAKE] Dataverse unavailable reading the department of contact {ContactId}.", principal.ContactId);
+            return Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable, title: "Service Unavailable",
+                detail: "Nothing was submitted; try again.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorDataverseUnavailable });
+        }
+
+        var answersJson = WithSystemKeys(clientAnswers, department);
+
         // 5. The create — app-only, the five intake columns and the owner.
         try
         {
@@ -257,6 +323,50 @@ public static class ExternalIntakeEndpoints
                 detail: "An unexpected error occurred submitting the request.",
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "EXT_INTAKE_INTERNAL_ERROR" });
         }
+    }
+
+    /// <summary>
+    /// The text stored in <c>sprk_intakedata</c>: the client's answers with the SYSTEM keys applied. Any client key named
+    /// <see cref="RequesterDepartmentKey"/> (compared case-insensitively, so no reader can be fooled by a differently-cased
+    /// copy) is dropped, then the key is added when <paramref name="requesterDepartment"/> has a value. When neither applies
+    /// the client's raw text is stored verbatim. Every other property is copied in order, duplicates included.
+    /// </summary>
+    internal static string WithSystemKeys(JsonElement clientAnswers, string? requesterDepartment)
+    {
+        var hasDepartment = !string.IsNullOrWhiteSpace(requesterDepartment);
+        var hasClientKey = clientAnswers.EnumerateObject()
+            .Any(p => string.Equals(p.Name, RequesterDepartmentKey, StringComparison.OrdinalIgnoreCase));
+        if (!hasDepartment && !hasClientKey)
+        {
+            return clientAnswers.GetRawText();
+        }
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions
+               {
+                   Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+               }))
+        {
+            writer.WriteStartObject();
+            foreach (var property in clientAnswers.EnumerateObject())
+            {
+                if (string.Equals(property.Name, RequesterDepartmentKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                property.WriteTo(writer);
+            }
+
+            if (hasDepartment)
+            {
+                writer.WriteString(RequesterDepartmentKey, requesterDepartment!.Trim());
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return Encoding.UTF8.GetString(stream.ToArray());
     }
 
     /// <summary>The 400 for the first invalid field, or <c>null</c> when the submission is valid.</summary>
