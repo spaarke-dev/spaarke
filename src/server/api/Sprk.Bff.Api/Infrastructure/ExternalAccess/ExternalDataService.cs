@@ -871,7 +871,8 @@ public class ExternalDataService
 
     /// <summary>
     /// Record titles by id. <see cref="Complete"/> is true only when every chunk was read in full, so an id missing from
-    /// <see cref="Names"/> then means the record no longer exists (deleted or deactivated is not distinguished).
+    /// <see cref="Names"/> then means the record was deleted. The read has no <c>statecode</c> filter, so a deactivated
+    /// record is still returned (and kept); only a deleted one is dropped.
     /// </summary>
     public sealed record RecordNamesRead(IReadOnlyDictionary<Guid, string?> Names, bool Complete);
 

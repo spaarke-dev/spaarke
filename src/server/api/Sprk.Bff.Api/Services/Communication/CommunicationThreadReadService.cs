@@ -419,7 +419,7 @@ public sealed class CommunicationThreadReadService
                 "IAppOnlyCommunicationQuery is not registered; the external-plane message read cannot run (fail closed).");
 
         var regardingValue = $"_{regardingField}_value";
-        var select = ExternalSelect(new[] { regardingValue });
+        var select = ExternalSelect(new[] { regardingValue }, includeContent: true);
         // Newest first with one over-fetched row (detects a cut-short list without a COUNT query): when the record has
         // more rows than the bound, the NEWEST ones are kept and the oldest dropped; the page is reversed to oldest→newest
         // below. Active AND sent/received only (ExternalStatusClause) — a Draft/Queued/Failed/Bounded/Recalled row is
@@ -460,13 +460,26 @@ public sealed class CommunicationThreadReadService
     private static bool IsExternallyVisibleRow(Dictionary<string, JsonElement> row)
         => IsExternallyReadableStatus(TryInt(row, StatusCodeAttribute)) && !IsHiddenFromExternal(TryInt(row, PrivilegeField));
 
-    /// <summary>The explicit external projection (no attachments, no recipient addresses) plus the regarding lookups read.</summary>
-    private static string ExternalSelect(IEnumerable<string> regardingValues)
-        => string.Join(',', new[]
+    /// <summary>
+    /// The explicit external projection (no attachments, no recipient addresses) plus the regarding lookups read.
+    /// <paramref name="includeContent"/> adds the body, its format and the subject: the task 033 thread read returns them;
+    /// the notification feed never uses them, so it projects without (task 037 review K3, least data).
+    /// </summary>
+    private static string ExternalSelect(IEnumerable<string> regardingValues, bool includeContent)
+    {
+        var columns = new List<string> { PkField };
+        if (includeContent)
         {
-            PkField, BodyField, BodyFormatField, SubjectField, DirectionField, SentByValue, CreatedByContactValue,
-            CreatedOnField, InternalOnlyField, PrivilegeField, StatusCodeAttribute,
-        }.Concat(regardingValues));
+            columns.AddRange(new[] { BodyField, BodyFormatField, SubjectField });
+        }
+
+        columns.AddRange(new[]
+        {
+            DirectionField, SentByValue, CreatedByContactValue, CreatedOnField, InternalOnlyField, PrivilegeField,
+            StatusCodeAttribute,
+        });
+        return string.Join(',', columns.Concat(regardingValues));
+    }
 
     /// <summary>
     /// The shared tail of every EXTERNAL read: the internal-only decision (an internal systemuser only — the same
@@ -560,7 +573,7 @@ public sealed class CommunicationThreadReadService
             var regardingValues = chunk.Select(r => r.Value).Distinct().ToList();
             var idFilter = string.Join(" or ", chunk.Select(r => $"{r.Value} eq {r.RecordId}"));
             var odata =
-                $"$select={ExternalSelect(regardingValues)}" +
+                $"$select={ExternalSelect(regardingValues, includeContent: false)}" +
                 $"&$filter=({idFilter}) and {ActiveOnlyClause} and {ExternalStatusClause} and {ExternalPrivilegeFilterClause}" +
                 $" and {CreatedOnField} ge {FormatOData(since)}" +
                 $"&$orderby={CreatedOnField} desc,{PkField} desc&$top={max + 1}";

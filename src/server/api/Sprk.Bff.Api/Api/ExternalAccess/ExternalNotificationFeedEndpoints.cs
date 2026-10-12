@@ -68,6 +68,12 @@ public static class ExternalNotificationFeedEndpoints
     /// <summary>Error code for a feed read that failed.</summary>
     public const string ErrorInternal = "EXT_NOTIFICATIONS_INTERNAL_ERROR";
 
+    /// <summary>
+    /// Error code for a caller whose derived contact could not be READ (a Dataverse fault on the systemuser row or the
+    /// oid binding). Both routes answer a retryable 503 (task 037 review F3-a; same fail-closed rule as task 035).
+    /// </summary>
+    public const string ErrorContactUnreadable = "EXT_NOTIFICATIONS_CONTACT_UNREADABLE";
+
     /// <summary>The stored marker.</summary>
     internal sealed record SeenMarker(DateTimeOffset SeenAt);
 
@@ -96,7 +102,8 @@ public static class ExternalNotificationFeedEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         externalGroup.MapPost("/notifications/seen", MarkSeenAsync)
             .WithName("MarkExternalNotificationsSeen")
@@ -149,6 +156,29 @@ public static class ExternalNotificationFeedEndpoints
         return MarkSeenCoreAsync(principal, MembershipEndpoints.ExtractTenantId(httpContext.User), cache, now, logger, ct);
     }
 
+    /// <summary>
+    /// A contact that could not be READ is unknown, not absent (<see cref="CallerPrincipal.ContactId"/> is Guid.Empty in
+    /// both cases, so the flag decides). The grant source and the service-request messages would be missing, so the feed
+    /// would look complete when it is not, and a following /seen would bury them for good. Both routes therefore answer a
+    /// retryable 503 with a fixed detail (no exception text) and touch nothing (task 037 review F3-a; task 035
+    /// <c>ExternalIntakeEndpoints</c> does the same). Null when the contact is readable.
+    /// </summary>
+    private static IResult? RefuseWhenContactUnreadable(CallerPrincipal principal, ILogger logger, string operation)
+    {
+        if (!(principal.ContactUnreadable && principal.ContactId == Guid.Empty))
+        {
+            return null;
+        }
+
+        logger.LogWarning(
+            "[EXT-NOTIFY] {Operation} refused for systemuser {SystemUserId}: the derived contact could not be read.",
+            operation, principal.SystemUserId);
+        return Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable, title: "Service Unavailable",
+            detail: "Your account could not be checked right now. Your notifications were not read or changed; try again shortly.",
+            extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorContactUnreadable });
+    }
+
     private static IResult MissingPrincipal() => Results.Problem(
         statusCode: StatusCodes.Status500InternalServerError,
         title: "Internal Server Error",
@@ -170,6 +200,12 @@ public static class ExternalNotificationFeedEndpoints
     internal static async Task<IResult> MarkSeenCoreAsync(
         CallerPrincipal principal, string tenantId, ITenantCache cache, DateTimeOffset now, ILogger logger, CancellationToken ct)
     {
+        // Before anything else: no marker may be set while a source was unreadable (F3-a).
+        if (RefuseWhenContactUnreadable(principal, logger, "Seen") is { } refused)
+        {
+            return refused;
+        }
+
         if (MarkerId(principal) is not { } markerId)
         {
             return ProblemDetailsHelper.Forbidden(
@@ -214,6 +250,11 @@ public static class ExternalNotificationFeedEndpoints
         ILogger logger,
         CancellationToken ct)
     {
+        if (RefuseWhenContactUnreadable(principal, logger, "Feed") is { } refused)
+        {
+            return refused;
+        }
+
         try
         {
             var cutoff = now - Window;
@@ -303,6 +344,8 @@ public static class ExternalNotificationFeedEndpoints
             {
                 var ids = group.Select(i => i.RecordId).Distinct().ToList();
                 var names = await dataService.GetRecordNamesAsync(group.Key, ids, ct).ConfigureAwait(false);
+                // A title read that did not finish is reported, never silent (review K2): the items stay, untitled.
+                truncated |= !names.Complete;
                 foreach (var id in ids)
                 {
                     if (names.Names.TryGetValue(id, out var name))

@@ -392,6 +392,234 @@ public class ExternalDataServiceTests
         };
     }
 
+    // =========================================================================
+    // Task 037 review F3-b — the three notification-feed reads, at the HTTP seam. Each asserts the QUERY it sends and the
+    // PARSE of what comes back; a renamed column or a dropped predicate fails here, not only in a live tenant.
+    // =========================================================================
+
+    private static readonly Guid FeedContact = Guid.Parse("cccccccc-0000-0000-0000-000000000001");
+
+    private static HttpResponseMessage JsonOk(string body) =>
+        new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+
+    private static HttpResponseMessage ServerError() => new(HttpStatusCode.InternalServerError);
+
+    private static string Decoded(string url) => Uri.UnescapeDataString(url);
+
+    private static string GrantRow(Guid id, Guid? project, Guid? matter, Guid? workAssignment, string? createdOn, string? grantedDate)
+    {
+        var parts = new List<string> { $"\"sprk_externalrecordaccessid\":\"{id}\"" };
+        parts.Add($"\"_sprk_project_value\":{(project is null ? "null" : $"\"{project}\"")}");
+        parts.Add($"\"_sprk_matter_value\":{(matter is null ? "null" : $"\"{matter}\"")}");
+        parts.Add($"\"_sprk_workassignment_value\":{(workAssignment is null ? "null" : $"\"{workAssignment}\"")}");
+        if (createdOn is not null) parts.Add($"\"createdon\":\"{createdOn}\"");
+        if (grantedDate is not null) parts.Add($"\"sprk_granteddate\":\"{grantedDate}\"");
+        return "{" + string.Join(",", parts) + "}";
+    }
+
+    [Fact]
+    public async Task GetRecentGrants_SendsOneQuery_FilteredOnContactStateGrantedDateAndExpiry_Unpaged_NewestFirst()
+    {
+        var (service, handler) = NewService();
+
+        var read = await service.GetRecentGrantsAsync(FeedContact, new DateOnly(2026, 9, 12), new DateOnly(2026, 10, 12));
+
+        read.Truncated.Should().BeFalse();
+        var url = handler.GetUrls.Should().ContainSingle().Subject;
+        var decoded = Decoded(url);
+        url.Should().Contain("/sprk_externalrecordaccesses?");
+        decoded.Should().Contain($"_sprk_contact_value eq {FeedContact}");
+        decoded.Should().Contain("statecode eq 0");
+        decoded.Should().Contain("sprk_granteddate ge 2026-09-12");
+        decoded.Should().Contain("sprk_expiresdate ge 2026-10-12", "a lapsed grant is never announced (the enforcement paths' predicate)");
+        decoded.Should().Contain("$orderby=createdon desc,sprk_externalrecordaccessid desc");
+        decoded.Should().Contain("createdon").And.Contain("_sprk_project_value").And.Contain("_sprk_matter_value")
+            .And.Contain("_sprk_workassignment_value");
+        url.Should().NotContain("$top", "$top suppresses @odata.nextLink; the read is paged and never silently cut");
+    }
+
+    [Fact]
+    public async Task GetRecentGrants_EmptyContact_ReadsNothing()
+    {
+        var (service, handler) = NewService();
+
+        var read = await service.GetRecentGrantsAsync(Guid.Empty, new DateOnly(2026, 9, 12), new DateOnly(2026, 10, 12));
+
+        read.Grants.Should().BeEmpty();
+        read.Truncated.Should().BeFalse();
+        handler.GetUrls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetRecentGrants_Parse_MapsRootsAndTimes_SkipsAmbiguousAndRootless()
+    {
+        var (service, handler) = NewService();
+        Guid projectGrant = Guid.NewGuid(), matterGrant = Guid.NewGuid(), waGrant = Guid.NewGuid();
+        Guid twoRoots = Guid.NewGuid(), noRoot = Guid.NewGuid(), noTime = Guid.NewGuid();
+        Guid project = Guid.NewGuid(), matter = Guid.NewGuid(), wa = Guid.NewGuid();
+        var rows = string.Join(",",
+            GrantRow(projectGrant, project, null, null, "2026-10-10T09:12:00Z", "2026-10-10"),
+            // No createdon: falls back to sprk_granteddate at 00:00 UTC.
+            GrantRow(matterGrant, null, matter, null, null, "2026-10-01"),
+            GrantRow(waGrant, null, null, wa, "2026-10-11T23:30:00Z", "2026-10-11"),
+            // Two roots: not exactly one, skipped.
+            GrantRow(twoRoots, Guid.NewGuid(), Guid.NewGuid(), null, "2026-10-10T09:12:00Z", "2026-10-10"),
+            // The root was deleted and the lookup emptied: skipped.
+            GrantRow(noRoot, null, null, null, "2026-10-10T09:12:00Z", "2026-10-10"),
+            // Neither createdon nor sprk_granteddate: no time to report, skipped.
+            GrantRow(noTime, Guid.NewGuid(), null, null, null, null));
+        handler.GetResponder = _ => JsonOk("{\"value\":[" + rows + "]}");
+
+        var read = await service.GetRecentGrantsAsync(FeedContact, new DateOnly(2026, 9, 12), new DateOnly(2026, 10, 12));
+
+        read.Truncated.Should().BeFalse();
+        read.Grants.Select(g => g.GrantId).Should().Equal(projectGrant, matterGrant, waGrant);
+        read.Grants[0].Should().Be(new ExternalDataService.RecentGrant(
+            projectGrant, ExternalGrantRootType.Project, project, DateTimeOffset.Parse("2026-10-10T09:12:00Z")));
+        read.Grants[1].Should().Be(new ExternalDataService.RecentGrant(
+            matterGrant, ExternalGrantRootType.Matter, matter, new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero)),
+            "createdon is absent, so the GrantedOnValue fallback is sprk_granteddate at 00:00 UTC");
+        read.Grants[2].RootType.Should().Be(ExternalGrantRootType.WorkAssignment);
+        read.Grants[2].RootId.Should().Be(wa);
+        read.Grants[2].GrantedOn.Should().Be(DateTimeOffset.Parse("2026-10-11T23:30:00Z"), "createdon, not the date, is the item time");
+    }
+
+    [Fact]
+    public async Task GetRecentGrants_AFailedRead_IsEmptyAndFlaggedTruncated()
+    {
+        var (service, handler) = NewService();
+        handler.GetResponder = _ => ServerError();
+
+        var read = await service.GetRecentGrantsAsync(FeedContact, new DateOnly(2026, 9, 12), new DateOnly(2026, 10, 12));
+
+        read.Grants.Should().BeEmpty();
+        read.Truncated.Should().BeTrue("a Dataverse fault must never read as 'no grants'");
+    }
+
+    [Fact]
+    public async Task GetServiceRequestsRequestedBy_FiltersOnTheRequesterColumn_ForEachDistinctNonEmptyId_AndParses()
+    {
+        var (service, handler) = NewService();
+        Guid requesterA = Guid.NewGuid(), requesterB = Guid.NewGuid(), requestId = Guid.NewGuid(), unnamedId = Guid.NewGuid();
+        handler.GetResponder = _ => JsonOk(
+            "{\"value\":[" +
+            $"{{\"sprk_servicerequestid\":\"{requestId}\",\"sprk_name\":\"Please review\",\"_sprk_requestedby_value\":\"{requesterA}\"}}," +
+            $"{{\"sprk_servicerequestid\":\"{unnamedId}\",\"_sprk_requestedby_value\":\"{requesterB}\"}}," +
+            // No requester: not attributable to anyone, dropped.
+            $"{{\"sprk_servicerequestid\":\"{Guid.NewGuid()}\",\"sprk_name\":\"orphan\"}}" +
+            "]}");
+
+        var read = await service.GetServiceRequestsRequestedByAsync(new[] { requesterA, requesterB, requesterA, Guid.Empty });
+
+        read.Truncated.Should().BeFalse();
+        var url = handler.GetUrls.Should().ContainSingle().Subject;
+        var decoded = Decoded(url);
+        url.Should().Contain("/sprk_servicerequests?");
+        decoded.Should().Contain($"_sprk_requestedby_value eq {requesterA}");
+        decoded.Should().Contain($"_sprk_requestedby_value eq {requesterB}");
+        decoded.Should().NotContain("00000000-0000-0000-0000-000000000000");
+        decoded.Split($"_sprk_requestedby_value eq {requesterA}").Should().HaveCount(2, "a duplicate id is queried once");
+        decoded.Should().Contain("$orderby=createdon desc");
+        url.Should().NotContain("$top");
+        read.Requests.Should().HaveCount(2);
+        read.Requests[0].Should().Be(new ExternalDataService.RequestedServiceRequest(requestId, "Please review", requesterA));
+        read.Requests[1].Should().Be(new ExternalDataService.RequestedServiceRequest(unnamedId, null, requesterB));
+    }
+
+    [Fact]
+    public async Task GetServiceRequestsRequestedBy_NoIds_ReadsNothing_AndAFailedReadIsTruncated()
+    {
+        var (service, handler) = NewService();
+
+        var none = await service.GetServiceRequestsRequestedByAsync(new[] { Guid.Empty });
+        none.Requests.Should().BeEmpty();
+        none.Truncated.Should().BeFalse();
+        handler.GetUrls.Should().BeEmpty();
+
+        handler.GetResponder = _ => ServerError();
+        var failed = await service.GetServiceRequestsRequestedByAsync(new[] { Guid.NewGuid() });
+        failed.Requests.Should().BeEmpty();
+        failed.Truncated.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("sprk_project", "sprk_projects", "sprk_projectid", "sprk_projectname")]
+    [InlineData("sprk_matter", "sprk_matters", "sprk_matterid", "sprk_mattername")]
+    [InlineData("sprk_workassignment", "sprk_workassignments", "sprk_workassignmentid", "sprk_name")]
+    public async Task GetRecordNames_ReadsTheRightEntitySet_WithItsIdAndNameColumns(
+        string entity, string entitySet, string idColumn, string nameColumn)
+    {
+        var (service, handler) = NewService();
+        Guid id = Guid.NewGuid(), unnamed = Guid.NewGuid();
+        handler.GetResponder = _ => JsonOk(
+            $"{{\"value\":[{{\"{idColumn}\":\"{id}\",\"{nameColumn}\":\"Acme\"}},{{\"{idColumn}\":\"{unnamed}\",\"{nameColumn}\":null}}]}}");
+
+        var read = await service.GetRecordNamesAsync(entity, new[] { id, unnamed });
+
+        var url = handler.GetUrls.Should().ContainSingle().Subject;
+        url.Should().Contain($"/{entitySet}?");
+        var decoded = Decoded(url);
+        decoded.Should().Contain($"{idColumn} eq {id}").And.Contain($"{idColumn} eq {unnamed}");
+        decoded.Should().Contain($"$select={idColumn},{nameColumn}");
+        url.Should().NotContain("statecode", "a deactivated record is kept; only a deleted one is dropped");
+        read.Complete.Should().BeTrue();
+        read.Names.Should().HaveCount(2);
+        read.Names[id].Should().Be("Acme");
+        read.Names[unnamed].Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetRecordNames_ChunksTheIds_AndACompleteReadMeansAMissingIdIsGone()
+    {
+        var (service, handler) = NewService();
+        var ids = Enumerable.Range(0, ExternalDataService.IdFilterChunkSize * 2 + 50).Select(_ => Guid.NewGuid()).ToList();
+        var gone = ids[^1];
+        handler.GetResponder = url =>
+        {
+            var d = Decoded(url);
+            var rows = ids.Where(id => id != gone && d.Contains($"sprk_matterid eq {id}"))
+                .Select(id => $"{{\"sprk_matterid\":\"{id}\",\"sprk_mattername\":\"M-{id:N}\"}}");
+            return JsonOk("{\"value\":[" + string.Join(",", rows) + "]}");
+        };
+
+        var read = await service.GetRecordNamesAsync("sprk_matter", ids);
+
+        handler.GetUrls.Should().HaveCount(3, "100 + 100 + 50 ids");
+        handler.GetUrls.Should().OnlyContain(u => u.Contains("/sprk_matters?"));
+        read.Complete.Should().BeTrue();
+        read.Names.Should().HaveCount(ids.Count - 1);
+        read.Names.Should().NotContainKey(gone, "a complete read that does not return an id means the record is gone");
+    }
+
+    [Fact]
+    public async Task GetRecordNames_AFailedChunk_IsNotComplete_SoAMissingIdIsNotTreatedAsGone()
+    {
+        var (service, handler) = NewService();
+        var ids = Enumerable.Range(0, ExternalDataService.IdFilterChunkSize + 5).Select(_ => Guid.NewGuid()).ToList();
+        var calls = 0;
+        handler.GetResponder = _ => ++calls == 2 ? ServerError() : JsonOk("{\"value\":[]}");
+
+        var read = await service.GetRecordNamesAsync("sprk_project", ids);
+
+        calls.Should().Be(2);
+        read.Complete.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetRecordNames_UnknownEntity_IsIncomplete_AndNoIds_IsCompleteWithoutARead()
+    {
+        var (service, handler) = NewService();
+
+        var unknown = await service.GetRecordNamesAsync("sprk_invoice", new[] { Guid.NewGuid() });
+        unknown.Names.Should().BeEmpty();
+        unknown.Complete.Should().BeFalse("an entity the feed cannot title is not 'gone'");
+
+        var none = await service.GetRecordNamesAsync("sprk_project", new[] { Guid.Empty });
+        none.Names.Should().BeEmpty();
+        none.Complete.Should().BeTrue();
+        handler.GetUrls.Should().BeEmpty();
+    }
+
     private static (ExternalDataService Service, CapturingHandler Handler) NewService()
     {
         var handler = new CapturingHandler();
@@ -411,6 +639,12 @@ public class ExternalDataServiceTests
         /// <summary>Every request that reached the transport, whatever its method.</summary>
         public List<HttpMethod> Requests { get; } = new();
 
+        /// <summary>The absolute URL of every GET, in order (task 037 review F3-b: the feed reads assert their queries).</summary>
+        public List<string> GetUrls { get; } = new();
+
+        /// <summary>When set, answers each GET (by its absolute URL); otherwise a GET is an empty collection.</summary>
+        public Func<string, HttpResponseMessage>? GetResponder { get; set; }
+
         public IReadOnlyDictionary<string, string?> SinglePostBody()
         {
             PostBodies.Should().ContainSingle("exactly one create is posted");
@@ -427,6 +661,14 @@ public class ExternalDataServiceTests
                 PostBodies.Add(await request.Content!.ReadAsStringAsync(ct));
                 var id = Guid.NewGuid().ToString("D");
                 return Json($"{{\"sprk_todoid\":\"{id}\",\"sprk_eventid\":\"{id}\",\"sprk_documentid\":\"{id}\"}}");
+            }
+
+            if (request.Method == HttpMethod.Get)
+            {
+                var url = request.RequestUri!.AbsoluteUri;
+                GetUrls.Add(url);
+                if (GetResponder is { } responder)
+                    return responder(url);
             }
 
             return Json("{\"value\":[]}");

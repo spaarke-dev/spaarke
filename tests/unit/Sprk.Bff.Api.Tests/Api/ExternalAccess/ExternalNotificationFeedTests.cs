@@ -480,6 +480,80 @@ public class ExternalNotificationFeedTests
         var item = feed.Value.Should().ContainSingle().Subject;
         item.Id.Should().Be(IdOf(row));
         item.RecordTitle.Should().BeNull("an unreadable title is not a deleted record");
+        feed.Truncated.Should().BeTrue("a title read that failed is reported, never silent (review K2)");
+    }
+
+    [Fact]
+    public async Task WhenEveryTitleReadIsComplete_TheFeedIsNotFlaggedTruncated()
+    {
+        var project = Guid.NewGuid();
+        Message("sprk_regardingproject", project, Now.AddHours(-1));
+
+        Body(await Feed(Ciam(Guid.NewGuid(), project: project))).Truncated.Should().BeFalse();
+    }
+
+    // ── review F3-a: a contact that could not be READ must not produce a silently incomplete feed ──
+
+    private static CallerPrincipal UnreadableContact(Guid systemUserId, Guid project) => new()
+    {
+        Plane = CallerPrincipalPlane.Workforce,
+        ContactId = Guid.Empty,
+        ContactUnreadable = true,
+        SystemUserId = systemUserId,
+        Email = "lawyer@spaarke.test",
+        ProjectAccess = new[] { CallerProjectAccess.FromLevel(project, ExternalAccessLevel.FullAccess) },
+    };
+
+    [Fact]
+    public async Task AnUnreadableContact_GetsA503_WithTheCode_AndNoFeedReadIsMade()
+    {
+        var project = Guid.NewGuid();
+        Message("sprk_regardingproject", project, Now.AddHours(-1));
+
+        var result = await Feed(UnreadableContact(Guid.NewGuid(), project));
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["errorCode"].Should().Be(ExternalNotificationFeedEndpoints.ErrorContactUnreadable);
+        ExternalNotificationFeedEndpoints.ErrorContactUnreadable.Should().Be("EXT_NOTIFICATIONS_CONTACT_UNREADABLE");
+        problem.ProblemDetails.Detail.Should().Be(
+            "Your account could not be checked right now. Your notifications were not read or changed; try again shortly.",
+            "a fixed retry detail, no exception text");
+        _data.GrantReads.Should().BeEmpty();
+        _data.ServiceRequestReads.Should().BeEmpty();
+        _data.NameReads.Should().BeEmpty();
+        _queries.Should().BeEmpty("no message query is made after the check");
+        _appOnly.Verify(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AnUnreadableContact_SeenIs503_AndNoMarkerIsWritten()
+    {
+        var cache = new Mock<ITenantCache>(MockBehavior.Strict);
+        _cache = cache.Object;
+
+        var result = await Seen(UnreadableContact(Guid.NewGuid(), Guid.NewGuid()), Now);
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["errorCode"].Should().Be(ExternalNotificationFeedEndpoints.ErrorContactUnreadable);
+        cache.VerifyNoOtherCalls(); // Strict: any SetAsync would have thrown; none was made.
+    }
+
+    [Fact]
+    public async Task ASystemUserWithAContact_IsUnaffectedByTheUnreadableContactCheck()
+    {
+        var systemUser = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var caller = SystemUser(systemUser, project);
+        _identity.Setup(i => i.IsExternalAsync(systemUser, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        Message("sprk_regardingproject", project, Now.AddHours(-1));
+
+        var feed = Body(await Feed(caller));
+        feed.Value.Should().ContainSingle();
+        _data.GrantReads.Should().ContainSingle("the grant source is read for a readable contact");
+
+        (await Seen(caller, Now)).Should().BeOfType<Ok<ExternalNotificationSeenResponse>>();
     }
 
     // ── AC5: unreadCount against last-seen; POST /seen clears it until a newer item arrives ─────────
@@ -621,6 +695,23 @@ public class ExternalNotificationFeedTests
     }
 
     [Fact]
+    public async Task AGrantOnTheBoundaryDay_IsKeptOrDroppedByItsInstant_NotByItsDate()
+    {
+        // Now = 2026-10-12T12:00Z, so the cutoff is 2026-09-12T12:00Z. The in-memory read, like a date-only filter, keeps
+        // every row of the boundary DAY; the endpoint's own per-row re-check must cut the morning one (review K4).
+        var me = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var caller = Ciam(me, project: project);
+        _data.AddGrant(me, ExternalGrantRootType.Project, project, new DateTimeOffset(2026, 9, 12, 8, 0, 0, TimeSpan.Zero));
+        var afternoon = _data.AddGrant(me, ExternalGrantRootType.Project, project, new DateTimeOffset(2026, 9, 12, 13, 0, 0, TimeSpan.Zero));
+
+        var feed = Body(await Feed(caller));
+
+        _data.GrantReads.Single().Since.Should().Be(new DateOnly(2026, 9, 12), "the read is handed the boundary DAY");
+        feed.Value.Select(i => i.Id).Should().Equal(afternoon.ToString("D"));
+    }
+
+    [Fact]
     public async Task AtMostOneHundredItems_NewestFirst_AndTheCutIsFlagged()
     {
         var me = Guid.NewGuid();
@@ -639,6 +730,22 @@ public class ExternalNotificationFeedTests
         feed.Truncated.Should().BeTrue("140 qualifying items were cut to 100");
         feed.UnreadCount.Should().Be(100);
         _queries.Single().Should().Contain("$top=101");
+    }
+
+    [Fact]
+    public async Task TheFeedQuery_ProjectsNoBodyFormatOrSubject_ButEveryColumnItsRulesNeed()
+    {
+        var project = Guid.NewGuid();
+        Message("sprk_regardingproject", project, Now.AddHours(-1));
+
+        await Feed(Ciam(Guid.NewGuid(), project: project));
+
+        var query = _queries.Should().ContainSingle().Subject!;
+        var select = query[..query.IndexOf('&')];
+        select.Should().Be(
+            "$select=sprk_communicationid,sprk_direction,_sprk_sentby_value,_sprk_createdbycontact_value,createdon," +
+            "sprk_isinternalonly,sprk_privilegeclassification,statuscode,_sprk_regardingproject_value");
+        select.Should().NotContain("sprk_body").And.NotContain("sprk_subject");
     }
 
     [Fact]
@@ -686,6 +793,7 @@ public class ExternalNotificationFeedTests
 
         public List<(Guid Contact, DateOnly Since, DateOnly Today)> GrantReads { get; } = new();
         public List<IReadOnlyCollection<Guid>> ServiceRequestReads { get; } = new();
+        public List<string> NameReads { get; } = new();
         public bool NamesReadFails { get; set; }
 
         public Guid AddGrant(Guid contact, ExternalGrantRootType rootType, Guid rootId, DateTimeOffset grantedOn)
@@ -731,6 +839,7 @@ public class ExternalNotificationFeedTests
         public override Task<RecordNamesRead> GetRecordNamesAsync(
             string entityLogicalName, IReadOnlyCollection<Guid> ids, CancellationToken ct = default)
         {
+            NameReads.Add(entityLogicalName);
             if (NamesReadFails)
                 return Task.FromResult(new RecordNamesRead(new Dictionary<Guid, string?>(), Complete: false));
 
