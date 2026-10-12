@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **116 tasks** across 14 phases (75 ✅ · 1 🔄 · 27 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-12)
+> (spec §9) · **123 tasks** across 15 phases (75 ✅ · 1 🔄 · 34 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-12: +140–146, Phase 4c child-record contract)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -210,6 +210,20 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | ✅ [done] 047 | [Schema: response columns on `sprk_workassignment` (D-54)](047-schema-work-assignment-response-columns.poml) | FULL | sonnet/high | — | — | **D-54**: responded-on + outcome (exact set agreed with the WA owner); 007 recipe; WA is a secure root · **[uac]**. Feeds 044, 061. **Start now** |
 | 🔲 [open] 048 | [D-66: move shared Dataverse write core (`OwnedChildWrite` + helpers) out of `Services/Ai` → `Services/Dataverse`, own PR (uac-r2 review)](048-move-dataverse-write-core-out-of-ai-namespace.poml) | FULL | sonnet/high | — | C | **D-66**; uac-r2 agreed (D-113): after #1391, before 046; sequence after #1391 (same file) **[uac]** |
 | 🔲 [open] 049 | [Remove Console User Write on `sprk_signal`](049-revoke-console-user-signal-write.poml) | STANDARD | sonnet/medium | 043, 055 | — | **D-17**, after the deployed Console closes Signals only via the BFF. Union re-verify · **[uac]** |
+
+### Phase 4c — Standard child-record contract (D-131..D-133; added 2026-10-12, critical path, before 035)
+
+Contract: `git show origin/work/unified-access-control-r2:projects/unified-access-control-r2/notes/ontology-standard-child-contract-2026-10-12.md`. Sequence: 140 → uac-r2 lineage + census PR → 141 → 142/143 → 144 → 145 → 146. All **[uac]** (uac-r2 reviews every PR).
+
+| # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
+|---|---|---|---|---|---|---|
+| 🔲 [open] 140 | [Schema: 14 DR regarding columns; Signal pair type text → Lookup](140-child-contract-schema-delta.poml) | FULL | sonnet/high | — | CC1 | **D-132** owner-approved. Scoped publish; dependency check before the Signal delete; upgrade runbook; Redis metadata cache note · **[uac]** |
+| 🔲 [open] 141 | [Generalise `TodoRegardingBuilder`; SignalWriter on the shared builder](141-shared-regarding-builder-signalwriter.poml) | FULL | **opus**/high | 140 (+ #1665/#1746/#1747/#1756 merged) | CC2 | **D-133**. Builder commit reviewed alone by uac-r2; To Do/Event tests unchanged; dedupe key unchanged · **[uac]** |
+| 🔲 [open] 142 | [DecisionRecordWriter: subject filing, all-parent owner, two-wall refusal](142-decision-record-writer-contract.poml) | FULL | **opus**/high | 141, 043 | CC3 | Contract C1–C3, C9; acceptance 1–3, 6, 7 · **[uac]** |
+| 🔲 [open] 143 | [D-130 owner on SignalWriter/Suppression/Commit; replace ownerid read rule](143-d130-owner-signal-writers.poml) | FULL | **opus**/high | 141, #1746 | CC3 | Audit F3 + F2 code side (F2 Read grant = owner decision). Absorbs the "F3 SignalWriter no-core ownership" lane · **[uac]** |
+| 🔲 [open] 144 | [Register Signal + DR with the core-ancestor restamper; re-file re-stamps/re-owns](144-restamper-registration-refile.poml) | FULL | **opus**/high | 142, 143, uac-r2 C4/C7 PR, #1747 | CC4 | uac-r2 conditions: separate commit; not an intermediate; root classification; report-only reconciliation first · **[uac]** |
+| 🔲 [open] 145 | [`sprk_matter` readers (context vs filing), backfill, evidence leak](145-matter-readers-backfill-evidence-leak.poml) | FULL | **opus**/high | 141, 142, 144 | CC5 | D-34 split; uac-r2 #1747 finding (e) (D-123 leak); backfill write needs owner approval · **[uac]** |
+| 🔲 [open] 146 | [Live gate: contract §5, 11 items](146-child-contract-live-gate.poml) | FULL | sonnet/high | 140–145 | CC6 | After the BFF with 141–145 is on dev and the DR metadata cache key has expired · **[uac]** |
 
 ### Phase 5 — The worklist surface
 
