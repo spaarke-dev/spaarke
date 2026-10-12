@@ -23,7 +23,7 @@ Load this pattern when:
 
 - Global namespace check MUST run at Step 2 preflight, BEFORE `az deployment sub create`. Failing at Step 2 → operator adjusts `bicepparam` before ANY resource is created; failing at deploy time → 16+ minutes wasted plus a partial-deploy rollback.
 - `az deployment sub what-if` does NOT catch global-namespace collisions — the What-If evaluator asks "would the deploy succeed given current state?" but doesn't call the resource-type `checkNameAvailability` API.
-- Reserved suffixes MUST be documented (Service Bus reserves `-sb`; others surface as they're discovered). Maintain the reserved-suffix registry in `scripts/provisioning-prereqs/reserved-suffixes.yaml`.
+- Reserved suffixes MUST be documented (Service Bus reserves `-sb`; others surface as they're discovered). Maintain the reserved-suffix registry in `scripts/provisioning-prereqs/reserved-suffixes.yaml` (planned, not yet authored — today PRQ-C-03 in `prereqs.yaml` runs the availability check).
 - Handler-side H2a MUST emit a rejection code if a global-name collision surfaces at `az deployment sub create` despite the preflight — this indicates the reserved-suffix registry drifted from Azure's actual rules and needs updating.
 
 ## Key Rules (walk this for every global-namespace resource)
