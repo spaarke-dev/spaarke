@@ -39,6 +39,7 @@
     <constraint source="contract C3/D-130">Owner = RecordOwnershipResolver over ALL parents: each resolved Signal's subject, every derived core, and the DR's own subject; taken exactly as returned; Refused → the commit fails with nothing written. No direct owningbusinessunit write. People go in sprk_assignedtointernal (contact), never ownerid.</constraint>
     <constraint source="contract C9/acceptance 7">Also-resolve refuses (no write) a DR whose Signals' secure-root sets differ; Undetermined/Failed/fault counts as a distinct secure set (fail closed).</constraint>
     <constraint source="uac-r2 #1665 N1 / #1778">The PR that first writes the DR subject lookup columns must also contain the C9 two-wall refusal and its nothing-written test. Do not split them across PRs.</constraint>
+    <constraint source="#1780 K3">`LineageColumnByCoreEntity` (DecisionRecordWriter.cs ~:192) maps roots to the typed sprk_matter/project/workassignment columns; if this task (or 145) moves filing off the typed columns, replace the map in the same change; it must never go empty (the 182 regression test fails with KeyNotFoundException if it does).</constraint>
     <constraint source="D-34/C8">sprk_corerecordid, sprk_corerecordtype, sprk_policyversion and the snapshot are written once at create and never by any later path (test).</constraint>
     <constraint source="project">Never use --no-verify or bare git stash; you cannot write .claude/. Publish-size delta per BFF hygiene.</constraint>
   </constraints>
@@ -58,6 +59,8 @@
     <criterion testable="true">Resolver Refused or a walk fault → nothing written, a failure result returned.</criterion>
     <criterion testable="true">D-34: no code path after create writes the four context fields.</criterion>
     <criterion testable="true">The census entries UAC task 182 left Pending/Waived against 142 (DR writer) are flipped to Routed, and the census + consistency guards pass.</criterion>
+    <criterion testable="true">#1783: after the census flip, `EveryChildTableTheServerCreatesCarriesTheCreatorPersonColumn` passes for sprk_decisionrecord per the owner's Q27 answer (column added and RequestedBy passed, or an owner-approved exemption). If Q27 is unanswered when this task starts, STOP and escalate rather than adding an exemption.</criterion>
+    <criterion testable="true">The XML doc on `LineageColumnByCoreEntity` (DecisionRecordWriter.cs ~:187-190) states the `Key == Value` typed-core rule (uac-r2 nit on #1780).</criterion>
     <criterion testable="true">Test scope: the stated contract plus the cases above; anything beyond needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 

@@ -18,7 +18,7 @@
 
 | Lane | PR | State | Next |
 |---|---|---|---|
-| **043** D-129/D-130 ownership, D-35 read | #1665, head `85f430366` | Our pass + fix round done. **UAC verdict APPROVE, held only for Q23.** N1 (two-wall refusal) scoped to task 142: PR-body note + #1778. K-a identity cache ~2 min; K-b no-core pair not cross-checked (FR-51); K-c writer AppendTo on contact → task 146 live gate. | Merge when Q23 is answered (and Q26 for dev use). |
+| **043** D-129/D-130 ownership, D-35 read | #1665, head `85f430366` | Our pass + fix round done. **UAC verdict APPROVE, held only for Q23.** N1 (two-wall refusal) scoped to task 142: PR-body note + #1778. K-a identity cache ~2 min; K-b no-core pair not cross-checked (FR-51); K-c writer AppendTo on contact → task 146 live gate. **Before merge:** merge the base (with #1780), rewrite the DR Pending reason in `RecordOwnerAssignmentCensusTests.cs` ~:246 (uac-r2 C2; PR comment posted), and fix the `DecisionCommitFollowUpsTests.cs:54` / `DecisionCommitServiceTests.cs:216` constructor args if #1746 merged first. | Merge when Q23 is answered (and Q26 for dev use). |
 | **025b** threshold values | #1756, head `5c020d2ac` | Re-check F3 boundary Theory added (`ThresholdRuleTests.ThresholdHolds_AppliesEachOperatorAtTheBoundary`; gt→ge and lt→le mutations each fail one row). Counted status = Reviewed only. | Merge script running. A one-line change if Q24 adds ToReview. |
 | **#1661** secure suppression | #1746, head `63e7a569d` | Fix round 2 (opus) running: our F1 ×3 + F3, uac-r2 N1 (cross-wall stamp survives NeedsWork), N2 (placing hits with a null owner; the cheap fix is preferred), N3 (issue); the run result shows the skipped policy id + count. | Send the head to uac-r2 → scoped re-check → merge. |
 | **#1659** filing trigger | #1747, head `cc6b10cf5` | UAC APPROVED. | Merge when Q25 is answered. |
@@ -38,7 +38,12 @@ Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-d
 
 - **Q23 (blocks #1665 merge and task 143): personal To Do Signals/DRs.** A (recommended): a new resolver outcome follows the subject's owner when the subject is user-owned and unfiled (uac-r2 design `RecordOwnershipContext.DerivedFrom(target)` at `RecordOwnershipResolver.cs:1511-1536`; UAC file → owner sign-off). B: BU team (uac-r2 advises against). C: no Signals on personal To Dos. Today the DR lands in the To Do's own BU default team.
 - **Q26 (blocks #1665 on dev):** assign Spaarke Basic User (or a minimal role) to the **Dev 1 and Test 1** BU default teams only; the Secure Record team stays roleless. #1776. Facts: `C:\wts-043\...\notes\043-bu-team-read-check.md`.
-- **Q27 (new):** #1777 — add `sprk_createdbyperson` (lookup → systemuser) to `sprk_budgetrevision` (scoped import, D-83); `ReviseBudgetExecutor` passes `RequestedBy`; drop 182's exemption. A schema change, so it needs owner approval. If approved, fold it into task 145, or into a new task 147.
+- **Q27 (blocks tasks 142 and 143 flipping to Routed):** `sprk_createdbyperson` (lookup → systemuser) is missing on three tables:
+  - `sprk_budgetrevision` (#1777);
+  - `sprk_decisionrecord` and `sprk_signal` (#1783).
+  - A (recommended): add the column to all three in one scoped import (D-83). Writers pass `RequestedBy`; job-raised Signals leave it null, with the reason recorded in the guard. Drop 182's exemption.
+  - B: Signal is exempt; DR and budget revision get the column.
+  - It is a schema change, so it needs owner approval. If approved, it goes in a new task 147, before 142 and 143.
 - **Q24:** invoice statuses counted as spend (only ToReview/Reviewed exist; Reviewed only for now).
 - **Q25:** word-add-in sign-off on `ReconciledEmailFiling.cs` for #1747 (the owner may approve on their behalf).
 - **Q22:** event column for the individual: `sprk_assignedto1` or `sprk_assignedto` (all are contact lookups).

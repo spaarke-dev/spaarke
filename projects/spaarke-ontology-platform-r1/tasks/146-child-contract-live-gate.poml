@@ -42,6 +42,8 @@
 
   <acceptance-criteria>
     <criterion testable="true">Items 1-11 of contract §5 each recorded as pass with evidence.</criterion>
+    <criterion testable="true">uac-r2 K-c (#1665): the writer identity's AppendTo on contact lets a DR with sprk_assignedtointernal be written live (evidence: row id + writer identity).</criterion>
+    <criterion testable="true">#1780 K1: notes/146-live-gate.md and deployment guide §10.5 state that the 140 schema (DR sprk_regarding* columns) must reach an environment before any BFF containing UAC 182's DR lineage row; SecureChildShareSynchronizer / SecureChildReconciliationJob select those columns without a probe, so a missing column fails the whole secure-child load.</criterion>
     <criterion testable="true">All zz- rows removed (query shows 0).</criterion>
   </acceptance-criteria>
 
