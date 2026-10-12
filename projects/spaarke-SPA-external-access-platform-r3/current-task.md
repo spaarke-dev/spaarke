@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-12 (037/054 done; 055 in review; 039 fix round; by context-handoff)
+> **Last Updated**: 2026-10-12 (039/055 done; 057 running; by context-handoff)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,13 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 055 (bell + deep link, SPA, this worktree, uncommitted) is under two fable reviews. 039 (matter/WA event reads, BFF) is in a sonnet fix round in worktree `C:\code_files\spaarke\.claude\worktrees\agent-a0356b48145f4ef5f` (branch `worktree-agent-a0356b48145f4ef5f`, not merged) |
-| **Step** | 037 merged + done (`fc71af7fb`); 054 done (`224e06292`); 039 marked in progress (`057522ff1`) |
-| **Status** | 055 files uncommitted (list below); SPA suite 775/775 before review |
-| **Next Action** | 055 reviews → sonnet fix round → commit by path → SPA suite → mark done. 039 fix round → scoped re-check → merge `--no-ff` → build + filtered unit + arch → mark done |
-
-### 055 uncommitted files (commit by path)
-`src/client/external-spa/`: modified `src/App.tsx`, `src/auth/msal-auth.ts`, `src/components/AppHeader.tsx`, `src/components/shell/index.ts`, `src/mocks/mock-service.ts`; new `src/api/notifications-client.ts`, `src/hooks/useNotificationFeed.ts`, `src/components/shell/NotificationBell.tsx`, `src/components/detail/{record-targets.ts,RecordOpener.tsx,RecordDeepLink.tsx}`, `tests/{NotificationBell,RecordDeepLink,App.notificationBell}.test.tsx`; plus `projects/.../notes/task-055-notes.md`.
+| **Task** | 057 (matter/WA events + to-dos in the detail view, SPA, this worktree, uncommitted) is with a sonnet implementer |
+| **Step** | 055 done (`b4d0cf101`), 039 merged + done (build 0/0, filtered unit 2885, arch 941; agent worktree removed). R3 pushed |
+| **Status** | Clean apart from 057 agent work |
+| **Next Action** | 057 done -> one fable review, fix, commit by path, SPA suite, mark done. Then wait on owner answers (002, 052/053, multi-root A/B/C, dispatch go) |
 
 ### Critical Context
 - **Parallel pattern:** BFF tasks run in isolated worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-*` (`git reset --hard <R3 sha>` first), commit there, main session merges `--no-ff`. SPA tasks run in this worktree, uncommitted; the main session commits by explicit path. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
@@ -36,8 +33,8 @@
 8. **Go for dev dispatch:** Teams package + SPA (`external-spa-dev`), then task 071 live sign-in; 040 step 5 after it (never remove the Copilot `access_as_user`).
 
 ## Next actions (in order)
-1. Land 055 and 039.
-2. New SPA task: matter/WA events and to-dos in the detail view (FR-03 consumer; RecordDetailModal shows static "No events or tasks…").
+1. Land 057 (FR-03 client; 070 depends on it).
+2. Known limits recorded in notes/task-039-notes.md section 11 (truncated one-bit signal, thinned grid pages, invoice documents vs thread).
 3. 002 after the column answers; 052/053 after the intake answers.
 4. 060 (self-registration service; co-host with T240c, own MI; registry field `CustomerTenantIds`).
 5. Before the BFF PR: `/conflict-check` (`AuthorizationModule.cs`, `Api/ExternalAccess/**` shared with UAC-r2) and actionlint on both deploy workflows.
