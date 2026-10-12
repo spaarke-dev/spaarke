@@ -88,12 +88,9 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 
 ## 032 and 034 status
 
-**032 (#1660) has merged** and is merged into this branch; `DecisionCommitFollowUps` calls its `SignalEvaluationTrigger.EnqueueAsync(SignalTriggerKind, string, Guid, Guid, string?, CancellationToken)` unchanged. **034 (#1654) has not merged.** The follow-ups use its branch API: `SignalSuppressionService.ApplyAsync(Guid, string, SuppressionGrain, CancellationToken)`, `SuppressionGrain.ForCore` and `SuppressionGrain.ForItem`.
+**Both have merged and are merged into this branch.** `DecisionCommitFollowUps` calls 032's `SignalEvaluationTrigger.EnqueueAsync(SignalTriggerKind, string, Guid, Guid, string?, CancellationToken)` and 034's `SignalSuppressionService.ApplyAsync(Guid, string, SuppressionGrain, CancellationToken)` (with `SuppressionGrain.ForCore` / `ForItem`) unchanged.
 
-**Effect on this branch:**
-- The BFF on this branch alone does not compile until 034 merges.
-- The tests and ArchTests were run in a local integration tree (`C:\wts-043i`, never pushed): this branch (with 032) plus 034's service file and its registration.
-- Once 034 merges, merge the project branch and re-run.
+034 (#1654) landed on the project branch as `02ba5f29b` and was merged here on 2026-10-12. The three additive conflicts (both usings in `DecisionPlanEndpoints.cs`; the 036, 043 and 034 HandlerDecisions in the census Ledger with line references refreshed; `defer-issues.md` merged cleanly) are resolved in that merge. After it: the Signals, decision, inquiry, suppression and secure-child filter passed 1651/1651, and the full ArchTests built from `C:\wts-043` passed 958/958.
 
 ## uac-r2 coordination (re-read 2026-10-11, origin/master 89480bff8)
 
