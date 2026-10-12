@@ -138,3 +138,10 @@ One adversarial pass, no F-class finding. Five known-limit items fixed in scope 
 - `actionlint` has not been run (not installed on this machine). Run it on both workflows before the PR.
 - The `jq` render line (`jq --arg id "$TEAMS_APP_ID" '.id = $id' manifest.prod.json`) was never executed locally (`jq` absent; only run with a shim in the original task).
 - The preflight tests assert the workflow text, not behaviour. The script itself was exercised by hand (section 6 and the authority cases above).
+
+## Live run (2026-10-11; owner approval "yes proceed 040, 041, 043")
+
+- `external-spa-dev` created with the 8 variables of section 3.1 (`VITE_BACKENDS` unset). One deliberate difference: `VITE_TEAMS_MSAL_CLIENT_ID` = `9f1da340-c647-4266-9d89-e09f10700593`, the "Spaarke Workspace" client created the same day (task 040 notes, live run), not the interim `1e40baad`. `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV` stays a repository secret.
+- `external-spa-prod` created empty, with required reviewer `spaarke-dev` (self-review allowed: single-owner repo) and deployment branches limited to `master` (custom branch policy). Its variables and secret wait on the owner (section 3.2).
+- Rollback: `gh api -X DELETE repos/spaarke-dev/spaarke/environments/<name>`.
+- Not run yet: the section 7 dispatches (dev Teams package, then dev SPA). The dev SPA build also needs task 041 step 1 (CIAM `user_impersonation`), which waits on an interactive CIAM sign-in.

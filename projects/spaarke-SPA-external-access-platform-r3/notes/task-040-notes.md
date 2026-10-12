@@ -244,3 +244,17 @@ Test `msal-browser assumptions the silent-renewal design relies on`: reads `iFra
 
 - K3: `notifyFailure(AuthFailed)` is sent before the recovery screen renders - Teams may hide the iframe and the "Sign in" button; and a mid-session popup-mode renewal failure has no sign-in UI until reload.
 - K4: Teams web `BroadcastChannel` storage partitioning between the bridge page and the app (already a 071 constraint).
+
+## Live run (dev, 2026-10-11; owner approval "yes proceed 040, 041, 043")
+
+Run by the session as `ralph.schroeder@spaarke.com` in tenant `a221a95e-…`. "Before" snapshots kept in the session scratchpad (not committed); the rollback lists are reproduced from them.
+
+| Step | Result |
+|---|---|
+| 0 | Snapshot of `1e40baad` (object `c2aab303-50f8-4279-9934-503ab3a4b357`): `user_impersonation` = `18afc847-a660-40b2-8925-747aed613f36`; A2-era `access_as_user` = `7e9e1e5a-3b0b-4153-9753-85b41d48c6fe`; 9 pre-authorized clients; Teams desktop/web and the broker on `access_as_user` only |
+| 1 | **"Spaarke Workspace" created**: client id `9f1da340-c647-4266-9d89-e09f10700593`, object `f53c9698-13f9-4d37-b53e-aab75f57a210`, SP `06850da2-912a-4d10-9159-cb9d66868695`, `AzureADMyOrg`; the 8 SPA redirect URIs of step 1 verified. Rollback: `az ad app delete --id 9f1da340-c647-4266-9d89-e09f10700593` |
+| 2 | Pre-authorizations PATCHed additively (9 → 10): `18afc847` added to `1fec8e78`, `5e3ce6c0`, `29d9ed98` (keeping `7e9e1e5a`); `9f1da340` added on `18afc847`. Read-back matches the intended list. Rollback: PATCH `preAuthorizedApplications` back to the 9 entries of the step 0 snapshot |
+| 3 | `.env.development` and `appPackage/env.dev.json` now use `9f1da340`; GitHub `external-spa-dev` `VITE_TEAMS_MSAL_CLIENT_ID` = `9f1da340` (task 043) |
+| 4 | Not run yet: dev SWA + Teams package dispatch, then the FR-21 live check (task 071) |
+| 5 | Not run: waits on a verified step 4. Remove only the Teams/broker `7e9e1e5a` entries — never the scope or the Copilot agent's pre-authorization (K6) |
+| CIAM `/auth-callback.html` on `bd57e54e` | Not run: the CIAM tenant `7052feba-…` needs an interactive MFA sign-in (AADSTS50076) |

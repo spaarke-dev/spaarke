@@ -288,3 +288,10 @@ Most authoritative: the Learn pages P3–P6 (API connector contract and authenti
 - P18 https://learn.microsoft.com/en-us/entra/external-id/external-collaboration-settings-configure — retrieved 2026-10-10
 - P19 https://learn.microsoft.com/en-us/power-platform/admin/pay-as-you-go-meters — retrieved 2026-10-10
 - Repo: `spec.md` §C7, `design.md` §C7 and §4.6 item 7, `notes/r3-auth-path.md`, `notes/coordination/2026-10-10-from-provisioning-t240d-s1-partial.md` (S1 PASS: keyless app-only Graph with MI-FIC), `.claude/adr/ADR-028-spaarke-auth-architecture.md` (A1, A4, A6), code files S1–S9. `knowledge/` holds no material on B2B self-service sign-up; the prior researcher notes cover CIAM only.
+
+### Owner answers (2026-10-11)
+
+- **Q2 — approved.** Provisioning adds the "Spaarke Registration" consent prerequisite next to PRQ-C-14; Spaarke completes publisher verification.
+- **Q3 — the customer's security group.** Self-registered workforce contacts join `sprk-{customerId}-users` (FR-14 as written); contacts get no app entry point beyond the SPA.
+- **Q4 — R3 adds it (task 060)** for the current customers; for future customers it becomes part of provisioning (T240c intake writes it next to `sprk_securitygroupid`).
+- **Q5 — co-host with the T240c directory service, with its own managed identity.**
