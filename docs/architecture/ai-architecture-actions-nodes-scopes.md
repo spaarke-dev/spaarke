@@ -249,7 +249,7 @@ The `sprk_analysisactiontype` Dataverse lookup table is KEPT in R7 (not dropped)
 | How a consumer surface dispatches a playbook | `ai-architecture-playbook-consumer-routing.md` |
 | How to author the JSON file the deploy script consumes | `ai-guide-playbook-deploy-recipe.md` |
 | JPS schema for action prompts + structured output | `ai-guide-jps-authoring.md` |
-| Maker recipe for a real `sprk_event` notification playbook | `PLAYBOOK-AUTHOR-GUIDE.md` |
+| Maker recipe for a membership-scoped query (the `sprk_event` notification playbooks it came from were retired, D-100) | `PLAYBOOK-AUTHOR-GUIDE.md` |
 | **How runtime data flows from playbook node configJson into the LLM prompt (R7 Wave 11 two-layer pattern)** | [`SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md) — Layer 1 orchestrator template resolution + Layer 2 PromptSchemaRenderer structured `## Input` section. Required reading for any new narrative-output consumer (Insight Engine, future Workspace UX). Maker tutorial: [`BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md`](../guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md). |
 | BFF placement decision criteria | `.claude/constraints/bff-extensions.md` (§G now points back here) |
 

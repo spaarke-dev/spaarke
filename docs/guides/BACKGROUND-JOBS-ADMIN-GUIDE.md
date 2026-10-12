@@ -68,7 +68,7 @@ Three jobs ship and are seeded automatically at BFF startup:
 
 | Job ID | Display Name | Default Cron | Default Enabled | Purpose |
 |---|---|---|---|---|
-| `notification-playbook-scheduler` | Notification Playbook Scheduler | `0 * * * *` (every hour at minute 0) | Yes | Fans out all 7 active notification-mode playbooks for every active user. Each child playbook gets a fresh correlation id; children are recorded in the parent run's `ResultJson` for tracing. Replaces the legacy `PlaybookSchedulerService`. |
+| `notification-playbook-scheduler` | Notification Playbook Scheduler | `0 * * * *` (every hour at minute 0) | Yes | Fans out every **active** notification-mode (`sprk_playbooktype = 2`) playbook for every active user. **As of 2026-10-09 (D-100) all seven notification playbooks are retired (inactive), so a tick fans out nothing.** Each child playbook gets a fresh correlation id; children are recorded in the parent run's `ResultJson` for tracing. Replaces the legacy `PlaybookSchedulerService`. |
 | `membership-reconciliation` | Membership Junction Reconciliation | `0 2 * * *` (daily at 02:00 UTC) | Yes (`Membership:Reconciliation:Enabled`) | Reconciles the `sprk_userentityassociation` junction table against source-of-truth identity Lookups on configured entities (`sprk_matter`, `sprk_document`, `sprk_event`, `sprk_task`, `sprk_opportunity`). Load-bearing for the 8 Q4 `sprk_assigned*` Lookups on `sprk_matter` because those fields are edited exclusively via maker portal / Power Automate / plugins (not through BFF endpoints), so real-time membership events do not cover them. |
 | `external-grant-expiry-reminders` | External Grant Expiry Reminders | `0 6 * * *` (daily at 06:00 UTC) | Yes | Reminds the internal user who granted an external share (else the record's owner, else its creator) that the grant is about to expire, through the existing `NotificationService`. Added by `unified-access-control-r2` task 100. |
 
@@ -266,6 +266,8 @@ curl -s -X POST \
 ## Common Operator Scenarios
 
 ### Scenario 1: "Last night's daily briefings didn't send"
+
+> **2026-10-09 (D-100):** the notification playbooks behind this scenario are retired; Daily Briefing does not use them. The steps below describe the scheduler mechanics only.
 
 The notification playbook scheduler is hourly, but each individual playbook respects its own schedule (on its `sprk_analysisplaybook` row; typically daily at 06:00 UTC for the morning-briefing playbook). If users report a missing briefing, walk through this:
 
@@ -531,7 +533,7 @@ curl -s -H "Authorization: Bearer {token}" \
 - **Migration of the remaining timer `BackgroundService` implementations** — **when next touched** ([ADR-052](../adr/ADR-052-workload-placement.md) §1), held by an ArchTest ratchet; tracked under the future project **`scheduled-jobs-migration`**. Queue-consumer services (`ServiceBusJobProcessor` family) are out of scope — they are ADR-004 work, not schedule-driven.
 - **Cron-expression validator helper in the admin endpoints** — pre-save feedback for operators once cron is tunable in Dataverse.
 - **Slack / Teams notification on job failure** — future hook into the run-completion path so a failed run pings a configured channel.
-- **Per-playbook "Run Now"** — today `POST .../notification-playbook-scheduler/trigger` runs the whole scheduler (all 7 playbooks for all users). A follow-up will optionally accept a `playbookId` in the request body to fan out only one playbook.
+- **Per-playbook "Run Now"** — today `POST .../notification-playbook-scheduler/trigger` runs the whole scheduler (every active notification playbook for all users; none today, D-100). A follow-up will optionally accept a `playbookId` in the request body to fan out only one playbook.
 
 ---
 

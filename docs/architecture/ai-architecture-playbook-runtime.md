@@ -198,7 +198,7 @@ The 11 historical pitfalls G1-G11 documented in the former `playbook-architectur
 | Where should this new config field live (Action vs Node vs Playbook)? | `ai-architecture-actions-nodes-scopes.md` |
 | How do I deploy a playbook? | `ai-guide-playbook-deploy-recipe.md` |
 | JPS schema features (`$ref`, `$choices`, override merge, structured output) | `ai-guide-jps-authoring.md` (trimmed) |
-| Maker recipe for `sprk_event` notification playbooks | `PLAYBOOK-AUTHOR-GUIDE.md` |
+| Maker recipe for a membership-scoped query (the notification playbooks it came from were retired, D-100) | `PLAYBOOK-AUTHOR-GUIDE.md` |
 | **How `{{nodeName.field}}` templates resolve at runtime + how AI executors get structured input (R7 Wave 11)** | [`SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md) — two-layer architecture: Layer 1 orchestrator template resolution against `RunContext.NodeOutputs + Parameters + run` metadata via `PlaybookTemplateContextBuilder` + `ITemplateEngine`; Layer 2 `PromptSchemaRenderer` `## Input` section assembled from resolved `configJson.inputBinding`. Required reading for narrative consumers. |
 
 `playbook-architecture.md` is now a one-line redirect to this doc.
