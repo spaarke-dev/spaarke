@@ -9,7 +9,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 035 (reviewed and fixed; merge waits on the owner's ownership answer), 054 (review fix round running in the main worktree, uncommitted), 032 (merged and verified; waits on the owner for service-request delete) |
+| **Task** | None running. 035 is reviewed and fixed (merge waits on the owner: ownership); 052 waits on the owner (field sets, card targets); 032/054 wait on the owner (service-request delete, invoice documents) |
 | **Step** | 020 done and committed (`460467c95`, `9cfa31e4c`). 035 implementation in an isolated worktree from `9cfa31e4c` |
 | **Status** | Not pushed since `e2b547352`: 056 merge + 020 commits wait for the 056 re-check |
 | **Next Action** | On each agent's completion: 056 → commit by path, push, mark done; 032/035 → two fable reviews for 035 (auth), one for 032, fix, merge `--no-ff`, verify |
@@ -35,7 +35,7 @@
 |---|---|
 | 035 Intake submit | Implemented and reviewed (two fable passes). Fix round `b6b4ab58f` (contact-unreadable 503, Dataverse 503, 256 KB cap, ledger guard) re-checked by the main session; branch head `b6b4ab58f` in worktree `C:\code_files\spaarke\.claude\worktrees\agent-ab4a5f6610ac67b9c`. **Merge blocked on the owner: who owns an intake row** (review pass 1 F2: I-6 / ADR-003, the owner census cannot see `BuildServiceRequestCreatePayload`). After the answer: implement the option (owner seam or census waiver + design.md ADR Tension), merge `--no-ff`, verify, mark done |
 | 032 Delete-own | Merged `19b24414e` (documents, to-dos, events; review approved; fixes `f7cb07ac3`). Full verification is running. Stays 🔄 until the owner decides service-request delete (AC 1 names service requests) |
-| 054 Detail documents + delete | Sonnet implementer in the main worktree, uncommitted. Scope: no service-request delete (escalated), no invoice documents (031 pending). Then one fable review, fix, commit by path |
+| 054 Detail documents + delete | Committed and pushed `83565c720` (fable review + fix round; SPA 650/650; server `/me systemUserId` + document-list `canCreate`). Stays 🔄 until the owner decides service-request delete (032) and invoice documents (031). Owed: live browser checks (cancel-then-delete and two deletes in one detail view, dark mode) |
 
 Done: 001, 003, 010, 011, 012, 020, 056, 030, 033, 034, 036, 041 (code), 042, 050, 051.
 
@@ -47,6 +47,7 @@ Done: 001, 003, 010, 011, 012, 020, 056, 030, 033, 034, 036, 041 (code), 042, 05
 
 ## Open owner questions
 
+1. **052 intake wizards:** approve the field sets (NDA: counterparty, purpose, mutual/one-way, deadline, notes; Policy Question: topic, question, urgency Low/Normal/High) and whether the NDA and Policy Question cards switch from their widgets to the wizards.
 1. **032 service-request delete:** A refuse when any related row exists (recommended) / B cascade the caller's own related rows, refuse if staff rows exist / C allow only in the first status.
 1. **035 licensed user with no contact:** the route answers 403 today. (a) keep the 403 and turn on `IdentityLink:Reconciliation:WritesEnabled` per environment / (b) create or link a contact at submit / (c) another attribution column for systemusers.
 1. **035 owner of an intake row:** it is application-owned (root BU) today. (a) leave it until routing exists / (b) a configured intake owner team / (c) the acting user's team for systemusers, plus (a) or (b) for contacts.
