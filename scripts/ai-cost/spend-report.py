@@ -443,26 +443,29 @@ def check_archive_tz(rows, tz_name, path):
 def merge_archive(archived, fresh, covered_days):
     """Upsert fresh rows into archived rows, keyed (day, project, model, kind).
 
-    For each covered day the fresh rows replace the archived ones, unless the fresh total cost is lower
-    than the archived total (transcripts were deleted): then the archived rows stay. Days outside
+    Never-shrink is judged per (day, project): within each covered day, the archived rows of a project
+    stay when the fresh rows of that project (absent = none) cost less than the archived ones, or carry
+    fewer calls (a model with no price archives $0 with N calls). Otherwise the fresh rows replace them.
+    Another project growing the same day does not cover for one whose transcripts vanished. Days outside
     `covered_days` are untouched. Returns (rows sorted by day then project, kept) where kept lists
-    (day, fresh_total, archived_total) for every day whose archived rows were kept."""
-    by_day_old, by_day_new = defaultdict(list), defaultdict(list)
+    (day, project, fresh_cost, archived_cost) for every (day, project) whose archived rows were kept."""
+    old_g, new_g = defaultdict(list), defaultdict(list)
     for r in archived:
-        by_day_old[r["day"]].append(r)
+        old_g[(r["day"], r["project"])].append(r)
     for r in fresh:
-        by_day_new[r["day"]].append(r)
-    covered = set(covered_days) | set(by_day_new)
+        new_g[(r["day"], r["project"])].append(r)
+    covered = set(covered_days) | {d for d, _ in new_g}
     merged, kept = [], []
-    for day in set(by_day_old) | covered:
-        old, new = by_day_old.get(day, []), by_day_new.get(day, [])
-        if day not in covered:
+    for key in set(old_g) | set(new_g):
+        old, new = old_g.get(key, []), new_g.get(key, [])
+        if key[0] not in covered:
             merged.extend(old)
             continue
-        old_t, new_t = sum(map(flat_cost, old)), sum(map(flat_cost, new))
-        if old and new_t < old_t - COST_EPS:
+        old_c, new_c = sum(map(flat_cost, old)), sum(map(flat_cost, new))
+        old_n, new_n = sum(r["calls"] for r in old), sum(r["calls"] for r in new)
+        if old and (new_c < old_c - COST_EPS or new_n < old_n):
             merged.extend(old)
-            kept.append((day, new_t, old_t))
+            kept.append((key[0], key[1], new_c, old_c))
         else:
             merged.extend(new)
     return sort_flat(merged), sorted(kept)
@@ -510,7 +513,7 @@ def main():
     ap.add_argument("--open", action="store_true")
     ap.add_argument("--archive", nargs="?", const=DEFAULT_ARCHIVE, metavar="PATH",
                     help="upsert this run's days into a durable CSV archive (default path "
-                         f"{DEFAULT_ARCHIVE.replace('%', '%%')}); a day is never replaced by a lower total. "
+                         f"{DEFAULT_ARCHIVE.replace('%', '%%')}); a (day, project) is never replaced by a lower total. "
                          "With --source archive, selects the file to read instead")
     ap.add_argument("--source", choices=["transcripts", "archive"], default="transcripts",
                     help="where rows come from: the local transcripts (default) or the archive, "
@@ -524,6 +527,7 @@ def main():
         except ValueError:
             ap.error("--since must be YYYY-MM-DD")
     t0 = time.time()
+    archive_failed = False
     archive_path = a.archive or DEFAULT_ARCHIVE
     tz_name = a.tz or "local"
     note = ""
@@ -563,12 +567,17 @@ def main():
         note = f"{st['files']} files"
         if a.archive:
             merged, kept = merge_archive(arows, full, day_range(since, until))
-            write_archive(archive_path, merged)
-            for day, new_t, old_t in kept:
-                print(f"WARN archive: {day}: fresh ${new_t:,.2f} < archived ${old_t:,.2f}; kept the archived rows "
-                      f"(transcripts for that day were probably deleted)", file=sys.stderr)
-            print(f"archive {archive_path}: {len(merged)} rows, {len(day_range(since, until))} days scanned, "
-                  f"{len(kept)} kept at the archived total", file=sys.stderr)
+            try:
+                write_archive(archive_path, merged)
+            except OSError as ex:           # the report is still worth printing; the exit code says it failed
+                print(f"spend-report: archive not written: {ex}", file=sys.stderr)
+                archive_failed = True
+            for day, project, new_t, old_t in kept:
+                print(f"WARN archive: {day} {project}: fresh ${new_t:,.2f} < archived ${old_t:,.2f}; kept the "
+                      f"archived rows (transcripts were probably deleted)", file=sys.stderr)
+            if not archive_failed:
+                print(f"archive {archive_path}: {len(merged)} rows, {len(day_range(since, until))} days scanned, "
+                      f"{len(kept)} (day, project) groups kept at the archived total", file=sys.stderr)
 
     tzl = tz_label(tz_name)
     if a.format == "text":
@@ -595,6 +604,8 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", newline="")
         sys.stdout.write(out)
         print(f"({note}, {time.time()-t0:.1f}s)", file=sys.stderr)
+    if archive_failed:
+        sys.exit(2)
 
 
 if __name__ == "__main__":

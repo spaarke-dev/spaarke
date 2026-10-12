@@ -6,6 +6,7 @@ Run: python -m unittest discover -s scripts/ai-cost/tests
 import contextlib
 import io
 import os
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -84,7 +85,7 @@ class UpdateOne(unittest.TestCase):
         self.transcript = {"cost": 100.0, "calls": 40}
         self.folder = "c--code-files-spaarke-wt-alpha-r1"
         patches = [
-            mock.patch.object(ubs, "find_folder", lambda slug: self.folder),
+            mock.patch.object(ubs, "find_folder", lambda slug, known=None: self.folder),
             mock.patch.object(ubs, "cost_for_folder", lambda f: dict(self.transcript)),
             mock.patch.object(ubs, "set_field", self.fake_set_field),
         ]
@@ -139,11 +140,87 @@ class UpdateOne(unittest.TestCase):
         self.transcript = {"cost": 0.0, "calls": 0}
         self.assertEqual(ubs.update_one("alpha-r1", "ITEM", "d", 1.0, 1, {})[0], "no-usage-found")
 
+    def test_as_of_is_written_last_and_only_after_a_figure_write_succeeded(self):
+        order = []
+        def fake(item_id, field_id, flag, value):
+            order.append(field_id)
+            return True, ""
+        with mock.patch.object(ubs, "set_field", fake):
+            ubs.update_one("alpha-r1", "ITEM", "2026-10-12", 90.0, 30)
+        self.assertEqual(order, [ubs.F_SPEND, ubs.F_CALLS, ubs.F_ASOF])
+
+    def test_as_of_not_written_when_every_figure_write_failed(self):
+        calls = []
+        def fake(item_id, field_id, flag, value):
+            calls.append(field_id)
+            return False, "boom"
+        with mock.patch.object(ubs, "set_field", fake):
+            status, r, kept = ubs.update_one("alpha-r1", "ITEM", "2026-10-12", 90.0, 30)
+        self.assertTrue(status.startswith("edit-failed"))
+        self.assertNotIn(ubs.F_ASOF, calls)
+
+    def test_as_of_written_when_one_figure_succeeded_and_one_failed(self):
+        calls = []
+        def fake(item_id, field_id, flag, value):
+            calls.append(field_id)
+            return field_id != ubs.F_SPEND, "no"
+        with mock.patch.object(ubs, "set_field", fake):
+            status, r, kept = ubs.update_one("alpha-r1", "ITEM", "2026-10-12", 90.0, 30)
+        self.assertTrue(status.startswith("edit-failed"))
+        self.assertEqual(calls[-1], ubs.F_ASOF)
+
     def test_failed_edit_is_reported(self):
         with mock.patch.object(ubs, "set_field", lambda *a: (False, "boom")):
             status, r, kept = ubs.update_one("alpha-r1", "ITEM", "d", None, None)
         self.assertTrue(status.startswith("edit-failed"))
         self.assertIn("boom", status)
+
+
+class SlugToFolder(unittest.TestCase):
+    """Board slug -> transcript folder -> archive key, against a sandbox ~/.claude/projects."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        for d in ("c--code-files-spaarke-wt-SPA-external-access-platform-r3",
+                  "c--code-files-spaarke-wt-daily-update-service-r2",
+                  "c--code-files-spaarke-wt-alpha-r1",
+                  "c--code-files-spaarke-wt-big-alpha-r1"):
+            os.makedirs(os.path.join(self.tmp.name, d))
+        p = mock.patch.object(ubs._gpc, "CLAUDE_PROJECTS", self.tmp.name)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_leading_spaarke_prefix_is_stripped_for_the_folder_and_the_archive_key(self):
+        slug = "spaarke-SPA-external-access-platform-r3"
+        folder = ubs.find_folder(slug)
+        self.assertEqual(folder, "c--code-files-spaarke-wt-SPA-external-access-platform-r3")
+        archive = {"spa-external-access-platform-r3": {"cost": 9.0, "calls": 4}}
+        self.assertEqual(ubs.archive_lookup(archive, slug, folder), {"cost": 9.0, "calls": 4})
+        self.assertEqual(ubs.archive_lookup(archive, slug, None), {"cost": 9.0, "calls": 4})   # no folder: slug candidates
+
+    def test_a_slug_never_fuzzy_matches_another_release(self):
+        self.assertIsNone(ubs.find_folder("spaarke-daily-update-service"))
+        self.assertIsNone(ubs.find_folder("daily-update-service"))
+        self.assertEqual(ubs.find_folder("daily-update-service-r2"), "c--code-files-spaarke-wt-daily-update-service-r2")
+
+    def test_exact_match_is_unaffected(self):
+        self.assertEqual(ubs.find_folder("alpha-r1"), "c--code-files-spaarke-wt-alpha-r1")
+        self.assertEqual(ubs.find_folder("ALPHA-R1"), "c--code-files-spaarke-wt-alpha-r1")      # case-insensitive
+        self.assertEqual(ubs.find_folder("big-alpha-r1"), "c--code-files-spaarke-wt-big-alpha-r1")
+
+    def test_exact_beats_the_stripped_form(self):
+        os.makedirs(os.path.join(self.tmp.name, "c--code-files-spaarke-wt-spaarke-alpha-r1"))
+        self.assertEqual(ubs.find_folder("spaarke-alpha-r1"), "c--code-files-spaarke-wt-spaarke-alpha-r1")
+
+    def test_prefix_only_fuzzy_hit_is_a_last_resort_and_skips_another_boards_exact_folder(self):
+        os.makedirs(os.path.join(self.tmp.name, "C--wtf2-gamma-r1"))
+        self.assertEqual(ubs.find_folder("gamma-r1"), "C--wtf2-gamma-r1")
+        # `alpha-r1` is exact for alpha-r1, but `big-alpha-r1` ends in it: with big-alpha-r1 a known
+        # board slug, a folder-less `alpha-r1` lookup must not borrow big-alpha-r1's folder.
+        shutil.rmtree(os.path.join(self.tmp.name, "c--code-files-spaarke-wt-alpha-r1"))
+        self.assertEqual(ubs.find_folder("alpha-r1"), "c--code-files-spaarke-wt-big-alpha-r1")
+        self.assertIsNone(ubs.find_folder("alpha-r1", ["alpha-r1", "big-alpha-r1"]))
 
 
 class MainOutput(unittest.TestCase):
@@ -155,7 +232,7 @@ class MainOutput(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(ubs, "board_projects", lambda: pairs), \
                 mock.patch.object(ubs, "archive_totals", lambda: {}), \
-                mock.patch.object(ubs, "find_folder", lambda s: "c--code-files-spaarke-wt-" + s), \
+                mock.patch.object(ubs, "find_folder", lambda s, known=None: "c--code-files-spaarke-wt-" + s), \
                 mock.patch.object(ubs, "cost_for_folder", lambda f: dict(totals[f])), \
                 mock.patch.object(ubs, "set_field", lambda *a: (writes.append(a) or (True, ""))), \
                 mock.patch("sys.argv", ["update-board-spend.py"]), \

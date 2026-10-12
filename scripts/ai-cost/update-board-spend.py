@@ -29,6 +29,7 @@ _spec = importlib.util.spec_from_file_location(
 _gpc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_gpc)
 find_folder, cost_for_folder = _gpc.find_folder, _gpc.cost_for_folder
+slug_candidates = _gpc.slug_candidates
 
 # spend-report.py owns the durable archive (see README "Durable archive") and the folder -> project name rule.
 _spec2 = importlib.util.spec_from_file_location(
@@ -121,16 +122,26 @@ def archive_totals(path=None):
     return {k: {"cost": round(v["cost"], 2), "calls": v["calls"]} for k, v in out.items()}
 
 
-def update_one(slug, item_id, today, board_spend=None, board_calls=None, archive=None):
+def archive_lookup(archive, slug, folder):
+    """The archive total for a board slug. Candidates in order: the name derived from the transcript
+    folder (what spend-report.py archived it under), then the slug, then the slug minus `spaarke-`."""
+    names = ([_sr.project_name(folder)] if folder else []) + slug_candidates(slug)
+    for n in names:
+        a = (archive or {}).get(n.lower())
+        if a:
+            return a
+    return None
+
+
+def update_one(slug, item_id, today, board_spend=None, board_calls=None, archive=None, known_slugs=None):
     """Returns (status, totals, kept_fields). `totals` is the figure computed this run (before the
     never-go-down rule); `kept_fields` lists the fields left unchanged because the board was higher."""
-    folder = find_folder(slug)
+    folder = find_folder(slug, known_slugs)
     r = cost_for_folder(folder) if folder else None
     if r is not None and r["calls"] == 0:
         r = None
     # The archive keys projects by the same name spend-report.py derives from the transcript folder.
-    name = _sr.project_name(folder) if folder else slug
-    a = (archive or {}).get(name.lower()) or (archive or {}).get(slug.lower())
+    a = archive_lookup(archive, slug, folder)
     r = best_totals(r, a)
     if r is None:
         return ("no-usage-found" if folder else "no-local-history"), None, []
@@ -138,16 +149,16 @@ def update_one(slug, item_id, today, board_spend=None, board_calls=None, archive
     kept = [n for n, w in (("spend", ws), ("calls", wc)) if not w]
     if not (ws or wc):
         return "kept", r, kept
-    errs = []
-    if ws:
-        ok, e = set_field(item_id, F_SPEND, "--number", r["cost"])
-        if not ok:
-            errs.append(e)
-    ok, e = set_field(item_id, F_ASOF, "--date", today)       # only when something is written
-    if not ok:
-        errs.append(e)
-    if wc:
-        ok, e = set_field(item_id, F_CALLS, "--number", r["calls"])
+    errs, wrote = [], 0
+    for want, field_id, flag, value in ((ws, F_SPEND, "--number", r["cost"]),
+                                        (wc, F_CALLS, "--number", r["calls"])):
+        if want:
+            ok, e = set_field(item_id, field_id, flag, value)
+            wrote += ok
+            if not ok:
+                errs.append(e)
+    if wrote:                       # As Of last, and only once a figure is actually on the board
+        ok, e = set_field(item_id, F_ASOF, "--date", today)
         if not ok:
             errs.append(e)
     if errs:
@@ -160,10 +171,11 @@ def main():
     today = datetime.date.today().isoformat()
     targets = args if args else None
 
+    board = board_projects()
     if targets is None:
-        pairs = board_projects()
+        pairs = board
     else:
-        all_pairs = {slug: (item_id, spend, calls) for item_id, slug, spend, calls in board_projects()}
+        all_pairs = {slug: (item_id, spend, calls) for item_id, slug, spend, calls in board}
         pairs = []
         for slug in targets:
             found = all_pairs.get(slug)
@@ -174,9 +186,10 @@ def main():
             pairs.append((found[0], slug, found[1], found[2]))
 
     archive = archive_totals()
+    known = [p[1] for p in board]      # every board slug, so a fuzzy folder match cannot cross releases
     updated = kept_n = skipped = failed = 0
     for item_id, slug, cur_spend, cur_calls in pairs:
-        status, r, kept = update_one(slug, item_id, today, cur_spend, cur_calls, archive)
+        status, r, kept = update_one(slug, item_id, today, cur_spend, cur_calls, archive, known)
         if status == "updated":
             updated += 1
             print(f"OK       {slug:55s} ${r['cost']:>10,.2f}  {r['calls']:>7,d} calls")

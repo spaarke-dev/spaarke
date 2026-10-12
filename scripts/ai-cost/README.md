@@ -25,7 +25,14 @@ than the one already on the board is not written: the script prints
 and AI Spend As Of is only updated when something is written. When the spend archive exists
 (see "Durable archive" below), the figure per project is
 max(transcript all-time total, archive all-time total). The decision lives in the pure function
-`decide_write()` and is unit-tested.
+`decide_write()` and is unit-tested. AI Spend As Of is written last, and only if at least one of the two
+figure writes succeeded.
+
+Board slug to transcript folder (`find_folder()` in `get-project-cost.py`), in order: exact `-wt-<slug>`
+(case-insensitive); exact `-wt-<slug>` with a leading `spaarke-` stripped; last resort, a folder that
+*ends* in `-<slug>` (extra prefix only), never one that merely contains the slug and never the exact
+folder of another board slug. So `spaarke-daily-update-service` does not pick up the `-r2` folder. The
+archive is looked up under the folder's project name, then the slug, then the slug minus `spaarke-`.
 
 ## spend-report.py
 
@@ -65,12 +72,21 @@ python scripts/ai-cost/spend-report.py --source archive --since 2026-09-01 --pro
   names and costs; the folder is created). Columns are exactly `--format csv`:
   `day,project,model,kind,calls,input,output,cache_read,cache_write,cost_cache_read,cost_cache_write,cost_input,cost_output,ctx,big,tz`.
   Sorted by day, then project. Written atomically (temp file + replace).
-- Rows are keyed `(day, project, model, kind)`. For each day in the scanned window the fresh rows replace
-  that day's archived rows, **unless the fresh total cost for the day is lower than the archived total**
-  (transcripts were deleted): the archived rows then stay and a `WARN archive:` line is printed.
-  Days outside the window are untouched, so running `--days 3` daily keeps growing the history.
+- Rows are keyed `(day, project, model, kind)`. For each day in the scanned window, each **(day, project)**
+  group of fresh rows replaces that group's archived rows, **unless the fresh group is lower** (transcripts
+  were deleted): fresh cost lower than archived, or fewer calls (a model with no price archives $0 with N
+  calls). The archived group then stays (also when the project is absent from the fresh scan) and a
+  `WARN archive: <day> <project>` line is printed. Another project growing the same day does not cover for
+  it. Days outside the window are untouched, so running `--days 3` daily keeps growing the history.
+  A change to project naming (e.g. a renamed worktree folder) leaves the old-name rows in place; they are
+  not merged or removed.
 - The archive always receives every project; `--project` only filters the report that is printed.
 - The archive records its tz. A run with a different `--tz` is refused rather than mixing day boundaries.
+  `tz=local` means the machine's zone at write time and is not re-checked if the zone later changes.
+- If the archive cannot be written (locked file, permissions), the report is still printed, the line
+  `spend-report: archive not written: <error>` goes to stderr, the previous archive and any temp file are
+  left clean, and the exit code is 2.
+- Concurrent `--archive` runs are not locked: the last writer wins.
 - `--source archive` reports from the archive instead of the transcripts, in any `--format`. Without
   `--days/--since/--today` it covers the whole history; `--archive PATH` picks the file and nothing is
   written. The days are in the archive's tz.

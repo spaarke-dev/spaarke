@@ -7,7 +7,9 @@ import io
 import json
 import os
 import tempfile
+import contextlib
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 
 import helpers
@@ -30,12 +32,39 @@ def row(day, project="alpha-r1", model="claude-sonnet-5", kind="main", cost=3.0,
 
 
 class Merge(unittest.TestCase):
-    def test_fresh_replaces_archived_day_when_not_lower(self):
+    def test_fresh_replaces_archived_group_when_not_lower(self):
         old = [row("2026-10-10", cost=3.0), row("2026-10-10", project="beta-r1", cost=1.0)]
-        new = [row("2026-10-10", cost=5.0)]
+        new = [row("2026-10-10", cost=5.0), row("2026-10-10", project="beta-r1", cost=1.0)]
         merged, kept = sr.merge_archive(old, new, ["2026-10-10"])
         self.assertEqual(kept, [])
-        self.assertEqual([(r["project"], r["cost_output"]) for r in merged], [("alpha-r1", 5.0)])
+        self.assertEqual([(r["project"], r["cost_output"]) for r in merged], [("alpha-r1", 5.0), ("beta-r1", 1.0)])
+
+    def test_project_missing_from_a_growing_day_is_kept(self):
+        # alpha's transcripts vanished while beta grew: the old day-total rule erased alpha.
+        old = [row("2026-10-10", cost=3.0), row("2026-10-10", project="beta-r1", cost=1.0)]
+        new = [row("2026-10-10", project="beta-r1", cost=9.0)]
+        merged, kept = sr.merge_archive(old, new, ["2026-10-10"])
+        self.assertEqual([(r["project"], r["cost_output"]) for r in merged], [("alpha-r1", 3.0), ("beta-r1", 9.0)])
+        self.assertEqual(kept, [("2026-10-10", "alpha-r1", 0, 3.0)])
+
+    def test_shrunk_project_is_kept_while_its_sibling_is_replaced(self):
+        old = [row("2026-10-10", cost=3.0), row("2026-10-10", project="beta-r1", cost=1.0)]
+        new = [row("2026-10-10", cost=1.0), row("2026-10-10", project="beta-r1", cost=2.0)]
+        merged, kept = sr.merge_archive(old, new, ["2026-10-10"])
+        self.assertEqual([(r["project"], r["cost_output"]) for r in merged], [("alpha-r1", 3.0), ("beta-r1", 2.0)])
+        self.assertEqual(kept, [("2026-10-10", "alpha-r1", 1.0, 3.0)])
+
+    def test_fewer_calls_keeps_the_archived_group_even_at_equal_or_zero_cost(self):
+        # A model with no price archives $0 with N calls; an empty/lower-call fresh set must not replace it.
+        old = [row("2026-10-10", model="mystery", cost=0.0, calls=7)]
+        merged, kept = sr.merge_archive(old, [], ["2026-10-10"])
+        self.assertEqual(merged, old)
+        self.assertEqual(kept, [("2026-10-10", "alpha-r1", 0, 0.0)])
+        merged, kept = sr.merge_archive(old, [row("2026-10-10", model="mystery", cost=0.0, calls=3)], ["2026-10-10"])
+        self.assertEqual(merged[0]["calls"], 7)
+        self.assertEqual(len(kept), 1)
+        merged, kept = sr.merge_archive(old, [row("2026-10-10", model="mystery", cost=0.0, calls=7)], ["2026-10-10"])
+        self.assertEqual(kept, [])                                      # equal: replaced
 
     def test_equal_total_is_replaced(self):
         old = [row("2026-10-10", cost=4.0, calls=1)]
@@ -44,12 +73,12 @@ class Merge(unittest.TestCase):
         self.assertEqual(kept, [])
         self.assertEqual(merged[0]["calls"], 2)
 
-    def test_lower_fresh_total_keeps_archived_rows_and_reports_the_day(self):
+    def test_lower_fresh_total_keeps_archived_rows_and_reports_the_group(self):
         old = [row("2026-10-10", cost=3.0), row("2026-10-10", project="beta-r1", cost=2.0)]
         new = [row("2026-10-10", cost=1.5)]
         merged, kept = sr.merge_archive(old, new, ["2026-10-10"])
         self.assertEqual(merged, sr.sort_flat(old))
-        self.assertEqual(kept, [("2026-10-10", 1.5, 5.0)])
+        self.assertEqual(kept, [("2026-10-10", "alpha-r1", 1.5, 3.0), ("2026-10-10", "beta-r1", 0, 2.0)])
 
     def test_covered_day_with_no_fresh_rows_is_kept(self):
         old = [row("2026-10-09", cost=3.0)]
@@ -197,6 +226,40 @@ class Cli(unittest.TestCase):
         r = self.run_cli("--tz", "utc", "--days", "3", "--archive", self.arch)
         self.assertEqual(self.read_arch(), before)
         self.assertIn(self.day(0), r.stderr)
+
+    def test_one_project_gone_while_another_grows_is_kept(self):
+        self.seed(n_today=1)
+        self.run_cli("--tz", "utc", "--days", "3", "--archive", self.arch)
+        before = {(x["day"], x["project"]): x for x in csv.DictReader(io.StringIO(self.read_arch()))}
+        import shutil
+        shutil.rmtree(os.path.join(self.projects, FOLDER_A))            # alpha's transcripts are deleted
+        write_transcript(self.projects, FOLDER_B, "s1.jsonl",
+                         [call_line(self.iso(1), "b1"), call_line(self.iso(1), "b2")])   # beta grows on day -1
+        r = self.run_cli("--tz", "utc", "--days", "3", "--archive", self.arch)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        after = {(x["day"], x["project"]): x for x in csv.DictReader(io.StringIO(self.read_arch()))}
+        for k in before:
+            if k[1] == "alpha-r1":
+                self.assertEqual(after[k], before[k])                    # alpha survives
+        self.assertEqual(int(after[(self.day(1), "beta-r1")]["calls"]), 2)
+        self.assertIn("alpha-r1", r.stderr)
+        self.assertIn("WARN archive", r.stderr)
+
+    def test_archive_write_failure_still_emits_the_report_and_exits_2(self):
+        self.seed()
+        self.assertEqual(self.run_cli("--tz", "utc", "--days", "3", "--archive", self.arch).returncode, 0)
+        before = self.read_arch()
+        out, err = io.StringIO(), io.StringIO()
+        argv = ["spend-report.py", "--tz", "utc", "--days", "3", "--archive", self.arch, "--format", "csv"]
+        with mock.patch.object(sr.gpc, "CLAUDE_PROJECTS", self.projects),                 mock.patch("os.replace", side_effect=PermissionError("locked")),                 mock.patch("sys.argv", argv),                 mock.patch("sys.stdout", out), contextlib.redirect_stderr(err):
+            out.reconfigure = lambda **kw: None           # StringIO has no reconfigure()
+            with self.assertRaises(SystemExit) as cm:
+                sr.main()
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("spend-report: archive not written: locked", err.getvalue())
+        self.assertIn("alpha-r1", out.getvalue())          # the report was emitted
+        self.assertEqual(self.read_arch(), before)         # old archive intact
+        self.assertEqual(os.listdir(os.path.dirname(self.arch)), ["spend-daily.csv"])   # no temp file left
 
     def test_project_filter_does_not_narrow_the_archive(self):
         self.seed()
