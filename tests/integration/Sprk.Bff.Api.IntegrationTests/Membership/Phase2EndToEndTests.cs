@@ -28,22 +28,13 @@
 //             publish fails):
 //     - QuickCreateMatter_SucceedsEvenIfPublishFails_Q2FireAndForget_AC1P2_8
 //
-//   LIVE-MODE scaffolding (deferred to post-operator-deploy):
-//     - LiveMode_PublisherToServiceBusToHandler_E2E
-//     - LiveMode_RedisPubSubInvalidationE2E
-//   Both gated by [Trait("Category","Live")] + env var presence so they
-//   auto-skip in the default CI baseline.
+//   (The two LiveMode_* placeholders - pass-by-return when their env var was unset and
+//   Assert.Fail("placeholder") when set - were removed in the C# test-diet; a real live
+//   Service Bus / Redis E2E is a post-deploy task, see notes/phase2-live-e2e-runbook.md.)
 //
 // Run procedure (in-memory only):
 //   dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/ \
 //     --filter "FullyQualifiedName~Phase2EndToEndTests"
-//
-// Run procedure (live-mode, post-operator-deploy):
-//   $env:SPAARKE_SB_NAMESPACE = "sb://<ns>.servicebus.windows.net/"
-//   $env:SPAARKE_REDIS_CONNECTION = "<host>:6380,password=...,ssl=true"
-//   dotnet test --filter "Category=Live&FullyQualifiedName~Phase2EndToEndTests"
-//   (See projects/spaarke-platform-foundations-r3/notes/phase2-live-e2e-runbook.md
-//    for full runbook.)
 //
 // Reference: projects/spaarke-platform-foundations-r3/spec.md AC-1P2.3 through
 //            AC-1P2.8, NFR-03; projects/spaarke-platform-foundations-r3/notes/
@@ -623,81 +614,6 @@ public sealed class Phase2EndToEndTests : IClassFixture<Phase2EndToEndFixture>
             "No junction row should be written when the publish silently dropped.");
         _fixture.SpyInvalidator.Invocations.Should().BeEmpty(
             "Invalidator not invoked because no junction write occurred.");
-    }
-
-    // ════════════════════════════════════════════════════════════════════
-    // LIVE-MODE scaffolding — deferred to post-operator-deploy (task 071).
-    // These tests connect to a real Service Bus topic + Redis instance via
-    // env vars SPAARKE_SB_NAMESPACE + SPAARKE_REDIS_CONNECTION; they
-    // auto-skip when env vars are absent. Filter via:
-    //   dotnet test --filter "Category=Live&FullyQualifiedName~Phase2EndToEndTests"
-    // (See phase2-live-e2e-runbook.md for full runbook.)
-    // ════════════════════════════════════════════════════════════════════
-
-    [Fact]
-    [Trait("Category", "Live")]
-    public void LiveMode_PublisherToServiceBusToHandler_E2E()
-    {
-        var sbNamespace = Environment.GetEnvironmentVariable("SPAARKE_SB_NAMESPACE");
-        if (string.IsNullOrWhiteSpace(sbNamespace))
-        {
-            // Skip-via-return — xUnit's standard pattern for env-gated
-            // integration tests when SkippableFact isn't referenced. Default
-            // CI baseline does NOT set SPAARKE_SB_NAMESPACE, so this test
-            // passes-as-no-op until the operator runs the runbook in
-            // notes/phase2-live-e2e-runbook.md.
-            return;
-        }
-
-        // PLACEHOLDER — full live-mode E2E requires:
-        //   1. Provision the topic per task 071 runbook + flip
-        //      Membership:EventPublisher:Enabled=true
-        //   2. Boot a separate WebApplicationFactory wired to the LIVE
-        //      MembershipEventPublisher + MembershipJunctionUpdaterHost
-        //      (NOT the in-memory peers used above).
-        //   3. POST /api/office/quickcreate/matter, wait for the consumer
-        //      to drain the message (poll the LIVE junction table via the
-        //      Web API client until the row appears or 30s timeout).
-        //   4. Assert junction row present + cache invalidation propagated
-        //      via the live Redis subscriber.
-        //
-        // Implementing this stub now would couple the test to Azure
-        // credentials + connection-string handling that isn't in scope
-        // for task 087 (the in-memory test path satisfies NFR-03 for the
-        // CI baseline). Filed as post-operator-deploy follow-up — see
-        // notes/phase2-live-e2e-runbook.md for the activation procedure.
-        Assert.Fail(
-            "Live-mode env var SPAARKE_SB_NAMESPACE is set but the test body " +
-            "is a post-operator-deploy follow-up placeholder. See " +
-            "notes/phase2-live-e2e-runbook.md §6 to implement.");
-    }
-
-    [Fact]
-    [Trait("Category", "Live")]
-    public void LiveMode_RedisPubSubInvalidationE2E()
-    {
-        var redisConn = Environment.GetEnvironmentVariable("SPAARKE_REDIS_CONNECTION");
-        if (string.IsNullOrWhiteSpace(redisConn))
-        {
-            // Same skip-via-return convention as
-            // LiveMode_PublisherToServiceBusToHandler_E2E.
-            return;
-        }
-
-        // PLACEHOLDER — full live-mode Redis pub/sub E2E requires:
-        //   1. Live ConnectionMultiplexer wired to the real Redis instance.
-        //   2. Subscribe a test handler to the `membership-cache-invalidate`
-        //      channel BEFORE issuing the QuickCreate POST.
-        //   3. POST + assert the subscriber received the payload within a
-        //      reasonable timeout (5s — Redis pub/sub latency is sub-second
-        //      but include CI noise margin).
-        //
-        // Same activation gate as LiveMode_PublisherToServiceBusToHandler_E2E
-        // — see notes/phase2-live-e2e-runbook.md.
-        Assert.Fail(
-            "Live-mode env var SPAARKE_REDIS_CONNECTION is set but the test " +
-            "body is a post-operator-deploy follow-up placeholder. See " +
-            "notes/phase2-live-e2e-runbook.md §6 to implement.");
     }
 
     // ════════════════════════════════════════════════════════════════════
