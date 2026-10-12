@@ -333,16 +333,16 @@ public record PlaybookStreamEvent
         PlaybookRunMetrics? metrics = null,
         string? errorCode = null,
         string? correlationId = null) => new()
-    {
-        Type = PlaybookEventType.RunFailed,
-        RunId = runId,
-        PlaybookId = playbookId,
-        Done = true,
-        Error = error,
-        Metrics = metrics,
-        ErrorCode = errorCode,
-        CorrelationId = correlationId
-    };
+        {
+            Type = PlaybookEventType.RunFailed,
+            RunId = runId,
+            PlaybookId = playbookId,
+            Done = true,
+            Error = error,
+            Metrics = metrics,
+            ErrorCode = errorCode,
+            CorrelationId = correlationId
+        };
 
     /// <summary>
     /// The ONE text of the RunFailed event when execution throws (ADR-019): the exception is logged server-side
