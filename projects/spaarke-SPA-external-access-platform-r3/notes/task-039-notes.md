@@ -1,7 +1,7 @@
 # Task 039 - External event reads for Matter and Work Assignment (FR-03, server)
 
 > Branch `worktree-agent-a0356b48145f4ef5f`, based on `fc71af7fb` (R3 head after 037). Rigor FULL (tags `bff-api`, `auth`, `testing`).
-> Code commit `02150553b`. No push, no PR (see "Not done").
+> Code commit `02150553b`. No push, no PR (see "Not done"). **Section 11 (fix round) supersedes sections 3 and 9 where they differ: the every-root rule now covers to-dos, documents, messages, the feed and the documents module grid, and is an INTERIM decision pending the owner.**
 
 ## 1. What changed
 
@@ -152,3 +152,58 @@ Command `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-pu
 - `/conflict-check` and the PR: no PR was opened (the brief says do not push). `Api/ExternalAccess/**` and `Infrastructure/ExternalAccess/**` are shared with `unified-access-control-r2` (open PRs #1583 touching `ExternalAccessModule.cs`, #1586 touching `ExternalAccessEndpoints.cs`); this change touches neither file. Run `/conflict-check` before the PR.
 - `TASK-INDEX.md`, the POML `<status>` and `current-task.md` were not edited (the caller owns them). The drift script was not run for that reason.
 - Live check against dev Dataverse: not run (no deploy in scope; task 038 deploys the BFF). The live `EventRoutesLiveTests` compile but were not executed.
+
+## 11. Fix round (reviews A and B): the every-root rule across the external lists
+
+### 11.1 INTERIM main-session decision, pending the owner
+
+On the external plane, a row filed to SEVERAL core roots (project / matter / work assignment) is listed only when the caller holds Read on EVERY root it carries. It is ONE function, `Infrastructure/ExternalAccess/ExternalMultiRootRule.AllRootsReadable`, called by every list below. `ExternalDataService.ParentReadable` is gone (extracted, not copied).
+
+- **What it applies to now**: events (039), to-dos (F1), documents, message threads, the notification feed, and the module grid's documents module (F2 audit, section 11.3).
+- **What it changes on the wire**: `GET /projects/{id}/events` and the three to-do routes, the document routes, `GET /{root}/{id}/messages` and `GET /notifications`, for MULTI-ROOT rows only. A single-root row lists exactly as before (tested).
+- **The POML acceptance criterion "project route unchanged" is deliberately NOT met for those rows.** It still holds for every single-root row, the 403 body, the DTO and the query filter.
+- **Known cost**: the principal cannot tell a secure root from one that is merely not granted, so a row filed to an ungranted NON-secure second root is also withheld (over-hides; never leaks).
+- **Owner options** (a later choice is a change in `ExternalMultiRootRule` only, plus the `RequireReadOnEveryRoot` flag on the documents module):
+  1. **every-root** (this, the default now);
+  2. **secure-only**: withhold only when the unreadable root is secure; needs a secure check on each unreadable root;
+  3. **union**: list when ANY root is readable (the pre-fix behaviour for project routes, which is the leak).
+- Withheld rows are logged with a count and do NOT set `truncated`.
+
+### 11.2 Known limits recorded
+
+- **K1**: `sprk_regardingservicerequest` is not consulted. There are no secure service requests, and delete-own (`AuthorizeDeleteOwnAsync`) does not consult it either. A service request is reached through its requester, not through the principal's root sets.
+- **K2**: pair-only filings are not found. A row filed only through the polymorphic regarding pair (`sprk_regardingrecordid`) and no typed root lookup is invisible to the typed-lookup `$filter` on every route, so it is neither listed nor checked.
+- **SPA gap (the main session will schedule it; the SPA is not touched here)**: there is no consumer yet for matter or work-assignment events and to-dos. `RecordDetailModal.tsx:~436-455` shows a static "No events or tasks...", and `EventsCalendar` / `SmartTodo` are project-only.
+- **K3 (new)**: the module grid's documents module can only evaluate the three typed root columns its FetchXML projects (`sprk_project`, `sprk_matter`, `sprk_workassignment`). The related twins are not projected there, so a grid row linked to a hidden root ONLY through a twin is not withheld by the grid (the record-detail document routes do read the twins).
+- **Observation, not changed (single item, not a list)**: `DownloadDocumentForParent` and the versions route authorize by Read on the ROUTE parent plus `GetDocumentParentAndNameAsync` (the document's lookup for that kind equals the route id), then resolve the SPE pointers. A document filed to project P and secure matter M therefore downloads through P's route for a P-only reader who knows the document id. The list no longer reveals the id, but the single-item check does not apply the every-root rule. Whether `RecordContainerResolver` (I-2) refuses such a document at `GetSpePointersAsync` was not verified. Needs its own task: apply `ExternalMultiRootRule` where `GetDocumentParentAndNameAsync` is called (`ExternalProjectDataEndpoints.cs:618, :1388`).
+
+### 11.3 Audit of every external list (verdicts)
+
+| List | Can a row carry an unreadable second root? | Verdict |
+|---|---|---|
+| `GET /projects/{id}/events`, `/matters/...`, `/workassignments/...` | Yes: `sprk_event` has the three lookups | Already ruled in 039 (`ReadableEvents`, now the shared rule) |
+| `GET .../todos` x3 (F1, `ExternalDataService.GetTodosAsync`) | Yes: a to-do under an invoice of secure matter M and project P is stamped with both (`CoreAncestorResolver`, `StandardRootColumns`). `TodoRow` and `BuildTodoListUrl` already read all three lookups | **Leak, fixed**: `GetTodosAsync` takes the `CallerPrincipal` and applies the rule |
+| `GET .../documents` x5 (`GetDocumentsAsync`) | Yes: `sprk_document` carries typed links to project, matter and work assignment plus a related twin of each (`DocumentLinkFields.All`; `CoreAncestorResolver.IntermediateRootColumns["sprk_document"]`). The list returns name, type and AI summary. The select read only `_sprk_project_value` | **Leak, fixed**: the select reads all six root links; the rule applies for every parent kind. A pin test checks the select against `DocumentLinkFields`. For invoice documents the rule is applied too: documents carry explicit links, no derived stamps |
+| `GET /{root}/{id}/messages` (projects, matters, work assignments, service requests) | Yes: `sprk_communication` is stamped with the root of whatever it is filed under (invoice, event, analysis...). The read was keyed on ONE regarding lookup (`ReadRegardingAppOnlyAsync`) | **Leak, fixed**: the three stamp columns are always selected (`ExternalSelect`), and the rule is a REQUIRED parameter of the read (`rootsReadable`, no default) |
+| `GET /invoices/{id}/messages` | Yes, but the stamps are exactly the invoice's own parents | **Exempt by the owner's decision** (2026-10-11, option A "inherit": an invoice is reached through the UNION of its parents). Applying the rule would empty the thread for the caller the owner chose to admit. Tested (`AnInvoiceThread_IsExemptFromTheEveryRootRule...`). If the owner moves invoices to every-root, remove the invoice branch of `ExternalMessageEndpoints.RootsReadableFor` |
+| `GET /notifications` (message items; task 037) | Yes: the same communications, matched on any accessible record | **Leak, fixed**: `ReadRecentForRecordsAppOnlyAsync` takes the same required rule. Grant items are single-root rows (one grant = one root, re-checked by `RightsOn`) |
+| Module grid, documents module (`/data/savedquery/...`, `ScopeRows`) | Yes: OR across the three document dimensions, in the server-side filter and in `ScopeRows` | **Leak, fixed** (new `ExternalModuleDescriptor.RequireReadOnEveryRoot`, set only on documents; the rule runs in `ScopeRows`, the grid's post-filter). See K3 above |
+| Module grid, invoices module | An invoice carries matter + project | **Unchanged**, owner decision above (union of parents). Tested |
+| `GET /projects/{id}/contacts`, `/organizations` | No: the rows are contacts / accounts, read through the grant junction (`GetProjectContactIdsAsync`), not root-filed records | Not applicable |
+| `GET /projects`, `/projects/{id}`, `/me`, `/me/entitlements`, `assigned-access`, `contact-grants`, `user-shares`, `can-manage-access`, no-access reads, `/data/record`, `/data/metadata`, `/data/savedqueries` | No: roots themselves, principal-derived data, grant ledgers (one root per row), single records, view or metadata lists | Not applicable |
+
+### 11.4 Fix 3 (K3, review A): the fake respects `$select`
+
+`ExternalRootEventReadTests.FakeDataverse` now serves `sprk_events`, `sprk_todos` and `sprk_documents` and projects each row through the request's `$select`. The message and feed harnesses do the same (`AppOnlySelectProjection`). Proof (mutation, restored afterwards): the matter lookup removed from the events, to-do and document selects and from the message stamp columns, one build, one run: **15 of 175 fail**, including `ProjectEvents_AlsoFiledToASecureMatterTheCallerCannotRead_AreWithheld`, `Todos_AlsoFiledToARootTheCallerCannotRead_AreWithheld_OnAllThreeRoutes`, `Documents_...AreWithheld_OnAllThreeRoutes`, the message and feed withholding tests, and the pinned-select tests.
+
+### 11.5 Fix 4 (K3, review B)
+
+`tests/integration/regression/Issue963_ExternalDataPagingTests.cs`: the event and to-do rows now carry `_sprk_regardingproject_value = Root`, and `Creator` holds Read on `Root` (`CallerProjectAccess.FromLevel(Root, ViewOnly)`), so the paging test models rows the rule would actually list. The documents and to-do reads now pass `Creator`.
+
+### 11.6 Evidence
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 warnings, 0 errors. `tests/unit/Sprk.Bff.Api.Tests` and `tests/integration/Sprk.Bff.Api.IntegrationTests` (live tests compile): 0 warnings, 0 errors.
+- Filtered unit run (the brief's filter plus `ExternalMultiRoot|ExternalModule|Tier2Scope|ExternalScope|CommunicationThread`): **1165 passed, 0 failed, 1 skipped**. `Issue963`: 36 passed. New: `ExternalMultiRootListReadTests` 24, plus 7 message tests and 3 feed tests added to the existing classes.
+- `ArchTests --filter RouteAuthorizationGuard`: 87 passed (ledger cites for `ExternalMessageEndpoints.cs` moved to :335/:481/:538).
+- **Fail-before** (mutation: `ExternalMultiRootRule.AllRootsReadable` skips the refusal, and `RequireReadOnEveryRoot = false`): **17 of 175 fail** across events, to-dos (3 routes), documents (3 routes), messages (3 routes + malformed), feed (2) and the module-grid documents test; the fail-closed (malformed lookup) tests fail too.
+- Test changes forced by the new signatures: `GetTodosAsync` / `GetDocumentsAsync` take the `CallerPrincipal` (4 test overrides and 3 call sites updated); `ProjectListUrl_IsUnchanged` renamed `ProjectListUrl_IsTheShippedQuery_PlusTheOtherRootLinks`; the pinned message and feed `$select` strings gained the two extra stamp columns.
