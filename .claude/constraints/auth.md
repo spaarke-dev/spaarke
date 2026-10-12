@@ -2,7 +2,7 @@
 
 > **Domain**: OAuth, OBO, Token Management, Access Control, Server Hardening
 > **Source ADRs**: **ADR-028 (canonical — Spaarke Auth v2)**, ADR-003 (server seams), ADR-004 (OBO), ADR-008 (filters), ADR-009 (Redis caching)
-> **Last Updated**: 2026-08-24 (ADR-028 **A4** applied; exception **E-3 CLOSED** — the BFF identity is secret-free)
+> **Last Updated**: 2026-10-11 (Model 1 workforce identity / home-tenant section added at the owner's request; earlier: 2026-08-24 ADR-028 **A4** applied, exception **E-3 CLOSED**)
 > **Last Reviewed**: 2026-08-24
 > **Status**: Verified · v2-aligned · A4-complete
 >
@@ -58,6 +58,13 @@ Load when:
 - ✅ **MUST** key any cached access **data** by caller identity **and** credential mode (SP vs OBO); a short explicit cross-request TTL is permitted (A1 retired "per-request only")
 - ✅ **MUST** fail closed on every error path — and **MUST NOT** cache a fault-derived result as if it were an answer (session 26 C12 / task 132)
 - ✅ **MUST** include machine-readable deny codes (e.g., `sdap.access.deny.team_mismatch`)
+
+### Model 1 workforce identity — the customer's home tenant (owner request 2026-10-11; R3)
+
+- ✅ **MUST** treat a Model 1 customer employee as a **B2B guest in Spaarke's tenant** who authenticates in **their company's own Entra tenant (home tenant)**: the stamp token carries `tid` = Spaarke, `acct = 1`, `idp` = home-tenant issuer. Model 1 moves Spaarke's side into Spaarke's tenant, not the customer's people.
+- ✅ **MUST** key workforce membership on the customer's home tenant id(s) in `WorkforceIdentity:CustomerTenantIds` (and, for self-registration, the same list in the Spaarke registry) — **never** on `AzureAd:TenantId` (= Spaarke on Model 1), an email domain or a `#EXT#` UPN.
+- ❌ **MUST NOT** use a multitenant / `common` / `organizations` authority for Model 1 workforce sign-in — the guest lands in the home tenant with a different `oid` (ADR-028 A7).
+- Full explanation and where each value lives: [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §6.5.2 "Model 1: why a customer has a home tenant at all"](../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md). Code: `WorkforceIdentityOptions.cs` `WorkforceMembershipTest`.
 
 ### SPE File Access — broker-only byte identity (binding — task 171, 2026-10-06; supersedes Pattern 4's writer-identity rule)
 

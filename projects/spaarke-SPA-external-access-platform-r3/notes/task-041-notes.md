@@ -108,3 +108,16 @@ Known limits not fixed (with owner):
 - Owner step: exposing `user_impersonation` on the CIAM BFF app `4a4d5126` and consenting it for the CIAM SPA client is a precondition of deploying this build (the docs now say so); it is tracked in task 070.
 
 Also noticed, not changed (outside the named files): the comment above `server.proxy` in `vite.config.ts` still says `bffApiCall` uses relative `/api/...` paths when `VITE_BFF_API_URL` is empty.
+
+## Live run (dev CIAM, 2026-10-11; owner approval "yes proceed 040, 041, 043")
+
+Signed in to `spaarkeextid` (`7052feba-…`) interactively by the owner (MFA); the session ran Graph PATCHes. "Before" snapshots of both apps kept in the session scratchpad.
+
+| Change | Result |
+|---|---|
+| Step 1: scope on **Spaarke External BFF API** `4a4d5126` (object `eca2addb-54df-4203-8a6a-5e496299a1fd`) | Delegated scope `user_impersonation` = `2017a8fe-9b37-4b8e-996a-9c9a099bb431` added, enabled, admin + user consent text; `SDAP.Access` (`2a417cbd-…`) unchanged |
+| Step 1: grant for the SPA client `bd57e54e` (object `43a46946-85a8-4560-9b74-a29c4f3d26ae`) | Chosen form: **pre-authorization** of `bd57e54e` on `2017a8fe` (no consent prompt, no admin grant); `bd57e54e` `requiredResourceAccess` now also lists `2017a8fe` |
+| 040 "new owner live step 1": `/auth-callback.html` on `bd57e54e` | Added `https://green-dune-0c4f1221e.7.azurestaticapps.net/auth-callback.html` and `http://localhost:3000/auth-callback.html`. `https://external.spaarke.com/auth-callback.html` NOT added: that origin belongs to the production CIAM client (T240d), not this dev client |
+
+Rollback: PATCH `4a4d5126` `api.preAuthorizedApplications` = `[]`, then set `2017a8fe` `isEnabled=false`, then PATCH the scope list back to `SDAP.Access` only; PATCH `bd57e54e` `spa.redirectUris` and `requiredResourceAccess` back to the snapshot (two URIs; `SDAP.Access` + Graph `User.Read`).
+Not yet verified live: a CIAM sign-in on a build that requests `api://4a4d5126-…/user_impersonation` (the next dev SPA deploy, task 043 section 7).
