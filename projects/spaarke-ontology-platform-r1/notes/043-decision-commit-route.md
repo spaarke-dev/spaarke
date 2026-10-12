@@ -37,22 +37,26 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 - The core record comes from the Signal's own `sprk_corerecordtype` and `sprk_corerecordid`, read app-only. Its table comes from `sprk_recordtype_ref`, and it must be a `CoreAncestorResolver.CoreRecordEntities` type.
 - A no-core item's owner is read app-only from the item row and must be a systemuser.
 - `DecisionReview` has no core or owner member, so the JSON binder drops anything the body names (tested).
+- **K2 (coordinator round).** `SignalCoreRecordAccess.AuthorizeAsync` now also returns the core pair the caller's own read saw (`SignalAccessDecision.CoreTypeId/CoreId`, optional members). Validation compares it with the app-only re-read for every Signal; a mismatch is refused `ontology.decision.core_changed` before any write.
+- **The record's owner is resolved in step 1** (coordinator round, item 5): `DecisionRecordWriter.ResolveOwnerAsync` runs before the first write and its answer is handed to `WriteAsync(request, owner, ct)`. An owner refusal refuses the commit (`record_refused`, nothing written); a resolver fault is a 503.
 
 **Idempotency.**
+- **One commit per review id at a time (coordinator round, item 3).** Before the ledger is read, the route takes an `IScheduledJobLease` (Redis `SET NX PX` when Redis is on, the same keyed-mutex use as `NoAccessShareEnforcer`) on `decision-review:{tid}:{oid}:{reviewId}` for 10 minutes, released in a `finally`. A second concurrent request gets 409 `review_in_progress`; a lease store that cannot be reached is a 503.
 - The ledger is ADR-009 `ITenantCache`: resource `decision-review`, id `{oid}:{reviewId}`, version 1.
-  - It holds an in-progress marker for 10 minutes; a concurrent repeat gets 409.
+  - It holds an in-progress marker for 10 minutes; a repeat that meets it gets 409.
   - It keeps the first outcome (Recorded or Failed) for 7 days.
   - A resume keeps the failure it resumes inside its in-progress marker. If the resume ends without a write outcome (refused, forbidden, unavailable, cancelled), that failure is put back, so the next retry still skips what landed (review fix F-1).
   - A refusal is not cached, so the same id can be corrected and sent again.
 - When the cache has nothing, the record itself answers the repeat: `sprk_confirmedby = caller` and `sprk_steps LIKE %"reviewId":"<id>"%`.
+- **A repeat must be the same review (item 10).** A stored outcome is returned only when the stored content hash matches; the hash covers the Signal id and everything the review asks for. A different decision, or the same review id on another Signal, is refused `review_changed`.
+- **A Recorded repeat finishes the closes (item 7).** It returns the first outcome and runs step 6 for any covered Signal the first run did not close or link (a close that failed, a crash after the record); the "already done" check makes this idempotent, and the stored outcome is updated. The durable-lookup path does the same with the record it finds.
 - A cache that cannot be read fails closed (503).
 
 **Retry (coordinator point 3).**
 - `retry: true` with the same content hash resumes a Failed outcome marked `Resumable`. Steps that landed (Done) are skipped, and a record a timed-out create left behind is found and reused.
 - Without the flag, the first outcome is replayed (AC4).
-- A Failed outcome is not resumable if a message step failed (it may have gone out) or if a step got no clear answer.
+- **Only a step that was Refused is resumable (item 2).** By the executor contract a Refused step wrote nothing. A Failed step may have landed (a create that timed out after committing, a message that went out, a revision whose amount was then refused), and a thrown step is Failed, so none of those is resumable.
 - A record-write failure after a send is not resumable (escalation trigger 1).
-- A step that failed after writing part of its work (non-empty `written`) is not resumable, so a retry cannot write it twice.
 
 **A fault before the first write (re-check finding).** An unexpected exception before step 2 (for example the plan read timing out) is a 503: nothing was written, so the review id is freed, or a resumed failure is put back. Only a fault after the first write is stored as a non-resumable failure.
 
@@ -62,10 +66,12 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 - Each Signal is re-read and updated with `UpdateIfRowVersionMatchesAsync`. On a version mismatch it is re-read once and the decision is made again.
 - A Signal Resolved with a system resolution (ConditionCleared, Superseded or PolicyRetired) and `sprk_resolvedon` on or after the review start is re-closed. It gets the commit's resolution (Acted or Dismissed), resolved-on, resolved-by and `sprk_decisionrecord` = the new record. The Signal result carries the warning `reclosed_after_system_resolution`.
 - A Signal a person resolved is left alone, with the warning `resolved_by_another_decision`.
+- **D-120 (025, owner 2026-10-11).** Every close (including the re-close of a system-resolved Signal) writes `sprk_lastevaluated` in the same update with the same timestamp as `sprk_resolvedon`, as `SignalWriter.CloseAsync` does. `CloseAsync` itself takes system resolutions only, so the commit route cannot call it. Test: `AClosedSignal_HasLastEvaluatedEqualToResolvedOn_D120` (open close and re-close).
 - The review start is:
-  - on a resume, the first attempt's bounded review start, stored in the ledger entry (review fix F-2; it used to be the first attempt's "now");
-  - otherwise the client's `planReadOn`, bounded to the last 24 hours and never later than now;
+  - on a resume, the first attempt's review start, stored in the ledger entry (review fix F-2; it used to be the first attempt's "now");
+  - otherwise the server's own plan-read stamp (K4, below);
   - otherwise now.
+- **K4: the review start is never client-sent.** I chose the server-issued stamp over a clamp. `DecisionPlanReadStamp` records, in the same tenant cache, when the decision-plan route last served this caller this Signal's plan (key `{oid}:{signalId}`, 4-hour TTL; the latest read wins, which can only move the start later, the fail-closed direction). The commit reads it. `DecisionReview.planReadOn` is removed. The plan route takes the stamp as an optional `[FromServices]` parameter and stamps best-effort after the plan resolves; a stamp that cannot be written or read means "the review started now".
 - Validation (step 1) applies the same rule. A Signal closed by the system before the review started is a 409.
 
 **BudgetRevision trigger (coordinator point 1).**
@@ -81,14 +87,12 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 
 ## 032 and 034 status
 
-**Neither had merged into `docs/ontology-platform-design` when this was built.** `DecisionCommitFollowUps` is built against their branch APIs:
-- `origin/task/ontology-032-event-triggers` (#1660): `SignalEvaluationTrigger(JobSubmissionService, ILogger)` and `virtual Task<bool> EnqueueAsync(SignalTriggerKind, string, Guid, Guid, string?, CancellationToken)`.
-- `origin/task/ontology-034-suppression` (#1654): `SignalSuppressionService.ApplyAsync(Guid, string, SuppressionGrain, CancellationToken)`, `SuppressionGrain.ForCore` and `SuppressionGrain.ForItem`.
+**032 (#1660) has merged** and is merged into this branch; `DecisionCommitFollowUps` calls its `SignalEvaluationTrigger.EnqueueAsync(SignalTriggerKind, string, Guid, Guid, string?, CancellationToken)` unchanged. **034 (#1654) has not merged.** The follow-ups use its branch API: `SignalSuppressionService.ApplyAsync(Guid, string, SuppressionGrain, CancellationToken)`, `SuppressionGrain.ForCore` and `SuppressionGrain.ForItem`.
 
 **Effect on this branch:**
-- The BFF on this branch alone does not compile until both are merged. `SignalsModule` registers both as singletons on their branches.
-- The tests and ArchTests were run in a local integration tree: this branch plus 032 plus 034's service file and its registration. That tree was never pushed.
-- Once both merge, merge the project branch and re-run.
+- The BFF on this branch alone does not compile until 034 merges.
+- The tests and ArchTests were run in a local integration tree (`C:\wts-043i`, never pushed): this branch (with 032) plus 034's service file and its registration.
+- Once 034 merges, merge the project branch and re-run.
 
 ## uac-r2 coordination (re-read 2026-10-11, origin/master 89480bff8)
 
@@ -133,13 +137,14 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 
 ## Known limits (K-class)
 
-- **The in-progress marker is a get-then-set on the tenant cache, not atomic.** Two truly simultaneous requests can both pass; the durable record lookup still prevents a second record after the first one is written. ITenantCache has no set-if-absent.
+- **With Redis disabled the review lock is process-local** (`ProcessLocalScheduledJobLease`): two instances could each take it. Production runs with Redis.
 - **A crash between a write and the outcome store.** The 10-minute marker expires, and the record lookup finds a written record. A crash before step 5 leaves landed writes that a repeat would run again.
 - **The outcome is kept 7 days.** After that, only a written record answers a repeat.
-- **A `send-email` Next step's communication id is not tracked by its core.** That follow-on is listed under `unnamedNextSteps` in the `sprk_steps` envelope (and counts as something done, so the record is Judgement, not a refused dismissal; review fix F-4), but not in `sprk_followons`.
-- **Replay ignores the Signal id.** A repeat of a review id under another Signal id returns the stored outcome (the ledger key is caller + review id). The caller must already be able to read that other Signal, so nothing leaks; the content hash only gates a `retry`.
+- **A `send-email` Next step whose communication row was not saved after the send** has no id. It is recorded in `sprk_followons` as a follow-on without an id (`{"actionCode":"send-email","entity":null,"id":null}`), and "nothing taken" is decided from the Next steps that actually ran, so the record is Judgement, not a refused dismissal (review fix F-4, coordinator item 4).
+- **K3: the durable lookup has not run against Dataverse.** `sprk_steps LIKE %"reviewId":"<id>"%` on a memo column is pinned only against the writer's serialized text in unit tests.
+- **The durable lookup cannot compare the content hash.** When the ledger has forgotten the outcome, the record found by review id answers the repeat without a hash check (the record does not store the hash).
 - **A crash during a resume.** The resumed failure lives in the 10-minute in-progress marker; if the process dies mid-resume and the marker expires, the failure is forgotten and a later retry runs from the start (the durable record lookup still prevents a second record).
-- **Also resolve is capped at 25 items** (review K2).
+- **Also resolve is capped at 25 items**; a longer list is `review_invalid`.
 - **A decision-created work assignment has the business-unit search-index cascade issue F-60 (#1607).** This is the same as the wizard and already filed.
 
 ## Tests and why each exists
@@ -195,5 +200,7 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 - Review fixes: disabling each fix (F-1 put-back, F-2 stored start, F-3 detached token and the cancellation release, F-4 unnamed Next steps, F-5 rights check, K2 cap) fails exactly its new test(s); all nine new tests failed under the mutations and pass on the fix.
 
 **`DecisionRecordWriterTests.cs` additions:** an unnamed Next step that is not a Next-step creator is refused; an unnamed `send-email` makes a Judgement record listed under `unnamedNextSteps`, and the `"reviewId":"<id>"` lookup text is still present.
+
+**Coordinator-round tests (review at e48399548):** `OnlyARefusedStep_IsResumable_...` and the `AnExecutorThatThrows_...` resumable assertion (item 2); `ASecondConcurrentCommitOfTheSameReview_IsInProgress_...` and `ALockStoreThatCannotBeReached_FailsClosed` (item 3); `ANotificationThatNamedNoRow_...` (item 4, a follow-on without an id); `TheRecordOwner_IsResolvedBeforeTheFirstWrite_...` (item 5); the cancellation tests (item 6); `ARecordedReplay_ClosesASignalTheFirstRunCouldNotClose` and `WhenTheLedgerHasForgotten_...` (item 7, both replay paths); `AlsoResolve_IsCapped` (item 9, `review_invalid`); `TheSameReviewIdForADifferentDecision_OrADifferentSignal_IsReviewChanged` (item 10); `ACorePairThatChanged...` (K2); `WithoutAServerPlanReadStamp_...`, `AServerPlanReadStamp_...`, `APlanReadStamp_IsTheServersOwn_AndExpires` (K4). A combined mutation of items 2, 3, 5, 7, 10, K2 and K4 failed all ten of their tests.
 
 **Also fixed in scope:** `DecisionActionCatalogTests.SendBudgetInquiry_HasNoReplyDueParameter_D56_D20` asserted the inquiry's parameters were exactly to/subject/body; this task's optional `outsideFirm` broke it. The assertion now lists `outsideFirm` (optional) and still has no reply-due parameter.

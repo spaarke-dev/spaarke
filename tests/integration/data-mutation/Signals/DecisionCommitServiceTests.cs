@@ -14,6 +14,7 @@ using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Api.Signals;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -98,6 +99,10 @@ public sealed class DecisionCommitServiceTests
         public List<IReadOnlyList<DecisionCommitService.SignalRow>> DismissedHandedOn { get; } = new();
         public List<IReadOnlyList<DecisionCommitStep>> FailedHandedOn { get; } = new();
         public Dictionary<(string Set, Guid Id), AccessRights> Rights { get; } = new();
+        public IScheduledJobLease Lease { get; set; } = new ProcessLocalScheduledJobLease();
+        public DecisionPlanReadStamp PlanReads { get; }
+        public RecordOwnerResolution Owner { get; set; } = RecordOwnerResolution.Unchanged("not a secure matter");
+        public Dictionary<Guid, Guid> CallerSeesCore { get; } = new();
         public List<(string Set, Guid Id)> RightsAsked { get; } = new();
 
         public const AccessRights AllRights =
@@ -153,6 +158,8 @@ public sealed class DecisionCommitServiceTests
                     Versions[target.Id]++;
                     return Task.FromResult(new OrganizationResponse());
                 });
+
+            PlanReads = new DecisionPlanReadStamp(Ledger, Clock, NullLogger<DecisionPlanReadStamp>.Instance);
 
             Probe = new Mock<CallerRecordAccessProbe>(
                 new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
@@ -242,7 +249,7 @@ public sealed class DecisionCommitServiceTests
                 if (row.GetAttributeValue<EntityReference>("sprk_corerecordtype") is { } t)
                 {
                     body["_sprk_corerecordtype_value"] = t.Id.ToString("D");
-                    body["sprk_corerecordid"] = row.GetAttributeValue<string>("sprk_corerecordid");
+                    body["sprk_corerecordid"] = CallerSeesCore.TryGetValue(id, out var seen) ? seen.ToString("D") : row.GetAttributeValue<string>("sprk_corerecordid");
                 }
 
                 return Ok(body);
@@ -267,11 +274,17 @@ public sealed class DecisionCommitServiceTests
             var plans = new DecisionPlanService(Entities.Object, NullLogger<DecisionPlanService>.Instance);
             var ownership = new Mock<IRecordOwnershipResolver>();
             ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(RecordOwnerResolution.Unchanged("not a secure matter"));
+                .ReturnsAsync(() =>
+                {
+                    Log.Add("owner");
+                    return Owner;
+                });
             var records = new DecisionRecordWriter(WriterClient(), ownership.Object, Clock, NullLogger<DecisionRecordWriter>.Instance);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(Executors.Values), records, WriterClient(),
-                Entities.Object, Probe.Object, Ledger, FollowUps.Object, Clock, NullLogger<DecisionCommitService>.Instance);
+                Entities.Object, Probe.Object, Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
         }
+
+        public Task StampPlanRead(Guid signal, DateTimeOffset at) => PlanReads.StampAtAsync(Tenant, CallerOid.ToString("D"), signal, at, CancellationToken.None);
 
         public Task<DecisionCommitResult> CommitAsync(DecisionReview review, Guid? signal = null, HttpContext? http = null, CancellationToken ct = default) =>
             Service().CommitAsync(signal ?? Primary, review, http ?? Http(), ct);
@@ -539,7 +552,20 @@ public sealed class DecisionCommitServiceTests
         result.Status.Should().Be(DecisionCommitStatus.Failed);
         result.FailedStep.Should().Be(3);
         result.Landed.Select(l => l.Entity).Should().Equal("sprk_budgetrevision", "sprk_budget");
+        result.Resumable.Should().BeFalse("a step that threw may have landed; a retry could write it twice");
         rig.Records.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task OnlyARefusedStep_IsResumable_AFailedOneMayHaveLanded()
+    {
+        var failedRig = new Rig();
+        failedRig.Executors["add-todo"].Result = DecisionActionOutcome.Failed("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var refusedRig = new Rig();
+        refusedRig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+
+        (await failedRig.CommitAsync(PathBReview(inquiry: false))).Resumable.Should().BeFalse("a Failed create may have committed");
+        (await refusedRig.CommitAsync(PathBReview(inquiry: false))).Resumable.Should().BeTrue("a Refused step wrote nothing");
     }
 
     [Fact]
@@ -601,7 +627,10 @@ public sealed class DecisionCommitServiceTests
         result.Status.Should().Be(DecisionCommitStatus.Recorded);
         result.Replayed.Should().BeTrue();
         result.DecisionRecordId.Should().Be(RecordId);
-        rig.Writes.Should().BeEmpty();
+        rig.Log.Should().NotContain(l => l.StartsWith("execute:", StringComparison.Ordinal) || l.StartsWith("record:", StringComparison.Ordinal),
+            "nothing is run or recorded again");
+        rig.LinkedRecord(Primary).Should().Be(RecordId, "a Signal the first run never closed is closed with the record found");
+        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionActed);
     }
 
     [Fact]
@@ -1012,7 +1041,9 @@ public sealed class DecisionCommitServiceTests
         var rig = new Rig();
         rig.AddSignal(Primary, DecisionLane.Decide, Matter, PathB, Resolved, SignalWriter.ResolutionConditionCleared, Now.UtcDateTime.AddHours(-2));
 
-        var result = await rig.CommitAsync(PathBReview() with { PlanReadOn = Now.AddMinutes(-5) });
+        await rig.StampPlanRead(Primary, Now.AddMinutes(-5));
+
+        var result = await rig.CommitAsync(PathBReview());
 
         result.Status.Should().Be(DecisionCommitStatus.Conflict);
         rig.Writes.Should().BeEmpty();
@@ -1022,7 +1053,7 @@ public sealed class DecisionCommitServiceTests
     public async Task ARetryOfAFailedReview_AfterTheSystemClosedTheSignal_SkipsWhatLanded_AndRecloses()
     {
         var rig = new Rig();
-        rig.Executors["add-todo"].Result = DecisionActionOutcome.Failed("add-todo", DecisionActionReasons.WriteFailed, "no");
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
         var review = PathBReview(inquiry: false);
 
         var failed = await rig.CommitAsync(review);
@@ -1085,7 +1116,7 @@ public sealed class DecisionCommitServiceTests
     public async Task ARetryThatIsRefused_KeepsTheStoredFailure_SoTheNextRetryStillSkipsWhatLanded()
     {
         var rig = new Rig();
-        rig.Executors["add-todo"].Result = DecisionActionOutcome.Failed("add-todo", DecisionActionReasons.WriteFailed, "no");
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
         var review = PathBReview(inquiry: false);
         (await rig.CommitAsync(review)).Resumable.Should().BeTrue();
 
@@ -1109,16 +1140,18 @@ public sealed class DecisionCommitServiceTests
         var rig = new Rig();
         // The wizard read the plan ten minutes ago; the system closed the Signal five minutes ago (after the read).
         rig.AddSignal(Primary, DecisionLane.Decide, Matter, PathB, Resolved, SignalWriter.ResolutionConditionCleared, Now.UtcDateTime.AddMinutes(-5));
-        rig.Executors["add-todo"].Result = DecisionActionOutcome.Failed("add-todo", DecisionActionReasons.WriteFailed, "no");
-        var review = PathBReview(inquiry: false) with { PlanReadOn = Now.AddMinutes(-10) };
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+        await rig.StampPlanRead(Primary, Now.AddMinutes(-10)); // the server served the plan ten minutes ago
+        var review = PathBReview(inquiry: false);
 
         var failed = await rig.CommitAsync(review);
         failed.Resumable.Should().BeTrue(failed.Detail);
 
         rig.Clock.Advance(TimeSpan.FromMinutes(1));
         rig.Executors["add-todo"].Result = null;
-        // The retry does not resend the plan-read time: only the stored review start can place the closure after it.
-        var retried = await rig.CommitAsync(review with { Retry = true, PlanReadOn = null });
+        // The plan is read again now: only the STORED review start can still place the closure after it.
+        await rig.StampPlanRead(Primary, rig.Clock.GetUtcNow());
+        var retried = await rig.CommitAsync(review with { Retry = true });
 
         retried.Status.Should().Be(DecisionCommitStatus.Recorded, "the closure came after the review started, so it is re-closed, not a conflict");
         rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionActed);
@@ -1172,7 +1205,9 @@ public sealed class DecisionCommitServiceTests
         result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
         result.SentButNotRecorded.Should().BeFalse();
         result.RecordClass.Should().Be("Judgement");
-        Steps(rig.Record).GetProperty("unnamedNextSteps").EnumerateArray().Select(c => c.GetString()).Should().Equal(new[] { "send-email" });
+        var followOn = JsonDocument.Parse(rig.Record.GetAttributeValue<string>("sprk_followons")).RootElement.EnumerateArray().Single();
+        followOn.GetProperty("actionCode").GetString().Should().Be("send-email");
+        followOn.GetProperty("id").ValueKind.Should().Be(JsonValueKind.Null, "a follow-on without an id, never dropped");
     }
 
     // ── FR-51: the caller writes the subject and appends to the matter ───────────────────────────────────────────
@@ -1248,7 +1283,7 @@ public sealed class DecisionCommitServiceTests
     public async Task AReadFaultDuringAResume_PutsTheResumedFailureBack()
     {
         var rig = new Rig();
-        rig.Executors["add-todo"].Result = DecisionActionOutcome.Failed("add-todo", DecisionActionReasons.WriteFailed, "no");
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
         var review = PathBReview(inquiry: false);
         (await rig.CommitAsync(review)).Resumable.Should().BeTrue();
         rig.Executors["add-todo"].Result = null;
@@ -1272,8 +1307,174 @@ public sealed class DecisionCommitServiceTests
 
         var result = await rig.CommitAsync(PathBReview(also: Enumerable.Range(0, 26).Select(_ => Guid.NewGuid()).ToList()));
 
-        result.ReasonCode.Should().Be(DecisionCommitReasons.AlsoResolveNotAllowed);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.ReviewInvalid);
         rig.Writes.Should().BeEmpty();
+    }
+
+    // ── Coordinator round (review at e48399548) ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ASecondConcurrentCommitOfTheSameReview_IsInProgress_AndWritesNothing()
+    {
+        var rig = new Rig();
+        var review = PathBReview();
+        // Another instance holds the review's lock (taken before the ledger read).
+        var held = await rig.Lease.TryAcquireAsync(DecisionCommitService.LeaseId(Tenant, CallerOid.ToString("D"), review.ReviewId), null, TimeSpan.FromMinutes(1), CancellationToken.None);
+        held.Status.Should().Be(ScheduledJobLeaseStatus.Granted);
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.InProgress);
+        rig.Writes.Should().BeEmpty();
+        await rig.Lease.ReleaseAsync(DecisionCommitService.LeaseId(Tenant, CallerOid.ToString("D"), review.ReviewId), held.Token!, CancellationToken.None);
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded, "the lock is released, not leaked");
+    }
+
+    [Fact]
+    public async Task ALockStoreThatCannotBeReached_FailsClosed()
+    {
+        var rig = new Rig();
+        var lease = new Mock<IScheduledJobLease>();
+        lease.Setup(l => l.TryAcquireAsync(It.IsAny<string>(), It.IsAny<DateTimeOffset?>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ScheduledJobLeaseUnavailableException("redis down"));
+        rig.Lease = lease.Object;
+
+        var result = await rig.CommitAsync(PathBReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable);
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TheRecordOwner_IsResolvedBeforeTheFirstWrite_AndARefusalWritesNothing()
+    {
+        var ok = new Rig();
+        await ok.CommitAsync(PathBReview());
+        ok.Log.IndexOf("owner").Should().BeLessThan(ok.Log.FindIndex(l => l.StartsWith("execute:", StringComparison.Ordinal)), "step 1, before any write");
+        ok.Log.Count(l => l == "owner").Should().Be(1, "resolved once and handed to the write");
+
+        var refused = new Rig { Owner = RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, "no team") };
+        var result = await refused.CommitAsync(PathBReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.RecordRefused);
+        refused.Writes.Should().BeEmpty("the inquiry never went out");
+    }
+
+    [Fact]
+    public async Task ARecordedReplay_ClosesASignalTheFirstRunCouldNotClose()
+    {
+        var rig = new Rig();
+        rig.BeforeSignalUpdate = _ =>
+        {
+            rig.BeforeSignalUpdate = null;
+            throw new TimeoutException("no answer"); // the close fails once, after the record
+        };
+        var review = PathBReview(inquiry: false, todo: false);
+
+        var first = await rig.CommitAsync(review);
+        first.Status.Should().Be(DecisionCommitStatus.Recorded);
+        first.Signals.Single().Warning.Should().Be("signal_close_failed");
+        rig.Status(Primary).Should().Be(Open);
+
+        var replay = await rig.CommitAsync(review);
+
+        replay.Replayed.Should().BeTrue();
+        rig.Records.Should().ContainSingle("the record is not written again");
+        rig.LinkedRecord(Primary).Should().Be(RecordId);
+        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionActed);
+        replay.Signals.Single().Warning.Should().BeNull();
+        (await rig.CommitAsync(review)).Signals.Single().Warning.Should().BeNull("the stored outcome was updated");
+    }
+
+    [Fact]
+    public async Task TheSameReviewIdForADifferentDecision_OrADifferentSignal_IsReviewChanged()
+    {
+        var rig = new Rig();
+        rig.AddSignal(Second, DecisionLane.Decide, Matter, PathB);
+        var review = PathBReview(inquiry: false, todo: false);
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+
+        var changed = await rig.CommitAsync(review with { Because = "something else" });
+        var otherSignal = await rig.CommitAsync(review, Second);
+
+        changed.ReasonCode.Should().Be(DecisionCommitReasons.ReviewChanged);
+        otherSignal.ReasonCode.Should().Be(DecisionCommitReasons.ReviewChanged);
+        rig.Status(Second).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task ACorePairThatChangedBetweenTheCallersReadAndTheAppOnlyRead_IsRefused()
+    {
+        var rig = new Rig();
+        rig.CallerSeesCore[Primary] = OtherMatter; // the caller was authorized on another matter
+
+        var result = await rig.CommitAsync(PathBReview());
+
+        result.ReasonCode.Should().Be(DecisionCommitReasons.CoreChanged);
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WithoutAServerPlanReadStamp_ASystemClosureBeforeTheCommit_IsAConflict()
+    {
+        var rig = new Rig();
+        rig.AddSignal(Primary, DecisionLane.Decide, Matter, PathB, Resolved, SignalWriter.ResolutionConditionCleared, Now.UtcDateTime.AddMinutes(-5));
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Conflict, "no server stamp: the review started now");
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AServerPlanReadStamp_BeforeTheSystemClosure_LetsTheDecisionReclose()
+    {
+        var rig = new Rig();
+        rig.AddSignal(Primary, DecisionLane.Decide, Matter, PathB, Resolved, SignalWriter.ResolutionConditionCleared, Now.UtcDateTime.AddMinutes(-5));
+        await rig.StampPlanRead(Primary, Now.AddMinutes(-10));
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionActed);
+        result.Signals.Single().Warning.Should().Be("reclosed_after_system_resolution");
+    }
+
+    [Fact]
+    public async Task APlanReadStamp_IsTheServersOwn_AndExpires()
+    {
+        var rig = new Rig();
+        var http = Http();
+
+        await rig.PlanReads.StampAsync(http, Primary, CancellationToken.None);
+        (await rig.PlanReads.ReadAsync(Tenant, CallerOid.ToString("D"), Primary, CancellationToken.None)).Should().Be(Now);
+        (await rig.PlanReads.ReadAsync(Tenant, Guid.NewGuid().ToString("D"), Primary, CancellationToken.None)).Should().BeNull("per caller");
+
+        rig.Clock.Advance(DecisionPlanReadStamp.Ttl + TimeSpan.FromMinutes(1));
+        (await rig.PlanReads.ReadAsync(Tenant, CallerOid.ToString("D"), Primary, CancellationToken.None)).Should().BeNull("an old read is not a review start");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AClosedSignal_HasLastEvaluatedEqualToResolvedOn_D120(bool reclose)
+    {
+        var rig = new Rig();
+        if (reclose)
+        {
+            rig.AddSignal(Primary, DecisionLane.Decide, Matter, PathB, Resolved, SignalWriter.ResolutionConditionCleared, Now.UtcDateTime.AddMinutes(-5));
+            rig.Signals[Primary]["sprk_lastevaluated"] = Now.UtcDateTime.AddMinutes(-5);
+            await rig.StampPlanRead(Primary, Now.AddMinutes(-10));
+        }
+
+        rig.Clock.Advance(TimeSpan.FromMinutes(3));
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        var update = rig.SignalUpdates.Single(u => u.Id == Primary).Fields;
+        update["sprk_lastevaluated"].Should().Be(update["sprk_resolvedon"], "D-120: never a lastevaluated later than resolvedon");
+        rig.Signals[Primary].GetAttributeValue<DateTime>("sprk_lastevaluated").Should().Be(rig.Signals[Primary].GetAttributeValue<DateTime>("sprk_resolvedon"));
     }
 
     // ── The HTTP mapping ─────────────────────────────────────────────────────────────────────────────────────────

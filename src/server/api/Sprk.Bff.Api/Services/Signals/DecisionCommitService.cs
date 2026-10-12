@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
@@ -54,10 +55,6 @@ public sealed record DecisionReview
 
     /// <summary>The decider's "because" text, recorded in the fact snapshot.</summary>
     public string? Because { get; init; }
-
-    /// <summary>When the wizard read the plan. Only used to tell a system closure DURING the review (tolerated, step 6) from
-    /// one before it; bounded to the last 24 hours and never later than now.</summary>
-    public DateTimeOffset? PlanReadOn { get; init; }
 
     /// <summary>Resume a review whose first attempt FAILED before its record: the steps that landed are not run again.</summary>
     public bool Retry { get; init; }
@@ -220,6 +217,7 @@ public static class DecisionCommitReasons
     public const string ReviewChanged = "ontology.decision.review_changed";
     public const string NotResumable = "ontology.decision.not_resumable";
     public const string NotAuthorized = "ontology.decision.not_authorized";
+    public const string CoreChanged = "ontology.decision.core_changed";
 }
 
 /// <summary>Stable EventIds for the commit route (50360-50369, assigned by the coordinator 2026-10-11).</summary>
@@ -269,13 +267,15 @@ public sealed class DecisionCommitService
     internal const int LedgerVersion = 1;
     internal static readonly TimeSpan InProgressTtl = TimeSpan.FromMinutes(10);
     internal static readonly TimeSpan OutcomeTtl = TimeSpan.FromDays(7);
-    internal static readonly TimeSpan PlanReadWindow = TimeSpan.FromHours(24);
 
     private const int ReasonMaxLength = 2000;
     private const int MaxNextSteps = 10;
     private const int MaxAlsoResolve = 25;
     private const string WriteOperation = "write";
     private const int ConcurrencyVersionMismatch = unchecked((int)0x80060882);
+
+    /// <summary>The state of a Signal the commit did not close or link.</summary>
+    private const string Unchanged = "Unchanged";
 
     private static readonly string[] SignalColumns =
     [
@@ -295,6 +295,8 @@ public sealed class DecisionCommitService
     private readonly CallerRecordAccessProbe _probe;
     private readonly ITenantCache _ledger;
     private readonly DecisionCommitFollowUps _followUps;
+    private readonly IScheduledJobLease _lease;
+    private readonly DecisionPlanReadStamp _planReads;
     private readonly TimeProvider _clock;
     private readonly ILogger<DecisionCommitService> _logger;
 
@@ -308,6 +310,8 @@ public sealed class DecisionCommitService
         CallerRecordAccessProbe probe,
         ITenantCache ledger,
         DecisionCommitFollowUps followUps,
+        IScheduledJobLease lease,
+        DecisionPlanReadStamp planReads,
         TimeProvider clock,
         ILogger<DecisionCommitService> logger)
     {
@@ -320,6 +324,8 @@ public sealed class DecisionCommitService
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _followUps = followUps ?? throw new ArgumentNullException(nameof(followUps));
+        _lease = lease ?? throw new ArgumentNullException(nameof(lease));
+        _planReads = planReads ?? throw new ArgumentNullException(nameof(planReads));
         _clock = clock ?? throw new ArgumentNullException(nameof(clock));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -406,7 +412,7 @@ public sealed class DecisionCommitService
         // cannot read an item learns nothing about it, not even a stored outcome. Nothing about the Signals is read app-only yet.
         var also = review.AlsoResolve ?? [];
         if (also.Count > MaxAlsoResolve)
-            return Refused(review.ReviewId, DecisionCommitReasons.AlsoResolveNotAllowed, $"A decision can resolve at most {MaxAlsoResolve} other items.");
+            return Refused(review.ReviewId, DecisionCommitReasons.ReviewInvalid, $"A decision can resolve at most {MaxAlsoResolve} other items.");
         if (also.Any(id => id == Guid.Empty || id == signalId) || also.Distinct().Count() != also.Count)
             return Refused(review.ReviewId, DecisionCommitReasons.AlsoResolveNotAllowed, "Also resolve names the item itself, a blank id or the same item twice.");
 
@@ -426,6 +432,58 @@ public sealed class DecisionCommitService
         var hash = ContentHash(signalId, review);
         var ledgerKey = $"{callerObjectId}:{review.ReviewId:D}";
 
+        // ---- (0a) One commit per review id at a time, across instances: an atomic lease (Redis SET NX PX when Redis is on;
+        // the same primitive NoAccessShareEnforcer uses as a keyed mutex). The ledger's marker alone is a get-then-set.
+        var leaseId = LeaseId(tenantId, callerObjectId, review.ReviewId);
+        ScheduledJobLeaseGrant grant;
+        try
+        {
+            grant = await _lease.TryAcquireAsync(leaseId, occurrenceUtc: null, InProgressTtl, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Decision commit: the review lock could not be taken for review {ReviewId} ({ExceptionType}); refusing (fail closed).",
+                review.ReviewId, ex.GetType().Name);
+            return Unavailable(review.ReviewId);
+        }
+
+        if (grant.Status != ScheduledJobLeaseStatus.Granted || grant.Token is not { } leaseToken)
+            return InProgress(review.ReviewId);
+
+        try
+        {
+            return await CommitLeasedAsync(signalId, review, http, now, tenantId, callerObjectId, ids, lanes, hash, ledgerKey, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            try
+            {
+                await _lease.ReleaseAsync(leaseId, leaseToken, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // It expires on its own (InProgressTtl); until then a repeat is told the review is in progress.
+                _logger.LogWarning("Decision commit: the review lock could not be released ({ExceptionType}).", ex.GetType().Name);
+            }
+        }
+    }
+
+    internal static string LeaseId(string tenantId, string callerObjectId, Guid reviewId) =>
+        $"{LedgerResource}:{tenantId}:{callerObjectId}:{reviewId:D}";
+
+    private static DecisionCommitResult InProgress(Guid reviewId) =>
+        new()
+        {
+            Status = DecisionCommitStatus.InProgress,
+            ReviewId = reviewId,
+            ReasonCode = DecisionCommitReasons.ReviewInProgress,
+            Detail = "This decision is already being recorded.",
+        };
+
+    private async Task<DecisionCommitResult> CommitLeasedAsync(
+        Guid signalId, DecisionReview review, HttpContext http, DateTimeOffset now, string tenantId, string callerObjectId,
+        IReadOnlyList<Guid> ids, IReadOnlyDictionary<Guid, SignalAccessDecision> lanes, string hash, string ledgerKey, CancellationToken ct)
+    {
         // ---- (0) The review id: in progress, or a first outcome to return --------------------------------------------
         LedgerEntry? prior;
         try
@@ -440,29 +498,27 @@ public sealed class DecisionCommitService
 
         DecisionCommitResult? resume = null;
         if (prior is { InProgress: true })
-        {
-            return new DecisionCommitResult
-            {
-                Status = DecisionCommitStatus.InProgress,
-                ReviewId = review.ReviewId,
-                ReasonCode = DecisionCommitReasons.ReviewInProgress,
-                Detail = "This decision is already being recorded.",
-            };
-        }
+            return InProgress(review.ReviewId);
 
         if (prior is { Outcome: { } first })
         {
+            // The same review id is the same review: the stored hash covers the Signal id and everything the review asks for.
+            if (!string.Equals(prior.ContentHash, hash, StringComparison.Ordinal))
+                return Refused(review.ReviewId, DecisionCommitReasons.ReviewChanged, "This review id was already used for a different decision.");
+            if (first.Status == DecisionCommitStatus.Recorded)
+                return await ReplayRecordedAsync(first, prior, ids, lanes, review, http, tenantId, ledgerKey).ConfigureAwait(false);
             if (!review.Retry || first.Status != DecisionCommitStatus.Failed)
                 return first with { Replayed = true };
             if (!first.Resumable)
                 return first with { Replayed = true, ReasonCode = DecisionCommitReasons.NotResumable };
-            if (!string.Equals(prior.ContentHash, hash, StringComparison.Ordinal))
-                return Refused(review.ReviewId, DecisionCommitReasons.ReviewChanged, "A retry must repeat the review it retries.");
             resume = first;
         }
 
-        // The review started when the wizard read the plan (bounded); a resume keeps the first attempt's start.
-        var reviewStart = prior?.ReviewStart ?? BoundPlanReadOn(review.PlanReadOn, now);
+        // The review started when the SERVER last served this caller the plan (K4: never a client-sent time); a resume keeps
+        // the first attempt's start; no stamp means it started now (any earlier system closure is then a conflict).
+        var reviewStart = prior?.ReviewStart
+            ?? await _planReads.ReadAsync(tenantId, callerObjectId, signalId, ct).ConfigureAwait(false)
+            ?? now;
 
         if (!review.Confirmed)
             return Refused(review.ReviewId, DecisionCommitReasons.NotConfirmed, "The decision was not confirmed; nothing was done.");
@@ -531,6 +587,74 @@ public sealed class DecisionCommitService
         return result;
     }
 
+    /// <summary>A repeat of a Recorded review: returns the first outcome and closes (or links) any covered Signal its first run
+    /// did not (a close that failed, a crash between the record and the closes). <see cref="CloseSignalAsync"/>'s own
+    /// "already done" check makes this idempotent. Nothing else is written again.</summary>
+    private async Task<DecisionCommitResult> ReplayRecordedAsync(
+        DecisionCommitResult first, LedgerEntry prior, IReadOnlyList<Guid> ids, IReadOnlyDictionary<Guid, SignalAccessDecision> lanes,
+        DecisionReview review, HttpContext http, string tenantId, string ledgerKey)
+    {
+        var closedAlready = first.Signals.Where(s => s.State != Unchanged).Select(s => s.SignalId).ToHashSet();
+        var open = ids.Where(id => !closedAlready.Contains(id)).ToList();
+        if (open.Count == 0 || first.DecisionRecordId is not { } recordId)
+            return first with { Replayed = true };
+
+        Guid? confirmedBy;
+        try
+        {
+            confirmedBy = await _probe.GetCallerSystemUserIdAsync(TokenHelper.ExtractBearerTokenOrNull(http), CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Decision commit: the caller's user id could not be read to finish closing review {ReviewId} ({ExceptionType}).",
+                review.ReviewId, ex.GetType().Name);
+            confirmedBy = null;
+        }
+
+        if (confirmedBy is not { } by || by == Guid.Empty)
+            return first with { Replayed = true };
+
+        var closed = await CloseAfterRecordAsync(open, lanes[ids[0]].Lane, review, recordId, by, prior.ReviewStart).ConfigureAwait(false);
+        var signals = first.Signals.Where(s => closedAlready.Contains(s.SignalId)).Concat(closed).ToList();
+        var updated = first with { Signals = signals, Warnings = signals.Where(x => x.Warning is not null).Select(x => x.Warning!).ToList() };
+        await TrySetLedgerAsync(tenantId, ledgerKey, prior with { Outcome = updated }, OutcomeTtl, CancellationToken.None).ConfigureAwait(false);
+        return updated with { Replayed = true };
+    }
+
+    /// <summary>Closes (or links) <paramref name="signalIds"/> with an already-written record, the resolution derived from the
+    /// review as validation derived it the first time. Uncancellable: these are writes after the record.</summary>
+    private async Task<IReadOnlyList<DecisionCommitSignal>> CloseAfterRecordAsync(
+        IReadOnlyList<Guid> signalIds, DecisionLane? lane, DecisionReview review, Guid recordId, Guid confirmedBy, DateTimeOffset reviewStart)
+    {
+        var (resolution, dismissalText) = ResolutionOf(review, lane);
+        var signals = new List<DecisionCommitSignal>();
+        foreach (var id in signalIds)
+            signals.Add(await CloseSignalAsync(id, resolution, dismissalText, recordId, confirmedBy, reviewStart, CancellationToken.None).ConfigureAwait(false));
+        return signals;
+    }
+
+    /// <summary>The resolution a (previously validated) review gives its Signals, and its dismissal text.</summary>
+    private static (Resolution Resolution, string? DismissalText) ResolutionOf(DecisionReview review, DecisionLane? lane)
+    {
+        var taken = (review.Actions ?? []).Where(a => a is { Taken: true }).Select(a => a.Code).ToList();
+        if (taken.Count == 0 && (review.NextSteps ?? []).Count == 0)
+        {
+            var reason = lane is { } l && review.Dismissal is { Code: { Length: > 0 } code }
+                ? DecisionActionCatalog.DismissalReasons(l).FirstOrDefault(r => r.Code == code)
+                : null;
+            return (Resolution.Dismissed, reason is null ? null : DismissalText(reason, review.Dismissal!.Detail));
+        }
+
+        return (taken.Any(c => DecisionActionCatalog.TryGet(c, out var def) && def.ResolvesSignal) ? Resolution.Acted : Resolution.InquirySent, null);
+    }
+
+    private static string DismissalText(DecisionDismissalReason reason, string? detail)
+    {
+        var trimmed = detail?.Trim();
+        var text = $"{reason.Code} - {(string.IsNullOrEmpty(trimmed) ? reason.Label : trimmed)}";
+        return text.Length > ReasonMaxLength ? text[..ReasonMaxLength] : text;
+    }
+
     /// <summary>Ends an attempt that wrote nothing new: a first attempt frees its review id; a resume puts back the failure it
     /// resumed, so the steps that landed are never forgotten (and never run again).</summary>
     private async Task ReleaseLedgerAsync(string tenantId, string ledgerKey, DateTimeOffset reviewStart, string hash, DecisionCommitResult? resume)
@@ -590,6 +714,8 @@ public sealed class DecisionCommitService
 
         if (existingRecord is { } recorded && resume is null)
         {
+            // The ledger forgot the outcome (or never got it): the record answers, and any Signal not yet closed with it is.
+            var closedNow = await CloseAfterRecordAsync(ids, lanes[ids[0]].Lane, review, recorded, confirmedBy, reviewStart).ConfigureAwait(false);
             return new DecisionCommitResult
             {
                 Status = DecisionCommitStatus.Recorded,
@@ -597,6 +723,8 @@ public sealed class DecisionCommitService
                 DecisionRecordId = recorded,
                 Replayed = true,
                 Detail = "This decision was already recorded.",
+                Signals = closedNow,
+                Warnings = closedNow.Where(x => x.Warning is not null).Select(x => x.Warning!).ToList(),
             };
         }
 
@@ -662,6 +790,22 @@ public sealed class DecisionCommitService
             return Refused(reviewId, DecisionCommitReasons.RecordRefused, $"This decision cannot be recorded ({ex.Reason}); nothing was done.");
         }
 
+        // ---- (1f) The record's owner, resolved BEFORE the first write: an owner refusal refuses the decision, not the record
+        // after the sends. The answer is handed to the write at step 5.
+        RecordOwnerResolution? recordOwner;
+        try
+        {
+            recordOwner = await _records.ResolveOwnerAsync(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p), executed: null), ct).ConfigureAwait(false);
+        }
+        catch (DecisionRecordRefusedException ex) when (ex.Reason == DecisionRecordRefusalReason.OwnerResolutionFailed)
+        {
+            return Unavailable(reviewId, DecisionCommitReasons.RecordRefused, "The decision's owner could not be checked; nothing was done.");
+        }
+        catch (DecisionRecordRefusedException ex)
+        {
+            return Refused(reviewId, DecisionCommitReasons.RecordRefused, $"This decision cannot be recorded ({ex.Reason}); nothing was done.");
+        }
+
         // ---- (2)(3)(4) The writes, in D-17 order ----------------------------------------------------------------------------
         // From the first write on, the request's cancellation no longer applies: a client that disconnects after a send must
         // still get its record written (or its failure stored), never a half-done commit with no outcome.
@@ -717,7 +861,7 @@ public sealed class DecisionCommitService
         {
             try
             {
-                var written = await _records.WriteAsync(RecordRequest(review, p, confirmedBy, now, steps, followOns, executed), writeCt).ConfigureAwait(false);
+                var written = await _records.WriteAsync(RecordRequest(review, p, confirmedBy, now, steps, followOns, executed), recordOwner, writeCt).ConfigureAwait(false);
                 recordId = written.RecordId;
                 recordClass = written.RecordClass.ToString();
             }
@@ -739,7 +883,7 @@ public sealed class DecisionCommitService
         var warnings = new List<string>();
         foreach (var row in p.Resolved)
         {
-            var closed = await CloseSignalAsync(row.Id, p, recordId, confirmedBy, reviewStart, writeCt).ConfigureAwait(false);
+            var closed = await CloseSignalAsync(row.Id, p.Resolution, p.DismissalText, recordId, confirmedBy, reviewStart, writeCt).ConfigureAwait(false);
             signals.Add(closed);
             if (closed.Warning is { } warning)
                 warnings.Add(warning);
@@ -783,6 +927,9 @@ public sealed class DecisionCommitService
         {
             if (row.CoreMalformed)
                 return No(DecisionCommitReasons.CoreUnsupported, "An item's core record could not be read; nothing was done.");
+            // K2: the core pair the caller's own read authorized must be the pair this route acts on (re-read app-only).
+            if (access[row.Id].CoreTypeId != row.CoreTypeId || access[row.Id].CoreId != row.CoreId)
+                return No(DecisionCommitReasons.CoreChanged, "An item's matter or project changed while the decision was made; nothing was done.");
             if (!row.IsOpen && !row.SystemClosedSince(reviewStart))
                 return No(DecisionCommitReasons.SignalNotOpen, "This item was already resolved; nothing was done.", status: DecisionCommitStatus.Conflict);
         }
@@ -871,12 +1018,9 @@ public sealed class DecisionCommitService
             var reason = DecisionActionCatalog.DismissalReasons(lane).FirstOrDefault(r => r.Code == code);
             if (reason is null)
                 return No(DecisionCommitReasons.DismissalReasonUnknown, $"'{code}' is not a dismissal reason for this lane.");
-            var detail = dismissal.Detail?.Trim();
-            if (reason.RequiresDetail && string.IsNullOrEmpty(detail))
+            if (reason.RequiresDetail && string.IsNullOrEmpty(dismissal.Detail?.Trim()))
                 return No(DecisionCommitReasons.DismissalDetailRequired, $"'{reason.Label}' needs a short explanation.");
-            dismissalText = $"{reason.Code} - {(string.IsNullOrEmpty(detail) ? reason.Label : detail)}";
-            if (dismissalText.Length > ReasonMaxLength)
-                dismissalText = dismissalText[..ReasonMaxLength];
+            dismissalText = DismissalText(reason, dismissal.Detail);
             outcome = Resolution.Dismissed;
         }
         else
@@ -1231,10 +1375,10 @@ public sealed class DecisionCommitService
         var landed = executed.SelectMany(e => e.Written).ToList();
         var possibly = outcome.PossiblyWritten.Select(w => new DecisionCommitRef(w.Entity, w.Id)).ToList();
 
-        // A message that failed may still have gone out; resuming would send it again. A failed step that wrote part of its work
-        // (a revision whose budget amount was then refused) would write it again on a resume. Anything else can resume: the steps
-        // that landed in full are not repeated.
-        var resumable = !(step.Def.SendsMessage && outcome.Status == DecisionActionStatus.Failed)
+        // Only a step that was REFUSED (by contract: nothing written) can resume. A Failed step may have landed (a create that
+        // timed out after committing, a message that went out, a revision whose amount was then refused), so running it again
+        // could write it twice; a thrown step is Failed. The steps that landed in full before it are never repeated.
+        var resumable = outcome.Status == DecisionActionStatus.Refused
                         && possibly.Count == 0
                         && outcome.Written.Count == 0;
         return new DecisionCommitResult
@@ -1305,21 +1449,21 @@ public sealed class DecisionCommitService
     /// Row-version conditional; a concurrent change is re-read once.
     /// </summary>
     private async Task<DecisionCommitSignal> CloseSignalAsync(
-        Guid signalId, Prepared p, Guid recordId, Guid confirmedBy, DateTimeOffset reviewStart, CancellationToken ct)
+        Guid signalId, Resolution resolution, string? dismissalText, Guid recordId, Guid confirmedBy, DateTimeOffset reviewStart, CancellationToken ct)
     {
-        var state = p.Resolution.ToString();
+        var state = resolution.ToString();
         for (var attempt = 0; attempt < 2; attempt++)
         {
             var row = await ReadSignalAsync(signalId, ct).ConfigureAwait(false);
             if (row is null)
                 return Warn(signalId, "signal_unreadable", "The item could not be read to close it.");
 
-            if (row.DecisionRecordId == recordId && (row.Status == SignalWriter.SignalStatusResolved || p.Resolution == Resolution.InquirySent))
+            if (row.DecisionRecordId == recordId && (row.Status == SignalWriter.SignalStatusResolved || resolution == Resolution.InquirySent))
                 return new DecisionCommitSignal(signalId, state, null); // already done (a resumed review)
 
             var open = row.IsOpen;
             var systemClosed = row.SystemClosedSince(reviewStart);
-            if (!open && !(systemClosed && p.Resolution != Resolution.InquirySent))
+            if (!open && !(systemClosed && resolution != Resolution.InquirySent))
             {
                 return Warn(signalId, row.Status == SignalWriter.SignalStatusResolved && !systemClosed ? "resolved_by_another_decision" : "closed_during_review",
                     "The item was closed by someone else while this decision was made; it was left as it is.");
@@ -1329,17 +1473,22 @@ public sealed class DecisionCommitService
                 return Warn(signalId, "signal_unversioned", "The item could not be closed safely.");
 
             var fields = new Dictionary<string, object> { ["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", recordId) };
-            if (p.Resolution == Resolution.InquirySent)
+            if (resolution == Resolution.InquirySent)
             {
                 fields["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusAcknowledged);
             }
             else
             {
                 fields["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved);
-                fields["sprk_resolutiontype"] = new OptionSetValue(p.Resolution == Resolution.Dismissed ? SignalWriter.ResolutionDismissed : SignalWriter.ResolutionActed);
-                fields["sprk_resolvedon"] = _clock.GetUtcNow().UtcDateTime;
+                fields["sprk_resolutiontype"] = new OptionSetValue(resolution == Resolution.Dismissed ? SignalWriter.ResolutionDismissed : SignalWriter.ResolutionActed);
+                // D-120 (025): written with sprk_resolvedon in the SAME update and the SAME timestamp, as SignalWriter.CloseAsync
+                // does (CloseAsync takes system resolutions only). A lastevaluated later than resolvedon would read as "the
+                // condition was observed cleared" on a Threshold Signal, and the next crossing would re-raise.
+                var resolvedOn = _clock.GetUtcNow().UtcDateTime;
+                fields["sprk_resolvedon"] = resolvedOn;
+                fields["sprk_lastevaluated"] = resolvedOn;
                 fields["sprk_resolvedby"] = new EntityReference("systemuser", confirmedBy);
-                if (p.DismissalText is { } reason)
+                if (dismissalText is { } reason)
                     fields["sprk_resolutionnotes"] = reason;
             }
 
@@ -1357,7 +1506,7 @@ public sealed class DecisionCommitService
                 _logger.LogWarning(DecisionCommitEvents.SignalCloseFailed, ex,
                     "Decision commit: Signal {SignalId} could not be closed with record {RecordId}.", signalId, recordId);
                 OntologyWriterTelemetry.RecordFailure("decision_commit_signal_close_failed");
-                return new DecisionCommitSignal(signalId, "Unchanged", "signal_close_failed");
+                return new DecisionCommitSignal(signalId, Unchanged, "signal_close_failed");
             }
         }
 
@@ -1368,7 +1517,7 @@ public sealed class DecisionCommitService
             _logger.LogWarning(DecisionCommitEvents.SignalCloseFailed,
                 "Decision commit: Signal {SignalId} not closed with record {RecordId}: {Code}.", id, recordId, code);
             OntologyWriterTelemetry.RecordFailure("decision_commit_signal_close_failed");
-            return new DecisionCommitSignal(id, "Unchanged", code);
+            return new DecisionCommitSignal(id, Unchanged, code);
         }
     }
 
@@ -1413,9 +1562,6 @@ public sealed class DecisionCommitService
             _logger.LogWarning(ex, "Decision commit: the in-progress marker could not be removed.");
         }
     }
-
-    internal static DateTimeOffset BoundPlanReadOn(DateTimeOffset? planReadOn, DateTimeOffset now) =>
-        planReadOn is { } read && read <= now && read >= now - PlanReadWindow ? read : now;
 
     /// <summary>A stable hash of what the review asks for (not the retry flag or the plan-read time), so a retry can be checked
     /// to be the same review.</summary>

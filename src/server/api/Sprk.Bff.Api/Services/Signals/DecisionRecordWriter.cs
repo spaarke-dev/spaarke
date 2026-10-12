@@ -63,8 +63,8 @@ public sealed record DecisionRecordFollowOn(string ActionCode, string Entity, Gu
 /// <param name="Denied">True when the human denied at the gate; the record then carries outcome Denied.</param>
 /// <param name="PrivilegeFlagged">Copied forward from the Signal (ADR-015: flagged, never decided).</param>
 /// <param name="UnnamedNextSteps">Next steps that ran but created no row the record can name (a notification email whose
-/// communication row was not tracked; task 043). Catalog Next-step codes; listed in <c>sprk_steps</c>, and they count as
-/// something done (not a dismissal), exactly as a follow-on does.</param>
+/// communication row was not saved after the send; task 043). Catalog Next-step codes; listed in <c>sprk_followons</c> as
+/// follow-ons without an id, and they count as something done (not a dismissal), exactly as a follow-on does.</param>
 public sealed record DecisionRecordRequest(
     Guid ReviewId,
     Guid PolicyVersionId,
@@ -84,7 +84,7 @@ public sealed record DecisionRecordRequest(
     bool PrivilegeFlagged = false,
     IReadOnlyList<string>? UnnamedNextSteps = null);
 
-/// <summary>The result of <see cref="DecisionRecordWriter.WriteAsync"/>.</summary>
+/// <summary>The result of <see cref="DecisionRecordWriter.WriteAsync(DecisionRecordRequest, CancellationToken)"/>.</summary>
 /// <param name="RecordId">The new <c>sprk_decisionrecord</c> id: the caller sets it on every resolved Signal.</param>
 /// <param name="RecordClass">The class derived from the catalog.</param>
 /// <param name="ResolvedSignalIds">The Signals the record covers, echoed for the caller's one link step.</param>
@@ -222,7 +222,12 @@ public sealed class DecisionRecordWriter
     /// or <see cref="DecisionRecordRefusalReason.DataverseAccessDenied"/> for a privilege fault; the inner exception is kept, and
     /// after a timeout the row may exist).</exception>
     /// <exception cref="OperationCanceledException">The caller cancelled.</exception>
-    public async Task<DecisionRecordWriteResult> WriteAsync(DecisionRecordRequest request, CancellationToken ct = default)
+    public Task<DecisionRecordWriteResult> WriteAsync(DecisionRecordRequest request, CancellationToken ct = default) =>
+        WriteAsync(request, resolvedOwner: null, ct);
+
+    /// <summary>Writes the review's one Decision Record with an owner already resolved by <see cref="ResolveOwnerAsync"/>
+    /// (null: resolve it here). Same exceptions as <see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/>.</summary>
+    public async Task<DecisionRecordWriteResult> WriteAsync(DecisionRecordRequest request, RecordOwnerResolution? resolvedOwner, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -237,47 +242,19 @@ public sealed class DecisionRecordWriter
             {
                 // Task 040 (D-33/D-34): the core record is the resolver's parent. Secure answer -> the team owns the row, set in
                 // the create by uac-r2's own ApplyTo; not secure -> the writer's current ownership stays (SignalWriter's rule).
-                RecordOwnerResolution owner;
-                try
-                {
-                    owner = await _ownership.ResolveOwnerAsync(
-                        new RecordOwnershipContext
-                        {
-                            TargetEntityLogicalName = core.EntityLogicalName,
-                            TargetRecordId = core.RecordId,
-                            Parents = Array.Empty<RecordOwnershipParent>(),
-                        },
-                        ct).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    // A Dataverse fault in the resolver is not an answer (it propagates there); here it becomes the writer's one
-                    // exception type. Nothing was written.
-                    throw new DecisionRecordRefusedException(
-                        DecisionRecordRefusalReason.OwnerResolutionFailed,
-                        "The ownership resolver failed, so the Decision Record owner is unknown; nothing was written.",
-                        innerException: ex);
-                }
-
-                if (owner.IsRefused)
+                // Task 043: the commit route resolves the owner BEFORE its first write and hands it in, so an owner refusal
+                // refuses the whole decision with nothing written.
+                var owner = resolvedOwner ?? await ResolveCoreOwnerAsync(core, ct).ConfigureAwait(false);
+                if (owner.IsRefused || (owner.IsSecureOwner && !owner.IsOwned))
                 {
                     throw new DecisionRecordRefusedException(
                         DecisionRecordRefusalReason.OwnerRefused,
-                        "The ownership resolver refused an owner for the Decision Record; nothing was written.",
+                        "The resolved owner of the Decision Record is a refusal; nothing was written.",
                         owner.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource);
                 }
 
                 if (owner.IsSecureOwner)
                 {
-                    // A secure answer with no team is malformed: falling through would write an ordinary-owned child of a secure root.
-                    if (!owner.IsOwned)
-                    {
-                        throw new DecisionRecordRefusedException(
-                            DecisionRecordRefusalReason.OwnerRefused,
-                            "The ownership resolver marked the record secure but named no owner team; nothing was written.",
-                            RecordOwnerRefusal.NoOwnerSource);
-                    }
-
                     owner.ApplyTo(entity);
                     secureTeamId = owner.OwningTeamId;
                 }
@@ -339,9 +316,80 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>
-    /// Task 043: every refusal <see cref="WriteAsync"/> can give WITHOUT I/O (validation, record class, column sizes, the no-core
+    /// Task 043: resolves the Decision Record's owner for a record with a core (null for a no-core review, whose owner is the
+    /// item's owner in the request), with every owner refusal the write would give. The commit route calls it before its first
+    /// write and passes the answer to <see cref="WriteAsync(DecisionRecordRequest, RecordOwnerResolution?, CancellationToken)"/>.
+    /// Writes nothing.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException">The owner was refused, or the resolver failed.</exception>
+    public async Task<RecordOwnerResolution?> ResolveOwnerAsync(DecisionRecordRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Core is not { } core)
+            return null;
+
+        try
+        {
+            return await ResolveCoreOwnerAsync(core, ct).ConfigureAwait(false);
+        }
+        catch (DecisionRecordRefusedException ex)
+        {
+            _logger.LogError(DecisionRecordEvents.WriteRefused, ex,
+                "Decision Record writer refused the owner for review {ReviewId} (reason={Reason}, ownerRefusal={OwnerRefusalCode}).",
+                request.ReviewId, ex.Reason, ex.OwnerRefusalCode);
+            OntologyWriterTelemetry.RecordFailure(ex.Reason);
+            throw;
+        }
+    }
+
+    private async Task<RecordOwnerResolution> ResolveCoreOwnerAsync(DecisionRecordCore core, CancellationToken ct)
+    {
+        RecordOwnerResolution owner;
+        try
+        {
+            owner = await _ownership.ResolveOwnerAsync(
+                new RecordOwnershipContext
+                {
+                    TargetEntityLogicalName = core.EntityLogicalName,
+                    TargetRecordId = core.RecordId,
+                    Parents = Array.Empty<RecordOwnershipParent>(),
+                },
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A Dataverse fault in the resolver is not an answer (it propagates there); here it becomes the writer's one
+            // exception type. Nothing was written.
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.OwnerResolutionFailed,
+                "The ownership resolver failed, so the Decision Record owner is unknown; nothing was written.",
+                innerException: ex);
+        }
+
+        if (owner.IsRefused)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.OwnerRefused,
+                "The ownership resolver refused an owner for the Decision Record; nothing was written.",
+                owner.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource);
+        }
+
+        // A secure answer with no team is malformed: falling through would write an ordinary-owned child of a secure root.
+        if (owner.IsSecureOwner && !owner.IsOwned)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.OwnerRefused,
+                "The ownership resolver marked the record secure but named no owner team; nothing was written.",
+                RecordOwnerRefusal.NoOwnerSource);
+        }
+
+        return owner;
+    }
+
+    /// <summary>
+    /// Task 043: every refusal <see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/> can give WITHOUT I/O (validation, record class, column sizes, the no-core
     /// owner), for a review projected before its first write. The commit route calls it before any action runs, because by the
-    /// time <see cref="WriteAsync"/> refuses, the review's emails have gone. Writes and reads nothing; logs nothing.
+    /// time <see cref="WriteAsync(DecisionRecordRequest, CancellationToken)"/> refuses, the review's emails have gone. Writes and reads nothing; logs nothing.
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException">The review as projected would be refused.</exception>
     public void Preflight(DecisionRecordRequest request)
@@ -605,15 +653,13 @@ public sealed class DecisionRecordWriter
                 written = (s.Step.Written ?? Array.Empty<DecisionRecordRef>()).Select(w => new { entity = w.Entity, id = w.Id }),
             }),
         };
-        if (r.UnnamedNextSteps is { Count: > 0 } unnamed)
-        {
-            envelope["unnamedNextSteps"] = unnamed; // task 043: Next steps that ran but created no row with an id
-        }
-
         e["sprk_steps"] = Memo("sprk_steps", JsonMemoMaxLength, envelope);
 
+        // Task 043: a Next step that ran but created no row the record can name (a notification whose communication row was
+        // not saved after the send) is still a follow-on: listed with a null entity and id, never dropped.
         e["sprk_followons"] = Memo("sprk_followons", JsonMemoMaxLength,
-            r.FollowOns.Select(f => new { actionCode = f.ActionCode, entity = f.Entity, id = f.Id }));
+            r.FollowOns.Select(f => new { actionCode = f.ActionCode, entity = (string?)f.Entity, id = (Guid?)f.Id })
+                .Concat((r.UnnamedNextSteps ?? []).Select(code => new { actionCode = code, entity = (string?)null, id = (Guid?)null })));
 
         if (r.Core is { } core)
         {

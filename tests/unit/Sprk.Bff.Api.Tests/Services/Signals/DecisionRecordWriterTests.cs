@@ -329,15 +329,17 @@ public sealed class DecisionRecordWriterTests
     }
 
     [Fact]
-    public async Task AnUnnamedNextStep_IsSomethingDone_JudgementAndListedInTheStepsEnvelope()
+    public async Task AnUnnamedNextStep_IsSomethingDone_JudgementAndAFollowOnWithoutAnId()
     {
         var h = new Harness();
         var result = await h.Writer.WriteAsync(Request(steps: [Skipped("send-budget-inquiry"), Skipped("revise-budget")])
             with { UnnamedNextSteps = ["send-email"] });
 
         result.RecordClass.Should().Be(RecordedDecisionClass.Judgement, "a notification went out; this is not a dismissal");
-        using var steps = JsonDocument.Parse(h.Row.GetAttributeValue<string>("sprk_steps"));
-        steps.RootElement.GetProperty("unnamedNextSteps").EnumerateArray().Select(e => e.GetString()).Should().Equal(new[] { "send-email" });
+        using var followOns = JsonDocument.Parse(h.Row.GetAttributeValue<string>("sprk_followons"));
+        var followOn = followOns.RootElement.EnumerateArray().Single();
+        followOn.GetProperty("actionCode").GetString().Should().Be("send-email");
+        followOn.GetProperty("id").ValueKind.Should().Be(JsonValueKind.Null);
         h.Row.GetAttributeValue<string>("sprk_steps").Should().Contain($"\"reviewId\":\"{Review:D}\"", "the durable lookup still finds it");
     }
 

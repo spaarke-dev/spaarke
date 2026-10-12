@@ -92,6 +92,8 @@ public static class SignalsModule
         // Task 043: the decision commit route's service and its after-record step (032 trigger, 034 suppression).
         services.AddScoped<DecisionCommitFollowUps>();
         services.AddScoped<DecisionCommitService>();
+        // Task 043 (K4): the server-side plan-read time the commit route uses as the review start (ITenantCache, a singleton).
+        services.AddSingleton<DecisionPlanReadStamp>();
 
         // RuleBodyDescriber (task 026, FR-48): the read-side plain-language description of a rule body. Stateless over the
         // compiler and the shared sysadmin entity service, both singletons.

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -48,7 +49,8 @@ public static class DecisionPlanEndpoints
         SignalCoreRecordAccess signalAccess,
         DecisionPlanService planService,
         RuleBodyDescriber describer,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromServices] DecisionPlanReadStamp? planReadStamp = null)
     {
         var decision = await signalAccess.AuthorizeAsync(signalId, ct);
         if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
@@ -87,6 +89,14 @@ public static class DecisionPlanEndpoints
         // "How this was determined" (task 026). A body that cannot be described is shown without the description, never
         // as a guess; it does not stop the decision from being taken.
         var described = await describer.DescribeAsync(resolution.RuleBodyJson, ct);
+
+        // Task 043 (K4): the server's own record of when this caller read this plan, so the commit route never trusts a client
+        // time to decide whether a system closure happened during the review. Best effort; it never fails the read.
+        if (planReadStamp is not null)
+        {
+            await planReadStamp.StampAsync(httpContext, signalId, ct);
+        }
+
         return Results.Ok(DecisionPlanResponse.From(signalId, lane, versionId, plan, described.Description));
     }
 }

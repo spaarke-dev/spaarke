@@ -26,7 +26,11 @@ public enum SignalAccessOutcome
 /// <param name="Outcome">The decision.</param>
 /// <param name="Lane">The Signal's lane; set only when <see cref="Outcome"/> is <see cref="SignalAccessOutcome.Allowed"/>.</param>
 /// <param name="PolicyVersionId">The policy version that raised the Signal; set only when allowed.</param>
-public sealed record SignalAccessDecision(SignalAccessOutcome Outcome, DecisionLane? Lane, Guid? PolicyVersionId)
+/// <param name="CoreTypeId">The core-record pair the caller's own read returned (task 043 K2), so a route that re-reads the
+/// Signal app-only can refuse when the pair changed between the two reads. Both null for a no-core Signal.</param>
+/// <param name="CoreId">The core record id of that pair; null for a no-core Signal.</param>
+public sealed record SignalAccessDecision(
+    SignalAccessOutcome Outcome, DecisionLane? Lane, Guid? PolicyVersionId, Guid? CoreTypeId = null, Guid? CoreId = null)
 {
     public static readonly SignalAccessDecision NotFound = new(SignalAccessOutcome.NotFound, null, null);
     public static readonly SignalAccessDecision CallerUnresolved = new(SignalAccessOutcome.CallerUnresolved, null, null);
@@ -153,7 +157,7 @@ public sealed class SignalCoreRecordAccess
                 return await DeniedAsync(core, "core record", ct).ConfigureAwait(false);
             }
 
-            return new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId);
+            return new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId, coreTypeId, coreId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
