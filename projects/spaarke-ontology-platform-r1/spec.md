@@ -270,6 +270,10 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   the non-secure owning BU is the **core record's** BU. **D-35 replaces D-31's ownership wording**: an item with **no
   matter and no project** gets a Signal **owned by the To Do's owner and visible to that owner only** (shown in their
   Do lane under a **"Not filed"** group); both core-record columns are null for this case only.
+  *Amended 2026-10-12, D-129/D-130*: records are owned by **teams**, never read as a person. The no-core Signal takes the
+  owner `RecordOwnershipResolver` gives it (owner-approved exceptions such as a personal To Do stay with the creator), and it
+  is visible to a caller who can read **both the Signal and its subject** as themselves (team membership and the secure
+  family decide). A person, where one is needed, comes from Assigned To Internal (`sprk_assignedtointernal`, a contact).
   *Amended 2026-10-07, D-36/D-37*: the core record is **any** of the access-control core types —
   `CoreAncestorResolver.CoreRecordEntities`: matter, project, work assignment, service request today — each its own
   grouping, security and suppression grain. A work-assignment or service-request subject is **its own** core record.
@@ -380,6 +384,9 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   pair for every core type, plus the typed lineage lookup (`sprk_matter`, `sprk_project` or `sprk_workassignment`)
   when the core type is a secure root — uac-r2's lineage keys on typed lookups (task 007). For an item with **no core
   record**, the record is **owned by the item's owner** and visible like its Signal (D-39).
+  *Amended 2026-10-12, D-129/D-130*: the no-core record's owner is `RecordOwnershipResolver`'s answer for Parents = [subject],
+  exactly as returned (refused → 422, nothing written); the decider's internal contact goes in `sprk_assignedtointernal`;
+  `sprk_confirmedby` stays the caller.
 - **FR-19**: Type each record with **`sprk_recordclass`** — `Judgement` · `Routine` · `Dismissal`.
   *Acceptance*: the Report Card and the action-rate metric **filter on read**; a bare completion or reschedule
   of one's own assigned work is `Routine`; any Do resolution that sends mail, creates a follow-on or closes a
@@ -432,7 +439,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   matter comes through its share, and the Signal itself reaches them through the mirrored share, so the two checks
   agree. A **matterless To Do** Signal (D-31) has no matter to check: what the route checks instead is open (§11.1 O-21).
   *Amended 2026-10-07, D-34/D-35*: the route checks the caller can read each row's **core record** (matter or project);
-  a D-35 row (no core record) is returned **only to the To Do's owner**, in their Do lane under **"Not filed"**. The
+  a D-35 row (no core record) is returned **only to the To Do's owner**, in their Do lane under **"Not filed"**
+  (*amended 2026-10-12, D-129/D-130*: to a caller who can read both the Signal and its subject; see FR-14). The
   grid configuration selects both core-record columns and orders a core record's items together.
   *Amended 2026-10-07, D-36*: "core record" covers all four core types; the access check, grouping and card labels are
   driven by `sprk_corerecordtype` (the catalog row's logical name, display-name and number fields) and

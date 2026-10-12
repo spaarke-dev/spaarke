@@ -60,7 +60,7 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | D-22 | Ontology admin = a **gated workspace tab**, writes as the caller; admin role granted on `sprk_triagecategory`; five tables in Spaarke Platform read-only; owner's account holds the admin role | Binding (role + app done, task 008) |
 | D-23 | The **UI composes the row headline**; the rule sentence stays literal | Binding |
 | D-24 | **FR-28 amended** to name the UI kit; reuse first | Binding |
-| D-25 | "Today" for each item = **assignee's → owner's → UTC** time zone | Binding |
+| D-25 | "Today" for each item = **assignee's → owner's → UTC** time zone *Amended 2026-10-12 by D-129: no owner fallback; assignee's linked user, else UTC.* | Binding |
 | D-26 | **Adopt the canonical modal** (`SprkModal` + `WizardShell`, in-app, ADR-050 amendment) **and migrate existing wizards** in this project | Binding |
 | D-27 | Events: the Do lane, Reschedule and the Daily Briefing use **`sprk_duedate` always**; `sprk_finalduedate` informational | Binding |
 | D-28 | **`statuscode` is authoritative**; `sprk_eventstatus` deprecated (inventory readers first) | Binding |
@@ -70,11 +70,11 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | D-32 | Switching a rule Off → On **re-raises** still-true subjects as new episodes | Binding |
 | D-33 | **Signals and Decision Records are secure children** of secured records (access-control mechanism), with three role edits | Binding (roles done, task 008; registration = task 039, awaiting uac-r2 review #1355) |
 | D-34 | Signals and Decision Records group under the item's **core record** (not "matter" only), reusing `CoreAncestorResolver` | Binding (extended by D-36) |
-| D-35 | Items with **no core record** → Signal visible to the item's **owner only**, "Not filed" group | Binding |
+| D-35 | Items with **no core record** → Signal visible to the item's **owner only**, "Not filed" group *Amended 2026-10-12 by D-129/D-130: owner = RecordOwnershipResolver; visible to a caller who can read the Signal and its subject.* | Binding |
 | D-36 | **All four core types** (matter, project, work assignment, service request), and the model is **extensible**: generic core-record reference (catalog type + id) on Signal and Decision Record; typed lineage lookups on the Decision Record only where the secure mechanism needs them | Binding (columns live, task 007) |
 | D-37 | Two core records → the item's **direct filed-under** record wins; ambiguous → matter over project | Binding |
 | D-38 | **No skips** anywhere | Binding |
-| D-39 | No-core items: suppression per **(policy, item)**; their Decision Record is owned by the item's owner | Binding |
+| D-39 | No-core items: suppression per **(policy, item)**; their Decision Record is owned by the item's owner *Amended 2026-10-12 by D-129/D-130: the no-core Decision Record owner is the resolver's answer for its subject.* | Binding |
 | D-40 | Rule date fields may take **one lower + one upper bound** (nothing more) | Binding (done, task 024) |
 | D-41 | **To Do date columns → Date Only**, own task 106 (031 depends on it) | Binding |
 | D-42 | Rank: **severity → `sprk_highpriority` → oldest → record number** | Binding (tasks 038, 062) |
