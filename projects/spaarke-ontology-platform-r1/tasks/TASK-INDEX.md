@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **123 tasks** across 15 phases (75 ✅ · 1 🔄 · 34 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-12: +140–146, Phase 4c child-record contract)
+> (spec §9) · **123 tasks** across 15 phases (76 ✅ · 1 🔄 · 33 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-12: +140–146, Phase 4c child-record contract)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -217,7 +217,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| 🔲 [open] 140 | [Schema: 14 DR regarding columns; Signal pair type text → Lookup](140-child-contract-schema-delta.poml) | FULL | sonnet/high | — | CC1 | **D-132** owner-approved. Scoped publish; dependency check before the Signal delete; upgrade runbook; Redis metadata cache note · **[uac]** |
+| ✅ [done] 140 | [Schema: 14 DR regarding columns; Signal pair type text → Lookup](140-child-contract-schema-delta.poml) | FULL | sonnet/high | — | CC1 | **D-132** owner-approved. Done on spaarkedev1 2026-10-12 (scoped publish; no dependency; upgrade runbook in the deployment guide §10.5; DR metadata cache key lives up to 6 h, so 146 waits) · see [notes/140-schema-delta.md](../notes/140-schema-delta.md) · **[uac]** |
 | 🔲 [open] 141 | [Generalise `TodoRegardingBuilder`; SignalWriter on the shared builder](141-shared-regarding-builder-signalwriter.poml) | FULL | **opus**/high | 140 (+ #1665/#1746/#1747/#1756 merged) | CC2 | **D-133**. Builder commit reviewed alone by uac-r2; To Do/Event tests unchanged; dedupe key unchanged · **[uac]** |
 | 🔲 [open] 142 | [DecisionRecordWriter: subject filing, all-parent owner, two-wall refusal](142-decision-record-writer-contract.poml) | FULL | **opus**/high | 141, 043 | CC3 | Contract C1–C3, C9; acceptance 1–3, 6, 7 · **[uac]** |
 | 🔲 [open] 143 | [D-130 owner on SignalWriter/Suppression/Commit; replace ownerid read rule](143-d130-owner-signal-writers.poml) | FULL | **opus**/high | 141, #1746 | CC3 | Audit F3 + F2 code side (F2 Read grant = owner decision). Absorbs the "F3 SignalWriter no-core ownership" lane · **[uac]** |

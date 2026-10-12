@@ -153,8 +153,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   columns.
 - **FR-03** *(amended 2026-10-07, D-13)*: Compose **`sprk_dedupekey`** as
   `{policycode}|{regardingrecordtype}|{regardingrecordid}|{episode}`.
-  *Acceptance*: the writer reads `sprk_regardingrecordtype` + `sprk_regardingrecordid` (there is **no**
-  `sprk_subjecttype` on `sprk_signal` — only on `sprk_policy`); ids stored **lowercase, braces stripped**
+  *Acceptance*: the writer composes the key from the subject's logical name it already holds + `sprk_regardingrecordid` (there is **no**
+  `sprk_subjecttype` on `sprk_signal` — only on `sprk_policy`; *amended 2026-10-12, D-132*: `sprk_signal.sprk_regardingrecordtype` is now a Lookup to `sprk_recordtype_ref`, so the key is composed from the subject's logical name the writer holds and is never read back from the pair type column); ids stored **lowercase, braces stripped**
   (audit §8.3 U1 found two divergent regexes in circulation); **within one episode** re-evaluation **upserts**
   rather than duplicating. The **episode** is a whole number starting at **1**, incremented when the subject
   re-raises after its previous Signal for the same policy was resolved (Acted, Dismissed, ConditionCleared,
