@@ -573,6 +573,16 @@
   <EntityRelationship Name="sprk_decisionrecord_matter" />
   <EntityRelationship Name="sprk_decisionrecord_policyversion" />
   <EntityRelationship Name="sprk_decisionrecord_project_sprk_project" />
+  <EntityRelationship Name="sprk_decisionrecord_regcomm" />
+  <EntityRelationship Name="sprk_decisionrecord_regdocument" />
+  <EntityRelationship Name="sprk_decisionrecord_regevent" />
+  <EntityRelationship Name="sprk_decisionrecord_reginvoice" />
+  <EntityRelationship Name="sprk_decisionrecord_regmatter" />
+  <EntityRelationship Name="sprk_decisionrecord_regproject" />
+  <EntityRelationship Name="sprk_decisionrecord_regrecordtype_recordtype_ref" />
+  <EntityRelationship Name="sprk_decisionrecord_regsvcreq" />
+  <EntityRelationship Name="sprk_decisionrecord_regtodo" />
+  <EntityRelationship Name="sprk_decisionrecord_regworkasg" />
   <EntityRelationship Name="sprk_decisionrecord_workassignment_sprk_workassignment" />
   <EntityRelationship Name="sprk_document_analysis_document" />
   <EntityRelationship Name="sprk_document_analysis_outputfile" />
@@ -775,6 +785,7 @@
   <EntityRelationship Name="sprk_signal_reginvoice" />
   <EntityRelationship Name="sprk_signal_regmatter" />
   <EntityRelationship Name="sprk_signal_regproject" />
+  <EntityRelationship Name="sprk_signal_regrecordtype_recordtype_ref" />
   <EntityRelationship Name="sprk_signal_regsvcreq" />
   <EntityRelationship Name="sprk_signal_regtodo" />
   <EntityRelationship Name="sprk_signal_regworkasg" />

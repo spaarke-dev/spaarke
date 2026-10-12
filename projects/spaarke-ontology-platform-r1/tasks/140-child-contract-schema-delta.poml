@@ -4,7 +4,7 @@
     <title>Child-record contract T1: 14 regarding columns on sprk_decisionrecord; sprk_signal.sprk_regardingrecordtype text → Lookup (sprk_recordtype_ref)</title>
     <phase>4c Standard child-record contract (D-131)</phase>
     <gate>startable (owner approved D-132 2026-10-12; uac-r2 approved the column list)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Live Dataverse schema change including a column delete; irreversible ordered procedure.</rigor-reason>
     <model-tier>sonnet</model-tier>
