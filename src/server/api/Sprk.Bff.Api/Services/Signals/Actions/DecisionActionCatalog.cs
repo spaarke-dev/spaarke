@@ -83,7 +83,8 @@ public sealed record DecisionActionDefinition(
     public DecisionGateFactors? Gate { get; init; }
 
     /// <summary>False for an intermediate step that leaves the Work Item open when it is the only thing taken (D-119: the budget
-    /// inquiry). Every other action resolves the Signal when taken.</summary>
+    /// inquiry; D-128 Q18: the Do-lane reminder). The Signal becomes Acknowledged and linked to the record, and the nightly
+    /// ConditionCleared closes it. Every other action resolves the Signal when taken.</summary>
     public bool ResolvesSignal { get; init; } = true;
 
     /// <summary>True for an action that sends a message: the commit route runs those after every Dataverse write and Next step
@@ -205,10 +206,10 @@ public static class DecisionActionCatalog
 
         new("send-reminder", "Send a reminder", DecisionLane.Do, IsNextStep: false, WorkType: null,
             MessageParameters,
-            ["Sends the message above to the recipient", "The response date is unchanged"],
+            ["Sends the message above to the recipient", "The response date is unchanged", "The item stays open until the work is done or its due date moves"],
             Excludes: [],
             DecisionRecordClass.Judgement)
-        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), SendsMessage = true },
+        { Gate = new DecisionGateFactors(GateRiskTier.Tier4, Reversible: false, ExternallyVisible: true), ResolvesSignal = false, SendsMessage = true },
 
         new("extend-response-date", "Extend response date", DecisionLane.Do, IsNextStep: false, WorkType: null,
             [

@@ -144,6 +144,24 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task Run_AcknowledgedSignalWhosePredicateNoLongerHolds_IsClosedConditionCleared_LikeAnOpenOne()
+    {
+        // D-119 / D-128 Q18: a budget inquiry or a reminder leaves the Signal Acknowledged and linked to its Decision Record; the
+        // nightly pass is what closes it once the work is done or the due date moves.
+        var h = new Harness().WithPathBPolicy(); // no hit
+        var signalId = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusAcknowledged, coreId: MatterId);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        var update = h.Org.ConditionalUpdates.Should().ContainSingle().Subject;
+        update.Id.Should().Be(signalId);
+        update.Fields["sprk_signalstatus"].Should().BeEquivalentTo(new OptionSetValue(SignalWriter.SignalStatusResolved));
+        update.Fields["sprk_resolutiontype"].Should().BeEquivalentTo(new OptionSetValue(SignalWriter.ResolutionConditionCleared));
+        update.Fields.Should().NotContainKey("sprk_decisionrecord", "a system closure writes no Decision Record; the existing link stays");
+    }
+
+    [Fact]
     public async Task Run_OpenSignalWhosePredicateStillHolds_IssuesNoWriteAtAll_AndEmitsRunLevelLastEvaluated()
     {
         var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
@@ -559,6 +577,23 @@ public partial class SignalReevaluationJobTests
 
         evaluation.Hits.Select(x => x.SubjectId).Should().Equal(new[] { brisbaneTodo },
             "due 14 January is before today (15th) in Brisbane but IS today in Pacific (D-25)");
+    }
+
+    [Fact]
+    public async Task Evaluate_ItemWithNoAssignee_IsJudgedOnTheUtcDate_NeverOnTheOwnersZone_D129()
+    {
+        // 2027-01-15T03:00Z is 2027-01-14 19:00 in Pacific. The owner (a systemuser) sits in Pacific, but ownerid is a team's
+        // slot (D-129), not a person: with no assignee the item is judged on the UTC date (15th), so due 14 January IS overdue.
+        var h = new Harness(runAt: new DateTimeOffset(2027, 1, 15, 3, 0, 0, TimeSpan.Zero)).WithTodoPolicy();
+        h.Sysadmin.SetUserZone(UserId, "Pacific Standard Time");
+        h.WithTodo(TodoId, due: new DateTime(2027, 1, 14), owner: new EntityReference("systemuser", UserId));
+
+        var evaluation = await h.Evaluator.EvaluateAsync(h.TodoPolicy(), subjectId: null);
+
+        evaluation.Hits.Select(x => x.SubjectId).Should().Equal(new[] { TodoId },
+            "the owner's Pacific zone must not be used (it would make 14 January 'today', not overdue)");
+        XElement.Parse(h.Sysadmin.Fetches.Single()).Descendants("attribute").Select(a => a.Attribute("name")!.Value)
+            .Should().NotContain("ownerid", "the evaluator no longer reads the owner as a person");
     }
 
     [Fact]
@@ -1615,6 +1650,14 @@ public partial class SignalReevaluationJobTests
             _zoneOfUser[user] = code;
             _userOfContact[contact] = user;
             return contact;
+        }
+
+        /// <summary>Gives a systemuser (e.g. an item's owner) a Dataverse zone, to prove it is NOT used as a person's zone.</summary>
+        public void SetUserZone(Guid user, string windowsZoneId)
+        {
+            var code = 1000 + _zones.Count;
+            _zones[code] = windowsZoneId;
+            _zoneOfUser[user] = code;
         }
 
         public Task<Entity> RetrieveAsync(string entityLogicalName, Guid id, string[] columns, CancellationToken ct = default)

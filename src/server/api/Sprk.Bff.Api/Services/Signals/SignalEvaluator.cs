@@ -66,7 +66,7 @@ public sealed record SignalEvaluation(
 /// cloned (<c>PredicateCompilerCallerGuardTests</c>).</para>
 /// <para><b>Per-item today (D-25, FR-47).</b> For a <c>when</c> field that is a Date Only column
 /// (<see cref="CompiledPredicate.DateOnlyWhenFields"/>), a relative bound (<c>now</c>, <c>now-Nd</c>) means a calendar day in
-/// the item's own zone: the assignee's, else the owner's, else UTC, through the shared <see cref="DataverseRecipientDays"/>
+/// the item's own zone: the assignee's, else UTC (D-129: never the owner's, records are owned by teams), through the shared <see cref="DataverseRecipientDays"/>
 /// (task 098). The compiled bound is instant-anchored, so it can both include and exclude an item near midnight; the query
 /// is therefore WIDENED by two days on each such bound and every returned row is re-judged against its own today. A row
 /// whose judgement is the same for every possible today needs no time-zone lookup.</para>
@@ -157,10 +157,10 @@ public sealed class SignalEvaluator
         if (dueColumn is not null) columns.Add(dueColumn);
         if (catalog.DisplayField is not null) columns.Add(catalog.DisplayField);
         if (catalog.NumberField is not null) columns.Add(catalog.NumberField);
-        if (dateBounds.Count > 0)
+        if (dateBounds.Count > 0 && assigneeColumn is not null)
         {
-            columns.Add("ownerid");
-            if (assigneeColumn is not null) columns.Add(assigneeColumn);
+            // D-25 as amended by D-129: "today" is the assignee's alone. ownerid is never read as a person (records are owned by teams).
+            columns.Add(assigneeColumn);
         }
 
         var fetch = XDocument.Parse(compiled.FetchXml);
@@ -363,7 +363,9 @@ public sealed class SignalEvaluator
         }
 
         var assignee = assigneeColumn is null ? null : row.GetAttributeValue<EntityReference>(assigneeColumn)?.Id;
-        var recipient = await days.ForAsync(assignee, row.GetAttributeValue<EntityReference>("ownerid"), ct).ConfigureAwait(false);
+        // D-129: no owner fallback. The assignee contact's linked user gives the zone (DataverseRecipientDays); no assignee, or an
+        // assignee who is not a user, is the UTC date.
+        var recipient = await days.ForAsync(assignee, owner: null, ct).ConfigureAwait(false);
         return Holds(row, bounds, recipient.Today);
     }
 

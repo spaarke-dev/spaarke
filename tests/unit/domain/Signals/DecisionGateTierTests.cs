@@ -64,10 +64,10 @@ public class DecisionGateTierTests
     }
 
     [Fact]
-    public void OnlyTheInquiryLeavesTheItemOpen_AndOnlyTheMessagesSend()
+    public void OnlyTheInquiryAndTheReminderLeaveTheItemOpen_AndOnlyTheMessagesSend()
     {
-        // D-119: the inquiry is an intermediate step; everything else resolves when taken.
-        DecisionActionCatalog.All.Where(a => !a.ResolvesSignal).Select(a => a.Code).Should().Equal("send-budget-inquiry");
+        // D-119: the inquiry is an intermediate step; D-128 Q18: so is the Do-lane reminder. Everything else resolves when taken.
+        DecisionActionCatalog.All.Where(a => !a.ResolvesSignal).Select(a => a.Code).Should().Equal("send-budget-inquiry", "send-reminder");
         DecisionActionCatalog.All.Where(a => a.SendsMessage).Select(a => a.Code)
             .Should().BeEquivalentTo("send-budget-inquiry", "send-reminder", "send-email");
     }
@@ -76,9 +76,12 @@ public class DecisionGateTierTests
     public void TheCommitService_TakesNoChatGateOrSessionType()
     {
         // D-52: no chat session and no ConfirmationPolicyEngine state; only the PublicContracts facade from the AI module.
+        // The one other allowance is the identity service (Ai.Membership: user -> linked contact, task 141), which is neither a chat
+        // gate nor a session; the commit records the deciding user's contact on the Decision Record (D-129).
         var parameters = typeof(Sprk.Bff.Api.Services.Signals.DecisionCommitService).GetConstructors()
             .SelectMany(c => c.GetParameters()).Select(p => p.ParameterType.Namespace ?? string.Empty);
         parameters.Should().NotContain(ns => ns.StartsWith("Sprk.Bff.Api.Services.Ai", StringComparison.Ordinal)
-                                             && ns != "Sprk.Bff.Api.Services.Ai.PublicContracts");
+                                             && ns != "Sprk.Bff.Api.Services.Ai.PublicContracts"
+                                             && ns != "Sprk.Bff.Api.Services.Ai.Membership");
     }
 }
