@@ -416,6 +416,40 @@ public class SpeAppOnlyContainerIsolationTests
         deleted.Select(c => c.Id).Should().Equal(OwnContainer);
     }
 
+    [Theory]
+    [InlineData(false, OtherCustomer)]
+    [InlineData(false, null)]
+    [InlineData(true, OtherCustomer)]
+    [InlineData(true, null)]   // what Graph returns for a deleted container today (F-165-RB, dev 2026-10-11)
+    public async Task SpeAdmin_BindingRead_OfAContainerThisStampDoesNotOwn_IsNotThere_NotAFault(bool deleted, string? marker)
+    {
+        // F-165-RB: the guard's refusal is a final answer about the id. Thrown on, the per-container rule read it as an
+        // unreadable binding and answered 503 "try again" instead of the uniform 404.
+        var graph = deleted
+            ? new RoutedGraph().DeletedContainer(ForeignContainer, marker)
+            : new RoutedGraph().Container(ForeignContainer, marker);
+
+        var read = await SpeAdmin(graph).GetContainerBindingForConfigAsync(Config(), ForeignContainer, deleted);
+
+        read.Should().BeNull();
+        graph.Requests.Should().ContainSingle("only the ownership marker was read");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SpeAdmin_BindingRead_WhenTheOwnershipReadGetsNoAnswer_Throws_NeverNotThere(bool deleted)
+    {
+        var path = deleted
+            ? $"/v1.0/storage/fileStorage/deletedContainers/{ForeignContainer}"
+            : $"/v1.0/storage/fileStorage/containers/{ForeignContainer}";
+        var graph = new RoutedGraph().Error("GET", path, HttpStatusCode.ServiceUnavailable);
+
+        var act = () => SpeAdmin(graph).GetContainerBindingForConfigAsync(Config(), ForeignContainer, deleted);
+
+        await act.Should().ThrowAsync<SpaarkeStorageException>("no answer is no decision — the caller refuses with the 503");
+    }
+
     [Fact]
     public async Task MarkOwned_GraphRefuses_DeletesTheUnmarkedContainer()
     {
