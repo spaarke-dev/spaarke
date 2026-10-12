@@ -544,4 +544,26 @@ public class ThresholdRuleTests
         result.IsRefused.Should().BeTrue();
         result.Refusal.Should().Contain("compiler");
     }
+
+    // The operator semantics of the computed value against the declared one. Pins every boundary: a swap of gt/ge or lt/le
+    // flips exactly the "equal" row. Offsets are in cents so the values stay decimal (the live columns are money/decimal).
+    [Theory]
+    [InlineData("ge", -1, false)]
+    [InlineData("ge", 0, true)]
+    [InlineData("ge", 1, true)]
+    [InlineData("gt", -1, false)]
+    [InlineData("gt", 0, false)]
+    [InlineData("gt", 1, true)]
+    [InlineData("le", -1, true)]
+    [InlineData("le", 0, true)]
+    [InlineData("le", 1, false)]
+    [InlineData("lt", -1, true)]
+    [InlineData("lt", 0, false)]
+    [InlineData("lt", 1, false)]
+    public void ThresholdHolds_AppliesEachOperatorAtTheBoundary(string fetchOperator, int centsFromDeclared, bool expected)
+    {
+        const decimal declared = 25000.00m;
+
+        SignalEvaluator.ThresholdHolds(declared + (centsFromDeclared * 0.01m), fetchOperator, declared).Should().Be(expected);
+    }
 }
