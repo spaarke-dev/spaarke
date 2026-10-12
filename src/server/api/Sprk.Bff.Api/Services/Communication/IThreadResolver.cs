@@ -77,16 +77,19 @@ public interface IThreadResolver
     /// record's Messages panel, which lists threads by the THREAD's typed regarding. Let R be the email's primary typed
     /// regarding (ADR-024 priority) and T its thread:
     /// <list type="bullet">
-    /// <item>the email is unfiled, is not an email, has no thread, T is already anchored to R, or T is not Open
-    /// (a private thread keeps its isolation) → nothing;</item>
-    /// <item>T is not a default thread (neither the per-user master nor a record's per-record default) and no OTHER active message in T is filed to a record other than R — whether T is
-    /// unanchored or anchored to a previous record (owner clarification 2026-10-11) → the whole of T follows: anchored to R
-    /// (its typed regarding and display fields, a previous record's lookup and display fields cleared, Record-Anchored),
-    /// owned by R's team (S6; a refusal, or a record that is not an ownership parent, leaves T untouched), its name
-    /// re-derived (marker-gated), and every active message in T filed to R is granted to R's members (unfiled messages are
-    /// not);</item>
-    /// <item>otherwise (T is a default thread, or holds another active message filed to a different record) → only the
-    /// email moves, to R's per-record default thread (Tier 2) through the S6 join, and is granted to R's members.</item>
+    /// <item>the email is unfiled, is not an email, has no thread, T is already anchored to ANY record the email is filed to
+    /// (any of its typed regarding lookups, not only R), or T is not Open (a private thread keeps its isolation) →
+    /// nothing;</item>
+    /// <item>T is not a default thread (neither the per-user master nor a record's per-record default), every active message
+    /// in T is an email, no OTHER active message in T is filed to a record other than R — whether T is unanchored or anchored
+    /// to a previous record (owner clarification 2026-10-11) — and neither T's owner nor R's S6 owner is the Secure team
+    /// (an undeterminable owner counts as Secure) → the whole of T follows: anchored to R (its typed regarding, R's primary
+    /// name read server-side, a previous record's lookup and display fields cleared, Record-Anchored), owned by R's team (S6;
+    /// a refusal, or a record that is not an ownership parent, leaves T and the email untouched), its name re-derived
+    /// (marker-gated), and every active message in T filed to R is granted to R's members (unfiled messages are not);</item>
+    /// <item>otherwise (T is a default thread, holds a non-email message or another active message filed to a different
+    /// record, or T or R is secure) → only the email moves, to R's per-record default thread (Tier 2) through the S6 join,
+    /// and is granted to R's members.</item>
     /// </list>
     /// The grant audience is always R — the email's own regarding, just validated by the filing write — never a re-read of
     /// a thread column (#1629). Prior grants are not revoked. Best-effort / non-fatal (NFR-02): never throws; any failure is

@@ -81,13 +81,22 @@ public sealed class ThreadResolver : IThreadResolver
     /// </summary>
     private readonly Access.IDirectThreadAccessService? _directThreadAccess;
 
+    /// <summary>
+    /// Task 129 F1-b: the Secure Record business-unit and owner-team names, to tell whether a thread is owned by the Secure
+    /// team (the same detection <see cref="Access.DirectThreadAccessService"/> uses). Without it a team-owned thread is
+    /// treated as possibly secure (fail closed).
+    /// </summary>
+    private readonly IConfiguration? _configuration;
+
     public ThreadResolver(
         IEnumerable<IThreadKeyStrategy> strategies,
         IGenericEntityService entityService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<ThreadResolver> logger,
-        Access.IDirectThreadAccessService? directThreadAccess = null)
+        Access.IDirectThreadAccessService? directThreadAccess = null,
+        IConfiguration? configuration = null)
     {
+        _configuration = configuration;
         _entityService = entityService;
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         // Fail fast on a duplicate channel registration (mirrors CommunicationChannelDispatcher's guard).
@@ -227,7 +236,16 @@ public sealed class ThreadResolver : IThreadResolver
     /// keeps its creator. A REFUSAL throws — inside the resolution paths this class's best-effort catch leaves the
     /// message unthreaded, so no record thread is ever created with an ordinary owner for a secure record.
     /// </summary>
-    private async Task<Guid?> ResolveRecordThreadOwnerAsync(RegardingAnchor? anchor, CancellationToken ct)
+    private async Task<Guid?> ResolveRecordThreadOwnerAsync(RegardingAnchor? anchor, CancellationToken ct) =>
+        (await ResolveRecordThreadOwnershipAsync(anchor, ct))?.OwningTeamId;
+
+    /// <summary>
+    /// <see cref="ResolveRecordThreadOwnerAsync"/>'s full answer — also whether the team is the Secure Record owner team
+    /// (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.IsSecureOwner"/>, task 129 F1-b). <c>null</c> for no
+    /// anchor or a party anchor; a refusal throws.
+    /// </summary>
+    private async Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution?> ResolveRecordThreadOwnershipAsync(
+        RegardingAnchor? anchor, CancellationToken ct)
     {
         if (anchor is null || !Guid.TryParse(anchor.RecordId, out var recordId) || recordId == Guid.Empty
             || !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(anchor.RecordType))
@@ -244,7 +262,7 @@ public sealed class ThreadResolver : IThreadResolver
         if (!owner.IsOwned)
             throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communicationthread", owner);
 
-        return owner.OwningTeamId;
+        return owner;
     }
 
     /// <summary>
@@ -490,6 +508,8 @@ public sealed class ThreadResolver : IThreadResolver
     // ── The thread follows the filing (spaarkeai-word-add-in-r1 task 129) ───────────────────────────────────────
 
     private const string CommunicationTypeField = "sprk_communicationtype";
+    private const string OwningTeamField = "owningteam";
+    private const string OwnerIdField = "ownerid";
     private const string PrivacyStateField = "sprk_privacystate";
     private const string StateCodeFilterField = "statecode";
     private const int StateActive = 0;
@@ -543,6 +563,7 @@ public sealed class ThreadResolver : IThreadResolver
                 ThreadRegardingColumns
                     .Append("sprk_threadtype").Append(DefaultThreadMarkerField).Append(PrivacyStateField)
                     .Append("sprk_regardingrecordid").Append("sprk_regardingrecordname").Append("sprk_regardingrecordurl")
+                    .Append(OwningTeamField).Append(OwnerIdField)
                     .ToArray(),
                 ct);
             if (thread is null)
@@ -552,11 +573,16 @@ public sealed class ThreadResolver : IThreadResolver
                 return;
             }
 
+            // Rule 1 (F1-a): T already shows on a record the email is filed to — ANY of its typed regarding lookups, not only
+            // the primary. A sharee adding matter M to an email filed to secure project P makes M primary; T, anchored to P,
+            // stays where it is rather than leaving P (and P's Secure team).
             var current = ThreadAnchorOf(thread);
-            if (current.HasAnchor && current.RecordId == recordId
-                && string.Equals(current.RecordType, regarding.RecordType, StringComparison.OrdinalIgnoreCase))
+            if (current.HasAnchor && IsFiledTo(email, current))
             {
-                return; // rule 1: already on R's panel
+                _logger.LogDebug(
+                    "Filing reconcile left thread {ThreadId} as it is: it is anchored to {RecordType}:{RecordId}, a record " +
+                    "{CommunicationId} is filed to", threadId, current.RecordType, current.RecordId, communicationId);
+                return;
             }
 
             if (thread.GetAttributeValue<OptionSetValue>(PrivacyStateField)?.Value != PrivacyStateOpen)
@@ -572,11 +598,13 @@ public sealed class ThreadResolver : IThreadResolver
             var isDefaultThread = thread.GetAttributeValue<bool?>(DefaultThreadMarkerField) == true;
 
             // Rule 2 (owner clarification 2026-10-11): any other thread — unanchored, or anchored to a previous record —
-            // follows the filing as a whole when no OTHER active message in it is filed to a different record.
+            // follows the filing as a whole when every active message in it is an email (F1-c) and none other is filed to a
+            // different record — and neither its owner nor R's is the Secure team (F1-b; AnchorThreadForFilingAsync answers
+            // false, and only the email moves).
             if (!isDefaultThread
-                && await FiledToOnlyAsync(threadId, communicationId, regarding, recordId, ct) is { } filedToRecord)
+                && await FiledToOnlyAsync(threadId, communicationId, regarding, recordId, ct) is { } filedToRecord
+                && await AnchorThreadForFilingAsync(threadId, thread, communicationId, regarding, recordId, filedToRecord, ct))
             {
-                await AnchorThreadForFilingAsync(threadId, thread, communicationId, regarding, recordId, filedToRecord, ct);
                 return;
             }
 
@@ -591,14 +619,18 @@ public sealed class ThreadResolver : IThreadResolver
 
     /// <summary>
     /// The active messages of <paramref name="threadId"/> filed to R (always including the filed email), or <c>null</c> when
-    /// any active message in it is filed to another record — or the bounded scan could not see them all.
+    /// any active message in it is filed to another record, or is not an email (F1-c: a chat or other channel's message is a
+    /// conversation between people — anchoring would re-own it and file what later joins it under R) — or the bounded scan
+    /// could not see them all.
     /// </summary>
     private async Task<IReadOnlyList<Guid>?> FiledToOnlyAsync(
         Guid threadId, Guid communicationId, RegardingAnchor regarding, Guid recordId, CancellationToken ct)
     {
+        var columns = MessageRegardingColumns();
+        columns.Add(CommunicationTypeField);
         var query = new QueryExpression("sprk_communication")
         {
-            ColumnSet = new ColumnSet(MessageRegardingColumns().ToArray()),
+            ColumnSet = new ColumnSet(columns.ToArray()),
             TopCount = MaxFilingReconcileMessageScan + 1,
             Criteria =
             {
@@ -616,6 +648,9 @@ public sealed class ThreadResolver : IThreadResolver
         var filedToRecord = new List<Guid> { communicationId };
         foreach (var message in messages)
         {
+            if (message.GetAttributeValue<OptionSetValue>(CommunicationTypeField)?.Value != (int)CommunicationType.Email)
+                return null; // not an email (or its type is unknown): the thread is not only a filing's email thread
+
             if (MessageRegardingAnchorOf(message) is not { } other)
                 continue; // unfiled: keeps its visibility (design K-b), never granted to R's members
 
@@ -637,14 +672,19 @@ public sealed class ThreadResolver : IThreadResolver
     /// previous record loses that record's typed lookup (and its display fields when R has none), so the thread's one anchor
     /// (<see cref="ThreadAnchorOf"/>) is R.
     /// </summary>
-    private async Task AnchorThreadForFilingAsync(
+    /// <returns>
+    /// <c>false</c> when the thread may not follow whole because its owner or R's is the Secure team (F1-b) — nothing is
+    /// written and the caller moves only the email (rule 3). <c>true</c> otherwise: anchored, or left as it is when R's owner
+    /// is refused or R owns no thread (a party).
+    /// </returns>
+    private async Task<bool> AnchorThreadForFilingAsync(
         Guid threadId, DataverseEntity thread, Guid communicationId, RegardingAnchor regarding, Guid recordId,
         IReadOnlyList<Guid> filedToRecord, CancellationToken ct)
     {
-        Guid? ownerTeamId;
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? ownership;
         try
         {
-            ownerTeamId = await ResolveRecordThreadOwnerAsync(regarding, ct);
+            ownership = await ResolveRecordThreadOwnershipAsync(regarding, ct);
         }
         catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException ex)
         {
@@ -652,18 +692,32 @@ public sealed class ThreadResolver : IThreadResolver
                 ex,
                 "Filing reconcile left thread {ThreadId} unanchored: the owner of {RecordType}:{RecordId} could not be resolved " +
                 "(CommunicationId: {CommunicationId})", threadId, regarding.RecordType, recordId, communicationId);
-            return;
+            return true;
         }
 
-        if (ownerTeamId is not { } teamId)
+        if (ownership?.OwningTeamId is not { } teamId)
         {
             // Not an ownership parent (a party: account / contact / organization) — a record thread is owned by its record's
             // team (S6), and there is none to give it, so the thread is left as it is.
             _logger.LogInformation(
                 "Filing reconcile left thread {ThreadId} unanchored: {RecordType}:{RecordId} owns no thread (CommunicationId: " +
                 "{CommunicationId})", threadId, regarding.RecordType, recordId, communicationId);
-            return;
+            return true;
         }
+
+        // F1-b: a whole-thread move never takes a thread out of the Secure team, nor into it. Out of it, the thread's other
+        // messages would leave a secure record's isolation; into it, the thread's sharee mirror is not written here (K1).
+        if (ownership.IsSecureOwner || await ThreadOwnerMayBeSecureAsync(thread, ct))
+        {
+            _logger.LogInformation(
+                "Filing reconcile moves only {CommunicationId}: thread {ThreadId} or {RecordType}:{RecordId} belongs to a secure " +
+                "record (or that cannot be told), so the thread does not follow whole",
+                communicationId, threadId, regarding.RecordType, recordId);
+            return false;
+        }
+
+        // K2: the thread's display name is R's own primary name, read server-side — not the name the caller filed with.
+        var recordName = await ReadRecordPrimaryNameAsync(regarding.RecordType, recordId, ct);
 
         // The anchored-thread field set of CreateThreadAsync, written as one update.
         var fields = new Dictionary<string, object>
@@ -674,8 +728,8 @@ public sealed class ThreadResolver : IThreadResolver
         };
         if (RegardingFieldMap.FieldFor(regarding.RecordType) is { } typedField)
             fields[typedField] = new EntityReference(regarding.RecordType, recordId); // what SetTypedRegardingLookup writes
-        if (!string.IsNullOrWhiteSpace(regarding.RecordName))
-            fields["sprk_regardingrecordname"] = TruncateTo(regarding.RecordName, 400);
+        if (!string.IsNullOrWhiteSpace(recordName))
+            fields["sprk_regardingrecordname"] = TruncateTo(recordName, 400);
         if (!string.IsNullOrWhiteSpace(regarding.RecordUrl))
             fields["sprk_regardingrecordurl"] = TruncateTo(regarding.RecordUrl, 400);
 
@@ -702,6 +756,75 @@ public sealed class ThreadResolver : IThreadResolver
         var assignment = ThreadAssignment.Anchored(threadId, regarding.RecordType, recordId);
         foreach (var messageId in filedToRecord)
             await GrantAsync(messageId, assignment, ct);
+        return true;
+    }
+
+    /// <summary>
+    /// <c>true</c> unless the thread's owner is proven NOT to be the Secure Record owner team: a user owner, or a team whose
+    /// own row rules it out — the detection <see cref="Access.DirectThreadAccessService"/> uses
+    /// (<see cref="Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync"/>, then
+    /// <see cref="Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync"/>). A team owner
+    /// with no configuration, or an ambiguous Secure team, answers <c>true</c> (fail closed). A Dataverse fault propagates.
+    /// </summary>
+    private async Task<bool> ThreadOwnerMayBeSecureAsync(DataverseEntity thread, CancellationToken ct)
+    {
+        var owningTeam = thread.GetAttributeValue<EntityReference>(OwningTeamField)?.Id
+            ?? (thread.GetAttributeValue<EntityReference>(OwnerIdField) is { } owner
+                && string.Equals(owner.LogicalName, "team", StringComparison.OrdinalIgnoreCase) ? owner.Id : null);
+        if (owningTeam is not { } team || team == Guid.Empty)
+            return false; // user-owned: never a secure child
+
+        if (_configuration is null)
+            return true;
+
+        if (await Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(
+                _entityService, _configuration, team, ct))
+            return false;
+
+        var secure = await Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(
+            _entityService, _configuration, ct);
+        return secure.Refusal is not null || secure.TeamId == team;
+    }
+
+    /// <summary>
+    /// <paramref name="entityLogicalName"/>'s primary name for <paramref name="recordId"/>, read server-side through the one
+    /// name map (<see cref="RegardingNameFields.PrimaryNameField"/>); <c>null</c> for a type it does not list, a row that
+    /// cannot be read, or a blank name.
+    /// </summary>
+    private async Task<string?> ReadRecordPrimaryNameAsync(string entityLogicalName, Guid recordId, CancellationToken ct)
+    {
+        if (RegardingNameFields.PrimaryNameField(entityLogicalName.ToLowerInvariant()) is not { } nameField)
+            return null;
+
+        try
+        {
+            var record = await _entityService.RetrieveAsync(entityLogicalName.ToLowerInvariant(), recordId, new[] { nameField }, ct);
+            return record?.GetAttributeValue<string>(nameField) is { } name && !string.IsNullOrWhiteSpace(name) ? name : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Filing reconcile could not read the name of {RecordType}:{RecordId}", entityLogicalName, recordId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Rule 1 (F1-a): <c>true</c> when <paramref name="anchor"/> is one of the records <paramref name="email"/> is filed to —
+    /// any of its typed ADR-024 regarding lookups, not only the primary.
+    /// </summary>
+    private static bool IsFiledTo(DataverseEntity email, ThreadAnchor anchor)
+    {
+        foreach (var (entityLogicalName, field) in RegardingFieldMap.All)
+        {
+            if (email.GetAttributeValue<EntityReference>(field) is not { } er || er.Id == Guid.Empty || er.Id != anchor.RecordId)
+                continue;
+
+            var type = string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName;
+            if (string.Equals(type, anchor.RecordType, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>

@@ -34,6 +34,9 @@ public sealed class RecordOwnershipResolverDouble : IRecordOwnershipResolver
     /// <summary>The answer to every question; <see langword="null"/> makes every writer refuse.</summary>
     public Guid? TeamId { get; set; } = DefaultTeamId;
 
+    /// <summary>Marks every resolved team as the Secure Record owner team (<see cref="RecordOwnerResolution.IsSecureOwner"/>).</summary>
+    public bool IsSecureOwner { get; set; }
+
     /// <summary>The refusal code reported when <see cref="TeamId"/> is null.</summary>
     public string RefusalCode { get; set; } = RecordOwnerRefusal.SecureParentNotIsolated;
 
@@ -101,7 +104,7 @@ public sealed class RecordOwnershipResolverDouble : IRecordOwnershipResolver
             return RecordOwnerResolution.Unchanged("double: unfiled row keeps its creator");
 
         return TeamId is { } team
-            ? RecordOwnerResolution.Owned(team)
+            ? RecordOwnerResolution.Owned(team) with { IsSecureOwner = IsSecureOwner }
             : RecordOwnerResolution.Refused(RefusalCode, "double: refused");
     }
 }
