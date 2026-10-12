@@ -469,6 +469,127 @@ public sealed class ExternalMultiRootRuleTests
         strict![WorkAssignment].IsKnown.Should().BeFalse();
     }
 
+    // =====================================================================
+    // #1630 intermediates under the read-time opt-in: a work assignment filed through an INVOICE or EVENT is filed under the
+    // matters and projects that intermediate belongs to. An intermediate the read does not return (deleted in a race, or not
+    // visible to the reader) is unknown on the read path, like a named matter or project that is not returned.
+    // =====================================================================
+
+    private static readonly Guid Intermediate = Guid.Parse("a0390000-0000-4000-8000-0000000000e4");
+
+    [Theory]
+    [InlineData("sprk_invoice")]
+    [InlineData("sprk_event")]
+    public async Task Intermediate_AWorkAssignmentWithAFalseOwnFlag_FiledThroughAnIntermediateTheReadDoesNotReturn_IsSecure(string table)
+    {
+        var data = new ExternalRootEventReadTests.FakeDataverse();
+        data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, WorkAssignment);
+        data.FileWorkAssignmentUnderIntermediate(WorkAssignment, table, Intermediate); // named, never created
+
+        var read = await data.NewService().GetNonSecureRootsAsync(new[] { Wa(WorkAssignment) }, CancellationToken.None);
+
+        read.NotSecure.Should().BeEmpty("an intermediate the read cannot find is unknown, and unknown counts as secure");
+        read.Complete.Should().BeFalse();
+        data.FilingReadLog.Should().Equal("sprk_workassignment", table);
+    }
+
+    [Theory]
+    [InlineData("sprk_invoice")]
+    [InlineData("sprk_event")]
+    public async Task Intermediate_TheSameBatched_ManyWorkAssignments_OneAbsentIntermediate_OnlyThatOneIsSecure(string table)
+    {
+        var data = new ExternalRootEventReadTests.FakeDataverse();
+        var other = Guid.Parse("a0390000-0000-4000-8000-0000000000e5");
+        var otherIntermediate = Guid.Parse("a0390000-0000-4000-8000-0000000000e6");
+        data.AddOpenRoot(ExternalGrantRootType.Matter, Matter);
+        data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, WorkAssignment);
+        data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, other);
+        data.FileWorkAssignmentUnderIntermediate(WorkAssignment, table, Intermediate); // never created
+        data.FileWorkAssignmentUnderIntermediate(other, table, otherIntermediate);
+        data.AddIntermediate(table, otherIntermediate, ExternalGrantRootType.Matter, Matter);
+
+        var read = await data.NewService().GetNonSecureRootsAsync(new[] { Wa(WorkAssignment), Wa(other) }, CancellationToken.None);
+
+        read.NotSecure.Should().Equal(new[] { Wa(other) }, "the absent intermediate withholds its own row; the present one belongs to a non-secure matter");
+        read.Complete.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("sprk_invoice")]
+    [InlineData("sprk_event")]
+    public async Task Intermediate_AWorkAssignmentWithAFalseOwnFlag_FiledThroughAnIntermediateOfANonSecureMatter_IsNotSecure(string table)
+    {
+        var data = new ExternalRootEventReadTests.FakeDataverse();
+        data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, WorkAssignment);
+        data.AddOpenRoot(ExternalGrantRootType.Matter, Matter);
+        data.FileWorkAssignmentUnderIntermediate(WorkAssignment, table, Intermediate);
+        data.AddIntermediate(table, Intermediate, ExternalGrantRootType.Matter, Matter);
+
+        var read = await data.NewService().GetNonSecureRootsAsync(new[] { Wa(WorkAssignment) }, CancellationToken.None);
+
+        read.NotSecure.Should().Equal(new[] { Wa(WorkAssignment) }, "the intermediate is present and belongs to a non-secure matter");
+        read.Complete.Should().BeTrue();
+        data.FilingReadLog.Should().Equal("sprk_workassignment", table, "sprk_matter");
+    }
+
+    [Theory]
+    [InlineData("sprk_invoice")]
+    [InlineData("sprk_event")]
+    public async Task Intermediate_AWorkAssignmentFiledThroughAnIntermediateOfASecureMatter_IsSecure(string table)
+    {
+        var data = new ExternalRootEventReadTests.FakeDataverse();
+        data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, WorkAssignment);
+        data.AddSecureRoot(ExternalGrantRootType.Matter, Matter);
+        data.FileWorkAssignmentUnderIntermediate(WorkAssignment, table, Intermediate);
+        data.AddIntermediate(table, Intermediate, ExternalGrantRootType.Matter, Matter);
+
+        (await NonSecure(data.NewService(), Wa(WorkAssignment))).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("sprk_invoice")]
+    [InlineData("sprk_event")]
+    public async Task Intermediate_AnIntermediateThatExistsButBelongsToNothing_IsNotUnknown_EvenOnTheReadPath(string table)
+    {
+        // "Not returned" (absent) is not "belongs to no matter or project" (present, names no parent): only the first is unknown.
+        var data = new ExternalRootEventReadTests.FakeDataverse();
+        data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, WorkAssignment);
+        data.FileWorkAssignmentUnderIntermediate(WorkAssignment, table, Intermediate);
+        data.AddIntermediate(table, Intermediate);
+
+        var read = await data.NewService().GetNonSecureRootsAsync(new[] { Wa(WorkAssignment) }, CancellationToken.None);
+
+        read.NotSecure.Should().Equal(Wa(WorkAssignment));
+        read.Complete.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("sprk_invoice")]
+    [InlineData("sprk_event")]
+    public async Task Intermediate_TheSharedWalk_ByDefault_StillTreatsAnAbsentIntermediateAsNamingNothing_ButOptsInToUnknown(string table)
+    {
+        var data = new ExternalRootEventReadTests.FakeDataverse();
+        data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, WorkAssignment);
+        data.FileWorkAssignmentUnderIntermediate(WorkAssignment, table, Intermediate); // named, never created
+        var ids = new[] { WorkAssignment };
+
+        foreach (var single in new[] { true, false })
+        {
+            // Both shapes of the walk: one record (point reads) and many (batched, intermediates read in chunks).
+            var asked = single ? ids : ids.Append(Guid.NewGuid()).ToArray();
+
+            var legacy = await EffectiveRootFlags.ReadAncestryAsync(
+                data.FilingReader, NullLogger.Instance, "sprk_workassignment", asked, CancellationToken.None);
+            legacy![WorkAssignment].IsKnown.Should().BeTrue("the write-time walk (UAC-r2) is unchanged: an absent intermediate names nothing");
+            legacy[WorkAssignment].HasSecureParent.Should().BeFalse();
+
+            var strict = await EffectiveRootFlags.ReadAncestryAsync(
+                data.FilingReader, NullLogger.Instance, "sprk_workassignment", asked, CancellationToken.None, absentParentIsUnknown: true);
+            strict![WorkAssignment].IsKnown.Should().BeFalse("the read path opts in: an intermediate that is not returned is unknown");
+            strict[WorkAssignment].Unverifiable.Should().Contain(table).And.Contain("not returned");
+        }
+    }
+
     [Fact]
     public async Task APastTheLookupBoundRequest_IsIncomplete()
     {

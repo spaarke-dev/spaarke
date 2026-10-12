@@ -577,6 +577,48 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             }
         }
 
+        /// <summary>
+        /// #1630: files work assignment <paramref name="workAssignment"/> under an INTERMEDIATE by its typed lookup
+        /// (<c>sprk_regardinginvoice</c> / <c>sprk_regardingevent</c>). The intermediate row itself is NOT created here
+        /// (<see cref="AddIntermediate"/> does that): a work assignment filed under an intermediate nobody added names an
+        /// intermediate the walk's read does not return. Seed the work assignment with <see cref="AddRoot"/> first.
+        /// </summary>
+        public void FileWorkAssignmentUnderIntermediate(Guid workAssignment, string intermediateTable, Guid intermediateId)
+        {
+            var column = intermediateTable switch
+            {
+                "sprk_invoice" => "sprk_regardinginvoice",
+                "sprk_event" => "sprk_regardingevent",
+                _ => throw new NotSupportedException("A work assignment files under an invoice or an event."),
+            };
+            lock (_filing) _filing[("sprk_workassignment", workAssignment)][column] = new EntityReference(intermediateTable, intermediateId);
+        }
+
+        /// <summary>
+        /// #1630: creates the intermediate row in the filing world. With a <paramref name="belongsTo"/> root it belongs to that
+        /// matter or project through its own root column (an invoice: <c>sprk_matter</c> / <c>sprk_project</c>; an event:
+        /// <c>sprk_regardingmatter</c> / <c>sprk_regardingproject</c>, the stamp topology); without one it exists but belongs to
+        /// nothing - which is NOT the same as an intermediate the read does not return.
+        /// </summary>
+        public void AddIntermediate(string intermediateTable, Guid id, ExternalGrantRootType? belongsTo = null, Guid? parentId = null)
+        {
+            var row = new Entity(intermediateTable, id);
+            if (belongsTo is { } root)
+            {
+                var column = (intermediateTable, root) switch
+                {
+                    ("sprk_invoice", ExternalGrantRootType.Matter) => "sprk_matter",
+                    ("sprk_invoice", ExternalGrantRootType.Project) => "sprk_project",
+                    ("sprk_event", ExternalGrantRootType.Matter) => "sprk_regardingmatter",
+                    ("sprk_event", ExternalGrantRootType.Project) => "sprk_regardingproject",
+                    _ => throw new NotSupportedException("An invoice or an event belongs to a matter or a project."),
+                };
+                row[column] = new EntityReference(ExternalGrantRoot.LogicalNameFor(root), parentId!.Value);
+            }
+
+            lock (_filing) _filing[(intermediateTable, id)] = row;
+        }
+
         private readonly Dictionary<string, Guid> _recordTypes = new();
 
         /// <summary>

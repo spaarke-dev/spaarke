@@ -47,6 +47,9 @@ public sealed class ExternalMultiRootSecureRootsTests : IClassFixture<ExternalRo
     private static readonly Guid Invoice = Guid.Parse("a0390000-0000-4000-8000-0000000000d1");
     private static readonly Guid ServiceRequest = Guid.Parse("a0390000-0000-4000-8000-0000000000e1");
 
+    /// <summary>The invoice or event a work assignment is filed through (#1630 intermediates).</summary>
+    private static readonly Guid Intermediate = Guid.Parse("a0390000-0000-4000-8000-0000000000d2");
+
     private readonly ExternalRootEventReadTests.Fixture _fixture;
 
     public ExternalMultiRootSecureRootsTests(ExternalRootEventReadTests.Fixture fixture)
@@ -124,6 +127,63 @@ public sealed class ExternalMultiRootSecureRootsTests : IClassFixture<ExternalRo
         _fixture.Data.FileWorkAssignmentUnder(W, ExternalGrantRootType.Matter, M); // M was never created
         var plain = Add(kind, "Project only");
         Add(kind, "Also in a work assignment under an unreadable matter", workAssignment: W);
+
+        (await ListIds(kind)).Should().Equal(plain);
+    }
+
+    // =====================================================================
+    // #1630 intermediates: a work assignment filed through an INVOICE or EVENT is filed under the matters and projects that
+    // intermediate belongs to. An intermediate the read does not return is unknown, and unknown counts as secure.
+    // =====================================================================
+
+    public static TheoryData<string, string> KindsAndIntermediates
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var kind in new[] { "events", "todos", "documents" })
+                foreach (var intermediate in new[] { "sprk_invoice", "sprk_event" })
+                    data.Add(kind, intermediate);
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(KindsAndIntermediates))]
+    public async Task ARowLinkedToPAndAWorkAssignmentFiledThroughAnIntermediateTheReadDoesNotReturn_IsWithheld(string kind, string intermediate)
+    {
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, W);
+        _fixture.Data.FileWorkAssignmentUnderIntermediate(W, intermediate, Intermediate); // named, never created
+        var plain = Add(kind, "Project only");
+        Add(kind, "Also in a work assignment filed through a missing intermediate", workAssignment: W);
+
+        (await ListIds(kind)).Should().Equal(plain);
+    }
+
+    [Theory]
+    [MemberData(nameof(KindsAndIntermediates))]
+    public async Task ARowLinkedToPAndAWorkAssignmentFiledThroughAnIntermediateOfANonSecureMatter_IsShown(string kind, string intermediate)
+    {
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, W);
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, M);
+        _fixture.Data.FileWorkAssignmentUnderIntermediate(W, intermediate, Intermediate);
+        _fixture.Data.AddIntermediate(intermediate, Intermediate, ExternalGrantRootType.Matter, M);
+        var plain = Add(kind, "Project only");
+        var dual = Add(kind, "Also in a work assignment filed through an intermediate of a non-secure matter", workAssignment: W);
+
+        (await ListIds(kind)).Should().BeEquivalentTo(new[] { plain, dual });
+    }
+
+    [Theory]
+    [MemberData(nameof(KindsAndIntermediates))]
+    public async Task ARowLinkedToPAndAWorkAssignmentFiledThroughAnIntermediateOfASecureMatter_IsWithheld(string kind, string intermediate)
+    {
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, W);
+        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, M);
+        _fixture.Data.FileWorkAssignmentUnderIntermediate(W, intermediate, Intermediate);
+        _fixture.Data.AddIntermediate(intermediate, Intermediate, ExternalGrantRootType.Matter, M);
+        var plain = Add(kind, "Project only");
+        Add(kind, "Also in a work assignment filed through an intermediate of a secure matter", workAssignment: W);
 
         (await ListIds(kind)).Should().Equal(plain);
     }
