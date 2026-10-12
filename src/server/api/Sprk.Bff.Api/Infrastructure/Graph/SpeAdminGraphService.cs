@@ -2868,6 +2868,12 @@ public sealed class SpeAdminGraphService
     /// a malformed QUERY (e.g. a bad <c>$select</c>) answers <c>400 BadRequest</c>, which stays a fault.</para>
     /// <para>Throttling (429), server errors (5xx), access refusals and timeouts are not this, and still throw: the caller
     /// refuses with the 503 (ADR-003).</para>
+    /// <para><b>Scope of that rule (F-165-RB).</b> It describes THIS binding read only. Before it runs, the T227d ownership
+    /// guard reads the same container: per its policy (<see cref="SpeContainerOwnershipGuard"/>, "Fail closed") a 400 of any
+    /// code, a 403 or a 404 there means "not owned" (that null marker is cached 10 minutes), and
+    /// <see cref="GetContainerBindingForConfigAsync"/> maps that refusal to "not there" — the uniform 404. So in the overall
+    /// per-container decision an access refusal or a malformed-query 400 answers 404; only 401/429/5xx, credential faults and
+    /// unparseable bodies reach the 503.</para>
     /// </remarks>
     internal static bool IsUnresolvableContainerId(ODataError ex) =>
         ex.ResponseStatusCode == (int)HttpStatusCode.BadRequest

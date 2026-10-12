@@ -104,6 +104,9 @@ public sealed class SpeAdminContainerOwnershipRefusalTests : IClassFixture<Admin
     [InlineData("DELETE")]
     public async Task RestoreOrPurge_OfThisStampsDeletedContainerInAnotherUnit_IsTheSame404ForALeafAdmin(string method)
     {
+        // NOT live behaviour for the marker: live Graph returns no customProperties for a deleted container (#1652 comment
+        // 6117086899, dev 2026-10-12), so live this is refused one step earlier (not owned) — the same 404 either way. The
+        // stubbed marker on rb-unitb isolates the business-unit refusal; a readable marker live is #1652 part 1.
         Seed(callerUnit: UnitA);
         using var client = Admin();
 
@@ -141,6 +144,10 @@ public sealed class SpeAdminContainerOwnershipRefusalTests : IClassFixture<Admin
     [Fact]
     public async Task Restore_OfThisStampsDeletedContainer_ForARootAdmin_IsRestored()
     {
+        // NOT live behaviour: on live Graph today this restore answers the uniform 404, not 200. Graph discards a
+        // container's customProperties on soft delete (measured on dev 2026-10-12, #1652 comment 6117086899), so the
+        // ownership marker this stub returns from deletedContainers/{id} is a state live Graph never produces. The test pins
+        // the decision GIVEN a readable marker; making it reachable live is #1652 part 1.
         Seed(callerUnit: Root);
         _fixture.Graph.StubPostExact($"{DeletedPath}/rb-own/restore", "{\"id\":\"rb-own\"}");
         using var client = Admin();
@@ -155,7 +162,8 @@ public sealed class SpeAdminContainerOwnershipRefusalTests : IClassFixture<Admin
     public async Task RecycleBinList_ShowsOnlyThisStampsDeletedContainersInTheCallersReach()
     {
         // Pins the trim GIVEN a readable marker. Live Graph returns no customProperties from deletedContainers/{id}
-        // (F-165-RB, measured on dev 2026-10-11), so on dev every deleted container is dropped here today — that half of
+        // (F-165-RB, measured on dev 2026-10-11; confirmed 2026-10-12 that soft delete discards them, #1652 comment
+        // 6117086899), so on dev every deleted container is dropped here today — that half of
         // the defect needs an owner decision (see the issue) and is not fixed by this change.
         Seed(callerUnit: UnitA);
         _fixture.Graph.StubGetExact(DeletedPath,
