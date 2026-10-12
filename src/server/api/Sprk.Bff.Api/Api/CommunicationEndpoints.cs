@@ -73,6 +73,12 @@ public static class CommunicationEndpoints
         ILogger logger,
         CancellationToken ct)
     {
+        // The matter BEFORE the write (a bounded app-only read, skipped without a trigger; never throws), so the trigger fires
+        // only when the filing changed and also re-evaluates the matter it left. Read before UpdateAsync can refuse: a refused
+        // PATCH costs one small read, and nothing else.
+        var before = await Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger
+            .ReadMatterAsync(entities, signalTrigger, id, logger).ConfigureAwait(false);
+
         var result = await ChildRecordEndpoints.UpdateAsync(
             "sprk_communication", id, body, user, ownership, restamper, children, httpContext, logger, ct,
             filingOnly: true).ConfigureAwait(false);
@@ -80,7 +86,7 @@ public static class CommunicationEndpoints
         if (result is Microsoft.AspNetCore.Http.HttpResults.NoContent)
         {
             await Sprk.Bff.Api.Services.Signals.FiledCommunicationSignalTrigger
-                .EnqueueIfClassifiedOnMatterAsync(entities, signalTrigger, id, logger, CancellationToken.None)
+                .EnqueueIfClassifiedOnMatterAsync(entities, signalTrigger, id, logger, before)
                 .ConfigureAwait(false);
         }
 

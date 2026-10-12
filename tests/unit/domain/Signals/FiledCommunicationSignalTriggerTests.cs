@@ -23,6 +23,7 @@ public class FiledCommunicationSignalTriggerTests
 {
     private static readonly Guid CommunicationId = Guid.Parse("a1659000-0000-4000-8000-0000000000c1");
     private static readonly Guid MatterId = Guid.Parse("a1659000-0000-4000-8000-0000000000a1");
+    private static readonly Guid OtherMatterId = Guid.Parse("a1659000-0000-4000-8000-0000000000a2");
 
     [Fact]
     public async Task ClassifiedAndOnAMatter_EnqueuesTheAssociationConfirmedTrigger_Once()
@@ -77,14 +78,144 @@ public class FiledCommunicationSignalTriggerTests
         var entities = new Mock<IGenericEntityService>();
         entities.Setup(e => e.RetrieveAsync("sprk_communication", CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("dataverse down"));
-        var log = new List<(LogLevel Level, string Message)>();
+        var log = new List<(LogLevel Level, string Message, EventId Id)>();
 
         var queued = await FiledCommunicationSignalTrigger.EnqueueIfClassifiedOnMatterAsync(
             entities.Object, trigger.Object, CommunicationId, new ListLogger(log));
 
         queued.Should().BeFalse();
         FilingSignalDoubles.VerifyNothingEnqueued(trigger);
-        log.Should().ContainSingle(e => e.Level == LogLevel.Warning).Which.Message.Should().Contain("nightly pass");
+        var warning = log.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject;
+        warning.Message.Should().Contain("nightly pass");
+        warning.Id.Should().Be(SignalTriggerEvents.FilingReadFailed, "a failed read carries the trigger family's stable event id");
+    }
+
+    [Fact]
+    public async Task WhenTheReadIsCancelled_OrTimesOut_DoesNotThrow_LogsTheStableEventId_AndEnqueuesNothing()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.RetrieveAsync("sprk_communication", CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException());
+        var log = new List<(LogLevel Level, string Message, EventId Id)>();
+
+        var queued = await FiledCommunicationSignalTrigger.EnqueueIfClassifiedOnMatterAsync(
+            entities.Object, trigger.Object, CommunicationId, new ListLogger(log));
+
+        queued.Should().BeFalse();
+        FilingSignalDoubles.VerifyNothingEnqueued(trigger);
+        log.Should().ContainSingle(e => e.Id == SignalTriggerEvents.FilingReadFailed && e.Level == LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task TheReadUsesItsOwnLiveBoundedToken_SoACallerThatGoesAwayCannotDropTheTrigger()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var seen = new List<CancellationToken>();
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.RetrieveAsync("sprk_communication", CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, string[], CancellationToken>((_, _, _, ct) => seen.Add(ct))
+            .ReturnsAsync(FilingSignalDoubles.Communication(CommunicationId, MatterId, classified: true));
+
+        var queued = await FiledCommunicationSignalTrigger.EnqueueIfClassifiedOnMatterAsync(
+            entities.Object, trigger.Object, CommunicationId, NullLogger.Instance);
+
+        queued.Should().BeTrue();
+        seen.Should().ContainSingle().Which.Should().Match<CancellationToken>(t => t.CanBeCanceled && !t.IsCancellationRequested,
+            "bounded (it can time out) and independent of any caller's token");
+    }
+
+    [Fact]
+    public async Task APatchThatLeftTheMatterAsItWas_EnqueuesNothing()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var entities = FilingSignalDoubles.Entities(FilingSignalDoubles.Communication(CommunicationId, MatterId, classified: true));
+
+        var queued = await FiledCommunicationSignalTrigger.EnqueueIfClassifiedOnMatterAsync(
+            entities.Object, trigger.Object, CommunicationId, NullLogger.Instance,
+            new FiledCommunicationSignalTrigger.MatterBefore(true, MatterId));
+
+        queued.Should().BeFalse();
+        FilingSignalDoubles.VerifyNothingEnqueued(trigger);
+    }
+
+    [Fact]
+    public async Task AMoveFromAToB_EnqueuesBothMatters()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var entities = FilingSignalDoubles.Entities(FilingSignalDoubles.Communication(CommunicationId, MatterId, classified: true));
+
+        var queued = await FiledCommunicationSignalTrigger.EnqueueIfClassifiedOnMatterAsync(
+            entities.Object, trigger.Object, CommunicationId, NullLogger.Instance,
+            new FiledCommunicationSignalTrigger.MatterBefore(true, OtherMatterId));
+
+        queued.Should().BeTrue();
+        FilingSignalDoubles.VerifyEnqueuedOnce(trigger, MatterId, CommunicationId);
+        FilingSignalDoubles.VerifyEnqueuedOnce(trigger, OtherMatterId, CommunicationId);
+    }
+
+    [Fact]
+    public async Task AnUnfileFromA_EnqueuesA_AndNothingElse()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var entities = FilingSignalDoubles.Entities(FilingSignalDoubles.Communication(CommunicationId, matter: null, classified: true));
+
+        var queued = await FiledCommunicationSignalTrigger.EnqueueIfClassifiedOnMatterAsync(
+            entities.Object, trigger.Object, CommunicationId, NullLogger.Instance,
+            new FiledCommunicationSignalTrigger.MatterBefore(true, OtherMatterId));
+
+        queued.Should().BeTrue();
+        FilingSignalDoubles.VerifyEnqueuedOnce(trigger, OtherMatterId, CommunicationId);
+        trigger.Verify(t => t.EnqueueAsync(It.IsAny<SignalTriggerKind>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+            It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AFirstFiling_FromNoMatter_EnqueuesOnlyTheNewMatter()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var entities = FilingSignalDoubles.Entities(FilingSignalDoubles.Communication(CommunicationId, MatterId, classified: true));
+
+        await FiledCommunicationSignalTrigger.EnqueueIfClassifiedOnMatterAsync(
+            entities.Object, trigger.Object, CommunicationId, NullLogger.Instance,
+            new FiledCommunicationSignalTrigger.MatterBefore(true, null));
+
+        FilingSignalDoubles.VerifyEnqueuedOnce(trigger, MatterId, CommunicationId);
+        trigger.Verify(t => t.EnqueueAsync(It.IsAny<SignalTriggerKind>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+            It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AMoveOfAnUnclassifiedCommunication_EnqueuesNothing_NeitherMatterHeldItsEvidence()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var entities = FilingSignalDoubles.Entities(FilingSignalDoubles.Communication(CommunicationId, MatterId, classified: false));
+
+        await FiledCommunicationSignalTrigger.EnqueueIfClassifiedOnMatterAsync(
+            entities.Object, trigger.Object, CommunicationId, NullLogger.Instance,
+            new FiledCommunicationSignalTrigger.MatterBefore(true, OtherMatterId));
+
+        FilingSignalDoubles.VerifyNothingEnqueued(trigger);
+    }
+
+    [Fact]
+    public async Task ReadMatter_ReportsTheMatterBeforeTheWrite_AndIsUnknownWithoutATriggerOrWhenTheReadFails()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var filed = FilingSignalDoubles.Entities(FilingSignalDoubles.Communication(CommunicationId, MatterId, classified: true));
+        var failing = new Mock<IGenericEntityService>();
+        failing.Setup(e => e.RetrieveAsync("sprk_communication", CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse down"));
+
+        var known = await FiledCommunicationSignalTrigger.ReadMatterAsync(filed.Object, trigger.Object, CommunicationId, NullLogger.Instance);
+        var noTrigger = await FiledCommunicationSignalTrigger.ReadMatterAsync(filed.Object, null, CommunicationId, NullLogger.Instance);
+        var failed = await FiledCommunicationSignalTrigger.ReadMatterAsync(failing.Object, trigger.Object, CommunicationId, NullLogger.Instance);
+
+        known.Should().Be(new FiledCommunicationSignalTrigger.MatterBefore(true, MatterId));
+        noTrigger.Known.Should().BeFalse();
+        failed.Known.Should().BeFalse();
+        filed.Verify(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once,
+            "no trigger registered: nothing is read");
     }
 
     [Fact]
@@ -112,14 +243,14 @@ public class FiledCommunicationSignalTriggerTests
         entities.VerifyNoOtherCalls();
     }
 
-    private sealed class ListLogger(List<(LogLevel Level, string Message)> sink) : ILogger
+    private sealed class ListLogger(List<(LogLevel Level, string Message, EventId Id)> sink) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            sink.Add((logLevel, formatter(state, exception)));
+            sink.Add((logLevel, formatter(state, exception), eventId));
     }
 }
 
@@ -152,6 +283,16 @@ internal static class FilingSignalDoubles
         var entities = new Mock<IGenericEntityService>();
         entities.Setup(e => e.RetrieveAsync("sprk_communication", row.Id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(row);
+        return entities;
+    }
+
+    /// <summary>The row before the write, then the row after it (the filing route reads the matter on both sides).</summary>
+    public static Mock<IGenericEntityService> EntitiesBeforeAndAfter(Entity before, Entity after)
+    {
+        var entities = new Mock<IGenericEntityService>();
+        entities.SetupSequence(e => e.RetrieveAsync("sprk_communication", after.Id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(before)
+            .ReturnsAsync(after);
         return entities;
     }
 

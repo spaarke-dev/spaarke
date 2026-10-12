@@ -1293,7 +1293,9 @@ public sealed partial class SecureChildOwnershipAiToolTests
             Event, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), HttpContextOfCaller(),
             NullLogger<Program>.Instance, CancellationToken.None);
 
-    /// <summary>PATCH /api/communications/{id}/filing's handler: the ONE re-file core, filing columns only.</summary>
+    /// <summary>The ONE re-file core (<see cref="ChildRecordEndpoints.UpdateAsync"/>, filing columns only) that
+    /// PATCH /api/communications/{id}/filing calls. It does NOT run the route handler, so it queues no Signal trigger; the
+    /// route's trigger is driven by <c>RefileCommunicationWithTrigger</c>.</summary>
     private Task<IResult> RefileCommunication(Guid communication, Dictionary<string, object?> payload) =>
         ChildRecordEndpoints.UpdateAsync(
             "sprk_communication", communication, Payload(payload), _user, _world.Resolver(), Restamper(), Children(),

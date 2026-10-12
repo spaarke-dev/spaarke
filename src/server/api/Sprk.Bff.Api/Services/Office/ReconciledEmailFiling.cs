@@ -145,7 +145,7 @@ public sealed class ReconciledEmailFiling
             // Ontology D-48 / #1659 (additive): a communication classified first and filed to a matter now is evaluated for
             // that matter's Signals at once, not at the nightly pass. Never throws; the filing above stands either way.
             await FiledCommunicationSignalTrigger
-                .EnqueueIfClassifiedOnMatterAsync(_dataverse, _signalTrigger, communicationId, _logger, ct)
+                .EnqueueIfClassifiedOnMatterAsync(_dataverse, _signalTrigger, communicationId, _logger)
                 .ConfigureAwait(false);
             return ReconciledFilingResult.Filed;
         }
