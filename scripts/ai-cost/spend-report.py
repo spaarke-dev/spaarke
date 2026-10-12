@@ -13,7 +13,12 @@ Days are calendar days in --tz (default: the machine's local timezone, DST-aware
 Usage:
   python spend-report.py [--days N | --since YYYY-MM-DD | --today] [--tz local|utc]
                          [--project SUBSTR ...] [--format text|json|csv|html]
-                         [--out PATH] [--open]
+                         [--out PATH] [--open] [--archive [PATH]] [--source transcripts|archive]
+
+Durable archive: transcripts are deleted by Claude Code after a retention period, so
+`--archive [PATH]` upserts this run's days into a CSV (default
+%USERPROFILE%\\.claude\\spend-archive\\spend-daily.csv) and never lets a day's total go down.
+`--source archive` reports from that file instead of the transcripts.
 """
 import argparse, csv, glob, importlib.util, io, json, os, sys, tempfile, time
 from collections import defaultdict
@@ -370,18 +375,146 @@ def html_report(flatrows, since, until, tz_name="local", tzl="UTC"):
     return HTML.replace("__DATA__", blob)
 
 
+# --- durable archive ----------------------------------------------------------------------
+# Claude Code deletes old transcripts, so the per-day rows are also kept in a CSV outside the repo
+# (it holds project names and costs). Same columns as `--format csv`, so one file feeds a dashboard.
+
+DEFAULT_ARCHIVE = os.path.join(os.path.expanduser("~"), ".claude", "spend-archive", "spend-daily.csv")
+INT_FIELDS = ["calls", "input", "output", "cache_read", "cache_write", "ctx", "big"]
+COST_FIELDS = ["cost_cache_read", "cost_cache_write", "cost_input", "cost_output"]
+COST_EPS = 1e-6      # float noise only; a real deletion drops a day by far more
+
+
+class ArchiveError(Exception):
+    pass
+
+
+def flat_cost(r):
+    return sum(r[k] for k in COST_FIELDS)
+
+
+def row_key(r):
+    return (r["day"], r["project"], r["model"], r["kind"])
+
+
+def sort_flat(rows):
+    return sorted(rows, key=row_key)       # day, then project (then model, kind)
+
+
+def day_range(since, until):
+    d, end, out = datetime.strptime(since, "%Y-%m-%d"), datetime.strptime(until, "%Y-%m-%d"), []
+    while d <= end:
+        out.append(d.strftime("%Y-%m-%d"))
+        d += timedelta(days=1)
+    return out
+
+
+def read_archive(path):
+    """Archived rows as flat dicts ([] if the file does not exist). Raises ArchiveError if malformed."""
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8", newline="") as fh:
+        rd = csv.DictReader(fh)
+        missing = [c for c in CSV_COLUMNS if c not in (rd.fieldnames or [])]
+        if missing:
+            raise ArchiveError(f"{path} is not a spend archive (missing columns: {', '.join(missing)})")
+        rows = []
+        for n, rec in enumerate(rd, start=2):
+            try:
+                r = {k: rec[k] for k in ("day", "project", "model", "kind", "tz")}
+                r.update({k: int(rec[k]) for k in INT_FIELDS})
+                r.update({k: float(rec[k]) for k in COST_FIELDS})
+            except (TypeError, ValueError) as ex:
+                raise ArchiveError(f"{path} line {n}: {ex}")
+            rows.append(r)
+    return rows
+
+
+def check_archive_tz(rows, tz_name, path):
+    """Refuse to mix day boundaries: every archived row must use the run's tz."""
+    found = sorted({r["tz"] for r in rows} - {tz_name})
+    if found:
+        raise ArchiveError(
+            f"{path} holds days bucketed in tz '{', '.join(found)}' but this run uses '{tz_name}'. "
+            f"Mixing bucket boundaries would double-count or drop calls; re-run with --tz {found[0]} "
+            f"or point --archive at a different file.")
+
+
+def merge_archive(archived, fresh, covered_days):
+    """Upsert fresh rows into archived rows, keyed (day, project, model, kind).
+
+    For each covered day the fresh rows replace the archived ones, unless the fresh total cost is lower
+    than the archived total (transcripts were deleted): then the archived rows stay. Days outside
+    `covered_days` are untouched. Returns (rows sorted by day then project, kept) where kept lists
+    (day, fresh_total, archived_total) for every day whose archived rows were kept."""
+    by_day_old, by_day_new = defaultdict(list), defaultdict(list)
+    for r in archived:
+        by_day_old[r["day"]].append(r)
+    for r in fresh:
+        by_day_new[r["day"]].append(r)
+    covered = set(covered_days) | set(by_day_new)
+    merged, kept = [], []
+    for day in set(by_day_old) | covered:
+        old, new = by_day_old.get(day, []), by_day_new.get(day, [])
+        if day not in covered:
+            merged.extend(old)
+            continue
+        old_t, new_t = sum(map(flat_cost, old)), sum(map(flat_cost, new))
+        if old and new_t < old_t - COST_EPS:
+            merged.extend(old)
+            kept.append((day, new_t, old_t))
+        else:
+            merged.extend(new)
+    return sort_flat(merged), sorted(kept)
+
+
+def write_archive(path, rows):
+    """Write atomically (temp file in the same folder, then replace); creates the folder."""
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".spend-archive.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(csv_report(rows))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+def filter_flat(flatrows, projects):
+    if not projects:
+        return list(flatrows)
+    return [r for r in flatrows if any(p.lower() in r["project"].lower() for p in projects)]
+
+
+def fail(msg):
+    print(f"spend-report: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--days", type=int, help="last N calendar days incl. today (default 14)")
     ap.add_argument("--since", help="first day, YYYY-MM-DD")
     ap.add_argument("--today", action="store_true",
                     help="the current calendar day only, 00:00 to now (in --tz); not with --days/--since")
-    ap.add_argument("--tz", choices=["local", "utc"], default="local",
-                    help="timezone whose calendar days are used for bucketing (default: local)")
+    ap.add_argument("--tz", choices=["local", "utc"],
+                    help="timezone whose calendar days are used for bucketing (default: local; "
+                         "with --source archive, the archive's own tz)")
     ap.add_argument("--project", action="append", default=[])
     ap.add_argument("--format", choices=["text", "json", "csv", "html"], default="text")
     ap.add_argument("--out")
     ap.add_argument("--open", action="store_true")
+    ap.add_argument("--archive", nargs="?", const=DEFAULT_ARCHIVE, metavar="PATH",
+                    help="upsert this run's days into a durable CSV archive (default path "
+                         f"{DEFAULT_ARCHIVE.replace('%', '%%')}); a day is never replaced by a lower total. "
+                         "With --source archive, selects the file to read instead")
+    ap.add_argument("--source", choices=["transcripts", "archive"], default="transcripts",
+                    help="where rows come from: the local transcripts (default) or the archive, "
+                         "which also covers days whose transcripts were deleted")
     a = ap.parse_args()
     if a.today and (a.days is not None or a.since):
         ap.error("--today cannot be combined with --days or --since")
@@ -390,33 +523,78 @@ def main():
             datetime.strptime(a.since, "%Y-%m-%d")
         except ValueError:
             ap.error("--since must be YYYY-MM-DD")
-    tz = resolve_tz(a.tz)
-    tzl = tz_label(a.tz)
-    since, until = resolve_window(a.days, a.since, a.today, tz)
     t0 = time.time()
-    rows, st = collect(since, tz)
-    fr = flat(rows, a.project, a.tz)
+    archive_path = a.archive or DEFAULT_ARCHIVE
+    tz_name = a.tz or "local"
+    note = ""
+
+    if a.source == "archive":
+        if not os.path.exists(archive_path):
+            fail(f"no archive at {archive_path} (create it with --archive)")
+        try:
+            arows = read_archive(archive_path)
+            if not a.tz and arows:
+                tz_name = arows[0]["tz"]
+            check_archive_tz(arows, tz_name, archive_path)
+        except ArchiveError as ex:
+            fail(str(ex))
+        tz = resolve_tz(tz_name)
+        if a.days is None and not a.since and not a.today:      # whole history
+            days_present = sorted({r["day"] for r in arows})
+            since = days_present[0] if days_present else today_in(tz).isoformat()
+            until = days_present[-1] if days_present else since
+        else:
+            since, until = resolve_window(a.days, a.since, a.today, tz)
+        fr = filter_flat([r for r in arows if since <= r["day"] <= until], a.project)
+        note = f"archive {archive_path}"
+    else:
+        tz = resolve_tz(tz_name)
+        since, until = resolve_window(a.days, a.since, a.today, tz)
+        arows = []
+        if a.archive:                       # fail before the (slow) scan if the archive is unusable
+            try:
+                arows = read_archive(archive_path)
+                check_archive_tz(arows, tz_name, archive_path)
+            except ArchiveError as ex:
+                fail(str(ex))
+        rows, st = collect(since, tz)
+        full = flat(rows, [], tz_name)      # the archive always gets every project, whatever --project says
+        fr = filter_flat(full, a.project)
+        note = f"{st['files']} files"
+        if a.archive:
+            merged, kept = merge_archive(arows, full, day_range(since, until))
+            write_archive(archive_path, merged)
+            for day, new_t, old_t in kept:
+                print(f"WARN archive: {day}: fresh ${new_t:,.2f} < archived ${old_t:,.2f}; kept the archived rows "
+                      f"(transcripts for that day were probably deleted)", file=sys.stderr)
+            print(f"archive {archive_path}: {len(merged)} rows, {len(day_range(since, until))} days scanned, "
+                  f"{len(kept)} kept at the archived total", file=sys.stderr)
+
+    tzl = tz_label(tz_name)
     if a.format == "text":
         out = text_report(fr, since, until, tzl)
     elif a.format == "json":
-        out = json.dumps({"tz": a.tz, "tz_label": tzl, "since": since, "until": until, "rows": fr}, indent=1)
+        out = json.dumps({"tz": tz_name, "tz_label": tzl, "source": a.source,
+                          "since": since, "until": until, "rows": fr}, indent=1)
     elif a.format == "csv":
         out = csv_report(fr)
     else:
-        out = html_report(fr, since, until, a.tz, tzl)
+        out = html_report(fr, since, until, tz_name, tzl)
         if not a.out:
             a.out = os.path.join(tempfile.gettempdir(), "spaarke-ai-spend.html")
     if a.out:
         with open(a.out, "w", encoding="utf-8", newline="") as fh:
             fh.write(out)
-        print(f"wrote {a.out} ({len(fr)} rows, {st['files']} files, {time.time()-t0:.1f}s)", file=sys.stderr)
+        print(f"wrote {a.out} ({len(fr)} rows, {note}, {time.time()-t0:.1f}s)", file=sys.stderr)
         if a.format == "html" and a.open:
             import webbrowser
             webbrowser.open("file:///" + os.path.abspath(a.out).replace("\\", "/"))
     else:
-        sys.stdout.reconfigure(encoding="utf-8")
+        # newline="": no "\n" -> "\r\n" translation, so csv (already CRLF) is not doubled to "\r\r\n"
+        # on Windows and stdout matches what --out writes.
+        sys.stdout.reconfigure(encoding="utf-8", newline="")
         sys.stdout.write(out)
-        print(f"({st['files']} files, {time.time()-t0:.1f}s)", file=sys.stderr)
+        print(f"({note}, {time.time()-t0:.1f}s)", file=sys.stderr)
 
 
 if __name__ == "__main__":

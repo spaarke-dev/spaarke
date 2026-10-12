@@ -41,6 +41,32 @@ Options: `--days N` (default 14), `--since YYYY-MM-DD` or `--today` (the current
 `--tz`; cannot be combined with `--days`/`--since`); `--tz local|utc`; `--project SUBSTR` (repeatable);
 `--format text|json|csv|html`; `--out PATH`; `--open` (html: open in the default browser).
 
+### Durable archive
+
+Claude Code deletes old transcripts, so history older than its retention period disappears.
+`--archive [PATH]` upserts the days of this run into a CSV that survives that.
+
+```
+python scripts/ai-cost/spend-report.py --days 3 --archive                  # default path
+python scripts/ai-cost/spend-report.py --days 30 --archive D:\spend.csv
+python scripts/ai-cost/spend-report.py --source archive --format html --open   # full history
+python scripts/ai-cost/spend-report.py --source archive --since 2026-09-01 --project foo --format csv
+```
+
+- Default path: `%USERPROFILE%\.claude\spend-archive\spend-daily.csv` (outside the repo: it holds project
+  names and costs; the folder is created). Columns are exactly `--format csv`:
+  `day,project,model,kind,calls,input,output,cache_read,cache_write,cost_cache_read,cost_cache_write,cost_input,cost_output,ctx,big,tz`.
+  Sorted by day, then project. Written atomically (temp file + replace).
+- Rows are keyed `(day, project, model, kind)`. For each day in the scanned window the fresh rows replace
+  that day's archived rows, **unless the fresh total cost for the day is lower than the archived total**
+  (transcripts were deleted): the archived rows then stay and a `WARN archive:` line is printed.
+  Days outside the window are untouched, so running `--days 3` daily keeps growing the history.
+- The archive always receives every project; `--project` only filters the report that is printed.
+- The archive records its tz. A run with a different `--tz` is refused rather than mixing day boundaries.
+- `--source archive` reports from the archive instead of the transcripts, in any `--format`. Without
+  `--days/--since/--today` it covers the whole history; `--archive PATH` picks the file and nothing is
+  written. The days are in the archive's tz.
+
 ## Tests
 
 ```
