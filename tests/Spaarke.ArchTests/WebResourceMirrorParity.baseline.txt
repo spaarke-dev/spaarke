@@ -1,0 +1,13 @@
+# Baseline for WebResourceMirrorParityGuardTests (issue #1651).
+# One line per SpaarkeMaster web-resource mirror that differs (after CRLF/BOM normalisation) from its maintained source:
+#   <mirror path> | <source path> ; <source path>
+# The list only shrinks. Fix a pair by copying the source over the mirror, then DELETE its line. Never add a line.
+src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/js/registrationribbon.js | src/client/webresources/js/sprk_registrationribbon.js
+src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/access_ribbon.js | src/client/webresources/js/sprk_access_ribbon.js
+src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_DocumentOperations.js | infrastructure/dataverse/ribbon/DocumentRibbons/WebResources/sprk_DocumentOperations.js ; src/client/webresources/js/sprk_DocumentOperations.js
+src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_analysis_commands.js | src/client/webresources/js/sprk_analysis_commands.js
+src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_emailactions.js | infrastructure/dataverse/ribbon/EmailRibbons/WebResources/sprk_emailactions.js ; src/client/webresources/js/sprk_emailactions.js
+src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_event_ribbon_commands.js | src/solutions/EventCommands/sprk_event_ribbon_commands.js
+src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_event_sidepane_form.js | src/client/webresources/js/sprk_event_sidepane_form.js
+src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_kpi_ribbon_actions.js | src/solutions/webresources/sprk_kpi_ribbon_actions.js
+src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_playbook_commands.js | src/client/webresources/js/sprk_playbook_commands.js
