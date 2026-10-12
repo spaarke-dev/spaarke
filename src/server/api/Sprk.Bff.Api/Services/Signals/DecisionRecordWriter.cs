@@ -62,6 +62,9 @@ public sealed record DecisionRecordFollowOn(string ActionCode, string Entity, Gu
 /// <param name="Reason">The dismissal / denial reason ("code - detail"); required when nothing was taken.</param>
 /// <param name="Denied">True when the human denied at the gate; the record then carries outcome Denied.</param>
 /// <param name="PrivilegeFlagged">Copied forward from the Signal (ADR-015: flagged, never decided).</param>
+/// <param name="UnnamedNextSteps">Next steps that ran but created no row the record can name (a notification email whose
+/// communication row was not tracked; task 043). Catalog Next-step codes; listed in <c>sprk_steps</c>, and they count as
+/// something done (not a dismissal), exactly as a follow-on does.</param>
 public sealed record DecisionRecordRequest(
     Guid ReviewId,
     Guid PolicyVersionId,
@@ -78,7 +81,8 @@ public sealed record DecisionRecordRequest(
     string? Because,
     string? Reason,
     bool Denied = false,
-    bool PrivilegeFlagged = false);
+    bool PrivilegeFlagged = false,
+    IReadOnlyList<string>? UnnamedNextSteps = null);
 
 /// <summary>The result of <see cref="DecisionRecordWriter.WriteAsync"/>.</summary>
 /// <param name="RecordId">The new <c>sprk_decisionrecord</c> id: the caller sets it on every resolved Signal.</param>
@@ -494,7 +498,19 @@ public sealed class DecisionRecordWriter
             }
         }
 
-        var nothingTaken = taken.Count == 0 && r.FollowOns.Count == 0;
+        var unnamed = r.UnnamedNextSteps ?? [];
+        foreach (var code in unnamed)
+        {
+            if (!DecisionActionCatalog.TryGet(code, out var unnamedDef) || !unnamedDef.IsNextStep)
+            {
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.RecordClassUnderivable,
+                    "An unnamed Next step is not a Next-step creator in the catalog, so the record class cannot be derived.");
+            }
+        }
+
+        var nextSteps = r.FollowOns.Count + unnamed.Count;
+        var nothingTaken = taken.Count == 0 && nextSteps == 0;
         if (r.Denied && !nothingTaken) throw Invalid("A denied review cannot also have taken an action or created a Next step.");
         if (nothingTaken && string.IsNullOrWhiteSpace(r.Reason))
         {
@@ -511,7 +527,7 @@ public sealed class DecisionRecordWriter
         // Next step is Judgement (every Next-step creator is); Routine otherwise.
         var recordClass = nothingTaken
             ? RecordedDecisionClass.Dismissal
-            : r.FollowOns.Count > 0 || taken.Any(t => t.Item2.RecordClass == DecisionRecordClass.Judgement)
+            : nextSteps > 0 || taken.Any(t => t.Item2.RecordClass == DecisionRecordClass.Judgement)
                 ? RecordedDecisionClass.Judgement
                 : RecordedDecisionClass.Routine;
 
@@ -575,11 +591,11 @@ public sealed class DecisionRecordWriter
             because = r.Because,
         });
 
-        e["sprk_steps"] = Memo("sprk_steps", JsonMemoMaxLength, new
+        var envelope = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            reviewId = r.ReviewId.ToString("D", CultureInfo.InvariantCulture),
-            resolvedSignalIds = r.ResolvedSignalIds.Select(id => id.ToString("D", CultureInfo.InvariantCulture)),
-            steps = plan.Steps.Select(s => new
+            ["reviewId"] = r.ReviewId.ToString("D", CultureInfo.InvariantCulture),
+            ["resolvedSignalIds"] = r.ResolvedSignalIds.Select(id => id.ToString("D", CultureInfo.InvariantCulture)),
+            ["steps"] = plan.Steps.Select(s => new
             {
                 code = s.Def.Code,
                 label = s.Def.Label,
@@ -588,7 +604,13 @@ public sealed class DecisionRecordWriter
                 outcome = s.Step.Taken ? s.Step.Outcome : "Skipped",
                 written = (s.Step.Written ?? Array.Empty<DecisionRecordRef>()).Select(w => new { entity = w.Entity, id = w.Id }),
             }),
-        });
+        };
+        if (r.UnnamedNextSteps is { Count: > 0 } unnamed)
+        {
+            envelope["unnamedNextSteps"] = unnamed; // task 043: Next steps that ran but created no row with an id
+        }
+
+        e["sprk_steps"] = Memo("sprk_steps", JsonMemoMaxLength, envelope);
 
         e["sprk_followons"] = Memo("sprk_followons", JsonMemoMaxLength,
             r.FollowOns.Select(f => new { actionCode = f.ActionCode, entity = f.Entity, id = f.Id }));

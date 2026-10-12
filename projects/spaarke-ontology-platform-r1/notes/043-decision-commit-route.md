@@ -29,6 +29,7 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 **Authorization.**
 - Every Signal (the primary and each Also-resolve) goes through `SignalCoreRecordAccess.AuthorizeAsync` as the caller. This happens before the review-id ledger is read, so a caller who cannot read an item learns nothing, not even a stored outcome.
 - If an access check returns CallerUnresolved, the answer is the single 403. Any other result that is not Allowed is the uniform 404.
+- **FR-51 (review fix F-5).** After the plan is validated and before any executor preflight, the route asks, as the caller through `CallerRecordAccessProbe`, for AppendTo on the core record (`entity.associate_document`) and Write on each covered Signal's subject (`write`, on the table `IGenericEntityService.GetEntitySetNameAsync` names). A missing right is a 403 `ontology.decision.not_authorized` before any write. A subject whose table cannot be resolved is denied. This applies to a dismissal or a record-only approval too, which no executor preflight would otherwise check. **This is stricter than the POML** (which named only the Signal read and each executor's preflight); it follows the spec's FR-51. See owner question 7.
 - When an executor preflight refuses with NotAuthorized, the result is a 403 that names the action.
 - This placement also keeps the route-census chain at two hops: handler → `DecisionCommitService.CommitAsync` → `SignalCoreRecordAccess.AuthorizeAsync` → `IDataverseUserClient`.
 
@@ -41,6 +42,7 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 - The ledger is ADR-009 `ITenantCache`: resource `decision-review`, id `{oid}:{reviewId}`, version 1.
   - It holds an in-progress marker for 10 minutes; a concurrent repeat gets 409.
   - It keeps the first outcome (Recorded or Failed) for 7 days.
+  - A resume keeps the failure it resumes inside its in-progress marker. If the resume ends without a write outcome (refused, forbidden, unavailable, cancelled), that failure is put back, so the next retry still skips what landed (review fix F-1).
   - A refusal is not cached, so the same id can be corrected and sent again.
 - When the cache has nothing, the record itself answers the repeat: `sprk_confirmedby = caller` and `sprk_steps LIKE %"reviewId":"<id>"%`.
 - A cache that cannot be read fails closed (503).
@@ -50,13 +52,16 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 - Without the flag, the first outcome is replayed (AC4).
 - A Failed outcome is not resumable if a message step failed (it may have gone out) or if a step got no clear answer.
 - A record-write failure after a send is not resumable (escalation trigger 1).
+- A step that failed after writing part of its work (non-empty `written`) is not resumable, so a retry cannot write it twice.
+
+**Cancellation (review fix F-3).** The request's token applies only up to the first write. From then on the executors, the record write, the closes and the follow-ups run on `CancellationToken.None`, so a client that disconnects after a send still gets its record or a stored failure. A cancellation before the first write frees the review id (or puts back a resumed failure) and rethrows. A record create that throws something other than the writer's refusal (for example a client-side timeout) becomes a `create_failed` failure that may have written the record.
 
 **Step 6 against a system closure (coordinator point 2).**
 - Each Signal is re-read and updated with `UpdateIfRowVersionMatchesAsync`. On a version mismatch it is re-read once and the decision is made again.
 - A Signal Resolved with a system resolution (ConditionCleared, Superseded or PolicyRetired) and `sprk_resolvedon` on or after the review start is re-closed. It gets the commit's resolution (Acted or Dismissed), resolved-on, resolved-by and `sprk_decisionrecord` = the new record. The Signal result carries the warning `reclosed_after_system_resolution`.
 - A Signal a person resolved is left alone, with the warning `resolved_by_another_decision`.
 - The review start is:
-  - the first attempt's `StartedAt` on a resume;
+  - on a resume, the first attempt's bounded review start, stored in the ledger entry (review fix F-2; it used to be the first attempt's "now");
   - otherwise the client's `planReadOn`, bounded to the last 24 hours and never later than now;
   - otherwise now.
 - Validation (step 1) applies the same rule. A Signal closed by the system before the review started is a 409.
@@ -122,13 +127,17 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 4. **`DeciderRole` is null.** No role source is wired. Is it needed in R1?
 5. **A no-core item owned by a team is refused** (`item_owner_unsupported`), because the record writer owns by systemuser. Is that acceptable for R1?
 6. **`send-reminder` resolves the Signal** (only the inquiry is non-resolving under D-119). Confirm.
+7. **FR-51 strictening.** The route now requires the caller's Write on each Signal's subject and AppendTo on the core record, even for a dismissal. A user who can read an item but cannot write its subject can no longer dismiss it. Confirm this is the intended rule (spec FR-51), or narrow it to the POML's rule (Signal read + executor preflights).
 
 ## Known limits (K-class)
 
 - **The in-progress marker is a get-then-set on the tenant cache, not atomic.** Two truly simultaneous requests can both pass; the durable record lookup still prevents a second record after the first one is written. ITenantCache has no set-if-absent.
 - **A crash between a write and the outcome store.** The 10-minute marker expires, and the record lookup finds a written record. A crash before step 5 leaves landed writes that a repeat would run again.
 - **The outcome is kept 7 days.** After that, only a written record answers a repeat.
-- **A `send-email` Next step's communication id is not tracked by its core.** That follow-on appears in the steps envelope but not in `sprk_followons`.
+- **A `send-email` Next step's communication id is not tracked by its core.** That follow-on is listed under `unnamedNextSteps` in the `sprk_steps` envelope (and counts as something done, so the record is Judgement, not a refused dismissal; review fix F-4), but not in `sprk_followons`.
+- **Replay ignores the Signal id.** A repeat of a review id under another Signal id returns the stored outcome (the ledger key is caller + review id). The caller must already be able to read that other Signal, so nothing leaks; the content hash only gates a `retry`.
+- **A crash during a resume.** The resumed failure lives in the 10-minute in-progress marker; if the process dies mid-resume and the marker expires, the failure is forgotten and a later retry runs from the start (the durable record lookup still prevents a second record).
+- **Also resolve is capped at 25 items** (review K2).
 - **A decision-created work assignment has the business-unit search-index cascade issue F-60 (#1607).** This is the same as the wizard and already filed.
 
 ## Tests and why each exists
@@ -156,6 +165,13 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 | Step-6 re-close / person-conflict / before-review-start | Coordinator point 2 |
 | Retry-after-system-closure and `ARetryThatChangesTheReview_IsRefused` | Coordinator point 3 |
 | HTTP mapping Theory, failure extensions, uniform 404 | The endpoint contract |
+| `AStepThatFailedAfterWritingPartOfItsWork_IsNotResumable_...` | Review: a partial step is never written twice |
+| `ARetryThatIsRefused_KeepsTheStoredFailure_...` | Review F-1 |
+| `ARetry_JudgesASystemClosure_AgainstTheReviewsOwnStart_...` | Review F-2 |
+| `ACancelledRequest_AfterTheFirstWrite_...`, `ACancelledRequest_BeforeAnyWrite_ReleasesTheReviewId` | Review F-3 |
+| `ANotificationThatNamedNoRow_IsStillRecorded_...` | Review F-4 |
+| `ACallerWhoCannotAppendToTheMatter_...`, `ACallerWhoCannotWriteTheSubject_...`, `ASubjectWhoseTableCannotBeResolved_IsDenied` | Review F-5 (FR-51) |
+| `AlsoResolve_IsCapped` | Review K2 |
 
 **`DecisionCommitFollowUpsTests.cs`** covers the trigger arguments, the failure path, no-revision, a trigger that returns false, suppression running, suppression failing, a policy without a code, the grain keying and the revision filter. These are the 032 and 034 hand-off contracts.
 
@@ -173,3 +189,6 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 **Mutation check (local).**
 - Moving the inquiry first fails AC1 and AC3.
 - Disabling the system-closure rule fails the re-close and retry tests.
+- Review fixes: disabling each fix (F-1 put-back, F-2 stored start, F-3 detached token and the cancellation release, F-4 unnamed Next steps, F-5 rights check, K2 cap) fails exactly its new test(s); all nine new tests failed under the mutations and pass on the fix.
+
+**Also fixed in scope:** `DecisionActionCatalogTests.SendBudgetInquiry_HasNoReplyDueParameter_D56_D20` asserted the inquiry's parameters were exactly to/subject/body; this task's optional `outsideFirm` broke it. The assertion now lists `outsideFirm` (optional) and still has no reply-due parameter.

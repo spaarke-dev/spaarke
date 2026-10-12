@@ -61,7 +61,9 @@ public class DecisionActionCatalogTests
     {
         DecisionActionCatalog.TryGet("send-budget-inquiry", out var inquiry).Should().BeTrue();
 
-        inquiry.Parameters.Select(p => p.Code).Should().Equal("to", "subject", "body");
+        // Task 043 added the optional outside firm (sprk_regardingorganization); still no reply-due parameter (D-56/D-20).
+        inquiry.Parameters.Select(p => p.Code).Should().Equal("to", "subject", "body", "outsideFirm");
+        inquiry.Parameters.Single(p => p.Code == "outsideFirm").Required.Should().BeFalse();
     }
 
     [Fact]

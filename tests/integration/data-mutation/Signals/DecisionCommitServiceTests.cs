@@ -97,6 +97,11 @@ public sealed class DecisionCommitServiceTests
         public FakeTimeProvider Clock { get; } = new(Now);
         public List<IReadOnlyList<DecisionCommitService.SignalRow>> DismissedHandedOn { get; } = new();
         public List<IReadOnlyList<DecisionCommitStep>> FailedHandedOn { get; } = new();
+        public Dictionary<(string Set, Guid Id), AccessRights> Rights { get; } = new();
+        public List<(string Set, Guid Id)> RightsAsked { get; } = new();
+
+        public const AccessRights AllRights =
+            AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share | AccessRights.Delete;
 
         public Rig()
         {
@@ -108,6 +113,7 @@ public sealed class DecisionCommitServiceTests
             Entities.Setup(e => e.RetrieveAsync("sprk_recordtype_ref", TypeMatter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new Entity("sprk_recordtype_ref", TypeMatter) { ["sprk_recordlogicalname"] = "sprk_matter" });
             Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
+            Entities.Setup(e => e.GetEntitySetNameAsync("sprk_todo", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_todos");
             Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) =>
                     new Entity("sprk_policyversion", id) { ["sprk_decisionplan"] = id == DoVersion ? DoPlan : PathBPlan });
@@ -152,6 +158,14 @@ public sealed class DecisionCommitServiceTests
                 new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
             { CallBase = false };
             Probe.Setup(p => p.GetCallerSystemUserIdAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => CallerUnresolved ? null : Caller);
+            // FR-51: the caller's rights on the subject and the core record; every record is granted unless a test takes it away.
+            Probe.Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string? token, string set, Guid id, CancellationToken _) =>
+                {
+                    token.Should().Be("caller-token", "the rights are asked AS THE CALLER");
+                    RightsAsked.Add((set, id));
+                    return Rights.TryGetValue((set, id), out var granted) ? granted : AllRights;
+                });
 
             var jobs = new Mock<JobSubmissionService>(MockBehavior.Loose, Options.Create(new ServiceBusOptions { QueueName = "test" }),
                 NullLogger<JobSubmissionService>.Instance, new Mock<ServiceBusClient>().Object);
@@ -259,8 +273,8 @@ public sealed class DecisionCommitServiceTests
                 Entities.Object, Probe.Object, Ledger, FollowUps.Object, Clock, NullLogger<DecisionCommitService>.Instance);
         }
 
-        public Task<DecisionCommitResult> CommitAsync(DecisionReview review, Guid? signal = null, HttpContext? http = null) =>
-            Service().CommitAsync(signal ?? Primary, review, http ?? Http(), CancellationToken.None);
+        public Task<DecisionCommitResult> CommitAsync(DecisionReview review, Guid? signal = null, HttpContext? http = null, CancellationToken ct = default) =>
+            Service().CommitAsync(signal ?? Primary, review, http ?? Http(), ct);
 
         public Entity Record => Records.Single();
 
@@ -284,11 +298,19 @@ public sealed class DecisionCommitServiceTests
 
         public bool Throws { get; set; }
 
+        public Action? OnPreflight { get; set; }
+
+        public Action? OnExecute { get; set; }
+
+        public List<CancellationToken> ExecuteTokens { get; } = new();
+
         public List<DecisionActionRequest> Requests { get; } = new();
 
         public Task<DecisionActionOutcome?> PreflightAsync(DecisionActionRequest request, CancellationToken ct)
         {
             rig.Log.Add($"preflight:{code}");
+            OnPreflight?.Invoke();
+            ct.ThrowIfCancellationRequested();
             return Task.FromResult(Refusal);
         }
 
@@ -296,6 +318,8 @@ public sealed class DecisionCommitServiceTests
         {
             rig.Log.Add($"execute:{code}");
             Requests.Add(request);
+            ExecuteTokens.Add(ct);
+            OnExecute?.Invoke();
             if (Throws) throw new TimeoutException("no answer");
             return Task.FromResult(Result ?? DecisionActionOutcome.Done(code, DefaultWritten(code)));
         }
@@ -1053,6 +1077,163 @@ public sealed class DecisionCommitServiceTests
 
         changed.ReasonCode.Should().Be(DecisionCommitReasons.ReviewChanged);
         rig.Log.Count(l => l == "execute:revise-budget").Should().Be(1);
+    }
+
+    // ── Review fixes: a resume never forgets what landed; one review start; no cancellation after the first write ──────
+
+    [Fact]
+    public async Task ARetryThatIsRefused_KeepsTheStoredFailure_SoTheNextRetryStillSkipsWhatLanded()
+    {
+        var rig = new Rig();
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Failed("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var review = PathBReview(inquiry: false);
+        (await rig.CommitAsync(review)).Resumable.Should().BeTrue();
+
+        // The retry is refused before any write (the To Do's target is not writable right now).
+        rig.Executors["add-todo"].Result = null;
+        rig.Executors["add-todo"].Refusal = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.NotAuthorized, "no");
+        var refused = await rig.CommitAsync(review with { Retry = true });
+        refused.Status.Should().Be(DecisionCommitStatus.Forbidden);
+
+        // The cause is fixed; the next retry resumes the SAME failure.
+        rig.Executors["add-todo"].Refusal = null;
+        var retried = await rig.CommitAsync(review with { Retry = true });
+
+        retried.Status.Should().Be(DecisionCommitStatus.Recorded, retried.Detail);
+        rig.Log.Count(l => l == "execute:revise-budget").Should().Be(1, "the revision that landed on the first attempt is never written again");
+    }
+
+    [Fact]
+    public async Task ARetry_JudgesASystemClosure_AgainstTheReviewsOwnStart_NotTheFirstAttempt()
+    {
+        var rig = new Rig();
+        // The wizard read the plan ten minutes ago; the system closed the Signal five minutes ago (after the read).
+        rig.AddSignal(Primary, DecisionLane.Decide, Matter, PathB, Resolved, SignalWriter.ResolutionConditionCleared, Now.UtcDateTime.AddMinutes(-5));
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Failed("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var review = PathBReview(inquiry: false) with { PlanReadOn = Now.AddMinutes(-10) };
+
+        var failed = await rig.CommitAsync(review);
+        failed.Resumable.Should().BeTrue(failed.Detail);
+
+        rig.Clock.Advance(TimeSpan.FromMinutes(1));
+        rig.Executors["add-todo"].Result = null;
+        var retried = await rig.CommitAsync(review with { Retry = true });
+
+        retried.Status.Should().Be(DecisionCommitStatus.Recorded, "the closure came after the review started, so it is re-closed, not a conflict");
+        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionActed);
+        rig.Log.Count(l => l == "execute:revise-budget").Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ACancelledRequest_AfterTheFirstWrite_StillFinishesTheCommit_AndWritesTheRecord()
+    {
+        var rig = new Rig();
+        using var cts = new CancellationTokenSource();
+        rig.Executors["revise-budget"].OnExecute = cts.Cancel; // the client disconnects once a write has landed
+
+        var result = await rig.CommitAsync(PathBReview(), ct: cts.Token);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Records.Should().ContainSingle();
+        rig.Status(Primary).Should().Be(Resolved);
+        rig.Executors.Values.SelectMany(e => e.ExecuteTokens).Should().OnlyContain(t => !t.CanBeCanceled, "the writes never run on the request's token");
+    }
+
+    [Fact]
+    public async Task ACancelledRequest_BeforeAnyWrite_ReleasesTheReviewId()
+    {
+        var rig = new Rig();
+        using var cts = new CancellationTokenSource();
+        rig.Executors["add-todo"].OnPreflight = cts.Cancel;
+        var review = PathBReview();
+
+        var cancelled = () => rig.CommitAsync(review, ct: cts.Token);
+        await cancelled.Should().ThrowAsync<OperationCanceledException>();
+        rig.Writes.Should().BeEmpty();
+
+        rig.Executors["add-todo"].OnPreflight = null;
+        var again = await rig.CommitAsync(review);
+        again.Status.Should().Be(DecisionCommitStatus.Recorded, "the review id is not left marked in progress");
+    }
+
+    [Fact]
+    public async Task ANotificationThatNamedNoRow_IsStillRecorded_AsAnUnnamedNextStep_NotRefusedAsADismissal()
+    {
+        var rig = new Rig();
+        rig.Executors["send-email"].Result = DecisionActionOutcome.Done("send-email");
+        var review = PathBReview(inquiry: false, revise: false, todo: false) with
+        {
+            NextSteps = [new DecisionReviewNextStep { Code = "send-email", Values = InquiryValues }],
+        };
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.SentButNotRecorded.Should().BeFalse();
+        result.RecordClass.Should().Be("Judgement");
+        Steps(rig.Record).GetProperty("unnamedNextSteps").EnumerateArray().Select(c => c.GetString()).Should().Equal(new[] { "send-email" });
+    }
+
+    // ── FR-51: the caller writes the subject and appends to the matter ───────────────────────────────────────────
+
+    [Fact]
+    public async Task ACallerWhoCannotAppendToTheMatter_IsForbidden_EvenForADismissal_BeforeAnyWrite()
+    {
+        var rig = new Rig();
+        rig.Rights[("sprk_matters", Matter)] = AccessRights.Read | AccessRights.Write;
+
+        var result = await rig.CommitAsync(Dismissal("not-material"));
+
+        result.Status.Should().Be(DecisionCommitStatus.Forbidden);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.NotAuthorized);
+        rig.Writes.Should().BeEmpty();
+        rig.Status(Primary).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task ACallerWhoCannotWriteTheSubject_IsForbidden_BeforeAnyWrite()
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        rig.Rights[("sprk_todos", ItemTodo)] = AccessRights.Read | AccessRights.AppendTo;
+        var review = new DecisionReview
+        {
+            ReviewId = Guid.NewGuid(),
+            Confirmed = true,
+            Actions = [Take("mark-complete"), Skip("reschedule")],
+        };
+
+        var result = await rig.CommitAsync(review, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Forbidden);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.NotAuthorized);
+        rig.RightsAsked.Should().Contain(("sprk_todos", ItemTodo), "asked on the subject's own table, as the caller");
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ASubjectWhoseTableCannotBeResolved_IsDenied()
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_unknown", subjectId: ItemTodo);
+        rig.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_unknown", It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("no metadata"));
+        var review = new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] };
+
+        var result = await rig.CommitAsync(review, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Forbidden);
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AlsoResolve_IsCapped()
+    {
+        var rig = new Rig();
+
+        var result = await rig.CommitAsync(PathBReview(also: Enumerable.Range(0, 26).Select(_ => Guid.NewGuid()).ToList()));
+
+        result.ReasonCode.Should().Be(DecisionCommitReasons.AlsoResolveNotAllowed);
+        rig.Writes.Should().BeEmpty();
     }
 
     // ── The HTTP mapping ─────────────────────────────────────────────────────────────────────────────────────────

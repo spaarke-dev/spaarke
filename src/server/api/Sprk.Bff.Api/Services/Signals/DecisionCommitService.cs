@@ -219,6 +219,7 @@ public static class DecisionCommitReasons
     public const string IdempotencyUnavailable = "ontology.decision.idempotency_unavailable";
     public const string ReviewChanged = "ontology.decision.review_changed";
     public const string NotResumable = "ontology.decision.not_resumable";
+    public const string NotAuthorized = "ontology.decision.not_authorized";
 }
 
 /// <summary>Stable EventIds for the commit route (50360-50369, assigned by the coordinator 2026-10-11).</summary>
@@ -272,6 +273,8 @@ public sealed class DecisionCommitService
 
     private const int ReasonMaxLength = 2000;
     private const int MaxNextSteps = 10;
+    private const int MaxAlsoResolve = 25;
+    private const string WriteOperation = "write";
     private const int ConcurrencyVersionMismatch = unchecked((int)0x80060882);
 
     private static readonly string[] SignalColumns =
@@ -322,7 +325,10 @@ public sealed class DecisionCommitService
     }
 
     /// <summary>The ledger entry for one review: in progress, or its first outcome.</summary>
-    internal sealed record LedgerEntry(bool InProgress, DateTimeOffset StartedAt, string ContentHash, DecisionCommitResult? Outcome);
+    /// <remarks><c>ReviewStart</c> is the bounded time the review started (the plan read), kept so a resume judges a system
+    /// closure against the SAME start. While a resume is in progress, <c>Outcome</c> still holds the failure it resumes, so a
+    /// resume that ends without a write puts it back instead of forgetting the steps that landed.</remarks>
+    internal sealed record LedgerEntry(bool InProgress, DateTimeOffset ReviewStart, string ContentHash, DecisionCommitResult? Outcome);
 
     /// <summary>What the route read about one Signal, app-only (server-written columns; never from the request).</summary>
     public sealed record SignalRow(
@@ -399,6 +405,8 @@ public sealed class DecisionCommitService
         // ---- (1a) Every Signal, AS THE CALLER (task 036's one check), before the review id is even looked up: a caller who
         // cannot read an item learns nothing about it, not even a stored outcome. Nothing about the Signals is read app-only yet.
         var also = review.AlsoResolve ?? [];
+        if (also.Count > MaxAlsoResolve)
+            return Refused(review.ReviewId, DecisionCommitReasons.AlsoResolveNotAllowed, $"A decision can resolve at most {MaxAlsoResolve} other items.");
         if (also.Any(id => id == Guid.Empty || id == signalId) || also.Distinct().Count() != also.Count)
             return Refused(review.ReviewId, DecisionCommitReasons.AlsoResolveNotAllowed, "Also resolve names the item itself, a blank id or the same item twice.");
 
@@ -453,15 +461,15 @@ public sealed class DecisionCommitService
             resume = first;
         }
 
-        // The review started when the wizard read the plan (bounded), or when a resumed review first ran.
-        var reviewStart = prior?.StartedAt ?? BoundPlanReadOn(review.PlanReadOn, now);
-        var startedAt = prior?.StartedAt ?? now;
+        // The review started when the wizard read the plan (bounded); a resume keeps the first attempt's start.
+        var reviewStart = prior?.ReviewStart ?? BoundPlanReadOn(review.PlanReadOn, now);
 
         if (!review.Confirmed)
             return Refused(review.ReviewId, DecisionCommitReasons.NotConfirmed, "The decision was not confirmed; nothing was done.");
 
-        // Mark the review in progress BEFORE any read that could take time, so a double-click meets the marker.
-        var marked = await TrySetLedgerAsync(tenantId, ledgerKey, new LedgerEntry(true, startedAt, hash, null), InProgressTtl, ct).ConfigureAwait(false);
+        // Mark the review in progress BEFORE any read that could take time, so a double-click meets the marker. A resume keeps
+        // the failure it resumes inside the marker: if this attempt ends without a write outcome, that failure is put back.
+        var marked = await TrySetLedgerAsync(tenantId, ledgerKey, new LedgerEntry(true, reviewStart, hash, resume), InProgressTtl, ct).ConfigureAwait(false);
         if (!marked)
             return Unavailable(review.ReviewId);
 
@@ -469,6 +477,13 @@ public sealed class DecisionCommitService
         try
         {
             result = await CommitCoreAsync(ids, lanes, review, http, now, reviewStart, resume, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Only reachable before the first write: from then on the writes run uncancellable (CommitCoreAsync). Nothing new
+            // landed, so free the review id (or put back the failure being resumed).
+            await ReleaseLedgerAsync(tenantId, ledgerKey, reviewStart, hash, resume).ConfigureAwait(false);
+            throw;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -489,17 +504,46 @@ public sealed class DecisionCommitService
         // same review id may be corrected and sent again.
         if (result.Status is DecisionCommitStatus.Recorded or DecisionCommitStatus.Failed)
         {
-            if (!await TrySetLedgerAsync(tenantId, ledgerKey, new LedgerEntry(false, startedAt, hash, result), OutcomeTtl, CancellationToken.None).ConfigureAwait(false))
+            if (!await TrySetLedgerAsync(tenantId, ledgerKey, new LedgerEntry(false, reviewStart, hash, result), OutcomeTtl, CancellationToken.None).ConfigureAwait(false))
             {
-                _logger.LogWarning("Decision commit: the outcome of review {ReviewId} could not be stored; a retry will find the record by its review id.", review.ReviewId);
+                if (result.Status == DecisionCommitStatus.Recorded)
+                {
+                    _logger.LogWarning("Decision commit: the outcome of review {ReviewId} could not be stored; a repeat will find the record by its review id.", review.ReviewId);
+                }
+                else
+                {
+                    // A failure has no record to find: a repeat after the in-progress marker expires could run the landed writes
+                    // again. Name them for the operator.
+                    _logger.LogError(DecisionCommitEvents.StepFailed,
+                        "Decision commit: the FAILED outcome of review {ReviewId} could not be stored; a repeat may write again. Landed: {Landed}.",
+                        review.ReviewId, string.Join(", ", result.Landed.Select(l => $"{l.Entity}:{l.Id:D}")));
+                }
             }
         }
         else
         {
-            await TryRemoveLedgerAsync(tenantId, ledgerKey).ConfigureAwait(false);
+            await ReleaseLedgerAsync(tenantId, ledgerKey, reviewStart, hash, resume).ConfigureAwait(false);
         }
 
         return result;
+    }
+
+    /// <summary>Ends an attempt that wrote nothing new: a first attempt frees its review id; a resume puts back the failure it
+    /// resumed, so the steps that landed are never forgotten (and never run again).</summary>
+    private async Task ReleaseLedgerAsync(string tenantId, string ledgerKey, DateTimeOffset reviewStart, string hash, DecisionCommitResult? resume)
+    {
+        if (resume is null)
+        {
+            await TryRemoveLedgerAsync(tenantId, ledgerKey).ConfigureAwait(false);
+            return;
+        }
+
+        if (!await TrySetLedgerAsync(tenantId, ledgerKey, new LedgerEntry(false, reviewStart, hash, resume), OutcomeTtl, CancellationToken.None).ConfigureAwait(false))
+        {
+            _logger.LogError(DecisionCommitEvents.StepFailed,
+                "Decision commit: the failure resumed by review {ReviewId} could not be put back; its in-progress marker holds it until it expires.",
+                resume.ReviewId);
+        }
     }
 
     private async Task<DecisionCommitResult> CommitCoreAsync(
@@ -562,6 +606,12 @@ public sealed class DecisionCommitService
             return refusal with { ReviewId = reviewId };
         var p = prepared.Ready!;
 
+        // ---- (1c') FR-51: as the caller, Write on every Signal's subject and AppendTo on its core record. A decision acts on the
+        // item and files a record under the matter, even when it only dismisses or approves (record-only actions write nothing
+        // of their own, so no executor preflight would ask). Fails closed.
+        if (await CallerMayDecideAsync(http, p, ct).ConfigureAwait(false) is { } denied)
+            return denied with { ReviewId = reviewId };
+
         // ---- (1d) Every executor's preflight, as the caller. A resumed review skips the steps that already landed. ------
         var done = (resume?.Steps ?? []).Where(s => s.Status == nameof(DecisionActionStatus.Done)).ToDictionary(s => s.Key, StringComparer.Ordinal);
         foreach (var step in p.Steps.Where(s => !done.ContainsKey(s.Key)))
@@ -596,7 +646,7 @@ public sealed class DecisionCommitService
         // ---- (1e) The record writer's own no-I/O preflight on the projected record ----------------------------------------
         try
         {
-            _records.Preflight(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p)));
+            _records.Preflight(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p), executed: null));
         }
         catch (DecisionRecordRefusedException ex)
         {
@@ -604,6 +654,9 @@ public sealed class DecisionCommitService
         }
 
         // ---- (2)(3)(4) The writes, in D-17 order ----------------------------------------------------------------------------
+        // From the first write on, the request's cancellation no longer applies: a client that disconnects after a send must
+        // still get its record written (or its failure stored), never a half-done commit with no outcome.
+        var writeCt = CancellationToken.None;
         var executed = new List<DecisionCommitStep>();
         foreach (var step in p.Steps)
         {
@@ -617,9 +670,9 @@ public sealed class DecisionCommitService
             DecisionActionOutcome outcome;
             try
             {
-                outcome = await executor.ExecuteAsync(Request(http, p, step), ct).ConfigureAwait(false);
+                outcome = await executor.ExecuteAsync(Request(http, p, step), writeCt).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            catch (Exception ex)
             {
                 _logger.LogError(DecisionCommitEvents.StepFailed, ex, "Decision commit: {Code} threw for review {ReviewId}.", step.Def.Code, reviewId);
                 outcome = DecisionActionOutcome.Failed(step.Def.Code, DecisionActionReasons.WriteFailed, "The step did not finish; it may have been applied.");
@@ -634,7 +687,7 @@ public sealed class DecisionCommitService
                     "Decision commit: step {Phase} ({Code}) {Status} for review {ReviewId}: {ReasonCode}. No record written; {Landed} write(s) landed.",
                     step.Phase, step.Def.Code, outcome.Status, reviewId, outcome.ReasonCode, failed.Landed.Count);
                 OntologyWriterTelemetry.RecordFailure("decision_commit_step_failed");
-                await _followUps.AfterFailedCommitAsync(p.Primary.MatterId, executed, ct).ConfigureAwait(false);
+                await _followUps.AfterFailedCommitAsync(p.Primary.MatterId, executed, writeCt).ConfigureAwait(false);
                 return failed;
             }
         }
@@ -654,13 +707,20 @@ public sealed class DecisionCommitService
         {
             try
             {
-                var written = await _records.WriteAsync(RecordRequest(review, p, confirmedBy, now, steps, followOns), ct).ConfigureAwait(false);
+                var written = await _records.WriteAsync(RecordRequest(review, p, confirmedBy, now, steps, followOns, executed), writeCt).ConfigureAwait(false);
                 recordId = written.RecordId;
                 recordClass = written.RecordClass.ToString();
             }
             catch (DecisionRecordRefusedException ex)
             {
                 return RecordFailed(reviewId, ex, executed, p);
+            }
+            catch (Exception ex)
+            {
+                // The writer wraps every fault but a cancellation; with no request token here, that is a client-side timeout, so
+                // the create may have committed.
+                return RecordFailed(reviewId, new DecisionRecordRefusedException(DecisionRecordRefusalReason.CreateFailed,
+                    "The Decision Record create did not answer; it may have been written.", innerException: ex), executed, p);
             }
         }
 
@@ -669,13 +729,13 @@ public sealed class DecisionCommitService
         var warnings = new List<string>();
         foreach (var row in p.Resolved)
         {
-            var closed = await CloseSignalAsync(row.Id, p, recordId, confirmedBy, reviewStart, ct).ConfigureAwait(false);
+            var closed = await CloseSignalAsync(row.Id, p, recordId, confirmedBy, reviewStart, writeCt).ConfigureAwait(false);
             signals.Add(closed);
             if (closed.Warning is { } warning)
                 warnings.Add(warning);
         }
 
-        warnings.AddRange(await _followUps.AfterRecordedAsync(p.Primary.MatterId, executed, p.Resolution == Resolution.Dismissed ? p.Resolved : [], ct).ConfigureAwait(false));
+        warnings.AddRange(await _followUps.AfterRecordedAsync(p.Primary.MatterId, executed, p.Resolution == Resolution.Dismissed ? p.Resolved : [], writeCt).ConfigureAwait(false));
 
         _logger.LogInformation(DecisionCommitEvents.Recorded,
             "Decision commit: review {ReviewId} recorded as {RecordId} ({Steps} step(s), {Signals} Signal(s), {Warnings} warning(s)).",
@@ -895,6 +955,49 @@ public sealed class DecisionCommitService
         return (values, null);
     }
 
+    /// <summary>FR-51: the caller must be able to WRITE each Signal's subject and APPEND TO the core record, asked as the caller
+    /// through the caller-rights probe. Null when they may; a Forbidden result otherwise (every "could not answer" is a no).</summary>
+    private async Task<DecisionCommitResult?> CallerMayDecideAsync(HttpContext http, Prepared p, CancellationToken ct)
+    {
+        if (p.Core is { } core
+            && !await CallerHoldsOnAsync(http, core.Entity, core.Id, DecisionExec.AppendToOperation, ct).ConfigureAwait(false))
+        {
+            return Forbidden("You do not have permission to record a decision on this matter.");
+        }
+
+        var checkedSubjects = new HashSet<(string, Guid)>();
+        foreach (var row in p.Resolved)
+        {
+            if (row.SubjectEntity is not { Length: > 0 } subject || row.SubjectId is not { } subjectId || subjectId == Guid.Empty)
+                continue; // nothing beyond the core record to act on
+            if (!checkedSubjects.Add((subject, subjectId)))
+                continue;
+            if (!await CallerHoldsOnAsync(http, subject, subjectId, WriteOperation, ct).ConfigureAwait(false))
+                return Forbidden("You do not have permission to change an item in this decision.");
+        }
+
+        return null;
+
+        static DecisionCommitResult Forbidden(string detail) =>
+            new() { Status = DecisionCommitStatus.Forbidden, ReasonCode = DecisionCommitReasons.NotAuthorized, Detail = detail };
+    }
+
+    private async Task<bool> CallerHoldsOnAsync(HttpContext http, string table, Guid id, string operation, CancellationToken ct)
+    {
+        string? set;
+        try
+        {
+            set = await _entities.GetEntitySetNameAsync(table, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Decision commit: the table of an item could not be resolved ({ExceptionType}); denying.", ex.GetType().Name);
+            return false;
+        }
+
+        return !string.IsNullOrEmpty(set) && await DecisionExec.CallerHoldsAsync(_probe, http, set, id, operation, ct).ConfigureAwait(false);
+    }
+
     // ── Reads ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private async Task<SignalRow?> ReadSignalAsync(Guid id, CancellationToken ct)
@@ -1038,7 +1141,7 @@ public sealed class DecisionCommitService
             .ToList();
 
     /// <summary>Each Next step's created row. A step that created none it can name (a send whose core tracked no id) is listed
-    /// in the steps envelope only; known limit, the record cannot carry a follow-on without an id.</summary>
+    /// as an unnamed Next step in the steps envelope instead (see <see cref="RecordRequest"/>).</summary>
     private static IReadOnlyList<DecisionRecordFollowOn> RecordFollowOns(Prepared p, IReadOnlyList<DecisionCommitStep> executed) =>
         executed.Where(e => e.Key.StartsWith("next-step:", StringComparison.Ordinal))
             .SelectMany(e => e.Written.Take(1).Select(w => new DecisionRecordFollowOn(e.Code, w.Entity, w.Id)))
@@ -1049,7 +1152,7 @@ public sealed class DecisionCommitService
 
     private static DecisionRecordRequest RecordRequest(
         DecisionReview review, Prepared p, Guid confirmedBy, DateTimeOffset now,
-        IReadOnlyList<DecisionRecordStep> steps, IReadOnlyList<DecisionRecordFollowOn> followOns) =>
+        IReadOnlyList<DecisionRecordStep> steps, IReadOnlyList<DecisionRecordFollowOn> followOns, IReadOnlyList<DecisionCommitStep>? executed) =>
         new(review.ReviewId,
             p.Primary.PolicyVersionId!.Value,
             p.RecordCore,
@@ -1064,7 +1167,13 @@ public sealed class DecisionCommitService
             DeciderRole: null,
             Because: string.IsNullOrWhiteSpace(review.Because) ? null : review.Because.Trim(),
             Reason: p.DismissalText,
-            PrivilegeFlagged: p.Resolved.Any(r => r.PrivilegeFlagged));
+            PrivilegeFlagged: p.Resolved.Any(r => r.PrivilegeFlagged),
+            // A Next step that ran but named no row (a notification whose communication row was not tracked) is still something
+            // done: listed in sprk_steps, so the record never reads as a dismissal after an email went out.
+            UnnamedNextSteps: (executed ?? [])
+                .Where(e => e.Key.StartsWith("next-step:", StringComparison.Ordinal) && e.Written.Count == 0)
+                .Select(e => e.Code)
+                .ToList());
 
     /// <summary>What the data said at decision time: each covered Signal's own server-written fact snapshot, by Signal id.</summary>
     internal static IReadOnlyDictionary<string, object?> FactValues(IEnumerable<SignalRow> rows)
