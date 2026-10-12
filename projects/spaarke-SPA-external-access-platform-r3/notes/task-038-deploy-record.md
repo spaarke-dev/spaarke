@@ -59,7 +59,14 @@ Need test identities (a CIAM partner test account and a workforce test user). Re
 
 ## Measurements
 
-(filled in when the publish-size run completes)
+Measured 2026-10-12 per `.claude/constraints/azure-deployment.md` (fresh short-path worktrees, same publish command as `Deploy-BffApi.ps1`, `Compress-Archive` Optimal on both):
+
+| | master `6be73d8a1` | branch `260e10fc3` |
+|---|---|---|
+| Zip | 36.480 MB | 36.580 MB |
+| Files | 192 | 192 (path-by-path identical set) |
+
+Delta **+0.100 MB** (under the +5 MB trigger; total far under 55/60 MB). `dotnet list package --vulnerable --include-transitive`: none on either side. SDK 10.0.101 present. Note: origin/master moved past the branch's last merge (`e5059672d`), so the delta also includes those later master commits.
 
 ## Record
 
