@@ -344,6 +344,28 @@ public record PlaybookStreamEvent
         CorrelationId = correlationId
     };
 
+    /// <summary>
+    /// The ONE text of the RunFailed event when execution throws (ADR-019): the exception is logged server-side
+    /// only, never echoed to the caller (unified-access-control-r2 task 164).
+    /// </summary>
+    public const string RunFailedMessage = "The playbook run failed. See the server log for details.";
+
+    /// <summary>
+    /// The stable <c>errorCode</c> of the terminal run-failed event written when a run stream fails after it has
+    /// started (ADR-019).
+    /// </summary>
+    public const string RunFailedErrorCode = "playbook.run-failed";
+
+    /// <summary>
+    /// The ONE construction site for the terminal error event of a playbook run stream that fails after it has
+    /// started (ADR-019). Takes NO exception input by design: the safe copy cannot regress into interpolating server
+    /// internals. The caller logs the exception; <paramref name="correlationId"/> (the request trace id) ties the
+    /// event to that log entry. Lives here, not on an endpoint class, so the service layer does not depend on the
+    /// Api layer.
+    /// </summary>
+    public static PlaybookStreamEvent BuildRunFailedEvent(Guid runId, Guid playbookId, string correlationId) =>
+        RunFailed(runId, playbookId, RunFailedMessage, errorCode: RunFailedErrorCode, correlationId: correlationId);
+
     /// <summary>Creates a RunCancelled event.</summary>
     public static PlaybookStreamEvent RunCancelled(Guid runId, Guid playbookId) => new()
     {
