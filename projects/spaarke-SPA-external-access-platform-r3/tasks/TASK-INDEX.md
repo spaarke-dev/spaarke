@@ -22,7 +22,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 034 | External message send endpoint (FR-11) | P3 | ✅ [done] | 030, 033 | O/h | FULL | Wave 4 |
 | 035 | Intake submit endpoint (FR-05, FR-06) | P3 | ✅ [done] | 011, 020, 033 | O/h | FULL | Wave 5 |
 | 036 | Email on subsequent grant (FR-07); no message email (spec C6) | P3 | ✅ [done] | 034 (UAC-r2 PR #1583 merged 2026-10-10, in branch) | S/h | FULL | Wave 5 |
-| 037 | Notification feed + last-seen (FR-08) | P3 | 🔄 [wip] | 034, 035 | O/h | FULL | Wave 6 |
+| 037 | Notification feed + last-seen (FR-08) | P3 | ✅ [done] | 034, 035 | O/h | FULL | Wave 6 |
 | 038 | Deploy R3 BFF to dev + live probes | P3 | 🔲 [open] | 010, 011, 012, 032, 035, 036, 037, 039 + 020 columns live in dev first — **satisfied 2026-10-11** (task 030 stamps sprk_createdbycontact; without it a contact create returns 400, after the upload bytes are already in SPE; tasks 033/034: the external message read selects _sprk_createdbycontact_value, so GET messages returns 500 and a contact POST fails until the column exists) | S/h | STANDARD | — (live deploy, owner-gated) |
 | 039 | Event reads for Matter and Work Assignment (FR-03 server) | P3 | 🔲 [open] | 032, 037 | S/h | FULL | Wave 7 |
 | 040 | Workforce client switch (FR-16) | P4 | 🔄 [wip] | 001 (+ owner client registration) | O/h | FULL | Wave 2 |
@@ -34,7 +34,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 052 | Intake wizards: wiring + NDA + Policy Question (FR-05) | P5 | 🔲 [open] | 035 | S/h | FULL | Wave 6 |
 | 053 | Intake wizards: Invention + Trademark (FR-05) | P5 | 🔲 [open] | 052 | S/h | FULL | Wave 7 |
 | 054 | Detail documents + delete-own actions (FR-24/FR-26 client) | P5 | ✅ [done] | 051, 032 | S/h | FULL | Wave 6 |
-| 055 | Notification bell + deep-link record open (FR-08/FR-07 client) | P5 | 🔲 [open] | 054, 037, 041 | S/h | FULL | Wave 7 |
+| 055 | Notification bell + deep-link record open (FR-08/FR-07 client) | P5 | 🔄 [wip] | 054, 037, 041 | S/h | FULL | Wave 7 |
 | 056 | Join page (FR-13), flagged until 060 | P5 | ✅ [done] | 003, 041 | O/h | FULL | Wave 8 |
 | 060 | Registration service: owner host decision, then build or R4 hand-off (FR-14) | P6 | 🔲 [open] | 003 + owner decision | O/h | FULL | — (blocked on owner) |
 | 070 | Deploy SPA + dev Teams package to dev | P7 | 🔲 [open] | 038, 042, 043, 053, 055, 056 | S/h | STANDARD | — (live, owner-gated) |
