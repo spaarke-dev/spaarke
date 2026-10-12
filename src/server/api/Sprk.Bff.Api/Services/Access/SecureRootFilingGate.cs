@@ -35,10 +35,13 @@ public sealed class SecureRootFilingGate
 
     /// <summary>
     /// BEFORE the write. <c>null</c>: proceed. Otherwise a refusal to answer in the writer's own contract, with nothing
-    /// written. See <see cref="SecureRootInheritance.CheckRefileAsync"/> for the value shapes accepted.
+    /// written. See <see cref="SecureRootInheritance.CheckRefileAsync"/> for the value shapes accepted, and for
+    /// <paramref name="callerMayFileUnder"/> (#1630: the writer's as-the-caller check on the secure records the write reaches
+    /// only through an invoice or event it sets).
     /// </summary>
     public async Task<RecordOwnerResolution?> CheckAsync(
-        string table, Guid? recordId, IEnumerable<KeyValuePair<string, object?>> writes, CancellationToken ct)
+        string table, Guid? recordId, IEnumerable<KeyValuePair<string, object?>> writes, CancellationToken ct,
+        Func<IReadOnlyList<SecureFilingParent>, CancellationToken, Task<RecordOwnerResolution?>>? callerMayFileUnder = null)
     {
         ArgumentNullException.ThrowIfNull(writes);
         if (!SecureRootInheritance.Inherits(table))
@@ -78,7 +81,7 @@ public sealed class SecureRootFilingGate
                 "whether the record it would be filed under is secure cannot be checked here, so it was not written");
         }
 
-        return await inheritance.CheckRefileAsync(table, recordId, materialized, ct).ConfigureAwait(false);
+        return await inheritance.CheckRefileAsync(table, recordId, materialized, ct, callerMayFileUnder).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -32,9 +32,9 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 
 - **MUST NOT** add `accessToken: string` or `token: string` props/fields anywhere in client code (except where required by third-party SDK contracts — Power BI `IReportEmbedConfiguration`, MSAL.js result objects — these are NOT Spaarke BFF tokens)
 - **MUST NOT** use `useState`/`useEffect` to snapshot a token (root cause of the 401-after-refresh bug v2 fixes)
-- **MUST NOT** write raw `fetch(url, { headers: { Authorization: \`Bearer ${...}\` } })` template literals — use `authenticatedFetch`. Limited D-AUTH-7 exceptions: SSE (EventSource ReadableStream), XHR uploads, Dataverse Web API direct calls (BFF-scoped wrapper would route wrong host), External SPA out-of-scope. Each carries `// Auth v2 (D-AUTH-7):` justification comment.
+- **MUST NOT** write raw `fetch(url, { headers: { Authorization: \`Bearer ${...}\` } })` template literals — use `authenticatedFetch`. Limited D-AUTH-7 exceptions: SSE (EventSource ReadableStream), XHR uploads, Dataverse Web API direct calls (BFF-scoped wrapper would route wrong host), External SPA out-of-scope, and the classic form-script helper `Spaarke.BffAuth.authenticatedFetch` (`sprk_/scripts/bff_auth.js`, built from `@spaarke/auth`; **Amendment A7** — only with its BFF-origin check). Each carries `// Auth v2 (D-AUTH-7):` justification comment.
 - **MUST NOT** instantiate `PublicClientApplication` directly outside `@spaarke/auth` (internal **Xrm** surfaces). The **collaboration hosts are exempted** — the external SPA and the Teams tab share **one standalone-MSAL module** (direct `PublicClientApplication` + per-tab `sessionStorage` isolation) with a **pluggable authority**: **Entra External ID (CIAM)** for the external SPA (**Amendment A1**) and **workforce Entra (multitenant, Teams SSO/NAA)** for the Teams tab (**Amendment A2**). Neither uses workforce B2B guests. All A1 isolation invariants are preserved for both hosts.
-  > ⚠️ **Model 1: the workforce authority here is superseded by [Amendment A7](#amendment-a7-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration).** The Teams tab and browser work-account sign-in use one **single-tenant** Spaarke client pinned to Spaarke's tenant (NAA, then popup), not multitenant Teams SSO.
+  > ⚠️ **Model 1: the workforce authority here is superseded by [Amendment A8](#amendment-a8-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration).** The Teams tab and browser work-account sign-in use one **single-tenant** Spaarke client pinned to Spaarke's tenant (NAA, then popup), not multitenant Teams SSO.
 - **MUST NOT** reference removed symbols: `BridgeStrategy`, `XrmStrategy`, `window.__SPAARKE_BFF_TOKEN__`, `tokenBridge.ts`, `publishToken`, `bffAuthProvider` (deleted in v2)
 - **MUST NOT** add `/debug/*` endpoints on the BFF (all removed in v2)
 - **MUST NOT** add plaintext secrets to `appsettings*.json` — Key Vault references only (production); dev OK with plain values
@@ -51,12 +51,12 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 - **MUST** resolve the CIAM-authenticated caller to a Dataverse `Contact` by **stable `oid`** (`sprk_externalobjectid`), and enforce authorization server-side via `sprk_externalrecordaccess` (three-plane model). Downstream authorization is **unchanged**.
 - **MUST** keep all external-surface SPE + Dataverse access **app-only / managed identity** (BFF-brokered). The external user's token is used **only** to authenticate to the BFF and **MUST NOT** be exchanged for a downstream Graph/SPE/Dataverse token (**no OBO on the external path**). When document content is exposed, the BFF **MUST** stream it app-only via `FileStorageContainer.Selected` + `ReadContent`.
 - **MUST**, when external self-registration is eventually enabled, use Entra External ID **self-service sign-up user flows** (R1 is admin-initiated only; sign-up is disabled via `isSignUpAllowed=false` until a future project enables it).
-  > ⚠️ **Scoped by [Amendment A7](#amendment-a7-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration):** this rule governs **CIAM partner** self-registration only. Workforce-contact (customer staff) self-registration follows A7's self-registration rule.
+  > ⚠️ **Scoped by [Amendment A8](#amendment-a8-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration):** this rule governs **CIAM partner** self-registration only. Workforce-contact (customer staff) self-registration follows A8's self-registration rule.
 
 ### New MUST NOT rules
 
 - **MUST NOT** require or provision a per-external-user Entra **B2B guest** object in the workforce tenant for document read/download (eliminated by the broker-only design).
-  > ⚠️ **Scoped by [Amendment A7](#amendment-a7-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration):** this rule targets **CIAM partners**. Customer staff (licensed users and licence-free workforce contacts) are B2B guests in Spaarke's tenant on the workforce plane.
+  > ⚠️ **Scoped by [Amendment A8](#amendment-a8-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration):** this rule targets **CIAM partners**. Customer staff (licensed users and licence-free workforce contacts) are B2B guests in Spaarke's tenant on the workforce plane.
 - **MUST NOT** federate the External ID tenant back to internal/workforce identities in a way that reintroduces cross-tenant guest coupling, without a further amendment.
 
 ### Documented boundary (limitation E-3)
@@ -72,7 +72,7 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 ### New MUST rules (collaboration Teams host only)
 
 - **MUST** authenticate Teams-host collaboration users with their **workforce Microsoft Entra identity** via Teams SSO / NAA against a **multitenant** app registration (per-customer admin consent). CIAM is not used inside Teams.
-  > ⚠️ **Superseded for Model 1 by [Amendment A7](#amendment-a7-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration):** one single-tenant Spaarke client, Spaarke-tenant authority, NAA then MSAL popup, no `webApplicationInfo`, no Teams-SSO fallback, scope `user_impersonation`. Multitenant is revisited only for Model 2.
+  > ⚠️ **Superseded for Model 1 by [Amendment A8](#amendment-a8-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration):** one single-tenant Spaarke client, Spaarke-tenant authority, NAA then MSAL popup, no `webApplicationInfo`, no Teams-SSO fallback, scope `user_impersonation`. Multitenant is revisited only for Model 2.
 - **MUST** serve both the external SPA (CIAM) and the Teams host (workforce) from **one shared standalone-MSAL module** whose **authority is config-driven / pluggable**; the module is exempt from the `@spaarke/auth`-only rule exactly as the A1 SPA is.
 - **MUST** keep the collaboration surface **broker-only** in both hosts (A1 invariant): the user token authenticates to the BFF **only** and **MUST NOT** be exchanged for a downstream Graph/SPE/Dataverse token (**no OBO on the collaboration path**). Document content streams **app-only**.
 - **MUST** resolve the workforce-authenticated caller to a **principal** — a `systemuser` (→ ADR-034 membership; ⚠️ **the systemuser derivation is SUPERSEDED by [Amendment A5](#amendment-a5-2026-09-04-workforce-systemuser-root-sets-derive-from-dataverses-impersonated-answer)** — root sets now come from Dataverse's own answer via app-only impersonated read, ∪ contact grants) or, for a non-systemuser, a `contact` (→ **contact-anchored membership**, see the ADR-034 cross-reference below) — and enforce authorization server-side via the **accessible-record-set** check. No Dataverse seat / OBO is required for read/download.
@@ -127,7 +127,7 @@ The non-systemuser (contact) principal resolves to membership via an **additive 
 - **MUST NOT** stand up a **second maintained workforce entry point** for the module-host surface. The workforce and CIAM planes share the **one** `ExternalCollaboration`-guarded group; the transitional `/api/v1/collab/*` group is slated for removal (teams-app-r1 §7) and **MUST NOT** be extended or given new callers.
 - **MUST NOT** exchange the caller's token for a downstream Graph/SPE/Dataverse token on **either** plane (**broker-only / no-OBO preserved from A1/A2 across the whole module-host platform**). Module document content streams **app-only** (`SpeFileStore` facade, `FileStorageContainer.Selected` + `ReadContent`, ADR-007), with authorization enforced server-side **before** streaming.
 - **MUST NOT** infer Tier-1 module entitlement from the fact of authentication, from the identity plane, or from Tier-2 record access; an unentitled module MUST be neither shown nor routable (direct-route denied server-side).
-  > ⚠️ **Amended by [Amendment A7](#amendment-a7-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration):** each caller gets a default Tier-1 module set derived from the **server-resolved principal kind**; unentitled modules are still neither shown nor routable.
+  > ⚠️ **Amended by [Amendment A8](#amendment-a8-2026-10-10-workforce-client-scope-default-modules-and-workforce-contact-self-registration):** each caller gets a default Tier-1 module set derived from the **server-resolved principal kind**; unentitled modules are still neither shown nor routable.
 - **MUST NOT** route the module-host SPA through the Xrm-bound `@spaarke/auth` while it remains Xrm-context-bound + MSAL v3; the shared standalone-MSAL module with pluggable authority (A1/A2) is the sanctioned client surface for this platform until a superseding consolidation amendment.
 
 ### Scope + preserved invariants
@@ -443,12 +443,59 @@ dedicated deployment per customer (D-12), so it can start without keys instead o
 > Amendments **A1–A6**. A6 changes resource configuration and provisioning only — no client surface, IdP or token
 > exchange changes.
 
-## Amendment A7 (2026-10-10): Workforce client, scope, default modules and workforce-contact self-registration
+## Amendment A7 (2026-10-11): Classic form scripts consume `@spaarke/auth` through `Spaarke.BffAuth`
+
+> **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5). **Decision**: owner, 2026-10-11
+> (`unified-access-control-r2`). **Driver**: #1655 (PR #1657) and #1656.
+
+### Why this amendment exists
+
+Classic Dataverse form scripts and ribbon commands (the access-status banner, the Access and secure-child ribbons,
+the post-save scripts, the parent rollup and the KPI scripts) cannot import an npm package. They used a hand-written
+MSAL copy, `sprk_/scripts/bff_auth.js`, which repeated two defects the library had fixed: a display-name login hint
+(AADSTS50058 for every user without a cached sign-in) and `accounts[0]` account selection (a script could call the
+BFF as **another user** whose account was cached in the same browser profile). #1657 rebuilds `bff_auth.js` from
+`@spaarke/auth`, so there is one sign-in implementation and one MSAL cache for PCFs, code pages and form scripts.
+
+These callers read the status and body of non-OK BFF responses (403 messages in the ribbon, 404 vs 503 in the
+banner). The library's `authenticatedFetch` throws on non-OK, so the helper keeps the `ResponseFetchFn` shape: it
+takes the token from the library and attaches the `Bearer` header itself. That is the one D-AUTH-7 site this
+amendment adds.
+
+### New MUST rules (classic form scripts and ribbon commands)
+
+- **MUST** call the BFF only through `Spaarke.BffAuth.getToken` / `Spaarke.BffAuth.authenticatedFetch` from
+  `sprk_/scripts/bff_auth.js`, registered on the form or ribbon. **MUST NOT** inline MSAL or load it from a CDN in a
+  web resource (#1655).
+- **MUST** build `bff_auth.js` from `@spaarke/auth` (`npm run build:webresource`); it counts as an INV-8 consumer and
+  is rebuilt and redeployed when the library changes. `check:webresource` keeps the committed bundle in step.
+- **MUST** keep the helper silent only (`requireSilentOnly`: never a popup or redirect), with a tenant-specific
+  authority and the library's account selection. A null token means the caller skips the call.
+- **MUST** refuse to attach the token to any URL whose origin is not the resolved BFF base URL's origin (return
+  `null`, no request). The D-AUTH-7 listing holds only with this check.
+- **MUST** use a cached MSAL account, and accept a token, only when it belongs to the signed-in Dataverse user
+  (Entra object id matched against `systemuser.azureactivedirectoryobjectid`); when that cannot be established, fall
+  closed to `ssoSilent` with no hint (#1656). This rule lives in the library, so it binds every consumer.
+
+### Scope
+
+- **Classic form scripts and ribbon commands only.** PCFs and code pages keep the throwing `authenticatedFetch`
+  (`AuthenticatedFetchFn`); a new `Response`-returning helper elsewhere is not covered by A7.
+- Other web resources that still load MSAL 2.x from the CDN (`sprk_DocumentOperations.js`, `sprk_emailactions.js`,
+  `sprk_aichatcontextmap_ribbon.js`) are pre-A7 debt; they move to `Spaarke.BffAuth` when next changed.
+
+> **Note (A7)**: Applied **concise-only** (no full `docs/adr/ADR-028-*.md` exists). This concise ADR now carries
+> Amendments **A1–A7** (A8 follows).
+
+## Amendment A8 (2026-10-10): Workforce client, scope, default modules and workforce-contact self-registration
 
 > **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5). **Driver project**:
 > `spaarke-SPA-external-access-platform-r3` (spec §ADR Tensions rows A2, A3, A1). **Owner-approved** 2026-10-10 ("the ADR modifications are approved").
 > **Amends one clause each of A1, A2 and A3; adds one rule.** Rationale: `projects/spaarke-SPA-external-access-platform-r3/notes/r3-auth-path.md`.
-> The auth system-of-record findings (§12b) are **not** in A7; they are a separate amendment owned by `spaarke-auth-system-of-record-r1`.
+> **Numbering:** approved and written as "A7" on the R3 branch (2026-10-10); renumbered A8 when master's A7
+> (2026-10-11, form scripts) reached master first. R3 code, notes and docs written before that merge cite it
+> as "ADR-028 A7"; read those as A8.
+> The auth system-of-record findings (§12b) are **not** in A8; they are a separate amendment owned by `spaarke-auth-system-of-record-r1`.
 
 ### Why
 
@@ -525,8 +572,9 @@ The Office add-in already runs the working shape: one single-tenant Spaarke clie
 - **Invites from each stamp BFF.** It puts a tenant-wide invite permission on every customer identity. A single shared path keeps it in one place.
 - **Combining with the §12b amendment.** §12b is not finished, and R3's Wave 2 (tasks 011, 012, 040) needs these rules first. Two dated amendments do not conflict, because they touch different clauses.
 
-> **Note (A7)**: Applied concise-only, like A1–A6. This concise ADR now carries Amendments A1–A7.
-> A7 changes the workforce client, scope, Tier-1 defaults and guest-creation path. It adds no IdP or token exchange, and does not weaken the no-OBO invariant.
+> **Note (A8)**: Applied concise-only, like A1–A7. This concise ADR now carries Amendments A1–A8.
+> A8 changes the workforce client, scope, Tier-1 defaults and guest-creation path. It adds no IdP or token exchange, and does not weaken the no-OBO invariant.
+
 
 ## Documented MI exceptions
 

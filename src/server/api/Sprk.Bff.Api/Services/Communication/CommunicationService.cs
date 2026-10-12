@@ -1009,7 +1009,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 Subject = request.Subject,
             };
 
-            var threadId = await _threadResolver.ResolveAndAssignThreadAsync(
+            var assignment = await _threadResolver.ResolveAndAssignAsync(
                 new ThreadResolutionRequest
                 {
                     CommunicationId = communicationId,
@@ -1023,13 +1023,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // task 043 CRITICAL RISK fix: sprk_communication is User-level and this message is owned by the
             // app-only identity, so a Direct-thread message is invisible to BOTH participants under the
             // impersonated read (task 050) unless explicitly shared. Best-effort inside GrantMessageAccessAsync
-            // itself (no-op for a non-Direct thread; failures are logged and swallowed).
-            if (threadId.HasValue && _directThreadAccess is not null)
+            // itself (failures are logged and swallowed). #1629: the audience is the one the join fixed.
+            if (assignment is not null && _directThreadAccess is not null)
             {
-                await _directThreadAccess.GrantMessageAccessAsync(communicationId, threadId.Value, ct);
+                await _directThreadAccess.GrantMessageAccessAsync(communicationId, assignment, ct);
             }
 
-            return threadId;
+            return assignment?.ThreadId;
         }
         catch (Exception ex)
         {
@@ -1057,7 +1057,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             // Task 146 / S6: joining a RECORD thread files the message under the thread's record — the same shared
             // step the resolver's JOIN path takes (owner re-derived before the stamp; a refusal stamps nothing and
             // lands in the best-effort catch below, leaving the sent message unthreaded rather than mis-owned).
-            await ThreadResolver.AssignToThreadReconcilingOwnerAsync(
+            var assignment = await ThreadResolver.AssignToThreadReconcilingOwnerAsync(
                 _genericEntityService,
                 _ownership,
                 communicationId,
@@ -1076,11 +1076,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 "Stamped explicit thread target {ThreadId} (respond-into-thread) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
                 threadId, communicationId, correlationId);
 
-            // task 043 CRITICAL RISK fix applies here too — grant this ONE message to the target thread's
-            // current participants (Direct two-party list or Open derived set; no-op for neither).
+            // task 043 CRITICAL RISK fix applies here too — grant this ONE message to the target thread's audience as the
+            // stamp read it (#1629: Direct two-party list, the anchor record's grantees, or nobody; never re-read).
             if (_directThreadAccess is not null)
             {
-                await _directThreadAccess.GrantMessageAccessAsync(communicationId, threadId, ct);
+                await _directThreadAccess.GrantMessageAccessAsync(communicationId, assignment, ct);
             }
 
             return threadId;

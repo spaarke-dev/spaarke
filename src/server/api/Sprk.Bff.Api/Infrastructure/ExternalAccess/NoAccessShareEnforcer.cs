@@ -435,7 +435,7 @@ public sealed class NoAccessShareEnforcer
                 .ReadSecureParentsAsync(_dataverse, _logger, entityLogicalName, recordId, ct,
                     maxDepth: SecureRootInheritance.MaxFilingDepth)
                 .ConfigureAwait(false);
-            if (!parents.IsKnown)
+            if (!parents.WallsDecidable) // #1616: an unrepeated pair beside a readably secure typed parent covers nothing
             {
                 _logger.LogError(
                     "[NO-ACCESS-ENFORCE] What {Type} {RecordId} is filed under could not be read ({Reason}); the entries " +
@@ -520,7 +520,7 @@ public sealed class NoAccessShareEnforcer
                             .ReadAncestryAsync(_dataverse, _logger, type, unflagged, ct).ConfigureAwait(false);
                         foreach (var id in unflagged.Distinct())
                         {
-                            if (ancestry is null || !ancestry.TryGetValue(id, out var answer) || !answer.IsKnown)
+                            if (ancestry is null || !ancestry.TryGetValue(id, out var answer) || !answer.WallsDecidable)
                             {
                                 run.Fail(type, id, null, "covered-records-unreadable",
                                     "What this record is filed under could not be read, so whether this entry covers it is " +

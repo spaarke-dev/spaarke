@@ -695,7 +695,12 @@ public sealed partial class RecordContainerResolver
     /// <para>Still held (<see cref="AncestorUnverifiableCode"/>), unchanged from task 155: a <c>sprk_servicerequest</c>
     /// (a core record that cannot carry <c>sprk_issecure</c>, so nothing is ever copied from it), and an intermediate
     /// column on a record that carries no copy at all — a work assignment, a project, a contact, or an invoice / document /
-    /// agreement filed under another record (their typed roots are their OWN links, so there is nothing to compare).</para>
+    /// agreement filed under another record (their typed roots are their OWN links, so there is nothing to compare).
+    /// #1630 (owner Option A) excepts ONE case: a work assignment's invoice or event lookup
+    /// (<see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance.IntermediateFilingColumns"/>) is followed, read live
+    /// and verified as any intermediate is, to the matters and projects that record belongs to — the secure-root
+    /// inheritance's parents for it, so storage follows the same family. An invoice or event that names anything else (a
+    /// work assignment or service request root) keeps it held.</para>
     ///
     /// <para><b>The polymorphic regarding pair</b> is read on every row that carries it: see
     /// <see cref="ResolvePolymorphicRegardingAsync"/>.</para>
@@ -986,18 +991,31 @@ public sealed partial class RecordContainerResolver
             ? sources.Select(s => s.Column).ToHashSet(StringComparer.OrdinalIgnoreCase)
             : [];
 
+        // #1630 (owner Option A): EXCEPT a work assignment's invoice / event lookup, which files it under the matters and
+        // projects that record belongs to (SecureRootInheritance.IntermediateFilingColumns — the secure-root inheritance's one
+        // rule), so its storage follows the same family; it is followed below.
+        var filingThrough = Sprk.Bff.Api.Services.Access.SecureRootInheritance.IntermediateFilingColumns
+            .TryGetValue(rowEntity, out var filingColumns)
+            ? filingColumns.Select(f => f.Column).ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : [];
+
         // EXCEPT a link back to the record UNDER RESOLUTION (task 031 review F3): that is a cycle, not a filing, the same
         // reasoning as Walk adding the record to Visited. A service request X that names a communication or to-do C is
         // walked X -> C, and C names X back (the communication engine stamps sprk_regardingservicerequest; a to-do filed
         // under X does too): held, it refused every upload to X. Only an EXACT back-reference (same entity AND id) on a
         // column that would be HELD is dropped — a link to any other service request or record is held exactly as before,
         // and a back-reference through a copy-SOURCE column (an event under an event under the first) is still the filing
-        // loop it always was (IntermediateRootsAsync refuses it).
+        // loop it always was (IntermediateRootsAsync refuses it). A column that is FOLLOWED (#1630 filingThrough) is not a
+        // HELD column, so it keeps master's handling untouched.
         var setIntermediates = allSetIntermediates
-            .Where(l => sourceColumns.Contains(l.Column) || !IsRecordUnderResolution(l, walkRecordEntity, walkRecordId))
+            .Where(l => sourceColumns.Contains(l.Column) || filingThrough.Contains(l.Column)
+                || !IsRecordUnderResolution(l, walkRecordEntity, walkRecordId))
             .ToList();
 
-        var held = setIntermediates.Where(i => !sourceColumns.Contains(i.Column)).Select(i => i.Column).ToList();
+        var held = setIntermediates
+            .Where(i => !sourceColumns.Contains(i.Column) && !filingThrough.Contains(i.Column))
+            .Select(i => i.Column)
+            .ToList();
         if (held.Count > 0)
         {
             throw Unverifiable(
@@ -1026,6 +1044,31 @@ public sealed partial class RecordContainerResolver
                 // CoreAncestorResolver derives a copy from typed root columns only.
                 extra.Add(pairHop);
             }
+        }
+
+        // #1630: a work assignment filed under an invoice or event (no copy is compared — a work assignment carries none). The
+        // record is read LIVE and verified through the same rules as any intermediate (IntermediateRootsAsync: its own filing,
+        // a stale copy of its own, a loop, the bounds), and the matters and projects it belongs to are walked as this row's own
+        // roots — exactly the parents the inheritance names for it. Anything else it names (a work assignment or service
+        // request root, a record its pair alone names) is not that rule, so the column stays HELD, as before #1630.
+        var through = setIntermediates.Where(i => filingThrough.Contains(i.Column)).ToList();
+        foreach (var link in through)
+        {
+            var above = await IntermediateRootsAsync(link, rowEntity, viaPrefix, depth, walk, ct).ConfigureAwait(false);
+            if (above.Extra.Count > 0
+                || above.Own.Any(h => !Sprk.Bff.Api.Services.Access.SecureRootInheritance.IsParent(h.Entity)))
+            {
+                throw Unverifiable(
+                    walkRecordEntity, walkRecordId, Via(viaPrefix, rowEntity, link.Column),
+                    heldBy: viaPrefix is null ? null : rowEntity);
+            }
+
+            own.AddRange(above.Own);
+        }
+
+        if (through.Count > 0)
+        {
+            setIntermediates = setIntermediates.Except(through).ToList();
         }
 
         if (setIntermediates.Count == 0 && setCarriers.Count == 0)
@@ -1456,7 +1499,9 @@ public sealed partial class RecordContainerResolver
     /// set is a disagreement.</item>
     /// <item>The pair is the only thing naming a record → its type decides, read from <c>sprk_recordtype_ref</c>: a
     /// type the row's entry FOLLOWS (a root; the communication's invoice) is returned and walked like a typed link (a
-    /// record that does not exist refuses there, 409); an INTERMEDIATE is the held path
+    /// record that does not exist refuses there, 409) — except any root (matter, project or another work assignment) named
+    /// by a WORK ASSIGNMENT's pair alone (#1616: it is text any user with Write can set, and the secure-root inheritance
+    /// reads it the same way), which refuses (<see cref="AncestorUnresolvedCode"/>); an INTERMEDIATE is the held path
     /// (<see cref="AncestorUnverifiableCode"/>); a PARTY (contact, account, organization) is not ownership and adds
     /// nothing, exactly like the typed party columns; a missing type, an unreadable type row (503) or a type this
     /// table does not classify → refused (<see cref="AncestorUnresolvedCode"/>).</item>
@@ -1548,6 +1593,23 @@ public sealed partial class RecordContainerResolver
 
         if (rowLinks.Follows(pairEntity))
         {
+            // #1616: on a work assignment the pair is text any user with Write can set through the Web API, bypassing the
+            // AppendTo check a lookup costs, so ALONE it names no root there — no matter, no project, and no other work
+            // assignment (whose container and secure state it would otherwise reach): refused, never walked. A typed link
+            // that repeats it was taken above (rule 3). A project's pair is BFF-managed (field-secured —
+            // SecureRootInheritance.PairNamesAParentOnItsOwn, the one rule the secure-root inheritance applies), so it is
+            // walked. Rule 5 on the child tables is #1627.
+            if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(rowEntity)
+                && !Sprk.Bff.Api.Services.Access.SecureRootInheritance.PairNamesAParentOnItsOwn(rowEntity))
+            {
+                throw AncestorUnresolved(
+                    normalizedEntity, recordId,
+                    $"{subject} names the record it is filed under only in its regarding pair, which none of its typed "
+                    + "regarding lookups repeats, so what it is filed under cannot be determined.",
+                    statusCode: 409,
+                    logDetail: $"{via} = {pairId}, type {pairEntity}, no typed lookup repeats it (#1616)");
+            }
+
             return new RootHop(pairEntity, pairId, via);
         }
 
@@ -1797,7 +1859,9 @@ public sealed partial class RecordContainerResolver
                     ("sprk_regardingagreement", "sprk_agreement"),
                 ]),
                 // A ROOT that is itself filed regarding a matter / project (live: 9 of 22 work assignments) or a
-                // communication / event / invoice (live: 1, held — a work assignment carries no copy).
+                // communication / event / invoice (live: 1). A work assignment carries no copy, so a communication stays
+                // held; #1630 (owner Option A): an invoice or event is FOLLOWED to the matters and projects it belongs to
+                // (SecureRootInheritance.IntermediateFilingColumns, NextHopsAsync) — the inheritance's own parent rule.
                 ["sprk_workassignment"] = new(polymorphic: true,
                 [
                     ("sprk_regardingproject", "sprk_project"), ("sprk_regardingmatter", "sprk_matter"),

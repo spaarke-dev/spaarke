@@ -34,6 +34,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-12: A comment becomes the constraint — prose outlives the mechanism it describes](#ap-12-a-comment-becomes-the-constraint--prose-outlives-the-mechanism-it-describes)
 - [AP-13: A tool with no parameter for a thing you must control, silently picking a default](#ap-13-a-tool-with-no-parameter-for-a-thing-you-must-control-silently-picking-a-default)
 - [AP-14: A facade method NAMED for an entity it does not write](#ap-14-a-facade-method-named-for-an-entity-it-does-not-write)
+- [AP-16: A swallowed catch — empty, comment-only, or log/telemetry-only](#ap-16-a-swallowed-catch--empty-comment-only-or-logtelemetry-only)
 - [G-16: `grep` silently cannot match characters above U+FFFF (most colored emoji)](#g-16-grep-silently-cannot-match-characters-above-uffff-most-colored-emoji)
 
 ### Gotchas
@@ -1163,3 +1164,31 @@ every read that carries a value — and in-memory doubles that serialize the sha
 Cross-session concurrency is not enforceable by settings; it stays a practice.
 
 ---
+
+### AP-16: A swallowed catch — empty, comment-only, or log/telemetry-only
+
+> **Added 2026-10-10** by the client error-handling cleanup (Phase 3, P5). **Class**: silent failure.
+> Siblings: [AP-7](#ap-7-converting-a-silent-fallback-into-fail-fast-verified-with-targeted-tests-only),
+> [G-15](#g-15-a-detached-xrm-method-loses-this-and-dies-inside-the-platform) (a bare `catch {}` hid a TypeError).
+
+**The shape.** A `catch` that is empty, holds only a comment, or holds only a `console.*`, telemetry
+(`logTelemetryError`, `reportClientError`, `trackException`) or `logger.*` call. The failure is hidden
+from the user and from the caller. The UI shows a healthy-looking empty state, and nobody can tell a
+data fault from no data. Logging is not handling: telemetry-only counts as swallowing.
+
+**Enforced by lint (client packages).** The client-lint ratchet (`scripts/quality/client-lint/`,
+`no-restricted-syntax` selectors) blocks new instances. The 259 existing ones are baselined in
+`eslint-suppressions.json` and shrink through `prune`.
+
+**On a flagged catch:**
+- handle the error (fall back, retry); or
+- surface it (error state, toast, message bar) alongside any logging; or
+- rethrow, or return a failure the caller checks.
+
+When swallowing is deliberate (best-effort cache warm, storage access, `AbortError`), write
+`// eslint-disable-next-line no-restricted-syntax -- <why this is safe>`. A disable without a reason
+fails `spaarke-client/catch-disable-needs-reason`.
+
+**Evidence**: `scripts/quality/client-lint/eslint.client.config.mjs` (`CATCH` rules) ·
+`scripts/quality/client-lint/controls/catch-policy.control.ts` · `docs/procedures/testing-and-code-quality.md`
+(client-lint section).

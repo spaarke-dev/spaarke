@@ -26,4 +26,17 @@ public interface IThreadMembershipDerivationService
     /// is unknown or has no derivable membership). De-duplicated by participant identity.
     /// </summary>
     Task<ThreadAuthorizedSet> DeriveAuthorizedSetAsync(Guid threadId, CancellationToken ct = default);
+
+    /// <summary>
+    /// The systemusers a message filed in a record thread is GRANTED Read to (#1629 F-A, F2): those the anchor record's
+    /// membership lookups name, plus the members of a team a lookup names, EXCEPT <paramref name="messageOwningTeamId"/>,
+    /// the team that owns the MESSAGE. That team's members already read the message through ownership, and the business
+    /// unit's default team that owns ordinary records can have hundreds of members, each of whom would cost one
+    /// synchronous share call on the send/ingest path. Every other team is expanded, including the anchor's own owner team
+    /// when it is not the message's owner (a party anchor, a non-default owner team in another business unit, or a
+    /// message whose primary ownership parent is another record). <c>null</c> (a user-owned message) expands every team.
+    /// The ACS reconcile keeps the full set (<see cref="DeriveAuthorizedSetAsync"/>): chat membership is not a share.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> DeriveAnchorGranteeUserIdsAsync(
+        string anchorEntityType, Guid anchorRecordId, Guid? messageOwningTeamId, CancellationToken ct = default);
 }

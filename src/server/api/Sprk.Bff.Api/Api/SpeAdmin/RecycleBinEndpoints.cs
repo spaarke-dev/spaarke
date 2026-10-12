@@ -239,6 +239,17 @@ public static class RecycleBinEndpoints
                 traceId: context.TraceIdentifier,
                 title: "Graph API Error");
         }
+        catch (SpeDeletedContainerRecordUnavailableException ex)
+        {
+            // The ownership-record store gave no answer (#1652): act on nothing and show nothing — never read the
+            // fault as "no record" (that would be a 404 hiding an outage) nor as "owned".
+            logger.LogError(
+                ex,
+                "ListDeletedContainers: deleted-container ownership records unavailable for configId {ConfigId}, TraceId={TraceId}",
+                configGuid, context.TraceIdentifier);
+
+            return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
@@ -360,6 +371,17 @@ public static class RecycleBinEndpoints
                 statusCode: ex.ClientStatusFor(),
                 traceId: context.TraceIdentifier,
                 title: "Graph API Error");
+        }
+        catch (SpeDeletedContainerRecordUnavailableException ex)
+        {
+            // The ownership-record store gave no answer (#1652): act on nothing and show nothing — never read the
+            // fault as "no record" (that would be a 404 hiding an outage) nor as "owned".
+            logger.LogError(
+                ex,
+                "RestoreContainer: deleted-container ownership records unavailable for configId {ConfigId}, TraceId={TraceId}",
+                configGuid, context.TraceIdentifier);
+
+            return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
@@ -484,6 +506,17 @@ public static class RecycleBinEndpoints
                 statusCode: ex.ClientStatusFor(),
                 traceId: context.TraceIdentifier,
                 title: "Graph API Error");
+        }
+        catch (SpeDeletedContainerRecordUnavailableException ex)
+        {
+            // The ownership-record store gave no answer (#1652): act on nothing and show nothing — never read the
+            // fault as "no record" (that would be a 404 hiding an outage) nor as "owned".
+            logger.LogError(
+                ex,
+                "PermanentDeleteContainer: deleted-container ownership records unavailable for configId {ConfigId}, TraceId={TraceId}",
+                configGuid, context.TraceIdentifier);
+
+            return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {

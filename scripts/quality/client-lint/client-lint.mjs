@@ -38,8 +38,15 @@ if (only && selected.length === 0) {
 }
 
 // Marker comments in controls/*.ts (a marker is a whole-line comment, so prose that mentions one never counts).
-const MARK_FIRE = /^\s*\/\/ @control must-fire\b/;
+const MARK_FIRE = /^\s*\/\/ @control must-fire\b(?:\s+(\S+))?/;
 const MARK_QUIET = /^\s*\/\/ @control must-not-fire\b/;
+
+const NUC_RULE = "@typescript-eslint/no-unnecessary-condition";
+// Exact number of must-fire controls per rule: deleting or silently skipping a fixture fails the run.
+const EXPECTED_FIRE = { [NUC_RULE]: 2, "no-restricted-syntax": 6, "spaarke-client/catch-disable-needs-reason": 3 };
+
+// Rules whose existing violations are recorded in eslint-suppressions.json by `baseline`.
+const SUPPRESSED_RULES = [NUC_RULE, "no-restricted-syntax", "spaarke-client/catch-disable-needs-reason"];
 
 const fmt = (ms) => `${(ms / 1000).toFixed(1)}s`;
 
@@ -139,7 +146,7 @@ async function baseline() {
   if (!only) fs.rmSync(SUPPRESSIONS, { force: true });
   let exit = 0;
   for (const p of selected) {
-    const r = await runEslint(["--suppress-rule", "@typescript-eslint/no-unnecessary-condition"], [`${p.dir}/src`]);
+    const r = await runEslint(SUPPRESSED_RULES.flatMap((rule) => ["--suppress-rule", rule]), [`${p.dir}/src`]);
     console.log(`${p.id}: ${fmt(r.ms)}`);
     if (r.code > 1) exit = r.code;
   }
@@ -167,6 +174,7 @@ async function controls() {
   let bad = 0;
   let mustFire = 0;
   let mustNot = 0;
+  const firedByRule = {};
   for (const r of results) {
     const lines = fs.readFileSync(r.filePath, "utf8").split(/\r?\n/);
     const reported = new Map();
@@ -184,8 +192,10 @@ async function controls() {
       const got = reported.get(target);
       if (fire) {
         mustFire++;
-        if (got !== "@typescript-eslint/no-unnecessary-condition") {
-          console.error(`FAIL ${path.basename(r.filePath)}:${target} must FIRE no-unnecessary-condition but ${got ? `got ${got}` : "was silent"}`);
+        const want = MARK_FIRE.exec(text)[1] ?? NUC_RULE;
+        firedByRule[want] = (firedByRule[want] ?? 0) + 1;
+        if (got !== want) {
+          console.error(`FAIL ${path.basename(r.filePath)}:${target} must FIRE ${want} but ${got ? `got ${got}` : "was silent"}`);
           bad++;
         }
       } else {
@@ -208,6 +218,12 @@ async function controls() {
   if (mustFire === 0 || mustNot === 0) {
     console.error(`FAIL control fixture is empty (must-fire=${mustFire}, must-not-fire=${mustNot})`);
     bad++;
+  }
+  for (const rule of new Set([...Object.keys(EXPECTED_FIRE), ...Object.keys(firedByRule)])) {
+    if ((firedByRule[rule] ?? 0) !== (EXPECTED_FIRE[rule] ?? 0)) {
+      console.error(`FAIL ${rule}: expected ${EXPECTED_FIRE[rule] ?? 0} must-fire control(s), found ${firedByRule[rule] ?? 0}`);
+      bad++;
+    }
   }
   console.log(`controls: ${mustFire} must-fire, ${mustNot} must-not-fire, ${bad} failure(s)`);
   process.exit(bad ? 1 : 0);

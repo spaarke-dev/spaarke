@@ -1,6 +1,6 @@
 /**
  * Spaarke Email Actions
- * Version: 1.2.0
+ * Version: 1.2.1
  * Description: Email form ribbon button handlers for Save to Document functionality
  *
  * ADR-006 Exception: Approved for ribbon button invocation
@@ -12,6 +12,9 @@
  *   sprk_BffApiAppId    — BFF API app registration ID (for OAuth scope)
  *   sprk_MsalClientId   — MSAL client application ID
  *   sprk_TenantId       — Azure AD tenant ID
+ *
+ * Changes in 1.2.1: BFF scope aligned to api://{bffAppId}/user_impersonation (the one scope every
+ * other Spaarke surface requests; #1453, task 123).
  *
  * Copyright (c) 2025 Spaarke
  */
@@ -43,14 +46,14 @@ Spaarke.Email.Config = {
             return this.tenantId ? "https://login.microsoftonline.com/" + this.tenantId : null;
         },
         get scope() {
-            return this.bffAppId ? "api://" + this.bffAppId + "/SDAP.Access" : null;
+            return this.bffAppId ? "api://" + this.bffAppId + "/user_impersonation" : null;
         },
         // Redirect URI — derived from Dataverse client URL at runtime
         redirectUri: null
     },
 
     // Version
-    version: "1.2.0"
+    version: "1.2.1"
 };
 
 // =============================================================================
@@ -94,7 +97,9 @@ Spaarke.Email._resolveConfig = function () {
                     "Ensure the SpaarkeCore solution is imported and the variable has a value."
                 );
             }
-            Spaarke.Email.Config.bffApiUrl = bffUrl.replace(/\/+$/, "");
+            // Normalize: strip trailing slashes AND trailing /api to get HOST ONLY.
+            // Prevents the recurring /api/api/ double-prefix bug in legacy JS web resources.
+            Spaarke.Email.Config.bffApiUrl = bffUrl.replace(/\/+$/, "").replace(/\/api$/i, "");
 
             // BFF App ID (required — used for OAuth scope)
             var bffAppId = envVars["sprk_BffApiAppId"];

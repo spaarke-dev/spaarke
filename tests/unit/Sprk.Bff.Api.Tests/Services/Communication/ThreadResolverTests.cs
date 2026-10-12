@@ -236,6 +236,31 @@ public class ThreadResolverTests
         created[0].Contains("sprk_isdefaultthread").Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("account")]
+    [InlineData(null)]
+    public async Task ResolveAndAssignAsync_Tier1Create_ReturnsTheAudienceTheCreateWrote(string? regardingType)
+    {
+        // #1629 F3: a Tier-1 CREATE grants what it wrote — the message's own typed regarding (record or party), or the
+        // Direct participants when the message has none. A CREATE that always answered Direct would grant a record's
+        // message to the creator's sharees instead of the record's members.
+        var request = Request(CommunicationType.Email, subject: "Contract review");
+        var regardingId = Guid.NewGuid();
+        var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
+        if (regardingType is not null)
+            SetMessageRegarding(communication, regardingType, regardingId, "Acme");
+        SetupRegardingRead(request.CommunicationId, communication);
+        var newThreadId = SetupThreadCreateCapture(out _);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.CreateNew));
+
+        var result = await sut.ResolveAndAssignAsync(request, CancellationToken.None);
+
+        result.Should().Be(regardingType is null
+            ? ThreadAssignment.Direct(newThreadId)
+            : ThreadAssignment.Anchored(newThreadId, regardingType, regardingId));
+    }
+
     [Fact]
     public async Task ResolveAndAssignThreadAsync_WhenNoStrategyForChannel_ReturnsNullWithoutTouchingDataverse()
     {
@@ -318,6 +343,242 @@ public class ThreadResolverTests
         result.Should().Be(existingDefault);
         _entity.Verify(e => e.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()), Times.Never);
         VerifyAssigned(request.CommunicationId, existingDefault, Times.Once());
+    }
+
+    /// <summary>
+    /// The Tier-2 find query evaluated against <paramref name="rows"/> the way Dataverse would: a row is returned only when
+    /// every condition of the query holds on it (equality and null conditions; the only kinds the find uses).
+    /// </summary>
+    private void SetupDefaultThreadRows(params DataverseEntity[] rows) =>
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+            {
+                var matches = rows.Where(row => q.Criteria.Conditions.All(c =>
+                {
+                    var value = row.Contains(c.AttributeName) ? row[c.AttributeName] : null;
+                    var actual = value switch
+                    {
+                        EntityReference er => (object)er.Id,
+                        OptionSetValue os => os.Value,
+                        _ => value,
+                    };
+                    return c.Operator switch
+                    {
+                        ConditionOperator.Equal => Equals(actual, c.Values[0]),
+                        ConditionOperator.Null => actual is null,
+                        _ => false,
+                    };
+                }));
+                return new EntityCollection(matches.Take(q.TopCount ?? int.MaxValue).ToList());
+            });
+
+    [Fact]
+    public async Task ResolveAndAssignThreadAsync_Tier2_NeverJoinsAThreadWhosePairAloneNamesTheRecord()
+    {
+        // #1629: a user marked their own thread as a default and set its pair (plain text) to matter X while its typed
+        // lookup names their own matter A. A message filed under X must not be drawn into that thread.
+        var request = Request(CommunicationType.Message, acsThreadId: null);
+        var matterX = Guid.NewGuid();
+        var matterA = Guid.NewGuid();
+        var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
+        SetMessageRegarding(communication, "sprk_matter", matterX, "Secure matter");
+        SetupRegardingRead(request.CommunicationId, communication);
+        var forged = Thread(Guid.NewGuid(), regardingType: "sprk_matter", regardingId: matterA.ToString(),
+            isDefault: true, threadType: ThreadTypeRecordAnchored);
+        forged["sprk_regardingrecordid"] = matterX.ToString();
+        var pairOnly = Thread(Guid.NewGuid(), isDefault: true, threadType: ThreadTypeRecordAnchored);
+        pairOnly["sprk_regardingrecordid"] = matterX.ToString();
+        SetupDefaultThreadRows(forged, pairOnly);
+        var newThreadId = SetupThreadCreateCapture(out var created);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Message, ThreadKeyResolution.Skip));
+
+        var result = await sut.ResolveAndAssignThreadAsync(request, CancellationToken.None);
+
+        result.Should().Be(newThreadId);
+        created.Should().ContainSingle();
+        created[0].GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(matterX);
+        VerifyAssigned(request.CommunicationId, forged.Id, Times.Never());
+        VerifyAssigned(request.CommunicationId, pairOnly.Id, Times.Never());
+        VerifyAssigned(request.CommunicationId, newThreadId, Times.Once());
+    }
+
+    [Fact]
+    public async Task ResolveAndAssignThreadAsync_Tier2_JoinsTheDefaultWhoseTypedLookupRepeatsThePair()
+    {
+        // The legitimate per-record default (typed lookup + the same pair) is still found and joined.
+        var request = Request(CommunicationType.Message, acsThreadId: null);
+        var matterX = Guid.NewGuid();
+        var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
+        SetMessageRegarding(communication, "sprk_matter", matterX);
+        SetupRegardingRead(request.CommunicationId, communication);
+        var legit = Thread(Guid.NewGuid(), regardingType: "sprk_matter", regardingId: matterX.ToString(),
+            isDefault: true, threadType: ThreadTypeRecordAnchored);
+        legit["sprk_regardingrecordid"] = matterX.ToString();
+        SetupDefaultThreadRows(legit);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Message, ThreadKeyResolution.Skip));
+
+        var result = await sut.ResolveAndAssignThreadAsync(request, CancellationToken.None);
+
+        result.Should().Be(legit.Id);
+        _entity.Verify(e => e.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+        VerifyAssigned(request.CommunicationId, legit.Id, Times.Once());
+    }
+
+    [Fact]
+    public async Task ResolveAndAssignAsync_Tier2_NeverJoinsADefaultThatAlsoCarriesAHigherPriorityLookup()
+    {
+        // #1629 F-B: a default thread with project P (and pair P) PLUS matter M, a matter the owner belongs to. ThreadAnchorOf
+        // anchors it on M (matter outranks project), so P's messages must not join it; a default with only P is joined.
+        var request = Request(CommunicationType.Message, acsThreadId: null);
+        var projectP = Guid.NewGuid();
+        var matterM = Guid.NewGuid();
+        var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
+        SetMessageRegarding(communication, "sprk_project", projectP);
+        SetupRegardingRead(request.CommunicationId, communication);
+        var mixed = Thread(Guid.NewGuid(), regardingType: "sprk_project", regardingId: projectP.ToString(),
+            isDefault: true, threadType: ThreadTypeRecordAnchored);
+        mixed["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterM);
+        mixed["sprk_regardingrecordid"] = projectP.ToString();
+        ThreadResolver.ThreadAnchorOf(mixed).RecordType.Should().Be("sprk_matter", "the attack depends on the matter outranking the project");
+        SetupDefaultThreadRows(mixed);
+        var newThreadId = SetupThreadCreateCapture(out _);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Message, ThreadKeyResolution.Skip));
+
+        var result = await sut.ResolveAndAssignAsync(request, CancellationToken.None);
+
+        result!.ThreadId.Should().Be(newThreadId);
+        VerifyAssigned(request.CommunicationId, mixed.Id, Times.Never());
+    }
+
+    [Fact]
+    public async Task ResolveAndAssignAsync_Tier2_JoinsADefaultCarryingOnlyTheKeysLookup_AndGrantsTheMessagesOwnRegarding()
+    {
+        var request = Request(CommunicationType.Message, acsThreadId: null);
+        var projectP = Guid.NewGuid();
+        var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
+        SetMessageRegarding(communication, "sprk_project", projectP);
+        SetupRegardingRead(request.CommunicationId, communication);
+        var only = Thread(Guid.NewGuid(), regardingType: "sprk_project", regardingId: projectP.ToString(),
+            isDefault: true, threadType: ThreadTypeRecordAnchored);
+        only["sprk_regardingrecordid"] = projectP.ToString();
+        SetupDefaultThreadRows(only);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Message, ThreadKeyResolution.Skip));
+
+        var result = await sut.ResolveAndAssignAsync(request, CancellationToken.None);
+
+        // F-C: the audience is the message's own regarding — the thread is never re-read for it.
+        result.Should().Be(ThreadAssignment.Anchored(only.Id, "sprk_project", projectP));
+        VerifyAssigned(request.CommunicationId, only.Id, Times.Once());
+        _entity.Verify(
+            e => e.RetrieveAsync("sprk_communicationthread", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ResolveAndAssignAsync_Tier3Master_GrantsNobody()
+    {
+        var request = Request(CommunicationType.Message, acsThreadId: null);
+        SetupRegardingRead(request.CommunicationId, new DataverseEntity("sprk_communication") { Id = request.CommunicationId });
+        SetupOwnerRead(request.CommunicationId, Guid.NewGuid());
+        var existingMaster = Guid.NewGuid();
+        SetupExistingDefaultThread(existingMaster);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Message, ThreadKeyResolution.Skip));
+
+        var result = await sut.ResolveAndAssignAsync(request, CancellationToken.None);
+
+        result.Should().Be(ThreadAssignment.NoGrant(existingMaster));
+    }
+
+    [Theory]
+    [InlineData(ThreadTypeDirect)]
+    [InlineData(ThreadTypeRecordAnchored)]
+    public async Task ResolveAndAssignAsync_Tier1Join_TakesTheAudienceFromTheReadThatFiledTheMessage(int threadType)
+    {
+        // #1629 F-C: the Tier-1 JOIN reads the thread ONCE (type + typed lookups) for both the owner re-file and the grant.
+        // #1629 F1: a typed lookup wins over sprk_threadtype — a "Direct" thread whose owner set sprk_regardingmatter = M
+        // files the message under M, so the audience is M's members, never the thread owner and their sharees.
+        var request = Request(CommunicationType.Email);
+        var existing = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var row = Thread(existing, regardingType: "sprk_matter", regardingId: matterId.ToString(), threadType: threadType);
+        _entity
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", existing, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.Join(existing)));
+
+        var result = await sut.ResolveAndAssignAsync(request, CancellationToken.None);
+
+        result.Should().Be(ThreadAssignment.Anchored(existing, "sprk_matter", matterId));
+        _entity.Verify(
+            e => e.RetrieveAsync("sprk_communicationthread", existing, It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Theory]
+    [InlineData(ThreadTypeDirect, true)]
+    [InlineData(ThreadTypeRecordAnchored, false)]
+    public async Task ResolveAndAssignAsync_Tier1Join_ThreadWithNoTypedLookup_IsDirectOnlyWhenTypedDirect(int threadType, bool direct)
+    {
+        // #1629 F1: Direct applies ONLY to a thread with no typed regarding lookup; a record-typed thread that lost its
+        // lookup grants nobody (fail closed).
+        var request = Request(CommunicationType.Email);
+        var existing = Guid.NewGuid();
+        var row = Thread(existing, threadType: threadType);
+        _entity
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", existing, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.Join(existing)));
+
+        var result = await sut.ResolveAndAssignAsync(request, CancellationToken.None);
+
+        result.Should().Be(direct ? ThreadAssignment.Direct(existing) : ThreadAssignment.NoGrant(existing));
+    }
+
+    [Fact]
+    public async Task ResolveAndAssignAsync_Tier1Join_DirectThreadWithAPartyLookup_GrantsTheParty_NotTheThreadOwner()
+    {
+        // #1629 F1: a party anchor is not an ownership parent (no re-file), but it is still the thread's typed anchor.
+        var request = Request(CommunicationType.Email);
+        var existing = Guid.NewGuid();
+        var accountId = Guid.NewGuid();
+        var row = Thread(existing, regardingType: "account", regardingId: accountId.ToString(), threadType: ThreadTypeDirect);
+        _entity
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", existing, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(row);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.Join(existing)));
+
+        var result = await sut.ResolveAndAssignAsync(request, CancellationToken.None);
+
+        result.Should().Be(ThreadAssignment.Anchored(existing, "account", accountId));
+    }
+
+    [Fact]
+    public void ThreadAnchorOf_AnchorsOnTheTypedLookupAndReportsThePairsStanding()
+    {
+        var matterA = Guid.NewGuid();
+        var matterX = Guid.NewGuid();
+
+        var disagreeing = Thread(Guid.NewGuid(), regardingType: "sprk_matter", regardingId: matterA.ToString());
+        disagreeing["sprk_regardingrecordid"] = matterX.ToString();
+        var anchor = ThreadResolver.ThreadAnchorOf(disagreeing);
+        (anchor.RecordType, anchor.RecordId, anchor.Pair).Should().Be(("sprk_matter", (Guid?)matterA, ThreadResolver.ThreadPairAgreement.NotRepeated));
+
+        var pairOnly = Thread(Guid.NewGuid());
+        pairOnly["sprk_regardingrecordid"] = matterX.ToString();
+        anchor = ThreadResolver.ThreadAnchorOf(pairOnly);
+        anchor.HasAnchor.Should().BeFalse();
+        anchor.Pair.Should().Be(ThreadResolver.ThreadPairAgreement.NotRepeated);
+
+        var repeated = Thread(Guid.NewGuid(), regardingType: "sprk_matter", regardingId: matterA.ToString());
+        repeated["sprk_regardingrecordid"] = matterA.ToString().ToUpperInvariant();
+        anchor = ThreadResolver.ThreadAnchorOf(repeated);
+        (anchor.RecordType, anchor.RecordId, anchor.Pair).Should().Be(("sprk_matter", (Guid?)matterA, ThreadResolver.ThreadPairAgreement.RepeatedByTypedLookup));
+
+        var none = Thread(Guid.NewGuid());
+        ThreadResolver.ThreadAnchorOf(none).Should().Be(new ThreadResolver.ThreadAnchor(null, null, ThreadResolver.ThreadPairAgreement.NoPair, null));
     }
 
     [Fact]
