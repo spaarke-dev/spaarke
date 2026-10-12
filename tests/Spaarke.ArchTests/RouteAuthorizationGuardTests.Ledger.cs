@@ -2621,12 +2621,12 @@ public partial class RouteAuthorizationGuardTests
             "The caller principal's own module entitlements (MeEntitlementsEndpoint.cs:32). Takes no id."),
         Permanent("GET /api/v1/external/notifications", PermanentBasis.CallerScopedOnly, "r3-037",
             "The caller principal's own feed: grants naming its own contact, each kept only with Read on its root "
-            + "(CallerPrincipal.RightsOn, ExternalNotificationFeedEndpoints.cs:233), and messages read only for its accessible "
-            + "set (:244) and its own service requests (the module's ScopeRows, :269), under the external read rules (:284). "
+            + "(CallerPrincipal.RightsOn, ExternalNotificationFeedEndpoints.cs:274), and messages read only for its accessible "
+            + "set (:285) and its own service requests (the module's ScopeRows, :310), under the external read rules (:325). "
             + "Takes no id."),
         Permanent("POST /api/v1/external/notifications/seen", PermanentBasis.CallerScopedOnly, "r3-037",
             "Writes the caller principal's own last-seen marker, keyed by its own systemuser or contact id "
-            + "(ExternalNotificationFeedEndpoints.cs:161, :181). Takes no id and no body."),
+            + "(ExternalNotificationFeedEndpoints.cs:191, :217). Takes no id and no body."),
         Permanent("GET /api/users/me/memberships/{entityType}", PermanentBasis.CallerScopedOnly, "167",
             "Memberships of the caller's own systemuserid, resolved from the oid claim "
             + "(MembershipEndpoints.cs:192-209). {entityType} is a table name; no caller-chosen principal or "

@@ -73,7 +73,8 @@ No query parameters. Auth: the external SPA token (CIAM or workforce), the same 
 ```
 
 - `value` is newest first, holds at most 100 items, and none older than 30 days.
-- `recordType` is the external route segment, so `/{recordType}/{recordId}` is the record detail and `/api/v1/external/{recordType}/{recordId}/messages` is its thread.
+- `recordType` is the external **API route segment**, not an SPA route. `/api/v1/external/{recordType}/{recordId}/messages` is the record's thread. The SPA opens a record in `RecordDetailModal`, so task 055 needs a segment-to-opener mapping (`projects`, `matters`, `workassignments`, `servicerequests` each to the SPA's own opener for that record type); it must not build a URL from the segment.
+- `unreadCount` counts the **returned page only** (at most 100 items). When `truncated` is true the real number may be higher, so task 055 shows "100+" instead of the bare count.
 - No message body, subject, address, privilege or internal-only value, and no contact or systemuser id, is in the response.
 
 Errors:
@@ -83,6 +84,7 @@ Errors:
 | 401 / 403 | from the group policy or the principal filter | not signed in, or not resolvable |
 | 429 | rate limit | back off |
 | 500 | `errorCode: EXT_NOTIFICATIONS_INTERNAL_ERROR` | a Dataverse read failed; retry later |
+| 503 | `errorCode: EXT_NOTIFICATIONS_CONTACT_UNREADABLE` | the caller's linked contact could not be read right now (a Dataverse fault on the systemuser row or the oid binding), so the grant and service-request sources would be missing. Nothing was read; a fixed retry detail, no exception text. Retry shortly; do not show an empty bell. |
 
 ### `POST /api/v1/external/notifications/seen`
 
@@ -93,6 +95,7 @@ No body. The same auth and rate limit apply.
 | 200 | `{ "lastSeenAt": "<server now, ISO-8601>" }` |
 | 403 | `reasonCode: sdap.external.notifications.caller_unattributable` — the principal has neither a systemuser nor a contact |
 | 503 | `errorCode: EXT_NOTIFICATIONS_SEEN_UNAVAILABLE` — the marker was not stored; retry |
+| 503 | `errorCode: EXT_NOTIFICATIONS_CONTACT_UNREADABLE` — the caller's contact could not be read; NO marker is written, so a marker can never be set while a source was missing. Retry |
 
 After a 200, a re-read of the feed shows `unreadCount = 0` until a newer item arrives. The items stay in `value` with `isUnread = false`.
 
@@ -126,7 +129,7 @@ The feed lives in the BFF, in the existing external-access endpoint group and th
 1. **Systemuser grants (POML escalation trigger; recorded in `decisions.md` and continued).** Team-membership access writes no grant row. A systemuser therefore sees grant items only for grants made to its linked contact, and otherwise sees messages only. Organization grants, which have no contact on the row, are not announced. No other grant source was invented.
 2. **Item time for a grant is `createdon`.** `sprk_granteddate` is a date only. Using midnight would hide a grant made after a same-day `/seen`. A re-grant (a level or expiry change) is not a new item.
 3. **`recordType` is the route segment** (the 033 `Roots` table), not the logical name, so the bell links straight to the detail and the thread.
-4. **A deleted record's items are dropped only on a complete title read.** A failed title read keeps the items with no title. Unreadable is not the same as deleted.
+4. **A deleted record's items are dropped only on a complete title read.** A failed title read keeps the items with no title and sets `truncated` (review K2). Unreadable is not the same as deleted. The names read has no `statecode` filter, so a deactivated record is kept; only a deleted one is dropped.
 5. **Both routes are rate-limited** with `dataverse-query`. The GET makes up to about 25 app-only reads per call, and a bell polls.
 6. **The own-message exclusion runs after the read.** The query takes the newest 101 rows, and the caller's own posts are removed afterwards. A caller who posted most of the recent messages can therefore see fewer than 100 items, flagged `truncated` only when the read was cut (K3).
 
@@ -194,7 +197,7 @@ The proofs below change the new code in place and run the feed tests plus the 03
 
 **Route ledger** (`tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs`):
 - a `GovernedFile` entry (GroupGated);
-- two `Permanent … CallerScopedOnly` entries, following the `/me` precedent (neither route takes an id), citing `ExternalNotificationFeedEndpoints.cs:161, :181, :233, :244, :269, :284`;
+- two `Permanent … CallerScopedOnly` entries, following the `/me` precedent (neither route takes an id), citing `ExternalNotificationFeedEndpoints.cs:191, :217, :274, :285, :310, :325` (moved by the 2026-10-12 review fixes);
 - census 120 → 121, with a history line.
 
 **Publish size** (bff-hygiene item 4). Each side was built from a fresh `git archive` of its commit (`src/server`, `config`, `Directory.*.props`, `global.json`) into a short path:
@@ -220,7 +223,20 @@ Each side ran `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/
 - **K2 — `/seen` marks "now", not "what was displayed".** An item created between the bell's last GET and the POST is marked read unseen. A future `seenThrough` body field would close this. Server/Dataverse clock skew is not corrected.
 - **K3 — own-message exclusion after the read.** See decision 6.
 - **K4 — record scan cap.** A caller with more than 1,000 accessible records is answered from the first 1,000, in principal order, and flagged `truncated`. The GET can make up to 20 message queries plus 3–4 reads; there is no caching of the feed itself.
-- **K5 — a re-grant is not an item.** Changing the level or expiry of an existing row does not re-announce it. A grant made by reactivating an old row is not announced either.
+- **K5 — a re-grant is not an item, and a restored grant is silent (OPEN OWNER QUESTION).** Changing the level or expiry of an existing row does not re-announce it. Worse, a lapsed grant restored in place (`GrantExternalAccessEndpoint.cs` ~:562-602, which raises `AccessGained` and which task 036 emails) produces **no bell item at all**: the row's `sprk_granteddate` and `createdon` are unchanged, so the feed's 30-day window (and its unread marker) still place it where it was, or outside the window. The member is emailed that they have access again, and the bell says nothing. Owner decision needed: re-stamp a date on restore (a grant-endpoint change, outside task 037 and not made here), or accept the email as the only notice. The grant endpoint was not touched.
 - **K6 — a Dataverse fault on the message read is a coded 500, not a partial feed.** Grant, service-request and title read failures degrade to `truncated` or a missing title.
 - **K7 — the marker is not durable.** A Redis loss re-marks the window as unread, by design (`decisions.md` 2026-10-10).
 - **Hook note.** The repo's lint-staged pre-commit hook makes and drops a backup stash entry on the shared stack during `git commit` (entry `69cdbf8e7`, already gone afterwards). This agent ran no `git stash` itself.
+
+## Review fixes (2026-10-12)
+
+A fix round for the review of `9da1bcef6` / `196f162d0`. Tests run filtered (`ExternalNotificationFeed|ExternalDataService|ExternalMessage|CommunicationThreadReadService|CallerPrincipal`) because the machine is loaded.
+
+- **F3-a — an unreadable contact is a 503, not a thin feed.** When `CallerPrincipal.ContactUnreadable` is true and no contact was derived, `GET /notifications` and `POST /notifications/seen` both answer 503 `EXT_NOTIFICATIONS_CONTACT_UNREADABLE` with a fixed retry detail (the task 035 intake rule, `ExternalIntakeEndpoints.cs` ~:152). Before: the feed skipped the grant source and the service-request messages but reported itself complete, and a following `/seen` buried those items for good. After: nothing is read and no marker is written. Tests: both routes with `ContactUnreadable = true` give 503, with no grant, service-request, title or message read and no cache call (a strict mock); a systemuser with a contact is unaffected.
+- **F3-b — the three `ExternalDataService` reads are tested at the HTTP seam** (`ExternalDataServiceTests`, via `CapturingHandler`, which now records GET URLs and can script responses). They assert the grants query (`_sprk_contact_value eq`, `statecode eq 0`, `sprk_granteddate ge`, `sprk_expiresdate ge`, the `$orderby`, no `$top`), the service-request filter on `_sprk_requestedby_value`, the entity sets and id/name columns for projects, matters and work assignments, the 100-id chunking, and the parse: a two-root or rootless row is skipped, `createdon` maps to `GrantedOn` with the `sprk_granteddate` fallback, a failed read or chunk gives `Truncated` / `Complete = false`, and a missing id in a complete read is gone. Fail-before proofs are in the commit report.
+- **K2 — a failed title read is reported.** `truncated |= !names.Complete`. Before: the items were kept untitled and the response said nothing.
+- **K3 — the feed no longer reads message bodies.** `ReadRecentForRecordsAppOnlyAsync` projects without `sprk_body`, `sprk_bodyformat` and `sprk_subject` (`ExternalSelect(..., includeContent: false)`). The task 033 thread read keeps its exact select, now asserted in `ExternalMessageEndpointsTests`; the feed's `$select` is asserted in `ExternalNotificationFeedTests`.
+- **K4 — the per-row 30-day re-check is exercised for grants.** A grant on the boundary day at 08:00Z (date at or after `since`, instant before `now - 30 d`) is excluded; one at 13:00Z is kept.
+- **Doc fix.** `RecordNamesRead` said "deleted or deactivated is not distinguished". The names read has no `statecode` filter, so a deactivated record is kept and only a deleted one is dropped.
+- **Contract notes** for task 055 (the `recordType` mapping, `unreadCount` on a truncated page, the new 503s) are in the SPA contract above, and K5 is sharpened.
+- **Route ledger** citations in `RouteAuthorizationGuardTests.Ledger.cs` were moved to the new lines.
