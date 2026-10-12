@@ -1024,6 +1024,24 @@ public sealed class DecisionCommitServiceTests
     }
 
     [Fact]
+    public async Task AStepThatFailedAfterWritingPartOfItsWork_IsNotResumable_SoARetryCannotWriteItTwice()
+    {
+        var rig = new Rig();
+        rig.Executors["revise-budget"].Result = DecisionActionOutcome.Failed("revise-budget", DecisionActionReasons.BudgetAmountNotWritten,
+            "The amount was not written", written: [new DecisionRecordRef("sprk_budgetrevision", RevisionId)]);
+        var review = PathBReview(inquiry: false);
+
+        var failed = await rig.CommitAsync(review);
+        rig.Executors["revise-budget"].Result = null;
+        var retried = await rig.CommitAsync(review with { Retry = true });
+
+        failed.Resumable.Should().BeFalse();
+        failed.Landed.Should().Equal(new DecisionCommitRef("sprk_budgetrevision", RevisionId));
+        retried.ReasonCode.Should().Be(DecisionCommitReasons.NotResumable);
+        rig.Log.Count(l => l == "execute:revise-budget").Should().Be(1, "the revision is never written twice");
+    }
+
+    [Fact]
     public async Task ARetryThatChangesTheReview_IsRefused()
     {
         var rig = new Rig();

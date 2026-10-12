@@ -1098,9 +1098,12 @@ public sealed class DecisionCommitService
         var landed = executed.SelectMany(e => e.Written).ToList();
         var possibly = outcome.PossiblyWritten.Select(w => new DecisionCommitRef(w.Entity, w.Id)).ToList();
 
-        // A message that failed may still have gone out; resuming would send it again. Anything else can resume: the steps
-        // that landed are not repeated.
-        var resumable = !(step.Def.SendsMessage && outcome.Status == DecisionActionStatus.Failed) && possibly.Count == 0;
+        // A message that failed may still have gone out; resuming would send it again. A failed step that wrote part of its work
+        // (a revision whose budget amount was then refused) would write it again on a resume. Anything else can resume: the steps
+        // that landed in full are not repeated.
+        var resumable = !(step.Def.SendsMessage && outcome.Status == DecisionActionStatus.Failed)
+                        && possibly.Count == 0
+                        && outcome.Written.Count == 0;
         return new DecisionCommitResult
         {
             Status = DecisionCommitStatus.Failed,
