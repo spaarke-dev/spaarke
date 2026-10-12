@@ -1668,9 +1668,12 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("POST /api/v1/external/servicerequests", "SubmitServiceRequestAsync", "IsEntitledAsync", Array.Empty<string>(),
             "Task 035 (FR-05/FR-06): 403 unless the caller principal is entitled to legal-front-door "
             + "(ModuleEntitlementResolver.IsEntitledAsync, ExternalIntakeEndpoints.cs:161 — a CIAM partner only with the partner "
-            + "switch on) and has a contact (:152, :163), before the one app-only create, whose sprk_requestedby is that contact "
-            + "(:226) and whose owner is the default team of that contact's business unit, resolved first and refused when it "
-            + "cannot be (:210). The route names no existing record."),
+            + "switch on), may submit the requested type (ModuleEntitlementResolver.IsIntakeTypeAvailable, :176 — Invention "
+            + "for a CIAM partner only with PartnerInventionIntakeEnabled on; owner 2026-10-12) and has a contact (:194, :205), "
+            + "before the one app-only create, whose sprk_requestedby is that contact (:292) and whose owner is the default team "
+            + "of that contact's business unit, resolved first and refused when it cannot be (:232, :261). The requester's "
+            + "department is read app-only from that contact (:270) and stored as a system key, never taken from the body. "
+            + "The route names no existing record."),
         new HandlerDecision("GET /api/office/communications/by-message-id/{internetMessageId}", "FindByMessageIdAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Reads through IDataverseUserClient under the CALLER's Dataverse security (task 127, "
             + "CommunicationsEndpoints.cs:145, :179); an unreadable communication 404s like a missing one."),
