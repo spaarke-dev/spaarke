@@ -33,6 +33,10 @@ Both were posted to uac-r2 on #1355 (comment 6074035905). PB-28 (records in noti
     <constraint source="project">Each fix needs a test that fails on the current code. AI-EX7 needs proof (a test or a code trace) of whether any read-only path really reaches a write tool before anything changes; if none does, record that and only correct the classification. Own worktree off origin/master; never use --no-verify or bare git stash; you cannot write .claude/.</constraint>
   </constraints>
 
+  <steps mode="directional">
+    <step order="1">Not executed: this task was deferred under D-106 (ontology critical path only); the self-contained pickup context is the ontology-deferred GitHub issue for this task. Steps are written when the task is picked up.</step>
+  </steps>
+
   <acceptance-criteria>
     <criterion testable="true">A user is credited a membership role only when the role column names one of the user's identities (test with a team-owned matter); CacheVersion is bumped.</criterion>
     <criterion testable="true">The AiAnalysis side-effect classification matches what it can actually dispatch, and no read-only caller can reach a write tool (test or trace recorded).</criterion>
