@@ -4,7 +4,7 @@
     <title>Intake wizards part 2: Invention Submission + Trademark Search (FR-05)</title>
     <phase>5 SPA features</phase>
     <gate>after 052</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New frontend wizards (tags frontend)</rigor-reason>
     <model-tier>sonnet</model-tier>
