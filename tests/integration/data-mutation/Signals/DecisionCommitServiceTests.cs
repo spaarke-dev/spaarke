@@ -17,6 +17,7 @@ using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Api.Signals;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -100,6 +101,9 @@ public sealed class DecisionCommitServiceTests
         public List<IReadOnlyList<DecisionCommitStep>> FailedHandedOn { get; } = new();
         public Dictionary<(string Set, Guid Id), AccessRights> Rights { get; } = new();
         public IScheduledJobLease Lease { get; set; } = new ProcessLocalScheduledJobLease();
+
+        /// <summary>The commit service's review ledger when a test wraps <see cref="Ledger"/>; the plan-read stamp keeps the plain one.</summary>
+        public ITenantCache? LedgerStore { get; set; }
         public DecisionPlanReadStamp PlanReads { get; }
         public RecordOwnerResolution Owner { get; set; } = RecordOwnerResolution.Unchanged("not a secure matter");
         public Dictionary<Guid, Guid> CallerSeesCore { get; } = new();
@@ -281,7 +285,7 @@ public sealed class DecisionCommitServiceTests
                 });
             var records = new DecisionRecordWriter(WriterClient(), ownership.Object, Clock, NullLogger<DecisionRecordWriter>.Instance);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(Executors.Values), records, WriterClient(),
-                Entities.Object, Probe.Object, Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
+                Entities.Object, Probe.Object, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
         }
 
         public Task StampPlanRead(Guid signal, DateTimeOffset at) => PlanReads.StampAtAsync(Tenant, CallerOid.ToString("D"), signal, at, CancellationToken.None);
@@ -1740,6 +1744,56 @@ public sealed class DecisionCommitServiceTests
         rig.Writes.Should().BeEmpty();
 
         (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded, "the lock was released, not held for its 10 minutes");
+    }
+
+    /// <summary>Cancels the request while the commit service writes its in-progress marker (the write itself lands).</summary>
+    private sealed class CancelDuringMarkerLedger(ITenantCache inner, CancellationTokenSource cts) : ITenantCache
+    {
+        public bool Armed { get; set; } = true;
+
+        public Task<T?> GetAsync<T>(string tenantId, string resource, string id, int version, string cacheInstance = "default", CancellationToken ct = default) =>
+            inner.GetAsync<T>(tenantId, resource, id, version, cacheInstance, ct);
+
+        public async Task SetAsync<T>(string tenantId, string resource, string id, int version, T value, TimeSpan? ttl = null,
+            string cacheInstance = "default", CancellationToken ct = default)
+        {
+            await inner.SetAsync(tenantId, resource, id, version, value, ttl, cacheInstance, CancellationToken.None);
+            if (Armed && resource == DecisionCommitService.LedgerResource)
+            {
+                Armed = false;
+                cts.Cancel();
+                ct.ThrowIfCancellationRequested();
+            }
+        }
+
+        public Task RemoveAsync(string tenantId, string resource, string id, int version, string cacheInstance = "default", CancellationToken ct = default) =>
+            inner.RemoveAsync(tenantId, resource, id, version, cacheInstance, ct);
+
+        public Task<T> GetOrCreateAsync<T>(string tenantId, string resource, string id, int version, Func<CancellationToken, Task<T>> factory,
+            TimeSpan? ttl = null, string cacheInstance = "default", CancellationToken ct = default) =>
+            inner.GetOrCreateAsync(tenantId, resource, id, version, factory, ttl, cacheInstance, ct);
+    }
+
+    [Fact]
+    public async Task K2_ACancellationWhileTheMarkerIsWritten_LeavesNoMarker_SoTheSameReviewIsNotBlocked()
+    {
+        var rig = new Rig();
+        using var cts = new CancellationTokenSource();
+        rig.LedgerStore = new CancelDuringMarkerLedger(rig.Ledger, cts);
+        var review = PathBReview();
+
+        try
+        {
+            await rig.CommitAsync(review, ct: cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Either outcome is fine for the cancelled attempt; what matters is the repeat below.
+        }
+
+        var again = await rig.CommitAsync(review);
+        again.Status.Should().NotBe(DecisionCommitStatus.InProgress, "the marker was released or replaced by the outcome, not held for its 10 minutes");
+        again.Status.Should().Be(DecisionCommitStatus.Recorded);
     }
 
     [Theory]

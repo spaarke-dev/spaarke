@@ -548,7 +548,9 @@ public sealed class DecisionCommitService
 
         // Mark the review in progress BEFORE any read that could take time, so a double-click meets the marker. A resume keeps
         // the failure it resumes inside the marker: if this attempt ends without a write outcome, that failure is put back.
-        var marked = await TrySetLedgerAsync(tenantId, ledgerKey, new LedgerEntry(true, reviewStart, hash, resume), InProgressTtl, ct).ConfigureAwait(false);
+        // Written uncancellable: a cancellation during the write must not leave a marker the try below never releases (it
+        // would block this review for InProgressTtl). A cancellation is seen inside the try, which frees the marker.
+        var marked = await TrySetLedgerAsync(tenantId, ledgerKey, new LedgerEntry(true, reviewStart, hash, resume), InProgressTtl, CancellationToken.None).ConfigureAwait(false);
         if (!marked)
             return Unavailable(review.ReviewId);
 
