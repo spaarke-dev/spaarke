@@ -463,8 +463,9 @@ public class SpeAdminTenantScope
     /// </para>
     /// <para>
     /// The binding is read from the container itself with the config's own client (<see cref="SpeContainerBusinessUnitStamp"/>
-    /// explains why a list read cannot carry it). <paramref name="deleted"/> reads it from the recycle bin
-    /// (<c>/deletedContainers/{id}</c>) for the routes that act on a soft-deleted container.
+    /// explains why a list read cannot carry it). For <paramref name="deleted"/> — the routes that act on a soft-deleted
+    /// container — Graph keeps no stamp, so the binding is this stamp's ownership record of the container, admitted only
+    /// while Graph lists it as deleted (<see cref="SpeAdminGraphService.GetDeletedContainerBindingsForConfigAsync"/>, #1652).
     /// </para>
     /// </remarks>
     public async Task<SpeAdminScopeDecision> DecideContainerAccessAsync(
@@ -586,7 +587,9 @@ public class SpeAdminTenantScope
     /// <summary>
     /// The containers in <paramref name="containerIds"/> the caller may see through <paramref name="config"/> — the
     /// list trim for <c>GET /containers</c>, <c>GET /recyclebin</c> and the two search routes. Each container's binding
-    /// is read (bounded concurrency); a container Graph no longer finds is simply not returned.
+    /// is read (bounded concurrency); a container Graph no longer finds is simply not returned. For
+    /// <paramref name="deleted"/> containers the binding is the BFF's ownership record, read for all ids at once
+    /// (<see cref="SpeAdminGraphService.GetDeletedContainerBindingsForConfigAsync"/>, #1652).
     /// </summary>
     /// <exception cref="Exception">THROWS when any binding read faults — the caller refuses (503), never shows an
     /// unverified container and never silently drops one it could not judge.</exception>
@@ -607,21 +610,31 @@ public class SpeAdminTenantScope
             return reachable;
         }
 
-        using var gate = new SemaphoreSlim(BindingReadConcurrency);
-        var reads = ids.Select(async id =>
+        IEnumerable<(string Id, SpeContainerBindingRead? Read)> results;
+        if (deleted)
         {
-            await gate.WaitAsync(ct).ConfigureAwait(false);
-            try
+            var deletedReads = await _graphService.GetDeletedContainerBindingsForConfigAsync(config, ids, ct).ConfigureAwait(false);
+            results = ids.Select(id => (id, deletedReads.GetValueOrDefault(id)));
+        }
+        else
+        {
+            using var gate = new SemaphoreSlim(BindingReadConcurrency);
+            var reads = ids.Select(async id =>
             {
-                return (Id: id, Read: await _graphService.GetContainerBindingForConfigAsync(config, id, deleted, ct).ConfigureAwait(false));
-            }
-            finally
-            {
-                gate.Release();
-            }
-        }).ToList();
+                await gate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    return (Id: id, Read: await _graphService.GetContainerBindingForConfigAsync(config, id, deleted: false, ct).ConfigureAwait(false));
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            }).ToList();
+            results = await Task.WhenAll(reads).ConfigureAwait(false);
+        }
 
-        foreach (var (id, read) in await Task.WhenAll(reads).ConfigureAwait(false))
+        foreach (var (id, read) in results)
         {
             var refusal = ClassifyContainer(scope, config.ContainerTypeId, read);
             if (refusal == SpeContainerRefusal.None)

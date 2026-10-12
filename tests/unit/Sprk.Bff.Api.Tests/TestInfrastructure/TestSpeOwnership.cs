@@ -21,6 +21,12 @@ namespace Sprk.Bff.Api.Tests.TestInfrastructure;
 /// </remarks>
 public static class TestSpeOwnership
 {
+    /// <summary>
+    /// The customer id of the <see cref="AllowAll"/> guard — what a deleted container's ownership record must name to be
+    /// this stamp's (#1652: Graph keeps no marker on a deleted container, so not even AllowAll can admit one without it).
+    /// </summary>
+    public const string AllowAllCustomer = "test";
+
     /// <summary>A guard that owns every container and hands out clients from <paramref name="factory"/>.</summary>
     public static SpeContainerOwnershipGuard AllowAll(IGraphClientFactory factory)
         => new AllowAllGuard(factory);
@@ -47,12 +53,9 @@ public static class TestSpeOwnership
             NullLogger<CustomerIdentity>.Instance);
 
     private sealed class AllowAllGuard(IGraphClientFactory factory)
-        : SpeContainerOwnershipGuard(factory, Array.Empty<string?>(), Customer("test"), NullLogger<SpeContainerOwnershipGuard>.Instance)
+        : SpeContainerOwnershipGuard(factory, Array.Empty<string?>(), Customer(AllowAllCustomer), NullLogger<SpeContainerOwnershipGuard>.Instance)
     {
         public override Task<bool> IsOwnedAsync(string containerOrDriveId, CancellationToken ct = default)
-            => Task.FromResult(true);
-
-        public override Task<bool> IsDeletedContainerOwnedAsync(string containerId, CancellationToken ct = default)
             => Task.FromResult(true);
     }
 }
