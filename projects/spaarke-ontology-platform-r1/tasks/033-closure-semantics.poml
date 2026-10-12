@@ -4,7 +4,7 @@
     <title>Closure semantics including aged-out-of-window</title>
     <phase>3 Evaluator and Signal lifecycle</phase>
     <gate>031 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Decides when a Signal stops existing; errors here either rot the worklist or close live work.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -100,6 +100,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-16 (amended 2026-10-07: D-13, D-14, Retire), FR-03 (episodes). design.md section 8.3 closing note covers the aged-out mapping. Reconciliation B.2 row 033; #15, #40. D-32 (Off then On re-raise).</notes>
+
+  <completion>COMPLETED 2026-10-11: PR #1653 (head 844e28d4c) merged into docs/ontology-platform-design as 7f22d0921 after independent review, fix round and re-check. Closure semantics on 031's job: aged-out to ConditionCleared, version supersede in-pass (Superseded + new episode citing the new version), Off/Retired to PolicyRetired; system closures never write a Decision Record or count as dismissals. Callables for 100 (SignalClosureService.ClosePolicyRetiredNowAsync, IsComplete) and 101 (SignalReevaluationJob.ReevaluatePolicyAsync); a current version with sprk_inforceto &lt;= now fails the policy (EventId 50309). Hand-offs recorded in the 100/101 POMLs.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
