@@ -7,11 +7,18 @@ get-project-cost.py and applies the same cost rules (dedup on
 (message.id, requestId), skip <synthetic>, cache-write 5m=1.25x / 1h=2x input,
 speed=="fast" = 2x).
 
-Days are UTC (the transcript timestamp date), same as get-project-cost.py.
+Days are calendar days in --tz (default: the machine's local timezone, DST-aware;
+--tz utc buckets by the UTC date of the transcript timestamp). Every output states the tz.
 
 Usage:
-  python spend-report.py [--days N | --since YYYY-MM-DD] [--project SUBSTR ...]
-                         [--format text|json|csv|html] [--out PATH] [--open]
+  python spend-report.py [--days N | --since YYYY-MM-DD | --today] [--tz local|utc]
+                         [--project SUBSTR ...] [--format text|json|csv|html]
+                         [--out PATH] [--open] [--archive [PATH]] [--source transcripts|archive]
+
+Durable archive: transcripts are deleted by Claude Code after a retention period, so
+`--archive [PATH]` upserts this run's days into a CSV (default
+%USERPROFILE%\\.claude\\spend-archive\\spend-daily.csv) and never lets a day's total go down.
+`--source archive` reports from that file instead of the transcripts.
 """
 import argparse, csv, glob, importlib.util, io, json, os, sys, tempfile, time
 from collections import defaultdict
@@ -46,13 +53,77 @@ def new_row():
     return dict.fromkeys(FIELDS, 0)
 
 
-def collect(since_day):
-    """Single pass. Returns (rows keyed (day, project, model, kind), stats)."""
+# A transcript file's mtime is its LAST write, so a file whose mtime is before the start of the
+# first requested day cannot hold calls from that day. The start of the day is measured in the
+# bucketing tz (local midnight can be hours before UTC midnight), and the cutoff is moved back by
+# MTIME_SLACK_S to absorb DST shifts and clock skew. Reading a few extra files is cheap; dropping
+# one that holds requested calls is not.
+MTIME_SLACK_S = 86400
+
+
+# --- timezone handling --------------------------------------------------------------------
+# `tz` is a tzinfo, or None for the machine's local zone (resolved by the system, DST-aware).
+
+def resolve_tz(name):
+    return timezone.utc if name == "utc" else None
+
+
+def in_tz(dt, tz):
+    return dt.astimezone(tz) if tz is not None else dt.astimezone()
+
+
+def day_of(ts, tz):
+    """Calendar day (YYYY-MM-DD) of an ISO-8601 transcript timestamp, in tz."""
+    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return in_tz(dt, tz).date().isoformat()
+
+
+def today_in(tz, now=None):
+    return in_tz(now or datetime.now(timezone.utc), tz).date()
+
+
+def tz_label(name, now=None):
+    """Human-readable description of the day boundaries, for headers."""
+    if name == "utc":
+        return "UTC"
+    n = in_tz(now or datetime.now(timezone.utc), None)
+    z = n.strftime("%z")
+    off = f"UTC{z[:3]}:{z[3:5]}" if z else "UTC"
+    return f"local time ({n.tzname()}, {off})"
+
+
+def day_start_epoch(day, tz):
+    """Epoch seconds of 00:00 on `day` (YYYY-MM-DD) in tz."""
+    naive = datetime.strptime(day, "%Y-%m-%d")
+    aware = naive.replace(tzinfo=tz) if tz is not None else naive.astimezone()
+    return aware.timestamp()
+
+
+def mtime_cutoff(since_day, tz):
+    return day_start_epoch(since_day, tz) - MTIME_SLACK_S
+
+
+def resolve_window(days, since, today, tz, now=None):
+    """(since_day, until_day) as YYYY-MM-DD strings, both in tz."""
+    t = today_in(tz, now)
+    if today:
+        return t.isoformat(), t.isoformat()
+    if since:
+        return since, t.isoformat()
+    return (t - timedelta(days=(14 if days is None else days) - 1)).isoformat(), t.isoformat()
+
+
+def collect(since_day, tz=None, root=None):
+    """Single pass. Returns (rows keyed (day, project, model, kind), stats).
+
+    Days are calendar days in tz (None = machine local zone)."""
     rows = defaultdict(new_row)
     seen = set()
-    cutoff = datetime.strptime(since_day, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()
+    cutoff = mtime_cutoff(since_day, tz)
     nfiles = 0
-    root = gpc.CLAUDE_PROJECTS
+    root = root or gpc.CLAUDE_PROJECTS
     for f in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
         try:
             if os.path.getmtime(f) < cutoff:
@@ -83,7 +154,10 @@ def collect(since_day):
                 if k[0] and k in seen:
                     continue
                 seen.add(k)
-                day = ts[:10]
+                try:
+                    day = day_of(ts, tz)
+                except (ValueError, OverflowError, OSError):
+                    continue
                 if day < since_day:
                     continue
                 model = m.get("model", "") or "unknown"
@@ -119,13 +193,14 @@ def total_cost(r):
     return r["cost_cache_read"] + r["cost_cache_write"] + r["cost_input"] + r["cost_output"]
 
 
-def flat(rows, projects):
+def flat(rows, projects, tz_name="local"):
     out = []
     for (day, proj, model, kind), r in sorted(rows.items()):
         if projects and not any(p.lower() in proj.lower() for p in projects):
             continue
         d = {"day": day, "project": proj, "model": model, "kind": kind}
         d.update({k: (round(v, 6) if isinstance(v, float) else v) for k, v in r.items()})
+        d["tz"] = tz_name
         out.append(d)
     return out
 
@@ -139,11 +214,11 @@ def agg(rows, key):
     return g
 
 
-def text_report(rows, since, until):
+def text_report(rows, since, until, tzl="UTC"):
     L = []
     tot = agg(rows, lambda r: "all")["all"]
     T = total_cost(tot) or 1e-9
-    L.append(f"AI spend (est., list price) {since}..{until} UTC  total ${total_cost(tot):,.0f}  calls {tot['calls']:,}")
+    L.append(f"AI spend (est., list price) {since}..{until}, days in {tzl}  total ${total_cost(tot):,.0f}  calls {tot['calls']:,}")
     L.append("")
     L.append(f"{'day':<11}{'calls':>7}{'sub%':>6}{'avg ctx':>9}{'>200k%':>8}{'est $':>9}{'cacheRd$':>9}{'cacheWr$':>9}{'out$':>7}")
     byday = agg(rows, lambda r: r["day"])
@@ -183,9 +258,13 @@ def text_report(rows, since, until):
     return "\n".join(L) + "\n"
 
 
+# `tz` is last so the positions of the pre-existing columns do not move.
+CSV_COLUMNS = ["day", "project", "model", "kind"] + FIELDS + ["tz"]
+
+
 def csv_report(flatrows):
     buf = io.StringIO()
-    w = csv.DictWriter(buf, fieldnames=["day", "project", "model", "kind"] + FIELDS)
+    w = csv.DictWriter(buf, fieldnames=CSV_COLUMNS)
     w.writeheader()
     for r in flatrows:
         w.writerow(r)
@@ -244,7 +323,7 @@ const col=i=>cs('--c'+((i%9)+1));
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
 const cost=r=>r.cost_cache_read+r.cost_cache_write+r.cost_input+r.cost_output;
 const usd=v=>'$'+Math.round(v).toLocaleString();
-$('range').textContent=D.since+' to '+D.until+' (UTC days)';
+$('range').textContent=D.since+' to '+D.until+' (days in '+D.tz_label+')';
 $('gen').textContent=' Generated '+D.generated+'.';
 const projs=[...new Set(R.map(r=>r.project))].sort();
 $('proj').innerHTML='<option value="">All projects</option>'+projs.map(p=>'<option>'+esc(p)+'</option>').join('');
@@ -289,49 +368,244 @@ render();
 """
 
 
-def html_report(flatrows, since, until):
-    data = {"since": since, "until": until,
+def html_report(flatrows, since, until, tz_name="local", tzl="UTC"):
+    data = {"since": since, "until": until, "tz": tz_name, "tz_label": tzl,
             "generated": datetime.now().strftime("%Y-%m-%d %H:%M"), "rows": flatrows}
     blob = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     return HTML.replace("__DATA__", blob)
 
 
+# --- durable archive ----------------------------------------------------------------------
+# Claude Code deletes old transcripts, so the per-day rows are also kept in a CSV outside the repo
+# (it holds project names and costs). Same columns as `--format csv`, so one file feeds a dashboard.
+
+DEFAULT_ARCHIVE = os.path.join(os.path.expanduser("~"), ".claude", "spend-archive", "spend-daily.csv")
+INT_FIELDS = ["calls", "input", "output", "cache_read", "cache_write", "ctx", "big"]
+COST_FIELDS = ["cost_cache_read", "cost_cache_write", "cost_input", "cost_output"]
+COST_EPS = 1e-6      # float noise only; a real deletion drops a day by far more
+
+
+class ArchiveError(Exception):
+    pass
+
+
+def flat_cost(r):
+    return sum(r[k] for k in COST_FIELDS)
+
+
+def row_key(r):
+    return (r["day"], r["project"], r["model"], r["kind"])
+
+
+def sort_flat(rows):
+    return sorted(rows, key=row_key)       # day, then project (then model, kind)
+
+
+def day_range(since, until):
+    d, end, out = datetime.strptime(since, "%Y-%m-%d"), datetime.strptime(until, "%Y-%m-%d"), []
+    while d <= end:
+        out.append(d.strftime("%Y-%m-%d"))
+        d += timedelta(days=1)
+    return out
+
+
+def read_archive(path):
+    """Archived rows as flat dicts ([] if the file does not exist). Raises ArchiveError if malformed."""
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8", newline="") as fh:
+        rd = csv.DictReader(fh)
+        missing = [c for c in CSV_COLUMNS if c not in (rd.fieldnames or [])]
+        if missing:
+            raise ArchiveError(f"{path} is not a spend archive (missing columns: {', '.join(missing)})")
+        rows = []
+        for n, rec in enumerate(rd, start=2):
+            try:
+                r = {k: rec[k] for k in ("day", "project", "model", "kind", "tz")}
+                r.update({k: int(rec[k]) for k in INT_FIELDS})
+                r.update({k: float(rec[k]) for k in COST_FIELDS})
+            except (TypeError, ValueError) as ex:
+                raise ArchiveError(f"{path} line {n}: {ex}")
+            rows.append(r)
+    return rows
+
+
+def check_archive_tz(rows, tz_name, path):
+    """Refuse to mix day boundaries: every archived row must use the run's tz."""
+    found = sorted({r["tz"] for r in rows} - {tz_name})
+    if found:
+        raise ArchiveError(
+            f"{path} holds days bucketed in tz '{', '.join(found)}' but this run uses '{tz_name}'. "
+            f"Mixing bucket boundaries would double-count or drop calls; re-run with --tz {found[0]} "
+            f"or point --archive at a different file.")
+
+
+def merge_archive(archived, fresh, covered_days):
+    """Upsert fresh rows into archived rows, keyed (day, project, model, kind).
+
+    Never-shrink is judged per (day, project): within each covered day, the archived rows of a project
+    stay when the fresh rows of that project (absent = none) cost less than the archived ones, or carry
+    fewer calls (a model with no price archives $0 with N calls). Otherwise the fresh rows replace them.
+    Another project growing the same day does not cover for one whose transcripts vanished. Days outside
+    `covered_days` are untouched. Returns (rows sorted by day then project, kept) where kept lists
+    (day, project, fresh_cost, archived_cost) for every (day, project) whose archived rows were kept."""
+    old_g, new_g = defaultdict(list), defaultdict(list)
+    for r in archived:
+        old_g[(r["day"], r["project"])].append(r)
+    for r in fresh:
+        new_g[(r["day"], r["project"])].append(r)
+    covered = set(covered_days) | {d for d, _ in new_g}
+    merged, kept = [], []
+    for key in set(old_g) | set(new_g):
+        old, new = old_g.get(key, []), new_g.get(key, [])
+        if key[0] not in covered:
+            merged.extend(old)
+            continue
+        old_c, new_c = sum(map(flat_cost, old)), sum(map(flat_cost, new))
+        old_n, new_n = sum(r["calls"] for r in old), sum(r["calls"] for r in new)
+        if old and (new_c < old_c - COST_EPS or new_n < old_n):
+            merged.extend(old)
+            kept.append((key[0], key[1], new_c, old_c))
+        else:
+            merged.extend(new)
+    return sort_flat(merged), sorted(kept)
+
+
+def write_archive(path, rows):
+    """Write atomically (temp file in the same folder, then replace); creates the folder."""
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".spend-archive.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+            fh.write(csv_report(rows))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+def filter_flat(flatrows, projects):
+    if not projects:
+        return list(flatrows)
+    return [r for r in flatrows if any(p.lower() in r["project"].lower() for p in projects)]
+
+
+def fail(msg):
+    print(f"spend-report: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--days", type=int, default=14)
-    ap.add_argument("--since")
+    ap.add_argument("--days", type=int, help="last N calendar days incl. today (default 14)")
+    ap.add_argument("--since", help="first day, YYYY-MM-DD")
+    ap.add_argument("--today", action="store_true",
+                    help="the current calendar day only, 00:00 to now (in --tz); not with --days/--since")
+    ap.add_argument("--tz", choices=["local", "utc"],
+                    help="timezone whose calendar days are used for bucketing (default: local; "
+                         "with --source archive, the archive's own tz)")
     ap.add_argument("--project", action="append", default=[])
     ap.add_argument("--format", choices=["text", "json", "csv", "html"], default="text")
     ap.add_argument("--out")
     ap.add_argument("--open", action="store_true")
+    ap.add_argument("--archive", nargs="?", const=DEFAULT_ARCHIVE, metavar="PATH",
+                    help="upsert this run's days into a durable CSV archive (default path "
+                         f"{DEFAULT_ARCHIVE.replace('%', '%%')}); a (day, project) is never replaced by a lower total. "
+                         "With --source archive, selects the file to read instead")
+    ap.add_argument("--source", choices=["transcripts", "archive"], default="transcripts",
+                    help="where rows come from: the local transcripts (default) or the archive, "
+                         "which also covers days whose transcripts were deleted")
     a = ap.parse_args()
-    today = datetime.now(timezone.utc).date()
-    since = a.since or (today - timedelta(days=a.days - 1)).isoformat()
-    until = today.isoformat()
+    if a.today and (a.days is not None or a.since):
+        ap.error("--today cannot be combined with --days or --since")
+    if a.since:
+        try:
+            datetime.strptime(a.since, "%Y-%m-%d")
+        except ValueError:
+            ap.error("--since must be YYYY-MM-DD")
     t0 = time.time()
-    rows, st = collect(since)
-    fr = flat(rows, a.project)
+    archive_failed = False
+    archive_path = a.archive or DEFAULT_ARCHIVE
+    tz_name = a.tz or "local"
+    note = ""
+
+    if a.source == "archive":
+        if not os.path.exists(archive_path):
+            fail(f"no archive at {archive_path} (create it with --archive)")
+        try:
+            arows = read_archive(archive_path)
+            if not a.tz and arows:
+                tz_name = arows[0]["tz"]
+            check_archive_tz(arows, tz_name, archive_path)
+        except ArchiveError as ex:
+            fail(str(ex))
+        tz = resolve_tz(tz_name)
+        if a.days is None and not a.since and not a.today:      # whole history
+            days_present = sorted({r["day"] for r in arows})
+            since = days_present[0] if days_present else today_in(tz).isoformat()
+            until = days_present[-1] if days_present else since
+        else:
+            since, until = resolve_window(a.days, a.since, a.today, tz)
+        fr = filter_flat([r for r in arows if since <= r["day"] <= until], a.project)
+        note = f"archive {archive_path}"
+    else:
+        tz = resolve_tz(tz_name)
+        since, until = resolve_window(a.days, a.since, a.today, tz)
+        arows = []
+        if a.archive:                       # fail before the (slow) scan if the archive is unusable
+            try:
+                arows = read_archive(archive_path)
+                check_archive_tz(arows, tz_name, archive_path)
+            except ArchiveError as ex:
+                fail(str(ex))
+        rows, st = collect(since, tz)
+        full = flat(rows, [], tz_name)      # the archive always gets every project, whatever --project says
+        fr = filter_flat(full, a.project)
+        note = f"{st['files']} files"
+        if a.archive:
+            merged, kept = merge_archive(arows, full, day_range(since, until))
+            try:
+                write_archive(archive_path, merged)
+            except OSError as ex:           # the report is still worth printing; the exit code says it failed
+                print(f"spend-report: archive not written: {ex}", file=sys.stderr)
+                archive_failed = True
+            for day, project, new_t, old_t in kept:
+                print(f"WARN archive: {day} {project}: fresh ${new_t:,.2f} < archived ${old_t:,.2f}; kept the "
+                      f"archived rows (transcripts were probably deleted)", file=sys.stderr)
+            if not archive_failed:
+                print(f"archive {archive_path}: {len(merged)} rows, {len(day_range(since, until))} days scanned, "
+                      f"{len(kept)} (day, project) groups kept at the archived total", file=sys.stderr)
+
+    tzl = tz_label(tz_name)
     if a.format == "text":
-        out = text_report(fr, since, until)
+        out = text_report(fr, since, until, tzl)
     elif a.format == "json":
-        out = json.dumps({"since": since, "until": until, "rows": fr}, indent=1)
+        out = json.dumps({"tz": tz_name, "tz_label": tzl, "source": a.source,
+                          "since": since, "until": until, "rows": fr}, indent=1)
     elif a.format == "csv":
         out = csv_report(fr)
     else:
-        out = html_report(fr, since, until)
+        out = html_report(fr, since, until, tz_name, tzl)
         if not a.out:
             a.out = os.path.join(tempfile.gettempdir(), "spaarke-ai-spend.html")
     if a.out:
         with open(a.out, "w", encoding="utf-8", newline="") as fh:
             fh.write(out)
-        print(f"wrote {a.out} ({len(fr)} rows, {st['files']} files, {time.time()-t0:.1f}s)", file=sys.stderr)
+        print(f"wrote {a.out} ({len(fr)} rows, {note}, {time.time()-t0:.1f}s)", file=sys.stderr)
         if a.format == "html" and a.open:
             import webbrowser
             webbrowser.open("file:///" + os.path.abspath(a.out).replace("\\", "/"))
     else:
-        sys.stdout.reconfigure(encoding="utf-8")
+        # newline="": no "\n" -> "\r\n" translation, so csv (already CRLF) is not doubled to "\r\r\n"
+        # on Windows and stdout matches what --out writes.
+        sys.stdout.reconfigure(encoding="utf-8", newline="")
         sys.stdout.write(out)
-        print(f"({st['files']} files, {time.time()-t0:.1f}s)", file=sys.stderr)
+        print(f"({note}, {time.time()-t0:.1f}s)", file=sys.stderr)
+    if archive_failed:
+        sys.exit(2)
 
 
 if __name__ == "__main__":
