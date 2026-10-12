@@ -32,7 +32,7 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 
 - **MUST NOT** add `accessToken: string` or `token: string` props/fields anywhere in client code (except where required by third-party SDK contracts — Power BI `IReportEmbedConfiguration`, MSAL.js result objects — these are NOT Spaarke BFF tokens)
 - **MUST NOT** use `useState`/`useEffect` to snapshot a token (root cause of the 401-after-refresh bug v2 fixes)
-- **MUST NOT** write raw `fetch(url, { headers: { Authorization: \`Bearer ${...}\` } })` template literals — use `authenticatedFetch`. Limited D-AUTH-7 exceptions: SSE (EventSource ReadableStream), XHR uploads, Dataverse Web API direct calls (BFF-scoped wrapper would route wrong host), External SPA out-of-scope. Each carries `// Auth v2 (D-AUTH-7):` justification comment.
+- **MUST NOT** write raw `fetch(url, { headers: { Authorization: \`Bearer ${...}\` } })` template literals — use `authenticatedFetch`. Limited D-AUTH-7 exceptions: SSE (EventSource ReadableStream), XHR uploads, Dataverse Web API direct calls (BFF-scoped wrapper would route wrong host), External SPA out-of-scope, and the classic form-script helper `Spaarke.BffAuth.authenticatedFetch` (`sprk_/scripts/bff_auth.js`, built from `@spaarke/auth`; **Amendment A7** — only with its BFF-origin check). Each carries `// Auth v2 (D-AUTH-7):` justification comment.
 - **MUST NOT** instantiate `PublicClientApplication` directly outside `@spaarke/auth` (internal **Xrm** surfaces). The **collaboration hosts are exempted** — the external SPA and the Teams tab share **one standalone-MSAL module** (direct `PublicClientApplication` + per-tab `sessionStorage` isolation) with a **pluggable authority**: **Entra External ID (CIAM)** for the external SPA (**Amendment A1**) and **workforce Entra (multitenant, Teams SSO/NAA)** for the Teams tab (**Amendment A2**). Neither uses workforce B2B guests. All A1 isolation invariants are preserved for both hosts.
 - **MUST NOT** reference removed symbols: `BridgeStrategy`, `XrmStrategy`, `window.__SPAARKE_BFF_TOKEN__`, `tokenBridge.ts`, `publishToken`, `bffAuthProvider` (deleted in v2)
 - **MUST NOT** add `/debug/*` endpoints on the BFF (all removed in v2)
@@ -437,6 +437,50 @@ dedicated deployment per customer (D-12), so it can start without keys instead o
 > **Note (A6)**: Applied **concise-only** (no full `docs/adr/ADR-028-*.md` exists). This concise ADR now carries
 > Amendments **A1–A6**. A6 changes resource configuration and provisioning only — no client surface, IdP or token
 > exchange changes.
+
+## Amendment A7 (2026-10-11): Classic form scripts consume `@spaarke/auth` through `Spaarke.BffAuth`
+
+> **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5). **Decision**: owner, 2026-10-11
+> (`unified-access-control-r2`). **Driver**: #1655 (PR #1657) and #1656.
+
+### Why this amendment exists
+
+Classic Dataverse form scripts and ribbon commands (the access-status banner, the Access and secure-child ribbons,
+the post-save scripts, the parent rollup and the KPI scripts) cannot import an npm package. They used a hand-written
+MSAL copy, `sprk_/scripts/bff_auth.js`, which repeated two defects the library had fixed: a display-name login hint
+(AADSTS50058 for every user without a cached sign-in) and `accounts[0]` account selection (a script could call the
+BFF as **another user** whose account was cached in the same browser profile). #1657 rebuilds `bff_auth.js` from
+`@spaarke/auth`, so there is one sign-in implementation and one MSAL cache for PCFs, code pages and form scripts.
+
+These callers read the status and body of non-OK BFF responses (403 messages in the ribbon, 404 vs 503 in the
+banner). The library's `authenticatedFetch` throws on non-OK, so the helper keeps the `ResponseFetchFn` shape: it
+takes the token from the library and attaches the `Bearer` header itself. That is the one D-AUTH-7 site this
+amendment adds.
+
+### New MUST rules (classic form scripts and ribbon commands)
+
+- **MUST** call the BFF only through `Spaarke.BffAuth.getToken` / `Spaarke.BffAuth.authenticatedFetch` from
+  `sprk_/scripts/bff_auth.js`, registered on the form or ribbon. **MUST NOT** inline MSAL or load it from a CDN in a
+  web resource (#1655).
+- **MUST** build `bff_auth.js` from `@spaarke/auth` (`npm run build:webresource`); it counts as an INV-8 consumer and
+  is rebuilt and redeployed when the library changes. `check:webresource` keeps the committed bundle in step.
+- **MUST** keep the helper silent only (`requireSilentOnly`: never a popup or redirect), with a tenant-specific
+  authority and the library's account selection. A null token means the caller skips the call.
+- **MUST** refuse to attach the token to any URL whose origin is not the resolved BFF base URL's origin (return
+  `null`, no request). The D-AUTH-7 listing holds only with this check.
+- **MUST** use a cached MSAL account, and accept a token, only when it belongs to the signed-in Dataverse user
+  (Entra object id matched against `systemuser.azureactivedirectoryobjectid`); when that cannot be established, fall
+  closed to `ssoSilent` with no hint (#1656). This rule lives in the library, so it binds every consumer.
+
+### Scope
+
+- **Classic form scripts and ribbon commands only.** PCFs and code pages keep the throwing `authenticatedFetch`
+  (`AuthenticatedFetchFn`); a new `Response`-returning helper elsewhere is not covered by A7.
+- Other web resources that still load MSAL 2.x from the CDN (`sprk_DocumentOperations.js`, `sprk_emailactions.js`,
+  `sprk_aichatcontextmap_ribbon.js`) are pre-A7 debt; they move to `Spaarke.BffAuth` when next changed.
+
+> **Note (A7)**: Applied **concise-only** (no full `docs/adr/ADR-028-*.md` exists). This concise ADR now carries
+> Amendments **A1–A7**.
 
 ## Documented MI exceptions
 

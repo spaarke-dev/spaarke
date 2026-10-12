@@ -10,7 +10,4 @@ src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_emailactions.js | infras
 src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_event_ribbon_commands.js | src/solutions/EventCommands/sprk_event_ribbon_commands.js
 src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_event_sidepane_form.js | src/client/webresources/js/sprk_event_sidepane_form.js
 src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_kpi_ribbon_actions.js | src/solutions/webresources/sprk_kpi_ribbon_actions.js
-src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_kpi_subgrid_refresh.js | src/solutions/webresources/sprk_kpi_subgrid_refresh.js
-src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_kpiassessment_quickcreate.js | src/solutions/webresources/sprk_kpiassessment_quickcreate.js
-src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_matter_kpi_refresh.js | src/solutions/webresources/sprk_matter_kpi_refresh.js
 src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_playbook_commands.js | src/client/webresources/js/sprk_playbook_commands.js
