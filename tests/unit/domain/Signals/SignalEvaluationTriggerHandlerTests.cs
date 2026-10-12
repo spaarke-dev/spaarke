@@ -90,6 +90,42 @@ public partial class SignalReevaluationJobTests
     }
 
     // =====================================================================================
+    // Task 025b (D-122): the budget-revision trigger evaluates a Threshold with FRESH values
+    // =====================================================================================
+
+    [Fact]
+    public async Task BudgetRevisionTrigger_ThresholdPolicy_RaisedBudget_ClosesTheOpenSignal_EvenThoughTheStoredUtilizationStillSaysOver()
+    {
+        var h = new Harness().WithThresholdPolicy().WithMatterUtilization(MatterId, 95m, "MAT-REVISED");
+        h.Sysadmin.SubjectRows["sprk_matter"].Single()["sprk_budgetutilizationpercent"] = 95m;   // nothing refreshed the stored copy
+        h.Sysadmin.BudgetRows.Single()["sprk_totalbudget"] = new Money(200000m);                   // the revision: 95000 / 200000 = 47.5
+        var signalId = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId);
+
+        var outcome = await RunTriggerAsync(h, SignalTriggerKind.BudgetRevision, MatterId, RevisionId);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        var update = h.Org.ConditionalUpdates.Should().ContainSingle().Subject;
+        update.Id.Should().Be(signalId);
+        update.Fields["sprk_resolutiontype"].Should().BeEquivalentTo(new OptionSetValue(SignalWriter.ResolutionConditionCleared));
+        h.Sysadmin.AggregateFetches.Should().HaveCount(2).And.OnlyContain(f => f.Contains(MatterId.ToString("D")) && !f.Contains(OtherMatterId.ToString("D")),
+            "the trigger reads the base rows of the ONE matter");
+    }
+
+    [Fact]
+    public async Task BudgetRevisionTrigger_ThresholdPolicy_LoweredBudget_RaisesTheSignal_WithTheComputedValue_EvenThoughTheStoredUtilizationStillSaysUnder()
+    {
+        var h = new Harness().WithThresholdPolicy().WithMatterUtilization(MatterId, 50m, "MAT-REVISED");
+        h.Sysadmin.SubjectRows["sprk_matter"].Single()["sprk_budgetutilizationpercent"] = 50m;
+        h.Sysadmin.BudgetRows.Single()["sprk_totalbudget"] = new Money(50000m);                    // 50000 / 50000 = 100
+
+        var outcome = await RunTriggerAsync(h, SignalTriggerKind.BudgetRevision, MatterId, RevisionId);
+
+        outcome.Status.Should().Be(JobStatus.Completed);
+        h.Org.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_sentence")
+            .Should().Be("Budget utilization has reached 100 percent.");
+    }
+
+    // =====================================================================================
     // AC6: a Signal a decision already closed as Acted stays Acted
     // =====================================================================================
 

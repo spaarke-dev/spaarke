@@ -234,6 +234,11 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
             attribute.Should().Match<AttributeMetadata>(a =>
                 a is DecimalAttributeMetadata || a is MoneyAttributeMetadata || a is DoubleAttributeMetadata || a is IntegerAttributeMetadata,
                 $"{entity}.{column} must be a numeric column");
+
+            // Task 025b (D-122): the evaluator derives these from the invoice and budget rows BECAUSE they are plain stored columns
+            // (SourceType 0) that only FinanceRollupService writes. If one becomes a rollup or calculated column, Dataverse keeps it
+            // current and the derivation (FinanceBaseValues) must be revisited, so this fails to make that a decision, not an accident.
+            (attribute.SourceType ?? 0).Should().Be(0, $"{entity}.{column} is a plain stored column (not calculated, not rollup)");
         }
     }
 

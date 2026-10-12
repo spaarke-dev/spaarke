@@ -59,6 +59,7 @@ public sealed class RuleBodyDescriber
     private static readonly IReadOnlyDictionary<string, string> EntityLabels = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["sprk_matter"] = "matter",
+        ["sprk_project"] = "project",
         ["sprk_event"] = "event",
         ["sprk_todo"] = "To Do",
         ["sprk_workassignment"] = "work assignment",
@@ -77,7 +78,9 @@ public sealed class RuleBodyDescriber
         ["sprk_eventtype_ref"] = "event type",
         ["statuscode"] = "status",
         ["statecode"] = "state",
-        ["sprk_budgetutilizationpercent"] = "budget utilization percent",
+        // A PERCENT (task 025b, D-122): 85 means 85 percent of the budget spent, 100 means fully spent. Said in the label so a
+        // reader of "is at least 85" cannot take it for a fraction or an amount.
+        ["sprk_budgetutilizationpercent"] = "budget utilization (percent of budget spent)",
         ["sprk_totalbudget"] = "total budget",
         ["sprk_totalspendtodate"] = "total spend to date",
     };

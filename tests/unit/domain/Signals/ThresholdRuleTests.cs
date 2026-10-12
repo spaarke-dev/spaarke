@@ -91,15 +91,56 @@ public class ThresholdRuleTests
     }
 
     [Theory]
-    [InlineData("sprk_budgetutilizationpercent")]
-    [InlineData("sprk_totalbudget")]
-    [InlineData("sprk_totalspendtodate")]
-    public void EveryVerifiedColumn_Compiles(string field)
+    [InlineData("sprk_matter", "sprk_budgetutilizationpercent")]
+    [InlineData("sprk_matter", "sprk_totalbudget")]
+    [InlineData("sprk_matter", "sprk_totalspendtodate")]
+    [InlineData("sprk_project", "sprk_budgetutilizationpercent")]
+    [InlineData("sprk_project", "sprk_totalbudget")]
+    [InlineData("sprk_project", "sprk_totalspendtodate")]
+    public void EveryVerifiedColumn_OnMatterAndProject_Compiles_AndIsMarkedForEvaluationFromTheBaseRows(string subject, string field)
     {
-        var compiled = Compiler().Compile(Body(field: field, value: "50000"), null, RuleType.Threshold);
+        var body = Body(field: field, value: "50000").Replace("\"sprk_matter\"", $"\"{subject}\"", StringComparison.Ordinal);
 
+        Validator().ValidateForSave("Threshold", body, null).IsValid.Should().BeTrue();
+        var compiled = Compiler().Compile(body, null, RuleType.Threshold);
+
+        compiled.SubjectEntity.Should().Be(subject);
+        compiled.SubjectIdAttribute.Should().Be(subject + "id");
         Fetch(compiled).Descendants("condition").Single().Attribute("attribute")!.Value.Should().Be(field);
+        compiled.Threshold.Should().Be(new ThresholdComparison(field, "ge", "50000", 50000m, BaseDerived: true));
     }
+
+    [Fact]
+    public void TheThresholdColumns_AreExactlyTheSixDerivedOnes_AndTheTableIsListedForEveryOne() =>
+        PredicateCompiler.ThresholdColumns.Should().BeEquivalentTo(new[]
+        {
+            ("sprk_matter", "sprk_budgetutilizationpercent"), ("sprk_matter", "sprk_totalbudget"), ("sprk_matter", "sprk_totalspendtodate"),
+            ("sprk_project", "sprk_budgetutilizationpercent"), ("sprk_project", "sprk_totalbudget"), ("sprk_project", "sprk_totalspendtodate"),
+        });
+
+    [Fact]
+    public void EveryThresholdColumn_IsOneTheEvaluatorDerivesFromTheBaseRows() =>
+        PredicateCompiler.ThresholdColumns.Should().OnlyContain(c => Sprk.Bff.Api.Services.Finance.FinanceBaseValues.IsDerived(c.Entity, c.Column),
+            "a Threshold column the evaluator reads from the stored row would be judged on a value nothing keeps current (D-122)");
+
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_project")]
+    public void AWhenOnADerivedColumn_InAThresholdBody_IsRefused_BecauseItWouldReadTheStaleStoredCopy(string subject)
+    {
+        var body = Body(extra: ",\"when\":{\"sprk_totalspendtodate\":{\">=\":5000}}").Replace("\"sprk_matter\"", $"\"{subject}\"", StringComparison.Ordinal);
+
+        var result = Validator().ValidateForSave("Threshold", body, null);
+
+        result.IsValid.Should().BeFalse();
+        result.Reason.Should().Be(Sprk.Bff.Api.Telemetry.OntologyWriterFailureReason.CompileRefused);
+        result.Errors.Should().ContainSingle().Which.Should().Contain("when.sprk_totalspendtodate").And.Contain("not kept current");
+    }
+
+    [Fact]
+    public void AnExistenceBody_MayStillScopeOnAStoredColumn_ThisTaskChangesOnlyThresholdBodies() =>
+        Compiler().Invoking(c => c.Compile(
+            """{"type":"Existence","subject":"sprk_matter","when":{"sprk_totalspendtodate":{">=":5000}},"all":[]}""")).Should().NotThrow();
 
     [Theory]
     [InlineData("12.50", "12.50")]
@@ -216,7 +257,6 @@ public class ThresholdRuleTests
     }
 
     [Theory]
-    [InlineData("sprk_project")]   // same column names exist there but were not verified for a threshold
     [InlineData("sprk_event")]
     [InlineData("sprk_servicerequest")]
     public void ASubjectOtherThanTheMatter_IsRefused(string subject)
@@ -390,7 +430,7 @@ public class ThresholdRuleTests
         var line = result.Description!.Clauses.Should().ContainSingle().Subject;
         line.ClauseId.Should().Be("threshold");
         line.Kind.Should().Be("Threshold");
-        line.Text.Should().Be("The matter's budget utilization percent is at least 90.");
+        line.Text.Should().Be("The matter's budget utilization (percent of budget spent) is at least 90.");
         line.Formal.Should().Be("sprk_matter.sprk_budgetutilizationpercent >= 90");
     }
 
@@ -411,7 +451,7 @@ public class ThresholdRuleTests
     {
         // "1e2" reads 100; 32 significant digits read the rounded decimal the compiled query actually compares.
         var exponent = await Describer().DescribeAsync(Body(value: "1e2"), CancellationToken.None);
-        exponent.Description!.Clauses.Single().Text.Should().Be("The matter's budget utilization percent is at least 100.");
+        exponent.Description!.Clauses.Single().Text.Should().Be("The matter's budget utilization (percent of budget spent) is at least 100.");
         exponent.Description.Clauses.Single().Formal.Should().Be("sprk_matter.sprk_budgetutilizationpercent >= 100");
 
         const string longValue = "90.123456789012345678901234567891";
@@ -420,7 +460,7 @@ public class ThresholdRuleTests
         compared.Should().NotBe(longValue, "the compiler rounds to System.Decimal");
 
         var described = await Describer().DescribeAsync(Body(value: longValue), CancellationToken.None);
-        described.Description!.Clauses.Single().Text.Should().Be($"The matter's budget utilization percent is at least {compared}.");
+        described.Description!.Clauses.Single().Text.Should().Be($"The matter's budget utilization (percent of budget spent) is at least {compared}.");
         described.Description.Clauses.Single().Formal.Should().EndWith(">= " + compared);
     }
 
@@ -438,8 +478,28 @@ public class ThresholdRuleTests
         result.IsRefused.Should().BeFalse(result.Refusal);
         result.Description!.Clauses.Single().Text.Should().Contain($"total spend to date {words} 5000").And.NotContain("after").And.NotContain("before");
 
-        var threshold = await Describer().DescribeAsync(Body(extra: ",\"when\":{\"sprk_totalspendtodate\":{\"" + op + "\":5000}}"), CancellationToken.None);
-        threshold.Description!.Clauses[0].Text.Should().Contain($"total spend to date {words} 5000").And.NotContain("after").And.NotContain("before");
+    }
+
+    [Fact]
+    public async Task TheDescriber_LabelsUtilizationAsAPercent_AndNamesTheProject()
+    {
+        var body = Body().Replace("\"sprk_matter\"", "\"sprk_project\"", StringComparison.Ordinal);
+
+        var result = await Describer().DescribeAsync(body, CancellationToken.None);
+
+        result.IsRefused.Should().BeFalse(result.Refusal);
+        var line = result.Description!.Clauses.Single();
+        line.Text.Should().Be("The project's budget utilization (percent of budget spent) is at least 90.");
+        line.Formal.Should().Be("sprk_project.sprk_budgetutilizationpercent >= 90");
+    }
+
+    [Fact]
+    public void AnOutOfRangeUtilization_IsRefusedWithTheUnitStated()
+    {
+        var result = Validator().ValidateForSave("Threshold", Body(value: "100000000001"), null);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle().Which.Should().Contain("PERCENT").And.Contain("100 means fully spent");
     }
 
     [Fact]
