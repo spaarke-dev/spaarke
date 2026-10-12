@@ -49,7 +49,7 @@ import { sendCommunication, SendCommunicationError } from '../../services/commun
 import type { ICommunicationAssociation, SendCommunicationOptions } from '../../services/communicationApi';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IDataService } from '../../types/serviceInterfaces';
-import { readSseStream, parseSseEvent } from '../../hooks/useSseStream';
+import { readSseStream, parseSseEvent, describeStreamError } from '../../hooks/useSseStream';
 import { getXrm } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
@@ -705,11 +705,12 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
             type?: string;
             content?: string;
             error?: string;
+            correlationId?: string;
             done?: boolean;
           } | null;
           if (!chunk) return;
           if (chunk.type === 'error' || chunk.error) {
-            throw new Error(chunk.error ?? 'Analysis returned an error');
+            throw new Error(describeStreamError(chunk, 'Analysis returned an error'));
           }
           if (chunk.type === 'chunk' || chunk.content) {
             accumulated += chunk.content ?? '';
