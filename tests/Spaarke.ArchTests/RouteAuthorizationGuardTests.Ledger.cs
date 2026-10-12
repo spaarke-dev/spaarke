@@ -1587,9 +1587,9 @@ public partial class RouteAuthorizationGuardTests
         // and any related row is a 409 has_related_records. Absent / not-requester: the same 403 as the other delete routes.
         new HandlerDecision("DELETE /api/v1/external/servicerequests/{id:guid}", "DeleteOwnServiceRequest", "IsRecordAccessible",
             new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
-            "Requester only (RightsForDocumentParentAsync -> module.IsRecordAccessible) and no related row in any of the 8 "
-            + "relationships (ExternalDataService.HasRelatedRecordsAsync) before the app-only row delete "
-            + "(ExternalProjectDataEndpoints.DeleteOwnServiceRequest, DeleteAuthorizedRowAsync)."),
+            "Requester only (RightsForDocumentParentAsync -> module.IsRecordAccessible, ExternalProjectDataEndpoints.cs:1726) and "
+            + "no related row in any of the 8 relationships (ExternalDataService.HasRelatedRecordsAsync, "
+            + "ExternalProjectDataEndpoints.cs:1739) before the app-only row delete (DeleteAuthorizedRowAsync, :1755)."),
         new HandlerDecision("POST /api/v1/external/api/dataverse/fetch", "ExecuteScopedFetchAsync", "Tier2ScopeFilterInjector", Array.Empty<string>(),
             "The caller's FetchXML is rewritten to their accessible-record set before it runs "
             + "(Tier2ScopeFilterInjector.Inject, ExternalModuleDataEndpoints.cs:264), then ScopeRows trims the "
