@@ -395,8 +395,38 @@ The three answers:
 
 ### 12.9 Not settled
 
-- **Own flag vs effective flag.** The rule reads each root's OWN `sprk_issecure`, as the decision states. The codebase's `GetEffectiveRootRecordFlagsAsync` (UAC-r2 task 174) treats a work assignment or project filed under a secure record as secure before its own flag catches up, and its remarks say every access decision asks that.
-  - Case not covered: a row linked to readable P and to unreadable work assignment W, where W's own flag is false but W is filed under secure matter M. That row is listed unless the row also carries M's stamp.
-  - `CoreAncestorResolver` normally stamps M as well, which closes it.
-  - Switching to effective flags is a change in `GetNonSecureRootsAsync` alone. It costs the filing walk (batched per level). Owner to confirm.
+- **Own flag vs effective flag: decided (main session, 2026-10-12): effective status, the stricter reading of option B.** See 12.10. Open for the owner only if they want the literal own-flag reading back.
 - K1, K2 and K4 of 11.8 are unchanged. Under option B, K4 (invoice documents use the multi-root rule, the invoice thread does not) over-hides only when the other parent is secure.
+
+### 12.10 Decision (main session, 2026-10-12): the rule uses the EFFECTIVE secure status
+
+The stricter reading of option B. It supersedes the "own flag" wording of 12.1 and 12.3 wherever they differ. Commit `edd2ad4df`.
+
+- **Rule.** A linked root the caller cannot read counts as non-secure only when its **effective** status is non-secure (UAC-r2 task 174: a record filed under a secure record is secure before its own flag catches up). A work assignment W whose own flag is false but which is filed under secure matter M is secure, so the row is withheld even when it carries no M stamp.
+- **One walk, reused.** `GetNonSecureRootsAsync` reads each root's own `sprk_issecure` over the Web API as before. For each table, the ids whose own flag is `false` go through `EffectiveRootFlags.ReadAncestryAsync` (the ONE filing walk, `SecureRootInheritance.ReadSecureParentsOfManyAsync`) and `EffectiveRootFlags.Fold`, the same pair `ExternalParticipationService.GetEffectiveRootRecordFlagsAsync` uses. No second walk was written.
+- **Seam.** `ExternalDataService` takes the app-only `IGenericEntityService` as an optional LAST constructor argument (`filing = null`; registered unconditionally in GraphModule, so the typed-client factory supplies it). The about 70 test construction sites are unchanged. `ExternalParticipationService` does the same.
+- **Matter and own-secure roots.** A matter files under nothing, so its own flag is its effective flag (no walk). A root whose own flag is `true` is secure already (no walk).
+- **Batching.** One walk per table for the distinct own-open ids of the whole request: one batched read of their rows, one batched read of their parents, per level, chunked at 200 ids (`SecureRootInheritance.IdsPerQuery`). A single id uses the one-record shape (two point reads). Never one walk per row. The existing 500-distinct-roots bound in `ExternalMultiRootRule.MaxFlagLookups` is unchanged and applies before any read.
+- **Fail closed.** The root counts as secure when: its own-flag read fails or returns nothing or a non-boolean (as before); the walk's read of the root or of an ancestor throws or faults; an ancestor's `sprk_issecure` is empty; the chain is longer than `MaxFilingDepth` (4); a pair type cannot be read; or no filing reader is configured. All of these fold to `RootRecordFlags.Unreadable`, which is secure.
+- **Unchanged shared-walk behaviour (noted, not changed).** The walk treats an ancestor record that does not exist as conferring nothing. Dataverse lookups cannot dangle, so this only matters in a delete race; changing the shared walk was out of scope. A root that is itself missing is secure (the own-flag read returns nothing).
+
+#### Test map (new tests: 61; filtered unit run 2985 to 3046)
+
+The test double: `ExternalRootEventReadTests.FakeDataverse` gains a filing world (`AddRoot` registers the same record there, `FileWorkAssignmentUnder` files W under a matter or project), a Moq `IGenericEntityService` (`FilingReader`) that answers the walk's `RetrieveMultipleAsync` by the id condition, a `FilingReadLog` that counts reads per entity, and the fault switches `FilingReadThrows` and `FilingFaultEntity`. `Fixture`, `NewService()` (with `withFilingReader: false` for the no-reader case) and the feed's `FeedData` pass it in.
+
+| Family | must-fire (own flag false, under a secure matter, no M stamp: hidden) | must-not-fire (under a non-secure matter: visible) | fail-closed (walk throws, ancestor read throws, ancestor flag empty: hidden) | batching |
+|---|---|---|---|---|
+| The read itself, `ExternalMultiRootRuleTests` | `EffectiveStatus_AWorkAssignmentWithAFalseOwnFlag_UnderASecureMatter_IsSecure`, `..._UnderASecureProject_IsSecure` | `..._UnderANonSecureMatter_IsNotSecure` (also pins the 2 reads), matter and own-secure roots cause no walk | `..._TheRootCountsAsSecure_FailClosed` (5: every read throws, ancestor read throws, W's read throws, ancestor flag empty, no filing reader) | `..._ManyRoots_CostOneOwnFlagQuery...` (20 W, 2 matters: 1 flag query, 2 walk reads), `..._OneRootAskedByManyRows_IsWalkedOnce` (25 rows) |
+| Lists (events, to-dos, documents), `ExternalMultiRootListReadTests` | `Effective_ARowFiledToAWorkAssignment...UnderASecureMatter_IsWithheld...` (6) | `..._UnderANonSecureMatter_IsListed` (6) | `Effective_WhenTheFilingChainCannotBeRead_TheRowIsWithheld_FailClosed` (9) | `Effective_ManyRowsLinkedToTheSameWorkAssignment_...` (3: 12 rows, 2 W, 1 flag query, 2 walk reads) |
+| Single document (content, versions), `ExternalMultiRootDocumentRouteTests` | `Effective_ADocumentFiledToAWorkAssignment...UnderASecureMatter_IsRefused...` (4, typed and twin link) | `..._UnderANonSecureMatter_IsServed` (4) | `Effective_WhenTheFilingChainCannotBeRead_TheDocumentIsRefused_FailClosed` (6) | `Effective_ADocumentLinkedToTheSameWorkAssignmentTwice_CostsOneWalk_AndAMisfiledOneNone` (2) |
+| Grid documents module, `ExternalMultiRootListReadTests` | `Effective_DocumentsModuleFetch_...UnderASecureMatter_IsWithheld` (typed and twin) | `..._UnderANonSecureMatter_IsListed` | `Effective_DocumentsModuleFetch_WhenTheFilingChainCannotBeRead...` | covered by the read-level batching tests (the endpoint makes one read per request) |
+| Messages, `ExternalMessageEndpointsTests` | `AMessageFiledToAWorkAssignmentWithAFalseOwnFlag_IsWithheldOnlyWhenItsMatterIsSecure(true)` | `(false)` | `AMessageFiledToAWorkAssignment_WhoseFilingChainCannotBeRead_IsWithheld_FailClosed` | read-level |
+| Feed, `ExternalNotificationFeedTests` | `AMessageFiledToAWorkAssignmentWithAFalseOwnFlag_IsInTheFeedOnlyWhenItsMatterIsNotSecure(true)` | `(false)` | `..._WhoseFilingChainCannotBeRead_IsNotInTheFeed_FailClosed` | read-level |
+
+#### Evidence
+
+- `dotnet build src/server/api/Sprk.Bff.Api/` and `tests/unit/Sprk.Bff.Api.Tests`: 0 warnings, 0 errors.
+- Unit, filter `External|Tier2Scope|CommunicationThread|Issue963`: **3046 passed, 0 failed, 0 skipped** (was 2985).
+- `tests/Spaarke.ArchTests`: **941 passed** (unchanged).
+- **Fail-before.** With the walk removed from `GetNonSecureRootsAsync` (the own-flag behaviour of `d375c597d`; `ancestry` forced to `null`, restored with `git checkout`), the new and effective-status tests (filter `Effective|FalseOwnFlag|WhoseFilingChainCannotBeRead`, 131 tests) give **46 failed, 85 passed**. The 46 are every must-fire, fail-closed and batching-by-walk test in all six families. The must-not-fire visibility tests pass under both behaviours, as expected; the one that also pins the walk's read log (`EffectiveStatus_..._UnderANonSecureMatter_IsNotSecure`) is among the 46.
+- **Publish size** (method of 12.7, tree `edd2ad4df` exported with `git archive` into `C:\wt039bz`): 192 files, zip **36.531 MB**, delta against 12.7's 36.531 MB: +0.000 MB at three decimals. No package reference or csproj changed, so no new CVE exposure. The scratch folder `C:\wt039bz` is left behind (removal of that path is blocked in this environment); delete it by hand.
