@@ -4,14 +4,14 @@ tags: [devops, project-archive, gh-cli, git]
 techStack: [gh-cli, graphql, git, python]
 appliesTo: ["/devops-project-archive", "archive project", "close project"]
 alwaysApply: false
-last-reviewed: 2026-06-25
+last-reviewed: 2026-10-12
 ---
 
 # devops-project-archive
 
 > **Category**: DevOps / Portfolio
 > **Tier**: Non-destructive — closes Issue state only. Worktree preserved.
-> **Last Reviewed**: 2026-06-25 (worktree-deletion behavior REMOVED per operator workflow change)
+> **Last Reviewed**: 2026-10-12 (final AI spend captured at close-out, Step 3); 2026-06-25 (worktree-deletion behavior REMOVED per operator workflow change)
 
 ## What this skill does (and doesn't)
 
@@ -79,6 +79,15 @@ Default: Y (non-destructive). Operator can still N to cancel.
 
 Invoke `/devops-project-sync` to capture latest field values (Task Count, Tasks Completed) BEFORE we close the Issue.
 
+**Then capture the final AI spend** (added 2026-10-11 — costs are computed from local transcripts, so close-out is the last moment they are complete for this project):
+
+```bash
+python scripts/ai-cost/spend-report.py --project {slug} --since {project start date} --archive   # folds every project's days in that range into the durable archive (--project only filters the printed report)
+python scripts/ai-cost/update-board-spend.py {slug}                                              # final AI Spend / AI Calls / As Of (never lowers a value)
+```
+
+Note the resulting `AI Spend (est.)` and `AI Calls` for the Step 4 Issue comment. Do **not** write cost figures into `projects/{name}/` or any other committed file — the repo keeps costs out of version control (`scripts/ai-cost/README.md`); the board and the Issue are where they live. If the project has no local transcript history on this machine, say so in the comment instead of a number.
+
 ### Step 4: Update Issue fields + close
 
 - Set `Status` field to `Completed` or `Cancelled` (per --status)
@@ -86,7 +95,7 @@ Invoke `/devops-project-sync` to capture latest field values (Task Count, Tasks 
   - If `--pr-number #M` provided: use the PR's merge date (`gh pr view #M --json mergedAt --jq .mergedAt`, take the date prefix YYYY-MM-DD). This is the truest "actual end".
   - Else: use today's date.
   - Mutation: `updateProjectV2ItemFieldValue` with `value: { date: "YYYY-MM-DD" }`.
-- Add comment to Issue: `Archived via /devops-project-archive on {date}. Closing PR: #M. Closed Date set to {merge-or-today}. Worktree at {worktree-path} preserved.`
+- Add comment to Issue: `Archived via /devops-project-archive on {date}. Closing PR: #M. Closed Date set to {merge-or-today}. Final AI spend (est., list price, this machine): ${spend} over {calls} calls. Worktree at {worktree-path} preserved.`
 - For Completed: `gh project item-edit ... --status Done` (or analogous mutation)
 - For Cancelled: add label `cancelled`
 - Close Issue: `gh issue close <#N> --comment "..."`
