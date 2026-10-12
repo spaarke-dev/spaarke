@@ -9,7 +9,9 @@ namespace Spaarke.ArchTests;
 /// <remarks>
 /// <para><b>Why a fitness function.</b> <c>src/dataverse/solutions/SpaarkeMaster/WebResources/</c> is an EXPORT from dev
 /// (the files that get packaged into the solution). The maintained sources live in <c>src/client/webresources/**</c>,
-/// <c>src/solutions/webresources/**</c> and <c>infrastructure/dataverse/ribbon/*/WebResources/**</c>. Nothing tied the two
+/// <c>src/solutions/webresources/**</c>, <c>infrastructure/dataverse/ribbon/*/WebResources/**</c> and the top-level
+/// <c>src/solutions/*/sprk_*.js|css</c> files (a code page's own ribbon-command script, e.g.
+/// <c>src/solutions/EventCommands/sprk_event_ribbon_commands.js</c>). Nothing tied the two
 /// together, so they drifted silently: the mirror's <c>sprk_subgrid_parent_rollup.js</c> was 1.0.0 and called the BFF
 /// recalculate endpoints anonymously (now 401) while the source was 2.0.0 (MSAL bearer token). Anyone who imports the
 /// committed solution would have shipped the broken script.</para>
@@ -48,6 +50,12 @@ public sealed class WebResourceMirrorParityGuardTests
         "src/solutions/webresources",
         "infrastructure/dataverse/ribbon",   // */WebResources/** below it — see IsRibbonWebResource
     ];
+
+    /// <summary>
+    /// <c>src/solutions/*</c> directories are code pages, not web-resource folders; only a <c>sprk_*.js|css</c> file sitting
+    /// DIRECTLY in one of them (not in a subfolder: those are build inputs or bootstrap helpers) is a web-resource source.
+    /// </summary>
+    private const string SolutionsRoot = "src/solutions";
 
     private static readonly string[] ExcludedSegments =
     [
@@ -206,7 +214,20 @@ public sealed class WebResourceMirrorParityGuardTests
 
     private static IReadOnlyList<Item> MirrorFiles() => ReadItems(Walk(Repo(MirrorRoot)));
 
-    private static IReadOnlyList<Item> SourceFiles() => ReadItems(SourceRoots.SelectMany(r => Walk(Repo(r))));
+    /// <summary>Top-level <c>src/solutions/*/sprk_*.js|css</c> files — see <see cref="SolutionsRoot"/>.</summary>
+    private static IEnumerable<string> SolutionTopLevelScripts()
+    {
+        var root = Repo(SolutionsRoot);
+        return !Directory.Exists(root)
+            ? []
+            : Directory.EnumerateDirectories(root)
+                .Where(d => !ExcludedSegments.Contains(Path.GetFileName(d), StringComparer.OrdinalIgnoreCase))
+                .SelectMany(Directory.EnumerateFiles)
+                .Where(f => Path.GetFileName(f).StartsWith("sprk_", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IReadOnlyList<Item> SourceFiles()
+        => ReadItems(SourceRoots.SelectMany(r => Walk(Repo(r))).Concat(SolutionTopLevelScripts()));
 
     [Fact(DisplayName = "Issue #1651: every SpaarkeMaster web-resource mirror matches its maintained source, or is in the baseline")]
     public void MirrorMatchesSource_OrIsBaselined()
@@ -243,6 +264,14 @@ public sealed class WebResourceMirrorParityGuardTests
         // the defect that motivated the guard: this pair exists and is compared
         Assert.Contains(MirrorFiles(), m => m.Path == $"{MirrorRoot}/sprk_subgrid_parent_rollup.js");
         Assert.Contains(SourceFiles(), s => s.Path == "src/solutions/webresources/sprk_subgrid_parent_rollup.js");
+
+        // a code page's own top-level sprk_*.js (src/solutions/<page>/) is a source too — its mirror drifted unreported
+        Assert.Contains(MirrorFiles(), m => m.Path == $"{MirrorRoot}/sprk_event_ribbon_commands.js");
+        Assert.Contains(SourceFiles(), s => s.Path == "src/solutions/EventCommands/sprk_event_ribbon_commands.js");
+        // ...but not a nested one, and not an unprefixed file
+        Assert.DoesNotContain(SourceFiles(), s => s.Path.StartsWith("src/solutions/", StringComparison.Ordinal)
+            && !s.Path.StartsWith("src/solutions/webresources/", StringComparison.Ordinal)
+            && s.Path.Count(c => c == '/') != 3);
     }
 
     // ── Controls (synthetic inputs) ───────────────────────────────────────────────────────────
