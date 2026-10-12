@@ -148,6 +148,37 @@ Needs a decision from the owner of the internal document UX.
 
 ---
 
+### ISS-005 — Binder-created contacts have no BU-team owner (outside I-6); intake visibility in child BUs
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-12 |
+| **Source** | Task 035 scoped re-check K3 (ownership fix `30fc4922a`); confirmed in code and by a read-only dev query |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1673 |
+
+**Description**
+
+The workforce identity binder creates contacts app-only with no `ownerid` (`ContactIdentityStore.CreatePayload`), so each such contact is owned by the BFF application user and sits in that user's business unit (the root BU). Contacts are outside invariant I-6 and the owner census. Task 035 owns an intake request by the default team of the requester contact's BU (owner decision 2026-10-11), so for a customer whose staff sit in a child BU, intakes from binder-created contacts land on the root BU's team and the customer's BU-level users never see them. Dev is unaffected today: 15 of 17 bound contacts are in the root BU "Spaarke", which holds 172 of 174 active users.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactIdentityStore.cs:298-331`
+- `src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs` (`ResolveOwnerAsync`)
+- `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` I-6 row
+- Dev check: `SELECT bu.name, COUNT(c.contactid) FROM contact c JOIN businessunit bu ON c.owningbusinessunit = bu.businessunitid WHERE c.sprk_externalobjectid IS NOT NULL GROUP BY bu.name`
+
+**Suggested fix** (if known)
+
+Decide the owning BU of a workforce contact (a per-stamp customer BU, or the matched systemuser's BU for licensed staff) and bind `ownerid` to that BU's default team in the binder create through `RecordOwnershipResolver`; add the seam to the census.
+
+**Estimated effort**: 1-2 days including the owner decision
+**Blockers**: owner decision on contact BU placement; binder code belongs to unified-access-control-r2 (task 141)
+**Related**: R3 task 035; #1673
+
+---
+
 ## Closed
 
 (none)
