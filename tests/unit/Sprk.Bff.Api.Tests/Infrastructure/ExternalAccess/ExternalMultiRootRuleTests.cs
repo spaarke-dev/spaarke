@@ -397,6 +397,78 @@ public sealed class ExternalMultiRootRuleTests
         read.NotSecure.Should().BeEmpty("fail closed, as before");
     }
 
+    // =====================================================================
+    // F4: a flag chunk can succeed and still leave an ASKED root unresolved (no row, an absent flag, a non-boolean flag).
+    // The root still counts as secure, but the read is not complete, so a list that withheld a row says Truncated.
+    // =====================================================================
+
+    [Theory]
+    [InlineData("the root has no row")]
+    [InlineData("the flag is absent")]
+    [InlineData("the flag is not a boolean")]
+    public async Task TheRead_IsIncomplete_WhenAnAskedRootIsUnresolved_YetStillCountsAsSecure(string unresolved)
+    {
+        var data = new ExternalRootEventReadTests.FakeDataverse();
+        var other = Guid.Parse("a0390000-0000-4000-8000-0000000000e9");
+        data.AddOpenRoot(ExternalGrantRootType.Matter, other); // resolved in the same chunk
+        switch (unresolved)
+        {
+            case "the flag is absent": data.AddRoot(ExternalGrantRootType.Matter, Matter, isSecure: null); break;
+            case "the flag is not a boolean": data.AddRootWithRawFlag(ExternalGrantRootType.Matter, Matter, "false"); break;
+        }
+
+        var read = await data.NewService().GetNonSecureRootsAsync(
+            new[] { (ExternalGrantRootType.Matter, Matter), (ExternalGrantRootType.Matter, other) }, CancellationToken.None);
+
+        read.NotSecure.Should().Equal(new[] { (ExternalGrantRootType.Matter, other) }, "the unresolved root counts as secure");
+        read.Complete.Should().BeFalse("a root went unresolved although the chunk succeeded");
+    }
+
+    [Fact]
+    public async Task TheRead_IsComplete_WhenEveryAskedRootCameBackWithABooleanFlag()
+    {
+        var data = new ExternalRootEventReadTests.FakeDataverse();
+        var other = Guid.Parse("a0390000-0000-4000-8000-0000000000e9");
+        data.AddSecureRoot(ExternalGrantRootType.Matter, Matter);
+        data.AddOpenRoot(ExternalGrantRootType.Matter, other);
+
+        var read = await data.NewService().GetNonSecureRootsAsync(
+            new[] { (ExternalGrantRootType.Matter, Matter), (ExternalGrantRootType.Matter, other) }, CancellationToken.None);
+
+        read.Complete.Should().BeTrue();
+        read.NotSecure.Should().Equal(new[] { (ExternalGrantRootType.Matter, other) });
+    }
+
+    // =====================================================================
+    // Depth 2 under the read-time opt-in: work assignment -> project -> matter that is ABSENT.
+    // =====================================================================
+
+    [Fact]
+    public async Task TheDepthTwoChain_WorkAssignmentUnderProjectUnderAnAbsentMatter_FoldsToSecureOnTheRead_ButNotByDefault()
+    {
+        var data = new ExternalRootEventReadTests.FakeDataverse();
+        data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, WorkAssignment);
+        data.AddOpenRoot(ExternalGrantRootType.Project, Project);
+        data.FileWorkAssignmentUnder(WorkAssignment, ExternalGrantRootType.Project, Project);
+        data.FileProjectUnderByPair(Project, ExternalGrantRootType.Matter, Matter); // the matter is named, never created
+
+        // The read path (opt-in): the unreachable matter makes the chain Unknown, so the work assignment is secure (withheld).
+        var read = await data.NewService().GetNonSecureRootsAsync(new[] { Wa(WorkAssignment) }, CancellationToken.None);
+        read.NotSecure.Should().BeEmpty("an absent matter at depth 2 is unknown, and unknown counts as secure");
+        read.Complete.Should().BeFalse();
+
+        // The shared walk's default (write-time, UAC-r2) is unchanged: the absent matter confers nothing.
+        var legacy = await EffectiveRootFlags.ReadAncestryAsync(
+            data.FilingReader, NullLogger.Instance, "sprk_workassignment", new[] { WorkAssignment }, CancellationToken.None);
+        legacy![WorkAssignment].IsKnown.Should().BeTrue();
+        legacy[WorkAssignment].HasSecureParent.Should().BeFalse();
+
+        var strict = await EffectiveRootFlags.ReadAncestryAsync(
+            data.FilingReader, NullLogger.Instance, "sprk_workassignment", new[] { WorkAssignment }, CancellationToken.None,
+            absentParentIsUnknown: true);
+        strict![WorkAssignment].IsKnown.Should().BeFalse();
+    }
+
     [Fact]
     public async Task APastTheLookupBoundRequest_IsIncomplete()
     {

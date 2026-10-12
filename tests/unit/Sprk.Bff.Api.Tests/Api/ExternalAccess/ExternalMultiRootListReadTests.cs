@@ -322,6 +322,51 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
 
     [Theory]
     [MemberData(nameof(Kinds))]
+    public async Task OptionB_AnUnresolvedRootInASucceededFlagRead_ThatWithholdsARow_SetsTruncated(string kind)
+    {
+        // F4: the chunk succeeds, but the linked matter has no row (missing, or invisible to the app identity).
+        _fixture.Principal = Principal("projects", RecordA);
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+        AddRow(kind, "projects", RecordA, "Withheld because its matter did not resolve", "matters", Hidden);
+
+        var (ids, truncated) = await ListIdsAndTruncated(kind, "projects");
+
+        ids.Should().Equal(plain);
+        truncated.Should().BeTrue("the row was withheld on an unresolved root, so the list may be short");
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task OptionB_ARootWithANonBooleanFlag_ThatWithholdsARow_SetsTruncated(string kind)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        _fixture.Data.AddRootWithRawFlag(ExternalGrantRootType.Matter, Hidden, "no");
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+        AddRow(kind, "projects", RecordA, "Withheld because its flag is not a boolean", "matters", Hidden);
+
+        var (ids, truncated) = await ListIdsAndTruncated(kind, "projects");
+
+        ids.Should().Equal(plain);
+        truncated.Should().BeTrue();
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task OptionB_AResolvedNonSecureRoot_ListsTheRow_WithoutTruncated(string kind)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden);
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+        var shown = AddRow(kind, "projects", RecordA, "Its matter resolved as non-secure", "matters", Hidden);
+
+        var (ids, truncated) = await ListIdsAndTruncated(kind, "projects");
+
+        ids.Should().BeEquivalentTo(new[] { plain, shown });
+        truncated.Should().BeFalse();
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
     public async Task OptionB_ACompleteFlagRead_WithASecureRowWithheld_DoesNotSetTruncated(string kind)
     {
         _fixture.Principal = Principal("projects", RecordA);

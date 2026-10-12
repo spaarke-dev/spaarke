@@ -1524,7 +1524,7 @@ public class ExternalDataService
     /// is Unknown too (<c>absentParentIsUnknown</c>, the read path's opt-in; the write-time walk is unchanged). No cache: a
     /// staff change to the flag applies on the next request.</para>
     /// <para><b>Complete.</b> The answer says whether the read COMPLETED (<see cref="NonSecureRootsRead.Complete"/>): every
-    /// flag chunk succeeded and every walk decided. When it did not, a root may count as secure only because it could not be
+    /// flag chunk succeeded, every asked root came back with a row and a boolean flag, and every walk decided. When it did not, a root may count as secure only because it could not be
     /// read; the document, event and to-do lists that withheld a row then set <c>Truncated</c>.</para>
     /// <para><c>virtual</c> per ADR-038 section 4 (substitution seam); the tests drive the real read over a fake Web API.</para>
     /// </remarks>
@@ -1544,13 +1544,27 @@ public class ExternalDataService
                 $"{idColumn},{SecureFlagColumn}", $"{idColumn} asc", ct);
 
             var ownOpen = new HashSet<Guid>();
+            var resolved = new HashSet<Guid>(); // asked ids that came back with a row AND a boolean flag
             foreach (var row in read.Rows)
             {
                 if (GuidValue(row, idColumn) is { } id && asked.Contains(id)
-                    && row.TryGetValue(SecureFlagColumn, out var flag) && flag.ValueKind == JsonValueKind.False)
+                    && row.TryGetValue(SecureFlagColumn, out var flag)
+                    && flag.ValueKind is JsonValueKind.True or JsonValueKind.False)
                 {
-                    ownOpen.Add(id);
+                    resolved.Add(id);
+                    if (flag.ValueKind == JsonValueKind.False)
+                    {
+                        ownOpen.Add(id);
+                    }
                 }
+            }
+
+            // F4: a chunk can succeed and still leave an asked root unresolved (no row: missing or invisible to the app
+            // identity; no sprk_issecure: field security; a non-boolean value). It still counts as secure, but the rows it
+            // withholds must say Truncated, so the read is not complete.
+            if (resolved.Count < asked.Count)
+            {
+                complete = false;
             }
 
             if (read.Outcome != CollectionReadOutcome.Complete)

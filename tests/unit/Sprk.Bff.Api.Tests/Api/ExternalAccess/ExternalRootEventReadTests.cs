@@ -222,6 +222,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
     public async Task ProjectEvents_AlsoFiledToASecureMatterTheCallerCannotRead_AreWithheld()
     {
         _fixture.Principal = Principal("projects", ExternalAccessLevel.Collaborate, RecordA);
+        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, Hidden); // F4: the matter genuinely resolves as secure
         _fixture.Data.Add("projects", RecordA, "Project only");
         _fixture.Data.Add("projects", RecordA, "Project and secure matter", matter: Hidden);
 
@@ -604,6 +605,21 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                 ["sprk_accesspermission"] = 100000000,
                 ["statecode"] = 0,
             });
+        }
+
+        /// <summary>
+        /// Seeds a root whose <c>sprk_issecure</c> comes back as a raw, NON-boolean JSON value (e.g. a string), the shape a
+        /// misconfigured or masked column could take. The filing world sees it as an absent flag.
+        /// </summary>
+        public void AddRootWithRawFlag(ExternalGrantRootType root, Guid id, object rawFlag)
+        {
+            AddRoot(root, id, isSecure: null);
+            var set = ExternalGrantRoot.BindFor(root).EntitySet;
+            lock (_sets)
+            {
+                _sets[set].Single(r => string.Equals(r[RootSets[set]] as string, id.ToString(), StringComparison.OrdinalIgnoreCase))
+                    ["sprk_issecure"] = rawFlag;
+            }
         }
 
         /// <summary>A secure root (<c>sprk_issecure = true</c>).</summary>
