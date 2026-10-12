@@ -1856,6 +1856,32 @@ public sealed partial class RecordContainerResolver
                 [
                     ("sprk_regardingmatter", "sprk_matter"), ("sprk_regardingproject", "sprk_project"),
                 ]),
+                // spaarke-SPA-external-access-platform-r3 task 031, owner decision 2026-10-11: "any document associated
+                // with a secure record goes into that secure record's own container", including a service request
+                // regarding a secure matter. Until this entry a service request (not securable, no links) took the
+                // no-links branch straight to its owning business unit's container, whatever it regarded.
+                //
+                // Its regarding lookups (solution source Entities/sprk_ServiceRequest/Entity.xml and
+                // Other/Relationships/*.xml; the live schema of 2026-10-10 confirms the sprk_regarding* family): the three
+                // roots are FOLLOWED as on every row. Its communication, invoice and to-do are FOLLOWED too, live, rather
+                // than held: a service request is a CORE record that carries no copy of anything (it is not in
+                // CoreAncestorResolver.StampSourceColumns), so there is no stale copy to guard against — the record it
+                // names is read and walked with that record's own links, exactly like a root above it, so a secure root
+                // anywhere on that chain decides (the owner's "regarding chain reaches a secure record"). Held would
+                // refuse every upload to a request filed under an invoice even when nothing on the chain is secure,
+                // where the owner's rule says the business unit's container.
+                //
+                // Unchanged: a service request named ABOVE another record (a to-do's sprk_regardingservicerequest, a
+                // document's sprk_relatedservicerequest) is still the HELD path on THAT record's row (task 156).
+                ["sprk_servicerequest"] = new(polymorphic: true,
+                [
+                    ("sprk_regardingproject", "sprk_project"), ("sprk_regardingmatter", "sprk_matter"),
+                    ("sprk_regardingworkassignment", "sprk_workassignment"),
+                    ("sprk_regardingcommunication", "sprk_communication"), ("sprk_regardinginvoice", "sprk_invoice"),
+                    ("sprk_regardingtodo", "sprk_todo"),
+                ],
+                followed: ["sprk_communication", "sprk_invoice", "sprk_todo"],
+                parties: CoreAncestorResolver.PartyRegardingColumns["sprk_servicerequest"]),
             };
 
         private readonly IReadOnlySet<string> _followedTargets;

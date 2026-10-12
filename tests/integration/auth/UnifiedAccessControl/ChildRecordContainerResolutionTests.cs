@@ -772,6 +772,18 @@ public partial class ChildRecordContainerResolutionTests
         + "sprk_assignedtointernal>contact;sprk_assignedtolawfirm1>sprk_organization;"
         + "sprk_regardingmatter>sprk_matter;sprk_regardingproject>sprk_project;"
         + "sprk_regardingrecordtype>sprk_recordtype_ref")]
+    // Task 031 (external-access-r3, owner decision 2026-10-11): sprk_servicerequest got a ChildAncestorLinks entry so a
+    // document filed to a service request lands in the container of the secure record the request is regarding. This
+    // row is from the SOLUTION SOURCE (src/dataverse/solutions/SpaarkeMaster/Entities/sprk_ServiceRequest/Entity.xml
+    // and its relationships), not a live sweep — every lookup / owner column with its target.
+    [InlineData("sprk_servicerequest", "both",
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_regardingaccount>account;sprk_regardingcommunication>sprk_communication;"
+        + "sprk_regardingcontact>contact;sprk_regardinginvoice>sprk_invoice;sprk_regardingmatter>sprk_matter;"
+        + "sprk_regardingorganization>sprk_organization;sprk_regardingproject>sprk_project;"
+        + "sprk_regardingrecordtype>sprk_recordtype_ref;sprk_regardingtodo>sprk_todo;"
+        + "sprk_regardingworkassignment>sprk_workassignment;sprk_requestedby>contact")]
     public async Task ChildRecordRead_RequestsEveryLinkAndIntermediateColumn(
         string entity, string pairShape, string sweptLookups)
     {
@@ -1130,6 +1142,67 @@ public partial class ChildRecordContainerResolutionTests
 
         world.Reads("businessunit").Should().Be(0);
         world.RootReads().Should().Be(0);
+    }
+
+    // Task 031 (external-access-r3, owner decision 2026-10-11): a SERVICE REQUEST resolved AS ITSELF (a document filed to
+    // it) follows its regarding chain live — a secure record on it decides the container; otherwise the BU's. The SR
+    // stays an intermediate when ANOTHER record names it (the hold above is unchanged).
+    [Fact(DisplayName = "Task 031: a service request regarding a SECURE matter resolves the matter's own container")]
+    public async Task ServiceRequest_RegardingASecureMatter_ResolvesTheMattersContainer()
+    {
+        var world = new World()
+            .WithChild("sprk_servicerequest", regardingMatter: MatterId)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_servicerequest", ChildId);
+
+        decision.ContainerId.Should().Be(RootContainer);
+        world.Reads("businessunit").Should().Be(0, "a secure ancestor never falls back to the shared container");
+    }
+
+    [Fact(DisplayName = "Task 031: a service request regarding a NON-secure matter resolves the business unit's container")]
+    public async Task ServiceRequest_RegardingANonSecureMatter_ResolvesTheBusinessUnitsContainer()
+    {
+        var world = new World()
+            .WithChild("sprk_servicerequest", regardingMatter: MatterId)
+            .WithRoot("sprk_matter", MatterId, isSecure: false, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_servicerequest", ChildId);
+
+        decision.ContainerId.Should().Be(BusinessUnitContainer);
+    }
+
+    [Fact(DisplayName = "Task 031: a service request regarding an INVOICE under a secure matter follows the invoice live to the matter's container")]
+    public async Task ServiceRequest_RegardingAnInvoiceUnderASecureMatter_FollowsTheInvoice()
+    {
+        var invoiceId = Guid.Parse("03103103-0000-0000-0000-000000000001");
+        var world = new World()
+            .WithChild("sprk_servicerequest", intermediate: ("sprk_regardinginvoice", invoiceId))
+            .WithRow("sprk_invoice", invoiceId, lookups: [("sprk_matter", "sprk_matter", MatterId)])
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_servicerequest", ChildId);
+
+        decision.ContainerId.Should().Be(RootContainer);
+        world.Reads("sprk_invoice").Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 031: a service request regarding a TO-DO under a secure project follows the to-do live to the project's container")]
+    public async Task ServiceRequest_RegardingATodoUnderASecureProject_FollowsTheTodo()
+    {
+        var todoId = Guid.Parse("03103103-0000-0000-0000-000000000002");
+        var world = new World()
+            .WithChild("sprk_servicerequest", intermediate: ("sprk_regardingtodo", todoId))
+            .WithRow("sprk_todo", todoId, lookups: [("sprk_regardingproject", "sprk_project", ProjectId)])
+            .WithRoot("sprk_project", ProjectId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_servicerequest", ChildId);
+
+        decision.ContainerId.Should().Be(RootContainer);
     }
 
     [Fact(DisplayName = "Task 155 f3: a pair naming a PARTY (contact) adds no root — the same as the typed party columns — and resolves the BU container")]
