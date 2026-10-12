@@ -759,6 +759,10 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         {
             "sprk_servicerequestid", "sprk_servicerequestnumber", "sprk_name", "statuscode", "createdon",
             "sprk_requestedby",
+            // spaarke-SPA-external-access-platform-r3, owner decision 2026-10-12: NOT grid-derived. The SPA reads the open /
+            // closed flag to hide Delete on a closed request (the delete route enforces it again). Appears on both sides of
+            // the task 134 shrink comparison, so it drops nothing.
+            "statecode",
         },
         ["sprk_gridconfiguration"] = new[] { "sprk_gridconfigurationid", "sprk_name", "sprk_configjson" },
     };

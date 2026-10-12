@@ -1883,6 +1883,9 @@ public static class ExternalProjectDataEndpoints
     /// <summary>The 409 reason code when a service request has related records (owner decision 2026-10-11, option A).</summary>
     internal const string HasRelatedRecordsReasonCode = "has_related_records";
 
+    /// <summary>The 409 reason code when a service request is closed (owner decision 2026-10-12: no deleting once closed).</summary>
+    internal const string ServiceRequestClosedReasonCode = "service_request_closed";
+
     /// <summary>
     /// DELETE /api/v1/external/servicerequests/{id} — hard-delete a service request the caller REQUESTED, while NOTHING is
     /// related to it (owner decision 2026-10-11, option A; FR-26).
@@ -1893,11 +1896,15 @@ public static class ExternalProjectDataEndpoints
     /// set), so the partner switch (<c>ExternalAccess:PartnerServiceRequestsEnabled</c>) is honoured. Absent, someone
     /// else's and a no-access caller get the SAME 403 as the other delete routes (<see cref="DeleteOwnDeniedReasonCode"/>);
     /// an unreadable requester is the existing 503 (<see cref="ServiceRequestUnreadableReasonCode"/>).</para>
-    /// <para><b>2. Option A.</b> If ANY row is related (every 1:N relationship from <c>sprk_servicerequest</c>:
+    /// <para><b>2. Open only (owner decision 2026-10-12).</b> A closed (inactive) request is never deleted: 409
+    /// <see cref="ServiceRequestClosedReasonCode"/>, decided BEFORE the related-records probe and before any delete. The state
+    /// is <c>statecode</c> (0 open, 1 closed; the table has no other status). A state that is not a readable 0 or 1 fails
+    /// closed: refused with the retryable 503, nothing deleted.</para>
+    /// <para><b>3. Option A.</b> If ANY row is related (every 1:N relationship from <c>sprk_servicerequest</c>:
     /// documents, messages, threads, events, to-dos, memos, analyses, signals - active or not), nothing is deleted and the
     /// answer is 409 <c>has_related_records</c>: all eight relationships are <c>RemoveLink</c>, so a delete would orphan
     /// staff records. The relationship probes are app-only; one that cannot be read is a 503 and nothing is deleted.</para>
-    /// <para><b>3. Recall.</b> The 409 tells the user to ask legal to recall it. That request is a plain message posted on
+    /// <para><b>4. Recall.</b> The 409 tells the user to ask legal to recall it. That request is a plain message posted on
     /// the request's own thread, <c>POST /api/v1/external/servicerequests/{id}/messages</c> (task 034, requester only, no
     /// email) - no endpoint or column of its own.</para>
     /// <para>Known limit: the probe and the delete are separate calls; a related row created between them (for example by
@@ -1918,6 +1925,32 @@ public static class ExternalProjectDataEndpoints
         {
             logger.LogWarning("[EXT-DELETE] Refused ServiceRequest {Id}: absent or not requested by the caller", id);
             return DenyDeleteOwn();
+        }
+
+        // Owner decision 2026-10-12: no deleting once the request is closed. Before the related-records probe and any delete.
+        ExternalDataService.ServiceRequestOpenState state;
+        try
+        {
+            state = await dataService.GetServiceRequestOpenStateAsync(id, ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return DeleteOwnUnavailable();
+        }
+
+        if (state == ExternalDataService.ServiceRequestOpenState.Closed)
+        {
+            logger.LogInformation("[EXT-DELETE] Refused ServiceRequest {Id}: it is closed", id);
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Service request is closed",
+                detail: "This request is closed, so it can't be deleted.",
+                extensions: new Dictionary<string, object?> { ["reasonCode"] = ServiceRequestClosedReasonCode });
+        }
+
+        if (state != ExternalDataService.ServiceRequestOpenState.Open)
+        {
+            // Fail closed: a state this check cannot read as Active is never treated as open.
+            logger.LogWarning("[EXT-DELETE] Refused ServiceRequest {Id}: its state could not be read as open or closed", id);
+            return DeleteOwnUnavailable();
         }
 
         bool hasRelated;

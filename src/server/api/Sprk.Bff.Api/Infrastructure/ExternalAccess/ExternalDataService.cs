@@ -815,6 +815,55 @@ public class ExternalDataService
         return row is null ? null : GuidValue(row, "_sprk_requestedby_value");
     }
 
+    /// <summary>
+    /// Whether a service request is still open. <c>sprk_servicerequest</c> has exactly two states (live describe,
+    /// 2026-10-12): <c>statecode</c> Active (0) / Inactive (1), with <c>statuscode</c> Active (1) / Inactive (2). There is
+    /// no separate "resolved" status, so Inactive IS closed. <see cref="Unknown"/> is the zero value on purpose: a default,
+    /// an absent row and any other value fail closed (owner decision 2026-10-12).
+    /// </summary>
+    public enum ServiceRequestOpenState
+    {
+        /// <summary>Not readable as Active or Inactive (absent row, null, or a value outside 0 / 1). Treated as closed.</summary>
+        Unknown = 0,
+
+        /// <summary><c>statecode</c> = 0.</summary>
+        Open = 1,
+
+        /// <summary><c>statecode</c> = 1 (inactive / resolved).</summary>
+        Closed = 2,
+    }
+
+    /// <summary>The Dataverse <c>statecode</c> → <see cref="ServiceRequestOpenState"/> rule. Pure; anything but 0 or 1 is Unknown.</summary>
+    internal static ServiceRequestOpenState ServiceRequestStateFor(int? statecode) => statecode switch
+    {
+        0 => ServiceRequestOpenState.Open,
+        1 => ServiceRequestOpenState.Closed,
+        _ => ServiceRequestOpenState.Unknown,
+    };
+
+    /// <summary>
+    /// The open / closed state of a service request (<c>statecode</c>), app-only. A request that does not exist, or whose
+    /// state is not a readable 0 / 1, is <see cref="ServiceRequestOpenState.Unknown"/>; a read that FAILS throws, so the
+    /// caller answers 503 and nothing is deleted (same rule as <see cref="GetServiceRequestRequesterAsync"/>).
+    /// </summary>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    public virtual async Task<ServiceRequestOpenState> GetServiceRequestOpenStateAsync(
+        Guid serviceRequestId, CancellationToken ct = default)
+    {
+        var url = $"{GetApiUrl()}/sprk_servicerequests({serviceRequestId})?$select=statecode";
+
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
+        if (row is null
+            || !row.TryGetValue("statecode", out var state)
+            || state.ValueKind != JsonValueKind.Number
+            || !state.TryGetInt32(out var code))
+        {
+            return ServiceRequestOpenState.Unknown;
+        }
+
+        return ServiceRequestStateFor(code);
+    }
+
     // ---------------------------------------------------------------------------
     // Legal Front Door intake (spaarke-SPA-external-access-platform-r3 task 035, FR-05 / FR-06)
     // ---------------------------------------------------------------------------
@@ -975,8 +1024,24 @@ public class ExternalDataService
     // the feed endpoint gates every item against the caller principal's accessible set itself.
     // ---------------------------------------------------------------------------
 
-    /// <summary>One grant row the feed reports: the row id, its single root and when it was granted.</summary>
-    public sealed record RecentGrant(Guid GrantId, ExternalGrantRootType RootType, Guid RootId, DateTimeOffset GrantedOn);
+    /// <summary>
+    /// One grant row the feed reports: the row id, its single root and when it was granted. <see cref="RenewedOn"/> is the
+    /// row's <c>modifiedon</c> when the row was changed after it was created (by more than <see cref="RenewalMinGap"/>),
+    /// else null. See <see cref="EventOn"/> and the renewal remarks on <see cref="GetRecentGrantsAsync"/>.
+    /// </summary>
+    public sealed record RecentGrant(
+        Guid GrantId, ExternalGrantRootType RootType, Guid RootId, DateTimeOffset GrantedOn, DateTimeOffset? RenewedOn = null)
+    {
+        /// <summary>When the feed item happened: the renewal time when there is one, else the grant time.</summary>
+        public DateTimeOffset EventOn => RenewedOn is { } renewed && renewed > GrantedOn ? renewed : GrantedOn;
+    }
+
+    /// <summary>
+    /// How long after <c>createdon</c> a change to a grant row is still part of creating it (a take-over stamp, the
+    /// Assigned-To adopt, a same-request follow-up write), so it is not announced as a renewal. A change later than this is
+    /// treated as a renewal (owner decision 2026-10-12; <c>modifiedon</c> is the only renewal timestamp that exists).
+    /// </summary>
+    internal static readonly TimeSpan RenewalMinGap = TimeSpan.FromMinutes(2);
 
     /// <summary>The recent-grants read: the rows, and whether it was cut short or failed (never silent).</summary>
     public sealed record RecentGrantsRead(IReadOnlyList<RecentGrant> Grants, bool Truncated);
@@ -1002,19 +1067,31 @@ public class ExternalDataService
     /// once, on create, as a date only — or that date at 00:00 UTC when <c>createdon</c> is unreadable.
     /// </summary>
     /// <remarks>Carries the enforcement paths' <see cref="ExternalParticipationService.ExpiryPredicate"/>, so a lapsed grant
-    /// is never announced. A failed read is returned empty and flagged truncated (the collection read's honesty rule).</remarks>
+    /// is never announced. A failed read is returned empty and flagged truncated (the collection read's honesty rule).
+    /// <para><b>Renewals (owner decision 2026-10-12).</b> A grant renewed or restored IN PLACE (a lapsed one re-granted, a
+    /// level raised, an expiry extended) keeps its row, its <c>createdon</c> and its <c>sprk_granteddate</c> (written once,
+    /// on create), and the table has no renewed-on or expiry-changed-on column (live describe 2026-10-12). The only
+    /// timestamp that moves is <c>modifiedon</c>, so when <paramref name="modifiedSince"/> is given the read also returns a
+    /// row modified at or after it, and <see cref="RecentGrant.RenewedOn"/> carries <c>modifiedon</c> when it is later than
+    /// <c>createdon</c> by more than <see cref="RenewalMinGap"/>. <b>Known false positive:</b> <c>modifiedon</c> also moves
+    /// on a shortened expiry, a lowered level, a take-over stamp or an edit in the model-driven app; none can be told from
+    /// a renewal with existing columns. The row must still be active and unexpired, so a lapsed grant is never announced.</para></remarks>
     public virtual async Task<RecentGrantsRead> GetRecentGrantsAsync(
-        Guid contactId, DateOnly since, DateOnly today, CancellationToken ct = default)
+        Guid contactId, DateOnly since, DateOnly today, CancellationToken ct = default,
+        DateTimeOffset? modifiedSince = null)
     {
         if (contactId == Guid.Empty)
             return new RecentGrantsRead(Array.Empty<RecentGrant>(), false);
 
+        var window = modifiedSince is { } modified
+            ? $"(sprk_granteddate ge {since:yyyy-MM-dd} or modifiedon ge {modified.UtcDateTime:yyyy-MM-ddTHH:mm:ssZ})"
+            : $"sprk_granteddate ge {since:yyyy-MM-dd}";
         var filter = Uri.EscapeDataString(
-            $"_sprk_contact_value eq {contactId} and statecode eq 0 and sprk_granteddate ge {since:yyyy-MM-dd} and "
+            $"_sprk_contact_value eq {contactId} and statecode eq 0 and {window} and "
             + ExternalParticipationService.ExpiryPredicate(today));
         var url = $"{GetApiUrl()}/sprk_externalrecordaccesses?$filter={filter}" +
                   "&$select=sprk_externalrecordaccessid,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value," +
-                  "sprk_granteddate,createdon&$orderby=createdon desc,sprk_externalrecordaccessid desc";
+                  "sprk_granteddate,createdon,modifiedon&$orderby=createdon desc,sprk_externalrecordaccessid desc";
 
         var read = await GetCollectionAsync<Dictionary<string, JsonElement>>(url, ct);
         var grants = new List<RecentGrant>();
@@ -1033,10 +1110,26 @@ public class ExternalDataService
             if (GrantedOnValue(row) is not { } grantedOn)
                 continue;
 
-            grants.Add(new RecentGrant(grantId, roots[0].Type, roots[0].Id, grantedOn));
+            grants.Add(new RecentGrant(grantId, roots[0].Type, roots[0].Id, grantedOn, RenewedOnValue(row)));
         }
 
         return new RecentGrantsRead(grants, read.Truncated);
+    }
+
+    /// <summary>
+    /// <c>modifiedon</c> when BOTH it and <c>createdon</c> read and the row was changed more than <see cref="RenewalMinGap"/>
+    /// after it was created; else null. Needs a real <c>createdon</c> (the date fallback would make every row look renewed).
+    /// </summary>
+    private static DateTimeOffset? RenewedOnValue(IReadOnlyDictionary<string, JsonElement> row)
+    {
+        if (row.TryGetValue("createdon", out var created) && created.ValueKind == JsonValueKind.String
+            && created.TryGetDateTimeOffset(out var createdOn)
+            && row.TryGetValue("modifiedon", out var modified) && modified.ValueKind == JsonValueKind.String
+            && modified.TryGetDateTimeOffset(out var modifiedOn)
+            && modifiedOn - createdOn > RenewalMinGap)
+            return modifiedOn;
+
+        return null;
     }
 
     /// <summary><c>createdon</c>, else <c>sprk_granteddate</c> (either wire shape) at 00:00 UTC; null when neither reads.</summary>

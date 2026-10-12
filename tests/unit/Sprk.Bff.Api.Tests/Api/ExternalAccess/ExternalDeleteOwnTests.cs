@@ -1010,6 +1010,12 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
         public Exception? RequesterFault { get; set; }
 
+        /// <summary>The state a request reads as when a test sets one; a request with none reads as Open (the default case).</summary>
+        public ConcurrentDictionary<Guid, ServiceRequestOpenState> States { get; } = new();
+
+        /// <summary>A fault for the state read (the real read throws for a failed Dataverse call).</summary>
+        public Exception? StateFault { get; set; }
+
         /// <summary>Related rows per (entity, service request): what the real probe would find in each relationship.</summary>
         public ConcurrentDictionary<(string Entity, Guid ServiceRequest), bool> RelatedRows { get; } = new();
 
@@ -1033,6 +1039,8 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             ServiceRequestDeletes.Clear();
             Targets.Clear();
             Requesters.Clear();
+            States.Clear();
+            StateFault = null;
             TargetFault = null;
             DeleteFault = null;
             RequesterFault = null;
@@ -1057,6 +1065,15 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
                 return Task.FromResult(Requesters.TryRemove(id, out _));
             }
             return Task.FromResult(Targets.TryRemove((kind, id), out _));
+        }
+
+        public override Task<ServiceRequestOpenState> GetServiceRequestOpenStateAsync(Guid serviceRequestId, CancellationToken ct = default)
+        {
+            if (StateFault is { } fault)
+                return Task.FromException<ServiceRequestOpenState>(fault);
+            if (States.TryGetValue(serviceRequestId, out var state))
+                return Task.FromResult(state);
+            return Task.FromResult(Requesters.ContainsKey(serviceRequestId) ? ServiceRequestOpenState.Open : ServiceRequestOpenState.Unknown);
         }
 
         public override Task<bool> HasRelatedRecordsAsync(Guid serviceRequestId, CancellationToken ct = default)
