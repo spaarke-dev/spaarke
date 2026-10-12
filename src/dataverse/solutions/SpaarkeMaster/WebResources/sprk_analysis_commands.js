@@ -6,7 +6,7 @@
  * DEPLOYMENT: Ribbon button on sprk_document form Analysis tab
  * ARCHITECTURE: Code Page dialog approach
  *
- * @version 1.0.0
+ * @version 1.1.0
  * @namespace Spaarke.Commands.Analysis
  */
 
@@ -136,8 +136,15 @@ function Spaarke_NewAnalysisFromSubgrid(selectedControl) {
 // ============================================================================
 
 /**
- * Navigate to Analysis Workspace Custom Page
+ * Navigate to SpaarkeAi (opens the existing analysis in the SpaarkeAi three-pane
+ * shell via the openSpaarkeAi deep-link shape)
  * Called when user clicks on an analysis record in the subgrid
+ *
+ * NOTE: this is a plain (non-module) web-resource script, so it cannot `import`
+ * src/solutions/SpaarkeAi/src/utils/launch-resolver.ts's openSpaarkeAi/buildLaunchUrl
+ * helpers directly. The URL parameter shape below (analysisId / entityLogicalName /
+ * entityId / regarding) is hand-duplicated to match that module byte-for-byte —
+ * keep both in sync if the wire format changes.
  *
  * @param {string} analysisId - The analysis record GUID
  * @param {string} documentId - The parent document GUID
@@ -156,34 +163,32 @@ function Spaarke_OpenAnalysisWorkspace(analysisId, documentId) {
         const cleanAnalysisId = analysisId.replace(/[{}]/g, '').toLowerCase();
         const cleanDocumentId = documentId ? documentId.replace(/[{}]/g, '').toLowerCase() : '';
 
-        // Prepare data payload for Custom Page
-        const dataPayload = JSON.stringify({
-            analysisId: cleanAnalysisId,
-            documentId: cleanDocumentId
-        });
-
-        const pageInput = {
-            pageType: "custom",
-            name: "sprk_analysisworkspace_8bc0b",
-            recordId: dataPayload  // Pass data via recordId (dialog workaround)
+        // Build the openSpaarkeAi param shape (mirrors launch-resolver.ts buildLaunchUrl):
+        // analysisId opens the existing analysis directly (no hub cards); entityLogicalName/
+        // entityId/regarding thread the parent document as regarding context.
+        const dataPayload = {
+            analysisId: cleanAnalysisId
         };
-
-        // Get app ID if available
-        try {
-            const globalContext = Xrm.Utility.getGlobalContext();
-            if (globalContext && globalContext.client && typeof globalContext.client.getAppId === 'function') {
-                pageInput.appId = globalContext.client.getAppId();
-            }
-        } catch (e) {
-            console.log("[Spaarke.Analysis] Could not get appId:", e.message);
+        if (cleanDocumentId) {
+            dataPayload.entityLogicalName = "sprk_document";
+            dataPayload.entityId = cleanDocumentId;
+            dataPayload.regarding = cleanDocumentId;
         }
 
-        // Navigate to Custom Page (full page, not dialog)
-        const navigationOptions = {
-            target: 1  // Full page (not dialog)
+        const pageInput = {
+            pageType: "webresource",
+            webresourceName: "sprk_spaarkeai",
+            data: buildQueryString(dataPayload)
         };
 
-        console.log("[Spaarke.Analysis] Navigating to Analysis Workspace:", pageInput);
+        // Navigate to SpaarkeAi as a modal dialog (matches openSpaarkeAi's default target=2)
+        const navigationOptions = {
+            target: 2,
+            width: { value: 80, unit: "%" },
+            height: { value: 80, unit: "%" }
+        };
+
+        console.log("[Spaarke.Analysis] Navigating to SpaarkeAi:", pageInput);
 
         Xrm.Navigation.navigateTo(pageInput, navigationOptions).then(
             function success() {
@@ -192,7 +197,7 @@ function Spaarke_OpenAnalysisWorkspace(analysisId, documentId) {
             function error(err) {
                 console.error("[Spaarke.Analysis] Navigation error:", err);
                 if (err && err.errorCode !== 2) {
-                    showErrorDialog("Error opening Analysis Workspace: " + (err.message || "Unknown error"));
+                    showErrorDialog("Error opening SpaarkeAi: " + (err.message || "Unknown error"));
                 }
             }
         );
@@ -204,7 +209,7 @@ function Spaarke_OpenAnalysisWorkspace(analysisId, documentId) {
 }
 
 /**
- * Navigate to Analysis Workspace from subgrid row click
+ * Navigate to SpaarkeAi (existing analysis) from subgrid row click
  * Called by ribbon OnRowClick or double-click handler
  *
  * @param {object} selectedItems - Selected items from subgrid
@@ -409,7 +414,10 @@ async function openAnalysisBuilderDialog(params, formContext) {
             data: buildQueryString(dataPayload)
         };
 
-        // Dialog options for Analysis Builder - percentage-based for responsive sizing
+        // Dialog options for Analysis Builder - percentage-based for responsive sizing.
+        // Matches the `wizard` OOB size in oobModalSizes.ts (spec FR-11/FR-18,
+        // task 090). Plain Dataverse web resource (no bundler) - cannot import
+        // that module; keep this literal in sync with it manually.
         const navigationOptions = {
             target: 2,      // Dialog
             position: 1,    // Center
@@ -546,8 +554,14 @@ RIBBON CONFIGURATION:
 
 WEB RESOURCE NAMES:
 - Playbook Library (merged, replaces AnalysisBuilder): sprk_playbooklibrary
-- Analysis Workspace: sprk_analysisworkspace_8bc0b
+- SpaarkeAi (existing analysis open, replaces the retired Analysis Workspace custom
+  page): sprk_spaarkeai
 
 VERSION HISTORY:
+- 1.1.0: OpenAnalysisWorkspace/OpenAnalysisWorkspaceFromSubgrid repointed to open
+  sprk_spaarkeai via the openSpaarkeAi deep-link param shape (analysisId/
+  entityLogicalName/entityId/regarding); dead custom-page navigation path
+  (pageType: "custom") removed (ai-advanced-capabilities-analysis-hub-r1 task 061,
+  spec §13.5).
 - 1.0.0: Initial release for AI Document Intelligence Phase 2
 */
