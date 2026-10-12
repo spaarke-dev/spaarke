@@ -26,7 +26,8 @@
 > tasks 044/050): the `AnalysisChunk.FieldDelta` server model + `FromDelta` +
 > its test file are DELETED (grep-zero shown in
 > `projects/spaarke-ai-architecture-redesign-r1/notes/track-b-completion-audit.md`).
-> The frozen engine's `Streaming.FieldDeltaEvent` type remains untouched. The
+> The frozen engine's `Streaming.FieldDeltaEvent` type and its
+> `IncrementalJsonParser` were deleted on 2026-10-12, since they had no caller left. The
 > "MUST preserve FieldDelta" / "MUST NOT delete until migrated" rules below are
 > therefore DISCHARGED — retained in this file for history only; the binding
 > content is the section-name-keyed streaming + widget contract.
