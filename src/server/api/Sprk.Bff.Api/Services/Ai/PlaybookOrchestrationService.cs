@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 using Sprk.Bff.Api.Services.Ai.Insights.Routing;
@@ -223,7 +224,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
             await ExecuteNodeBasedModeAsync(context, nodes, writer, cancellationToken);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || context.CancellationToken.IsCancellationRequested)
         {
             context.MarkCancelled();
             await writer.WriteAsync(PlaybookStreamEvent.RunCancelled(
@@ -232,9 +233,10 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "App-only playbook execution failed - RunId: {RunId}", context.RunId);
-            context.MarkFailed(ex.Message);
+            var failureDetail = ProblemDetailsHelper.Explain("The playbook run failed.", ex);
+            context.MarkFailed(failureDetail);
             await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
-                context.RunId, context.PlaybookId, ex.Message), CancellationToken.None);
+                context.RunId, context.PlaybookId, failureDetail), CancellationToken.None);
         }
         finally
         {
@@ -272,7 +274,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 await ExecuteNodeBasedModeAsync(context, nodes, writer, cancellationToken);
             }
         }
-        catch (OperationCanceledException)
+        // Only a cancellation the CALLER asked for is a cancelled run: the SSE request token, or the run context's own token
+        // (the Stop button: POST /runs/{id}/cancel -> context.Cancel()). Any other OperationCanceledException (an upstream
+        // HTTP timeout surfaces as a TaskCanceledException) is a failure: it falls through to the RunFailed path below
+        // instead of ending the stream as RunCancelled, which the Analysis bridge drops (a silent "success").
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || context.CancellationToken.IsCancellationRequested)
         {
             context.MarkCancelled();
             await writer.WriteAsync(PlaybookStreamEvent.RunCancelled(
@@ -281,9 +287,12 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Playbook execution failed - RunId: {RunId}", context.RunId);
-            context.MarkFailed(ex.Message);
-            await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
-                context.RunId, context.PlaybookId, ex.Message), CancellationToken.None);
+            context.MarkFailed(ProblemDetailsHelper.Explain("The playbook run failed.", ex));
+            // ADR-019: this event goes to the caller's SSE stream. The exception stays in the log above; the stream
+            // gets the fixed text, the stable code and the trace id that finds the log entry.
+            await writer.WriteAsync(PlaybookStreamEvent.BuildRunFailedEvent(
+                context.RunId, context.PlaybookId, context.HttpContext?.TraceIdentifier ?? context.RunId.ToString()),
+                CancellationToken.None);
         }
         finally
         {
@@ -375,7 +384,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error validating playbook {PlaybookId}", playbookId);
-            return PlaybookValidationResult.Failure($"Validation error: {ex.Message}");
+            return PlaybookValidationResult.Failure(ProblemDetailsHelper.Explain("Validation failed.", ex));
         }
     }
 
@@ -485,7 +494,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 TokensIn = output.Metrics.TokensIn,
                 TokensOut = output.Metrics.TokensOut,
                 Confidence = output.Confidence,
-                ErrorMessage = output.ErrorMessage,
+                ErrorMessage = ProblemDetailsHelper.Redact(output.ErrorMessage),
                 OutputPreview = TruncateOutput(output.TextContent)
             })
             .ToArray();
@@ -635,9 +644,10 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     break;
 
                 case "error":
-                    context.MarkFailed(chunk.Error ?? "Unknown error");
+                    var legacyError = ProblemDetailsHelper.Redact(chunk.Error) ?? "Unknown error";
+                    context.MarkFailed(legacyError);
                     await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
-                        context.RunId, context.PlaybookId, chunk.Error ?? "Unknown error"), cancellationToken);
+                        context.RunId, context.PlaybookId, legacyError), cancellationToken);
                     return;
             }
         }
@@ -744,7 +754,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     "Node {NodeName} in batch {BatchNumber} failed - stopping playbook execution",
                     failedNode.node.Name, batchNumber);
 
-                var failureDetail = $"Node '{failedNode.node.Name}' failed: {failedNode.result.ErrorMessage}";
+                var failureDetail = $"Node '{failedNode.node.Name}' failed: {ProblemDetailsHelper.Redact(failedNode.result.ErrorMessage)}";
                 context.MarkFailed(failureDetail);
 
                 await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
@@ -1257,7 +1267,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 {
                     await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
                         runContext.RunId, runContext.PlaybookId, node.Id, node.Name,
-                        compositeOutput.ErrorMessage ?? "Iteration failed"), cancellationToken);
+                        ProblemDetailsHelper.Redact(compositeOutput.ErrorMessage) ?? "Iteration failed"), cancellationToken);
                 }
 
                 EmitNodeCompleted(compositeOutput.Success ? "completed" : "failed");
@@ -1339,7 +1349,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
                 await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name,
-                    output.ErrorMessage ?? "Unknown error"), cancellationToken);
+                    ProblemDetailsHelper.Redact(output.ErrorMessage) ?? "Unknown error"), cancellationToken);
             }
 
             // R3 FR-3H1.4 / AC-H1.2 — scan NodeOutput for literal `{{` substrings
@@ -1366,17 +1376,21 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         {
             _logger.LogError(ex, "Node {NodeName} threw exception", node.Name);
 
+            // The node's error text is stored (run detail) and streamed (NodeFailed): the exception type and a redacted
+            // message, never a secret value.
+            var nodeError = ProblemDetailsHelper.Explain("The node threw an unexpected error.", ex);
+
             // Create error output to store
             var errorOutput = NodeOutput.Error(
                 node.Id,
                 node.OutputVariable,
-                ex.Message,
+                nodeError,
                 NodeErrorCodes.InternalError);
 
             runContext.StoreNodeOutput(errorOutput);
 
             await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
-                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, ex.Message), cancellationToken);
+                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, nodeError), cancellationToken);
 
             EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063) — exception path
 
@@ -1748,7 +1762,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             }
             catch (JsonException ex)
             {
-                errors.Add($"Node '{node.Name}': JPS schema is not valid JSON — {ex.Message}");
+                errors.Add($"Node '{node.Name}': JPS schema is not valid JSON — {ProblemDetailsHelper.Redact(ex.Message)}");
                 continue;
             }
 
