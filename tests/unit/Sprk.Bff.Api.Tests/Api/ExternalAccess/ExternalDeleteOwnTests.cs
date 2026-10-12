@@ -501,7 +501,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
     [Theory]
     [InlineData(DeletableKind.Document, "sprk_documents",
-        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,_sprk_relatedservicerequest_value")]
+        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,_sprk_relatedservicerequest_value,_sprk_invoice_value")]
     [InlineData(DeletableKind.Todo, "sprk_todos",
         "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value")]
     [InlineData(DeletableKind.Event, "sprk_events",
