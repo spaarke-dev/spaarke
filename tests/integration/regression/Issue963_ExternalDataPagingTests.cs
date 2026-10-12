@@ -42,7 +42,7 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
     private static readonly CallerPrincipal Creator = new()
     {
         Plane = CallerPrincipalPlane.CiamContact, ContactId = Guid.Parse("96300000-0000-0000-0000-0000000000c0"),
-        ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        ProjectAccess = new[] { CallerProjectAccess.FromLevel(Root, ExternalAccessLevel.ViewOnly) },
     };
 
     private readonly FakeDataverse _dataverse = new();
@@ -88,10 +88,16 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
                     });
                     break;
                 case "todos":
-                    _dataverse.Add("sprk_todos", new JsonObject { ["sprk_todoid"] = id, ["sprk_name"] = $"To-do {i}" });
+                    _dataverse.Add("sprk_todos", new JsonObject
+                    {
+                        ["sprk_todoid"] = id, ["sprk_name"] = $"To-do {i}", ["_sprk_regardingproject_value"] = Root.ToString(),
+                    });
                     break;
                 case "events":
-                    _dataverse.Add("sprk_events", new JsonObject { ["sprk_eventid"] = id, ["sprk_eventname"] = $"Event {i}" });
+                    _dataverse.Add("sprk_events", new JsonObject
+                    {
+                        ["sprk_eventid"] = id, ["sprk_eventname"] = $"Event {i}", ["_sprk_regardingproject_value"] = Root.ToString(),
+                    });
                     break;
                 case "contacts":
                     _dataverse.Add("sprk_externalrecordaccesses", new JsonObject { ["_sprk_contact_value"] = id });
@@ -106,10 +112,10 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         switch (read)
         {
             case "documents":
-                var docs = await _sut.GetDocumentsAsync(ExternalDataService.DocumentParentKind.Project, Root);
+                var docs = await _sut.GetDocumentsAsync(ExternalDataService.DocumentParentKind.Project, Root, Creator);
                 return (docs.Value.Select(d => d.SprkDocumentid).ToList(), docs.Truncated);
             case "todos":
-                var todos = await _sut.GetTodosAsync(ExternalDataService.TodoRootKind.Project, Root);
+                var todos = await _sut.GetTodosAsync(ExternalDataService.TodoRootKind.Project, Root, Creator);
                 return (todos.Value.Select(t => t.SprkTodoid).ToList(), todos.Truncated);
             case "events":
                 var events = await _sut.GetEventsAsync(ExternalDataService.TodoRootKind.Project, Root, Creator);

@@ -627,7 +627,7 @@ public sealed class EventRoutesLiveTests
             reopened.GetProperty("sprk_duedate").GetString().Should().Be("2026-10-23");
 
             // The list read the SPA renders.
-            (await external.GetTodosAsync(ExternalDataService.TodoRootKind.Project, projectId)).Value
+            (await external.GetTodosAsync(ExternalDataService.TodoRootKind.Project, projectId, OperatorReading(operatorId, projectId))).Value
                 .Single(t => t.SprkTodoid == ext.SprkTodoid).SprkDuedate.Should().Be("2026-10-23");
 
             // ── The SDK writers (production DataverseServiceClientImpl) ────────────────────────────────────────

@@ -345,7 +345,8 @@ public static class ExternalMessageEndpoints
             // Internal-only reaches a SYSTEMUSER principal only (the read service also asks IsExternalAsync). A contact —
             // CIAM or workforce — passes null, so the shared filter hides every internal-only row from it.
             var read = await threadReadService
-                .ReadRegardingAppOnlyAsync(messageRoot.EntityLogicalName, id, principal.SystemUserId, ct)
+                .ReadRegardingAppOnlyAsync(
+                    messageRoot.EntityLogicalName, id, principal.SystemUserId, RootsReadableFor(messageRoot, principal), ct)
                 .ConfigureAwait(false);
 
             return Results.Ok(new ExternalCollectionResponse<ExternalMessageDto>
@@ -368,6 +369,23 @@ public static class ExternalMessageEndpoints
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "EXT_MESSAGES_INTERNAL_ERROR" });
         }
     }
+
+    /// <summary>
+    /// Which messages of a thread the caller may see by the core roots they are stamped with (fix round for r3 task 039;
+    /// the one rule is <see cref="ExternalMultiRootRule"/>): a message also filed to a project, matter or work assignment
+    /// the caller cannot read is withheld, so a secure matter's message does not show on a project thread.
+    /// </summary>
+    /// <remarks>
+    /// <b>Invoice threads are exempt, by the owner's decision (2026-10-11, option A "inherit").</b> An invoice is not a root;
+    /// its thread is reached through the UNION of the caller's rights on its parents (the gate above), and every message
+    /// filed under it is stamped with exactly those parents. Applying the every-root rule there would empty the thread for
+    /// a caller who reaches the invoice through only one of its parents, which is the case the owner chose to allow. The
+    /// exposure is the invoice's own, not a second lookup. Service-request threads are NOT exempt (requester scope).
+    /// </remarks>
+    internal static Func<MessageRootLookups, bool> RootsReadableFor(MessageRoot root, CallerPrincipal principal) =>
+        string.Equals(root.EntityLogicalName, "sprk_invoice", StringComparison.OrdinalIgnoreCase)
+            ? _ => true
+            : roots => ExternalMultiRootRule.AllRootsReadable(principal, roots.Project, roots.Matter, roots.WorkAssignment);
 
     /// <summary>
     /// The record gate. Fail-closed: no registered module, an empty accessible set, a missing record and a record outside

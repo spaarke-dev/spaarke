@@ -375,6 +375,9 @@ public static class ExternalAccessModule
         {
             Name = "documents",
             RecordEntity = "sprk_document",
+            // Fix round for r3 task 039 (INTERIM, ExternalMultiRootRule): a document also filed to a root the caller cannot
+            // read is not listed by the grid, as on the record-detail document routes.
+            RequireReadOnEveryRoot = true,
             ScopeDimensions = new[]
             {
                 new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },

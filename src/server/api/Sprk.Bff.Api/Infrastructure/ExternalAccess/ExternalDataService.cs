@@ -142,6 +142,14 @@ public class ExternalDataService
         [JsonPropertyName("sprk_documenttype")] public string? SprkDocumenttype { get; set; }
         [JsonPropertyName("sprk_filesummary")] public string? SprkSummary { get; set; }
         [JsonPropertyName("_sprk_project_value")] public string? SprkProjectidValue { get; set; }
+        // Fix round for task 039: the other root links, read so the list can withhold a document also filed to a root the
+        // caller cannot read (ExternalMultiRootRule). The typed column and its related twin, per root, are the roots in
+        // DocumentLinkFields (the one declaration; pinned by test). Never mapped onto the wire DTO.
+        [JsonPropertyName("_sprk_relatedproject_value")] public string? SprkRelatedprojectValue { get; set; }
+        [JsonPropertyName("_sprk_matter_value")] public string? SprkMatterValue { get; set; }
+        [JsonPropertyName("_sprk_relatedmatter_value")] public string? SprkRelatedmatterValue { get; set; }
+        [JsonPropertyName("_sprk_workassignment_value")] public string? SprkWorkassignmentValue { get; set; }
+        [JsonPropertyName("_sprk_relatedworkassignment_value")] public string? SprkRelatedworkassignmentValue { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
         [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
@@ -386,33 +394,60 @@ public class ExternalDataService
             ? binding
             : throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a document parent kind.");
 
-    /// <summary>Retrieves all documents linked to the specified parent record through that parent's lookup.</summary>
+    /// <summary>Retrieves the documents linked to the specified parent record through that parent's lookup, minus any also filed to a root the caller cannot read.</summary>
     /// <remarks>
     /// Task 105: followed page by page up to <see cref="MaxCollectionRows"/> (it was a single <c>$top=200</c> read, so
     /// a project's 201st document was silently missing); a cut-short list says
     /// <see cref="ExternalCollectionResponse{T}.Truncated"/>. The primary key breaks <c>createdon</c> ties so pages
     /// never overlap. Task 031 generalized it from project to every <see cref="DocumentParentKind"/>; the project query
     /// is unchanged.
+    /// <para>Fix round for task 039: a document carries typed links to a project, a matter and a work assignment (and a
+    /// related twin of each), so one filed to a secure matter AND to a project the caller can read used to list on the
+    /// project route (name and AI summary). It is now listed only if the caller holds Read on every root it carries
+    /// (<see cref="ExternalMultiRootRule"/>). The caller has ALREADY been authorized for <paramref name="parentId"/>.</para>
     /// </remarks>
     public virtual async Task<ExternalCollectionResponse<ExternalDocumentDto>> GetDocumentsAsync(
-        DocumentParentKind parentKind, Guid parentId, CancellationToken ct = default)
+        DocumentParentKind parentKind, Guid parentId, CallerPrincipal caller, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(caller);
         var url = BuildDocumentListUrl(GetApiUrl(), parentKind, parentId);
 
         var read = await GetCollectionAsync<DocumentRow>(url, ct);
+        var readable = read.Rows.Where(r => DocumentRootsReadable(caller, r)).ToList();
+        if (readable.Count != read.Rows.Count)
+        {
+            _logger.LogInformation(
+                "[EXT-DATA] documents: {Withheld} of {Total} document(s) of {ParentKind} {ParentId} withheld - also filed to a record the caller cannot read",
+                read.Rows.Count - readable.Count, read.Rows.Count, parentKind, parentId);
+        }
+
         return new ExternalCollectionResponse<ExternalDocumentDto>
         {
-            Value = read.Rows.Select(MapDocument).ToList(),
+            Value = readable.Select(MapDocument).ToList(),
             Truncated = read.Truncated,
         };
     }
+
+    private static bool DocumentRootsReadable(CallerPrincipal caller, DocumentRow row) =>
+        ExternalMultiRootRule.AllRootsReadable(
+            caller,
+            (ExternalGrantRootType.Project, row.SprkProjectidValue),
+            (ExternalGrantRootType.Project, row.SprkRelatedprojectValue),
+            (ExternalGrantRootType.Matter, row.SprkMatterValue),
+            (ExternalGrantRootType.Matter, row.SprkRelatedmatterValue),
+            (ExternalGrantRootType.WorkAssignment, row.SprkWorkassignmentValue),
+            (ExternalGrantRootType.WorkAssignment, row.SprkRelatedworkassignmentValue));
 
     /// <summary>The document list URL for one parent. Pure, so a test can read the filter (task 031).</summary>
     internal static string BuildDocumentListUrl(string apiUrl, DocumentParentKind parentKind, Guid parentId)
     {
         var binding = GetDocumentParentBinding(parentKind);
         // Task 032 (FR-26, review 031 K2): both creator stamps, so the SPA can offer Delete only on the caller's own rows.
-        var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,createdon,"
+        // Fix round for task 039: every root link (typed + related twin), so a document also filed to a root the caller
+        // cannot read can be withheld (ExternalMultiRootRule).
+        var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,"
+                     + "_sprk_relatedproject_value,_sprk_matter_value,_sprk_relatedmatter_value,"
+                     + "_sprk_workassignment_value,_sprk_relatedworkassignment_value,createdon,"
                      + CreatorStampSelect;
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {parentId}");
         return $"{apiUrl}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc,sprk_documentid asc";
@@ -1214,15 +1249,31 @@ public class ExternalDataService
     /// task-017 trap; <see cref="BuildTodoListUrl"/> is tested directly for exactly that reason.
     /// </remarks>
     public virtual async Task<ExternalCollectionResponse<ExternalTodoDto>> GetTodosAsync(
-        TodoRootKind rootKind, Guid rootId, CancellationToken ct = default)
+        TodoRootKind rootKind, Guid rootId, CallerPrincipal caller, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(caller);
         var url = BuildTodoListUrl(GetApiUrl(), rootKind, rootId);
 
         // Task 105: paged to the cap, and a cut-short list says so (see GetDocumentsAsync).
         var read = await GetCollectionAsync<TodoRow>(url, ct);
+
+        // Fix round for task 039: a to-do under an invoice of secure matter M and project P is stamped with BOTH roots, so
+        // the project route used to list M's to-do to a reader of P alone. Listed only if the caller holds Read on every
+        // root the to-do carries (ExternalMultiRootRule); a single-root to-do lists exactly as before.
+        var readable = read.Rows
+            .Where(r => ExternalMultiRootRule.AllRootsReadable(
+                caller, r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue))
+            .ToList();
+        if (readable.Count != read.Rows.Count)
+        {
+            _logger.LogInformation(
+                "[EXT-DATA] todos: {Withheld} of {Total} to-do(s) regarding {RootKind} {RootId} withheld - also filed to a record the caller cannot read",
+                read.Rows.Count - readable.Count, read.Rows.Count, rootKind, rootId);
+        }
+
         return new ExternalCollectionResponse<ExternalTodoDto>
         {
-            Value = read.Rows.Select(MapTodo).ToList(),
+            Value = readable.Select(MapTodo).ToList(),
             Truncated = read.Truncated,
         };
     }
@@ -1313,24 +1364,13 @@ public class ExternalDataService
     /// Without it an event filed to a secure matter AND to a project the caller can read is returned by the project route
     /// to a caller who holds nothing on the matter: the matter's isolation (its rights come only from a direct grant) would
     /// be bypassed by a second lookup. A row naming no other root is unaffected, so every single-parent event lists
-    /// exactly as before.</para>
-    /// <para>Fail closed: a lookup value that is not a GUID is unreadable. The rights are the principal's, through the same
-    /// <see cref="CallerPrincipal.RightsOn"/> dispatch the grant routes use.</para>
+    /// exactly as before. The rule itself (fail-closed, and its interim status) is <see cref="ExternalMultiRootRule"/>,
+    /// shared with the to-do, document, message and feed lists.</para>
     /// </remarks>
     private static List<EventRow> ReadableEvents(IReadOnlyList<EventRow> rows, CallerPrincipal caller) =>
-        rows.Where(r =>
-            ParentReadable(caller, ExternalGrantRootType.Project, r.SprkRegardingprojectValue)
-            && ParentReadable(caller, ExternalGrantRootType.Matter, r.SprkRegardingmatterValue)
-            && ParentReadable(caller, ExternalGrantRootType.WorkAssignment, r.SprkRegardingworkassignmentValue))
+        rows.Where(r => ExternalMultiRootRule.AllRootsReadable(
+                caller, r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue))
             .ToList();
-
-    private static bool ParentReadable(CallerPrincipal caller, ExternalGrantRootType rootType, string? lookupValue)
-    {
-        if (string.IsNullOrWhiteSpace(lookupValue))
-            return true; // not filed to this root
-        return Guid.TryParse(lookupValue, out var rootId)
-               && caller.RightsOn(rootType, rootId).HasFlag(Spaarke.Dataverse.AccessRights.Read);
-    }
 
     /// <summary>
     /// Creates a new <c>sprk_event</c> record associated with the supplied project via

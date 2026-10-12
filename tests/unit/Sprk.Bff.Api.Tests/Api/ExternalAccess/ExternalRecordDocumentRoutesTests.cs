@@ -831,13 +831,16 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
     }
 
     [Fact]
-    public void ProjectListUrl_IsUnchanged()
+    public void ProjectListUrl_IsTheShippedQuery_PlusTheOtherRootLinks()
     {
-        // Task 032 (FR-26, review 031 K2) appended the two creator stamps; nothing else changed.
+        // Task 032 (FR-26, review 031 K2) appended the two creator stamps; the task 039 fix round added the other root links
+        // (typed + related twin) so a document also filed to a root the caller cannot read can be withheld. Filter and order unchanged.
         ExternalDataService.BuildDocumentListUrl("https://org.test/api/data/v9.2", ExternalDataService.DocumentParentKind.Project, RecordA)
             .Should().Be("https://org.test/api/data/v9.2/sprk_documents?$filter="
                          + Uri.EscapeDataString($"_sprk_project_value eq {RecordA}")
-                         + "&$select=sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,createdon"
+                         + "&$select=sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value"
+                         + ",_sprk_relatedproject_value,_sprk_matter_value,_sprk_relatedmatter_value"
+                         + ",_sprk_workassignment_value,_sprk_relatedworkassignment_value,createdon"
                          + ",_sprk_createdbyperson_value,_sprk_createdbycontact_value"
                          + "&$orderby=createdon desc,sprk_documentid asc");
     }
@@ -1253,7 +1256,7 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
         }
 
         public override Task<ExternalCollectionResponse<ExternalDocumentDto>> GetDocumentsAsync(
-            DocumentParentKind parentKind, Guid parentId, CancellationToken ct = default)
+            DocumentParentKind parentKind, Guid parentId, CallerPrincipal caller, CancellationToken ct = default)
         {
             DocumentReads.Enqueue($"list:{parentKind}:{parentId}");
             return Task.FromResult(new ExternalCollectionResponse<ExternalDocumentDto>

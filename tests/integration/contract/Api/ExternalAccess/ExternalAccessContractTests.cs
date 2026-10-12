@@ -1478,7 +1478,7 @@ internal sealed class StubExternalDataService : ExternalDataService
 
     // Task 031: the document seams take the parent kind; these routes are project-only, so the recorded read is unchanged.
     public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalDocumentDto>> GetDocumentsAsync(
-        DocumentParentKind parentKind, Guid projectId, CancellationToken ct = default)
+        DocumentParentKind parentKind, Guid projectId, CallerPrincipal caller, CancellationToken ct = default)
     {
         _reads.Enqueue($"{nameof(GetDocumentsAsync)}:{projectId}");
         return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalDocumentDto> { Truncated = TruncatedRequested });
@@ -1486,7 +1486,7 @@ internal sealed class StubExternalDataService : ExternalDataService
 
     // Task 105: the to-do list seam, so the list-envelope contract covers the to-dos route too.
     public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalTodoDto>> GetTodosAsync(
-        TodoRootKind rootKind, Guid rootId, CancellationToken ct = default)
+        TodoRootKind rootKind, Guid rootId, CallerPrincipal caller, CancellationToken ct = default)
     {
         _reads.Enqueue($"{nameof(GetTodosAsync)}:{rootKind}:{rootId}");
         return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalTodoDto> { Truncated = TruncatedRequested });

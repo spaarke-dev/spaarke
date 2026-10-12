@@ -161,6 +161,16 @@ public sealed class ExternalModuleDescriptor
     }
 
     /// <summary>
+    /// When true, a row is kept only if EVERY root it is filed to (<c>sprk_project</c>, <c>sprk_matter</c>,
+    /// <c>sprk_workassignment</c> among the scope dimensions) is one the caller holds Read on, as well as matching SOME
+    /// dimension (<see cref="ExternalMultiRootRule"/>, the rule every list on the plane shares). Default false: the OR
+    /// across dimensions is the module's visibility. Set for the documents module (fix round for r3 task 039): a
+    /// document filed to a secure matter AND an accessible project is not the project reader's to list. The invoices
+    /// module leaves it off: an invoice is reached through the UNION of its parents (owner decision 2026-10-11).
+    /// </summary>
+    public bool RequireReadOnEveryRoot { get; init; }
+
+    /// <summary>
     /// The module's resolved scope dimensions — either the explicit <see cref="ScopeDimensions"/> list,
     /// or a one-element list built from the <see cref="RecordIdAttribute"/> + <see cref="AccessibleRecordIds"/>
     /// shorthand. Throws if neither is configured (a wiring bug — fail fast).
@@ -243,13 +253,43 @@ public sealed class ExternalModuleDescriptor
             {
                 if (ids.Count > 0 && TryGetAttributeId(row, attribute, out var id) && ids.Contains(id))
                 {
-                    scoped.Add(row);
-                    break; // OR across dimensions — one match is enough.
+                    // OR across dimensions — one match is enough, unless the module also requires Read on every root.
+                    if (!RequireReadOnEveryRoot || AllRootsReadable(principal, row, resolved.Select(d => d.Attribute)))
+                        scoped.Add(row);
+                    break;
                 }
             }
         }
 
         return scoped;
+    }
+
+    /// <summary>
+    /// The multi-root rule over a module row: each root-typed scope attribute the row populates must be a root the caller
+    /// holds Read on. A populated value that is not a GUID is unreadable (fail closed); an attribute that is not a root
+    /// (or is blank) is not part of the rule.
+    /// </summary>
+    private static bool AllRootsReadable(
+        CallerPrincipal principal, IReadOnlyDictionary<string, object?> row, IEnumerable<string> attributes)
+    {
+        foreach (var attribute in attributes)
+        {
+            var rootType = attribute.ToLowerInvariant() switch
+            {
+                "sprk_project" => (ExternalGrantRootType?)ExternalGrantRootType.Project,
+                "sprk_matter" => ExternalGrantRootType.Matter,
+                "sprk_workassignment" => ExternalGrantRootType.WorkAssignment,
+                _ => null,
+            };
+            if (rootType is null || !row.TryGetValue(attribute, out var raw) || raw is null)
+                continue;
+
+            var lookup = TryGetAttributeId(row, attribute, out var id) ? id.ToString() : "unreadable";
+            if (!ExternalMultiRootRule.AllRootsReadable(principal, (rootType.Value, lookup)))
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>

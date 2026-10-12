@@ -562,7 +562,7 @@ public static class ExternalProjectDataEndpoints
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return DenyDocumentParent(parentKind);
 
-        var documents = await dataService.GetDocumentsAsync(parentKind, parentId, ct);
+        var documents = await dataService.GetDocumentsAsync(parentKind, parentId, callerContext, ct);
         return Results.Ok(new ExternalDocumentListResponse
         {
             Value = documents.Value,
@@ -685,7 +685,7 @@ public static class ExternalProjectDataEndpoints
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return DenyRoot(rootKind);
 
-        return Results.Ok(await dataService.GetTodosAsync(rootKind, rootId, ct));
+        return Results.Ok(await dataService.GetTodosAsync(rootKind, rootId, callerContext, ct));
     }
 
     private static async Task<IResult> CreateTodoForRoot(

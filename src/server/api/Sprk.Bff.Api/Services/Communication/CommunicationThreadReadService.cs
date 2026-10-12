@@ -397,13 +397,21 @@ public sealed class CommunicationThreadReadService
     /// <param name="entityType">The regarding entity logical name (an ADR-024 family member, e.g. <c>sprk_matter</c>).</param>
     /// <param name="recordId">The record the caller has already been authorized to read.</param>
     /// <param name="callerSystemUserId">The caller's <c>systemuserid</c> when the caller is a systemuser; <c>null</c> for a contact.</param>
+    /// <param name="rootsReadable">
+    /// REQUIRED (no default, so a caller cannot forget it): whether the caller may see a message carrying these core-root
+    /// stamps. A communication filed under an invoice of secure matter M and project P is stamped with both, so the
+    /// keyed lookup alone would list it on P's thread to a reader of P only. A row it refuses is dropped, not counted
+    /// as truncation.
+    /// </param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AppOnlyRegardingReadResult> ReadRegardingAppOnlyAsync(
         string entityType,
         Guid recordId,
         Guid? callerSystemUserId,
+        Func<MessageRootLookups, bool> rootsReadable,
         CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(rootsReadable);
         if (string.IsNullOrWhiteSpace(entityType))
             throw BadRequest("A regarding entity type is required.");
 
@@ -435,7 +443,7 @@ public sealed class CommunicationThreadReadService
         // Re-check every row (defence in depth — the query is not the only gate): it must regard THIS record and carry a
         // sent/received status. A row with a missing or unreadable status is dropped (fail closed).
         var scoped = bounded
-            .Where(r => TryGuid(r, regardingValue) == recordId && IsExternallyVisibleRow(r))
+            .Where(r => TryGuid(r, regardingValue) == recordId && IsExternallyVisibleRow(r) && rootsReadable(RootsOf(r)))
             .ToList();
 
         var (messages, isInternal) = await FilterExternalMessagesAsync(scoped, callerSystemUserId, ct);
@@ -447,6 +455,16 @@ public sealed class CommunicationThreadReadService
 
         return new AppOnlyRegardingReadResult(messages, truncated);
     }
+
+    private const string ProjectStampColumn = "_sprk_regardingproject_value";
+    private const string MatterStampColumn = "_sprk_regardingmatter_value";
+    private const string WorkAssignmentStampColumn = "_sprk_regardingworkassignment_value";
+
+    private static readonly string[] RootStampColumns = { ProjectStampColumn, MatterStampColumn, WorkAssignmentStampColumn };
+
+    /// <summary>The core-root stamps a row carries (raw lookup values; a column the row lacks reads as not filed).</summary>
+    private static MessageRootLookups RootsOf(Dictionary<string, JsonElement> row) => new(
+        TryString(row, ProjectStampColumn), TryString(row, MatterStampColumn), TryString(row, WorkAssignmentStampColumn));
 
     /// <summary>True only for a Status Reason that means the message was actually sent or received (see the allow-list).</summary>
     private static bool IsExternallyReadableStatus(int? statusCode)
@@ -467,6 +485,9 @@ public sealed class CommunicationThreadReadService
     /// </summary>
     private static string ExternalSelect(IEnumerable<string> regardingValues, bool includeContent)
     {
+        // The three core-root stamps are ALWAYS read, whichever record the query is keyed on: they are what lets a row also
+        // filed to a root the caller cannot read be withheld (RootsOf). A read that dropped one would list such a row.
+        regardingValues = regardingValues.Concat(RootStampColumns).Distinct();
         var columns = new List<string> { PkField };
         if (includeContent)
         {
@@ -537,15 +558,22 @@ public sealed class CommunicationThreadReadService
     /// <param name="since">The window start; only messages created at or after it are read.</param>
     /// <param name="callerSystemUserId">The caller's <c>systemuserid</c> when the caller is a systemuser; <c>null</c> for a contact.</param>
     /// <param name="max">The most messages to return (newest first).</param>
+    /// <param name="rootsReadable">
+    /// REQUIRED: whether the caller may see a message carrying these core-root stamps (see
+    /// <see cref="ReadRegardingAppOnlyAsync"/>). A message filed to one accessible record and also to a root the caller
+    /// cannot read is not reported; it is dropped, not counted as truncation.
+    /// </param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AppOnlyRecentReadResult> ReadRecentForRecordsAppOnlyAsync(
         IReadOnlyList<(string EntityType, Guid RecordId)> records,
         DateTimeOffset since,
         Guid? callerSystemUserId,
         int max,
+        Func<MessageRootLookups, bool> rootsReadable,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(records);
+        ArgumentNullException.ThrowIfNull(rootsReadable);
         if (max <= 0)
             throw new ArgumentOutOfRangeException(nameof(max), "The feed read needs a positive bound.");
 
@@ -591,6 +619,9 @@ public sealed class CommunicationThreadReadService
                 continue;
             if (TryDateTimeOffset(row, CreatedOnField) is not { } createdOn || createdOn < since || !IsExternallyVisibleRow(row))
                 continue;
+            if (!rootsReadable(RootsOf(row)))
+                continue; // also filed to a root the caller cannot read
+
             var match = keyed.FirstOrDefault(r => TryGuid(row, r.Value) == r.RecordId);
             if (match.Value is null)
                 continue;

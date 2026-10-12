@@ -322,7 +322,11 @@ public static class ExternalNotificationFeedEndpoints
             // Messages: the external read rules (status, privilege, internal-only) are the read service's; the caller's
             // own messages are dropped by the creator stamp.
             var recent = await threadReadService
-                .ReadRecentForRecordsAppOnlyAsync(records, cutoff, principal.SystemUserId, MaxItems, ct)
+                .ReadRecentForRecordsAppOnlyAsync(
+                    records, cutoff, principal.SystemUserId, MaxItems,
+                    // A message also filed to a root the caller cannot read is not reported (ExternalMultiRootRule).
+                    roots => ExternalMultiRootRule.AllRootsReadable(principal, roots.Project, roots.Matter, roots.WorkAssignment),
+                    ct)
                 .ConfigureAwait(false);
             truncated |= recent.Truncated;
             foreach (var m in recent.Messages)

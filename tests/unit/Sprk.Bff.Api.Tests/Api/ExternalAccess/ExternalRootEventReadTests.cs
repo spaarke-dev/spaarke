@@ -434,12 +434,15 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
     }
 
     /// <summary>
-    /// A Dataverse Web API for <c>sprk_events</c>: answers a GET by applying the <c>$filter</c> the service built
-    /// (<c>_sprk_regarding*_value eq {guid}</c>) to the seeded rows, so a wrong lookup or id returns the wrong rows.
+    /// A Dataverse Web API for <c>sprk_events</c>, <c>sprk_todos</c> and <c>sprk_documents</c>: answers a GET by applying
+    /// the <c>$filter</c> the service built (<c>_sprk_..._value eq {guid}</c>) to the seeded rows of that entity set, so a
+    /// wrong lookup or id returns the wrong rows, and then PROJECTS each row through the request's <c>$select</c>, as
+    /// Dataverse does: a column the query did not ask for is not in the response. A query that drops a lookup the
+    /// withholding rule needs therefore reads it as absent ("not filed") and the withholding tests fail.
     /// </summary>
     public sealed class FakeDataverse : HttpMessageHandler
     {
-        private readonly List<Dictionary<string, object?>> _rows = new();
+        private readonly Dictionary<string, List<Dictionary<string, object?>>> _sets = new();
 
         /// <summary>Every request URL (unescaped). A denied request leaves this empty.</summary>
         public ConcurrentQueue<string> Urls { get; } = new();
@@ -449,9 +452,18 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
 
         public void Reset()
         {
-            lock (_rows) _rows.Clear();
+            lock (_sets) _sets.Clear();
             Urls.Clear();
             Fault = null;
+        }
+
+        private void Seed(string set, Dictionary<string, object?> row)
+        {
+            lock (_sets)
+            {
+                if (!_sets.TryGetValue(set, out var rows)) _sets[set] = rows = new List<Dictionary<string, object?>>();
+                rows.Add(row);
+            }
         }
 
         /// <summary>Seeds an event filed to <paramref name="segment"/>'s record <paramref name="record"/> (and optionally others).</summary>
@@ -460,7 +472,7 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             string? rawMatterLookup = null)
         {
             var id = Guid.NewGuid().ToString();
-            var row = new Dictionary<string, object?>
+            Seed("sprk_events", new Dictionary<string, object?>
             {
                 ["sprk_eventid"] = id,
                 ["sprk_eventname"] = name,
@@ -472,8 +484,58 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                 ["_sprk_regardingworkassignment_value"] = segment == "workassignments" ? record.ToString() : workAssignment?.ToString(),
                 ["_sprk_createdbyperson_value"] = null,
                 ["_sprk_createdbycontact_value"] = CallerContact.ToString(),
+            });
+            return id;
+        }
+
+        /// <summary>Seeds a to-do filed to <paramref name="segment"/>'s record <paramref name="record"/> (and optionally others).</summary>
+        public string AddTodo(
+            string segment, Guid record, string name, Guid? project = null, Guid? matter = null, Guid? workAssignment = null,
+            string? rawMatterLookup = null)
+        {
+            var id = Guid.NewGuid().ToString();
+            Seed("sprk_todos", new Dictionary<string, object?>
+            {
+                ["sprk_todoid"] = id,
+                ["sprk_name"] = name,
+                ["sprk_duedate"] = "2026-10-21",
+                ["statecode"] = 0,
+                ["statuscode"] = 1,
+                ["createdon"] = "2026-10-01T10:00:00Z",
+                ["_sprk_regardingproject_value"] = segment == "projects" ? record.ToString() : project?.ToString(),
+                ["_sprk_regardingmatter_value"] = segment == "matters" ? record.ToString() : rawMatterLookup ?? matter?.ToString(),
+                ["_sprk_regardingworkassignment_value"] = segment == "workassignments" ? record.ToString() : workAssignment?.ToString(),
+                ["_sprk_createdbyperson_value"] = null,
+                ["_sprk_createdbycontact_value"] = CallerContact.ToString(),
+            });
+            return id;
+        }
+
+        /// <summary>
+        /// Seeds a document filed to <paramref name="segment"/>'s record <paramref name="record"/> through that root's typed
+        /// lookup, plus any <paramref name="extra"/> link columns (e.g. <c>_sprk_matter_value</c>, <c>_sprk_relatedmatter_value</c>).
+        /// </summary>
+        public string AddDocument(string segment, Guid record, string name, params (string Column, Guid Value)[] extra)
+        {
+            var id = Guid.NewGuid().ToString();
+            var row = new Dictionary<string, object?>
+            {
+                ["sprk_documentid"] = id,
+                ["sprk_documentname"] = name,
+                ["sprk_documenttype"] = null,
+                ["sprk_filesummary"] = $"summary of {name}",
+                ["createdon"] = "2026-10-01T10:00:00Z",
+                ["_sprk_createdbyperson_value"] = null,
+                ["_sprk_createdbycontact_value"] = CallerContact.ToString(),
+                [segment switch
+                {
+                    "projects" => "_sprk_project_value",
+                    "matters" => "_sprk_matter_value",
+                    _ => "_sprk_workassignment_value",
+                }] = record.ToString(),
             };
-            lock (_rows) _rows.Add(row);
+            foreach (var (column, value) in extra) row[column] = value.ToString();
+            Seed("sprk_documents", row);
             return id;
         }
 
@@ -485,18 +547,29 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             if (Fault is { } fault)
                 return Task.FromResult(new HttpResponseMessage(fault));
 
-            var filter = Regex.Match(url, @"(_sprk_regarding\w+_value) eq ([0-9a-fA-F-]{36})");
+            var set = request.RequestUri.AbsolutePath[(request.RequestUri.AbsolutePath.LastIndexOf('/') + 1)..];
+            var filter = Regex.Match(url, @"(_sprk_\w+_value) eq ([0-9a-fA-F-]{36})");
+            var select = Regex.Match(url, @"\$select=([^&]*)");
+            var columns = select.Success ? select.Groups[1].Value.Split(',').ToHashSet(StringComparer.Ordinal) : null;
+
             List<Dictionary<string, object?>> match;
-            lock (_rows)
+            lock (_sets)
             {
+                var rows = _sets.TryGetValue(set, out var seeded) ? seeded : new List<Dictionary<string, object?>>();
                 match = filter.Success
-                    ? _rows.Where(r => string.Equals(r[filter.Groups[1].Value] as string, filter.Groups[2].Value, StringComparison.OrdinalIgnoreCase)).ToList()
+                    ? rows.Where(r => r.TryGetValue(filter.Groups[1].Value, out var v)
+                                      && string.Equals(v as string, filter.Groups[2].Value, StringComparison.OrdinalIgnoreCase)).ToList()
                     : new List<Dictionary<string, object?>>();
             }
 
+            // $select projection: only the requested columns come back.
+            var projected = match
+                .Select(r => columns is null ? r : r.Where(kv => columns.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value))
+                .ToList();
+
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent(JsonSerializer.Serialize(new { value = match }), System.Text.Encoding.UTF8, "application/json"),
+                Content = new StringContent(JsonSerializer.Serialize(new { value = projected }), System.Text.Encoding.UTF8, "application/json"),
             });
         }
     }
