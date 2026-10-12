@@ -121,6 +121,14 @@ public sealed class CallerPrincipal
     /// <summary>The Dataverse systemuserid; non-null only for a workforce systemuser principal.</summary>
     public Guid? SystemUserId { get; init; }
 
+    /// <summary>
+    /// The derived contact could not be READ (a Dataverse fault), as opposed to read and found absent. Only the workforce
+    /// systemuser strategy sets it, from <see cref="WorkforcePrincipal.ContactUnreadable"/>; false everywhere else.
+    /// When true, <see cref="ContactId"/> is <see cref="Guid.Empty"/> because the contact is UNKNOWN, not because the user
+    /// is unlinked — a caller that acts on "no contact" (task 035 intake) must answer a retryable 503, not a final 403.
+    /// </summary>
+    public bool ContactUnreadable { get; init; }
+
     /// <summary>The caller's email/UPN (from token claims). May be empty for an oid-resolved caller
     /// whose token carries no email claim.</summary>
     public string Email { get; init; } = string.Empty;
@@ -671,6 +679,7 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
             Plane = CallerPrincipalPlane.Workforce,
             ContactId = principal.ContactId ?? Guid.Empty,
             SystemUserId = principal.SystemUserId,
+            ContactUnreadable = principal.ContactUnreadable,
             Email = WorkforcePrincipalResolver.ExtractTokenEmail(httpContext.User) ?? string.Empty,
             Oid = principal.Oid,
             ProjectAccess = projectAccess,

@@ -236,6 +236,46 @@ public class ModuleEntitlementResolverTests
         resolver.MapReads.Should().Be(0, "the CIAM term never reads the App-Role map");
     }
 
+    // ── (9) IsEntitledAsync — the one Tier-1 check a module-gated route asks (r3 task 035; review 011 K2) ──────
+    // It answers from the SAME set ResolveAsync returns (/me/entitlements), so the route cannot drift from /me.
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task IsEntitledAsync_LegalFrontDoor_Ciam_FollowsThePartnerSwitch(bool partnerSwitch, bool expected)
+    {
+        var resolver = new TestResolver(SeededMap, partnerSwitch);
+        var caller = Ciam();
+
+        var entitled = await resolver.IsEntitledAsync(caller, UserWithRoles(), ModuleEntitlementResolver.LegalFrontDoorModule);
+
+        entitled.Should().Be(expected);
+        entitled.Should().Be((await resolver.ResolveAsync(caller, UserWithRoles())).Contains("legal-front-door"),
+            "the check is the /me set, not a second rule");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IsEntitledAsync_LegalFrontDoor_EveryWorkforceCaller_IsEntitled_WithNoMapRow(bool partnerSwitch)
+    {
+        var resolver = new TestResolver(Array.Empty<AppRoleModuleMapping>(), partnerSwitch);
+
+        (await resolver.IsEntitledAsync(WorkforceSystemUser(), UserWithRoles(), "legal-front-door")).Should().BeTrue();
+        (await resolver.IsEntitledAsync(WorkforceContact(), UserWithRoles(), "LEGAL-FRONT-DOOR")).Should().BeTrue(
+            "module codes compare case-insensitively, as the resolver's own union does");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("assigned-work")]
+    public async Task IsEntitledAsync_BlankOrUngrantedModule_IsFalse(string moduleCode)
+    {
+        var resolver = new TestResolver(SeededMap);
+
+        (await resolver.IsEntitledAsync(WorkforceContact(), UserWithRoles("FrontDoorUser"), moduleCode)).Should().BeFalse();
+    }
+
     // ── (8) the "service-requests" descriptor predicate (FR-06 partner switch) ──────────────────────
     [Fact]
     public void ServiceRequests_CiamCaller_SwitchOff_AccessibleSetEmpty_AndNoRowSurvives()

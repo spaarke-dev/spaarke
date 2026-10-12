@@ -227,6 +227,41 @@ public class CallerPrincipalResolverTests
             It.IsAny<WorkforcePrincipal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // Task 035 review F1: the workforce resolver's "derived contact could not be READ" flag must reach the principal. Without
+    // it ContactId = Guid.Empty is all a handler sees, and a linked lawyer hit by a Dataverse 429 reads as "not linked".
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WorkforceStrategy_SystemUser_CarriesTheContactUnreadableFlagOntoThePrincipal(bool contactUnreadable)
+    {
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.ForSystemUser(
+                Guid.NewGuid(), derivedContactId: null, Guid.NewGuid().ToString(), WorkforceTenantId,
+                contactUnreadable: contactUnreadable));
+
+        var accessible = new Mock<IAccessibleRecordSetService>();
+        accessible.Setup(s => s.ComposeAsync(
+                It.IsAny<WorkforcePrincipal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((WorkforcePrincipal _, string entity, CancellationToken _) => new AccessibleRecordSet
+            {
+                PrincipalKind = WorkforcePrincipalKind.SystemUser,
+                EntityType = entity,
+                Rights = RightsOf(),
+                Sources = new AccessibleRecordSetSources(true, false, false)
+            });
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, accessible.Object, Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
+
+        var result = await strategy.ResolveAsync(
+            new DefaultHttpContext { User = Principal(("email", "lawyer@contoso.com")) }, CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue();
+        result.Principal!.ContactId.Should().Be(Guid.Empty);
+        result.Principal.ContactUnreadable.Should().Be(contactUnreadable,
+            "an unreadable contact and an absent one are both Guid.Empty; only the flag tells them apart");
+    }
+
     // ── CIAM strategy: resolution by the oid binding (task 141); record scope from the evaluator (task 135) ──
     //
     // The vetoes themselves (FR-21/22/23), plane parity and the fault family are pinned end-to-end through
