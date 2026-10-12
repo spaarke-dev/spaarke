@@ -150,7 +150,9 @@ public static class PlaybookEndpoints
             .ProducesProblem(400)
             .ProducesProblem(401)
             .ProducesProblem(403)
-            .ProducesProblem(404);
+            .ProducesProblem(404)
+            .ProducesProblem(409)
+            .ProducesProblem(503);
 
         // GET /api/ai/playbooks/templates - List template playbooks
         group.MapGet("/templates", ListTemplates)
@@ -689,9 +691,10 @@ public static class PlaybookEndpoints
     /// <summary>
     /// Save canvas layout for a playbook.
     /// </summary>
-    private static async Task<IResult> SaveCanvasLayout(
+    internal static async Task<IResult> SaveCanvasLayout(
         Guid id,
         SaveCanvasLayoutRequest request,
+        HttpContext httpContext,
         IPlaybookService playbookService,
         INodeService nodeService,
         ILoggerFactory loggerFactory,
@@ -709,14 +712,34 @@ public static class PlaybookEndpoints
 
         try
         {
+            // D-97 / PB-08: repo-deployed system playbooks are read-only in the Designer. Check ONCE, before
+            // anything is persisted; the permit carries the node snapshot the check read.
+            var permit = await nodeService.EnsureCanvasSyncAllowedAsync(id, cancellationToken);
+
             // Persist the raw canvas JSON to the playbook record
             var result = await playbookService.SaveCanvasLayoutAsync(id, request.Layout);
 
-            // Sync canvas visual design → executable sprk_playbooknode Dataverse records
-            await nodeService.SyncCanvasToNodesAsync(id, request.Layout, cancellationToken);
+            // Sync canvas visual design → executable sprk_playbooknode Dataverse records (no re-check, no re-read)
+            await nodeService.SyncCanvasToNodesAsync(permit, request.Layout, cancellationToken);
 
             logger.LogInformation("Saved canvas layout and synced nodes for playbook {PlaybookId}", id);
             return Results.Ok(result);
+        }
+        catch (ProtectedPlaybookCanvasSyncException ex)
+        {
+            logger.LogWarning("Canvas save refused for playbook {PlaybookId}: {Reason}", id, ex.Reason);
+            // Unverifiable = the guard could not read Dataverse (transient): 503, retryable. Otherwise the
+            // playbook is a repo-deployed system playbook: 409 with a stable errorCode for the Designer.
+            var unverifiable = ex.Reason == ProtectedPlaybookReason.Unverifiable;
+            return Results.Problem(
+                statusCode: unverifiable ? 503 : 409,
+                title: unverifiable ? "Playbook could not be verified" : "Playbook is read-only",
+                detail: ex.Message,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = unverifiable ? "playbook_canvas_unverifiable" : "playbook_read_only",
+                    ["correlationId"] = httpContext.TraceIdentifier
+                });
         }
         catch (Exception ex)
         {

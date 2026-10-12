@@ -201,8 +201,18 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             _logger.LogInformation(
                 "[PLAYBOOK-EXEC] Step 3b: Syncing canvas to nodes — {NodeCount} canvas nodes, {EdgeCount} edges",
                 canvasLayout.Layout.Nodes.Length, canvasLayout.Layout.Edges?.Length ?? 0);
-            await _nodeService.SyncCanvasToNodesAsync(
-                request.PlaybookId, canvasLayout.Layout, cancellationToken);
+            try
+            {
+                await _nodeService.SyncCanvasToNodesAsync(
+                    request.PlaybookId, canvasLayout.Layout, cancellationToken);
+            }
+            catch (ProtectedPlaybookCanvasSyncException ex)
+            {
+                // D-97 / PB-08: repo-deployed playbooks keep their stored nodes; the run continues on them.
+                _logger.LogWarning(
+                    "[PLAYBOOK-EXEC] canvas sync refused for protected playbook {PlaybookId} ({Reason}); continuing with stored nodes",
+                    request.PlaybookId, ex.Reason);
+            }
         }
         else
         {
