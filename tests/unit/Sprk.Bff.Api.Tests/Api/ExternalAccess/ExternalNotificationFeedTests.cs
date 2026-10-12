@@ -61,8 +61,11 @@ public class ExternalNotificationFeedTests
         _appOnly
             .Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Callback<string, string?, CancellationToken>((_, odata, _) => _queries.Add(odata))
-            // In the query's own order (createdon desc), as Dataverse answers — but NOT filtered: the server re-checks.
-            .ReturnsAsync(() => _messageRows.OrderByDescending(r => r["createdon"].GetDateTimeOffset()).ToList());
+            // In the query's own order (createdon desc), as Dataverse answers — but NOT filtered: the server re-checks. Each
+            // row is projected through the query's $select, so a column the query dropped is absent (r3 task 039, K3).
+            .Returns<string, string?, CancellationToken>((_, odata, _) =>
+                Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>(AppOnlySelectProjection.Project(
+                    _messageRows.OrderByDescending(r => r["createdon"].GetDateTimeOffset()), odata)));
     }
 
     // ── principals ──────────────────────────────────────────────────────────────────────────────────
@@ -732,6 +735,42 @@ public class ExternalNotificationFeedTests
         _queries.Single().Should().Contain("$top=101");
     }
 
+    // ── a message filed to SEVERAL core roots is reported only if the caller can read EVERY one (fix round, task 039) ──
+
+    [Theory]
+    [InlineData("_sprk_regardingmatter_value")]
+    [InlineData("_sprk_regardingworkassignment_value")]
+    public async Task AMessageAlsoFiledToARootTheCallerCannotRead_IsNotInTheFeed(string otherRootColumn)
+    {
+        var project = Guid.NewGuid();
+        var caller = Ciam(Guid.NewGuid(), project: project);
+        var plain = Message("sprk_regardingproject", project, Now.AddHours(-2));
+        var dual = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        dual[otherRootColumn] = El(Guid.NewGuid().ToString("D"));
+        _data.Name(project, "Project Alpha");
+
+        var feed = Body(await Feed(caller));
+
+        feed.Value.Select(i => i.Id).Should().Equal(IdOf(plain));
+        feed.UnreadCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AMessageAlsoFiledToARootTheCallerCanRead_IsInTheFeed_Once()
+    {
+        var project = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        var caller = Ciam(Guid.NewGuid(), project: project, matter: matter);
+        var dual = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        dual["_sprk_regardingmatter_value"] = El(matter.ToString("D"));
+        _data.Name(project, "Project Alpha");
+        _data.Name(matter, "Matter Beta");
+
+        var feed = Body(await Feed(caller));
+
+        feed.Value.Select(i => i.Id).Should().Equal(IdOf(dual));
+    }
+
     [Fact]
     public async Task TheFeedQuery_ProjectsNoBodyFormatOrSubject_ButEveryColumnItsRulesNeed()
     {
@@ -744,7 +783,8 @@ public class ExternalNotificationFeedTests
         var select = query[..query.IndexOf('&')];
         select.Should().Be(
             "$select=sprk_communicationid,sprk_direction,_sprk_sentby_value,_sprk_createdbycontact_value,createdon," +
-            "sprk_isinternalonly,sprk_privilegeclassification,statuscode,_sprk_regardingproject_value");
+            "sprk_isinternalonly,sprk_privilegeclassification,statuscode,_sprk_regardingproject_value," +
+            "_sprk_regardingmatter_value,_sprk_regardingworkassignment_value");
         select.Should().NotContain("sprk_body").And.NotContain("sprk_subject");
     }
 

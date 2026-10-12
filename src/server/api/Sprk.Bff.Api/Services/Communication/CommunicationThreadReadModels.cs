@@ -146,6 +146,14 @@ public sealed record AppOnlyRecentReadResult(
 public sealed record RecentRecordMessage(ThreadMessageDto Message, string EntityType, Guid RecordId);
 
 /// <summary>
+/// The core-root stamp lookups (<c>_sprk_regardingproject_value</c>, <c>_sprk_regardingmatter_value</c>,
+/// <c>_sprk_regardingworkassignment_value</c>) a communication row carries, raw as Dataverse returned them (null or blank
+/// when the row is not filed to that root). The external reads hand these to the caller's multi-root rule so a message also
+/// filed to a root the caller cannot read is withheld (fix round for r3 task 039).
+/// </summary>
+public sealed record MessageRootLookups(string? Project, string? Matter, string? WorkAssignment);
+
+/// <summary>
 /// One thread summary row for the left-pane thread list (R3 task 003 / FR-16). Minimal by construction — the list
 /// pane renders a label + type; opening a thread fetches its messages via the existing thread-read. Every item here
 /// was returned by the IMPERSONATED <c>sprk_communicationthreads</c> query, so the caller may see the thread record

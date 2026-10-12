@@ -132,7 +132,10 @@ public class ExternalMessageEndpointsTests
         _appOnly
             .Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Callback<string, string?, CancellationToken>((_, odata, _) => _lastOData = odata)
-            .ReturnsAsync(rows.OrderByDescending(r => r["createdon"].GetDateTimeOffset()).ToList());
+            // Each row is projected through the query's $select, so a column the query dropped is absent (r3 task 039, K3).
+            .Returns<string, string?, CancellationToken>((_, odata, _) =>
+                Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>(AppOnlySelectProjection.Project(
+                    rows.OrderByDescending(r => r["createdon"].GetDateTimeOffset()), odata)));
 
     private Task<IReadOnlyDictionary<string, object?>> ReadRecord(
         string entity, Guid id, string[]? select, CancellationToken ct)
@@ -237,8 +240,133 @@ public class ExternalMessageEndpointsTests
         _lastOData.Should().StartWith(
             "$select=sprk_communicationid,sprk_body,sprk_bodyformat,sprk_subject,sprk_direction,_sprk_sentby_value," +
             "_sprk_createdbycontact_value,createdon,sprk_isinternalonly,sprk_privilegeclassification,statuscode," +
-            "_sprk_regardingproject_value&");
+            "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value&");
         _impersonated.VerifyNoOtherCalls();
+    }
+
+    // ── a message filed to SEVERAL core roots is listed only if the caller can read EVERY one (fix round, task 039) ──
+    // A communication filed under an invoice of secure matter M and project P is stamped with both. The thread read is
+    // keyed on one lookup, so P's thread used to list M's message to a reader of P alone.
+
+    [Theory]
+    [InlineData("projects")]
+    [InlineData("matters")]
+    [InlineData("workassignments")]
+    public async Task AMessageAlsoFiledToARootTheCallerCannotRead_IsWithheld_OnEveryRootRoute(string root)
+    {
+        var record = Guid.NewGuid();
+        var hidden = Guid.NewGuid();
+        var (regardingField, caller) = root switch
+        {
+            "projects" => ("sprk_regardingproject", Ciam(project: record)),
+            "matters" => ("sprk_regardingmatter", Ciam(matter: record)),
+            _ => ("sprk_regardingworkassignment", Ciam(workAssignment: record)),
+        };
+        var plain = Guid.NewGuid();
+        var dual = Guid.NewGuid();
+        var otherStamp = root == "projects" ? "_sprk_regardingmatter_value" : "_sprk_regardingproject_value";
+        var dualRow = MessageRow(dual, regardingField, record, internalOnly: false, "2026-10-02T09:00:00Z", "Secure matter message");
+        dualRow[otherStamp] = El(hidden.ToString("D"));
+        SetupMessages(
+            MessageRow(plain, regardingField, record, internalOnly: false, "2026-10-01T09:00:00Z", "Plain"),
+            dualRow);
+
+        var messages = Messages(await Get(root, record, caller));
+
+        messages.Select(m => m.SprkCommunicationid).Should().Equal(plain.ToString("D"));
+    }
+
+    [Fact]
+    public async Task AMessageAlsoFiledToARootTheCallerCanRead_IsListed()
+    {
+        var project = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        var dual = Guid.NewGuid();
+        var row = MessageRow(dual, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
+        row["_sprk_regardingmatter_value"] = El(matter.ToString("D"));
+        SetupMessages(row);
+
+        var messages = Messages(await Get("projects", project, Ciam(project: project, matter: matter)));
+
+        messages.Select(m => m.SprkCommunicationid).Should().Equal(dual.ToString("D"));
+    }
+
+    [Fact]
+    public async Task AMessageFiledToAMalformedRoot_IsWithheld_FailClosed()
+    {
+        var project = Guid.NewGuid();
+        var row = MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
+        row["_sprk_regardingworkassignment_value"] = El("not-a-guid");
+        SetupMessages(row);
+
+        Messages(await Get("projects", project, Ciam(project: project))).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("_sprk_regardingmatter_value", 7)]
+    [InlineData("_sprk_regardingworkassignment_value", true)]
+    [InlineData("_sprk_regardingmatter_value", new[] { 1 })]
+    public async Task AMessageWhoseRootStampIsPresentButNotAString_IsWithheld_FailClosed(string stamp, object value)
+    {
+        // K3 (fix round 3): a stamp that is present as a non-string JSON value is malformed, not "not filed". Same verdict as
+        // DocumentRootLinks and the delete-target parse.
+        var project = Guid.NewGuid();
+        var plain = Guid.NewGuid();
+        var row = MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
+        row[stamp] = El(value);
+        SetupMessages(MessageRow(plain, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"), row);
+
+        Messages(await Get("projects", project, Ciam(project: project))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(plain.ToString("D"));
+    }
+
+    [Fact]
+    public async Task AMessageWhoseOtherRootStampIsJsonNull_IsListed_NotFiled()
+    {
+        var project = Guid.NewGuid();
+        var id = Guid.NewGuid();
+        var row = MessageRow(id, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
+        row["_sprk_regardingmatter_value"] = JsonSerializer.SerializeToElement<string?>(null);
+        SetupMessages(row);
+
+        Messages(await Get("projects", project, Ciam(project: project))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(id.ToString("D"));
+    }
+
+    [Fact]
+    public async Task TheThreadQuery_AlwaysReadsAllThreeRootStamps_WhateverRecordItIsKeyedOn()
+    {
+        var matter = Guid.NewGuid();
+        SetupMessages();
+
+        await Get("matters", matter, Ciam(matter: matter));
+
+        // The projection is what lets the rule see a second root; a query that dropped one would list such a row.
+        _lastOData.Should().Contain("_sprk_regardingproject_value").And.Contain("_sprk_regardingmatter_value")
+            .And.Contain("_sprk_regardingworkassignment_value");
+    }
+
+    [Fact]
+    public async Task AnInvoiceThread_IsExemptFromTheEveryRootRule_ItIsReachedThroughTheUnionOfItsParents()
+    {
+        // Owner decision 2026-10-11 (option A "inherit"): a caller who reaches the invoice through ONE of its parents reads
+        // its thread. Every message under an invoice is stamped with exactly the invoice's parents, so the every-root rule
+        // would empty that thread for the very caller the owner chose to admit.
+        var matter = Guid.NewGuid();
+        var project = Guid.NewGuid();
+        var invoice = Guid.NewGuid();
+        _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
+        {
+            ["id"] = invoice,
+            ["sprk_matter"] = Lookup(matter, "sprk_matter"),
+            ["sprk_project"] = Lookup(project, "sprk_project"),
+        };
+        var row = MessageRow(Guid.NewGuid(), "sprk_regardinginvoice", invoice, internalOnly: false, "2026-10-01T09:00:00Z");
+        row["_sprk_regardingmatter_value"] = El(matter.ToString("D"));
+        row["_sprk_regardingproject_value"] = El(project.ToString("D"));
+        SetupMessages(row);
+
+        Messages(await Get("invoices", invoice, Ciam(matter: matter))).Should().HaveCount(1);
     }
 
     [Theory]

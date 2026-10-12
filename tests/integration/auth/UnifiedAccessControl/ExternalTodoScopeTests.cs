@@ -1142,7 +1142,7 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
         public Guid? LastCreateCallerContactId { get; private set; }
 
         public override Task<ExternalCollectionResponse<ExternalTodoDto>> GetTodosAsync(
-            ExternalDataService.TodoRootKind rootKind, Guid rootId, CancellationToken ct = default)
+            ExternalDataService.TodoRootKind rootKind, Guid rootId, CallerPrincipal caller, CancellationToken ct = default)
         {
             ListCallCount++;
             LastListArgs = (rootKind, rootId);

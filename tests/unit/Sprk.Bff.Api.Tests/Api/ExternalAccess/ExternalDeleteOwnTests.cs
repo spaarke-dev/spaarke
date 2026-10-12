@@ -48,6 +48,9 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     private static readonly Guid RecordB = Guid.Parse("a0320000-0000-4000-8000-00000000000b");
     private static readonly Guid RequestA = Guid.Parse("a0320000-0000-4000-8000-0000000000c1");
 
+    /// <summary>A record the caller holds nothing on (task 039 fix round).</summary>
+    private static readonly Guid Hidden = Guid.Parse("a0320000-0000-4000-8000-0000000000dd");
+
     private readonly Fixture _fixture;
 
     public ExternalDeleteOwnTests(Fixture fixture)
@@ -171,6 +174,83 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         _fixture.Data.Requesters[RequestA] = CallerContact;
         using var allowed = await Delete("documents", id);
         allowed.StatusCode.Should().Be(HttpStatusCode.NoContent);
+    }
+
+    [Theory]
+    [InlineData(DocumentParentKind.Project)]
+    [InlineData(DocumentParentKind.Matter)]
+    [InlineData(DocumentParentKind.WorkAssignment)]
+    public async Task Document_AlsoFiledToARootTheCallerCannotRead_ThroughARelatedTwin_Is403(DocumentParentKind hidden)
+    {
+        // Task 039 fix round: the related twin of each root (sprk_relatedproject / _relatedmatter / _relatedworkassignment) is a
+        // parent the delete consults, as the list, download and versions do. Seed models what ParseDeleteTarget reads from it.
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact,
+            parents: new[] { Project(RecordA), new DeleteTargetParent(hidden, Hidden) });
+        _fixture.Principal = ContactOn(RecordA, ExternalAccessLevel.FullAccess);
+
+        using var response = await Delete("documents", id);
+
+        await ShouldBeTheUniformDenial(response);
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+        _fixture.Steps.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Document_AlsoFiledToATwinRootTheCallerCanRead_IsDeleted()
+    {
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact,
+            parents: new[] { Project(RecordA), new DeleteTargetParent(DocumentParentKind.Matter, RecordB) });
+        _fixture.Principal = Contact(
+            projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) },
+            matters: new Dictionary<Guid, AccessRights> { [RecordB] = AccessRights.Read });
+
+        using var response = await Delete("documents", id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        _fixture.Exists(DeletableKind.Document, id).Should().BeFalse();
+    }
+
+    [Theory]
+    [MemberData(nameof(AllKinds))]
+    public async Task Row_WithAParentLookupThatIsNotAGuid_Is403_FailClosed(string segment)
+    {
+        var id = _fixture.Seed(KindOf(segment), contact: CallerContact, parents: Project(RecordA));
+        _fixture.Data.Targets[(KindOf(segment), id)] =
+            new DeleteTarget(null, CallerContact, new[] { Project(RecordA) }, HasUnreadableParentLink: true);
+        _fixture.Principal = ContactOn(RecordA, ExternalAccessLevel.FullAccess);
+
+        using var response = await Delete(segment, id);
+
+        await ShouldBeTheUniformDenial(response);
+        _fixture.Exists(KindOf(segment), id).Should().BeTrue();
+        _fixture.Steps.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ParseDeleteTarget_ReadsTheRelatedTwinsAsParents_AndFlagsAValueThatIsNotAGuid()
+    {
+        using var doc = JsonDocument.Parse($$"""
+            {
+              "_sprk_createdbycontact_value": "{{CallerContact}}",
+              "_sprk_project_value": "{{RecordA}}",
+              "_sprk_relatedmatter_value": "{{RecordB}}",
+              "_sprk_relatedworkassignment_value": null,
+              "_sprk_relatedproject_value": ""
+            }
+            """);
+        var row = doc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+
+        var target = ParseDeleteTarget(DeletableKind.Document, row);
+
+        target.HasUnreadableParentLink.Should().BeFalse("null and blank are 'not filed'");
+        target.Parents.Should().BeEquivalentTo(new[] { Project(RecordA), new DeleteTargetParent(DocumentParentKind.Matter, RecordB) });
+
+        foreach (var garbled in new[] { "\"not-a-guid\"", "42", "true" })
+        {
+            using var bad = JsonDocument.Parse($$"""{ "_sprk_relatedmatter_value": {{garbled}}, "_sprk_project_value": "{{RecordA}}" }""");
+            ParseDeleteTarget(DeletableKind.Document, bad.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone()))
+                .HasUnreadableParentLink.Should().BeTrue($"{garbled} is present but not a GUID");
+        }
     }
 
     [Fact]
@@ -501,7 +581,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
     [Theory]
     [InlineData(DeletableKind.Document, "sprk_documents",
-        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,_sprk_relatedservicerequest_value,_sprk_invoice_value")]
+        "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,_sprk_relatedservicerequest_value,_sprk_invoice_value,_sprk_relatedproject_value,_sprk_relatedmatter_value,_sprk_relatedworkassignment_value")]
     [InlineData(DeletableKind.Todo, "sprk_todos",
         "_sprk_createdbyperson_value,_sprk_createdbycontact_value,_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value")]
     [InlineData(DeletableKind.Event, "sprk_events",
