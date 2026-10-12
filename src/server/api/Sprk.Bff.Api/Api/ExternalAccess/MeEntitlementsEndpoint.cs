@@ -55,6 +55,14 @@ public static class MeEntitlementsEndpoint
             "[EXT-ENTITLE] Caller {ContactId} ({Plane}) entitled to {Count} module(s). TraceId={TraceId}",
             caller.ContactId, plane, entitlements.Count, httpContext.TraceIdentifier);
 
-        return Results.Ok(new MeEntitlementsResponse(displayName ?? string.Empty, caller.Email, plane, entitlements));
+        // Per-type availability for the Legal Front Door tiles (owner decision 2026-10-12): the same rule the submit route
+        // enforces, and only for a caller entitled to the module.
+        IReadOnlyList<int> intakeTypes = entitlements.Contains(
+                ModuleEntitlementResolver.LegalFrontDoorModule, StringComparer.OrdinalIgnoreCase)
+            ? resolver.IntakeRequestTypesFor(caller)
+            : Array.Empty<int>();
+
+        return Results.Ok(new MeEntitlementsResponse(
+            displayName ?? string.Empty, caller.Email, plane, entitlements, intakeTypes));
     }
 }

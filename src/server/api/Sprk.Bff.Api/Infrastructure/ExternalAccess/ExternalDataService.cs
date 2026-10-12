@@ -839,6 +839,38 @@ public class ExternalDataService
     /// (<c>Other/Relationships/Contact.xml</c>, relationship <c>sprk_servicerequest_RequestedBy_contact</c>).</summary>
     internal const string RequestedByBindKey = "sprk_RequestedBy@odata.bind";
 
+    /// <summary>The standard <c>contact.department</c> column (String, 100): the requester's department.</summary>
+    internal const string ContactDepartmentColumn = "department";
+
+    /// <summary>
+    /// The department on the requester's contact record, trimmed; null when the contact has none, is blank there, or does
+    /// not exist. App-only Dataverse read, the same way as the other external reads (no OBO).
+    /// </summary>
+    /// <remarks>
+    /// Owner decision 2026-10-12: the wizard does not ask for the requester's department; the submit route stores the
+    /// contact's value as the system key <c>requesterDepartment</c>. The principal carries no contact attributes and the
+    /// ownership resolver's contact read selects only the owning business unit and team, so there is no existing contact
+    /// read to widen; this is the one added read, made after validation so a rejected submission costs nothing. A read that
+    /// FAILS throws <see cref="DataverseUnavailableException"/> rather than returning null: "could not read" must not be
+    /// stored as "no department".
+    /// </remarks>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    public virtual async Task<string?> GetContactDepartmentAsync(Guid contactId, CancellationToken ct = default)
+    {
+        if (contactId == Guid.Empty)
+            throw new ArgumentException("A contact id is required.", nameof(contactId));
+
+        var url = $"{GetApiUrl()}/contacts({contactId:D})?$select={ContactDepartmentColumn}";
+
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
+        return row is not null
+               && row.TryGetValue(ContactDepartmentColumn, out var value)
+               && value.ValueKind == JsonValueKind.String
+               && value.GetString()?.Trim() is { Length: > 0 } department
+            ? department
+            : null;
+    }
+
     /// <summary>
     /// The COMPLETE create payload for an intake-submitted <c>sprk_servicerequest</c>: the six columns the intake writes —
     /// the five of the request itself and the OWNER (task 035, owner decision 2026-10-11). Pure so a test can read it.

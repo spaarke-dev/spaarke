@@ -125,6 +125,41 @@ public class ModuleEntitlementResolver
         return entitlements.Contains(moduleCode, StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>The <c>sprk_requesttype</c> option for Invention Submission: the one intake type a CIAM partner needs a flag for.</summary>
+    public const int InventionSubmissionRequestType = 100000001;
+
+    /// <summary>
+    /// Whether this caller may submit the intake type <paramref name="requestType"/> (owner decision 2026-10-12). Workforce
+    /// callers (staff and workforce contacts) may submit every type; a CIAM partner may submit every type except
+    /// Invention Submission, which also needs <see cref="ExternalAccessOptions.PartnerInventionIntakeEnabled"/>. An unknown
+    /// type is never available. This is a TYPE gate only: Tier-1 module entitlement to <c>legal-front-door</c> is
+    /// <see cref="IsEntitledAsync"/>, asked first. The plane is the SERVER-resolved <see cref="CallerPrincipal.Plane"/>.
+    /// </summary>
+    public bool IsIntakeTypeAvailable(CallerPrincipal principal, int requestType)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        if (!ExternalDataService.ServiceRequestTypes.ContainsKey(requestType))
+        {
+            return false;
+        }
+
+        return principal.Plane != CallerPrincipalPlane.CiamContact
+            || requestType != InventionSubmissionRequestType
+            || _options.PartnerInventionIntakeEnabled;
+    }
+
+    /// <summary>
+    /// The intake request types this caller may submit (the <c>sprk_requesttype</c> option values, ascending): what
+    /// <c>/me/entitlements</c> reports so the SPA can hide a tile the submit route would refuse. Same rule as
+    /// <see cref="IsIntakeTypeAvailable"/>. It does NOT consider module entitlement - the caller of this method reports an
+    /// empty list when the caller is not entitled to <c>legal-front-door</c>.
+    /// </summary>
+    public IReadOnlyList<int> IntakeRequestTypesFor(CallerPrincipal principal) =>
+        ExternalDataService.ServiceRequestTypes.Keys
+            .Where(type => IsIntakeTypeAvailable(principal, type))
+            .OrderBy(type => type)
+            .ToList();
+
     /// <summary>
     /// Resolves the caller's module entitlement codes by server-resolved principal kind (A7). CIAM → the
     /// outside-counsel set, plus <c>legal-front-door</c> when the partner switch is on; workforce → the
