@@ -9,13 +9,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Owner-decision work of 2026-10-12. Option B (multi-root, secure roots only, EFFECTIVE secure status) is being finished in worktree `C:\code_files\spaarke\.claude\worktreesgent-ae8f4415f1670de13` (branch `worktree-agent-ae8f4415f1670de13`, commits `d29fe0342`, `d375c597d` + an effective-flag follow-up; not merged) |
+| **Task** | Owner-decision work of 2026-10-12. Option B (multi-root, secure roots only, EFFECTIVE secure status) is being finished in worktree `C:\code_files\spaarke\.claude\worktrees\agent-ae8f4415f1670de13` (branch `worktree-agent-ae8f4415f1670de13`, commits `d29fe0342`, `d375c597d` + an effective-flag follow-up; not merged) |
 | **Step** | Merged and pushed: closed SR cannot be deleted + renewal bell items (`72b0b6520`), their review fixes incl. SPA (`4a0fd6cd8`), intake department + partner Invention flag + `/me` intakeRequestTypes (merge after `4a0fd6cd8`), ledger prose (`b4f1a4610`). Verified: build 0/0, filtered unit 3218, arch 941; SPA 849 |
-| **Status** | Main worktree clean. An empty locked folder `C:\code_files\spaarke\.claude\worktreesgent-af842f88050a4b5b9` remains (worktree unregistered, branch deleted); remove later |
+| **Status** | Main worktree clean. An empty locked folder `C:\code_files\spaarke\.claude\worktrees\agent-af842f88050a4b5b9` remains (worktree unregistered, branch deleted); remove later |
 | **Next Action** | Option B done -> TWO fable reviews (tenant isolation) -> fix -> merge `--no-ff` -> build + filtered unit + arch. Then: grid views task (after owner confirms a/b/c below), 052/053 intake wizards, 038 BFF deploy to dev (owner said ok; show commands + rollback first) |
 
 ### Critical Context
-- **Parallel pattern:** BFF tasks run in isolated worktrees under `C:\code_files\spaarke\.claude\worktreesgent-*` (`git reset --hard <R3 sha>` first), commit there, main session merges `--no-ff`. SPA tasks run in this worktree, uncommitted; the main session commits by explicit path. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
+- **Parallel pattern:** BFF tasks run in isolated worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-*` (`git reset --hard <R3 sha>` first), commit there, main session merges `--no-ff`. SPA tasks run in this worktree, uncommitted; the main session commits by explicit path. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
 - **Review policy:** auth/security/tenant-isolation changes get two fable passes; other FULL tasks one. Fix rounds sonnet; a fix that changes approach gets a scoped re-check. Max 4 agents.
 - **Quota:** the opus weekly limit was hit on 2026-10-12 (resets 9pm America/New_York); use sonnet for implementers until then.
 - **Bookkeeping edits:** python script files in the scratchpad (sed breaks on the status emoji). Check with `pwsh -NoProfile -File scripts/check-task-status-drift.ps1`.
