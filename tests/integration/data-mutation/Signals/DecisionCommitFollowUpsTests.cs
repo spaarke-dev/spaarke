@@ -119,6 +119,34 @@ public sealed class DecisionCommitFollowUpsTests
     }
 
     [Fact]
+    public async Task SuppressionOverSignalsTheCallerCannotRead_ReachesTheCallerAsNothing_NoStatusNoCount()
+    {
+        // uac-r2 on 034: ApplyAsync counts every Signal of the (policy, core) grain app-only, Secure-team rows included. Here the
+        // grain holds three dismissed Signals owned by a Secure team (enough to suppress) that this caller cannot read.
+        var now = DateTime.UtcNow;
+        _entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new EntityCollection(Enumerable.Range(0, 3).Select(_ => new Entity("sprk_signal", Guid.NewGuid())
+            {
+                ["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved),
+                ["sprk_resolutiontype"] = new OptionSetValue(SignalWriter.ResolutionDismissed),
+                ["sprk_resolvedon"] = now.AddDays(-1),
+                ["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", Guid.NewGuid()),
+                ["owningteam"] = new EntityReference("team", Guid.NewGuid()),
+            }).ToList()));
+        var walled = await FollowUps().AfterRecordedAsync(Matter, [], [Row(TypeMatter, Matter, null, Policy)], CancellationToken.None);
+
+        _entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+        var none = await FollowUps().AfterRecordedAsync(Matter, [], [Row(TypeMatter, Matter, null, Policy)], CancellationToken.None);
+
+        walled.Should().Equal(none, "the caller's answer is the same whether or not the grain holds rows they cannot read");
+        walled.Should().BeEmpty();
+        typeof(DecisionCommitResult).GetProperties().Select(p => p.Name)
+            .Should().NotContain(n => n.Contains("Suppress", StringComparison.OrdinalIgnoreCase) || n.Contains("Count", StringComparison.OrdinalIgnoreCase),
+                "the commit response (Results.Ok of this type) carries no suppression status or count");
+    }
+
+    [Fact]
     public async Task SuppressionThatFails_IsAWarning_NotAFailure()
     {
         _entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))

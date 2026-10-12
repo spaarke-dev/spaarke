@@ -82,6 +82,7 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 **Suppression (034 hand-off).**
 - After a Dismissed commit, each dismissed Signal's grain is passed to `SignalSuppressionService.ApplyAsync(policyId, policyCode, grain)`. The grain is (policy, core) or (policy, item from the dedupe key), as 034 keys it.
 - A failure is non-fatal: a Warning log, the metric `decision_commit_suppression_failed` and the result warning `suppression_not_applied`.
+- **Nothing from `ApplyAsync` reaches the caller (uac-r2 on 034).** Its status and counts are computed app-only over every Signal of the grain, Secure-team rows the caller cannot read included, so the route discards them: the response carries only the fixed warning above, never a count or a suppressed state. Test: `SuppressionOverSignalsTheCallerCannotRead_ReachesTheCallerAsNothing_NoStatusNoCount`.
 
 **EventIds.** 50360-50364 are used, from the 50360-50369 range the coordinator assigned.
 
