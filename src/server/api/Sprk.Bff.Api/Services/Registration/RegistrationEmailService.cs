@@ -20,8 +20,10 @@ public class RegistrationEmailService
 {
     // The system sender is configuration (owner decision 2026-10-11), not a literal: it was the constant "demo@demo.spaarke.com".
     // It reuses Communication:DefaultMailbox - the platform's one central mailbox (the canonical manifest's
-    // Communication-DefaultMailbox, intake-supplied per stamp; the template default is mailbox-central@spaarke.com) - so the
-    // sender here is always the mailbox the Communication pipeline already approves (Communication:ApprovedSenders).
+    // Communication-DefaultMailbox, intake-supplied per stamp). ENFORCED invariant: CommunicationOptionsValidator fails the
+    // host's start outside Development/Testing unless DefaultMailbox is non-blank AND equals the Email of an entry in
+    // Communication:ApprovedSenders (the send path rejects any other explicit FromMailbox as InvalidSender). Deployed hosts
+    // therefore need App Settings Communication__DefaultMailbox and a matching Communication__ApprovedSenders__N__Email.
     private string FromMailbox => ResolveFromMailbox(_communicationOptions.Value);
 
     private const string SupportEmail = "support@spaarke.com";
