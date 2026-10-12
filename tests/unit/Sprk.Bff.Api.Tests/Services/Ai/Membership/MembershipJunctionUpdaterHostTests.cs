@@ -17,8 +17,10 @@
 
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Xunit;
 
@@ -38,16 +40,27 @@ public class MembershipJunctionUpdaterHostTests
         //   - No Service Bus client created. (Null host has no Service
         //     Bus deps to begin with.)
         //   - StopAsync is a no-op.
-        var sut = new NullMembershipJunctionUpdaterHost(
-            NullLogger<NullMembershipJunctionUpdaterHost>.Instance);
+        var logger = new Mock<ILogger<NullMembershipJunctionUpdaterHost>>();
+        var sut = new NullMembershipJunctionUpdaterHost(logger.Object);
 
         using var cts = new CancellationTokenSource();
 
         await sut.StartAsync(cts.Token);
         await sut.StopAsync(CancellationToken.None);
 
-        // No exception ⇒ contract met. ExecuteAsync returns
-        // Task.CompletedTask after a single LogInformation.
+        // ExecuteAsync ran to completion (not faulted, not cancelled)...
+        sut.ExecuteTask.Should().NotBeNull();
+        sut.ExecuteTask!.IsCompletedSuccessfully.Should().BeTrue();
+
+        // ...after exactly one Information line saying the updater is disabled.
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("MembershipJunctionUpdater disabled")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
     }
 
     // ─── NFR-07 30s drain ──────────────────────────────────────────────────

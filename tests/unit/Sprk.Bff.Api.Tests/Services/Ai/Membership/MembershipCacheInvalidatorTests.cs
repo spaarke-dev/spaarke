@@ -150,36 +150,47 @@ public class MembershipCacheInvalidatorTests
 
     // ─── Argument guards (silent no-ops) ───────────────────────────────────
 
+    private static void AssertNothingPublished(Mock<ISubscriber> subscriber) =>
+        subscriber.Verify(
+            s => s.PublishAsync(It.IsAny<RedisChannel>(), It.IsAny<RedisValue>(), It.IsAny<CommandFlags>()),
+            Times.Never);
+
     [Fact]
     public async Task PublishInvalidationAsync_EmptyPersonId_NoOp()
     {
-        var subscriber = new Mock<ISubscriber>(MockBehavior.Strict);
+        var subscriber = new Mock<ISubscriber>();
         var sut = CreateSut(subscriber, out _);
 
-        // No setup on PublishAsync — strict mock fails the test if it's called.
         await sut.PublishInvalidationAsync(Guid.Empty, EntityLogicalName, CorrelationId, CancellationToken.None);
+
+        // Verify, don't rely on a Strict mock: PublishInvalidationAsync swallows every exception (FR-2P2.8),
+        // so a Strict-mock violation would be caught and logged, and this test could never fail.
+        AssertNothingPublished(subscriber);
     }
 
     [Fact]
     public async Task PublishInvalidationAsync_EmptyEntityLogicalName_NoOp()
     {
-        var subscriber = new Mock<ISubscriber>(MockBehavior.Strict);
+        var subscriber = new Mock<ISubscriber>();
         var sut = CreateSut(subscriber, out _);
 
         await sut.PublishInvalidationAsync(PersonId, "", CorrelationId, CancellationToken.None);
+
+        AssertNothingPublished(subscriber);
     }
 
     [Fact]
     public async Task PublishInvalidationAsync_CancelledBeforePublish_NoOp()
     {
-        var subscriber = new Mock<ISubscriber>(MockBehavior.Strict);
+        var subscriber = new Mock<ISubscriber>();
         var sut = CreateSut(subscriber, out _);
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        // No publish call — strict mock would fail if invoked.
         await sut.PublishInvalidationAsync(PersonId, EntityLogicalName, CorrelationId, cts.Token);
+
+        AssertNothingPublished(subscriber);
     }
 
     // ─── Null peer ─────────────────────────────────────────────────────────
