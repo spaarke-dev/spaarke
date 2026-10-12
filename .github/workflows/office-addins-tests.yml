@@ -121,6 +121,9 @@ on:
       # change there changes what ships.
       - 'src/client/office-addins/**'
       - 'src/client/shared/Spaarke.Auth/**'
+      # The web resource built from it (#1655): sprk_/scripts/bff_auth.js, both committed copies.
+      - 'src/solutions/webresources/sprk_bff_auth.js'
+      - 'src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/bff_auth.js'
       # Third path, which the deploy workflow does NOT carry (reported as a
       # separate finding in notes/043): jest.config.js AND webpack.config.js
       # both map `@spaarke/communication-components/logic/connections/provenance`
@@ -162,6 +165,8 @@ on:
     paths:
       - 'src/client/office-addins/**'
       - 'src/client/shared/Spaarke.Auth/**'
+      - 'src/solutions/webresources/sprk_bff_auth.js'
+      - 'src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/bff_auth.js'
       - 'src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
       - '.github/workflows/office-addins-tests.yml'
       # Mirrors the pull_request server paths above (task 070) so a direct push to
@@ -444,6 +449,12 @@ jobs:
       - name: "Test @spaarke/auth"
         working-directory: src/client/shared/Spaarke.Auth
         run: npx jest --ci --maxWorkers=2
+
+      # sprk_/scripts/bff_auth.js (Spaarke.BffAuth, the form scripts' sign-in) is BUILT from this library
+      # (#1655). A library change that is not rebuilt into it, or a hand edit of the generated file, fails here.
+      - name: "Check the bff_auth.js web resource is a current build of @spaarke/auth"
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npm run check:webresource
 
       - name: Install dependencies
         working-directory: src/client/office-addins
