@@ -86,7 +86,7 @@ python scripts/ai-cost/spend-report.py --project {slug} --since {project start d
 python scripts/ai-cost/update-board-spend.py {slug}                                              # final AI Spend / AI Calls / As Of (never lowers a value)
 ```
 
-Note the resulting `AI Spend (est.)` and `AI Calls` for the Step 4 Issue comment. Do **not** write cost figures into `projects/{name}/` or any other committed file — the repo keeps costs out of version control (`scripts/ai-cost/README.md`); the board and the Issue are where they live. If the project has no local transcript history on this machine, say so in the comment instead of a number.
+`{project start date}` is `YYYY-MM-DD` (the project README's created date). Over a long range expect one `WARN archive: ...` line per already-pruned day — the archived rows are kept, which is the point. Note the resulting `AI Spend (est.)` and `AI Calls` for the Step 4 Issue comment. Do **not** write cost figures into `projects/{name}/` or any other committed file — the repo keeps costs out of version control (`scripts/ai-cost/README.md`); the board and the Issue are where they live. If the project has no local transcript history on this machine, say so in the comment instead of a number.
 
 ### Step 4: Update Issue fields + close
 

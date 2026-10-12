@@ -42,7 +42,7 @@ Not auto-triggered by anything — including `task-execute`, `devops-project-syn
 
 ### Step 0: Fold recent days into the durable archive
 
-Transcripts are the only raw source and they can be deleted (Claude Code prunes them after `cleanupPeriodDays`, default 30 — this machine sets 3650 in `~/.claude/settings.json`; a removed worktree or a new machine loses them too). The archive at `%USERPROFILE%\.claude\spend-archive\spend-daily.csv` keeps every day once it has been captured, so capture first:
+Transcripts are the only raw source and they can be deleted (Claude Code prunes them after `cleanupPeriodDays`, default 30 — this machine sets 3650 in `~/.claude/settings.json`; manual cleanup of `~/.claude/projects/` or a new machine loses them too — removing a git worktree does not). The archive at `%USERPROFILE%\.claude\spend-archive\spend-daily.csv` keeps every day once it has been captured, so capture first:
 
 ```bash
 python scripts/ai-cost/spend-report.py --days 7 --archive     # upsert the last 7 local days; never shrinks a stored day
