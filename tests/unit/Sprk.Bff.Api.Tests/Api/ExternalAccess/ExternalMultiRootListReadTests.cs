@@ -303,6 +303,139 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         body.Entities.Single().Keys.Should().NotContain(k => k.StartsWith("sprk_related", StringComparison.Ordinal));
     }
 
+    // ---- F1 (fix round 3): a grid whose FetchXML omits a typed root column must not fail OPEN ----
+
+    private const string ProjectOnlyGridFetch =
+        "<fetch><entity name='sprk_document'><attribute name='sprk_documentid'/><attribute name='sprk_documentname'/>"
+        + "<attribute name='sprk_project'/></entity></fetch>";
+
+    [Fact]
+    public async Task DocumentsModuleFetch_NamingOnlySprkProject_StillWithholdsARowFiledToAHiddenRoot_AndNeverReturnsTheUnrequestedRoots()
+    {
+        // Dataverse omits a null attribute, and a column the query did not read is omitted too. The executeFetch double
+        // therefore projects every row through the EXECUTED FetchXML's attribute list (as FakeDataverse does for $select):
+        // a pipeline that never asked for sprk_matter / sprk_workassignment / the twins would see the P+M row as project-only.
+        var caller = PrincipalWith(
+            projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        var rows = new IReadOnlyDictionary<string, object?>[]
+        {
+            DocRow("Project only", project: RecordA),
+            DocRow("Project and hidden matter", project: RecordA, matter: Hidden),
+            DocRow("Project and hidden work assignment", project: RecordA, workAssignment: Hidden),
+            DocRow("Project and hidden twin", project: RecordA, extra: ("sprk_relatedproject", Hidden)),
+        };
+
+        var (body, executed) = await RunDocumentsFetchAsync(caller, ProjectOnlyGridFetch, rows);
+
+        body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("Project only");
+        // The server asked for every attribute the rule reads...
+        foreach (var attribute in new[]
+                 {
+                     "sprk_matter", "sprk_workassignment", "sprk_relatedproject", "sprk_relatedmatter", "sprk_relatedworkassignment",
+                 })
+        {
+            executed.Should().Contain($"name=\"{attribute}\"");
+        }
+        // ...and gave back none the caller did not.
+        body.Entities.Single().Keys.Should().BeEquivalentTo(new[] { "@logicalName", "sprk_documentname", "sprk_project" });
+    }
+
+    [Fact]
+    public async Task DocumentsModuleFetch_NamingOnlySprkProject_ListsARowFiledToTwoReadableRoots_WithoutTheUnrequestedRootColumn()
+    {
+        var caller = PrincipalWith(
+            projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) },
+            matters: new Dictionary<Guid, AccessRights> { [RecordB] = AccessRights.Read });
+        var dual = (Dictionary<string, object?>)DocRow("Project and readable matter", project: RecordA, matter: RecordB);
+        dual["@formattedValues"] = new Dictionary<string, string> { ["sprk_matter"] = "Matter B", ["sprk_project"] = "Project A" };
+
+        var (body, _) = await RunDocumentsFetchAsync(caller, ProjectOnlyGridFetch, new[] { dual });
+
+        var row = body.Entities.Should().ContainSingle().Subject;
+        row.Keys.Should().NotContain("sprk_matter");
+        ((IReadOnlyDictionary<string, string>)row["@formattedValues"]!).Keys.Should().Equal("sprk_project");
+    }
+
+    [Fact]
+    public async Task DocumentsModuleFetch_NamingEveryRootColumn_ReturnsThem_AsBefore()
+    {
+        const string fetch = "<fetch><entity name='sprk_document'><attribute name='sprk_documentname'/>"
+            + "<attribute name='sprk_project'/><attribute name='sprk_matter'/></entity></fetch>";
+        var caller = PrincipalWith(
+            projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) },
+            matters: new Dictionary<Guid, AccessRights> { [RecordB] = AccessRights.Read });
+
+        var (body, _) = await RunDocumentsFetchAsync(
+            caller, fetch, new[] { DocRow("Both readable", project: RecordA, matter: RecordB) });
+
+        body.Entities.Single().Keys.Should().BeEquivalentTo(
+            new[] { "@logicalName", "sprk_documentname", "sprk_project", "sprk_matter" });
+    }
+
+    [Fact]
+    public void EveryModuleWithTheEveryRootRule_ProjectsEveryAttributeTheRuleReads()
+    {
+        // "Projection covers every attribute the rule reads": the scope dimensions plus the declared extra root lookups.
+        // Every module that sets RequireReadOnEveryRoot is checked, so a new one cannot leave a root unprojected.
+        var modules = Registry().Modules.Where(m => m.RequireReadOnEveryRoot).ToList();
+        modules.Should().NotBeEmpty();
+        foreach (var module in modules)
+        {
+            module.RootRuleAttributes.Should().BeEquivalentTo(
+                module.EffectiveDimensions.Select(d => d.Attribute).Concat(module.AdditionalRootLookups.Select(l => l.Attribute)));
+        }
+
+        Registry().FindByEntity("sprk_document")!.RootRuleAttributes.Should().BeEquivalentTo(new[]
+        {
+            "sprk_project", "sprk_matter", "sprk_workassignment",
+            "sprk_relatedproject", "sprk_relatedmatter", "sprk_relatedworkassignment",
+        });
+    }
+
+    /// <summary>
+    /// Runs the real documents-module fetch pipeline over the production registry. The double executes the FetchXML it is
+    /// handed the way Dataverse does: each row keeps <c>@logicalName</c> plus only the attributes named in the executed
+    /// FetchXML, and a null attribute is omitted.
+    /// </summary>
+    private static async Task<(FetchResponseDto Body, string Executed)> RunDocumentsFetchAsync(
+        CallerPrincipal caller, string callerFetchXml, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows)
+    {
+        var executed = string.Empty;
+        var result = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
+            new FetchRequestDto("sprk_document", callerFetchXml, PagingCookie: null),
+            caller, Registry(), new FetchXmlEntityExtractor(),
+            (request, _) =>
+            {
+                executed = request.FetchXml;
+                return Task.FromResult(new FetchResponseDto(
+                    ProjectThroughFetch(request.FetchXml, rows), MoreRecords: false, PagingCookie: null));
+            },
+            NullLogger.Instance, CancellationToken.None);
+        return (result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!, executed);
+    }
+
+    private static IReadOnlyList<IReadOnlyDictionary<string, object?>> ProjectThroughFetch(
+        string fetchXml, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows)
+    {
+        var names = System.Xml.Linq.XDocument.Parse(fetchXml).Descendants("attribute")
+            .Select(a => (string?)a.Attribute("name")).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return rows.Select(row =>
+        {
+            var projected = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, value) in row)
+            {
+                if (key == "@logicalName")
+                    projected[key] = value;
+                else if (key == "@formattedValues" && value is IEnumerable<KeyValuePair<string, string>> formatted)
+                    projected[key] = formatted.Where(f => names.Contains(f.Key)).ToDictionary(f => f.Key, f => f.Value);
+                else if (value is not null && names.Contains(key))
+                    projected[key] = value;
+            }
+
+            return (IReadOnlyDictionary<string, object?>)projected;
+        }).ToList();
+    }
+
     [Fact]
     public async Task DocumentsModule_SingleRecordRead_IsRefusedForADocumentId()
     {

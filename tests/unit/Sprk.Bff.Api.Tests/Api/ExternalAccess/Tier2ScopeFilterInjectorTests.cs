@@ -199,6 +199,17 @@ public sealed class Tier2ScopeFilterInjectorTests
     }
 
     [Fact]
+    public void EnsureProjected_ReportsExactlyTheAttributesItAdded_SoTheCallerCanStripThem()
+    {
+        var scoped = Tier2ScopeFilterInjector.Inject(ProjectFetchXml, "sprk_projectid", new HashSet<Guid> { IdA });
+
+        Tier2ScopeFilterInjector.EnsureProjected(
+            scoped, new[] { "SPRK_PROJECTID", "sprk_matter", "sprk_matter", "sprk_workassignment" }, out var added);
+
+        added.Should().Equal("sprk_matter", "sprk_workassignment");
+    }
+
+    [Fact]
     public void EnsureProjected_RefusesAMalformedFetch()
     {
         var act = () => Tier2ScopeFilterInjector.EnsureProjected("<fetch>", new[] { "a" });

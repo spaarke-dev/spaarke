@@ -302,6 +302,37 @@ public class ExternalMessageEndpointsTests
         Messages(await Get("projects", project, Ciam(project: project))).Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("_sprk_regardingmatter_value", 7)]
+    [InlineData("_sprk_regardingworkassignment_value", true)]
+    [InlineData("_sprk_regardingmatter_value", new[] { 1 })]
+    public async Task AMessageWhoseRootStampIsPresentButNotAString_IsWithheld_FailClosed(string stamp, object value)
+    {
+        // K3 (fix round 3): a stamp that is present as a non-string JSON value is malformed, not "not filed". Same verdict as
+        // DocumentRootLinks and the delete-target parse.
+        var project = Guid.NewGuid();
+        var plain = Guid.NewGuid();
+        var row = MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
+        row[stamp] = El(value);
+        SetupMessages(MessageRow(plain, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"), row);
+
+        Messages(await Get("projects", project, Ciam(project: project))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(plain.ToString("D"));
+    }
+
+    [Fact]
+    public async Task AMessageWhoseOtherRootStampIsJsonNull_IsListed_NotFiled()
+    {
+        var project = Guid.NewGuid();
+        var id = Guid.NewGuid();
+        var row = MessageRow(id, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
+        row["_sprk_regardingmatter_value"] = JsonSerializer.SerializeToElement<string?>(null);
+        SetupMessages(row);
+
+        Messages(await Get("projects", project, Ciam(project: project))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(id.ToString("D"));
+    }
+
     [Fact]
     public async Task TheThreadQuery_AlwaysReadsAllThreeRootStamps_WhateverRecordItIsKeyedOn()
     {

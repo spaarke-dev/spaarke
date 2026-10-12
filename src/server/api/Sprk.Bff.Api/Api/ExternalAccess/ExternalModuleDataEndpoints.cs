@@ -272,12 +272,15 @@ public static class ExternalModuleDataEndpoints
             // notes/grid-widget-empty-diagnosis.md. ScopeRows below is retained as defense-in-depth.
             var scopedFetchXml = Tier2ScopeFilterInjector.Inject(request.FetchXml, scopeDimensions);
 
-            // Fix round for r3 task 039 (K3): a module whose every-root rule checks lookups beyond its scope dimensions
-            // (the documents module's related twins) has the server project them, AFTER the column guard, so ScopeRows can
-            // withhold a row linked to a hidden root only through one. They are not readable columns; the strip drops them.
-            if (module.RequireReadOnEveryRoot && module.AdditionalRootLookups.Count > 0)
+            // Fix round for r3 task 039 (K3, F1): a module whose every-root rule reads root links the caller's FetchXML may
+            // not name (the related twins, and any scope dimension the grid left out) has the server project ALL of them,
+            // AFTER the column guard. Dataverse omits a null attribute, so a link the query did not read looks "not filed"
+            // and ScopeRows would let a row filed to a hidden root through: the projection must cover every attribute the
+            // rule reads (RootRuleAttributes). The ones the caller did not ask for are removed from the response below.
+            IReadOnlyList<string> serverProjected = Array.Empty<string>();
+            if (module.RequireReadOnEveryRoot)
                 scopedFetchXml = Tier2ScopeFilterInjector.EnsureProjected(
-                    scopedFetchXml, module.AdditionalRootLookups.Select(l => l.Attribute));
+                    scopedFetchXml, module.RootRuleAttributes, out serverProjected);
             var scopedRequest = request with { FetchXml = scopedFetchXml };
 
             // App-only execution (broker-only, no OBO), then Tier-2 scope the rows to the caller's set
@@ -285,7 +288,11 @@ public static class ExternalModuleDataEndpoints
             // runs AFTER ScopeRows, which needs the scope attributes (and @logicalName) still present.
             var result = await executeFetch(scopedRequest, ct).ConfigureAwait(false);
             var scoped = module.ScopeRows(principal, result.Entities);
-            var projected = StripRowsToReadableColumns(scoped, module, logger);
+            // The response carries the readable columns the CALLER requested: a root column the server projected only for
+            // the rule (serverProjected) is not one of them, even when it is on the module's readable list.
+            var returnable = new HashSet<string>(module.ReadableColumns, StringComparer.OrdinalIgnoreCase);
+            returnable.ExceptWith(serverProjected);
+            var projected = StripRowsToReadableColumns(scoped, module, returnable, logger);
 
             logger.LogInformation(
                 "[EXT-MODULE] Fetch module={Module} entity={Entity}: {Returned}/{Total} rows after Tier-2 scope (server-side filtered).",
@@ -967,13 +974,14 @@ public static class ExternalModuleDataEndpoints
     private static IReadOnlyList<IReadOnlyDictionary<string, object?>> StripRowsToReadableColumns(
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
         ExternalModuleDescriptor module,
+        IReadOnlySet<string> returnable,
         ILogger logger)
     {
         var projected = new List<IReadOnlyDictionary<string, object?>>(rows.Count);
         var removed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var row in rows)
         {
-            projected.Add(StripToReadableColumns(row, module.ReadableColumns, keepLogicalName: true, out var dropped));
+            projected.Add(StripToReadableColumns(row, returnable, keepLogicalName: true, out var dropped));
             removed.UnionWith(dropped);
         }
 

@@ -184,6 +184,15 @@ public sealed class ExternalModuleDescriptor
     public IReadOnlyList<RootLookup> AdditionalRootLookups { get; init; } = Array.Empty<RootLookup>();
 
     /// <summary>
+    /// Every row attribute the every-root rule (<see cref="RequireReadOnEveryRoot"/>) reads: the scope dimensions plus
+    /// <see cref="AdditionalRootLookups"/>. The fetch endpoint projects all of them server-side (a caller's FetchXML may
+    /// name only some, and Dataverse omits a null attribute, so an unprojected link reads as "not filed" and the rule
+    /// would fail open), then returns only the columns the caller requested. Fix round for r3 task 039, F1.
+    /// </summary>
+    public IEnumerable<string> RootRuleAttributes =>
+        EffectiveDimensions.Select(d => d.Attribute).Concat(AdditionalRootLookups.Select(l => l.Attribute));
+
+    /// <summary>
     /// The module's resolved scope dimensions — either the explicit <see cref="ScopeDimensions"/> list,
     /// or a one-element list built from the <see cref="RecordIdAttribute"/> + <see cref="AccessibleRecordIds"/>
     /// shorthand. Throws if neither is configured (a wiring bug — fail fast).

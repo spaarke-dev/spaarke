@@ -161,9 +161,19 @@ internal static class Tier2ScopeFilterInjector
     /// (the canonical child order: attributes, filter, order), or first when there is none.
     /// </remarks>
     /// <exception cref="FetchXmlParseException">If the FetchXML is not well-formed or has no entity.</exception>
-    public static string EnsureProjected(string fetchXml, IEnumerable<string> attributes)
+    public static string EnsureProjected(string fetchXml, IEnumerable<string> attributes) =>
+        EnsureProjected(fetchXml, attributes, out _);
+
+    /// <inheritdoc cref="EnsureProjected(string, IEnumerable{string})"/>
+    /// <param name="fetchXml">The caller's (guarded) FetchXML.</param>
+    /// <param name="attributes">The attributes the server needs projected.</param>
+    /// <param name="added">The attributes this call added, i.e. the ones the caller's FetchXML did NOT request. The caller of
+    /// this method removes exactly these from the response, so a column the server read for itself is never returned.</param>
+    public static string EnsureProjected(string fetchXml, IEnumerable<string> attributes, out IReadOnlyList<string> added)
     {
         ArgumentNullException.ThrowIfNull(attributes);
+        var addedNames = new List<string>();
+        added = addedNames;
 
         XDocument document;
         try
@@ -187,13 +197,14 @@ internal static class Tier2ScopeFilterInjector
         {
             if (!projected.Add(name))
                 continue;
+            addedNames.Add(name);
 
-            var added = new XElement("attribute", new XAttribute("name", name));
+            var element = new XElement("attribute", new XAttribute("name", name));
             var last = entity.Elements("attribute").LastOrDefault();
             if (last is not null)
-                last.AddAfterSelf(added);
+                last.AddAfterSelf(element);
             else
-                entity.AddFirst(added);
+                entity.AddFirst(element);
         }
 
         return document.ToString(SaveOptions.DisableFormatting);

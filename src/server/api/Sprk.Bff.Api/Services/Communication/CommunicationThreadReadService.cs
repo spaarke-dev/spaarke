@@ -462,9 +462,25 @@ public sealed class CommunicationThreadReadService
 
     private static readonly string[] RootStampColumns = { ProjectStampColumn, MatterStampColumn, WorkAssignmentStampColumn };
 
-    /// <summary>The core-root stamps a row carries (raw lookup values; a column the row lacks reads as not filed).</summary>
+    /// <summary>The core-root stamps a row carries (raw lookup values; a column the row lacks, or holds as JSON null, reads
+    /// as not filed).</summary>
     private static MessageRootLookups RootsOf(Dictionary<string, JsonElement> row) => new(
-        TryString(row, ProjectStampColumn), TryString(row, MatterStampColumn), TryString(row, WorkAssignmentStampColumn));
+        RootStamp(row, ProjectStampColumn), RootStamp(row, MatterStampColumn), RootStamp(row, WorkAssignmentStampColumn));
+
+    /// <summary>Stands for a stamp that is present but not a string; the multi-root rule reads it as an unreadable root.</summary>
+    private const string MalformedRootStamp = "malformed";
+
+    /// <summary>
+    /// One stamp, fail CLOSED (fix round for r3 task 039, K3): absent or JSON null is "not filed", a string is the lookup, and
+    /// any other JSON value (a number, object, array, boolean) is malformed, so the row is withheld, as
+    /// <c>DocumentRootLinks</c> and the delete-target parse read the same case.
+    /// </summary>
+    private static string? RootStamp(Dictionary<string, JsonElement> row, string key)
+    {
+        if (!row.TryGetValue(key, out var v) || v.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            return null;
+        return v.ValueKind == JsonValueKind.String ? v.GetString() : MalformedRootStamp;
+    }
 
     /// <summary>True only for a Status Reason that means the message was actually sent or received (see the allow-list).</summary>
     private static bool IsExternallyReadableStatus(int? statusCode)
