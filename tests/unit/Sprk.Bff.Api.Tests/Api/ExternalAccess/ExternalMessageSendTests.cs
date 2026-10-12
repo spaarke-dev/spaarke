@@ -69,9 +69,11 @@ public class ExternalMessageSendTests
             .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => _created.Add(e))
             .ReturnsAsync(() => Guid.NewGuid());
+        // The shared outbound message-thread step resolves through ResolveAndAssignAsync (master #1629: it returns the
+        // ThreadAssignment carrying the grant audience, not a bare thread id), so that is the seam this post reaches.
         _threads
-            .Setup(t => t.ResolveAndAssignThreadAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(_threadId);
+            .Setup(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ThreadAssignment.NoGrant(_threadId));
     }
 
     /// <summary>A channel sender that fails the test if the post ever reaches it (no email, no chat send — FR-11).</summary>
@@ -360,7 +362,7 @@ public class ExternalMessageSendTests
         dto.SprkDirection.Should().Be(Incoming);
 
         // Filed in the record's thread by the existing message-thread step (no ACS id → the record's default thread).
-        _threads.Verify(t => t.ResolveAndAssignThreadAsync(
+        _threads.Verify(t => t.ResolveAndAssignAsync(
             It.Is<ThreadResolutionRequest>(r => r.ChannelType == CommunicationType.Message && r.AcsThreadId == null),
             It.IsAny<CancellationToken>()), Times.Once);
         ShouldHaveSentNothing();
@@ -801,9 +803,9 @@ public class ExternalMessageSendTests
         var project = Guid.NewGuid();
         ThreadResolutionRequest? seen = null;
         _threads
-            .Setup(t => t.ResolveAndAssignThreadAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .Setup(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
             .Callback<ThreadResolutionRequest, CancellationToken>((r, _) => seen = r)
-            .ReturnsAsync(_threadId);
+            .ReturnsAsync(ThreadAssignment.NoGrant(_threadId));
 
         Created(await Post("projects", project, Ciam(project: project)));
 
@@ -819,9 +821,9 @@ public class ExternalMessageSendTests
         var project = Guid.NewGuid();
         ThreadResolutionRequest? seen = null;
         _threads
-            .Setup(t => t.ResolveAndAssignThreadAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .Setup(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
             .Callback<ThreadResolutionRequest, CancellationToken>((r, _) => seen = r)
-            .ReturnsAsync(_threadId);
+            .ReturnsAsync(ThreadAssignment.NoGrant(_threadId));
 
         Created(await Post("projects", project, SystemUser(Guid.NewGuid(), project)));
 
