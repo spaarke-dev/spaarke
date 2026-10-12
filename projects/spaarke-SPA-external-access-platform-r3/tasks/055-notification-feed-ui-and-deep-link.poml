@@ -4,7 +4,7 @@
     <title>Notification feed UI + deep-link record open (FR-08, FR-07 client)</title>
     <phase>5 SPA features</phase>
     <gate>after 054, 037 and 041</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New frontend surface + link handling feeding backend selection (tags frontend)</rigor-reason>
     <model-tier>sonnet</model-tier>

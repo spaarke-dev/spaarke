@@ -34,7 +34,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 052 | Intake wizards: wiring + NDA + Policy Question (FR-05) | P5 | 🔲 [open] | 035 | S/h | FULL | Wave 6 |
 | 053 | Intake wizards: Invention + Trademark (FR-05) | P5 | 🔲 [open] | 052 | S/h | FULL | Wave 7 |
 | 054 | Detail documents + delete-own actions (FR-24/FR-26 client) | P5 | ✅ [done] | 051, 032 | S/h | FULL | Wave 6 |
-| 055 | Notification bell + deep-link record open (FR-08/FR-07 client) | P5 | 🔄 [wip] | 054, 037, 041 | S/h | FULL | Wave 7 |
+| 055 | Notification bell + deep-link record open (FR-08/FR-07 client) | P5 | ✅ [done] | 054, 037, 041 | S/h | FULL | Wave 7 |
 | 056 | Join page (FR-13), flagged until 060 | P5 | ✅ [done] | 003, 041 | O/h | FULL | Wave 8 |
 | 060 | Registration service: owner host decision, then build or R4 hand-off (FR-14) | P6 | 🔲 [open] | 003 + owner decision | O/h | FULL | — (blocked on owner) |
 | 070 | Deploy SPA + dev Teams package to dev | P7 | 🔲 [open] | 038, 042, 043, 053, 055, 056 | S/h | STANDARD | — (live, owner-gated) |
