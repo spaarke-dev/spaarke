@@ -566,10 +566,10 @@ public class PolicyVersionValidatorTests
     // =====================================================================================
 
     [Theory]
-    [InlineData("Threshold")]
     [InlineData("Switch")]
-    [InlineData("100000000")] // Threshold's numeric option-set value
-    public void ValidateForSave_RuleTypeWithNoAuthoredSchemaYet_IsRefused_ReasonRuleTypeUnsupported_NeverThrows(string ruleTypeRaw)
+    [InlineData("switch")]
+    [InlineData("100000001")] // Switch's numeric option-set value
+    public void ValidateForSave_SwitchRuleType_IsRefused_ReasonRuleTypeUnsupported_NeverThrows(string ruleTypeRaw)
     {
         var act = () => Sut().ValidateForSave(ruleTypeRaw, "{}", messageTemplate: null);
 
@@ -745,7 +745,7 @@ public class PolicyVersionValidatorTests
     private sealed class TimeProviderFailureException(string message) : Exception(message);
 
     [Theory]
-    [InlineData("Threshold", null, null, OntologyWriterFailureReason.RuleTypeUnsupported)]
+    [InlineData("Switch", null, null, OntologyWriterFailureReason.RuleTypeUnsupported)]
     [InlineData("Existence", "{ not valid json", null, OntologyWriterFailureReason.SchemaInvalid)]
     public void TryPrepareForEvaluation_InvalidBody_RecordsExactReasonTagOnTheMetric(
         string ruleType, string? body, string? template, string expectedReason)
@@ -824,13 +824,13 @@ public class PolicyVersionValidatorTests
     }
 
     [Fact]
-    public void TryPrepareForEvaluation_ThresholdRuleType_ReturnsFalse_NeverThrows()
+    public void TryPrepareForEvaluation_SwitchRuleType_ReturnsFalse_NeverThrows()
     {
-        // Defense in depth: a Threshold policy version (no schema authored yet, task 020 scope) must not
-        // crash the evaluator -- it is simply an invalid policy version like any other.
+        // Defense in depth: a Switch policy version (deferred by D-16, no schema) must not crash the evaluator --
+        // it is simply an invalid policy version like any other.
         var sut = Sut();
 
-        var act = () => sut.TryPrepareForEvaluation(Snapshot("Threshold", "{}"), subjectId: null, out var compiled);
+        var act = () => sut.TryPrepareForEvaluation(Snapshot("Switch", "{}"), subjectId: null, out var compiled);
 
         var ok = act.Should().NotThrow().Subject;
         ok.Should().BeFalse();
