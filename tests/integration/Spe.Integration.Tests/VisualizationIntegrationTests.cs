@@ -180,7 +180,7 @@ public class VisualizationIntegrationTests
         metadata.MaxDepthReached.Should().BeLessOrEqualTo(metadata.Depth);
         metadata.NodesPerLevel.Should().NotBeEmpty();
         metadata.NodesPerLevel.Sum().Should().Be(10); // Total nodes = sum of nodes per level
-        metadata.SearchLatencyMs.Should().BeGreaterOrEqualTo(0);
+        metadata.SearchLatencyMs.Should().Be(150);
 
         _output.WriteLine("Metadata validated:");
         _output.WriteLine($"  Source: {metadata.SourceDocumentId}");

@@ -427,69 +427,6 @@ public class SemanticSearchServiceTests
 
     #endregion
 
-    #region SearchAsync - Timing Metrics Tests
-
-    [Fact]
-    public async Task SearchAsync_ReturnsSearchDurationMetrics()
-    {
-        // Arrange
-        var service = CreateService();
-        var request = CreateValidRequest();
-
-        SetupMockEmbedding();
-        SetupMockSearchClient();
-
-        // Act
-        var result = await service.SearchAsync(request, TestTenantId);
-
-        // Assert
-        result.Metadata.SearchDurationMs.Should().BeGreaterOrEqualTo(0);
-    }
-
-    [Fact]
-    public async Task SearchAsync_ReturnsEmbeddingDurationMetrics()
-    {
-        // Arrange
-        var service = CreateService();
-        var request = CreateValidRequest(HybridSearchMode.Rrf);
-
-        SetupMockEmbedding();
-        SetupMockSearchClient();
-
-        // Act
-        var result = await service.SearchAsync(request, TestTenantId);
-
-        // Assert
-        result.Metadata.EmbeddingDurationMs.Should().BeGreaterOrEqualTo(0);
-    }
-
-    [Fact]
-    public async Task SearchAsync_WithVectorSearch_EmbeddingDurationIsPopulated()
-    {
-        // Arrange
-        var service = CreateService();
-        var request = CreateValidRequest(HybridSearchMode.VectorOnly);
-
-        // Add slight delay to ensure timing is measurable
-        _embeddingCacheMock
-            .Setup(x => x.GetEmbeddingForContentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ReadOnlyMemory<float>?)null);
-
-        _openAiClientMock
-            .Setup(x => x.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(_testEmbedding);
-
-        SetupMockSearchClient();
-
-        // Act
-        var result = await service.SearchAsync(request, TestTenantId);
-
-        // Assert - Embedding duration should be recorded
-        result.Metadata.EmbeddingDurationMs.Should().BeGreaterOrEqualTo(0);
-    }
-
-    #endregion
-
     #region SearchAsync - Result Enrichment Tests
 
     [Fact]

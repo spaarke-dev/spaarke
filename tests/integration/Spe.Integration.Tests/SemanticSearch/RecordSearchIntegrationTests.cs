@@ -221,8 +221,11 @@ public class RecordSearchIntegrationTests : IClassFixture<RecordSearchTestFixtur
     [Fact]
     public async Task PostRecordSearch_ResponseContainsResultsAndMetadata()
     {
-        // Arrange
-        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        // Arrange — the route is deny-by-default (see RecordSearchAuthorizationTests), so grant the
+        // caller Read on the first of the two rows MockRecordSearchService always returns.
+        var callerId = Guid.NewGuid().ToString();
+        _fixture.Access.GrantRecord(callerId, "sprk_matters", Guid.Parse("00000000-0000-0000-0000-000000000001"), AccessRights.Read);
+        var client = _fixture.CreateAuthenticatedClient(TestTenantId, callerId);
         var request = new RecordSearchRequest
         {
             Query = "Contoso project",
@@ -238,14 +241,13 @@ public class RecordSearchIntegrationTests : IClassFixture<RecordSearchTestFixtur
         var content = await response.Content.ReadFromJsonAsync<RecordSearchResponse>(_jsonOptions);
         content.Should().NotBeNull();
 
-        // Results should be present (mock returns sample data)
-        content!.Results.Should().NotBeNull();
-        content.Results.Should().HaveCountGreaterOrEqualTo(0);
+        // Exactly the one permitted row of the mock's two
+        content!.Results.Should().ContainSingle().Which.RecordName.Should().Be("Sample Record 1");
 
-        // Metadata should contain expected fields
+        // Metadata reflects the permitted rows; SearchTime is the mock's fixed 42 ms
         content.Metadata.Should().NotBeNull();
-        content.Metadata.TotalCount.Should().BeGreaterOrEqualTo(0);
-        content.Metadata.SearchTime.Should().BeGreaterOrEqualTo(0);
+        content.Metadata.TotalCount.Should().Be(1);
+        content.Metadata.SearchTime.Should().Be(42);
         content.Metadata.HybridMode.Should().NotBeNullOrEmpty();
     }
 
