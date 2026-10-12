@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Xunit;
@@ -233,8 +234,112 @@ public sealed class SpeAdminContainerOwnershipRefusalTests : IClassFixture<Admin
         response.IsSuccessStatusCode.Should().BeFalse("the restore did not leave a reachable container");
         _fixture.Graph.AllRequests.Should().ContainSingle(r => r.Method == "DELETE" && r.Path == $"{ContainersPath}/rb-own",
             "a live container with no marker or stamp is unreachable by every admin — it goes back to the recycle bin");
-        _fixture.DeletedRecords.RecordOf("rb-own").Should().NotBeNull(
-            "the record still admits the container in the bin, so the restore can be retried");
+        var record = _fixture.DeletedRecords.RecordOf("rb-own");
+        record.Should().NotBeNull("the record still admits the container in the bin, so the restore can be retried");
+        record!.DeletedAt.Should().BeAfter(DateTimeOffset.UtcNow.AddMinutes(-5),
+            "#1652 round 1: the record is re-written before the re-delete, so its ttl restarts with SPE's new retention");
+    }
+
+    // ── #1652 round 1 ─────────────────────────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(null, "10000000-0000-0000-0000-000000000000")]          // the marker did not read back
+    [InlineData(OwnCustomer, "1b000000-0000-0000-0000-000000000000")]   // the stamp read back as another unit
+    [InlineData(OtherCustomer, "10000000-0000-0000-0000-000000000000")] // another customer's marker read back
+    public async Task Restore_WhenTheReadBackIsNotTheRecordsMarkerAndStamp_ReturnsTheContainerToTheBin(
+        string? readBackMarker, string readBackUnit)
+    {
+        Seed(callerUnit: Root);
+        _fixture.Graph.StubPostExact($"{DeletedPath}/rb-own/restore", "{\"id\":\"rb-own\"}");
+        _fixture.Graph.StubPatch($"{ContainersPath}/rb-own/customProperties", "{}");
+        StubActive("rb-own", readBackMarker, Guid.Parse(readBackUnit));
+        _fixture.Graph.StubDelete($"{ContainersPath}/rb-own");
+        using var client = Admin();
+
+        var response = await client.SendAsync(RecycleBinRequest("POST", "rb-own"));
+
+        response.IsSuccessStatusCode.Should().BeFalse();
+        _fixture.Graph.AllRequests.Should().ContainSingle(r => r.Method == "DELETE" && r.Path == $"{ContainersPath}/rb-own",
+            "a container whose marker AND stamp do not both read back is not reachable as ours — back to the bin");
+        _fixture.DeletedRecords.RecordOf("rb-own").Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Restore_ByARootAdmin_OfAUnitBContainer_WritesTheRecordsUnit_NotTheCallers()
+    {
+        Seed(callerUnit: Root);
+        _fixture.Graph.StubPostExact($"{DeletedPath}/rb-unitb/restore", "{\"id\":\"rb-unitb\"}");
+        _fixture.Graph.StubPatch($"{ContainersPath}/rb-unitb/customProperties", "{}");
+        StubActive("rb-unitb", OwnCustomer, UnitB);
+        using var client = Admin();
+
+        var response = await client.SendAsync(RecycleBinRequest("POST", "rb-unitb"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = _fixture.Graph.AllRequests.Should().ContainSingle(r => r.Method == "PATCH").Subject.BodyAsJson();
+        body.GetProperty(SpeContainerBusinessUnitStamp.PropertyName).GetProperty("value").GetString()
+            .Should().BeEquivalentTo(UnitB.ToString(), "the container goes back to the unit that owned it, not the restorer's");
+        _fixture.DeletedRecords.DocumentOf("rb-unitb").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Restore_WhenGraphSaysNotFound_ButTheContainerIsLiveAndBare_IsReMarkedFromTheRecord()
+    {
+        // Graph restored it, the 2xx was lost, and the SDK's retry read 404 (#1652 round 1, scenario 2).
+        Seed(callerUnit: Root);
+        _fixture.Graph.StubPostExact($"{DeletedPath}/rb-own/restore", """{"error":{"code":"itemNotFound","message":"x"}}""", 404);
+        _fixture.Graph.StubGetSequence($"{ContainersPath}/rb-own",
+            (LiveJson("rb-own", null, null), 200),
+            (LiveJson("rb-own", OwnCustomer, Root), 200));
+        _fixture.Graph.StubPatch($"{ContainersPath}/rb-own/customProperties", "{}");
+        using var client = Admin();
+
+        var response = await client.SendAsync(RecycleBinRequest("POST", "rb-own"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = _fixture.Graph.AllRequests.Should().ContainSingle(r => r.Method == "PATCH").Subject.BodyAsJson();
+        body.GetProperty(SpeContainerOwnershipGuard.MarkerPropertyName).GetProperty("value").GetString().Should().Be(OwnCustomer);
+        body.GetProperty(SpeContainerBusinessUnitStamp.PropertyName).GetProperty("value").GetString()
+            .Should().BeEquivalentTo(Root.ToString());
+        _fixture.Graph.AllRequests.Should().NotContain(r => r.Method == "DELETE");
+        _fixture.DeletedRecords.DocumentOf("rb-own").Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(OtherCustomer, null)]                                     // another customer's marker
+    [InlineData(null, "1b000000-0000-0000-0000-000000000000")]            // a stamp, no marker
+    public async Task Restore_WhenGraphSaysNotFound_AndTheLiveContainerCarriesAnythingElse_IsUntouched_AndTheUniform404(
+        string? liveMarker, string? liveUnit)
+    {
+        Seed(callerUnit: Root);
+        _fixture.Graph.StubPostExact($"{DeletedPath}/rb-own/restore", """{"error":{"code":"itemNotFound","message":"x"}}""", 404);
+        _fixture.Graph.StubGet($"{ContainersPath}/rb-own", LiveJson("rb-own", liveMarker, liveUnit is null ? null : Guid.Parse(liveUnit)));
+        using var client = Admin();
+
+        var problem = await Problem(await client.SendAsync(RecycleBinRequest("POST", "rb-own")));
+
+        AssertUniformNotFound(problem, "rb-own", recycleBin: true);
+        _fixture.Graph.AllRequests.Should().NotContain(r => r.Method == "PATCH" || r.Method == "DELETE",
+            "a live container carrying another marker or stamp is never written");
+        _fixture.DeletedRecords.RecordOf("rb-own").Should().NotBeNull("the record is left as it was");
+    }
+
+    [Fact]
+    public async Task Restore_WhenGraphGivesNoAnswer_AndTheLiveStateIsUnreadable_FailsLoud_WritesNothing_AndKeepsTheRecord()
+    {
+        // Graph may have restored it; nothing can tell. Nothing is written, the record stays, and an operator is told.
+        Seed(callerUnit: Root);
+        _fixture.Graph.StubPostExact($"{DeletedPath}/rb-own/restore", """{"error":{"code":"generalException","message":"x"}}""", 500);
+        _fixture.Graph.StubGet($"{ContainersPath}/rb-own", """{"error":{"code":"generalException","message":"x"}}""", 500);
+        using var client = Admin();
+
+        var response = await client.SendAsync(RecycleBinRequest("POST", "rb-own"));
+
+        response.IsSuccessStatusCode.Should().BeFalse();
+        _fixture.Graph.AllRequests.Should().NotContain(r => r.Method == "PATCH" || r.Method == "DELETE");
+        _fixture.DeletedRecords.RecordOf("rb-own").Should().NotBeNull();
+        _fixture.Logs.Lines.Should().Contain(l => l.Level == LogLevel.Critical && l.Message.Contains("rb-own"),
+            "a container that may be live and unmarked is named where an operator sees it");
     }
 
     [Fact]
@@ -342,6 +447,24 @@ public sealed class SpeAdminContainerOwnershipRefusalTests : IClassFixture<Admin
         // Forged: a well-formed record of rb-forged in every field but its document type (e.g. written as another kind).
         records.Seed("rb-forged", OwnCustomer, Root, TypeT, Config);
         records.DocumentOf("rb-forged")!.DocumentType = "workspace-tab";
+    }
+
+    /// <summary>A live container's single read, with optional marker and stamp (none of either = what Graph restores).</summary>
+    private static string LiveJson(string id, string? marker, Guid? unit)
+    {
+        var properties = new List<string>();
+        if (unit is { } u)
+        {
+            properties.Add("\"" + SpeContainerBusinessUnitStamp.PropertyName + "\":{\"value\":\"" + u + "\",\"isSearchable\":false}");
+        }
+
+        if (marker is not null)
+        {
+            properties.Add("\"" + SpeContainerOwnershipGuard.MarkerPropertyName + "\":{\"value\":\"" + marker + "\",\"isSearchable\":false}");
+        }
+
+        return "{\"id\":\"" + id + "\",\"displayName\":\"Container " + id + "\",\"containerTypeId\":\"" + TypeT +
+               "\",\"status\":\"active\",\"customProperties\":{" + string.Join(",", properties) + "}}";
     }
 
     /// <summary>The ACTIVE container, carrying <paramref name="marker"/> (null = none) and the unit stamp.</summary>

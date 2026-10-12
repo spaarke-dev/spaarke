@@ -542,6 +542,137 @@ public class SpeAppOnlyContainerIsolationTests
         graph.Requests.Should().BeEmpty("a container whose record could not be written is not deleted — it would be stranded");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // #1652 round 1: once a restore or a create-bind has begun, the caller's cancellation never strands the container
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private const string OwnRestorePath = "/v1.0/storage/fileStorage/deletedContainers/" + OwnContainer + "/restore";
+    private const string OwnLivePath = "/v1.0/storage/fileStorage/containers/" + OwnContainer;
+    private const string OwnPropertiesPath = OwnLivePath + "/customProperties";
+
+    [Fact]
+    public async Task SpeAdmin_Restore_WhenTheReMarkPatchHangs_ReturnsTheContainerToTheBin_WithARefreshedRecord()
+    {
+        // The PATCH never answers in time; the caller gives up after 3 s. The restore must still end defined: back in
+        // the bin, its record re-written (ttl restarted with SPE's retention), not live and unmarked.
+        var graph = DeletedList(OwnContainer)
+            .Respond("POST", OwnRestorePath, $$"""{"id":"{{OwnContainer}}"}""")
+            .Respond("PATCH", OwnPropertiesPath, "{}")
+            .Before("PATCH", OwnPropertiesPath, token => Task.Delay(TimeSpan.FromSeconds(10), token))
+            .Respond("DELETE", OwnLivePath, "", HttpStatusCode.NoContent);
+        var records = new FakeSpeDeletedContainerRecords();
+        records.Seed(OwnContainer, Customer, OwnUnit, Config().ContainerTypeId);
+        var seededAt = records.RecordOf(OwnContainer)!.DeletedAt;
+        var service = SpeAdmin(graph, records);
+        service.UncancellableStepTimeout = TimeSpan.FromMilliseconds(500);
+        using var caller = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+
+        var act = () => service.RestoreContainerForConfigAsync(Config(), OwnContainer, caller.Token);
+
+        await act.Should().ThrowAsync<Exception>();
+        graph.Requests.Should().Contain(r => r.Method == "DELETE" && r.Path == OwnLivePath,
+            "a restored container that could not be re-marked goes back to the recycle bin");
+        var record = records.RecordOf(OwnContainer);
+        record.Should().NotBeNull("the record still admits it in the bin");
+        record!.DeletedAt.Should().BeAfter(seededAt, "the record is re-written, so its ttl restarts with the new retention");
+        record.BusinessUnitId.Should().Be(OwnUnit);
+    }
+
+    [Fact]
+    public async Task SpeAdmin_Restore_WhenTheCallerCancelsDuringTheReMark_TheReMarkStillCompletes()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var graph = DeletedList(OwnContainer)
+            .Respond("POST", OwnRestorePath, $$"""{"id":"{{OwnContainer}}"}""")
+            .Respond("PATCH", OwnPropertiesPath, "{}")
+            .Before("PATCH", OwnPropertiesPath, async token =>
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(token);
+            })
+            .Respond("GET", OwnLivePath, LiveContainerJson(OwnContainer, Customer, OwnUnit));
+        var records = new FakeSpeDeletedContainerRecords();
+        records.Seed(OwnContainer, Customer, OwnUnit, Config().ContainerTypeId);
+        using var caller = new CancellationTokenSource();
+
+        var restore = SpeAdmin(graph, records).RestoreContainerForConfigAsync(Config(), OwnContainer, caller.Token);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        caller.Cancel();                       // the client disconnects mid-PATCH
+        release.TrySetResult();
+        var restored = await restore.WaitAsync(TimeSpan.FromSeconds(30));
+
+        restored.Should().BeTrue("the restore Graph carried out is finished, whatever the caller did");
+        graph.Requests.Should().Contain(r => r.Method == "GET" && r.Path == OwnLivePath, "the marker and stamp were read back");
+        graph.Requests.Should().NotContain(r => r.Method == "DELETE");
+        records.RecordOf(OwnContainer).Should().BeNull("the restore completed, so the record is spent");
+    }
+
+    [Fact]
+    public async Task SpeAdmin_CreateBind_WhenTheStampPatchHangs_TheCompensatingDeleteRuns()
+    {
+        // The container exists once the POST answers; a bind that never completes must remove it, even though the
+        // caller has given up — never leave it live and unbound.
+        var graph = new RoutedGraph()
+            .Respond("POST", "/v1.0/storage/fileStorage/containers", """{"id":"new-container","displayName":"New"}""")
+            .Respond("PATCH", "/v1.0/storage/fileStorage/containers/new-container/customProperties", "{}")
+            .Before("PATCH", "/v1.0/storage/fileStorage/containers/new-container/customProperties",
+                token => Task.Delay(TimeSpan.FromSeconds(10), token))
+            .Respond("DELETE", "/v1.0/storage/fileStorage/containers/new-container", "", HttpStatusCode.NoContent);
+        var service = SpeAdmin(graph);
+        service.UncancellableStepTimeout = TimeSpan.FromMilliseconds(500);
+        using var caller = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+
+        var act = () => service.CreateContainerAsync(graph.Client, Config().ContainerTypeId, "New", null, OwnUnit, caller.Token);
+
+        await act.Should().ThrowAsync<SpeAdminGraphService.ContainerBindingException>();
+        graph.Requests.Should().Contain(r => r.Method == "DELETE" && r.Path == "/v1.0/storage/fileStorage/containers/new-container",
+            "the unbound container is removed — the compensation runs for a timed-out bind too");
+    }
+
+    [Fact]
+    public async Task SpeAdmin_CreateBind_WhenTheCallerCancelsDuringTheBind_TheBindStillCompletes()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var graph = NewContainerGraph("New", OwnUnit)
+            .Before("PATCH", "/v1.0/storage/fileStorage/containers/new-container/customProperties", async token =>
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(token);
+            });
+        using var caller = new CancellationTokenSource();
+
+        var create = SpeAdmin(graph).CreateContainerAsync(graph.Client, Config().ContainerTypeId, "New", null, OwnUnit, caller.Token);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        caller.Cancel();
+        release.TrySetResult();
+        var created = await create.WaitAsync(TimeSpan.FromSeconds(30));
+
+        created.Id.Should().Be("new-container");
+        graph.Requests.Should().Contain(r => r.Method == "GET" && r.Path == "/v1.0/storage/fileStorage/containers/new-container",
+            "the stamp was read back — the bind finished");
+        graph.Requests.Should().NotContain(r => r.Method == "DELETE");
+    }
+
+    [Fact]
+    public void DeletedContainerRecord_SerializesThroughTheStampsCosmosOptions_WithTheNamesCosmosNeeds()
+    {
+        // id (the item id), tenantId (the partition key path /tenantId) and ttl (per-item expiry) must reach Cosmos under
+        // exactly these names through the CosmosClient's real System.Text.Json options.
+        var document = SpeDeletedContainerRecordStore.RecordDocument.From(new SpeDeletedContainerRecord(
+            OwnContainer, Customer, OwnUnit, Config().ConfigId, Config().ContainerTypeId, DateTimeOffset.UtcNow));
+
+        var json = JsonSerializer.SerializeToElement(
+            document, Sprk.Bff.Api.Infrastructure.DI.AiPersistenceModule.CosmosJsonSerializerOptions);
+
+        json.GetProperty("id").GetString().Should().Be(SpeDeletedContainerRecordStore.DocumentId(OwnContainer));
+        json.GetProperty("tenantId").GetString().Should().Be(SpeDeletedContainerRecordStore.PartitionValue);
+        json.GetProperty("ttl").GetInt32().Should().Be((int)SpeDeletedContainerRecordStore.RecordTtl.TotalSeconds);
+        json.GetProperty("documentType").GetString().Should().Be(SpeDeletedContainerRecordStore.DocumentTypeValue);
+        json.GetProperty("containerId").GetString().Should().Be(OwnContainer);
+    }
+
     [Fact]
     public async Task SpeAdmin_RecordAndSoftDelete_OfAnUnboundContainer_WritesNothing_AndDeletesNothing()
     {
@@ -666,6 +797,28 @@ public class SpeAppOnlyContainerIsolationTests
             "{\"value\":[" + string.Join(",", ids.Select(id =>
                 "{\"id\":\"" + id + "\",\"displayName\":\"Deleted " + id + "\",\"containerTypeId\":\"" + Config().ContainerTypeId + "\"}")) + "]}");
 
+    /// <summary>A live container's single read: its type, and optionally the marker and the business-unit stamp.</summary>
+    private static string LiveContainerJson(string id, string? marker, Guid? unit)
+    {
+        var properties = new Dictionary<string, object>();
+        if (marker is not null)
+        {
+            properties[SpeContainerOwnershipGuard.MarkerPropertyName] = new { value = marker, isSearchable = false };
+        }
+
+        if (unit is { } u)
+        {
+            properties[SpeContainerBusinessUnitStamp.PropertyName] = new { value = u.ToString("D"), isSearchable = false };
+        }
+
+        return JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["id"] = id,
+            ["containerTypeId"] = Config().ContainerTypeId,
+            ["customProperties"] = properties,
+        });
+    }
+
     private static SpeContainerBindingRead BoundRead(string id)
         => new(id, Config().ContainerTypeId, SpeContainerBinding.BoundTo(OwnUnit));
 
@@ -712,6 +865,14 @@ public class SpeAppOnlyContainerIsolationTests
     private sealed class RoutedGraph : HttpMessageHandler
     {
         private readonly Dictionary<(string, string), (HttpStatusCode Status, string Body)> _routes = new();
+        private readonly Dictionary<(string, string), Func<CancellationToken, Task>> _before = new();
+
+        /// <summary>Runs <paramref name="before"/> (with the REQUEST's token) before answering (method, path).</summary>
+        public RoutedGraph Before(string method, string path, Func<CancellationToken, Task> before)
+        {
+            _before[(method, path)] = before;
+            return this;
+        }
         private readonly List<Sent> _requests = new();
 
         public RoutedGraph()
@@ -751,6 +912,11 @@ public class SpeAppOnlyContainerIsolationTests
             var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(ct);
             var path = request.RequestUri!.AbsolutePath;
             _requests.Add(new Sent(request.Method.Method, path, request.RequestUri.Query, body));
+
+            if (_before.TryGetValue((request.Method.Method, path), out var before))
+            {
+                await before(ct);
+            }
 
             var (status, json) = _routes.TryGetValue((request.Method.Method, path), out var route)
                 ? route

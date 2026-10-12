@@ -34,6 +34,13 @@ public class ContainerOperations
     }
 
     /// <summary>
+    /// Bounds the bind of a container that already exists (#1652 round 1). The bind runs on its own token with this
+    /// timeout, never the caller's: a client disconnect mid-bind used to skip the compensating delete and leave a live,
+    /// unbound container. Settable for tests only.
+    /// </summary>
+    internal TimeSpan UncancellableStepTimeout { get; set; } = TimeSpan.FromSeconds(90);
+
+    /// <summary>
     /// Creates an SPE container and binds it to <paramref name="owningBusinessUnitId"/> before returning
     /// (<see cref="Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBusinessUnitStamp"/>; unified-access-control-r2 task 165,
     /// owner round 20 item 1). A container whose stamp cannot be written and read back is soft-deleted again and the
@@ -87,10 +94,13 @@ public class ContainerOperations
             _logger.LogInformation("Successfully created SPE container {ContainerId} with display name {DisplayName}",
                 createdContainer.Id, displayName);
 
-            await BindNewContainerAsync(graphClient, createdContainer.Id!, owningBusinessUnitId, ct);
+            // From here the container exists, so neither step runs on the caller's token (#1652 round 1): a cancelled
+            // bind or mark would skip its compensating delete and leave a live container no route reaches.
+            await BindNewContainerAsync(graphClient, createdContainer.Id!, owningBusinessUnitId);
 
-            // Without the marker this stamp could not reach its own new container (task 227d).
-            await _ownership.MarkOwnedAsync(createdContainer.Id!, ct);
+            // Without the marker this stamp could not reach its own new container (task 227d). The guard skips its
+            // compensation when ITS token is cancelled, so it gets none; Graph's request timeout still bounds it.
+            await _ownership.MarkOwnedAsync(createdContainer.Id!, CancellationToken.None);
 
             return new ContainerDto(
                 createdContainer.Id!,
@@ -118,10 +128,14 @@ public class ContainerOperations
     /// <summary>
     /// Stamps the just-created container, reads the stamp back, and on any failure soft-deletes it and throws
     /// <see cref="InvalidOperationException"/> (the caller's existing "container could not be created" path).
+    /// Runs on its own token bounded by <see cref="UncancellableStepTimeout"/>, and compensates for EVERY failure,
+    /// cancellation and timeout included (#1652 round 1).
     /// </summary>
     private async Task BindNewContainerAsync(
-        GraphServiceClient graphClient, string containerId, Guid owningBusinessUnitId, CancellationToken ct)
+        GraphServiceClient graphClient, string containerId, Guid owningBusinessUnitId)
     {
+        using var step = new CancellationTokenSource(UncancellableStepTimeout);
+        var ct = step.Token;
         try
         {
             await SpeAdminGraphService.WriteBusinessUnitStampAsync(graphClient, containerId, owningBusinessUnitId, ct);
@@ -135,7 +149,7 @@ public class ContainerOperations
             _logger.LogInformation("Container {ContainerId} bound to business unit {BusinessUnitId}",
                 containerId, owningBusinessUnitId);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
             _logger.LogError(ex,
                 "Container {ContainerId} was created but could not be bound to business unit {BusinessUnitId} — removing it.",

@@ -226,15 +226,24 @@ public sealed class GraphWireMockFixture : IDisposable
         return this;
     }
 
-    /// <summary>Serves <paramref name="jsonBody"/> for a PATCH — used to cover update-property paths.</summary>
-    public GraphWireMockFixture StubPatch(string pathPrefix, string jsonBody, int statusCode = 200)
+    /// <summary>
+    /// Serves <paramref name="jsonBody"/> for a PATCH — used to cover update-property paths. <paramref name="delay"/>
+    /// holds the answer back, to cover a caller that gives up while the PATCH is in flight.
+    /// </summary>
+    public GraphWireMockFixture StubPatch(string pathPrefix, string jsonBody, int statusCode = 200, TimeSpan? delay = null)
     {
+        var response = Response.Create()
+            .WithStatusCode(statusCode)
+            .WithHeader("Content-Type", "application/json")
+            .WithBody(jsonBody);
+        if (delay is { } d)
+        {
+            response = response.WithDelay(d);
+        }
+
         _server
             .Given(Request.Create().WithPath(new WireMock.Matchers.WildcardMatcher($"{pathPrefix}*")).UsingPatch())
-            .RespondWith(Response.Create()
-                .WithStatusCode(statusCode)
-                .WithHeader("Content-Type", "application/json")
-                .WithBody(jsonBody));
+            .RespondWith(response);
 
         return this;
     }

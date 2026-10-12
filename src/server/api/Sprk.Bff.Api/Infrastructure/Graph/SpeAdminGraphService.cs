@@ -1770,8 +1770,10 @@ public sealed class SpeAdminGraphService
         // CreateContainerAsync binds the new container to its business unit (unified-access-control-r2 task 165).
         try { created = await CreateContainerAsync(client, containerTypeId, displayName, description, owningBusinessUnitId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateContainer({containerTypeId})"); }
-        // Without the marker this stamp could not reach the container it just created (task 227d).
-        await RequireOwnership().MarkOwnedAsync(created.Id, ct).ConfigureAwait(false);
+        // Without the marker this stamp could not reach the container it just created (task 227d). Not on the caller's
+        // token (#1652 round 1): the guard skips its compensating delete when THAT token is cancelled, which would leave
+        // a live, unmarked container. Graph's own request timeout still bounds it.
+        await RequireOwnership().MarkOwnedAsync(created.Id, CancellationToken.None).ConfigureAwait(false);
         return created;
     }
 
@@ -2661,23 +2663,138 @@ public sealed class SpeAdminGraphService
         return deleted.Where(c => reads.GetValueOrDefault(c.Id) is not null).ToList();
     }
 
+    /// <summary>
+    /// The longest one UNCANCELLABLE step of the SPE admin plane may run — a step that, once its first Graph write is
+    /// sent, must finish or be undone whatever the caller does (#1652 round 1): completing a restore (re-mark, read-back),
+    /// returning a restored container to the recycle bin, binding a container just created. Each such step runs on its
+    /// own token with this timeout, never on the request's: a client disconnect or a request timeout in the middle would
+    /// otherwise leave a live container with no marker or stamp, reachable by no admin. Settable for tests only.
+    /// </summary>
+    internal TimeSpan UncancellableStepTimeout { get; set; } = TimeSpan.FromSeconds(90);
+
     public async Task<bool> RestoreContainerForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
         var (client, binding) = await GetDeletedContainerAccessAsync(config, containerId, ct).ConfigureAwait(false);
-        bool restored;
-        try { restored = await RestoreContainerAsync(client, containerId, ct).ConfigureAwait(false); }
-        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"RestoreContainer({containerId})"); }
-        // While in the bin the container read as "no marker" (404); drop that so the restored one is reachable now.
-        await RequireOwnership().ForgetContainerAsync(containerId).ConfigureAwait(false);
-        if (restored)
+        ct.ThrowIfCancellationRequested();
+
+        // From the restore POST on, nothing is cancellable by the caller (#1652 round 1): a restore that Graph carries
+        // out must end with the container re-marked, or back in the recycle bin — never live and unreachable.
+        bool restored = false;
+        Exception? noAnswer = null;
+        using (var step = new CancellationTokenSource(UncancellableStepTimeout))
         {
-            // Give the live container back its marker and stamp from the record; only then is the record spent (#1652).
-            await RebindRestoredContainerAsync(client, containerId, binding, ct).ConfigureAwait(false);
-            await RequireDeletedRecords().RemoveAsync(containerId, CancellationToken.None).ConfigureAwait(false);
+            try { restored = await RestoreContainerAsync(client, containerId, step.Token).ConfigureAwait(false); }
+            catch (ODataError ex) when (ex.ResponseStatusCode is >= 400 and < 500)
+            {
+                // A definite refusal: nothing was restored.
+                throw ex.ToSpaarkeStorageException($"RestoreContainer({containerId})");
+            }
+            catch (Exception ex)
+            {
+                // No answer (5xx, transport fault, timeout): Graph may have restored it. Look before answering.
+                noAnswer = ex;
+            }
         }
 
-        return restored;
+        // While in the bin the container read as "no marker" (404); drop that before it is read live.
+        await RequireOwnership().ForgetContainerAsync(containerId).ConfigureAwait(false);
+
+        if (!restored)
+        {
+            // Graph said "not in the bin" — which is also what an SDK retry reads after a restore whose 2xx was lost
+            // (#1652 round 1) — or gave no answer at all. The live container decides.
+            if (await CompleteUnconfirmedRestoreAsync(client, config, containerId, binding).ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            if (noAnswer is not null)
+            {
+                throw noAnswer is ODataError odata
+                    ? odata.ToSpaarkeStorageException($"RestoreContainer({containerId})")
+                    : new InvalidOperationException(
+                        $"Restoring container '{containerId}' got no answer from Graph, and the container is not live.", noAnswer);
+            }
+
+            return false;
+        }
+
+        // Give the live container back its marker and stamp from the record; only then is the record spent (#1652).
+        await RebindRestoredContainerAsync(client, config, containerId, binding).ConfigureAwait(false);
+        await CompleteRestoreAsync(containerId).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
+    /// A restore Graph did not confirm (it answered "not found", or nothing): the container — still admitted by this
+    /// stamp's ownership record — is read LIVE. Live with NO marker and NO stamp (Graph restored it and the answer was
+    /// lost): it is re-marked from the record, exactly as a confirmed restore. Live with this stamp's marker and the
+    /// record's unit: already complete. Live carrying anything else: not touched (false — the uniform 404). Not live:
+    /// false.
+    /// </summary>
+    private async Task<bool> CompleteUnconfirmedRestoreAsync(
+        GraphServiceClient graphClient,
+        ContainerTypeConfig config,
+        string containerId,
+        Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead binding)
+    {
+        (Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead? Read, string? Marker) live;
+        try
+        {
+            using var step = new CancellationTokenSource(UncancellableStepTimeout);
+            live = await ReadLiveOwnershipAsync(graphClient, containerId, step.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Graph may have restored it, and its live state is unreadable: once out of the bin no retry reaches it, so
+            // say so where an operator sees it. The ownership record is kept and names its customer and unit.
+            _logger.LogCritical(ex,
+                "Restore of container {ContainerId} was not confirmed by Graph and its live state could not be read: it may " +
+                "be live with no marker or stamp. Its ownership record is kept; re-mark it from the record if it is live.",
+                containerId);
+            throw;
+        }
+
+        if (live.Read is not { } read)
+        {
+            return false;
+        }
+
+        var ownership = RequireOwnership();
+        var sameType = Sprk.Bff.Api.Services.SpeAdmin.SpeAdminTenantScope.SameGuid(read.ContainerTypeId, config.ContainerTypeId);
+        var bare = live.Marker is null && read.Binding.BusinessUnitId is null && !read.Binding.IsMalformed;
+        var alreadyOurs = ownership.IsThisStampsMarker(live.Marker) && !read.Binding.IsMalformed
+                          && read.Binding.BusinessUnitId == binding.Binding.BusinessUnitId;
+
+        if (sameType && bare)
+        {
+            _logger.LogWarning(
+                "Restore of container {ContainerId} was not confirmed by Graph, but the container is live with no marker " +
+                "or stamp — re-marking it from its ownership record.", containerId);
+            await RebindRestoredContainerAsync(graphClient, config, containerId, binding).ConfigureAwait(false);
+            await CompleteRestoreAsync(containerId).ConfigureAwait(false);
+            return true;
+        }
+
+        if (sameType && alreadyOurs)
+        {
+            await CompleteRestoreAsync(containerId).ConfigureAwait(false);
+            return true;
+        }
+
+        _logger.LogWarning(
+            "Restore of container {ContainerId} was not confirmed by Graph, and the live container carries a marker or " +
+            "stamp other than this stamp's record names (or another type) — left untouched.", containerId);
+        return false;
+    }
+
+    /// <summary>The restore is done: the record is spent, and no stale "no marker" is served for the live container.</summary>
+    private async Task CompleteRestoreAsync(string containerId)
+    {
+        await RequireDeletedRecords().RemoveAsync(containerId, CancellationToken.None).ConfigureAwait(false);
+        // After the re-mark (#1652 round 1): a read between the first invalidation and the PATCH may have cached "none".
+        await RequireOwnership().ForgetContainerAsync(containerId).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -2685,25 +2802,29 @@ public sealed class SpeAdminGraphService
     /// Graph discards a container's <c>customProperties</c> on soft delete, so unless Graph re-hydrates them on restore
     /// (not measured) the live container would come back unmarked and unbound — unreachable by every admin, with its
     /// record gone. ONE merge <c>PATCH …/customProperties</c> carries both (idempotent when they are already there), and
-    /// the stamp is read back. On any failure the container is moved back to the recycle bin — where its record still
-    /// admits it, so the restore can be retried — and this throws.
+    /// both are read back. Runs on its own token (<see cref="UncancellableStepTimeout"/>), never the caller's. On ANY
+    /// failure — a Graph refusal, a fault, a timeout, a wrong read-back — the container is returned to the recycle bin
+    /// with a freshly written record (<see cref="ReturnRestoredContainerToBinAsync"/>), and this throws.
     /// </summary>
     private async Task RebindRestoredContainerAsync(
         GraphServiceClient graphClient,
+        ContainerTypeConfig config,
         string containerId,
-        Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead binding,
-        CancellationToken ct)
+        Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead binding)
     {
-        var businessUnitId = binding.Binding.BusinessUnitId
-            ?? throw new InvalidOperationException($"The ownership record of container '{containerId}' carries no business unit.");
         try
         {
+            var businessUnitId = binding.Binding.BusinessUnitId
+                ?? throw new InvalidOperationException($"The ownership record of container '{containerId}' carries no business unit.");
+            var ownership = RequireOwnership();
+            using var step = new CancellationTokenSource(UncancellableStepTimeout);
+
             var stamp = Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBusinessUnitStamp.ToProperty(businessUnitId);
             var payload = JsonSerializer.Serialize(new Dictionary<string, object>
             {
                 [SpeContainerOwnershipGuard.MarkerPropertyName] = new Dictionary<string, object>
                 {
-                    ["value"] = RequireOwnership().RequireCustomerId(),
+                    ["value"] = ownership.RequireCustomerId(),
                     ["isSearchable"] = false,
                 },
                 [stamp.Name] = new Dictionary<string, object> { ["value"] = stamp.Value, ["isSearchable"] = stamp.IsSearchable },
@@ -2713,35 +2834,29 @@ public sealed class SpeAdminGraphService
 
             await ExecuteWithRetryAsync<object?>(async () =>
             {
-                using var _ = await SendGraphJsonAsync(graphClient, HttpMethod.Patch, url, payload, ct).ConfigureAwait(false);
+                using var _ = await SendGraphJsonAsync(graphClient, HttpMethod.Patch, url, payload, step.Token).ConfigureAwait(false);
                 return null;
-            }, ct).ConfigureAwait(false);
+            }, step.Token).ConfigureAwait(false);
 
-            var readBack = await GetContainerBindingAsync(graphClient, containerId, deleted: false, ct).ConfigureAwait(false);
-            if (readBack?.Binding.BusinessUnitId != businessUnitId)
+            var (readBack, marker) = await ReadLiveOwnershipAsync(graphClient, containerId, step.Token).ConfigureAwait(false);
+            if (readBack?.Binding.BusinessUnitId != businessUnitId || readBack.Binding.IsMalformed)
             {
                 throw new InvalidOperationException("The restored container's business-unit stamp did not read back after the write.");
+            }
+
+            if (!ownership.IsThisStampsMarker(marker))
+            {
+                throw new InvalidOperationException("The restored container's ownership marker did not read back after the write.");
             }
 
             _logger.LogInformation(
                 "Restored container {ContainerId} re-marked and re-bound to business unit {BusinessUnitId} from its ownership record.",
                 containerId, businessUnitId);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
-            var returned = false;
-            try
-            {
-                returned = await SoftDeleteContainerAsync(graphClient, containerId, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception deleteEx)
-            {
-                _logger.LogCritical(deleteEx,
-                    "Restored container {ContainerId} could not be re-marked AND could not be moved back to the recycle bin: " +
-                    "it is live but unmarked and unbound, unreachable by every admin until an operator re-marks it.",
-                    containerId);
-            }
-
+            // Every failure, cancellation and timeout included: this section has no caller token to honour.
+            var returned = await ReturnRestoredContainerToBinAsync(graphClient, config, containerId, binding).ConfigureAwait(false);
             throw new InvalidOperationException(
                 $"Container '{containerId}' was restored but its ownership marker and business-unit stamp could not be " +
                 "re-written" + (returned
@@ -2749,6 +2864,92 @@ public sealed class SpeAdminGraphService
                     : "; moving it back to the recycle bin failed too, so it is live but unreachable until an operator re-marks it."),
                 ex);
         }
+    }
+
+    /// <summary>
+    /// Undoes a restore that could not be completed: re-writes the container's ownership record FIRST — a fresh record,
+    /// so its ttl restarts with SharePoint Embedded's retention, which the soft delete restarts too (#1652 round 1) — then
+    /// soft-deletes the container. A record that cannot be written does not stop the delete (a live, unmarked container
+    /// is worse than one in the bin with an expiring record); it is logged critical. Each call has its own timeout.
+    /// </summary>
+    /// <returns>True when the container is back in the recycle bin.</returns>
+    private async Task<bool> ReturnRestoredContainerToBinAsync(
+        GraphServiceClient graphClient,
+        ContainerTypeConfig config,
+        string containerId,
+        Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead binding)
+    {
+        try
+        {
+            using var write = new CancellationTokenSource(UncancellableStepTimeout);
+            await RequireDeletedRecords().WriteAsync(
+                new Sprk.Bff.Api.Services.SpeAdmin.SpeDeletedContainerRecord(
+                    ContainerId: containerId,
+                    CustomerId: RequireOwnership().RequireCustomerId(),
+                    BusinessUnitId: binding.Binding.BusinessUnitId ?? Guid.Empty,
+                    ConfigId: config.ConfigId,
+                    ContainerTypeId: binding.ContainerTypeId ?? config.ContainerTypeId,
+                    DeletedAt: DateTimeOffset.UtcNow),
+                write.Token).ConfigureAwait(false);
+        }
+        catch (Exception recordEx)
+        {
+            _logger.LogCritical(recordEx,
+                "Container {ContainerId} is going back to the recycle bin, but its ownership record could not be refreshed: " +
+                "the record may expire before SharePoint Embedded's retention does, leaving the container unrestorable.",
+                containerId);
+        }
+
+        try
+        {
+            using var delete = new CancellationTokenSource(UncancellableStepTimeout);
+            return await SoftDeleteContainerAsync(graphClient, containerId, delete.Token).ConfigureAwait(false);
+        }
+        catch (Exception deleteEx)
+        {
+            _logger.LogCritical(deleteEx,
+                "Restored container {ContainerId} could not be re-marked AND could not be moved back to the recycle bin: " +
+                "it is live but unmarked and unbound, unreachable by every admin until an operator re-marks it.",
+                containerId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The LIVE container's binding and ownership marker in one single-container read (<c>$select</c> includes
+    /// <c>customProperties</c>). (null, null) when Graph does not find it. A fault throws.
+    /// </summary>
+    private async Task<(Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead? Read, string? Marker)> ReadLiveOwnershipAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        CancellationToken ct)
+    {
+        var container = await ExecuteWithRetryAsync(async () =>
+        {
+            try
+            {
+                return await graphClient.Storage.FileStorage.Containers[containerId]
+                    .GetAsync(c => c.QueryParameters.Select = BindingSelect, ct).ConfigureAwait(false);
+            }
+            catch (ODataError ex) when (ex.ResponseStatusCode == (int)HttpStatusCode.NotFound || IsUnresolvableContainerId(ex))
+            {
+                return null;
+            }
+        }, ct).ConfigureAwait(false);
+
+        if (container is null)
+        {
+            return (null, null);
+        }
+
+        var properties = ReadCustomProperties(container);
+        var marker = properties.FirstOrDefault(p => SpeContainerOwnershipGuard.IsMarkerProperty(p.Name))?.Value;
+        return (
+            new Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead(
+                ContainerId: container.Id ?? containerId,
+                ContainerTypeId: container.ContainerTypeId?.ToString(),
+                Binding: Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBusinessUnitStamp.Read(properties)),
+            string.IsNullOrWhiteSpace(marker) ? null : marker);
     }
 
     public async Task<bool> PermanentDeleteContainerForConfigAsync(
@@ -3134,12 +3335,20 @@ public sealed class SpeAdminGraphService
     /// Stamps a container the BFF has just created, reads the stamp back, and — when either fails — soft-deletes the
     /// container and throws <see cref="ContainerBindingException"/>, so no container is left active and unbound.
     /// </summary>
+    /// <remarks>
+    /// The container already exists, so the bind is an uncancellable step (#1652 round 1): it runs on its own token
+    /// (<see cref="UncancellableStepTimeout"/>), never the caller's, and the compensating delete runs for EVERY failure —
+    /// a cancelled or timed-out bind used to skip it and leave a live, unbound container.
+    /// </remarks>
     private async Task BindNewContainerAsync(
         GraphServiceClient graphClient,
         string containerId,
         Guid businessUnitId,
-        CancellationToken ct)
+        CancellationToken callerCt)
     {
+        _ = callerCt; // deliberately not honoured — see the remarks
+        using var step = new CancellationTokenSource(UncancellableStepTimeout);
+        var ct = step.Token;
         try
         {
             if (string.IsNullOrWhiteSpace(containerId))
@@ -3163,7 +3372,7 @@ public sealed class SpeAdminGraphService
             _logger.LogInformation(
                 "Container {ContainerId} bound to business unit {BusinessUnitId}", containerId, businessUnitId);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
             _logger.LogError(ex,
                 "Container {ContainerId} was created but could not be bound to business unit {BusinessUnitId} — removing it.",
