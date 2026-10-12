@@ -9,6 +9,7 @@ import * as React from 'react';
 import {
   Checkbox,
   Field,
+  FieldContextProvider,
   Input,
   Radio,
   RadioGroup,
@@ -131,26 +132,50 @@ export interface CheckboxRowProps extends RowBase {
   onChange: (codes: string[]) => void;
 }
 
-/** Several choices as checkboxes. */
+/**
+ * Several choices as checkboxes. The checkboxes are taken OUT of the Field's control context: a Fluent `Checkbox` inside a
+ * `Field` otherwise takes the Field's one control id and `aria-labelledby`, so every checkbox would share an id (a label
+ * click toggles the first box) and be named by the group label instead of its own.
+ */
 export const CheckboxRow: React.FC<CheckboxRowProps> = p => {
   const s = useStyles();
   return (
     <Field label={p.label} required={p.required} hint={p.hint} {...validation(p)}>
       <div role="group" aria-label={p.label} className={s.group}>
-        {p.options.map(o => (
-          <Checkbox
-            key={o.code}
-            label={o.label}
-            checked={p.value.includes(o.code)}
-            onChange={(_e, d) =>
-              p.onChange(d.checked ? [...p.value.filter(c => c !== o.code), o.code] : p.value.filter(c => c !== o.code))
-            }
-          />
-        ))}
+        <FieldContextProvider value={undefined}>
+          {p.options.map(o => (
+            <Checkbox
+              key={o.code}
+              label={o.label}
+              checked={p.value.includes(o.code)}
+              onChange={(_e, d) =>
+                p.onChange(
+                  d.checked ? [...p.value.filter(c => c !== o.code), o.code] : p.value.filter(c => c !== o.code)
+                )
+              }
+            />
+          ))}
+        </FieldContextProvider>
       </div>
     </Field>
   );
 };
+
+export interface ConfirmRowProps {
+  /** The statement the requester agrees to (the checkbox's label). */
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  error?: string;
+  showError: boolean;
+}
+
+/** One checkbox that must be ticked to go on (a confirmation statement). */
+export const ConfirmRow: React.FC<ConfirmRowProps> = p => (
+  <Field {...validation({ label: p.label, error: p.error, showError: p.showError })}>
+    <Checkbox label={p.label} checked={p.checked} onChange={(_e, d) => p.onChange(d.checked === true)} />
+  </Field>
+);
 
 /** The read-only summary on a wizard's last step. */
 export const ReviewList: React.FC<{ rows: Array<{ label: string; value: string }> }> = ({ rows }) => {

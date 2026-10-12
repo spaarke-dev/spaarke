@@ -1,8 +1,9 @@
 /**
- * R3 task 052 (FR-05) - the Legal Front Door intake wizards (NDA Assessment, Policy Question) and their entry points.
+ * R3 tasks 052/053 (FR-05) - the Legal Front Door intake wizards (NDA Assessment, Policy Question, Invention Submission,
+ * Trademark Search) and their entry points.
  *
- * What runs for real: `QuickStartPane` (cards + More Services), the intake registry and visibility rule, both wizards on
- * the real shared `WizardShell`/`SprkModal`, the intake client (path, body, ProblemDetails parsing) and the widget
+ * What runs for real: `QuickStartPane` (cards + More Services), the intake registry and visibility rule, all four wizards
+ * on the real shared `WizardShell`/`SprkModal`, the intake client (path, body, ProblemDetails parsing) and the widget
  * registry. What is substituted: the network seam (`bffApiCall`, answering the submit route and throwing `ApiError`
  * exactly as bff-client builds it - the raw ProblemDetails body is the message) and the record opener (`useOpenRecord`).
  */
@@ -174,25 +175,60 @@ describe('entry points open the intake wizards', () => {
     expect(screen.getByRole('dialog', { name: 'Policy Question' })).toBeTruthy();
   });
 
-  it('a card with neither wizard nor widget (Trademark) is "coming soon" in More Services and opens nothing', () => {
+  it('the Invention Submission card opens the Invention wizard (not the Inventions widget tab) - task 053', () => {
     renderPane();
-    fireEvent.click(screen.getByRole('button', { name: /Browse all legal services/ }));
-    const services = screen.getByRole('dialog', { name: 'Legal services' });
-    expect(within(services).getByText('Coming soon')).toBeTruthy();
+    fireEvent.click(card(/Submit an invention disclosure/));
+    expect(screen.getByRole('dialog', { name: 'Invention Submission' })).toBeTruthy();
     expect(onOpenWidget).not.toHaveBeenCalled();
   });
 
-  it('the Invention card still opens its widget tab (task 053 replaces it with a wizard)', () => {
+  it('the Trademark Search card opens the Trademark wizard - task 053', () => {
     renderPane();
-    fireEvent.click(card(/Submit an invention disclosure/));
-    expect(onOpenWidget).toHaveBeenCalledWith('inventions');
+    fireEvent.click(card(/clearance search/));
+    expect(screen.getByRole('dialog', { name: 'Trademark Search' })).toBeTruthy();
+    expect(onOpenWidget).not.toHaveBeenCalled();
   });
 
-  it('the registry maps each request type to one wizard; task 053 only has to append two entries', () => {
-    expect(INTAKE_WIZARDS.map(w => w.requestType)).toEqual([NDA, POLICY]);
+  it('the More Services entries open the Invention and Trademark wizards, and nothing is "coming soon"', () => {
+    renderPane();
+    fireEvent.click(screen.getByRole('button', { name: /Browse all legal services/ }));
+    const services = screen.getByRole('dialog', { name: 'Legal services' });
+    expect(within(services).queryByText('Coming soon')).toBeNull();
+    fireEvent.click(within(services).getByRole('button', { name: /Submit an invention disclosure/ }));
+    expect(screen.getByRole('dialog', { name: 'Invention Submission' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Legal services' })).toBeNull();
+
+    cleanup();
+    renderPane();
+    fireEvent.click(screen.getByRole('button', { name: /Browse all legal services/ }));
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'Legal services' })).getByRole('button', { name: /clearance search/ })
+    );
+    expect(screen.getByRole('dialog', { name: 'Trademark Search' })).toBeTruthy();
+    expect(onOpenWidget).not.toHaveBeenCalled();
+  });
+
+  it('the registry maps each of the four request types to one wizard', () => {
+    expect(INTAKE_WIZARDS.map(w => w.requestType)).toEqual([NDA, POLICY, INVENTION, TRADEMARK]);
     expect(getIntakeWizard(NDA)?.label).toBe('NDA Assessment');
-    expect(getIntakeWizard(INVENTION)).toBeUndefined();
-    expect(getIntakeWizard(TRADEMARK)).toBeUndefined();
+    expect(getIntakeWizard(INVENTION)?.label).toBe('Invention Submission');
+    expect(getIntakeWizard(TRADEMARK)?.label).toBe('Trademark Search');
+    expect(getIntakeWizard(100000099)).toBeUndefined();
+  });
+
+  it('every Quick Start card now opens a wizard, none a widget tab', () => {
+    for (const name of [
+      /Start an NDA assessment/,
+      /Submit a policy question/,
+      /Submit an invention disclosure/,
+      /clearance search/,
+    ]) {
+      renderPane();
+      fireEvent.click(card(name));
+      expect(screen.getAllByRole('dialog').length).toBeGreaterThan(0);
+      cleanup();
+    }
+    expect(onOpenWidget).not.toHaveBeenCalled();
   });
 });
 
@@ -240,6 +276,29 @@ describe('entry-point visibility follows /me/entitlements, not the plane (review
   it('partner invention switch: the Invention card follows the server list for a partner', () => {
     renderPane(partner(true, { intakeRequestTypes: [NDA, INVENTION, POLICY, TRADEMARK] }));
     expect(hasCard(/Submit an invention disclosure/)).toBe(true);
+  });
+
+  it('partner with [NDA, POLICY, TRADEMARK] (invention switch off): no Invention card or More Services entry; Trademark opens its wizard', () => {
+    renderPane(partner(true, { intakeRequestTypes: [NDA, POLICY, TRADEMARK] }));
+    expect(hasCard(/Submit an invention disclosure/)).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: /Browse all legal services/ }));
+    const services = screen.getByRole('dialog', { name: 'Legal services' });
+    expect(within(services).queryByRole('button', { name: /Submit an invention disclosure/ })).toBeNull();
+    expect(within(services).getByRole('button', { name: /clearance search/ })).toBeTruthy();
+
+    cleanup();
+    renderPane(partner(true, { intakeRequestTypes: [NDA, POLICY, TRADEMARK] }));
+    fireEvent.click(card(/clearance search/));
+    expect(screen.getByRole('dialog', { name: 'Trademark Search' })).toBeTruthy();
+  });
+
+  it('the same partner with Invention listed (switch on) sees the Invention card and More Services entry, and it opens the wizard', () => {
+    renderPane(partner(true, { intakeRequestTypes: [NDA, INVENTION, POLICY, TRADEMARK] }));
+    fireEvent.click(screen.getByRole('button', { name: /Browse all legal services/ }));
+    const services = screen.getByRole('dialog', { name: 'Legal services' });
+    expect(within(services).getByRole('button', { name: /Submit an invention disclosure/ })).toBeTruthy();
+    fireEvent.click(within(services).getByRole('button', { name: /Submit an invention disclosure/ }));
+    expect(screen.getByRole('dialog', { name: 'Invention Submission' })).toBeTruthy();
   });
 
   it('intakeRequestTypes undefined (older server / rollout fallback): the documented fallback, not none, not all', () => {
@@ -365,6 +424,19 @@ describe('NDA Assessment wizard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(screen.getByText(/open the request and add the other party/i)).toBeTruthy();
     expect(screen.queryByLabelText(/Signer email/)).toBeNull();
+  });
+
+  it('the sensitive-information checkboxes each have their own name and toggle independently (task 053 fix to CheckboxRow)', () => {
+    radio('Review the other party’s NDA (they sent their own draft)');
+    change(/Who is the other party/, 'Contoso Ltd');
+    change(/What is your relationship with them/, 'vendor');
+    next();
+    const source = screen.getByRole('checkbox', { name: 'Source code or technical designs' }) as HTMLInputElement;
+    const personal = screen.getByRole('checkbox', { name: 'Personal or customer data' }) as HTMLInputElement;
+    expect(source.id).not.toBe(personal.id);
+    fireEvent.click(source);
+    expect(source.checked).toBe(true);
+    expect(personal.checked).toBe(false);
   });
 
   it('issue path: asks signer name, signer email (format), term and governing law, and requires neededBy', () => {
@@ -715,6 +787,641 @@ describe('Policy Question wizard', () => {
     await screen.findByText('Question sent to Legal');
     fireEvent.click(screen.getByRole('button', { name: 'Service Requests' }));
     expect(onOpenWidget).toHaveBeenCalledWith('service-requests');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Invention Submission wizard (task 053)
+// ---------------------------------------------------------------------------
+
+const PAST = addDaysIso(todayIso(), -30);
+const SOON = addDaysIso(todayIso(), 20); // inside the 60-day warning window
+const LATER = addDaysIso(todayIso(), 200); // outside it
+
+const INV_TITLE = 'Improved battery cooling method';
+const INV_PROBLEM = 'Batteries overheat during fast charging in compact devices.';
+const INV_DESCRIPTION =
+  'A phase-change layer routes heat to the chassis so charging can stay at full rate without throttling.';
+
+/** A radio inside the radio group whose label matches `group` (Yes/No labels repeat across the Invention wizard). */
+const radioIn = (group: RegExp, option: string): void => {
+  fireEvent.click(within(screen.getByRole('radiogroup', { name: group })).getByRole('radio', { name: option }));
+};
+
+/** Invention step 1, then Next. */
+function fillInventionStep1(): void {
+  change(/Short, non-confidential title/, INV_TITLE);
+  change(/What problem does it solve/, INV_PROBLEM);
+  change(/How does it work/, INV_DESCRIPTION);
+  next();
+}
+
+/** Invention steps 2 and 3 on the shortest path (submitter is the inventor; nothing disclosed, shared or used), then Next. */
+function fillInventionStep2and3(): void {
+  radioIn(/Are you one of the inventors/, 'Yes');
+  next();
+  radioIn(/shared publicly/, 'No');
+  radioIn(/outside the company, even under NDA/, 'No');
+  radioIn(/used in a product or service/, 'No');
+  radioIn(/developed with, or funded by/, 'No');
+  next();
+}
+
+/** Leaves the wizard on step 4 with everything valid except the confirmation. */
+function fillInventionToConfirm(): void {
+  fillInventionStep1();
+  fillInventionStep2and3();
+}
+
+const tickConfirm = (): void => {
+  fireEvent.click(screen.getByRole('checkbox', { name: /I confirm this is accurate/ }));
+};
+
+describe('Invention Submission wizard', () => {
+  beforeEach(() => {
+    renderPane();
+    fireEvent.click(card(/Submit an invention disclosure/));
+  });
+
+  it('step 1 requires title (5-150), problem (20+) and description (50+); knownAlternatives is optional', () => {
+    expect(nextButton().disabled).toBe(true);
+    const title = screen.getByLabelText(/Short, non-confidential title/);
+    fireEvent.blur(title);
+    expect(screen.getByText('Enter a short title.')).toBeTruthy();
+    fireEvent.change(title, { target: { value: 'abc' } });
+    expect(screen.getByText(/at least 5 characters/)).toBeTruthy();
+    fireEvent.change(title, { target: { value: INV_TITLE } });
+    change(/What problem does it solve/, 'too short');
+    change(/How does it work/, 'also too short');
+    expect(nextButton().disabled).toBe(true);
+    change(/What problem does it solve/, INV_PROBLEM);
+    change(/How does it work/, INV_DESCRIPTION);
+    expect(nextButton().disabled).toBe(false); // knownAlternatives left blank
+  });
+
+  it('warns beside the title that it appears in the (unsecured) request title and must stay generic', () => {
+    expect(screen.getByText(/Appears in the request title; keep it generic\./)).toBeTruthy();
+  });
+
+  it('asks no department question, anywhere', () => {
+    const dialog = (): HTMLElement => screen.getByRole('dialog', { name: 'Invention Submission' });
+    expect(within(dialog()).queryByText(/department/i)).toBeNull();
+    fillInventionToConfirm();
+    expect(within(dialog()).queryByLabelText(/department/i)).toBeNull();
+    expect(within(dialog()).queryByText(/department/i)).toBeNull();
+  });
+
+  it('"not an inventor" needs at least one listed inventor with a name; an email must have an email shape', () => {
+    fillInventionStep1();
+    radioIn(/Are you one of the inventors/, 'No');
+    expect(screen.getByText('Add at least one inventor.')).toBeTruthy();
+    expect(nextButton().disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add inventor' }));
+    expect(nextButton().disabled).toBe(true); // the row's name is empty
+    const name = screen.getByLabelText(/Inventor 1 name/);
+    fireEvent.blur(name);
+    expect(screen.getByText('Enter the inventor’s name.')).toBeTruthy();
+    fireEvent.change(name, { target: { value: 'Pat Doe' } });
+    expect(nextButton().disabled).toBe(false); // email and organization are optional
+
+    const email = screen.getByLabelText(/Inventor 1 email/);
+    fireEvent.change(email, { target: { value: 'not-an-email' } });
+    fireEvent.blur(email);
+    expect(screen.getByText(/valid email address/)).toBeTruthy();
+    expect(nextButton().disabled).toBe(true);
+    fireEvent.change(email, { target: { value: 'pat@contoso.example' } });
+    expect(nextButton().disabled).toBe(false);
+
+    // removing the only row brings the list error back
+    fireEvent.click(screen.getByRole('button', { name: 'Remove inventor 1' }));
+    expect(screen.getByText('Add at least one inventor.')).toBeTruthy();
+    expect(nextButton().disabled).toBe(true);
+  });
+
+  it('"I am an inventor" needs no list; the list is capped at 20 inventors', () => {
+    fillInventionStep1();
+    radioIn(/Are you one of the inventors/, 'Yes');
+    expect(nextButton().disabled).toBe(false);
+    const add = screen.getByRole('button', { name: 'Add inventor' }) as HTMLButtonElement;
+    for (let i = 0; i < 20; i++) fireEvent.click(add);
+    expect(screen.getByLabelText(/Inventor 20 name/)).toBeTruthy();
+    expect(add.disabled).toBe(true);
+  });
+
+  it('public disclosure: asks date and method; a past date is for "already", a future one for "planned"', () => {
+    fillInventionStep1();
+    radioIn(/Are you one of the inventors/, 'Yes');
+    next();
+    expect(screen.queryByLabelText(/Date \(first or planned\)/)).toBeNull();
+    radioIn(/shared publicly/, 'Yes, already');
+    const date = screen.getByLabelText(/Date \(first or planned\)/);
+    fireEvent.change(date, { target: { value: LATER } });
+    fireEvent.blur(date);
+    expect(screen.getByText(/Choose a date on or before today/)).toBeTruthy();
+    fireEvent.change(date, { target: { value: PAST } });
+    expect(screen.queryByText(/Choose a date on or before today/)).toBeNull();
+
+    radioIn(/shared publicly/, 'Not yet, but planned');
+    fireEvent.change(screen.getByLabelText(/Date \(first or planned\)/), { target: { value: PAST } });
+    fireEvent.blur(screen.getByLabelText(/Date \(first or planned\)/));
+    expect(screen.getByText(/Choose a date from today/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/Date \(first or planned\)/), { target: { value: LATER } });
+    expect(screen.queryByText(/Choose a date from today/)).toBeNull();
+    // the method is still outstanding
+    radioIn(/outside the company, even under NDA/, 'No');
+    radioIn(/used in a product or service/, 'No');
+    radioIn(/developed with, or funded by/, 'No');
+    expect(nextButton().disabled).toBe(true);
+    change(/How\?/, 'demo');
+    expect(nextButton().disabled).toBe(false);
+  });
+
+  it('shows the patent-timing warning for a disclosure already made, and for a planned one within 60 days only', () => {
+    fillInventionStep1();
+    radioIn(/Are you one of the inventors/, 'Yes');
+    next();
+    expect(screen.queryByText(/can limit or end patent protection/)).toBeNull();
+    radioIn(/shared publicly/, 'Yes, already');
+    expect(screen.getByText(/can limit or end patent protection/)).toBeTruthy();
+    radioIn(/shared publicly/, 'Not yet, but planned');
+    expect(screen.queryByText(/can limit or end patent protection/)).toBeNull(); // no date yet
+    change(/Date \(first or planned\)/, LATER);
+    expect(screen.queryByText(/can limit or end patent protection/)).toBeNull();
+    change(/Date \(first or planned\)/, SOON);
+    expect(screen.getByText(/can limit or end patent protection/)).toBeTruthy();
+    radioIn(/shared publicly/, 'No');
+    expect(screen.queryByText(/can limit or end patent protection/)).toBeNull();
+  });
+
+  it('conditional follow-ups: shared externally, product use and outside involvement each ask their detail', () => {
+    fillInventionStep1();
+    radioIn(/Are you one of the inventors/, 'Yes');
+    next();
+    radioIn(/shared publicly/, 'No');
+    radioIn(/outside the company, even under NDA/, 'Yes');
+    radioIn(/used in a product or service/, 'Planned');
+    radioIn(/developed with, or funded by/, 'Yes');
+    expect(nextButton().disabled).toBe(true);
+    change(/With whom, and was there an NDA/, 'Supplier X, under NDA');
+    change(/Product or service name/, 'Widget 2');
+    change(/Who, and under what agreement/, 'University grant');
+    expect(nextButton().disabled).toBe(false);
+    // "Not sure" is a complete answer and asks nothing more
+    radioIn(/outside the company, even under NDA/, 'Not sure');
+    expect(screen.queryByLabelText(/With whom/)).toBeNull();
+    radioIn(/used in a product or service/, 'No');
+    expect(screen.queryByLabelText(/Product or service name/)).toBeNull();
+  });
+
+  it('the confirmation must be ticked before Submit; the summary shows the answers as labels', () => {
+    fillInventionToConfirm();
+    expect(submitButton('Submit disclosure').disabled).toBe(true);
+    expect(screen.getByText(INV_TITLE)).toBeTruthy();
+    expect(screen.getByText('Shared outside the company')).toBeTruthy();
+    tickConfirm();
+    expect(submitButton('Submit disclosure').disabled).toBe(false);
+    tickConfirm();
+    expect(submitButton('Submit disclosure').disabled).toBe(true);
+    expect(screen.getByText('Confirm the statement to submit.')).toBeTruthy();
+  });
+
+  it('submits the Invention type, a short-title-only title, and the shortest answers envelope; shows the success screen', async () => {
+    fillInventionToConfirm();
+    tickConfirm();
+    fireEvent.click(submitButton('Submit disclosure'));
+
+    await screen.findByText('Invention disclosure submitted');
+    const { path, init, body } = lastSubmit();
+    expect(path).toBe(SUBMIT_PATH);
+    expect((init as RequestInit).method).toBe('POST');
+    expect(body).toEqual({
+      requestType: 100000001,
+      title: 'Invention – Improved battery cooling method',
+      answers: {
+        schemaVersion: 1,
+        shortTitle: INV_TITLE,
+        problemSolved: INV_PROBLEM,
+        description: INV_DESCRIPTION,
+        submitterIsInventor: true,
+        publicDisclosure: 'none',
+        sharedExternally: 'no',
+        productUse: 'no',
+        externalInvolvement: 'no',
+        accuracyConfirmed: true,
+      },
+    });
+    // technical detail never reaches the unsecured title
+    expect(body.title).not.toMatch(/phase-change|overheat/);
+    expect(screen.getByText(/Legal has received/)).toBeTruthy();
+    expect(screen.getByText(/add drawings, slides, lab notes or a draft paper under/)).toBeTruthy();
+    expect(screen.getByText(/don.t publish, present, demo or post about this invention/)).toBeTruthy();
+    expect(screen.queryByText(/will prioritise accordingly/)).toBeNull();
+  });
+
+  it('the full submission carries inventors, disclosure, sharing, product and outside involvement as codes', async () => {
+    change(/Short, non-confidential title/, INV_TITLE);
+    change(/What problem does it solve/, INV_PROBLEM);
+    change(/How does it work/, INV_DESCRIPTION);
+    change(/Similar products, methods or patents/, 'Competitor patent US 1,234,567; ours differs in the layer.');
+    next();
+    radioIn(/Are you one of the inventors/, 'No');
+    fireEvent.click(screen.getByRole('button', { name: 'Add inventor' }));
+    change(/Inventor 1 name/, 'Pat Doe');
+    change(/Inventor 1 email/, 'pat@contoso.example');
+    change(/Inventor 1 organization/, 'Contoso Labs');
+    fireEvent.click(screen.getByRole('button', { name: 'Add inventor' }));
+    change(/Inventor 2 name/, 'Sam Roe');
+    change(/Roughly when did you come up with it/, PAST);
+    next();
+    radioIn(/shared publicly/, 'Yes, already');
+    change(/Date \(first or planned\)/, PAST);
+    change(/How\?/, 'publication');
+    change(/Where\?/, 'Journal of Thermal Design');
+    radioIn(/outside the company, even under NDA/, 'Yes');
+    change(/With whom, and was there an NDA/, 'Supplier X, under NDA');
+    radioIn(/used in a product or service/, 'Planned');
+    change(/Product or service name/, 'Widget 2');
+    change(/Release date/, FUTURE);
+    radioIn(/developed with, or funded by/, 'Yes');
+    change(/Who, and under what agreement/, 'University grant 77');
+    next();
+    change(/Anything else\?/, 'Prototype exists.');
+    tickConfirm();
+    fireEvent.click(submitButton('Submit disclosure'));
+
+    await screen.findByText('Invention disclosure submitted');
+    expect(lastSubmit().body.answers).toEqual({
+      schemaVersion: 1,
+      shortTitle: INV_TITLE,
+      problemSolved: INV_PROBLEM,
+      description: INV_DESCRIPTION,
+      knownAlternatives: 'Competitor patent US 1,234,567; ours differs in the layer.',
+      submitterIsInventor: false,
+      coInventors: [
+        { name: 'Pat Doe', email: 'pat@contoso.example', organization: 'Contoso Labs' },
+        { name: 'Sam Roe' },
+      ],
+      conceptionDate: PAST,
+      publicDisclosure: 'done',
+      disclosureDate: PAST,
+      disclosureMethod: 'publication',
+      disclosureVenue: 'Journal of Thermal Design',
+      sharedExternally: 'yes',
+      sharedWith: 'Supplier X, under NDA',
+      productUse: 'planned',
+      productName: 'Widget 2',
+      productDate: FUTURE,
+      externalInvolvement: 'yes',
+      externalInvolvementDetails: 'University grant 77',
+      notes: 'Prototype exists.',
+      accuracyConfirmed: true,
+    });
+    // the success screen echoes the disclosure date
+    expect(
+      screen.getByText(new RegExp(`Legal has your disclosure date of ${PAST} and will prioritise accordingly`))
+    ).toBeTruthy();
+  });
+
+  it('a hidden branch leaves no stale key: switching disclosure back to "No" drops the date, method and venue', async () => {
+    fillInventionStep1();
+    radioIn(/Are you one of the inventors/, 'Yes');
+    next();
+    radioIn(/shared publicly/, 'Yes, already');
+    change(/Date \(first or planned\)/, PAST);
+    change(/How\?/, 'demo');
+    change(/Where\?/, 'Trade show');
+    radioIn(/shared publicly/, 'No');
+    radioIn(/outside the company, even under NDA/, 'No');
+    radioIn(/used in a product or service/, 'No');
+    radioIn(/developed with, or funded by/, 'No');
+    next();
+    tickConfirm();
+    fireEvent.click(submitButton('Submit disclosure'));
+    await screen.findByText('Invention disclosure submitted');
+    const answers = lastSubmit().body.answers;
+    for (const key of ['disclosureDate', 'disclosureMethod', 'disclosureVenue', 'coInventors', 'conceptionDate']) {
+      expect(answers).not.toHaveProperty(key);
+    }
+    expect(Object.keys(answers).some(k => /department|requester/i.test(k))).toBe(false);
+  });
+
+  it('the success screen links to the request and to the Service Requests tab', async () => {
+    fillInventionToConfirm();
+    tickConfirm();
+    fireEvent.click(submitButton('Submit disclosure'));
+    await screen.findByText('Invention disclosure submitted');
+    fireEvent.click(screen.getByRole('button', { name: 'Open request' }));
+    expect(openRecord).toHaveBeenCalledWith({ entityName: 'sprk_servicerequest', recordId: CREATED_ID });
+    expect(screen.queryByRole('dialog', { name: 'Invention Submission' })).toBeNull();
+  });
+
+  it('"Service Requests" on the success screen opens that tab', async () => {
+    fillInventionToConfirm();
+    tickConfirm();
+    fireEvent.click(submitButton('Submit disclosure'));
+    await screen.findByText('Invention disclosure submitted');
+    fireEvent.click(screen.getByRole('button', { name: 'Service Requests' }));
+    expect(onOpenWidget).toHaveBeenCalledWith('service-requests');
+  });
+
+  it('a 403 shows the server message, keeps every answer, and a retry then succeeds', async () => {
+    bffApiCall.mockRejectedValueOnce(
+      new ApiError(
+        403,
+        problem(403, {
+          reasonCode: 'sdap.external.intake.invention_not_available',
+          errorCode: 'sdap.external.intake.invention_not_available',
+        })
+      )
+    );
+    fillInventionToConfirm();
+    tickConfirm();
+    fireEvent.click(submitButton('Submit disclosure'));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('not available to you');
+    expect(screen.queryByText('Invention disclosure submitted')).toBeNull();
+    expect(screen.getByText(INV_TITLE)).toBeTruthy();
+    expect(submitButton('Submit disclosure').disabled).toBe(false);
+
+    fireEvent.click(submitButton('Submit disclosure'));
+    await screen.findByText('Invention disclosure submitted');
+    expect(bffApiCall.mock.calls.filter(c => c[0] === SUBMIT_PATH)).toHaveLength(2);
+  });
+
+  it('a 401 says the session expired, not "could not be submitted", and keeps the answers', async () => {
+    bffApiCall.mockRejectedValueOnce(new ApiError(401, problem(401)));
+    fillInventionToConfirm();
+    tickConfirm();
+    fireEvent.click(submitButton('Submit disclosure'));
+    const text = (await screen.findByRole('alert')).textContent ?? '';
+    expect(text).toContain('Your session has expired. Sign in again, then submit.');
+    expect(text).not.toContain('could not be submitted');
+    expect(screen.queryByText('Invention disclosure submitted')).toBeNull();
+    expect(screen.getByText(INV_TITLE)).toBeTruthy();
+    expect(submitButton('Submit disclosure').disabled).toBe(false);
+  });
+
+  it('Cancel closes the wizard without submitting; re-opening starts empty', () => {
+    change(/Short, non-confidential title/, INV_TITLE);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: 'Invention Submission' })).toBeNull();
+    expect(bffApiCall).not.toHaveBeenCalled();
+    fireEvent.click(card(/Submit an invention disclosure/));
+    expect((screen.getByLabelText(/Short, non-confidential title/) as HTMLInputElement).value).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Trademark Search wizard (task 053)
+// ---------------------------------------------------------------------------
+
+const TM_GOODS = 'A cloud analytics product for retail teams.';
+
+const checkbox = (name: string): void => {
+  fireEvent.click(screen.getByRole('checkbox', { name }));
+};
+
+/** Trademark step 1, then Next. */
+function fillTrademarkStep1(form = 'Name or word only'): void {
+  change(/Proposed name or mark/, 'AURORA');
+  radio(form);
+  next();
+}
+
+/** Trademark steps 1 and 2, leaving the wizard on step 3. */
+function fillTrademarkToStatus(): void {
+  fillTrademarkStep1();
+  change(/What will it be used for/, TM_GOODS);
+  checkbox('United States');
+  next();
+}
+
+describe('Trademark Search wizard', () => {
+  beforeEach(() => {
+    renderPane();
+    fireEvent.click(card(/clearance search/));
+  });
+
+  it('step 1 requires the mark (1-200) and the kind of mark', () => {
+    expect(nextButton().disabled).toBe(true);
+    const mark = screen.getByLabelText(/Proposed name or mark/);
+    fireEvent.blur(mark);
+    expect(screen.getByText('Enter the proposed name or mark.')).toBeTruthy();
+    fireEvent.change(mark, { target: { value: 'AURORA' } });
+    expect(nextButton().disabled).toBe(true); // markForm missing
+    radio('Slogan or tagline');
+    expect(nextButton().disabled).toBe(false);
+  });
+
+  it('warns that the mark appears in the (unsecured) request title', () => {
+    expect(screen.getByText(/The mark appears in the request title/)).toBeTruthy();
+  });
+
+  it('a logo (alone or with the name) tells the requester to add the file under Documents; a word or slogan does not', () => {
+    expect(screen.queryByText(/add the logo or design file under/)).toBeNull();
+    radio('Logo or design only');
+    expect(screen.getByText(/add the logo or design file under/)).toBeTruthy();
+    radio('Name with a logo');
+    expect(screen.getByText(/add the logo or design file under/)).toBeTruthy();
+    radio('Name or word only');
+    expect(screen.queryByText(/add the logo or design file under/)).toBeNull();
+    radio('Slogan or tagline');
+    expect(screen.queryByText(/add the logo or design file under/)).toBeNull();
+  });
+
+  it('step 2 requires the goods/services (10+) and at least one territory; "Other" asks for text', () => {
+    fillTrademarkStep1();
+    expect(nextButton().disabled).toBe(true);
+    change(/What will it be used for/, 'short');
+    fireEvent.blur(screen.getByLabelText(/What will it be used for/));
+    expect(screen.getByText(/at least 10 characters/)).toBeTruthy();
+    change(/What will it be used for/, TM_GOODS);
+    expect(nextButton().disabled).toBe(true); // no territory
+    checkbox('Other');
+    expect(nextButton().disabled).toBe(true); // other countries missing
+    change(/Other countries/, 'Brazil and Mexico');
+    expect(nextButton().disabled).toBe(false);
+    checkbox('Other');
+    expect(screen.queryByLabelText(/Other countries/)).toBeNull();
+    expect(nextButton().disabled).toBe(true); // no territory left
+    checkbox('Worldwide / online only');
+    expect(nextButton().disabled).toBe(false);
+  });
+
+  it('offers the fixed territory list by label, "Other" last, and no trademark-class question', () => {
+    fillTrademarkStep1();
+    const group = screen.getByRole('group', { name: /Where will it be used/ });
+    expect(within(group).getByRole('checkbox', { name: 'United States' })).toBeTruthy();
+    expect(within(group).getByRole('checkbox', { name: 'European Union' })).toBeTruthy();
+    expect(within(group).getAllByRole('checkbox')).toHaveLength(10);
+    expect(within(group).getAllByRole('checkbox').at(-1)).toBe(within(group).getByRole('checkbox', { name: 'Other' }));
+    expect(screen.queryByLabelText(/class/i)).toBeNull(); // the hint says Legal works out the classes; no field asks
+  });
+
+  it('step 3: current use is required; "publicly" asks since-when and where; launch and need-by dates are optional', () => {
+    fillTrademarkToStatus();
+    expect(submitButton('Submit request').disabled).toBe(true);
+    radio('Yes, publicly');
+    expect(screen.getByLabelText(/Since when/)).toBeTruthy();
+    expect(screen.getByLabelText(/Where is it used/)).toBeTruthy();
+    expect(submitButton('Submit request').disabled).toBe(false);
+    radio('Not yet');
+    expect(screen.queryByLabelText(/Since when/)).toBeNull();
+    expect(submitButton('Submit request').disabled).toBe(false);
+  });
+
+  it('the result date cannot be after the launch date', () => {
+    fillTrademarkToStatus();
+    radio('Not yet');
+    change(/Planned launch or announcement date/, FUTURE);
+    const needed = screen.getByLabelText(/When do you need the result/);
+    fireEvent.change(needed, { target: { value: addDaysIso(todayIso(), 60) } });
+    fireEvent.blur(needed);
+    expect(screen.getByText(/up to the launch date/)).toBeTruthy();
+    expect(submitButton('Submit request').disabled).toBe(true);
+    fireEvent.change(needed, { target: { value: addDaysIso(todayIso(), 10) } });
+    expect(submitButton('Submit request').disabled).toBe(false);
+  });
+
+  it('submits the Trademark type, a mark-only title, and the answers envelope; shows the success screen', async () => {
+    fillTrademarkToStatus();
+    radio('Not yet');
+    change(/Planned launch or announcement date/, FUTURE);
+    fireEvent.click(submitButton('Submit request'));
+
+    await screen.findByText('Trademark search requested');
+    const { path, init, body } = lastSubmit();
+    expect(path).toBe(SUBMIT_PATH);
+    expect((init as RequestInit).method).toBe('POST');
+    expect(body).toEqual({
+      requestType: 100000003,
+      title: 'Trademark search – AURORA',
+      answers: {
+        schemaVersion: 1,
+        proposedMark: 'AURORA',
+        markForm: 'word',
+        goodsServices: TM_GOODS,
+        territories: ['us'],
+        currentUse: 'notYet',
+        launchDate: FUTURE,
+      },
+    });
+    expect(body.title).not.toMatch(/analytics|retail/);
+    expect(screen.getByText(/Legal has received your request for/)).toBeTruthy();
+    expect(screen.getByText(/A quick search that finds no conflicts is not the same as clearance/)).toBeTruthy();
+    expect(screen.queryByText(/add the logo file/)).toBeNull();
+  });
+
+  it('the full submission carries meaning, role, territories (incl. other), use details and notes; a logo adds the Documents step', async () => {
+    fillTrademarkStep1('Name with a logo');
+    // back to step 1 is not needed: add the optional meaning there
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    change(/What does it mean/, 'Latin for dawn');
+    next();
+    change(/What will it be used for/, TM_GOODS);
+    fireEvent.change(screen.getByLabelText(/What will it name/), { target: { value: 'product' } });
+    checkbox('United States');
+    checkbox('European Union');
+    checkbox('Other');
+    change(/Other countries/, 'Brazil');
+    next();
+    radio('Yes, publicly');
+    change(/Since when/, PAST);
+    change(/Where is it used/, 'Canada, web');
+    change(/Planned launch or announcement date/, LATER);
+    change(/When do you need the result/, FUTURE);
+    change(/Anything else Legal should know/, 'An agency proposed the name.');
+    fireEvent.click(submitButton('Submit request'));
+
+    await screen.findByText('Trademark search requested');
+    expect(lastSubmit().body.answers).toEqual({
+      schemaVersion: 1,
+      proposedMark: 'AURORA',
+      markForm: 'wordAndLogo',
+      markMeaning: 'Latin for dawn',
+      goodsServices: TM_GOODS,
+      markRole: 'product',
+      territories: ['us', 'eu', 'other'],
+      territoriesOther: 'Brazil',
+      currentUse: 'public',
+      firstUseDate: PAST,
+      useLocations: 'Canada, web',
+      launchDate: LATER,
+      neededBy: FUTURE,
+      notes: 'An agency proposed the name.',
+    });
+    expect(screen.getByText(/add the logo file under/)).toBeTruthy();
+  });
+
+  it('a hidden branch leaves no stale key: "not yet" drops since-when and where; no department or requester key', async () => {
+    fillTrademarkToStatus();
+    radio('Yes, publicly');
+    change(/Since when/, PAST);
+    change(/Where is it used/, 'Canada');
+    radio('Not yet');
+    fireEvent.click(submitButton('Submit request'));
+    await screen.findByText('Trademark search requested');
+    const answers = lastSubmit().body.answers;
+    expect(answers).not.toHaveProperty('firstUseDate');
+    expect(answers).not.toHaveProperty('useLocations');
+    expect(Object.keys(answers).some(k => /department|requester|class/i.test(k))).toBe(false);
+  });
+
+  it('"Open request" and "Service Requests" on the success screen work', async () => {
+    fillTrademarkToStatus();
+    radio('Not yet');
+    fireEvent.click(submitButton('Submit request'));
+    await screen.findByText('Trademark search requested');
+    fireEvent.click(screen.getByRole('button', { name: 'Service Requests' }));
+    expect(onOpenWidget).toHaveBeenCalledWith('service-requests');
+  });
+
+  it('"Open request" opens the new request in the detail view', async () => {
+    fillTrademarkToStatus();
+    radio('Not yet');
+    fireEvent.click(submitButton('Submit request'));
+    await screen.findByText('Trademark search requested');
+    fireEvent.click(screen.getByRole('button', { name: 'Open request' }));
+    expect(openRecord).toHaveBeenCalledWith({ entityName: 'sprk_servicerequest', recordId: CREATED_ID });
+  });
+
+  it('a 403 shows the server message and keeps every answer; a retry then succeeds', async () => {
+    bffApiCall.mockRejectedValueOnce(
+      new ApiError(403, problem(403, { detail: 'Your account is not linked to a contact record.' }))
+    );
+    fillTrademarkToStatus();
+    radio('Not yet');
+    fireEvent.click(submitButton('Submit request'));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('not linked to a contact record');
+    expect(screen.queryByText('Trademark search requested')).toBeNull();
+    expect(screen.getByText('AURORA')).toBeTruthy();
+    expect(submitButton('Submit request').disabled).toBe(false);
+    fireEvent.click(submitButton('Submit request'));
+    await screen.findByText('Trademark search requested');
+    expect(bffApiCall.mock.calls.filter(c => c[0] === SUBMIT_PATH)).toHaveLength(2);
+  });
+
+  it('a 401 says the session expired and keeps the answers', async () => {
+    bffApiCall.mockRejectedValueOnce(new ApiError(401, problem(401)));
+    fillTrademarkToStatus();
+    radio('Not yet');
+    fireEvent.click(submitButton('Submit request'));
+    const text = (await screen.findByRole('alert')).textContent ?? '';
+    expect(text).toContain('Your session has expired. Sign in again, then submit.');
+    expect(text).not.toContain('could not be submitted');
+    expect(screen.getByText('AURORA')).toBeTruthy();
+    expect(submitButton('Submit request').disabled).toBe(false);
+  });
+
+  it('Cancel closes the wizard without submitting; re-opening starts empty', () => {
+    change(/Proposed name or mark/, 'AURORA');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: 'Trademark Search' })).toBeNull();
+    expect(bffApiCall).not.toHaveBeenCalled();
+    fireEvent.click(card(/clearance search/));
+    expect((screen.getByLabelText(/Proposed name or mark/) as HTMLInputElement).value).toBe('');
   });
 });
 

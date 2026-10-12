@@ -4,8 +4,8 @@
  * Two jobs, both small:
  *
  *   1. WIZARDS. `INTAKE_WIZARDS` maps a `sprk_requesttype` value to its wizard component and label. Task 052 registers NDA
- *      Assessment and Policy Question; task 053 adds Invention Submission and Trademark Search by appending two entries
- *      here and giving the matching Quick Start actions no other change. A request type with no entry has no wizard yet.
+ *      Assessment and Policy Question; task 053 adds Invention Submission and Trademark Search, so all four request types
+ *      have a wizard. A request type with no entry has no wizard.
  *
  *   2. VISIBILITY. `isIntakeTypeAvailable(me, requestType)` decides whether an entry point (a Quick Start card, a More
  *      Services entry) is shown. The rule itself lives in the leaf module `intakeAvailability.ts` (driven by
@@ -16,6 +16,8 @@ import type * as React from 'react';
 import { INTAKE_REQUEST_TYPE } from '../api/intake-client';
 import { NdaAssessmentWizard } from './NdaAssessmentWizard';
 import { PolicyQuestionWizard } from './PolicyQuestionWizard';
+import { InventionSubmissionWizard } from './InventionSubmissionWizard';
+import { TrademarkSearchWizard } from './TrademarkSearchWizard';
 
 // The visibility rule lives in a leaf module (shared with widgetRegistry); re-exported so existing imports keep working.
 export { LEGAL_FRONT_DOOR_ENTITLEMENT, isIntakeTypeAvailable } from './intakeAvailability';
@@ -36,10 +38,16 @@ export interface IntakeWizardDefinition {
   Wizard: React.ComponentType<IntakeWizardProps>;
 }
 
-/** The registered wizards. Task 053 appends Invention Submission and Trademark Search. */
+/** The registered wizards: one per `sprk_requesttype`. */
 export const INTAKE_WIZARDS: readonly IntakeWizardDefinition[] = [
   { requestType: INTAKE_REQUEST_TYPE.ndaAssessment, label: 'NDA Assessment', Wizard: NdaAssessmentWizard },
   { requestType: INTAKE_REQUEST_TYPE.policyQuestion, label: 'Policy Question', Wizard: PolicyQuestionWizard },
+  {
+    requestType: INTAKE_REQUEST_TYPE.inventionSubmission,
+    label: 'Invention Submission',
+    Wizard: InventionSubmissionWizard,
+  },
+  { requestType: INTAKE_REQUEST_TYPE.trademarkSearch, label: 'Trademark Search', Wizard: TrademarkSearchWizard },
 ];
 
 /** The wizard for a request type, or `undefined` when none is built yet. */
