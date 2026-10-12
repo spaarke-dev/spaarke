@@ -29,7 +29,7 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 **Authorization.**
 - Every Signal (the primary and each Also-resolve) goes through `SignalCoreRecordAccess.AuthorizeAsync` as the caller. This happens before the review-id ledger is read, so a caller who cannot read an item learns nothing, not even a stored outcome.
 - If an access check returns CallerUnresolved, the answer is the single 403. Any other result that is not Allowed is the uniform 404.
-- **FR-51 (review fix F-5).** After the plan is validated and before any executor preflight, the route asks, as the caller through `CallerRecordAccessProbe`, for AppendTo on the core record (`entity.associate_document`) and Write on each covered Signal's subject (`write`, on the table `IGenericEntityService.GetEntitySetNameAsync` names). A missing right is a 403 `ontology.decision.not_authorized` before any write. A subject whose table cannot be resolved is denied. This applies to a dismissal or a record-only approval too, which no executor preflight would otherwise check. **This is stricter than the POML** (which named only the Signal read and each executor's preflight); it follows the spec's FR-51. See owner question 7.
+- **FR-51 (review fix F-5).** After the plan is validated and before any executor preflight, the route asks, as the caller through `CallerRecordAccessProbe`, for AppendTo on the core record (`entity.associate_document`) and Write on each covered Signal's subject (`write`, on the table `IGenericEntityService.GetEntitySetNameAsync` names). A missing right is a 403 `ontology.decision.not_authorized` before any write. A table whose entity set cannot be looked up (a metadata fault) is a 503 before any write; set names are memoised per commit. This applies to a dismissal or a record-only approval too, which no executor preflight would otherwise check. **This is stricter than the POML** (which named only the Signal read and each executor's preflight); it follows the spec's FR-51. See owner question 7.
 - When an executor preflight refuses with NotAuthorized, the result is a 403 that names the action.
 - This placement also keeps the route-census chain at two hops: handler → `DecisionCommitService.CommitAsync` → `SignalCoreRecordAccess.AuthorizeAsync` → `IDataverseUserClient`.
 
@@ -53,6 +53,8 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 - A Failed outcome is not resumable if a message step failed (it may have gone out) or if a step got no clear answer.
 - A record-write failure after a send is not resumable (escalation trigger 1).
 - A step that failed after writing part of its work (non-empty `written`) is not resumable, so a retry cannot write it twice.
+
+**A fault before the first write (re-check finding).** An unexpected exception before step 2 (for example the plan read timing out) is a 503: nothing was written, so the review id is freed, or a resumed failure is put back. Only a fault after the first write is stored as a non-resumable failure.
 
 **Cancellation (review fix F-3).** The request's token applies only up to the first write. From then on the executors, the record write, the closes and the follow-ups run on `CancellationToken.None`, so a client that disconnects after a send still gets its record or a stored failure. A cancellation before the first write frees the review id (or puts back a resumed failure) and rethrows. A record create that throws something other than the writer's refusal (for example a client-side timeout) becomes a `create_failed` failure that may have written the record.
 
@@ -170,7 +172,8 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 | `ARetry_JudgesASystemClosure_AgainstTheReviewsOwnStart_...` | Review F-2 |
 | `ACancelledRequest_AfterTheFirstWrite_...`, `ACancelledRequest_BeforeAnyWrite_ReleasesTheReviewId` | Review F-3 |
 | `ANotificationThatNamedNoRow_IsStillRecorded_...` | Review F-4 |
-| `ACallerWhoCannotAppendToTheMatter_...`, `ACallerWhoCannotWriteTheSubject_...`, `ASubjectWhoseTableCannotBeResolved_IsDenied` | Review F-5 (FR-51) |
+| `ACallerWhoCannotAppendToTheMatter_...`, `ACallerWhoCannotWriteTheSubject_...`, `ASubjectWhoseTableCannotBeLookedUp_IsUnavailable_...` | Review F-5 (FR-51) |
+| `AReadFaultBeforeAnyWrite_IsUnavailable_...`, `AReadFaultDuringAResume_PutsTheResumedFailureBack` | Re-check: a pre-write fault is not a stored failure |
 | `AlsoResolve_IsCapped` | Review K2 |
 
 **`DecisionCommitFollowUpsTests.cs`** covers the trigger arguments, the failure path, no-revision, a trigger that returns false, suppression running, suppression failing, a policy without a code, the grain keying and the revision filter. These are the 032 and 034 hand-off contracts.
@@ -190,5 +193,7 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 - Moving the inquiry first fails AC1 and AC3.
 - Disabling the system-closure rule fails the re-close and retry tests.
 - Review fixes: disabling each fix (F-1 put-back, F-2 stored start, F-3 detached token and the cancellation release, F-4 unnamed Next steps, F-5 rights check, K2 cap) fails exactly its new test(s); all nine new tests failed under the mutations and pass on the fix.
+
+**`DecisionRecordWriterTests.cs` additions:** an unnamed Next step that is not a Next-step creator is refused; an unnamed `send-email` makes a Judgement record listed under `unnamedNextSteps`, and the `"reviewId":"<id>"` lookup text is still present.
 
 **Also fixed in scope:** `DecisionActionCatalogTests.SendBudgetInquiry_HasNoReplyDueParameter_D56_D20` asserted the inquiry's parameters were exactly to/subject/body; this task's optional `outsideFirm` broke it. The assertion now lists `outsideFirm` (optional) and still has no reply-due parameter.

@@ -1117,7 +1117,8 @@ public sealed class DecisionCommitServiceTests
 
         rig.Clock.Advance(TimeSpan.FromMinutes(1));
         rig.Executors["add-todo"].Result = null;
-        var retried = await rig.CommitAsync(review with { Retry = true });
+        // The retry does not resend the plan-read time: only the stored review start can place the closure after it.
+        var retried = await rig.CommitAsync(review with { Retry = true, PlanReadOn = null });
 
         retried.Status.Should().Be(DecisionCommitStatus.Recorded, "the closure came after the review started, so it is re-closed, not a conflict");
         rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionActed);
@@ -1212,7 +1213,7 @@ public sealed class DecisionCommitServiceTests
     }
 
     [Fact]
-    public async Task ASubjectWhoseTableCannotBeResolved_IsDenied()
+    public async Task ASubjectWhoseTableCannotBeLookedUp_IsUnavailable_BeforeAnyWrite()
     {
         var rig = new Rig();
         rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_unknown", subjectId: ItemTodo);
@@ -1221,8 +1222,47 @@ public sealed class DecisionCommitServiceTests
 
         var result = await rig.CommitAsync(review, DoSignal);
 
-        result.Status.Should().Be(DecisionCommitStatus.Forbidden);
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, "a metadata fault is not an answer about the caller; it still fails closed");
         rig.Writes.Should().BeEmpty();
+        rig.RightsAsked.Should().NotContain(r => r.Id == ItemTodo);
+    }
+
+    [Fact]
+    public async Task AReadFaultBeforeAnyWrite_IsUnavailable_AndFreesTheReviewId()
+    {
+        var rig = new Rig();
+        rig.Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("no answer"));
+        var review = PathBReview();
+
+        var faulted = await rig.CommitAsync(review);
+
+        faulted.Status.Should().Be(DecisionCommitStatus.Unavailable, "nothing was written, so it is not a stored failure");
+        rig.Writes.Should().BeEmpty();
+        rig.Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) => new Entity("sprk_policyversion", id) { ["sprk_decisionplan"] = PathBPlan });
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded, "the same review id runs once the read recovers");
+    }
+
+    [Fact]
+    public async Task AReadFaultDuringAResume_PutsTheResumedFailureBack()
+    {
+        var rig = new Rig();
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Failed("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var review = PathBReview(inquiry: false);
+        (await rig.CommitAsync(review)).Resumable.Should().BeTrue();
+        rig.Executors["add-todo"].Result = null;
+
+        rig.Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("no answer"));
+        (await rig.CommitAsync(review with { Retry = true })).Status.Should().Be(DecisionCommitStatus.Unavailable);
+
+        rig.Entities.Setup(e => e.RetrieveAsync("sprk_policyversion", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) => new Entity("sprk_policyversion", id) { ["sprk_decisionplan"] = PathBPlan });
+        var retried = await rig.CommitAsync(review with { Retry = true });
+
+        retried.Status.Should().Be(DecisionCommitStatus.Recorded, retried.Detail);
+        rig.Log.Count(l => l == "execute:revise-budget").Should().Be(1);
     }
 
     [Fact]

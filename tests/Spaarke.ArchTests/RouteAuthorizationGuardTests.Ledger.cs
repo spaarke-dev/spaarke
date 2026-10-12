@@ -1606,7 +1606,7 @@ public partial class RouteAuthorizationGuardTests
             + "its core record read AS THE CALLER through IDataverseUserClient; anything but Allowed returns before the review-id "
             + "ledger, any app-only read or any write (uniform 404 at :421-422, caller_unresolved 403 at :419-420). Before any "
             + "write it also asks, as the caller through CallerRecordAccessProbe, Write on each Signal's subject and AppendTo on "
-            + "the core record (FR-51; :612, :998) and every executor's own preflight."),
+            + "the core record (FR-51; :621, :1022) and every executor's own preflight."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — WhoAmI first (a caller it "
             + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.cs:229), the payload mapped with the "

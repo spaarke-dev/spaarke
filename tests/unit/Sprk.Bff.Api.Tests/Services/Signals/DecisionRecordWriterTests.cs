@@ -317,6 +317,31 @@ public sealed class DecisionRecordWriterTests
     }
 
     [Fact]
+    public async Task AnUnnamedNextStep_ThatIsNotANextStepCreator_IsRefused()
+    {
+        var h = new Harness();
+        var act = () => h.Writer.WriteAsync(Request(steps: [Skipped("send-budget-inquiry"), Skipped("revise-budget")], reason: "not-material - Not material")
+            with { UnnamedNextSteps = ["revise-budget"] });
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason
+            .Should().Be(DecisionRecordRefusalReason.RecordClassUnderivable);
+        h.Created.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AnUnnamedNextStep_IsSomethingDone_JudgementAndListedInTheStepsEnvelope()
+    {
+        var h = new Harness();
+        var result = await h.Writer.WriteAsync(Request(steps: [Skipped("send-budget-inquiry"), Skipped("revise-budget")])
+            with { UnnamedNextSteps = ["send-email"] });
+
+        result.RecordClass.Should().Be(RecordedDecisionClass.Judgement, "a notification went out; this is not a dismissal");
+        using var steps = JsonDocument.Parse(h.Row.GetAttributeValue<string>("sprk_steps"));
+        steps.RootElement.GetProperty("unnamedNextSteps").EnumerateArray().Select(e => e.GetString()).Should().Equal(new[] { "send-email" });
+        h.Row.GetAttributeValue<string>("sprk_steps").Should().Contain($"\"reviewId\":\"{Review:D}\"", "the durable lookup still finds it");
+    }
+
+    [Fact]
     public async Task ActionsThatExcludeEachOther_CannotBothBeTaken()
     {
         var h = new Harness();

@@ -474,9 +474,10 @@ public sealed class DecisionCommitService
             return Unavailable(review.ReviewId);
 
         DecisionCommitResult result;
+        var progress = new CommitProgress();
         try
         {
-            result = await CommitCoreAsync(ids, lanes, review, http, now, reviewStart, resume, ct).ConfigureAwait(false);
+            result = await CommitCoreAsync(ids, lanes, review, http, now, reviewStart, resume, progress, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -487,10 +488,12 @@ public sealed class DecisionCommitService
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            // Defensive: CommitCoreAsync turns every expected failure into a result. Whatever escaped did so before the first
-            // write could be confirmed or after it; report it without claiming either, and keep the review id blocked.
-            _logger.LogError(DecisionCommitEvents.StepFailed, ex, "Decision commit: review {ReviewId} faulted unexpectedly.", review.ReviewId);
-            result = new DecisionCommitResult
+            // Defensive: CommitCoreAsync turns every expected failure into a result. A fault before the first write wrote
+            // nothing: 503, and the review id is freed (or a resumed failure put back). After it, report the fault without
+            // claiming what landed, and keep the review id blocked.
+            _logger.LogError(DecisionCommitEvents.StepFailed, ex, "Decision commit: review {ReviewId} faulted unexpectedly (writing: {Writing}).",
+                review.ReviewId, progress.Writing);
+            result = !progress.Writing ? Unavailable(review.ReviewId) : new DecisionCommitResult
             {
                 Status = DecisionCommitStatus.Failed,
                 ReviewId = review.ReviewId,
@@ -546,9 +549,15 @@ public sealed class DecisionCommitService
         }
     }
 
+    /// <summary>Whether a commit has reached its first write (set once, before step 2).</summary>
+    private sealed class CommitProgress
+    {
+        public bool Writing { get; set; }
+    }
+
     private async Task<DecisionCommitResult> CommitCoreAsync(
         IReadOnlyList<Guid> ids, IReadOnlyDictionary<Guid, SignalAccessDecision> lanes, DecisionReview review, HttpContext http,
-        DateTimeOffset now, DateTimeOffset reviewStart, DecisionCommitResult? resume, CancellationToken ct)
+        DateTimeOffset now, DateTimeOffset reviewStart, DecisionCommitResult? resume, CommitProgress progress, CancellationToken ct)
     {
         var reviewId = review.ReviewId;
 
@@ -657,6 +666,7 @@ public sealed class DecisionCommitService
         // From the first write on, the request's cancellation no longer applies: a client that disconnects after a send must
         // still get its record written (or its failure stored), never a half-done commit with no outcome.
         var writeCt = CancellationToken.None;
+        progress.Writing = true;
         var executed = new List<DecisionCommitStep>();
         foreach (var step in p.Steps)
         {
@@ -956,13 +966,18 @@ public sealed class DecisionCommitService
     }
 
     /// <summary>FR-51: the caller must be able to WRITE each Signal's subject and APPEND TO the core record, asked as the caller
-    /// through the caller-rights probe. Null when they may; a Forbidden result otherwise (every "could not answer" is a no).</summary>
+    /// through the caller-rights probe. Null when they may; Forbidden when a right is missing (every "could not answer" from the
+    /// probe is a no); Unavailable when a table's entity set cannot be looked up.</summary>
     private async Task<DecisionCommitResult?> CallerMayDecideAsync(HttpContext http, Prepared p, CancellationToken ct)
     {
-        if (p.Core is { } core
-            && !await CallerHoldsOnAsync(http, core.Entity, core.Id, DecisionExec.AppendToOperation, ct).ConfigureAwait(false))
+        var sets = new Dictionary<string, string?>(StringComparer.Ordinal);
+
+        if (p.Core is { } core)
         {
-            return Forbidden("You do not have permission to record a decision on this matter.");
+            if (await CallerHoldsOnAsync(http, sets, core.Entity, core.Id, DecisionExec.AppendToOperation, ct).ConfigureAwait(false) is not { } mayAppend)
+                return Unavailable(Guid.Empty);
+            if (!mayAppend)
+                return Forbidden("You do not have permission to record a decision on this matter.");
         }
 
         var checkedSubjects = new HashSet<(string, Guid)>();
@@ -972,7 +987,9 @@ public sealed class DecisionCommitService
                 continue; // nothing beyond the core record to act on
             if (!checkedSubjects.Add((subject, subjectId)))
                 continue;
-            if (!await CallerHoldsOnAsync(http, subject, subjectId, WriteOperation, ct).ConfigureAwait(false))
+            if (await CallerHoldsOnAsync(http, sets, subject, subjectId, WriteOperation, ct).ConfigureAwait(false) is not { } mayWrite)
+                return Unavailable(Guid.Empty);
+            if (!mayWrite)
                 return Forbidden("You do not have permission to change an item in this decision.");
         }
 
@@ -982,17 +999,24 @@ public sealed class DecisionCommitService
             new() { Status = DecisionCommitStatus.Forbidden, ReasonCode = DecisionCommitReasons.NotAuthorized, Detail = detail };
     }
 
-    private async Task<bool> CallerHoldsOnAsync(HttpContext http, string table, Guid id, string operation, CancellationToken ct)
+    /// <summary>True/false: the caller holds / lacks <paramref name="operation"/> on the record. Null: the table's entity set
+    /// could not be looked up (a metadata fault, not an answer about the caller). Set names are memoised per commit.</summary>
+    private async Task<bool?> CallerHoldsOnAsync(
+        HttpContext http, Dictionary<string, string?> sets, string table, Guid id, string operation, CancellationToken ct)
     {
-        string? set;
-        try
+        if (!sets.TryGetValue(table, out var set))
         {
-            set = await _entities.GetEntitySetNameAsync(table, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            _logger.LogWarning("Decision commit: the table of an item could not be resolved ({ExceptionType}); denying.", ex.GetType().Name);
-            return false;
+            try
+            {
+                set = await _entities.GetEntitySetNameAsync(table, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Decision commit: the entity set of {Table} could not be looked up ({ExceptionType}).", table, ex.GetType().Name);
+                return null;
+            }
+
+            sets[table] = set;
         }
 
         return !string.IsNullOrEmpty(set) && await DecisionExec.CallerHoldsAsync(_probe, http, set, id, operation, ct).ConfigureAwait(false);
