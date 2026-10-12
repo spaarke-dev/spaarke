@@ -440,7 +440,7 @@ Environments are defined in `config/environments.json` (read it at runtime; this
 | Pre-flight: PAC CLI not authenticated | No auth profile | Run `pac auth create --environment <url>` |
 | Pre-flight: BFF URL ends with `/api` | Misconfigured registry | Edit `config/environments.json` to remove `/api` suffix |
 | Build fails | Missing dependencies or compilation error | Check build output; run `npm install --legacy-peer-deps --no-audit --no-fund` in the affected directory (not `npm ci` — most lock files are stale) |
-| `Cannot process argument transformation ... CustomerId` / missing mandatory parameter | `-CustomerId` omitted or fails `^[a-z][a-z0-9]{2,7}$` | Pass the registry id (dev = `dev`); see Step 5 |
+| `Cannot validate argument on parameter 'CustomerId'` (pattern) / prompt or error for missing mandatory parameter `CustomerId` | `-CustomerId` omitted or fails `^[a-z][a-z0-9]{2,7}$` | Pass the registry id (dev = `dev`); see Step 5 |
 | `Registry lookup found NO sprk_dataverseenvironment row` | No registry row matches the id (Demo today) | Fix the registry row (give it a valid `sprk_customerid`); never hard-code a target in the script |
 | BFF deploy fails | App Service not found or auth issue | Verify `appServiceName` in environments.json matches Azure |
 | SpaarkeMaster import refused or fails | Type switch / downgrade refused; no published package; no access | The message names the refusal. "no solutions.SpaarkeMaster entry" = nothing published yet (run `publish-dataverse-solutions-manifest.yml`); a refusal = fix `solutionPackageType` or publish a higher version; access = Storage Blob Data Reader on `sprkcpartifacts{env}` and pac signed in to the target (your own identity — no service principal) |
