@@ -33,7 +33,7 @@ Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-d
 - **Q7 live re-run:** attempted once; never ran (Azure CLI token timeout under load; no rows written, verified by query). Retry once when the machine is quiet: env `SIGNALS_LIVE_DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com`, `SIGNALS_LIVE_CALLER_ID=3121bf1b-9fbf-f111-aaaf-0022482913fc`, filter `FullyQualifiedName~SignalWriterSeamTests.WriteAsync_EventAndTodoUnderAMatter_GroupUnderTheMatter_CreateAndReconcile_RefreshDueDate&DisplayName~sprk_todo`; then query zz-037 rows = 0.
 - **Q11:** rename deferred F-nn → I-nn in one commit (025 has merged, so it can run now).
 - **Q15:** EventId 50361 alert + runbook in task 035. **Q8:** #1111 to master after 035 + 055.
-- **To do (docs, main session):** reword D-35/D-39/D-25 and spec lines (FR-14 `spec.md:265-271,300,382,435,646,658,723`) to team ownership; fix `docs/data-model/sprk_matter-related-tables.md:23` (`sprk_assignedtointernal` targets contact, not systemuser).
+- **Q11 timing:** hold the F-nn → I-nn rename until #1746/#1747/025b merge (their branches touch the notes; avoid conflicts).
 - **After ontology works:** close-out phase in TASK-INDEX (deferred issues batched by area).
 - Owner decisions page https://claude.ai/artifact/ADCv42eKukX2BQx7d62Mop (Q1–Q19 answered 2026-10-12).
 
