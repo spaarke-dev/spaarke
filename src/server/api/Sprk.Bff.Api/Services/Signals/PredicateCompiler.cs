@@ -229,7 +229,22 @@ public sealed partial class PredicateCompiler
         ("sprk_event", "sprk_tododuedate"),
         ("sprk_todo", "sprk_duedate"),
         ("sprk_workassignment", "sprk_responseduedate"),
+        ("sprk_workassignment", "sprk_respondedon"),
     }.ToFrozenSet();
+
+    /// <summary>
+    /// The value range Dataverse accepts for each <see cref="ThresholdColumns"/> entry (live column metadata,
+    /// <c>SignalPredicateTests.ThresholdColumns_RangesFitTheLiveColumnMetadata</c>). A threshold outside it is refused at
+    /// save: Dataverse would reject the comparison at run time (or, for a bound beyond the column, the rule could never
+    /// fire), and a policy that cannot work must not save.
+    /// </summary>
+    public static readonly FrozenDictionary<(string Entity, string Column), (decimal Min, decimal Max)> ThresholdColumnRanges =
+        new Dictionary<(string, string), (decimal, decimal)>
+        {
+            [("sprk_matter", "sprk_budgetutilizationpercent")] = (-100000000000m, 100000000000m),
+            [("sprk_matter", "sprk_totalbudget")] = (-922337203685477m, 922337203685477m),
+            [("sprk_matter", "sprk_totalspendtodate")] = (-922337203685477m, 922337203685477m),
+        }.ToFrozenDictionary();
 
     /// <summary>
     /// The columns a <see cref="RuleType.Threshold"/> body may compare: the numeric spend roll-ups on the matter
@@ -240,12 +255,8 @@ public sealed partial class PredicateCompiler
     /// numeric. Adding a column is a schema check plus a code change with review; its table must also be in
     /// <see cref="EvaluatorGlobalReadableEntities"/>.
     /// </summary>
-    public static readonly FrozenSet<(string Entity, string Column)> ThresholdColumns = new[]
-    {
-        ("sprk_matter", "sprk_budgetutilizationpercent"),
-        ("sprk_matter", "sprk_totalbudget"),
-        ("sprk_matter", "sprk_totalspendtodate"),
-    }.ToFrozenSet();
+    public static readonly FrozenSet<(string Entity, string Column)> ThresholdColumns = ThresholdColumnRanges.Keys.ToFrozenSet();
+
 
     /// <summary>An empty <c>all</c> array, for a body type that has none.</summary>
     private static readonly JsonElement NoClauses = JsonDocument.Parse("[]").RootElement.Clone();
@@ -620,6 +631,14 @@ public sealed partial class PredicateCompiler
         }
 
         var operand = FormatScalar(valueEl, nowUtc, at + ".value");
+        var (min, max) = ThresholdColumnRanges[(subject, field)];
+        var declared = valueEl.GetDecimal();
+        if (declared < min || declared > max)
+        {
+            throw new PredicateCompilationException(
+                $"{at}.value: {operand} is outside the range Dataverse holds for '{subject}.{field}' ({min.ToString(CultureInfo.InvariantCulture)} to {max.ToString(CultureInfo.InvariantCulture)}).");
+        }
+
         UseOf(positiveUses, field).RecordWhen(subject);
         return Condition(field, op, operand);
     }

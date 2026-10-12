@@ -344,6 +344,33 @@ public class ThresholdRuleTests
         }
     }
 
+    // ── K1: a value outside the column's Dataverse range is refused at save ──────────────────────────────────
+
+    [Theory]
+    [InlineData("sprk_totalbudget", "922337203685478")]
+    [InlineData("sprk_totalspendtodate", "-922337203685478")]
+    [InlineData("sprk_budgetutilizationpercent", "100000000001")]
+    [InlineData("sprk_budgetutilizationpercent", "-100000000001")]
+    public void AValueOutsideTheColumnsRange_IsRefusedAtSave_ByTheValidatorAndTheCompiler(string field, string value)
+    {
+        Compiler().Invoking(c => c.Compile(Body(field: field, value: value), null, RuleType.Threshold))
+            .Should().Throw<PredicateCompilationException>().WithMessage("*outside the range Dataverse holds*");
+        Compiler().Invoking(c => c.CompileSchemaValidated(Body(field: field, value: value), null, RuleType.Threshold))
+            .Should().Throw<PredicateCompilationException>().WithMessage("*outside the range Dataverse holds*");
+
+        Validator().ValidateForSave("Threshold", Body(field: field, value: value), messageTemplate: null).IsValid.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("sprk_totalbudget", "922337203685477")]
+    [InlineData("sprk_totalspendtodate", "-922337203685477")]
+    [InlineData("sprk_budgetutilizationpercent", "100000000000")]
+    [InlineData("sprk_budgetutilizationpercent", "-100000000000")]
+    public void AValueAtTheColumnsLimit_IsAccepted(string field, string value)
+    {
+        Compiler().Invoking(c => c.Compile(Body(field: field, value: value), null, RuleType.Threshold)).Should().NotThrow();
+    }
+
     // ── The describer (task 026 hand-off) ─────────────────────────────────────────────────────────────────────
 
     private static RuleBodyDescriber Describer()
@@ -377,6 +404,52 @@ public class ThresholdRuleTests
         var result = await Describer().DescribeAsync(Body(field: "sprk_totalbudget", op: op, value: "250000"), CancellationToken.None);
 
         result.Description!.Clauses.Single().Text.Should().Be($"The matter's total budget {words} 250000.");
+    }
+
+    [Fact]
+    public async Task TheDescriber_PrintsTheCompilersCanonicalNumber_NotTheRawJson()
+    {
+        // "1e2" reads 100; 32 significant digits read the rounded decimal the compiled query actually compares.
+        var exponent = await Describer().DescribeAsync(Body(value: "1e2"), CancellationToken.None);
+        exponent.Description!.Clauses.Single().Text.Should().Be("The matter's budget utilization percent is at least 100.");
+        exponent.Description.Clauses.Single().Formal.Should().Be("sprk_matter.sprk_budgetutilizationpercent >= 100");
+
+        const string longValue = "90.123456789012345678901234567891";
+        var compiled = Compiler().Compile(Body(value: longValue), null, RuleType.Threshold);
+        var compared = Fetch(compiled).Descendants("condition").Single().Attribute("value")!.Value;
+        compared.Should().NotBe(longValue, "the compiler rounds to System.Decimal");
+
+        var described = await Describer().DescribeAsync(Body(value: longValue), CancellationToken.None);
+        described.Description!.Clauses.Single().Text.Should().Be($"The matter's budget utilization percent is at least {compared}.");
+        described.Description.Clauses.Single().Formal.Should().EndWith(">= " + compared);
+    }
+
+    [Theory]
+    [InlineData(">=", "is at least")]
+    [InlineData(">", "is more than")]
+    [InlineData("<=", "is at most")]
+    [InlineData("<", "is less than")]
+    public async Task TheDescriber_UsesNumericWording_ForANumericWhenComparison_InThresholdAndExistenceBodies(string op, string words)
+    {
+        var existence = "{\"type\":\"Existence\",\"subject\":\"sprk_matter\",\"when\":{\"sprk_totalspendtodate\":{\"" + op + "\":5000}},\"all\":[]}";
+
+        var result = await Describer().DescribeAsync(existence, CancellationToken.None);
+
+        result.IsRefused.Should().BeFalse(result.Refusal);
+        result.Description!.Clauses.Single().Text.Should().Contain($"total spend to date {words} 5000").And.NotContain("after").And.NotContain("before");
+
+        var threshold = await Describer().DescribeAsync(Body(extra: ",\"when\":{\"sprk_totalspendtodate\":{\"" + op + "\":5000}}"), CancellationToken.None);
+        threshold.Description!.Clauses[0].Text.Should().Contain($"total spend to date {words} 5000").And.NotContain("after").And.NotContain("before");
+    }
+
+    [Fact]
+    public async Task TheDescriber_KeepsDateWording_ForADateOperand()
+    {
+        var existence = """{"type":"Existence","subject":"sprk_matter","when":{"sprk_openeddate":{">=":"now-30d"}},"all":[]}""";
+
+        var result = await Describer().DescribeAsync(existence, CancellationToken.None);
+
+        result.Description!.Clauses.Single().Text.Should().Contain("is on or after 30 days ago");
     }
 
     [Fact]

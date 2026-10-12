@@ -1339,9 +1339,16 @@ public sealed partial class SignalWriter
     {
         DateTimeOffset dto => dto.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
         DateTime dt => dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        // The SDK hands Money and Decimal columns back at scale 10 (live spaarkedev1: 25000.0000000000, 1.2500000000), so
+        // trim the trailing zeros: a sentence reads "25000" and "94.5", not the stored scale.
+        decimal number => Normalize(number).ToString(CultureInfo.InvariantCulture),
+        Money money => Normalize(money.Value).ToString(CultureInfo.InvariantCulture),
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
         _ => value.ToString() ?? string.Empty,
     };
+
+    /// <summary>Dividing by 1.000...0 (28 places) drops a decimal's trailing zeros without changing its value.</summary>
+    private static decimal Normalize(decimal value) => value / 1.0000000000000000000000000000m;
 
     /// <summary>Mirrors <c>TodoRegardingBuilder.BuildRecordUrl</c> — a relative URL; the model-driven app
     /// resolves the host origin at click time. No org URL or tenant id hard-coded.</summary>

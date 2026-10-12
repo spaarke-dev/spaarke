@@ -581,6 +581,22 @@ public class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task Evaluate_DateOnlyBoundOnRespondedOn_IsWidenedLikeTheOtherDateOnlyColumns()
+    {
+        // F-67: sprk_workassignment.sprk_respondedon is Date Only, so its relative bound is widened by DateOnlyWideningDays (2)
+        // before the per-item judgement; sprk_responseduedate is the reference (same widening).
+        var h = new Harness();
+        const string body = """{"type":"Existence","subject":"sprk_workassignment","when":{"sprk_respondedon":{"<=":"now"}},"all":[]}""";
+        var policy = new SignalEvaluationPolicy(PolicyId, PolicyCode, SignalWriter.LaneDo, VersionId, Existence.ToString(), body, "Responded.");
+
+        await h.Evaluator.EvaluateAsync(policy, subjectId: null);
+
+        var conditions = XElement.Parse(h.Sysadmin.Fetches.Single()).Element("entity")!.Element("filter")!.Elements("condition")
+            .Select(c => (c.Attribute("attribute")!.Value, c.Attribute("operator")!.Value, c.Attribute("value")!.Value)).ToList();
+        conditions.Should().Equal(new[] { ("sprk_respondedon", "le", "2026-10-12T03:00:00Z") }, "the same widening the To Do due date gets");
+    }
+
+    [Fact]
     public async Task Evaluate_InvalidPolicyVersion_ReturnsNoHits_AndReadsNothing()
     {
         var h = new Harness();
@@ -989,7 +1005,7 @@ public class SignalReevaluationJobTests
     public async Task Run_ThresholdPolicy_WritesASignalForTheMatterOverTheThreshold_AndNoneForTheMatterUnder()
     {
         var h = new Harness().WithThresholdPolicy()
-            .WithMatterUtilization(MatterId, 94.5m, "MAT-OVER")
+            .WithMatterUtilization(MatterId, 94.5000000000m, "MAT-OVER") // scale 10, as the SDK returns it (live spaarkedev1)
             .WithMatterUtilization(OtherMatterId, 62m, "MAT-UNDER");
 
         var result = await h.RunAsync();
@@ -1009,13 +1025,30 @@ public class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task Run_ThresholdPolicy_WithAnOptionSetWhenCondition_IsNotExcludedByTheFake_ControlForTheNumericFilter()
+    {
+        // statecode = 0 is an OptionSetValue: the fake must ignore it (not read it as a null number) and still judge the comparison.
+        const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_budgetutilizationpercent","operator":">=","value":90},"when":{"statecode":0}}""";
+        var h = new Harness().WithThresholdPolicy(body, UtilizationTemplate)
+            .WithMatterUtilization(MatterId, 94.5m, "MAT-OVER");
+        h.Sysadmin.SubjectRows["sprk_matter"][0]["statecode"] = new OptionSetValue(0);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        h.Org.CreatedPayloads.Should().ContainSingle("the active matter at 94.5 meets >= 90; an option set condition is not a number");
+        XElement.Parse(h.Sysadmin.Fetches.Should().ContainSingle().Subject).Descendants("condition")
+            .Select(c => c.Attribute("attribute")!.Value).Should().Contain("statecode");
+    }
+
+    [Fact]
     public async Task Run_ThresholdPolicy_ReadsACurrencyColumnAsAPlainNumber_AndEqualsTheDeclaredValueCounts()
     {
         const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_totalspendtodate","operator":">=","value":50000}}""";
         var h = new Harness().WithThresholdPolicy(body, "Spend to date is {{sprk_totalspendtodate}}.");
         h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId)
         {
-            ["sprk_matterid"] = MatterId, ["sprk_totalspendtodate"] = new Money(50000m),
+            ["sprk_matterid"] = MatterId, ["sprk_totalspendtodate"] = new Money(50000.0000000000m), // scale 10, as the SDK returns it
         });
         h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", OtherMatterId)
         {
@@ -1796,10 +1829,15 @@ public class SignalReevaluationJobTests
             .All(c =>
             {
                 var expected = decimal.Parse((string)c.Attribute("value")!, System.Globalization.CultureInfo.InvariantCulture);
-                decimal? actual = row.Attributes.TryGetValue((string)c.Attribute("attribute")!, out var v)
-                    ? v switch { Money m => m.Value, decimal d => d, _ => null }
-                    : null;
-                return actual is { } a && (string?)c.Attribute("operator") switch
+                var op = (string?)c.Attribute("operator");
+                var present = row.Attributes.TryGetValue((string)c.Attribute("attribute")!, out var v);
+
+                // Only a numeric column is compared. An option set, lookup or string column (statecode eq 0) is not modelled
+                // here and never excludes a row; a missing value never satisfies an ordered comparison (Dataverse: null).
+                if (present && v is not (Money or decimal)) return true;
+                if (!present) return op == "eq";
+                decimal? actual = v switch { Money m => m.Value, decimal d => d, _ => null };
+                return actual is { } a && op switch
                 {
                     "ge" => a >= expected,
                     "gt" => a > expected,

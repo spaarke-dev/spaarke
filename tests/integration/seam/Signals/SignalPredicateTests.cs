@@ -238,6 +238,38 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
     }
 
     [Fact]
+    public async Task ThresholdColumns_RangesFitTheLiveColumnMetadata_AndTheSdkReturnsTheirValuesAtTheColumnScale()
+    {
+        if (!_dv.IsLive) return;
+
+        foreach (var ((entity, column), (min, max)) in PredicateCompiler.ThresholdColumnRanges)
+        {
+            var attribute = await _dv.GetAttributeAsync(entity, column);
+            var (liveMin, liveMax, precision) = attribute switch
+            {
+                DecimalAttributeMetadata d => ((decimal?)d.MinValue, (decimal?)d.MaxValue, (int?)d.Precision),
+                MoneyAttributeMetadata m => ((decimal?)m.MinValue, (decimal?)m.MaxValue, m.Precision),
+                _ => throw new InvalidOperationException($"{entity}.{column} is {attribute.GetType().Name}, not a numeric column"),
+            };
+            _out.WriteLine($"{entity}.{column}: {attribute.GetType().Name} live min {liveMin} max {liveMax} precision {precision}; compiler range {min} to {max}");
+
+            // The compiler may be narrower than the column, never wider (a wider range would let a value through that Dataverse rejects).
+            min.Should().BeGreaterThanOrEqualTo(liveMin!.Value, $"{entity}.{column} lower bound");
+            max.Should().BeLessThanOrEqualTo(liveMax!.Value, $"{entity}.{column} upper bound");
+
+            // How the SDK hands the value back (scale), for SignalWriter.FormatFactValue.
+            var rows = await _dv.RunFetchRowsAsync(
+                $"<fetch top=\"5\"><entity name=\"{entity}\"><attribute name=\"{column}\" /><filter><condition attribute=\"{column}\" operator=\"not-null\" /></filter></entity></fetch>");
+            foreach (var value in rows.Select(r => r[column]))
+            {
+                var number = value is Money money ? money.Value : (decimal)value;
+                var scale = (decimal.GetBits(number)[3] >> 16) & 0xFF;
+                _out.WriteLine($"  {column} returned as {value.GetType().Name} {number.ToString(System.Globalization.CultureInfo.InvariantCulture)} (scale {scale})");
+            }
+        }
+    }
+
+    [Fact]
     public async Task ThresholdFixture_ReturnsExactlyTheRowsOfTheHandWrittenFetchXml_IncludingTheBoundaryAndExcludingNulls()
     {
         if (!_dv.IsLive) return;
@@ -404,6 +436,10 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
                 """<fetch aggregate="true"><entity name="sprk_matter"><attribute name="sprk_matterid" alias="n" aggregate="count" /></entity></fetch>"""));
             return (int)((AliasedValue)result.Entities[0]["n"]).Value;
         }
+
+        /// <summary>The raw rows of a hand-written query, for reading column values as the SDK returns them.</summary>
+        public async Task<IReadOnlyList<Entity>> RunFetchRowsAsync(string fetchXml) =>
+            (await _client!.RetrieveMultipleAsync(new FetchExpression(fetchXml))).Entities.ToList();
 
         public async Task<Guid> WhoAmIAsync() =>
             ((WhoAmIResponse)await _client!.ExecuteAsync(new WhoAmIRequest())).UserId;

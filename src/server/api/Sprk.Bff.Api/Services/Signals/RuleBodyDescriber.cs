@@ -357,6 +357,21 @@ public sealed class RuleBodyDescriber
     private static string OperatorWords(string op, JsonElement operand, string column, bool isLookup, Dictionary<Guid, string> names)
     {
         var shown = Display(operand, isLookup, names);
+        if (operand.ValueKind == JsonValueKind.Number)
+        {
+            // A numeric operand is a quantity, never a date: "is at least 5", not "is on or after 5".
+            return op switch
+            {
+                ">=" => $"is at least {shown}",
+                ">" => $"is more than {shown}",
+                "<=" => $"is at most {shown}",
+                "<" => $"is less than {shown}",
+                "<>" => $"is not {shown}",
+                "=" => $"is {shown}",
+                _ => throw new PredicateCompilationException($"{column}: operator '{op}' has no description."),
+            };
+        }
+
         return op switch
         {
             ">=" => $"is on or after {shown}",
@@ -406,7 +421,15 @@ public sealed class RuleBodyDescriber
         return Raw(value);
     }
 
-    private static string Raw(JsonElement value) => value.ValueKind == JsonValueKind.String ? value.GetString()! : value.GetRawText();
+    /// <summary>A string as its text; a number in the compiler's canonical form (<c>PredicateCompiler.FormatScalar</c>:
+    /// plain invariant decimal), so "1e2" reads 100 and a value beyond 28 digits reads the rounded value the query
+    /// compares; anything else as raw JSON.</summary>
+    private static string Raw(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString()!,
+        JsonValueKind.Number when value.TryGetDecimal(out var number) => number.ToString(CultureInfo.InvariantCulture),
+        _ => value.GetRawText(),
+    };
 
     private static string Label(IReadOnlyDictionary<string, string> labels, string logicalName) =>
         labels.TryGetValue(logicalName, out var label) ? label : logicalName;
