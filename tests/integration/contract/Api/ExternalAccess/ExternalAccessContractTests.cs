@@ -1493,9 +1493,10 @@ internal sealed class StubExternalDataService : ExternalDataService
     }
 
     public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalEventDto>> GetEventsAsync(
-        Guid projectId, CancellationToken ct = default)
+        TodoRootKind rootKind, Guid projectId, CallerPrincipal caller, CancellationToken ct = default)
     {
-        _reads.Enqueue($"{nameof(GetEventsAsync)}:{projectId}");
+        // Task 039: the event seam takes the root kind; a project read is recorded as before, any other root with its kind.
+        _reads.Enqueue(rootKind == TodoRootKind.Project ? $"{nameof(GetEventsAsync)}:{projectId}" : $"{nameof(GetEventsAsync)}:{rootKind}:{projectId}");
         return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalEventDto> { Truncated = TruncatedRequested });
     }
 

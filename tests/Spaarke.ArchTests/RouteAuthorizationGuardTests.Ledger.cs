@@ -1589,8 +1589,19 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/versions", "GetInvoiceDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
             "Delegates to ListDocumentVersionsForParent: the inherited Read on the invoice (ExternalProjectDataEndpoints.cs:1350) "
             + "and the document's invoice scoping (:1357) before the version read."),
-        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/events", "GetEvents", "HoldsReadOnProject", Array.Empty<string>(),
-            "Read on the route project (ExternalProjectDataEndpoints.cs:799) before any Dataverse read."),
+        // Task 039 (external-access-platform-r3, FR-03): the project event read is generalized over the root kind, as the
+        // to-do read is; the matter and work-assignment routes are two more adapters on the same handler.
+        new HandlerDecision("GET /api/v1/external/projects/{id:guid}/events", "GetEvents", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to ListEventsForRoot: 403 unless RightsForRoot gives Read on the route project "
+            + "(ExternalProjectDataEndpoints.cs:1469) before any Dataverse read."),
+        new HandlerDecision("GET /api/v1/external/matters/{id:guid}/events", "GetMatterEvents", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to ListEventsForRoot: 403 unless RightsForRoot gives Read on the route matter "
+            + "(ExternalProjectDataEndpoints.cs:1469) before any Dataverse read; an event also filed to a root the "
+            + "caller cannot read is withheld (ExternalDataService.ReadableEvents)."),
+        new HandlerDecision("GET /api/v1/external/workassignments/{id:guid}/events", "GetWorkAssignmentEvents", "RightsForRoot", Array.Empty<string>(),
+            "Delegates to ListEventsForRoot: 403 unless RightsForRoot gives Read on the route work assignment "
+            + "(ExternalProjectDataEndpoints.cs:1469) before any Dataverse read; an event also filed to a root the "
+            + "caller cannot read is withheld (ExternalDataService.ReadableEvents)."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/events", "CreateEvent", "AccessRights", Array.Empty<string>(),
             "Requires Create on the route project (ExternalProjectDataEndpoints.cs:831) before the write."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/contacts", "GetContacts", "HoldsReadOnProject", Array.Empty<string>(),

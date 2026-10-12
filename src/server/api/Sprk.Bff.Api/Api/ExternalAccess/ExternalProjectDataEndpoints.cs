@@ -22,6 +22,8 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   POST /projects/{id}/todos            — create a new to-do regarding the project
 ///   GET  /projects/{id}/events           — CALENDAR events for a project (sprk_event)
 ///   POST /projects/{id}/events           — create a calendar event on the project
+///   GET  /matters/{id}/events            — CALENDAR events for a matter (task 039; read only)
+///   GET  /workassignments/{id}/events    — CALENDAR events for a work assignment (task 039; read only)
 ///   GET  /projects/{id}/contacts         — contacts with access to the project
 ///   GET  /projects/{id}/organizations    — organizations linked to project contacts
 ///   GET  /matters/{id}/todos             — to-dos for a matter (sprk_todo, regarding=matter)
@@ -389,6 +391,22 @@ public static class ExternalProjectDataEndpoints
         group.MapGet("/projects/{id:guid}/events", GetEvents)
             .WithName("GetExternalProjectEvents")
             .WithSummary("Get calendar events for a Secure Project (sprk_event records regarding the project)")
+            .Produces<ExternalCollectionResponse<ExternalEventDto>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        // Task 039 (FR-03): the same read for the other two roots that have events. The handler is ListEventsForRoot, the
+        // project route's own, so the Read check and the DTO are identical. Read only: event CREATE stays project-only.
+        group.MapGet("/matters/{id:guid}/events", GetMatterEvents)
+            .WithName("GetExternalMatterEvents")
+            .WithSummary("Get calendar events regarding an accessible matter (sprk_event, sprk_regardingmatter)")
+            .Produces<ExternalCollectionResponse<ExternalEventDto>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        group.MapGet("/workassignments/{id:guid}/events", GetWorkAssignmentEvents)
+            .WithName("GetExternalWorkAssignmentEvents")
+            .WithSummary("Get calendar events regarding an accessible work assignment (sprk_event, sprk_regardingworkassignment)")
             .Produces<ExternalCollectionResponse<ExternalEventDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
@@ -1421,14 +1439,25 @@ public static class ExternalProjectDataEndpoints
     }
 
     /// <summary>
-    /// GET /api/v1/external/projects/{id}/events — calendar events for a project.
+    /// The calendar events of one accessible root, shared by the project, matter and work-assignment routes (task 039,
+    /// FR-03): ONE implementation, three thin adapters that name their root kind, as <see cref="ListTodosForRoot"/>.
     /// </summary>
     /// <remarks>
-    /// Same gate as every other project-scoped read: the caller must hold Read on {id}
-    /// (<see cref="HoldsReadOnProject"/>, task 136) or this returns 403 before any Dataverse read happens.
+    /// <para><b>Gate:</b> Read on the route root from <see cref="RightsForRoot"/>, or 403 before any Dataverse read. A root
+    /// the caller cannot reach, one that does not exist and one the caller holds nothing on are the same answer
+    /// (<see cref="DenyRoot"/>), so an id cannot be probed. The rights come from the principal, so there is no Dataverse
+    /// read in the decision and nothing here can be a 503; an unreadable events read is flagged <c>truncated</c> like
+    /// every other list on this plane (task 105).</para>
+    /// <para><b>The project route is the shipped one:</b> the same Read test (<see cref="HoldsReadOnProject"/> is
+    /// <c>RightsForRoot(Project)</c>), the same 403 body, the same DTO.</para>
+    /// <para><b>Secure records:</b> a secure matter or work assignment is reachable only through the rights the principal
+    /// holds on it (a grant row with a level), exactly as for its to-dos and documents; nothing here widens that. An
+    /// event also filed to a root the caller cannot read is withheld (<c>ExternalDataService.GetEventsAsync</c>), the same
+    /// rule delete-own applies.</para>
     /// </remarks>
-    private static async Task<IResult> GetEvents(
-        Guid id,
+    private static async Task<IResult> ListEventsForRoot(
+        ExternalDataService.TodoRootKind rootKind,
+        Guid rootId,
         HttpContext httpContext,
         ExternalDataService dataService,
         CancellationToken ct)
@@ -1436,12 +1465,27 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        if (!HoldsReadOnProject(callerContext, id))
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this project");
+        // ADR-003: an out-of-scope root DENIES, never an empty list.
+        if (!RightsForRoot(callerContext, rootKind, rootId).HasFlag(Spaarke.Dataverse.AccessRights.Read))
+            return DenyRoot(rootKind);
 
-        return Results.Ok(await dataService.GetEventsAsync(id, ct));
+        return Results.Ok(await dataService.GetEventsAsync(rootKind, rootId, callerContext, ct));
     }
+
+    /// <summary>GET /api/v1/external/projects/{id}/events — calendar events for a project.</summary>
+    private static Task<IResult> GetEvents(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, CancellationToken ct) =>
+        ListEventsForRoot(ExternalDataService.TodoRootKind.Project, id, httpContext, dataService, ct);
+
+    /// <summary>GET /api/v1/external/matters/{id}/events — calendar events for a matter (task 039).</summary>
+    private static Task<IResult> GetMatterEvents(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, CancellationToken ct) =>
+        ListEventsForRoot(ExternalDataService.TodoRootKind.Matter, id, httpContext, dataService, ct);
+
+    /// <summary>GET /api/v1/external/workassignments/{id}/events — calendar events for a work assignment (task 039).</summary>
+    private static Task<IResult> GetWorkAssignmentEvents(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, CancellationToken ct) =>
+        ListEventsForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, httpContext, dataService, ct);
 
     /// <summary>
     /// POST /api/v1/external/projects/{id}/events — create a calendar event on a project.

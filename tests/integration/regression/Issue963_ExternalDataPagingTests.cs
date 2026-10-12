@@ -112,7 +112,7 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
                 var todos = await _sut.GetTodosAsync(ExternalDataService.TodoRootKind.Project, Root);
                 return (todos.Value.Select(t => t.SprkTodoid).ToList(), todos.Truncated);
             case "events":
-                var events = await _sut.GetEventsAsync(Root);
+                var events = await _sut.GetEventsAsync(ExternalDataService.TodoRootKind.Project, Root, Creator);
                 return (events.Value.Select(e => e.SprkEventid).ToList(), events.Truncated);
             case "contacts":
                 var contacts = await _sut.GetContactsAsync(Root);

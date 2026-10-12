@@ -197,6 +197,10 @@ public class ExternalDataService
         [JsonPropertyName(EventStatusColumn)] public int? SprkStatus { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName("_sprk_regardingproject_value")] public string? SprkRegardingprojectValue { get; set; }
+        // Task 039: the other two root lookups, read so a list can withhold an event also filed to a record the caller
+        // cannot read (see ReadableEvents). Never mapped onto the wire DTO.
+        [JsonPropertyName("_sprk_regardingmatter_value")] public string? SprkRegardingmatterValue { get; set; }
+        [JsonPropertyName("_sprk_regardingworkassignment_value")] public string? SprkRegardingworkassignmentValue { get; set; }
         [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
         [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
     }
@@ -1257,28 +1261,75 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// Retrieves all <c>sprk_event</c> records whose regarding-project equals the supplied project id.
+    /// Retrieves the <c>sprk_event</c> records regarding one accessible root (project, matter or work assignment), minus
+    /// any also filed to a root the <paramref name="caller"/> cannot read.
     /// </summary>
     /// <remarks>
-    /// CALENDAR events, not to-dos. <c>sprk_event</c> has no <c>sprk_projectid</c> attribute — its
-    /// project lookup is <c>sprk_regardingproject</c> (metadata-verified, smart-todo-r5 task 002),
-    /// so the filter uses <c>_sprk_regardingproject_value</c>.
-    ///
-    /// The legacy <c>sprk_todoflag</c> attribute is deliberately NOT selected. smart-todo-decoupling-r3
-    /// FR-29 retired the event-as-todo model; to-dos live on <c>sprk_todo</c> and are served by
-    /// <see cref="GetTodosAsync"/>. Reintroducing that flag here would resurrect the model FR-29 removed.
+    /// <para>CALENDAR events, not to-dos. The filter column comes from <see cref="TodoRootBinding"/>, the table the
+    /// to-do list and the delete-own check already share, so the three reads cannot name different columns for the
+    /// same root. <c>sprk_event</c> carries the same three lookups as <c>sprk_todo</c> (<c>sprk_regardingproject</c>,
+    /// <c>sprk_regardingmatter</c>, <c>sprk_regardingworkassignment</c>; live metadata, unified-access-control-r2 task
+    /// 159 notes section 0.2).</para>
+    /// <para>The legacy <c>sprk_todoflag</c> attribute is deliberately NOT selected. smart-todo-decoupling-r3 FR-29
+    /// retired the event-as-todo model; to-dos live on <c>sprk_todo</c> and are served by <see cref="GetTodosAsync"/>.</para>
+    /// <para><b>Task 039 (FR-03) generalized this from project-only.</b> The caller has ALREADY been authorized for
+    /// <paramref name="rootId"/> (Read, from <c>RightsForRoot</c>); <paramref name="caller"/> is here only for the
+    /// second half of the rule, <see cref="ReadableEvents"/>.</para>
     /// </remarks>
-    public virtual async Task<ExternalCollectionResponse<ExternalEventDto>> GetEventsAsync(Guid projectId, CancellationToken ct = default)
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="rootKind"/> is <c>None</c> or <c>Ambiguous</c>:
+    /// deny states, not roots.</exception>
+    // `virtual` per ADR-038 section 4 (substitution seam): the endpoint tests assert WHICH root was asked for and that a
+    // denied list never reached Dataverse. BuildEventsQuery is tested directly for the $filter this seam would hide.
+    public virtual async Task<ExternalCollectionResponse<ExternalEventDto>> GetEventsAsync(
+        TodoRootKind rootKind, Guid rootId, CallerPrincipal caller, CancellationToken ct = default)
     {
-        var url = $"{GetApiUrl()}/{BuildEventsQuery(projectId)}";
+        ArgumentNullException.ThrowIfNull(caller);
+        var url = $"{GetApiUrl()}/{BuildEventsQuery(rootKind, rootId)}";
 
         // Task 105: paged to the cap, and a cut-short list says so (see GetDocumentsAsync).
         var read = await GetCollectionAsync<EventRow>(url, ct);
+        var readable = ReadableEvents(read.Rows, caller);
+        if (readable.Count != read.Rows.Count)
+        {
+            _logger.LogInformation(
+                "[EXT-DATA] events: {Withheld} of {Total} event(s) regarding {RootKind} {RootId} withheld - also filed to a record the caller cannot read",
+                read.Rows.Count - readable.Count, read.Rows.Count, rootKind, rootId);
+        }
+
         return new ExternalCollectionResponse<ExternalEventDto>
         {
-            Value = read.Rows.Select(MapEvent).ToList(),
+            Value = readable.Select(MapEvent).ToList(),
             Truncated = read.Truncated,
         };
+    }
+
+    /// <summary>
+    /// The events of <paramref name="rows"/> the caller may see: an event is listed only if the caller holds Read on EVERY
+    /// root it is filed to (<c>sprk_regardingproject</c>, <c>sprk_regardingmatter</c>, <c>sprk_regardingworkassignment</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>This is the delete-own rule (<c>ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync</c>: "Read on EVERY parent
+    /// this plane authorizes") applied to the list, so one record cannot be readable on one route and hidden on another.
+    /// Without it an event filed to a secure matter AND to a project the caller can read is returned by the project route
+    /// to a caller who holds nothing on the matter: the matter's isolation (its rights come only from a direct grant) would
+    /// be bypassed by a second lookup. A row naming no other root is unaffected, so every single-parent event lists
+    /// exactly as before.</para>
+    /// <para>Fail closed: a lookup value that is not a GUID is unreadable. The rights are the principal's, through the same
+    /// <see cref="CallerPrincipal.RightsOn"/> dispatch the grant routes use.</para>
+    /// </remarks>
+    private static List<EventRow> ReadableEvents(IReadOnlyList<EventRow> rows, CallerPrincipal caller) =>
+        rows.Where(r =>
+            ParentReadable(caller, ExternalGrantRootType.Project, r.SprkRegardingprojectValue)
+            && ParentReadable(caller, ExternalGrantRootType.Matter, r.SprkRegardingmatterValue)
+            && ParentReadable(caller, ExternalGrantRootType.WorkAssignment, r.SprkRegardingworkassignmentValue))
+            .ToList();
+
+    private static bool ParentReadable(CallerPrincipal caller, ExternalGrantRootType rootType, string? lookupValue)
+    {
+        if (string.IsNullOrWhiteSpace(lookupValue))
+            return true; // not filed to this root
+        return Guid.TryParse(lookupValue, out var rootId)
+               && caller.RightsOn(rootType, rootId).HasFlag(Spaarke.Dataverse.AccessRights.Read);
     }
 
     /// <summary>
@@ -1330,18 +1381,28 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// The relative <c>sprk_events</c> query <see cref="GetEventsAsync"/> sends (task 097: live column names).
-    /// Internal for tests.
+    /// The relative <c>sprk_events</c> query <see cref="GetEventsAsync"/> sends (task 097: live column names; task 039: any
+    /// accessible root). Internal for tests.
     /// </summary>
-    internal static string BuildEventsQuery(Guid projectId)
+    internal static string BuildEventsQuery(TodoRootKind rootKind, Guid rootId)
     {
+        var binding = TryGetRootBinding(rootKind)
+            ?? throw new ArgumentOutOfRangeException(nameof(rootKind), rootKind,
+                "Events can only be listed for a project, matter or work assignment. None/Ambiguous are deny states - a "
+                + "caller reaching here with one has skipped its authorization gate.");
+
         // Task 032 (FR-26): both creator stamps, so the SPA offers Delete only on the caller's own events.
-        var select = $"sprk_eventid,{EventNameColumn},sprk_duedate,{EventStatusColumn},createdon,_sprk_regardingproject_value,"
+        // Task 039: all three root lookups, so a row also filed to a root the caller cannot read can be withheld.
+        var select = $"sprk_eventid,{EventNameColumn},sprk_duedate,{EventStatusColumn},createdon,"
+                     + "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,"
                      + CreatorStampSelect;
-        var filter = Uri.EscapeDataString($"_sprk_regardingproject_value eq {projectId}");
+        var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
         // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
         return $"sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc,sprk_eventid asc";
     }
+
+    /// <summary>The project form of <see cref="BuildEventsQuery(TodoRootKind, Guid)"/> (the shipped query, plus the two extra lookups).</summary>
+    internal static string BuildEventsQuery(Guid projectId) => BuildEventsQuery(TodoRootKind.Project, projectId);
 
     /// <summary>
     /// The COMPLETE create payload for an external calendar event: the caller's fields, the project bind, and the
