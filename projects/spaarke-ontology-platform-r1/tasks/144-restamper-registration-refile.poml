@@ -56,6 +56,8 @@
     <criterion testable="true">sprk_corerecordid/type, policy version and snapshot are byte-identical before and after each re-file.</criterion>
     <criterion testable="true">CoreAncestorResolverTests pass unchanged (IntermediateRootColumns unchanged).</criterion>
     <criterion testable="true">The report-only stale-row report exists in notes/.</criterion>
+    <criterion testable="true">uac-r2 K4 condition (from #1746): a Secure-owned Signal whose core is a project or work assignment and whose subject does not reach the root leaves #1746's undetermined suppression bucket once its sprk_regarding{project,workassignment} stamp exists (test).</criterion>
+    <criterion testable="true">uac-r2 K7 (from #1746): a hit on a secure project/work-assignment core is placed in its secure partition (not Ordinary) once the stamp exists, so no ordinary stamp mutes it (test).</criterion>
     <criterion testable="true">Test scope: the stated contract plus the cases above; anything beyond needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 

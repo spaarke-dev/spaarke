@@ -38,6 +38,7 @@
     <constraint source="contract C2">The stamp goes in sprk_regarding{matter,project,workassignment,servicerequest} derived by CoreAncestorResolver; do not write the typed sprk_matter/sprk_project/sprk_workassignment as filing for new rows (their backfill/retirement is 145; keep them populated as today until 145 decides).</constraint>
     <constraint source="contract C3/D-130">Owner = RecordOwnershipResolver over ALL parents: each resolved Signal's subject, every derived core, and the DR's own subject; taken exactly as returned; Refused → the commit fails with nothing written. No direct owningbusinessunit write. People go in sprk_assignedtointernal (contact), never ownerid.</constraint>
     <constraint source="contract C9/acceptance 7">Also-resolve refuses (no write) a DR whose Signals' secure-root sets differ; Undetermined/Failed/fault counts as a distinct secure set (fail closed).</constraint>
+    <constraint source="uac-r2 #1665 N1 / #1778">The PR that first writes the DR subject lookup columns must also contain the C9 two-wall refusal and its nothing-written test. Do not split them across PRs.</constraint>
     <constraint source="D-34/C8">sprk_corerecordid, sprk_corerecordtype, sprk_policyversion and the snapshot are written once at create and never by any later path (test).</constraint>
     <constraint source="project">Never use --no-verify or bare git stash; you cannot write .claude/. Publish-size delta per BFF hygiene.</constraint>
   </constraints>
@@ -56,6 +57,7 @@
     <criterion testable="true">Two-wall negative: Signals under secure roots X and Y → refused, nothing written.</criterion>
     <criterion testable="true">Resolver Refused or a walk fault → nothing written, a failure result returned.</criterion>
     <criterion testable="true">D-34: no code path after create writes the four context fields.</criterion>
+    <criterion testable="true">The census entries UAC task 182 left Pending/Waived against 142 (DR writer) are flipped to Routed, and the census + consistency guards pass.</criterion>
     <criterion testable="true">Test scope: the stated contract plus the cases above; anything beyond needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
@@ -68,7 +70,7 @@
     </files>
   </knowledge>
 
-  <notes>Created 2026-10-12 (D-131..D-133). Two adversarial passes (security) per root CLAUDE.md §8.5; uac-r2 reviews.</notes>
+  <notes>Created 2026-10-12 (D-131..D-133). Two adversarial passes (security) per root CLAUDE.md §8.5; uac-r2 reviews. UAC task 182 carries the one-line `LineageColumnByCoreEntity` typed-core filter in DecisionRecordWriter.cs (`Roots.Contains(l.Value) &amp;&amp; l.Key == l.Value`), so the map survives the sprk_regarding* lineage columns; approved by the ontology main session 2026-10-12 (option b). Start from the code after 182 merges; do not re-add the filter.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

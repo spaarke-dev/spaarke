@@ -28,7 +28,7 @@
       <file>src/server/api/Sprk.Bff.Api/Services/Workspace/TodoRegardingBuilder.cs (ApplyResolverFieldsAsync, ApplyResolverPairAsync, RegardingLookupByEntity)</file>
       <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/TaskActionCore.cs (existing reuse for sprk_event)</file>
       <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs (~:236-245 doc, ~:695 dedupe key, ~:1202-1206 pair write)</file>
-      <file>every reader of sprk_signal.sprk_regardingrecordtype as a string: grep src/server and src/solutions, src/client</file>
+      <file>every reader of sprk_signal.sprk_regardingrecordtype as a string: grep src/server and src/solutions, src/client; known: SignalCoreRecordAccess.cs ~:115 ($select) and ToRow ~:1354 (from #1665), SignalWriter.cs ~:1206; full list in notes/140-schema-delta.md</file>
     </relevant-files>
   </context>
 
