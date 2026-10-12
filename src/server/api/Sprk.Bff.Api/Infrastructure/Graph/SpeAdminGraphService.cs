@@ -1649,16 +1649,29 @@ public sealed class SpeAdminGraphService
     /// <summary>
     /// The business-unit binding of <paramref name="containerId"/> (owner round 20 item 2), read with the config's
     /// client from the active container (<paramref name="deleted"/> false) or from the recycle bin. Null when the
-    /// container does not exist there. A read fault throws <see cref="SpaarkeStorageException"/> — the caller must
-    /// refuse, never treat it as "unbound".
+    /// container does not exist there OR is not this stamp's (the ownership guard's refusal, task 227d — the guard
+    /// answers a foreign and a nonexistent id alike, and so does this). A read fault throws
+    /// <see cref="SpaarkeStorageException"/> — the caller must refuse, never treat it as "unbound".
     /// </summary>
     public async Task<Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead?> GetContainerBindingForConfigAsync(
         ContainerTypeConfig config, string containerId, bool deleted, CancellationToken ct = default)
     {
         // One container: refused (404, as for a missing one) unless this stamp owns it (task 227d).
-        var client = deleted
-            ? await GetClientForDeletedContainerAsync(config, containerId, ct).ConfigureAwait(false)
-            : await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
+        GraphServiceClient client;
+        try
+        {
+            client = deleted
+                ? await GetClientForDeletedContainerAsync(config, containerId, ct).ConfigureAwait(false)
+                : await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
+        }
+        catch (SdapProblemException ex) when (ex.Code == SpeContainerOwnershipGuard.NotOwnedErrorCode)
+        {
+            // F-165-RB: the guard's "not this stamp's" is a final answer about the id, not a fault. Thrown on, the
+            // per-container rule read it as an unreadable binding and answered 503 "try again" for every foreign,
+            // unmarked or nonexistent container; as "not there" it is the ONE uniform 404 (task 165 §11.3).
+            return null;
+        }
+
         try { return await GetContainerBindingAsync(client, containerId, deleted, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetContainerBinding({containerId})"); }
     }
@@ -2855,6 +2868,12 @@ public sealed class SpeAdminGraphService
     /// a malformed QUERY (e.g. a bad <c>$select</c>) answers <c>400 BadRequest</c>, which stays a fault.</para>
     /// <para>Throttling (429), server errors (5xx), access refusals and timeouts are not this, and still throw: the caller
     /// refuses with the 503 (ADR-003).</para>
+    /// <para><b>Scope of that rule (F-165-RB).</b> It describes THIS binding read only. Before it runs, the T227d ownership
+    /// guard reads the same container: per its policy (<see cref="SpeContainerOwnershipGuard"/>, "Fail closed") a 400 of any
+    /// code, a 403 or a 404 there means "not owned" (that null marker is cached 10 minutes), and
+    /// <see cref="GetContainerBindingForConfigAsync"/> maps that refusal to "not there" — the uniform 404. So in the overall
+    /// per-container decision an access refusal or a malformed-query 400 answers 404; only 401/429/5xx, credential faults and
+    /// unparseable bodies reach the 503.</para>
     /// </remarks>
     internal static bool IsUnresolvableContainerId(ODataError ex) =>
         ex.ResponseStatusCode == (int)HttpStatusCode.BadRequest
