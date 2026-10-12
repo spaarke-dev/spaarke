@@ -40,8 +40,8 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 /// <c>AnalysisChunk</c> envelope) was DELETED 2026-07-07 (redesign-r1 task 050, per
 /// ADR-037 as amended — client dual-render removed at task 046; the engine-shell
 /// chat-summarize producer was deleted at FR-P3-05 task 044). Section-name-keyed
-/// events are the sole structured-streaming contract. (The frozen engine's internal
-/// <c>Streaming.FieldDeltaEvent</c> parser type is a distinct symbol, untouched.)
+/// events are the sole structured-streaming contract. (The engine's internal
+/// <c>Streaming.FieldDeltaEvent</c> parser type was deleted with its only consumer.)
 /// </para>
 ///
 /// <para>
