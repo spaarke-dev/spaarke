@@ -46,11 +46,15 @@ public class MembershipJunctionUpdaterHostTests
         using var cts = new CancellationTokenSource();
 
         await sut.StartAsync(cts.Token);
+
+        // .NET 10 BackgroundService runs ExecuteAsync off the StartAsync thread. Stopping
+        // straight away can cancel it before it runs, so wait for it to finish first.
+        sut.ExecuteTask.Should().NotBeNull();
+        await sut.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
         await sut.StopAsync(CancellationToken.None);
 
         // ExecuteAsync ran to completion (not faulted, not cancelled)...
-        sut.ExecuteTask.Should().NotBeNull();
-        sut.ExecuteTask!.IsCompletedSuccessfully.Should().BeTrue();
+        sut.ExecuteTask.IsCompletedSuccessfully.Should().BeTrue();
 
         // ...after exactly one Information line saying the updater is disabled.
         logger.Verify(
