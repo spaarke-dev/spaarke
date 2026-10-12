@@ -45,6 +45,8 @@
 - [Autonumber on existing primary-name col (2026-10-02)](dataverse-autonumber-existing-primary-name-2026-10-02.md) — text→autonumber documented; fill-if-empty community-only; seed default 1000, not in solution; no uniqueness vs manual values
 - [MDA clickable form banner (2026-09-30)](mda-clickable-form-banner-options-2026-09-30.md) — addGlobalNotification app-wide/persists; setFormNotification text-only; PCF MessageBar REC
 - [Impersonation for async/Functions (2026-09-14)](dataverse-impersonation-async-functions-2026-09-14.md) — documented for services; trust = S2S app controls access; SB SAS → forgeable caller id
+- [Secure families via access teams (2026-10-12)](dataverse-secure-family-access-teams-2026-10-12.md) — templates 4/entity,100 entities; no documented share/team caps; hierarchy+create-by-member leaks; filtered record ownership now public preview; owner-team-per-family alt
+- [RetrievePrincipalAccess vs privileges (2026-10-09)](dataverse-retrieveprincipalaccess-vs-privilege-2026-10-09.md) — privilege check gates shares (documented); RPA intersect undocumented, inferred; spike
 - [POA Grant/Modify/Revoke (2026-09-15)](dataverse-poa-grant-modify-revoke-semantics-2026-09-15.md) — ModifyAccess REPLACES; many edge cases undocumented; Revoke doc bug
 - [Background work hosting (2026-09-12)](background-work-hosting-best-practice-2026-09-12.md) — separate compute for scale; in-proc cron dupes on scale-out; Durable Task Scheduler GA
 - [Plugins state + alternatives (2026-09-25)](dataverse-plugins-state-alternatives-2026-09-25.md) — .NET Fx 4.6.2–4.8 only; MI GA but FIC-per-env cap; input to ADR-002 revisit

@@ -1384,6 +1384,18 @@ No BFF path removes or deactivates an entry: users do it in the model-driven app
 
 The owner asked for research on the practical and technical limits of access teams and POA growth (running), and asked whether the umbrella family serves other aggregation needs ("update all related records", "all decisions across related records").
 
+## Round 95 (2026-10-12): OWNER: ontology records join the standard child contract; secure-family team type
+
+1. **Approved: ontology Signals and Decision Records adopt the standard child-record contract.** They get polymorphic regarding plus typed subject lookups, core-ancestor stamps re-derived on re-file, resolver ownership through the single write path, lineage rows, reconciler and share-mirror reach, and the census guard.
+   - **D-34 split:** the decision context (`sprk_corerecordid`, `sprk_corerecordtype`, the policy version, the snapshot) is immutable. Filing, stamps, owner and shares follow the subject's current family.
+   - **Split of work:** ontology implements the schema delta and the writers; UAC adds the lineage rows and the census guard (F4), reviews F8, and reviews every ontology PR.
+   - Contract, acceptance criteria and sequencing: [ontology-standard-child-contract-2026-10-12.md](ontology-standard-child-contract-2026-10-12.md).
+2. **Secure family: research done.** It supersedes round 94's "access team per family" as the recommendation. **The agent now recommends an owner team per family** (zero POA, no per-row share, a one-query drift check, isolation between families by construction, `ReassignObjectsOwner` per family), conditional on seven spikes. The owner has not yet chosen between an owner team and an access team. Full comparison: [secure-family-design-research-2026-10-12.md](secure-family-design-research-2026-10-12.md).
+3. **#1746 suppression walk (peer question).**
+   - Start from the subject row itself, so the subject's own owner never stops the walk.
+   - An ordinary-team-owned *intermediate* stops it. That is the resolver's own rule, bounded by the recent-changes pass, which writes by default.
+   - An Undetermined, Failed or faulted walk counts as secure, or the hit is skipped. It is never ordinary.
+
 ## C7 research
 
 - **The user:** a customer **employee without a Power Apps licence (Type 2)**, signing in with company SSO.
