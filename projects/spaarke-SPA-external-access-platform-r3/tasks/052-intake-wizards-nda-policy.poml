@@ -4,7 +4,7 @@
     <title>Intake wizards part 1: wiring + NDA Assessment + Policy Question (FR-05)</title>
     <phase>5 SPA features</phase>
     <gate>after 035</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New frontend wizards (tags frontend)</rigor-reason>
     <model-tier>sonnet</model-tier>

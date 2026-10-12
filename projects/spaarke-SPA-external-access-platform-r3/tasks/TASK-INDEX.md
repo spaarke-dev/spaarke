@@ -31,7 +31,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 043 | Production build + Teams package in CI (FR-20) | P4 | 🔄 [wip] code done, awaiting owner GitHub environments + prod Teams app id | 040 | S/h | STANDARD | Wave 3 |
 | 050 | Record detail view: fields, docs/invoices, events/tasks (FR-01–03) | P5 | ✅ [done] | none | S/h | FULL | Wave 1 |
 | 051 | Detail messages section: read + send (FR-04/FR-11 client) | P5 | ✅ [done] | 050, 034 | S/h | FULL | Wave 5 |
-| 052 | Intake wizards: wiring + NDA + Policy Question (FR-05) | P5 | 🔲 [open] | 035 | S/h | FULL | Wave 6 |
+| 052 | Intake wizards: wiring + NDA + Policy Question (FR-05) | P5 | 🔄 [wip] | 035 | S/h | FULL | Wave 6 |
 | 053 | Intake wizards: Invention + Trademark (FR-05) | P5 | 🔲 [open] | 052 | S/h | FULL | Wave 7 |
 | 054 | Detail documents + delete-own actions (FR-24/FR-26 client) | P5 | ✅ [done] | 051, 032 | S/h | FULL | Wave 6 |
 | 055 | Notification bell + deep-link record open (FR-08/FR-07 client) | P5 | ✅ [done] | 054, 037, 041 | S/h | FULL | Wave 7 |
