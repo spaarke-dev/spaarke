@@ -520,3 +520,10 @@ Final sweep 20:15Z: 0 `# gate17*` / `# gate18*` matters or events, 0 grant rows 
 **Owner questions:**
 1. Should replying into a thread require AppendTo on its record? That would block View Only sharees from replying.
 2. When a regarding is set on an existing Direct thread later, should new messages keep going to the two parties, or to the record's audience (current behaviour, fails closed)?
+
+## 2026-10-12 #1666 rollout (F-165-RB part 2)
+
+- #1666 merged as `67e06a626` (squash, pinned to the verified head `ed464acd5`; both verifiers PASS).
+- Attempt 1 of CI run 38199684912 failed 5 Task 167 Production-boot Arch Tests. The cause is the Redis managed-identity path, not #1666: master run 38161601966 at `848f639` failed the same 5 tests. Re-running only the failed jobs passed. Filed as #1672.
+- BFF deployed to dev from `C:\wtdep` at `67e06a626`: all 4 critical files match (SHA-256), `healthz` passes, and both CORS origins are present.
+- Behaviour now live: a recycle-bin container whose ownership this stamp cannot prove answers the uniform 404, not 503. Protected B (an ownership record that survives deletion, #1652) is next, on `fix/uac-r2-1652-recyclebin-ownership-record`.
