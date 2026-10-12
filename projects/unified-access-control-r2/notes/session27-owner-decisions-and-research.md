@@ -1364,6 +1364,26 @@ The owner, after the task count kept rising (74 tasks added 2026-09-28..10-09): 
 
 No BFF path removes or deactivates an entry: users do it in the model-driven app, and only `sprk_noaccessentry` table privileges govern that. The owner chose roles only, for wrap-up: only roles that also hold Share may hold Write or Delete on the entry table. On dev the only human role with Write is Spaarke Access Administrator (Write at Global, no Delete, no Share on matter, project or work assignment). So it is assigned only together with a role that holds Share, for example Core User, and the setup guides say so. Per-record enforcement (a BFF remove route) is filed as #1601 for after the project.
 
+## Round 94 (2026-10-12): OWNER: external file access to secure records, and the secure-family model
+
+**External file access** (the investigation is at origin/master `91cbac7b8`): contacts never hold an SPE permission. Every byte is streamed by the BFF, app-only, after the evaluator decides, through `/api/v1/external` routes in `ExternalProjectDataEndpoints.cs`. Decisions on the gaps:
+- **G1 (owner restatement): a file is filed to exactly ONE record.** A document in a secure container is reachable only by those with access to that secure document. File bytes that also exist outside the secure container belong to a separate Document, controlled by its own record. Consequence: the external document routes authorize by the document's OWN filing record (the one whose container holds it), not by `_sprk_project_value` alone, and no document may confer access through a second record.
+- **G2: enforce document-level Restricted on external routes.**
+- **G3: approved as recommended.** On Make Secure, Restricted, a No Access entry or a revoke, enumerate and delete the item's sharing-link permissions app-only. Delete relocated sources permanently, not soft-delete. Retiring links altogether (#1350) is still acceptable.
+- **G4: approved as recommended.** Read the container type's sharing setting, set `isSharingRestricted = true`, and add that check to the provisioning verifier. Changing it is a tenant configuration write, so the owner runs it or approves it explicitly.
+- **G5: approved as recommended.** Check the recipients of secure or Restricted attachments: a recipient without a grant, or on the No Access list, is refused or sent a link instead.
+- **G6 (#1072/056) and G7 (#1566):** stay as filed.
+- **G8:** live proof with a real CIAM sign-in through the External SPA, run by the owner from steps the agent provides. It needs the four CIAM identities from task 140.
+
+**Secure family (direction, design note pending, not yet built).** The owner rejects one business unit or owner team per secure family because it doesn't scale. Preferred direction:
+- a `sprk_securefamily` table, with a lookup of the same name on every family table, as the canonical "umbrella" relationship;
+- a single lookup, so a child belongs to at most one family; a write that would put a child under two families is refused;
+- ownership stays with Secure Record Owners (isolation);
+- one Dataverse **access team** per family, which each family row is shared with once; internal access is team membership;
+- external contacts are unaffected: they are still BFF-evaluated grants, and the family gives the evaluator a one-hop key.
+
+The owner asked for research on the practical and technical limits of access teams and POA growth (running), and asked whether the umbrella family serves other aggregation needs ("update all related records", "all decisions across related records").
+
 ## C7 research
 
 - **The user:** a customer **employee without a Power Apps licence (Type 2)**, signing in with company SSO.
