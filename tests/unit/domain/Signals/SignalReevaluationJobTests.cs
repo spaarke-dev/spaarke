@@ -1084,6 +1084,52 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
+    public void Plan_ThresholdActed_UnknownResolutionTime_NeverStampsAndNeverReRaises()
+    {
+        var hit = CommHit(MatterId);
+        var unknown = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed, resolvedOn: null);
+
+        var cleared = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { unknown }, isThreshold: true);
+        cleared.ClearedMarks.Should().BeEmpty("a stamp cannot register as a marker without a resolution time; stamping would repeat every pass (D-61)");
+        cleared.NoDatedEvidence.Should().Be(1);
+
+        var holds = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { unknown with { LastEvaluated = RunAt.UtcDateTime } },
+            isThreshold: true);
+        holds.Creates.Should().BeEmpty();
+        holds.NoDatedEvidence.Should().Be(1);
+    }
+
+    [Fact]
+    public void Plan_ThresholdActed_ClearedWithinTheToleranceOfTheResolution_DoesNotStampYet()
+    {
+        var hit = CommHit(MatterId);
+        var justResolved = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed,
+            resolvedOn: RunAt.UtcDateTime.AddSeconds(-30));
+        var justPast = justResolved with { ResolvedOn = RunAt.UtcDateTime - ExistingSignal.ClearedMarkerTolerance - TimeSpan.FromSeconds(1) };
+
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { justResolved }, isThreshold: true)
+            .ClearedMarks.Should().BeEmpty("a stamp within the tolerance is not a marker, so the next pass would stamp again");
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { justPast }, isThreshold: true)
+            .ClearedMarks.Should().ContainSingle("the stamp now registers as a marker");
+    }
+
+    [Fact]
+    public async Task Run_ThresholdActed_TheSignalChangedBeforeTheStamp_WritesNothing_CountsChangedSinceRead_AndTheRunSucceeds()
+    {
+        var h = new Harness().WithThresholdPolicy().WithMatterUtilization(MatterId, 62m, "MAT-ACTED");
+        var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionActed, resolvedOn: ActedOn, coreId: MatterId, lastEvaluated: ActedOn);
+        h.Org.ResolveByPersonBeforeConditionalUpdate.Add(id); // the row changes between the job's read and its stamp
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        result.ResultJson.Should().Contain("\"changedSinceRead\":1").And.Contain("\"clearedMarked\":0");
+        h.Org.ConditionalUpdates.Should().BeEmpty("the row-version check refused the stamp");
+        h.Org.Rows[id].GetAttributeValue<DateTime>("sprk_lastevaluated").Should().Be(ActedOn, "no stamp was written");
+    }
+
+    [Fact]
     public void Plan_ThresholdActed_Marker_DecidesTheReRaise_AndTheStamp()
     {
         var hit = CommHit(MatterId);

@@ -417,12 +417,12 @@ public sealed class SignalReevaluationJob : IScheduledJob
         _logger.Log(success ? LogLevel.Information : LogLevel.Warning, OntologyWriterEvents.EvaluatorHeartbeat,
             "[SIGNAL-EVALUATOR] heartbeat outcome={Outcome} lastEvaluated={LastEvaluated:o} policies={Policies} hits={Hits} " +
             "written={Written} reraised={Reraised} updated={Updated} closed={Closed} supersededClosed={SupersededClosed} policyRetiredClosed={PolicyRetiredClosed} reassigned={Reassigned} refused={Refused} " +
-            "unchanged={Unchanged} suppressed={Suppressed} quietWindow={QuietWindow} dateUnchanged={DateUnchanged} awaitingEvidence={AwaitingEvidence} noDatedEvidence={NoDatedEvidence} " +
+            "unchanged={Unchanged} suppressed={Suppressed} quietWindow={QuietWindow} dateUnchanged={DateUnchanged} awaitingEvidence={AwaitingEvidence} noDatedEvidence={NoDatedEvidence} clearedMarked={ClearedMarked} " +
             "invalidPolicies={InvalidPolicies} policyFailures={PolicyFailures} attempt={Attempt} durationMs={DurationMs} " +
             "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             success ? "succeeded" : "failed", now, counts.PoliciesEvaluated, counts.Hits, counts.Written, counts.Reraised,
             counts.Updated, counts.Closed, counts.SupersededClosed, counts.RetiredClosed, counts.Reassigned, counts.Refused, counts.Unchanged, counts.Suppressed,
-            counts.QuietWindow, counts.DateUnchanged, counts.AwaitingEvidence, counts.NoDatedEvidence, counts.InvalidPolicies, counts.PolicyFailures, context.Attempt,
+            counts.QuietWindow, counts.DateUnchanged, counts.AwaitingEvidence, counts.NoDatedEvidence, counts.ClearedMarked, counts.InvalidPolicies, counts.PolicyFailures, context.Attempt,
             (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
         return duration;
     }
@@ -716,6 +716,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             dateUnchanged = DateUnchanged,
             awaitingEvidence = AwaitingEvidence,
             noDatedEvidence = NoDatedEvidence,
+            clearedMarked = ClearedMarked,
             unparseableKeys = UnparseableKeys,
             anomalies = Anomalies,
             createsDeferred = CreatesDeferred,
@@ -917,6 +918,7 @@ internal static class SignalEpisodePlanner
                     // D-120: a Threshold hit has no dated witness. It re-raises after a RE-CROSSING: the job observed the
                     // condition false after the resolution (the marker), and it holds again now. Never cleared: silent.
                     if (latest.ClearedObserved) plan.Creates.Add(new PlannedCreate(hit, latest.Episode + 1));
+                    else if (latest.ResolvedOn is null) plan.NoDatedEvidence++;
                     else plan.AwaitingEvidence++;
                     continue;
                 }
@@ -952,7 +954,11 @@ internal static class SignalEpisodePlanner
                 if (!hitSubjects.Contains(subject) && latest.IsResolved && latest.Resolution == SignalWriter.ResolutionActed
                     && !latest.ClearedObserved)
                 {
-                    plan.ClearedMarks.Add(latest);
+                    // Stamp only when the stamp WILL register as a marker (later than resolvedon + tolerance): an unknown resolution
+                    // time can never be compared (counted with the other "no dated evidence" cases), and a pass within the tolerance
+                    // would write a stamp that is not a marker and be stamped again next pass (D-61).
+                    if (latest.ResolvedOn is not { } resolvedOn) plan.NoDatedEvidence++;
+                    else if (now > resolvedOn + ExistingSignal.ClearedMarkerTolerance) plan.ClearedMarks.Add(latest);
                 }
             }
         }

@@ -826,6 +826,10 @@ public sealed partial class SignalWriter
     /// <c>lastevaluated</c> later than <c>resolvedon</c> as "cleared observed"). Conditional on <paramref name="rowVersion"/>; a
     /// Signal changed since the read returns false and writes nothing (the next pass re-reads it). Never touches status,
     /// resolution, <c>sprk_resolvedon</c> or any other column. A failure is logged at Error, metered and rethrown.
+    /// <para><b>Marker contract (D-120).</b> <c>sprk_lastevaluated</c> MORE THAN 1 minute after <c>sprk_resolvedon</c> on a resolved
+    /// Signal means "cleared observed" (<see cref="ExistingSignal.ClearedMarkerTolerance"/>). Nothing but this stamp may write
+    /// <c>sprk_lastevaluated</c> later than <c>sprk_resolvedon</c> on a resolved row; task 043's commit route, which resolves a
+    /// Signal Acted, must stamp both columns together (within the tolerance) or leave <c>lastevaluated</c> alone.</para>
     /// </summary>
     internal async Task<bool> MarkClearedObservedAsync(Guid signalId, string? rowVersion, string policyCode, CancellationToken ct = default)
     {
