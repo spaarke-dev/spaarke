@@ -527,3 +527,10 @@ Final sweep 20:15Z: 0 `# gate17*` / `# gate18*` matters or events, 0 grant rows 
 - Attempt 1 of CI run 38199684912 failed 5 Task 167 Production-boot Arch Tests. The cause is the Redis managed-identity path, not #1666: master run 38161601966 at `848f639` failed the same 5 tests. Re-running only the failed jobs passed. Filed as #1672.
 - BFF deployed to dev from `C:\wtdep` at `67e06a626`: all 4 critical files match (SHA-256), `healthz` passes, and both CORS origins are present.
 - Behaviour now live: a recycle-bin container whose ownership this stamp cannot prove answers the uniform 404, not 503. Protected B (an ownership record that survives deletion, #1652) is next, on `fix/uac-r2-1652-recyclebin-ownership-record`.
+
+## 2026-10-12 #1657 + ADR-028 A7 rollout (form-script sign-in, #1655/#1656)
+
+- #1667 (ADR-028 Amendment A7) merged as `32f8e7712`. #1657 merged as `9695a4ca7` (head `709652dba`). The round-2 re-check PASSED with no F-class findings: Spaarke.Auth 249/249, form scripts 303/303, bundle fresh. Known limits K2 (redirects) and K3 (`http:` base URL) are added to #1671.
+- Read-only form check on dev: only the Matter main form loads `sprk_subgrid_parent_rollup.js` and `sprk_matter_kpi_refresh.js`, and it registers `bff_auth.js`. `sprk_kpi_subgrid_refresh.js` and `sprk_kpiassessment_quickcreate.js` are referenced by no form.
+- Deployed to dev with `Deploy-WebResourceInline.ps1 -WebResourceType 3` and a scoped PublishXml each, `bff_auth.js` first. All 5 live copies are byte-equal to the source: bff_auth 352,432 B; rollup 14,777; matter_kpi 14,078; kpi_subgrid 15,099; kpiassessment_quickcreate 20,535.
+- Still open for task 153: the owner re-checks the access banner as testuser1 in InPrivate. The expected result is no red banner and no AADSTS50058 in the console.
