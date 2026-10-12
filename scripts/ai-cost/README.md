@@ -19,6 +19,14 @@ python scripts/ai-cost/get-project-cost.py unified-access-control-r2
 Pushes the per-project totals from `get-project-cost.py` to the GitHub portfolio board
 (AI Spend / AI Calls / AI Spend As Of). Normally driven by the `/project-spend-update` skill.
 
+The board figures never go down. Transcripts are deleted over time, so a fresh figure that is lower
+than the one already on the board is not written: the script prints
+`KEEP <slug> (fresh < board; transcripts likely pruned)`. AI Spend and AI Calls are judged separately,
+and AI Spend As Of is only updated when something is written. When the spend archive exists
+(see "Durable archive" below), the figure per project is
+max(transcript all-time total, archive all-time total). The decision lives in the pure function
+`decide_write()` and is unit-tested.
+
 ## spend-report.py
 
 On-demand report and dashboard. One pass over the transcripts, aggregated by
