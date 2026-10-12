@@ -29,16 +29,17 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   GET  /workassignments/{id}/todos     — to-dos for a work assignment
 ///   POST /workassignments/{id}/todos     — create a new to-do regarding the work assignment
 ///   PATCH /todos/{id}                    — update a to-do (scoped to its own accessible root)
-///   GET  /{matters|workassignments|servicerequests}/{id}/documents                          — documents (task 031)
-///   GET  /{matters|workassignments|servicerequests}/{id}/documents/{documentId}/content     — download
-///   POST /{matters|workassignments|servicerequests}/{id}/documents                          — upload
-///   GET  /{matters|workassignments|servicerequests}/{id}/documents/{documentId}/versions    — version history
+///   GET  /{matters|workassignments|servicerequests|invoices}/{id}/documents                          — documents (task 031)
+///   GET  /{matters|workassignments|servicerequests|invoices}/{id}/documents/{documentId}/content     — download
+///   POST /{matters|workassignments|servicerequests|invoices}/{id}/documents                          — upload
+///   GET  /{matters|workassignments|servicerequests|invoices}/{id}/documents/{documentId}/versions    — version history
 ///   DELETE /{documents|todos|events}/{id} — delete a record the caller created, with Read on its parent (task 032)
 ///
 /// DOCUMENTS ON EVERY CORE RECORD (task 031 / FR-24): one list, download, versions and upload handler,
 /// generalized over the document parent (ExternalDataService.DocumentParentKind). Project, matter and
 /// work assignment rights come from RightsForRoot; a service request's from the submitter scope (the
-/// Service Requests module's accessible set). Invoice is not mapped: escalated, no Tier-2 answer yet.
+/// Service Requests module's accessible set); an invoice's are inherited from its matter and project
+/// (owner decision 2026-10-11, option A — the union, RightsForInvoiceAsync).
 ///
 /// READ routes verify the caller holds Read on the requested record (HoldsReadOnProject /
 /// ListTodosForRoot, both through RightsForRoot). Returns 403 if not; NEVER an empty collection, which
@@ -229,8 +230,8 @@ public static class ExternalProjectDataEndpoints
         // requests, through the SAME four handlers (generalized over the document parent). Each checks
         // Tier-2 on the route record: Read to list, download and read versions, Create to upload. A
         // service request is checked through the submitter scope (the requester is the caller). Invoice
-        // is not mapped: task 031 escalated it (no Tier-2 answer for an invoice id). The templates are
-        // literal, one registration per route, so the route-authorization ArchTest reads each one.
+        // routes follow below (owner option A, 2026-10-11). The templates are literal, one registration
+        // per route, so the route-authorization ArchTest reads each one.
         // ---------------------------------------------------------------------------------------
 
         group.MapGet("/matters/{id:guid}/documents", GetMatterDocuments)
@@ -340,6 +341,49 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
+
+        // Invoice documents (task 031, owner decision 2026-10-11, option A "inherit"): the same four handlers. An invoice
+        // is not a root, so its rights are the caller's rights on its PARENT records — the union over the invoice's
+        // sprk_matter and sprk_project (RightsForInvoiceAsync). Read lists, downloads and reads versions; Create uploads.
+        group.MapGet("/invoices/{id:guid}/documents", GetInvoiceDocuments)
+            .WithName("GetExternalInvoiceDocuments")
+            .WithSummary("Get documents for an invoice whose matter or project the caller can read")
+            .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapGet("/invoices/{id:guid}/documents/{documentId:guid}/content", DownloadInvoiceDocumentContent)
+            .WithName("DownloadExternalInvoiceDocument")
+            .WithSummary("Download an invoice document's content (authz-before-stream, app-only)")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapPost("/invoices/{id:guid}/documents", UploadInvoiceDocument)
+            .WithName("UploadExternalInvoiceDocument")
+            .WithSummary("Upload a document to an invoice (Create inherited from its matter or project; server-derived container, app-only)")
+            .Accepts<IFormFile>("multipart/form-data")
+            .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
+            .Produces<ExternalDocumentDto>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapGet("/invoices/{id:guid}/documents/{documentId:guid}/versions", GetInvoiceDocumentVersions)
+            .WithName("GetExternalInvoiceDocumentVersions")
+            .WithSummary("Get SPE version history for a document on an invoice")
+            .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // GET /api/v1/external/projects/{id}/events — calendar events for the project
         group.MapGet("/projects/{id:guid}/events", GetEvents)
@@ -764,6 +808,9 @@ public static class ExternalProjectDataEndpoints
     /// else, and a request that does not exist, gets None. Both deny identically, so an id cannot be probed. A missing
     /// module descriptor, or a module that grants the caller nothing, denies before any read. A requester read that
     /// FAILS (throttle, outage) is a 503 <see cref="ServiceRequestUnreadableReasonCode"/>, never a 403.</para>
+    /// <para><b>An invoice is not a root either</b> (owner decision 2026-10-11, option A): it INHERITS the caller's
+    /// rights on its parent records — the union over its matter and project (<see cref="RightsForInvoiceAsync"/>). An
+    /// invoice read that FAILS is a 503 <see cref="InvoiceUnreadableReasonCode"/>.</para>
     /// </remarks>
     private static async Task<(Spaarke.Dataverse.AccessRights Rights, IResult? Fault)> RightsForDocumentParentAsync(
         CallerPrincipal caller,
@@ -797,6 +844,21 @@ public static class ExternalProjectDataEndpoints
                         detail: "The service request could not be checked right now. Try again shortly.",
                         extensions: new Dictionary<string, object?> { ["reasonCode"] = ServiceRequestUnreadableReasonCode }));
                 }
+            case ExternalDataService.DocumentParentKind.Invoice:
+                try
+                {
+                    return (await RightsForInvoiceAsync(caller, parentId, dataService, ct), null);
+                }
+                catch (ExternalDataService.DataverseUnavailableException)
+                {
+                    // Same posture as the service request: an unreadable invoice is a fault (503), never "no access" and
+                    // never access. Nothing has touched SPE or been written.
+                    return (Spaarke.Dataverse.AccessRights.None, Results.Problem(
+                        statusCode: StatusCodes.Status503ServiceUnavailable,
+                        title: "Invoice unavailable",
+                        detail: "The invoice could not be checked right now. Try again shortly.",
+                        extensions: new Dictionary<string, object?> { ["reasonCode"] = InvoiceUnreadableReasonCode }));
+                }
             default:
                 return (Spaarke.Dataverse.AccessRights.None, null);
         }
@@ -804,6 +866,44 @@ public static class ExternalProjectDataEndpoints
 
     /// <summary>The 503 reason code when a service request's requester could not be read (task 031 review).</summary>
     internal const string ServiceRequestUnreadableReasonCode = "sdap.access.service_request_unreadable";
+
+    /// <summary>The 503 reason code when an invoice's parents could not be read (task 031, owner option A).</summary>
+    internal const string InvoiceUnreadableReasonCode = "sdap.access.invoice_unreadable";
+
+    /// <summary>
+    /// The caller's rights on an invoice's documents (task 031, owner decision 2026-10-11, option A "inherit"): the UNION
+    /// of the caller's rights on the invoice's parent records, its <c>sprk_matter</c> and <c>sprk_project</c>, through
+    /// the same <see cref="RightsForRoot"/> the matter and project routes use.
+    /// </summary>
+    /// <remarks>
+    /// <para>The union is the rule the invoices module already applies to make an invoice visible (its matter OR its
+    /// project in the caller's Read set) and the rule the message routes apply to an invoice post
+    /// (<c>ExternalMessageEndpoints.RightsThroughParents</c>). So Read on either parent lists, downloads and reads
+    /// versions; Create on either parent uploads; a ViewOnly parent alone gives Read without Create.</para>
+    /// <para>A caller holding Read on no matter and no project is denied before any read (the read could not change the
+    /// answer). A missing invoice and an invoice under records the caller cannot read deny identically (no oracle).</para>
+    /// </remarks>
+    private static async Task<Spaarke.Dataverse.AccessRights> RightsForInvoiceAsync(
+        CallerPrincipal caller,
+        Guid invoiceId,
+        ExternalDataService dataService,
+        CancellationToken ct)
+    {
+        if (caller.GetAccessibleMatterIds().Count == 0 && !caller.GetAccessibleProjectIds().Any())
+            return Spaarke.Dataverse.AccessRights.None;
+
+        var parents = await dataService.GetInvoiceParentsAsync(invoiceId, ct);
+        if (parents is not { } invoiceParents)
+            return Spaarke.Dataverse.AccessRights.None;
+
+        var rights = Spaarke.Dataverse.AccessRights.None;
+        if (invoiceParents.MatterId is { } matterId)
+            rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.Matter, matterId);
+        if (invoiceParents.ProjectId is { } projectId)
+            rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, projectId);
+
+        return rights;
+    }
 
     private static async Task<Spaarke.Dataverse.AccessRights> RightsForServiceRequestAsync(
         CallerPrincipal caller,
@@ -837,6 +937,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService.DocumentParentKind.Matter => "matter",
         ExternalDataService.DocumentParentKind.WorkAssignment => "work assignment",
         ExternalDataService.DocumentParentKind.ServiceRequest => "service request",
+        ExternalDataService.DocumentParentKind.Invoice => "invoice",
         _ => "project",
     };
 
@@ -866,6 +967,11 @@ public static class ExternalProjectDataEndpoints
         CancellationToken ct) =>
         ListDocumentsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, httpContext, dataService, modules, ct);
 
+    private static Task<IResult> GetInvoiceDocuments(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        CancellationToken ct) =>
+        ListDocumentsForParent(ExternalDataService.DocumentParentKind.Invoice, id, httpContext, dataService, modules, ct);
+
     private static Task<IResult> DownloadDocumentContent(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
@@ -892,6 +998,13 @@ public static class ExternalProjectDataEndpoints
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
         ILogger<Program> logger, CancellationToken ct) =>
         DownloadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, logger, ct);
+
+    private static Task<IResult> DownloadInvoiceDocumentContent(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        ILogger<Program> logger, CancellationToken ct) =>
+        DownloadDocumentForParent(ExternalDataService.DocumentParentKind.Invoice, id, documentId, httpContext,
             dataService, modules, storageResolver, fileStore, logger, ct);
 
     private static Task<IResult> UploadDocument(
@@ -922,6 +1035,13 @@ public static class ExternalProjectDataEndpoints
         UploadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, file, httpContext, dataService,
             modules, containerResolver, fileStore, ownership, logger, ct);
 
+    private static Task<IResult> UploadInvoiceDocument(
+        Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
+        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        UploadDocumentForParent(ExternalDataService.DocumentParentKind.Invoice, id, file, httpContext, dataService,
+            modules, containerResolver, fileStore, ownership, logger, ct);
+
     private static Task<IResult> GetDocumentVersions(
         Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
@@ -948,6 +1068,13 @@ public static class ExternalProjectDataEndpoints
         ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
         Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
         ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+
+    private static Task<IResult> GetInvoiceDocumentVersions(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.Invoice, id, documentId, httpContext,
             dataService, modules, storageResolver, fileStore, entityService, logger, ct);
 
     private static IResult DenyRoot(ExternalDataService.TodoRootKind rootKind)
@@ -1182,6 +1309,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService.DocumentParentKind.Matter => "matters",
         ExternalDataService.DocumentParentKind.WorkAssignment => "workassignments",
         ExternalDataService.DocumentParentKind.ServiceRequest => "servicerequests",
+        ExternalDataService.DocumentParentKind.Invoice => "invoices",
         _ => "projects",
     };
 
@@ -1491,10 +1619,12 @@ public static class ExternalProjectDataEndpoints
     /// <see cref="RightsForDocumentParentAsync"/> the list and download routes use (a project, matter or work assignment
     /// from the principal's rights; a service request through the requester scope). The parents consulted are the
     /// lookups <c>ExternalDataService</c> models for the kind: a document's <c>sprk_project</c>, <c>sprk_matter</c>,
-    /// <c>sprk_workassignment</c> and <c>sprk_relatedservicerequest</c>; a to-do's or event's <c>sprk_regardingproject</c>,
-    /// <c>sprk_regardingmatter</c> and <c>sprk_regardingworkassignment</c>. Other lookups on the row (for example
-    /// <c>sprk_invoice</c>, <c>sprk_relatedagreement</c>, <c>sprk_relatedcontact</c>, <c>sprk_parentdocument</c>,
-    /// <c>sprk_email</c>) are not consulted. A row filed to none of the modelled parents is refused. Every modelled
+    /// <c>sprk_workassignment</c>, <c>sprk_relatedservicerequest</c> and — since the owner's invoice decision of
+    /// 2026-10-11 (option A) — <c>sprk_invoice</c>, whose Read is inherited from the invoice's matter and project; a
+    /// to-do's or event's <c>sprk_regardingproject</c>, <c>sprk_regardingmatter</c> and
+    /// <c>sprk_regardingworkassignment</c>. Other lookups on the row (for example <c>sprk_relatedinvoice</c>,
+    /// <c>sprk_relatedagreement</c>, <c>sprk_relatedcontact</c>, <c>sprk_parentdocument</c>, <c>sprk_email</c>) are not
+    /// consulted. A row filed to none of the modelled parents is refused. Every modelled
     /// parent, not any: a document also filed by staff to a modelled record the caller can no longer read is not the
     /// caller's to destroy.</item>
     /// </list>

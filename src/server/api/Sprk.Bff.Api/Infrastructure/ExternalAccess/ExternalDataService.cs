@@ -319,10 +319,10 @@ public class ExternalDataService
     /// <c>sprk_document</c> parent through its own lookup (<see cref="DocumentParentBinding"/>).
     /// </summary>
     /// <remarks>
-    /// Invoice is NOT here: invoices are not in the caller's accessible set as roots, so there is no Tier-2 answer for
-    /// an invoice id. Task 031 escalated it (POML escalation trigger 2). Adding it is one row in
-    /// <see cref="DocumentParents"/> plus its rights arm in the endpoint, once the owner decides how an invoice is
-    /// authorized.
+    /// <b>Invoice</b> (owner decision 2026-10-11, task 031 option A "inherit"): an invoice is not a root in the caller's
+    /// accessible set, so its documents take the caller's rights on the invoice's PARENT records — the union over its
+    /// <c>sprk_matter</c> and <c>sprk_project</c> (<see cref="GetInvoiceParentsAsync"/>; the endpoint's rights arm), the
+    /// same "any accessible parent" rule the invoices module and the message routes apply.
     /// </remarks>
     public enum DocumentParentKind
     {
@@ -330,6 +330,7 @@ public class ExternalDataService
         Matter = 2,
         WorkAssignment = 3,
         ServiceRequest = 4,
+        Invoice = 5,
     }
 
     /// <summary>
@@ -369,6 +370,10 @@ public class ExternalDataService
             [DocumentParentKind.ServiceRequest] = new(
                 DocumentParentKind.ServiceRequest, "sprk_servicerequest", "sprk_servicerequests",
                 "sprk_RelatedServiceRequest", "sprk_relatedservicerequest"),
+            // Task 031 owner decision 2026-10-11 (option A): sprk_document.sprk_invoice (Entity.xml:3452), navigation
+            // property sprk_Invoice (Other/Relationships/sprk_Invoice.xml, sprk_invoice_sprk_document).
+            [DocumentParentKind.Invoice] = new(
+                DocumentParentKind.Invoice, "sprk_invoice", "sprk_invoices", "sprk_Invoice", "sprk_invoice"),
         };
 
     /// <summary>The binding for a document parent kind. Throws for a value outside the table: a programming error.</summary>
@@ -823,6 +828,25 @@ public class ExternalDataService
         return row is not null && GuidValue(row, "sprk_servicerequestid") is { } id
             ? id
             : throw new InvalidOperationException("Dataverse returned no service request id after create");
+    }
+
+    /// <summary>
+    /// The parent records of an invoice (<c>sprk_matter</c>, <c>sprk_project</c>), or null when the invoice does not exist
+    /// (a genuine 404). App-only Dataverse read.
+    /// </summary>
+    /// <remarks>
+    /// Task 031, owner decision 2026-10-11 (option A): an invoice's document rights are inherited from these parents, so
+    /// this is the one fact that decision needs. A read that FAILS throws <see cref="DataverseUnavailableException"/>,
+    /// never null — the same rule as <see cref="GetServiceRequestRequesterAsync"/>.
+    /// </remarks>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    public virtual async Task<(Guid? MatterId, Guid? ProjectId)?> GetInvoiceParentsAsync(
+        Guid invoiceId, CancellationToken ct = default)
+    {
+        var url = $"{GetApiUrl()}/sprk_invoices({invoiceId})?$select=_sprk_matter_value,_sprk_project_value";
+
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
+        return row is null ? null : (GuidValue(row, "_sprk_matter_value"), GuidValue(row, "_sprk_project_value"));
     }
 
     /// <summary>An app-only Dataverse read could not be completed (not a 404): the caller reports it as a 503.</summary>
@@ -1568,8 +1592,9 @@ public class ExternalDataService
     /// authorizes it through.
     /// </summary>
     /// <remarks>
-    /// <para><b>Documents</b> use the four task-031 parent lookups (<see cref="DocumentParents"/>), the same ones the
-    /// external list, download and upload routes scope by.</para>
+    /// <para><b>Documents</b> use the task-031 parent lookups (<see cref="DocumentParents"/>), the same ones the
+    /// external list, download and upload routes scope by — including <c>sprk_invoice</c> since the owner's option A
+    /// (2026-10-11), whose Read is inherited from the invoice's parents.</para>
     /// <para><b>To-dos and events</b> use the three root lookups of <see cref="RootBindings"/>
     /// (<c>sprk_regardingproject</c> / <c>sprk_regardingmatter</c> / <c>sprk_regardingworkassignment</c>; the same column
     /// names on <c>sprk_event</c>, solution source <c>Entities/sprk_Event/Entity.xml</c>), the roots

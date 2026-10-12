@@ -1561,6 +1561,22 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/v1/external/servicerequests/{id:guid}/documents/{documentId:guid}/versions", "GetServiceRequestDocumentVersions", "IsRecordAccessible", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
             "Delegates to ListDocumentVersionsForParent: the requester check (ExternalProjectDataEndpoints.cs:751) and the "
             + "document's service-request scoping (:1149) before the version read."),
+        // Task 031 (FR-24, owner decision 2026-10-11 option A): an invoice is not a root and is not securable — its rights
+        // are INHERITED, the union of the caller's RightsForRoot on the invoice's sprk_matter and sprk_project
+        // (ExternalProjectDataEndpoints.RightsForInvoiceAsync), the rule ExternalMessageEndpoints.RightsThroughParents
+        // already applies to an invoice post.
+        new HandlerDecision("GET /api/v1/external/invoices/{id:guid}/documents", "GetInvoiceDocuments", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentsForParent: Read on the route invoice (ExternalProjectDataEndpoints.cs:531), the union "
+            + "of RightsForRoot on its matter and project (RightsForInvoiceAsync, :886), before the document list."),
+        new HandlerDecision("GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/content", "DownloadInvoiceDocumentContent", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to DownloadDocumentForParent: the inherited Read on the invoice (ExternalProjectDataEndpoints.cs:575) "
+            + "AND the document's sprk_invoice scoping (:587) before the app-only stream."),
+        new HandlerDecision("POST /api/v1/external/invoices/{id:guid}/documents", "UploadInvoiceDocument", "AccessRights", Array.Empty<string>(),
+            "Delegates to UploadDocumentForParent: Create on the route invoice, inherited from its matter or project "
+            + "(rights.HasFlag(AccessRights.Create), ExternalProjectDataEndpoints.cs:1184) before any SPE write."),
+        new HandlerDecision("GET /api/v1/external/invoices/{id:guid}/documents/{documentId:guid}/versions", "GetInvoiceDocumentVersions", "RightsForRoot", new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Delegates to ListDocumentVersionsForParent: the inherited Read on the invoice (ExternalProjectDataEndpoints.cs:1350) "
+            + "and the document's invoice scoping (:1357) before the version read."),
         new HandlerDecision("GET /api/v1/external/projects/{id:guid}/events", "GetEvents", "HoldsReadOnProject", Array.Empty<string>(),
             "Read on the route project (ExternalProjectDataEndpoints.cs:799) before any Dataverse read."),
         new HandlerDecision("POST /api/v1/external/projects/{id:guid}/events", "CreateEvent", "AccessRights", Array.Empty<string>(),
