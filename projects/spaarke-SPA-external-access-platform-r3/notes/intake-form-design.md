@@ -387,6 +387,20 @@ All answers sit only in the field-secured `sprk_intakedata`. No answer text goes
 4. **Option lists.** Should the policy topics and trademark territories be fixed Spaarke defaults in R3 (recommended), or configurable per customer (which needs a configuration surface that isn't in scope)?
 5. **NDA scope.** Is "NDA Assessment" review-only (Legal assesses a draft, usually the counterparty's), or should it also cover issuing our standard NDA? Issuing would add signer name and email, term and governing law (Ironclad-style [S4]) and probably make `neededBy` required.
 
+### 6.1 Owner answers (2026-10-12)
+
+| # | Answer | Build consequence |
+|---|---|---|
+| 1 | Use the contact record's department field. | No department question in any wizard. The server copies the requester contact's `department` into the stored intake data as the system key `requesterDepartment`, never from the client. |
+| 2 | Invention Submission is optionally available to partners, default **off**; by default it is for workforce users (staff and workforce contacts) only. | New `ExternalAccess:PartnerInventionIntakeEnabled` (default false). The server refuses a CIAM invention submission while it is off; the SPA hides the tile. Trademark Search follows the existing partner switch. |
+| 3 | Incidents: keep it simple for now. A notification or alerting process (for example an email to a designated mailbox) is wanted later. | R3: no incident channel link or routing in the Policy Question wizard. The alerting process is deferred (tracked in `defer-issues.md`). |
+| 4 | Policy topics and trademark territories are fixed for R3; per-customer configuration comes later. | Fixed code lists in R3, kept as stable codes so a later per-environment configuration can replace the source without a data migration. |
+| 5 | NDA covers both review and issuing our standard NDA ("needs extended functionality"). | The NDA wizard asks review vs issue. The issue path adds signer name, signer email, term and governing law, and makes `neededBy` required. Whether "issue" also means generating the NDA document automatically is an open question (§6.2). |
+
+### 6.2 Open after the owner answers
+
+- **NDA issue path.** Does "issuing our standard NDA" mean the request collects what Legal needs to issue it (R3 scope as built), or that Spaarke generates the standard NDA document automatically from the answers? Generation needs a template, a document-generation capability and a delivery step, and is not in the R3 spec.
+
 ---
 
 ## 7. Sources (all retrieved 2026-10-11)

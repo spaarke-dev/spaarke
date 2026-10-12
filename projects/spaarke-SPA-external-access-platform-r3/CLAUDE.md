@@ -97,6 +97,16 @@ Full table: `spec.md` §Owner Clarifications. These still constrain work:
 - 2026-10-10 — the add-in is for Dataverse-licensed users only. Do not add add-in work here.
 - 2026-10-10 — R3 owns FR-22 (Ciam audience forms) and FR-23 (default-scheme CIAM guard). Provisioning owns `CiamGraphClientFactory` → MI-FIC, H3c, H4b `Ciam:*` and the H13 probes.
 
+**Owner answers 2026-10-12**
+- Multi-root visibility: option B. A row linked to several core roots needs Read on every linked **secure** root (`sprk_issecure`); an unreadable non-secure root does not hide it. Unknown secure state counts as secure. Delete paths stay every-parent (FR-26). Invoice threads stay any-parent.
+- A closed service request cannot be deleted.
+- Invoice document upload needs only the invoice's rights (the union of its parents); no every-parent requirement.
+- Bell items: staff with access through a team get grant items; a renewed grant produces an item.
+- A workforce contact created at sign-in belongs to the customer's primary business unit (owned by its default team, I-6).
+- Intake: department from the contact record; Invention for workforce by default, partners behind a flag (default off); incidents kept simple (alerting deferred); fixed option lists in R3; NDA covers review and issuing our standard NDA. Details: `notes/intake-form-design.md` §6.1.
+- Grid columns: the owner wants grids driven by the entity's Dataverse views (savedqueries) with the shared view selector, as in the workspace grids, rather than hard-coded column sets. Approach under discussion (task 002).
+- Registration service (060): a shared service is acceptable if it does not conflict with the Model 1 dedicated and segregated customer directive.
+
 **Delivery**
 - 2026-10-09 — R3 delivers the production build and package; go-live is gated on T240c/T240d and DNS.
 - 2026-10-09 — provisioning builds no new components. The registration service is R3's, or R4's with a written path (task 060).
