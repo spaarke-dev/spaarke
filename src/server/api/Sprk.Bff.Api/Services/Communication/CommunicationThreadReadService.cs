@@ -73,6 +73,41 @@ public sealed class CommunicationThreadReadService
     private const int StatusDelivered = (int)CommunicationStatus.Delivered;
     private static readonly string ExternalStatusClause =
         $"({StatusCodeAttribute} eq {StatusSend} or {StatusCodeAttribute} eq {StatusDelivered})";
+    // External-plane privilege rule (owner decision 2026-10-11, task 033 follow-up): an external caller NEVER receives a
+    // message classified Privileged OR Potentially Privileged; None and null are shown. THIS list is the one place the
+    // hidden set is named - relaxing the rule to "Privileged only" is deleting PotentiallyPrivileged from it. The OData
+    // clause the external query adds and the per-row re-check are both derived from it. Applies to the app-only external
+    // read only: the impersonated internal reads still treat privilege as display metadata (ADR-015, owner decision
+    // 2026-07-16) and are unchanged.
+
+    /// <summary>
+    /// The privilege classifications an external caller never receives. Hide-only, and a classification not in the
+    /// defined set is hidden too (<see cref="IsHiddenFromExternal"/>): fail closed.
+    /// </summary>
+    public static readonly IReadOnlyList<CommunicationPrivilegeClassification> ExternallyHiddenPrivilege =
+        new[] { CommunicationPrivilegeClassification.PotentiallyPrivileged, CommunicationPrivilegeClassification.Privileged };
+
+    /// <summary>
+    /// The <c>$filter</c> clause every EXTERNAL message query must carry, so the privilege rule is applied by Dataverse
+    /// BEFORE paging (a page cut after filtering would otherwise be short): a null classification, or one outside
+    /// <see cref="ExternallyHiddenPrivilege"/>. Derived from that list. Any other external read of
+    /// <c>sprk_communication</c> (a notification feed, a count, a "latest") must add it.
+    /// </summary>
+    public static readonly string ExternalPrivilegeFilterClause =
+        $"({PrivilegeField} eq null or ("
+        + string.Join(" and ", ExternallyHiddenPrivilege.Select(p => $"{PrivilegeField} ne {(int)p}"))
+        + "))";
+
+    /// <summary>
+    /// Whether an external caller must not receive a message with this raw <c>sprk_privilegeclassification</c> value:
+    /// it is in <see cref="ExternallyHiddenPrivilege"/>, or it is a value this code does not define (an unreadable
+    /// classification is hidden, not shown). Null and None are shown.
+    /// </summary>
+    public static bool IsHiddenFromExternal(int? classification) =>
+        classification is { } value
+        && (ExternallyHiddenPrivilege.Contains((CommunicationPrivilegeClassification)value)
+            || !Enum.IsDefined(typeof(CommunicationPrivilegeClassification), value));
+
     private const string BodyField = "sprk_body";
     private const string BodyFormatField = "sprk_bodyformat";
     private const string TypeField = "sprk_communicationtype";
@@ -395,6 +430,7 @@ public sealed class CommunicationThreadReadService
         // never read for the external plane.
         var odata =
             $"$select={select}&$filter={regardingValue} eq {recordId} and {ActiveOnlyClause} and {ExternalStatusClause}" +
+            $" and {ExternalPrivilegeFilterClause}" +
             $"&$orderby={CreatedOnField} desc,{PkField} desc&$top={MaxRegardingScan + 1}";
         var rows = await appOnlyQuery.QueryAsync(CommunicationSet, odata, ct);
 
@@ -403,7 +439,9 @@ public sealed class CommunicationThreadReadService
         // Re-check every row (defence in depth — the query is not the only gate): it must regard THIS record and carry a
         // sent/received status. A row with a missing or unreadable status is dropped (fail closed).
         var scoped = bounded
-            .Where(r => TryGuid(r, regardingValue) == recordId && IsExternallyReadableStatus(TryInt(r, StatusCodeAttribute)))
+            .Where(r => TryGuid(r, regardingValue) == recordId
+                        && IsExternallyReadableStatus(TryInt(r, StatusCodeAttribute))
+                        && !IsHiddenFromExternal(TryInt(r, PrivilegeField)))
             .ToList();
 
         var isInternal = callerSystemUserId is { } systemUserId
