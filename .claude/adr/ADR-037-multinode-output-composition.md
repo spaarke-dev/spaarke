@@ -2,7 +2,7 @@
 
 > **Status**: Accepted (amended 2026-07-05)
 > **Domain**: BFF AI / composite output streaming + FE widget rendering
-> **Last Updated**: 2026-07-05
+> **Last Updated**: 2026-10-12
 >
 > **⚠️ Amendment 2026-07-05 (Path B per CLAUDE.md §6.5 — operator-approved, `spaarke-ai-code-audit-r1` ADR review A-2)**:
 > 1. **RESCINDED**: the Migration-Path rule *"any future workspace playbook

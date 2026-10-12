@@ -46,7 +46,7 @@
     </background>
     <relevant-files>
       <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (net-new messaging attachment materialization step)</file>
-      <file>src/server/api/Sprk.Bff.Api/Services/Communication/GraphAttachmentAdapter.cs (materialization shape to reuse — email precedent)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/GraphAttachmentAdapter.cs — REMOVED 2026-10-12 (PR #1764; it never had a caller). The shipped messaging path is Services/Communication/MessageAttachmentMaterializer.cs; read that instead</file>
       <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs (ADR-007 SPE facade — the sole SPE access path)</file>
       <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
       <file>docs/standards/CHAT-ATTACHMENT-POLICY.md (binding — caps + MIME allow-list to enforce)</file>

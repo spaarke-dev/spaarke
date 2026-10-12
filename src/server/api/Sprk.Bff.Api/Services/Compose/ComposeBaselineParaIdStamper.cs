@@ -28,7 +28,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// text). This stamper walks the baseline's paragraphs in the SAME document order and, for each id-LESS
 /// paragraph, stamps the client's paraId IFF the baseline paragraph's text matches the snapshot text for
 /// that position (folded + whitespace-normalized — <see cref="ComposeTextFold.Normalize"/>). After this
-/// the baseline physically carries every id the editor uses, so the synthesizer + E2 anchoring resolve
+/// the baseline physically carries every id the editor uses, so `ComposeShadowPatchEngine.Resolve` + E2 anchoring resolve
 /// cleanly and the SAVED document is self-consistent for future round-trips.
 /// </para>
 /// <para>

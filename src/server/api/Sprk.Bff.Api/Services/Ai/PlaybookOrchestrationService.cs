@@ -1322,9 +1322,9 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 // existing consumers see unchanged behavior.
                 //
                 // Backward-compat invariant: emits ONLY for actionType == DeliverComposite.
-                // Existing NodeType.Output → DeliverOutput path emits ZERO section events; its
-                // `FieldDelta` stream (via PlaybookExecutionEngine.ExecuteChatSummarizeAsync)
-                // continues UNCHANGED until migrated by FR-58 (task 118R).
+                // Existing NodeType.Output → DeliverOutput path emits ZERO section events. (The legacy
+                // `FieldDelta` stream it once fed was deleted: the engine path on 2026-07-07, the
+                // parser on 2026-10-12.)
                 if (actionType == ExecutorType.DeliverComposite)
                 {
                     await EmitDeliverCompositeSectionEventsAsync(
