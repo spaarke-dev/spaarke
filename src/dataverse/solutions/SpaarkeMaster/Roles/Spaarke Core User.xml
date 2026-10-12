@@ -749,5 +749,6 @@
     <RolePrivilege name="prvWriteUserSettings" level="Local" />
     <RolePrivilege name="prvWriteWorkflow" level="Basic" />
     <RolePrivilege name="prvWriteWorkflowSession" level="Basic" />
+    <RolePrivilege name="prvReadappnotification" level="Basic" />
   </RolePrivileges>
 </Role>

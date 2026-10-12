@@ -45,6 +45,14 @@ public interface IThreadResolver
     Task<Guid?> ResolveAndAssignThreadAsync(ThreadResolutionRequest request, CancellationToken ct = default);
 
     /// <summary>
+    /// <see cref="ResolveAndAssignThreadAsync"/>, also returning WHO the message's read grant is for, as the thread was
+    /// when the message joined it (#1629): the audience <see cref="Access.IDirectThreadAccessService.GrantMessageAccessAsync"/>
+    /// grants. A thread's type and regarding lookups are columns its owner can rewrite between the join and the grant, so
+    /// the grant never re-reads them. <c>null</c> when no thread was resolved (never throws, NFR-02).
+    /// </summary>
+    Task<ThreadAssignment?> ResolveAndAssignAsync(ThreadResolutionRequest request, CancellationToken ct = default);
+
+    /// <summary>
     /// FR-07 marker-gated naming re-derive (task 071). Recomputes and updates <c>sprk_name</c> from the
     /// thread's CURRENT regarding ONLY while the task-002 <c>sprk_nameisautoderived</c> marker is Auto
     /// (<c>true</c>, or missing/null on a pre-002-schema thread — treated the same as Auto); a marker of
@@ -123,6 +131,46 @@ public interface IThreadResolver
 /// denormalized <c>sprk_regardingrecord*</c> pointer the resolver already stamps at thread create.
 /// </summary>
 public sealed record RecordThreadAnchor(string EntityType, string RecordId, string? RecordName);
+
+/// <summary>Whose read grant a message gets from the thread it joined (#1629).</summary>
+public enum ThreadGrantAudience
+{
+    /// <summary>Nobody: the per-user master catch-all (Tier 3), or a record thread no typed regarding lookup anchors.</summary>
+    None,
+
+    /// <summary>A Direct 1:1 thread's two-party list (its owner and the user it is shared to).</summary>
+    DirectParticipants,
+
+    /// <summary>
+    /// The anchor record's members: the users its user lookups name, plus the members of every team a lookup names,
+    /// EXCEPT the team that owns the MESSAGE (its members already read it). The anchor's own owner team is expanded when it
+    /// is not the message's owner. A secure message is never granted.
+    /// </summary>
+    AnchorRecordMembers,
+}
+
+/// <summary>
+/// A message's assignment to a thread, and the read-grant audience fixed AT THE JOIN (#1629): the topology and anchor the
+/// join matched or read, carried into <see cref="Access.IDirectThreadAccessService.GrantMessageAccessAsync"/> so a thread
+/// owner who flips its type or swaps its lookup after the join cannot redirect the grant. A per-record default (Tier 2)
+/// carries the message's OWN regarding, never a re-read of the thread.
+/// </summary>
+public sealed record ThreadAssignment(
+    Guid ThreadId,
+    ThreadGrantAudience Audience,
+    string? AnchorEntityType = null,
+    Guid? AnchorRecordId = null)
+{
+    /// <summary>No grant from this thread.</summary>
+    public static ThreadAssignment NoGrant(Guid threadId) => new(threadId, ThreadGrantAudience.None);
+
+    /// <summary>A Direct 1:1 thread's two-party grant.</summary>
+    public static ThreadAssignment Direct(Guid threadId) => new(threadId, ThreadGrantAudience.DirectParticipants);
+
+    /// <summary>A record thread's grant, to the members of the record it was anchored to at the join.</summary>
+    public static ThreadAssignment Anchored(Guid threadId, string anchorEntityType, Guid anchorRecordId) =>
+        new(threadId, ThreadGrantAudience.AnchorRecordMembers, anchorEntityType, anchorRecordId);
+}
 
 /// <summary>
 /// Channel-neutral input to <see cref="IThreadResolver.ResolveAndAssignThreadAsync"/>. The resolver

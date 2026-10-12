@@ -201,14 +201,19 @@ public sealed class SecureShareNoAccessGuard
         // Round 61 item 1: the supplied filing names the DIRECT secure parents (as a write will leave it); every secure
         // record above each of them is asked as well, through the same bounded, cycle-safe climb.
         var ancestors = new List<Sprk.Bff.Api.Services.Access.SecureFilingParent>(parents.SecureParents);
-        var unverifiable = parents.Unverifiable;
+        // #1616: an unrepeated pair is kept apart from a real gap (SecureParentsAnswer.UnknownOnlyThroughAnUnrepeatedPair).
+        var unknown = parents.UnknownOnlyThroughAnUnrepeatedPair ? null : parents.Unverifiable;
+        var unrepeated = parents.UnknownOnlyThroughAnUnrepeatedPair ? parents.Unverifiable : null;
         foreach (var parent in parents.SecureParents)
         {
             var above = await Sprk.Bff.Api.Services.Access.SecureRootInheritance
                 .ReadSecureParentsAsync(_dataverse, _logger, parent.Table, parent.Id, ct,
                     maxDepth: Sprk.Bff.Api.Services.Access.SecureRootInheritance.MaxFilingDepth)
                 .ConfigureAwait(false);
-            unverifiable ??= above.Unverifiable;
+            if (above.UnknownOnlyThroughAnUnrepeatedPair)
+                unrepeated ??= above.Unverifiable;
+            else
+                unknown ??= above.Unverifiable;
             foreach (var ancestor in above.SecureParents)
             {
                 if (!ancestors.Any(a => string.Equals(a.Table, ancestor.Table, StringComparison.OrdinalIgnoreCase) && a.Id == ancestor.Id))
@@ -217,7 +222,10 @@ public sealed class SecureShareNoAccessGuard
         }
 
         return await CheckOwnAndAncestorsAsync(entityLogicalName, recordId, systemUserId, scope,
-            new Sprk.Bff.Api.Services.Access.SecureParentsAnswer(ancestors, unverifiable), ct, prospectiveOrganizations)
+            new Sprk.Bff.Api.Services.Access.SecureParentsAnswer(ancestors, unknown ?? unrepeated)
+            {
+                UnknownOnlyThroughAnUnrepeatedPair = unknown is null && unrepeated is not null,
+            }, ct, prospectiveOrganizations)
             .ConfigureAwait(false);
     }
 
@@ -247,7 +255,9 @@ public sealed class SecureShareNoAccessGuard
         };
 
         var decisions = new List<SecureShareWallDecision> { own };
-        if (!parents.IsKnown)
+        // #1616: an unrepeated pair beside a readably secure typed parent names nothing the record is filed under — its
+        // walls are the typed parents' (SecureParentsAnswer.WallsDecidable); any other gap refuses.
+        if (!parents.WallsDecidable)
             decisions.Add(SecureShareWallDecision.Unreadable(parents.Unverifiable!) with { FilingUnreadable = true });
 
         foreach (var parent in parents.SecureParents)
