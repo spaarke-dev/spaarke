@@ -3,6 +3,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Signals;
 
 namespace Sprk.Bff.Api.Services.Communication;
 
@@ -223,22 +224,28 @@ public sealed class RuleGatedAssessedConsumer : ICommunicationAssessedProducer
 {
     private const string CommunicationEntity = "sprk_communication";
     private const string RegardingMatterColumn = "sprk_regardingmatter";
+    private const string TriageCategoryColumn = "sprk_triagecategory";
 
     private readonly IGenericEntityService _entityService;
     private readonly CommunicationRuleGate _gate;
     private readonly CommunicationRiActionService _riAction;
     private readonly ILogger<RuleGatedAssessedConsumer> _logger;
+    private readonly SignalEvaluationTrigger? _signalTrigger;
 
+    /// <param name="signalTrigger">Ontology task 032 (D-12): queues the matter's Signal re-evaluation once a communication has
+    /// been classified. Registered in production; null only where a test builds the consumer without it.</param>
     public RuleGatedAssessedConsumer(
         IGenericEntityService entityService,
         CommunicationRuleGate gate,
         CommunicationRiActionService riAction,
-        ILogger<RuleGatedAssessedConsumer> logger)
+        ILogger<RuleGatedAssessedConsumer> logger,
+        SignalEvaluationTrigger? signalTrigger = null)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _riAction = riAction ?? throw new ArgumentNullException(nameof(riAction));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _signalTrigger = signalTrigger;
     }
 
     public async Task PublishAsync(CommunicationAssessedSignal signal, CancellationToken ct = default)
@@ -248,22 +255,35 @@ public sealed class RuleGatedAssessedConsumer : ICommunicationAssessedProducer
         // Resolve the matter (regarding) for rule matching. Tenant is null today (single-tenant per environment);
         // a blank-tenant rule matches all tenants. A read failure resolves matter to null (matches all-matter rules).
         Guid? matterId = null;
+        var classified = false;
         try
         {
             var comm = await _entityService
-                .RetrieveAsync(CommunicationEntity, signal.CommunicationId, new[] { RegardingMatterColumn }, ct)
+                .RetrieveAsync(CommunicationEntity, signal.CommunicationId, new[] { RegardingMatterColumn, TriageCategoryColumn }, ct)
                 .ConfigureAwait(false);
             var matter = comm?.GetAttributeValue<EntityReference>(RegardingMatterColumn);
             if (matter is not null && matter.Id != Guid.Empty)
             {
                 matterId = matter.Id;
             }
+
+            classified = comm?.GetAttributeValue<EntityReference>(TriageCategoryColumn) is { Id: var category } && category != Guid.Empty;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
                 "[comms-policy] could not resolve regarding matter for {CommunicationId}; matching against all-matter rules.",
                 signal.CommunicationId);
+        }
+
+        // Ontology task 032 (D-12): the classification is persisted before this assessed event (enrichment step order), so a
+        // classified communication on a matter may now raise that matter's Work Item. QUEUED, never evaluated here, so enrichment
+        // latency is not coupled to evaluation; independent of the RI gate below (that decides notifications, this decides
+        // Signals). A communication filed later reaches the evaluator through the association-confirmed trigger (D-48).
+        if (_signalTrigger is not null && classified && matterId is { } classifiedMatter)
+        {
+            await _signalTrigger.EnqueueAsync(
+                SignalTriggerKind.Classification, "sprk_matter", classifiedMatter, signal.CommunicationId, ct: ct).ConfigureAwait(false);
         }
 
         var request = new CommunicationRuleDecisionRequest(
