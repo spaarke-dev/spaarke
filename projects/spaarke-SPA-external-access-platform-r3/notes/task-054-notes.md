@@ -140,3 +140,65 @@ An adversarial review found five defects. All five are fixed here, still uncommi
 - **A silent `/me` failure:** `useCallerContext` swallows the error by design: no Delete anywhere and, for a project, no Upload, with no message. The server still authorises every action.
 - **Project-page Documents tab difference:** the project page tab still hides Download for ViewOnly (Collaborate+ default) and offers no Delete (it passes no `caller`), while the detail view shows Download to every reader. Left as it was (finding 3).
 - **Live and dark-mode check still owed:** nothing here was seen in a browser (jsdom has no layout): the Delete icon placement, dark mode, and the nested confirm-over-modal focus behaviour (fix 1, point 7) need one live pass by the owner, in a browser and in the Teams tab.
+
+## Owner decisions 2026-10-11: SR delete + recall, invoice documents
+
+Date: 2026-10-12. SPA half of the owner decisions (the BFF half is in `owner-decisions-2026-10-11-bff.md` and `task-031-notes.md`). Left UNCOMMITTED for the main session to commit by path. This supersedes scope adjustments 1 and 2 at the top of this file (service-request delete not built; invoice documents not added): both are now built.
+
+### What was built (all under `src/client/external-spa/`)
+
+1. **Delete a service request (the requester only).** `DELETE /api/v1/external/servicerequests/{id}` through the existing delete-own flow (`useDeleteOwn`, `DeleteOwnConfirm`, shared `ConfirmModal`).
+   - **Who sees it.** `ServiceRequestActions` renders only when the record's `sprk_requestedby` is the caller's contact (`isRequestedByCaller`: reads the id out of the entity reference the module fetch returns, never a name; a missing id, a missing identity or a systemuser with no linked contact shows nothing). The `/me` identity is the one the detail view already reads (`useCallerContext`). The server's requester gate stays authoritative: a 403 shows the existing denial wording.
+   - **204.** The detail view shows "This service request was deleted" in place of the request's sections (fields, actions, documents, messages); no further read for it is made. The grid is re-read when the dialog closes (see Review fixes 2026-10-12).
+   - **409 `has_related_records`.** `deleteFailureOf` has a new case: "This service request already has activity (documents, messages or other records), so it can't be deleted. You can ask legal to recall it. Nothing was deleted." (the client's own wording, as for the other messages; the server's `detail` is not echoed). `DeleteFailure` now carries `reasonCode`. The request stays, and a warning bar offers **Send recall request**.
+   - **Recall.** A short box (shared `FormModal`, size `sm`) with a prefilled, editable text ("Please recall this request."), the same 1 to 10,000 character rule and counter as the thread's compose box. Send posts through the EXISTING client, `sendMessage('servicerequests', id, text)` (`POST /api/v1/external/servicerequests/{id}/messages`, body `{ sprk_body }`); no new client or route. `sendErrorOf` (the thread's own error wording) is now exported from `RecordMessages.tsx` and reused. A lock closes the double-click gap (the server has no idempotency guard). On 201: the box closes, a success bar says "Legal has been asked to recall this request. You can follow the reply in Messages.", the 409 bar goes, and Delete is withdrawn (the request now has a message, so the server would answer 409 again). The visible thread re-reads through a new optional `RecordMessages` prop `refreshSignal` (never appends the 201 body, review 034 K3). A failure keeps the box open with the edited text and shows the reason inside it (401 shows the shared sign-in state). While the post is in flight the detail dialog's Close, x and browse buttons are held (same hold as a message send).
+   - **503.** The generic error bar says nothing was deleted and to try again in a moment; Delete stays available and a retry works.
+2. **Invoice documents on the detail view.** `DocumentRoot` gains `'invoices'`; `RECORD_DETAIL_ENTITIES.sprk_invoice.documentsRoot = 'invoices'`; `DocumentLibrary` names the noun "invoice". An invoice's detail now shows the Documents section over `/api/v1/external/invoices/{id}/documents` (list, download, versions, upload), with Upload gated by the list's `canCreate` exactly as for matters and work assignments (a missing `canCreate` fails closed; `uploadOverride` only overrides a project). Delete on an invoice document is the document's own delete route (created-by-me rule, unchanged).
+
+### Files
+
+Changed:
+- `src/client/external-spa/src/api/delete-own.ts` (409 `has_related_records` wording and `REASON_HAS_RELATED_RECORDS`; `reasonCode` on the failure; `requestedByIdOf`, `isRequestedByCaller`)
+- `src/client/external-spa/src/api/web-api-client.ts` (`deleteOwnServiceRequest`; `DocumentRoot` + `'invoices'`; comments)
+- `src/client/external-spa/src/components/DocumentLibrary.tsx` (invoice noun)
+- `src/client/external-spa/src/components/detail/RecordDetailFields.tsx` (invoice `documentsRoot`)
+- `src/client/external-spa/src/components/detail/RecordDetailModal.tsx` (mounts `ServiceRequestActions`; deleted state; recall refresh and busy hold)
+- `src/client/external-spa/src/components/detail/RecordMessages.tsx` (`refreshSignal`; exports `sendErrorOf` and `SendError`)
+- `src/client/external-spa/tests/DetailDocumentsDelete.test.tsx` (harness: `invoice` grid, `record` overlay, message POST handler; 24 new tests)
+- `src/client/external-spa/tests/RecordDetailModal.test.tsx` (the invoice no-documents case becomes the invoice-documents case; the network mock serves the invoices documents route)
+
+New:
+- `src/client/external-spa/src/components/detail/ServiceRequestActions.tsx`
+
+### Test evidence (in `src/client/external-spa`)
+
+- `npm run typecheck`: exit 0. `npm run lint`: exit 0, 0 problems. `npm run build`: exit 0. `npm run check:dist`: exit 0 ("1 file(s) clean").
+- `npx vitest run` (full): **26 files, 674 tests passed, 0 failed**, run twice (95.16 s and 79.97 s), no flake. Before this change the suite was 650; `DetailDocumentsDelete.test.tsx` goes from 58 to 82 tests (24 new; the old "the request itself has no Delete" case is renamed "caller is not the requester"); `RecordDetailModal.test.tsx` keeps its count (the invoice case of one `it.each` is split into its own test).
+- **Fail-before.** With `ServiceRequestActions` not mounted and the invoice `documentsRoot` removed (my versions restored from copies afterwards; no `git stash`), a representative subset of the new tests fails 8 of 8: requester sees Delete, 204, 409 notice, recall success, invoice list and the three `canCreate` cases (the SR ones after the 60 s `findBy` timeout, the invoice ones at once).
+- Coverage map (in `DetailDocumentsDelete.test.tsx`): requester sees Delete / non-requester does not (3 cases) / other record types never / the rule reads ids, not names; asks first and Cancel sends nothing; 204 (one DELETE, deleted state, no thread); 403 (existing denial message); 503 (retry wording, Delete stays, retry succeeds); 409 (activity message, request stays, recall offered, nothing posted); recall posts the EDITED text exactly once to the messages route (a double click is one post); recall success (confirmation, box closes, thread re-read, Delete withdrawn); recall failure (error, box kept, text kept, retry works); blank or over-long cannot send, Cancel posts nothing; recall 403 wording; invoice list, download, `canCreate` true/false/missing, empty-state gating, multipart upload to the invoices route, delete of an own invoice document.
+- The geometry stubs (`offsetParent`, body rect) from the task 054 review fix are reused. The nested recall box is queried through `recallDialog()`, which waits out tabster's 250 ms pass and asserts the box is not `aria-hidden`.
+
+### Known limits
+
+- **The grid behind the dialog is not refreshed after a 204.** The request's row stays in the grid until the grid reloads; SUPERSEDED by Review fixes (2026-10-12): as first written, paging away and back re-read the gone record and showed "You don't have access", not "was deleted" - the claim that paging back shows "was deleted" was false before that fix. `ExternalDataGrid` has no refresh handle and its wrapper text is pinned by `ExternalSpaGridViewSelectorGuardTests`, so it was not touched.
+- **Recall is a request, not a deletion.** After a recall the request cannot be deleted from the SPA (the server would answer 409). Withdrawing the Delete action reflects that.
+- The Delete decision uses the `sprk_requestedby` id the module fetch returns. The shape was read from `FetchResponseDto` / `FetchService` (an entity reference), not observed live; if a deployment serialises the lookup differently the action stays hidden (fail closed).
+- Dev mock mode has no handler for the new DELETE (the detail view is unreachable in mock mode, task 051 deviation 5).
+
+### Live browser checks owed (jsdom has no layout)
+
+1. **Delete with no related records.** As the requester of a fresh service request with no documents, messages or other records: open the detail, "Delete request", confirm. Expect "was deleted", and after closing and reloading the grid the row is gone. As a different user the same request shows no Delete button.
+2. **409 then recall.** On a request with a document or a message: Delete, confirm. Expect the activity message and "Send recall request". Open the box (prefilled), edit, Send. Expect the "Your recall request was posted to this request's messages for the legal team." bar, the new message in the thread, and no Delete button. Check keyboard focus in the nested box (Tab stays inside), and that a forced failure (offline) keeps the box and the text.
+3. **Dark mode and the Teams theme** for the new delete button, the warning and success bars and the recall box; and the invoice Documents section.
+4. **Invoice documents:** upload on an invoice under a matter the caller can Create on; download; and an invoice under a ViewOnly matter or project shows no Upload.
+
+## Review fixes (2026-10-12)
+
+All under `src/client/external-spa/`, uncommitted.
+
+- **F3 - deleted record re-read as "You don't have access".** `useRecord` caches only the last key, so after a 204, paging to another record and back re-ran the read; the gone record gave `DeniedError` and the lock showed (the earlier note that paging back shows "was deleted" was wrong, it only held while the same record stayed on screen). `RecordDetailModal` now computes `isDeleted = !!id && deletedIds.has(id)`, passes `open && !isDeleted ? id : undefined` to `useRecord` (no read), renders the "was deleted" block first and guards the loading, denied, notfound, error and ready blocks with `!isDeleted`. Test: delete SR 2 of 3, page to 3, page back to 2: "was deleted", no further read for SR 2, no `alert`, no denied or notfound block. Fails before the fix.
+- **F4 - grid kept the deleted row.** New optional prop `onRecordDeleted` on `RecordDetailModal`, called on the service request's 204 (the only record-level delete the modal has; document, task and event deletes are rows inside the lists and refresh themselves). `GridWidgetBody` records it and, on close, bumps `gridKey` (`<ExternalDataGrid key={gridKey} .../>`) so the grid remounts and re-reads. `ExternalDataGrid.tsx` is untouched; `ExternalSpaGridViewSelectorGuard` ArchTest filter: 220 passed. Tests: remount after delete-and-close with the deleted row gone; no remount on a plain close; `onRecordDeleted` fires once on 204, not on a 503. Fails before the fix.
+- **K3 - 403 wording.** For noun `service request`: "Only the person who submitted this request can delete it. Nothing was deleted." (the trailing sentence kept so the message still says nothing changed). Other nouns unchanged. Tests: the 403 service-request flow and a `deleteFailureOf` unit test for the four nouns.
+- **K4 - accessible name and recall wording.** The `aria-label` "Delete service request" is removed; the button's name is its visible text "Delete request". The confirmation title stays "Delete service request". The recall confirmation now reads "Your recall request was posted to this request's messages for the legal team." (the post is a thread message; no email is sent). Tests updated to the new button name and text.
+
+Known limit (unchanged by these fixes): the grid re-read is a remount, so scroll position and any in-grid sort or filter reset after a delete.

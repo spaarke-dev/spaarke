@@ -95,6 +95,10 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
     // handler identity changes, and nothing renders from the rows until a row is opened.
     const rowsRef = React.useRef<ReadonlyArray<Record<string, unknown>>>([]);
     const [detail, setDetail] = React.useState<DetailTarget | null>(null);
+    // Remounts the grid so it re-reads after the user deleted a record in the detail modal (that modal unmounts on close
+    // and forgets what it deleted, so the stale row would otherwise stay in the grid and reopen as "no access").
+    const [gridKey, setGridKey] = React.useState(0);
+    const deletedRef = React.useRef(false);
 
     const handleRecordsLoaded = React.useCallback((records: ReadonlyArray<Record<string, unknown>>) => {
       rowsRef.current = records;
@@ -113,11 +117,22 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
     }, []);
 
     const handleIndexChange = React.useCallback((index: number) => setDetail(d => (d ? { ...d, index } : d)), []);
-    const handleClose = React.useCallback(() => setDetail(null), []);
+    const handleRecordDeleted = React.useCallback(() => {
+      deletedRef.current = true;
+    }, []);
+    const handleClose = React.useCallback(() => {
+      setDetail(null);
+      if (deletedRef.current) {
+        deletedRef.current = false;
+        rowsRef.current = [];
+        setGridKey(k => k + 1);
+      }
+    }, []);
 
     return (
       <div className={s.root}>
         <ExternalDataGrid
+          key={gridKey}
           configId={configId}
           dataverseClient={gridDataverseClient}
           theme={theme}
@@ -132,6 +147,7 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
             recordIds={detail.ids}
             index={detail.index}
             onIndexChange={handleIndexChange}
+            onRecordDeleted={handleRecordDeleted}
           />
         )}
       </div>

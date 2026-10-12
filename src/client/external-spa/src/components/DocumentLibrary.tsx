@@ -1,6 +1,6 @@
 /**
  * DocumentLibrary component — Document management for the Project page Documents tab AND the record detail view
- * (task 054: project, matter, work assignment, service request - the task 031 routes).
+ * (task 054: project, matter, work assignment, service request, invoice - the task 031 routes).
  *
  * ROOT (task 054). `root` + `recordId` pick the task 031 routes (`/api/v1/external/{projects|matters|workassignments|
  * servicerequests}/{id}/documents[/...]`); a service request's documents are reachable ONLY through its own route. The
@@ -266,6 +266,7 @@ const RECORD_NOUN: Readonly<Record<DocumentRoot, string>> = {
   matters: 'matter',
   workassignments: 'work assignment',
   servicerequests: 'service request',
+  invoices: 'invoice',
 };
 
 /**

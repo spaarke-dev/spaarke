@@ -224,7 +224,7 @@ interface Mocks {
   deny: Set<string>;
   /**
    * Rows the task 031 document routes return, keyed by `${root}:${recordId}` (root = projects | matters | workassignments |
-   * servicerequests), in the DTO shape (`sprk_name`).
+   * servicerequests | invoices), in the DTO shape (`sprk_name`).
    */
   documents: Record<string, Array<Record<string, unknown>>>;
   /** Rows the invoices rollup (still the module fetch) returns, keyed by `${parentAttribute}:${parentId}`. */
@@ -255,7 +255,9 @@ function detailReadOf(body: { entityName: string; fetchXml: string }): { c: Case
  */
 function sideReads(path: string): unknown {
   if (path === '/api/v1/external/me') return { contactId: guid(7), email: 'me@example.test', projects: [] };
-  if (/^\/api\/v1\/external\/(projects|matters|workassignments|servicerequests)\/[^/]+\/documents$/.test(path)) {
+  if (
+    /^\/api\/v1\/external\/(projects|matters|workassignments|servicerequests|invoices)\/[^/]+\/documents$/.test(path)
+  ) {
     return { value: [] };
   }
   return undefined;
@@ -263,9 +265,10 @@ function sideReads(path: string): unknown {
 
 function installNetwork(): void {
   bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
-    const docs = /^\/api\/v1\/external\/(projects|matters|workassignments|servicerequests)\/([^/]+)\/documents$/.exec(
-      path
-    );
+    const docs =
+      /^\/api\/v1\/external\/(projects|matters|workassignments|servicerequests|invoices)\/([^/]+)\/documents$/.exec(
+        path
+      );
     if (docs) return { value: mocks.documents[`${docs[1]}:${docs[2]}`] ?? [] };
     if (path === '/api/v1/external/me') return sideReads(path);
     // POST /fetch  (every entity's detail by id, and the invoices rollup by parent lookup)
@@ -708,22 +711,43 @@ describe('sections', () => {
     expect(invoiceFetches).toHaveLength(0);
   });
 
-  it.each(['sprk_document', 'sprk_invoice'])(
-    '%s: no events section, and no documents or invoices section or read',
-    async entity => {
-      const c = caseOf(entity);
-      renderWidget(c.Body);
-      fireEvent.click(gridRow(c, 1));
-      const dialog = await screen.findByRole('dialog');
-      await within(dialog).findByTestId('record-detail-fields');
+  it('sprk_document: no events section, and no documents or invoices section or read', async () => {
+    const c = caseOf('sprk_document');
+    renderWidget(c.Body);
+    fireEvent.click(gridRow(c, 1));
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByTestId('record-detail-fields');
 
-      expect(within(dialog).queryByTestId('record-detail-events')).toBeNull();
-      expect(within(dialog).queryByTestId('record-detail-documents')).toBeNull();
-      expect(within(dialog).queryByTestId('record-detail-invoices')).toBeNull();
-      const calls = bffApiCall.mock.calls.map(call => String(call[0]));
-      expect(calls.some(p => p.endsWith('/events') || p.endsWith('/todos') || p.endsWith('/documents'))).toBe(false);
-    }
-  );
+    expect(within(dialog).queryByTestId('record-detail-events')).toBeNull();
+    expect(within(dialog).queryByTestId('record-detail-documents')).toBeNull();
+    expect(within(dialog).queryByTestId('record-detail-invoices')).toBeNull();
+    const calls = bffApiCall.mock.calls.map(call => String(call[0]));
+    expect(calls.some(p => p.endsWith('/events') || p.endsWith('/todos') || p.endsWith('/documents'))).toBe(false);
+  });
+
+  it('sprk_invoice: documents from the invoices route (owner decision 2026-10-11); no events section, no invoices rollup', async () => {
+    const c = caseOf('sprk_invoice');
+    const invoiceId = ID.invoice[0];
+    mocks.documents[`invoices:${invoiceId}`] = [
+      { sprk_documentid: guid(941), sprk_name: 'Invoice PDF', createdon: '2026-02-03T10:00:00Z' },
+    ];
+    renderWidget(c.Body);
+    fireEvent.click(gridRow(c, 1));
+    const dialog = await screen.findByRole('dialog');
+    await within(await within(dialog).findByTestId('record-detail-documents')).findByText('Invoice PDF');
+
+    expect(within(dialog).queryByTestId('record-detail-events')).toBeNull();
+    expect(within(dialog).queryByTestId('record-detail-invoices')).toBeNull();
+    const calls = bffApiCall.mock.calls.map(call => String(call[0]));
+    expect(calls).toContain(`/api/v1/external/invoices/${invoiceId}/documents`);
+    // Never the module fetch for an invoice's documents.
+    const moduleDocumentReads = bffApiCall.mock.calls
+      .filter(call => String(call[0]).endsWith('/api/dataverse/fetch'))
+      .map(call => JSON.parse(String((call[1] as RequestInit).body)) as { entityName: string })
+      .filter(b => b.entityName === 'sprk_document');
+    expect(moduleDocumentReads).toHaveLength(0);
+    expect(calls.some(p => p.endsWith('/events') || p.endsWith('/todos'))).toBe(false);
+  });
 
   it('sprk_servicerequest: documents from the servicerequests route only; no events section, no invoices rollup', async () => {
     const c = caseOf('sprk_servicerequest');

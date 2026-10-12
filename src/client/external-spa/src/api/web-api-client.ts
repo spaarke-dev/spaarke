@@ -442,10 +442,11 @@ export async function getDocuments(
 /**
  * The record types whose documents the external plane serves (task 031): the `{root}` segment of
  * `/api/v1/external/{root}/{id}/documents`. A service request's documents are reachable ONLY through the
- * `servicerequests` route (the documents module's scope dimensions lack its lookup), never the module fetch. Invoice
- * documents are not here: they wait on an owner decision (task 031 notes).
+ * `servicerequests` route (the documents module's scope dimensions lack its lookup), never the module fetch. An invoice's
+ * documents use the `invoices` route (owner decision 2026-10-11, option A: rights inherited from the invoice's matter and
+ * project, the union of both; task 031 notes).
  */
-export type DocumentRoot = 'projects' | 'matters' | 'workassignments' | 'servicerequests';
+export type DocumentRoot = 'projects' | 'matters' | 'workassignments' | 'servicerequests' | 'invoices';
 
 /** `/api/v1/external/{root}/{id}/documents`: list (GET) and upload (POST). */
 export function documentsPath(root: DocumentRoot, recordId: string): string {
@@ -468,7 +469,7 @@ export interface DocumentListResult extends ListResult<ODataDocument> {
 }
 
 /**
- * The documents of a project, matter, work assignment or service request (task 031 routes), and the BFF's `canCreate`:
+ * The documents of a project, matter, work assignment, service request or invoice (task 031 routes), and the BFF's `canCreate`:
  * whether the caller holds Create on the record (so a ViewOnly reader is not offered an upload that can only fail).
  */
 export async function getRecordDocuments(root: DocumentRoot, recordId: string): Promise<DocumentListResult> {
@@ -750,9 +751,9 @@ export async function updateTodo(todoId: string, payload: UpdateTodoPayload): Pr
 // Delete-own (task 054, FR-26; server: task 032)
 // ---------------------------------------------------------------------------
 //
-// SERVICE REQUESTS: no delete exists server-side yet (escalated to the owner in task 032), so there is deliberately no
-// `deleteOwnServiceRequest` here and no Delete action on a service request. When the owner decides, add the call below
-// and its action in RecordDetailModal.
+// SERVICE REQUESTS (owner decision 2026-10-11): the requester may delete their own request while it has no related record.
+// A request with activity answers 409 `has_related_records`, and the user can then ask legal to recall it through the
+// existing message post (`sendMessage`, messages-client.ts) - there is no recall endpoint.
 //
 // Each call resolves on 204. The server decides (stamp + Read on the parent) and answers a uniform 403, 409 (checked out /
 // storage unverified), 503 (nothing deleted, retry) or 500, all as ProblemDetails with a `reasonCode`; see
@@ -766,6 +767,16 @@ export async function deleteOwnDocument(documentId: string): Promise<void> {
 /** Hard-deletes a to-do the caller created. */
 export async function deleteOwnTodo(todoId: string): Promise<void> {
   await bffApiCall<void>(`/api/v1/external/todos/${encodeURIComponent(todoId)}`, { method: 'DELETE' });
+}
+
+/**
+ * Hard-deletes a service request the caller requested, when it has no related record. 204 on success; 403 (uniform: not the
+ * requester / absent), 409 `has_related_records` (the request has activity: offer a recall), 503 (nothing deleted, retry).
+ */
+export async function deleteOwnServiceRequest(serviceRequestId: string): Promise<void> {
+  await bffApiCall<void>(`/api/v1/external/servicerequests/${encodeURIComponent(serviceRequestId)}`, {
+    method: 'DELETE',
+  });
 }
 
 /** Hard-deletes an event the caller created. */
@@ -808,6 +819,7 @@ export const webApiClient = {
   updateTodo,
   deleteOwnTodo,
   deleteOwnEvent,
+  deleteOwnServiceRequest,
   // Contacts
   getContacts,
   // Organizations

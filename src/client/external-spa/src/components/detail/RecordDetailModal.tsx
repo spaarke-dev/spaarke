@@ -18,12 +18,16 @@
  *               SAME Tier-2-scoped module read the Invoices tab runs, so a row shows here exactly when the tab shows it
  *               for this record (FR-02).
  *   - documents (task 054, FR-24): the shared `DocumentLibrary` over the task 031 routes
- *               `/api/v1/external/{projects|matters|workassignments|servicerequests}/{id}/documents` - list, download,
- *               version history and upload (Create). A service request's documents are reachable ONLY there. Invoice
- *               documents wait on an owner decision (task 031), so an invoice shows no documents section.
+ *               `/api/v1/external/{projects|matters|workassignments|servicerequests|invoices}/{id}/documents` - list,
+ *               download, version history and upload (Create, gated by the list's `canCreate`). A service request's
+ *               documents are reachable ONLY there.
  *   - delete-own (task 054, FR-26): `GET /api/v1/external/me` says who the caller is; a document, to-do or event whose
  *               creator stamp is that principal shows Delete (asks first, 204 removes it, a 403 shows an error). Messages
- *               and service requests have no Delete: the server has no service-request delete yet (task 032 escalation).
+ *               have no Delete. An invoice's documents use the `invoices` root (owner decision 2026-10-11, option A).
+ *   - service request actions (owner decisions 2026-10-11): the REQUESTER sees "Delete request" (`ServiceRequestActions`:
+ *               DELETE /api/v1/external/servicerequests/{id}; 409 `has_related_records` offers "Send recall request", a
+ *               post to the request's own message thread through the existing message client). A 204 shows the request as
+ *               deleted in place of its sections; the grid behind lists it until it reloads.
  *   - messages: GET/POST /api/v1/external/{root}/{id}/messages for project, matter, work assignment, invoice and
  *               service request (`RecordMessages`, task 051; a document has no thread, so no section).
  *   - events/tasks: the existing `EventsCalendar` / `SmartTodo` (read-only: `AccessLevel.ViewOnly` hides create and
@@ -52,6 +56,7 @@ import { EventsCalendar } from '../EventsCalendar';
 import { SmartTodo } from '../SmartTodo';
 import { TruncatedListNotice } from '../TruncatedListNotice';
 import { RecordMessages } from './RecordMessages';
+import { ServiceRequestActions } from './ServiceRequestActions';
 import {
   EMPTY_VALUE,
   RecordDetailFields,
@@ -466,6 +471,11 @@ export interface RecordDetailModalProps {
   index: number;
   /** Called with the new position when the user pages to the previous / next row. */
   onIndexChange: (index: number) => void;
+  /**
+   * Called once when the caller deleted the record shown here (the service request, on a 204). The opener uses it to
+   * re-read its list: this modal unmounts on close, so what it knows about deleted rows does not outlive it.
+   */
+  onRecordDeleted?: () => void;
 }
 
 export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
@@ -475,6 +485,7 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
   recordIds,
   index,
   onIndexChange,
+  onRecordDeleted,
 }) => {
   const styles = useStyles();
   const cfg = getRecordDetailEntity(entityName);
@@ -482,9 +493,17 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
   // True while the Messages section has a send in flight. Paging away or closing then would unmount the thread and lose
   // the send's result (success, error, kept draft), so both are held until it settles (review 051 K3).
   const [messageSending, setMessageSending] = React.useState(false);
+  // True while a service request recall post is in flight: same hold as a message send.
+  const [recallSending, setRecallSending] = React.useState(false);
+  // Service requests the caller deleted in this session (a 204): shown as deleted, never re-read.
+  const [deletedIds, setDeletedIds] = React.useState<ReadonlySet<string>>(() => new Set());
+  // Bumped when a recall message was posted, so the visible thread re-reads (never appends the 201 body).
+  const [threadRefresh, setThreadRefresh] = React.useState(0);
   const id = recordIds[index];
+  // A record deleted in this session is never read again: its read would answer 403/404 and show as "no access".
+  const isDeleted = !!id && deletedIds.has(id);
 
-  const state = useRecord(cfg, open ? id : undefined, attempt);
+  const state = useRecord(cfg, open && !isDeleted ? id : undefined, attempt);
   // Who the caller is (for Delete on their own rows) and their project level (for Upload): read once per opening. Identity
   // does not change from record to record, so paging does not read it again; `caller` is memoised so the sections that
   // take it as a prop see a new object only when the identity changes.
@@ -494,6 +513,7 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
   if (!cfg) return null;
 
   const title = recordDetailTitle(cfg, state.status === 'ready' ? state.record : null);
+  const holdNavigation = messageSending || recallSending;
 
   const handleNavigate = (dir: 'prev' | 'next'): void => {
     const next = dir === 'prev' ? index - 1 : index + 1;
@@ -504,7 +524,7 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
   // Close is also disabled so the hold is visible. SprkModal has no disabled state for its x or its "<" ">" buttons
   // (shared component); the browse buttons are held by the `onBeforeNavigate` guard, which blocks the move.
   const handleClose = (): void => {
-    if (!messageSending) onClose();
+    if (!holdNavigation) onClose();
   };
 
   return (
@@ -517,22 +537,30 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
         index,
         total: recordIds.length,
         onNavigate: handleNavigate,
-        onBeforeNavigate: () => !messageSending,
+        onBeforeNavigate: () => !holdNavigation,
       }}
       footer={
-        <Button appearance="primary" onClick={handleClose} disabled={messageSending}>
+        <Button appearance="primary" onClick={handleClose} disabled={holdNavigation}>
           Close
         </Button>
       }
     >
       <div className={styles.body} data-testid="record-detail-body">
-        {state.status === 'loading' && (
+        {isDeleted && (
+          <div className={styles.denied} role="status" data-testid="record-detail-deleted">
+            <Text size={400} weight="semibold">
+              This {cfg.label.toLowerCase()} was deleted
+            </Text>
+          </div>
+        )}
+
+        {!isDeleted && state.status === 'loading' && (
           <div className={styles.center}>
             <Spinner size="medium" label="Loading record..." />
           </div>
         )}
 
-        {state.status === 'denied' && (
+        {!isDeleted && state.status === 'denied' && (
           <div className={styles.denied} role="alert" data-testid="record-detail-denied">
             <LockClosedRegular className={styles.deniedIcon} aria-hidden />
             <Text size={400} weight="semibold">
@@ -541,7 +569,7 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
           </div>
         )}
 
-        {state.status === 'notfound' && (
+        {!isDeleted && state.status === 'notfound' && (
           <div className={styles.denied} role="status" data-testid="record-detail-notfound">
             <Text size={400} weight="semibold">
               This record is no longer available
@@ -549,7 +577,7 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
           </div>
         )}
 
-        {state.status === 'error' && (
+        {!isDeleted && state.status === 'error' && (
           <div className={styles.denied} role="alert" data-testid="record-detail-error">
             <Text size={300}>{state.message}</Text>
             {state.retryable && (
@@ -560,19 +588,39 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
           </div>
         )}
 
-        {state.status === 'ready' && id && (
+        {!isDeleted && state.status === 'ready' && id && (
           // Keyed by record so every section's state resets when the user pages to another row.
           <React.Fragment key={`${cfg.entity}:${id}`}>
-            <RecordDetailFields cfg={cfg} record={state.record} />
-            {cfg.documentsRoot && (
-              <DocumentsSection root={cfg.documentsRoot} id={id} context={callerContext} caller={caller} />
-            )}
-            {cfg.invoicesBy && <InvoicesSection parentAttribute={cfg.invoicesBy} parentId={id} />}
-            {cfg.showsEventsAndTasks && <EventsAndTasksSection entity={cfg.entity} id={id} caller={caller} />}
-            {/* No Delete on a service request: the server has no service-request delete yet (task 032 escalation); add the
-                action here, with deleteOwnServiceRequest in web-api-client, when the owner decides. */}
-            {/* Messages (task 051): the record's thread + compose, for the entities the server has a thread for. */}
-            <RecordMessages entity={cfg.entity} recordId={id} onSendingChange={setMessageSending} />
+            <>
+              <RecordDetailFields cfg={cfg} record={state.record} />
+              {/* The requester's actions on their own service request (owner decisions 2026-10-11). */}
+              {cfg.entity === 'sprk_servicerequest' && (
+                <ServiceRequestActions
+                  requestId={id}
+                  record={state.record}
+                  caller={caller}
+                  label={title}
+                  onDeleted={() => {
+                    setDeletedIds(prev => new Set(prev).add(id));
+                    onRecordDeleted?.();
+                  }}
+                  onRecalled={() => setThreadRefresh(n => n + 1)}
+                  onBusyChange={setRecallSending}
+                />
+              )}
+              {cfg.documentsRoot && (
+                <DocumentsSection root={cfg.documentsRoot} id={id} context={callerContext} caller={caller} />
+              )}
+              {cfg.invoicesBy && <InvoicesSection parentAttribute={cfg.invoicesBy} parentId={id} />}
+              {cfg.showsEventsAndTasks && <EventsAndTasksSection entity={cfg.entity} id={id} caller={caller} />}
+              {/* Messages (task 051): the record's thread + compose, for the entities the server has a thread for. */}
+              <RecordMessages
+                entity={cfg.entity}
+                recordId={id}
+                onSendingChange={setMessageSending}
+                refreshSignal={threadRefresh}
+              />
+            </>
           </React.Fragment>
         )}
       </div>

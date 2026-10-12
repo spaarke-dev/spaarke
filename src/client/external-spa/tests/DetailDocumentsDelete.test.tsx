@@ -16,9 +16,11 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
-const { bffApiCall, bffApiBlob, gridSpecs } = vi.hoisted(() => ({
+const { bffApiCall, bffApiBlob, gridSpecs, gridMounts } = vi.hoisted(() => ({
   bffApiCall: vi.fn(),
   bffApiBlob: vi.fn(),
+  /** How many times the fake grid has mounted (a remount is a fresh data read). */
+  gridMounts: { count: 0 },
   gridSpecs: {} as Record<
     string,
     { entityName: string; idAttribute: string; nameAttribute: string; rows: Array<Record<string, unknown>> }
@@ -54,6 +56,9 @@ vi.mock('../src/widgets/ExternalDataGrid', async () => {
       const spec = gridSpecs[props.configId];
       const { onRecordsLoaded } = props;
       R.useEffect(() => {
+        gridMounts.count += 1;
+      }, []);
+      R.useEffect(() => {
         onRecordsLoaded?.(spec.rows);
       }, [onRecordsLoaded, spec.rows]);
       return R.createElement(
@@ -88,7 +93,15 @@ import { SmartTodo } from '../src/components/SmartTodo';
 import { EventsCalendar } from '../src/components/EventsCalendar';
 import { RecordMessages } from '../src/components/detail/RecordMessages';
 import { RecordDetailModal } from '../src/components/detail/RecordDetailModal';
-import { callerIdentityOf, deleteFailureOf, isCreatedByCaller, type CallerIdentity } from '../src/api/delete-own';
+import {
+  callerIdentityOf,
+  deleteFailureOf,
+  isCreatedByCaller,
+  isRequestedByCaller,
+  requestedByIdOf,
+  type CallerIdentity,
+} from '../src/api/delete-own';
+import InvoicesWidgetBody from '../src/widgets/InvoicesWidget';
 import MattersWidgetBody from '../src/widgets/MattersWidget';
 import ProjectsWidgetBody from '../src/widgets/ProjectsWidget';
 import ServiceRequestsWidgetBody from '../src/widgets/ServiceRequestsWidget';
@@ -111,6 +124,7 @@ const PROJECT = guid(101);
 const MATTER = guid(201);
 const WORK_ASSIGNMENT = guid(301);
 const SERVICE_REQUEST = guid(601);
+const INVOICE = guid(501);
 
 const asContact: CallerIdentity = { contactId: ME, systemUserId: null };
 const asSystemUser: CallerIdentity = { contactId: null, systemUserId: SYSTEM_USER };
@@ -217,6 +231,7 @@ beforeEach(() => {
   installLayout();
   bffApiCall.mockReset();
   bffApiBlob.mockReset();
+  gridMounts.count = 0;
   loginRedirect.mockReset();
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
 });
@@ -912,6 +927,14 @@ const GRID = {
     recordId: SERVICE_REQUEST,
     Body: ServiceRequestsWidgetBody,
   },
+  invoice: {
+    configId: '3ff4102c-1092-f111-b8dc-7ced8ddc4a05',
+    entity: 'sprk_invoice',
+    id: 'sprk_invoiceid',
+    name: 'sprk_name',
+    recordId: INVOICE,
+    Body: InvoicesWidgetBody,
+  },
   document: {
     configId: '3af4102c-1092-f111-b8dc-7ced8ddc4a05',
     entity: 'sprk_document',
@@ -929,6 +952,7 @@ const RECORD_ROW: Record<string, Record<string, unknown>> = {
   sprk_matter: { sprk_mattername: 'Matter M', sprk_matternumber: 'MAT-1' },
   sprk_workassignment: { sprk_name: 'Work W', sprk_workassignmentnumber: 'WA-1' },
   sprk_servicerequest: { sprk_name: 'Request R', sprk_servicerequestnumber: 'SR-1' },
+  sprk_invoice: { sprk_name: 'Invoice I', sprk_invoicenumber: 'INV-1' },
   sprk_document: { sprk_documentname: 'A document', sprk_documenttype: 'Contract' },
 };
 
@@ -942,6 +966,10 @@ interface DetailNet {
   events: Array<Record<string, unknown>>;
   messages: Array<Record<string, unknown>>;
   onDelete?: (path: string) => unknown;
+  /** Extra columns on the opened record's row (for example the service request's `sprk_requestedby`). */
+  record?: Record<string, unknown>;
+  /** A POST to the record's message thread; its answer is the 201 body. Absent = the post is not expected. */
+  onPostMessage?: (path: string, body: unknown) => unknown;
 }
 
 function installDetailNet(key: GridKey, net: DetailNet): void {
@@ -955,7 +983,7 @@ function installDetailNet(key: GridKey, net: DetailNet): void {
     if (path.endsWith('/api/dataverse/fetch')) {
       const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
       if (body.entityName === g.entity)
-        return { entities: [{ [g.id]: g.recordId, ...RECORD_ROW[g.entity] }], moreRecords: false };
+        return { entities: [{ [g.id]: g.recordId, ...RECORD_ROW[g.entity], ...net.record }], moreRecords: false };
       return { entities: [], moreRecords: false };
     }
     if (/\/documents$/.test(path)) {
@@ -965,7 +993,13 @@ function installDetailNet(key: GridKey, net: DetailNet): void {
     }
     if (/\/todos$/.test(path)) return { value: net.todos };
     if (/\/events$/.test(path)) return { value: net.events };
-    if (/\/messages$/.test(path)) return { value: net.messages };
+    if (/\/messages$/.test(path)) {
+      if (options?.method === 'POST') {
+        if (!net.onPostMessage) throw new Error(`unexpected message POST ${path}`);
+        return net.onPostMessage(path, JSON.parse(String(options.body)));
+      }
+      return { value: net.messages };
+    }
     throw new Error(`unexpected BFF call ${options?.method ?? 'GET'} ${path}`);
   });
 }
@@ -1176,7 +1210,7 @@ describe('the record detail view', () => {
   );
 
   it(
-    'Service request: documents via the servicerequests route, deletable like any other; the request itself has no Delete',
+    'Service request (caller is not the requester): documents via the servicerequests route, deletable like any other; the request itself has no Delete',
     async () => {
       installDetailNet('sr', emptyNet({ documents: mixedDocs() }));
       const dialog = await openDetail('sr');
@@ -1370,6 +1404,686 @@ describe('the record detail view', () => {
       await waitFor(() => expect(within(dialog).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
 
       expect(bffApiCall.mock.calls.filter(c => c[0] === '/api/v1/external/me')).toHaveLength(1);
+    },
+    SLOW
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Owner decisions 2026-10-11: delete a service request (the requester), recall when it has activity, invoice documents
+// ---------------------------------------------------------------------------
+
+const SR_ROUTE = `/api/v1/external/servicerequests/${SERVICE_REQUEST}`;
+const SR_MESSAGES = `${SR_ROUTE}/messages`;
+const HAS_ACTIVITY_DETAIL =
+  "This request already has activity (documents, messages or other records), so it can't be deleted. You can ask legal to recall it by sending a request to recall.";
+
+/** A request the signed-in caller (ME) requested; the module fetch serialises the lookup as an entity reference. */
+const requestedByMe = { sprk_requestedby: { id: ME, logicalName: 'contact', name: 'Me Myself' } };
+const requestedBySomeone = { sprk_requestedby: { id: SOMEONE, logicalName: 'contact', name: 'Someone Else' } };
+
+const messagePosts = (): unknown[][] =>
+  bffApiCall.mock.calls.filter(
+    c => (c[1] as RequestInit | undefined)?.method === 'POST' && /\/messages$/.test(String(c[0]))
+  );
+const messageReads = (): unknown[][] =>
+  bffApiCall.mock.calls.filter(
+    c => (c[1] as RequestInit | undefined)?.method === undefined && String(c[0]) === SR_MESSAGES
+  );
+
+const hasRelatedRecords = (): ApiError =>
+  new ApiError(
+    409,
+    problem(409, {
+      reasonCode: 'has_related_records',
+      title: 'Service request has activity',
+      detail: HAS_ACTIVITY_DETAIL,
+    })
+  );
+
+/** The "Send recall request" box (a nested modal): found once tabster has finished its hide pass. */
+async function recallDialog(): Promise<HTMLElement> {
+  const dialog = await screen.findByRole('dialog', { name: 'Send recall request' }, { timeout: 5000 });
+  await settleModalizer();
+  expect(dialog.getAttribute('aria-hidden')).toBeNull();
+  return dialog;
+}
+
+/** Requester, a request with no related record: Delete, confirm, and the server's answer. */
+async function deleteTheRequest(dialog: HTMLElement): Promise<void> {
+  fireEvent.click(await within(dialog).findByRole('button', { name: 'Delete request' }, SLOW));
+  const confirm = await confirmDialog(/^Delete service request$/);
+  fireEvent.click(within(confirm).getByRole('button', { name: 'Delete' }));
+}
+
+describe('service request: who sees Delete', () => {
+  it(
+    'the requester sees Delete (named for the request); nothing else in the dialog deletes it',
+    async () => {
+      installDetailNet('sr', emptyNet({ record: requestedByMe }));
+      const dialog = await openDetail('sr');
+      const button = await within(dialog).findByRole('button', { name: 'Delete request' }, SLOW);
+      expect(button).toBeTruthy();
+      expect(within(dialog).getAllByRole('button', { name: /delete|remove/i })).toHaveLength(1);
+      // Nothing is sent until the user confirms.
+      expect(deleteCalls()).toHaveLength(0);
+    },
+    SLOW
+  );
+
+  it.each([
+    ['someone else requested it', { record: requestedBySomeone }],
+    ['the record names no requester', { record: {} }],
+    ['the caller identity could not be read (/me fails)', { record: requestedByMe, me: null }],
+  ])(
+    'a non-requester sees no Delete: %s',
+    async (_label, over) => {
+      installDetailNet('sr', emptyNet(over as Partial<DetailNet>));
+      const dialog = await openDetail('sr');
+      const docs = await within(dialog).findByTestId('record-detail-documents');
+      await within(docs).findByText(/No documents have been uploaded/);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(within(dialog).queryByRole('button', { name: 'Delete request' })).toBeNull();
+      expect(within(dialog).queryByTestId('service-request-actions')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'no other record type offers Delete on the record itself, even where the caller is named as requester',
+    async () => {
+      installDetailNet('matter', emptyNet({ record: requestedByMe }));
+      const dialog = await openDetail('matter');
+      await within(dialog).findByTestId('record-detail-documents');
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(within(dialog).queryByRole('button', { name: 'Delete request' })).toBeNull();
+    },
+    SLOW
+  );
+
+  it('the requester rule reads an id, never a name, and fails closed', () => {
+    const me = { contactId: ME, systemUserId: null } as CallerIdentity;
+    expect(isRequestedByCaller(requestedByMe, me)).toBe(true);
+    expect(isRequestedByCaller({ sprk_requestedby: { Id: ME.toUpperCase() } }, me)).toBe(true);
+    expect(isRequestedByCaller({ _sprk_requestedby_value: ME }, me)).toBe(true);
+    expect(isRequestedByCaller(requestedBySomeone, me)).toBe(false);
+    // A name that looks like the caller is not an identity.
+    expect(isRequestedByCaller({ sprk_requestedby: { name: 'Me Myself' } }, me)).toBe(false);
+    expect(isRequestedByCaller({}, me)).toBe(false);
+    expect(isRequestedByCaller(requestedByMe, null)).toBe(false);
+    // A systemuser principal with no linked contact never matches (the server's gate is the contact).
+    expect(isRequestedByCaller(requestedByMe, asSystemUser)).toBe(false);
+    expect(requestedByIdOf({ sprk_requestedby: { id: '00000000-0000-0000-0000-000000000000' } })).toBeNull();
+  });
+});
+
+describe('service request: delete', () => {
+  it(
+    'asks first; Cancel sends nothing',
+    async () => {
+      installDetailNet('sr', emptyNet({ record: requestedByMe }));
+      const dialog = await openDetail('sr');
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'Delete request' }, SLOW));
+      const confirm = await confirmDialog(/^Delete service request$/);
+      expect(within(confirm).getByText(/Delete "Request R"\?/)).toBeTruthy();
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByText(/^Delete service request$/)).toBeNull());
+      expect(deleteCalls()).toHaveLength(0);
+      expect(await within(dialog).findByRole('button', { name: 'Delete request' }, SLOW)).toBeTruthy();
+    },
+    SLOW
+  );
+
+  it(
+    '204: one DELETE to the request route, then the request is shown as deleted and its actions and thread go',
+    async () => {
+      installDetailNet('sr', emptyNet({ record: requestedByMe, onDelete: () => undefined }));
+      const dialog = await openDetail('sr');
+      await deleteTheRequest(dialog);
+
+      expect(await within(dialog).findByTestId('record-detail-deleted', undefined, SLOW)).toBeTruthy();
+      expect(within(dialog).getByText('This service request was deleted')).toBeTruthy();
+      expect(deleteCalls()).toEqual([[SR_ROUTE, { method: 'DELETE' }]]);
+      expect(within(dialog).queryByRole('button', { name: 'Delete request' })).toBeNull();
+      expect(within(dialog).queryByTestId('record-detail-messages')).toBeNull();
+      expect(within(dialog).queryByTestId('service-request-has-activity')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    '403: the shared denial message, the request stays, and Delete is still offered',
+    async () => {
+      installDetailNet(
+        'sr',
+        emptyNet({
+          record: requestedByMe,
+          onDelete: () => {
+            throw new ApiError(403, problem(403, { reasonCode: 'sdap.access.deny.delete_own' }));
+          },
+        })
+      );
+      const dialog = await openDetail('sr');
+      await deleteTheRequest(dialog);
+
+      const error = await within(dialog).findByTestId('delete-own-error', undefined, SLOW);
+      expect(error.textContent).toMatch(
+        /^Only the person who submitted this request can delete it\. Nothing was deleted\.$/
+      );
+      expect(within(dialog).queryByTestId('service-request-has-activity')).toBeNull();
+      expect(within(dialog).queryByTestId('record-detail-deleted')).toBeNull();
+      expect(await within(dialog).findByRole('button', { name: 'Delete request' }, SLOW)).toBeTruthy();
+    },
+    SLOW
+  );
+
+  it(
+    '503: says nothing was deleted and to retry; Delete is still offered and a retry that succeeds deletes it',
+    async () => {
+      let unavailable = true;
+      installDetailNet(
+        'sr',
+        emptyNet({
+          record: requestedByMe,
+          onDelete: () => {
+            if (unavailable) {
+              throw new ApiError(503, problem(503, { reasonCode: 'sdap.access.delete_own_unavailable' }));
+            }
+            return undefined;
+          },
+        })
+      );
+      const dialog = await openDetail('sr');
+      await deleteTheRequest(dialog);
+
+      const error = await within(dialog).findByTestId('delete-own-error', undefined, SLOW);
+      expect(error.textContent).toMatch(/nothing was deleted.*try again in a moment/i);
+      expect(within(dialog).queryByTestId('service-request-has-activity')).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Send recall request' })).toBeNull();
+
+      unavailable = false;
+      await deleteTheRequest(dialog);
+      expect(await within(dialog).findByTestId('record-detail-deleted', undefined, SLOW)).toBeTruthy();
+      expect(deleteCalls()).toHaveLength(2);
+    },
+    SLOW
+  );
+
+  it('403 wording: a service request names its submitter; every other noun keeps the creator wording', () => {
+    const forbidden = (): ApiError => new ApiError(403, problem(403, { reasonCode: 'sdap.access.deny.delete_own' }));
+    const sr = deleteFailureOf(forbidden(), 'service request');
+    if (sr.kind !== 'error') throw new Error('expected an error message');
+    expect(sr.message).toBe('Only the person who submitted this request can delete it. Nothing was deleted.');
+    for (const noun of ['document', 'task', 'event']) {
+      const other = deleteFailureOf(forbidden(), noun);
+      if (other.kind !== 'error') throw new Error('expected an error message');
+      expect(other.message).toMatch(new RegExp(`cannot delete this ${noun}: only the person who created it`));
+    }
+  });
+
+  it('the refusal wording: 409 has_related_records is the activity message, never the stored-file one', () => {
+    const failure = deleteFailureOf(hasRelatedRecords(), 'service request');
+    if (failure.kind !== 'error') throw new Error('expected an error message');
+    expect(failure.reasonCode).toBe('has_related_records');
+    expect(failure.message).toMatch(/already has activity/);
+    expect(failure.message).toMatch(/can't be deleted/);
+    expect(failure.message).not.toMatch(/stored file/);
+    // The server's own detail is never echoed; the client's wording stands.
+    expect(failure.message).not.toBe(HAS_ACTIVITY_DETAIL);
+  });
+});
+
+describe('service request: 409 has_related_records and the recall request', () => {
+  /** A request that has activity; the recall post answers 201 (the thread re-read then carries the message). */
+  function activityNet(over: Partial<DetailNet> = {}): DetailNet {
+    return emptyNet({
+      record: requestedByMe,
+      onDelete: () => {
+        throw hasRelatedRecords();
+      },
+      onPostMessage: () => ({ sprk_communicationid: guid(960), isMine: true }),
+      ...over,
+    });
+  }
+
+  it(
+    '409: shows that the request has activity and cannot be deleted, keeps the request, and offers a recall',
+    async () => {
+      installDetailNet('sr', activityNet());
+      const dialog = await openDetail('sr');
+      await deleteTheRequest(dialog);
+
+      const notice = await within(dialog).findByTestId('service-request-has-activity', undefined, SLOW);
+      expect(notice.textContent).toMatch(/already has activity/);
+      expect(notice.textContent).toMatch(/can't be deleted/);
+      // Reachable by role once tabster lifts the page's aria-hidden after the confirmation closes.
+      expect(await within(notice).findByRole('button', { name: 'Send recall request' }, SLOW)).toBeTruthy();
+      // The generic error bar is not shown beside it, and the request is still there.
+      expect(within(dialog).queryByTestId('delete-own-error')).toBeNull();
+      expect(within(dialog).queryByTestId('record-detail-deleted')).toBeNull();
+      expect(within(dialog).getByTestId('record-detail-fields')).toBeTruthy();
+      // Nothing has been posted: the recall is the user's choice.
+      expect(messagePosts()).toHaveLength(0);
+    },
+    SLOW
+  );
+
+  it(
+    'recall: the box is prefilled and editable; Send posts the EDITED text exactly once to the messages route',
+    async () => {
+      installDetailNet('sr', activityNet());
+      const dialog = await openDetail('sr');
+      await deleteTheRequest(dialog);
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'Send recall request' }, SLOW));
+
+      const box = await recallDialog();
+      const input = within(box).getByRole('textbox', { name: 'Recall request message' }) as HTMLTextAreaElement;
+      expect(input.value).toBe('Please recall this request.');
+      fireEvent.change(input, { target: { value: '  Raised in error - please recall this request.  ' } });
+      await waitFor(() => expect(input.value).toBe('  Raised in error - please recall this request.  '));
+
+      // A double click is one post (the server has no idempotency guard).
+      const send = within(box).getByRole('button', { name: 'Send' });
+      fireEvent.click(send);
+      fireEvent.click(send);
+
+      await waitFor(() => expect(messagePosts()).toHaveLength(1));
+      expect(messagePosts()[0][0]).toBe(SR_MESSAGES);
+      expect(JSON.parse(String((messagePosts()[0][1] as RequestInit).body))).toEqual({
+        sprk_body: 'Raised in error - please recall this request.',
+      });
+      // No delete was retried, and nothing but the one message post was written.
+      expect(deleteCalls()).toHaveLength(1);
+    },
+    SLOW
+  );
+
+  it(
+    'recall success: a confirmation that legal was asked, the box closes, the thread is re-read, Delete is withdrawn',
+    async () => {
+      installDetailNet('sr', activityNet());
+      const dialog = await openDetail('sr');
+      await within(dialog).findByTestId('record-messages-empty', undefined, SLOW);
+      const readsBefore = messageReads().length;
+
+      await deleteTheRequest(dialog);
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'Send recall request' }, SLOW));
+      fireEvent.click(within(await recallDialog()).getByRole('button', { name: 'Send' }));
+
+      const done = await within(dialog).findByTestId('service-request-recalled', undefined, SLOW);
+      expect(done.textContent).toMatch(
+        /Your recall request was posted to this request's messages for the legal team\./
+      );
+      expect(done.textContent).not.toMatch(/Legal has been asked/);
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Send recall request' })).toBeNull());
+      // The thread is re-read from the server (never appended from the 201 body).
+      await waitFor(() => expect(messageReads().length).toBe(readsBefore + 1));
+      // The request now has a message, so the delete (which would 409 again) and the 409 notice are gone.
+      expect(within(dialog).queryByRole('button', { name: 'Delete request' })).toBeNull();
+      expect(within(dialog).queryByTestId('service-request-has-activity')).toBeNull();
+      expect(messagePosts()).toHaveLength(1);
+    },
+    SLOW
+  );
+
+  it(
+    'recall failure: an error is shown, the box stays open with the edited text, and a retry can still succeed',
+    async () => {
+      let fail = true;
+      installDetailNet(
+        'sr',
+        activityNet({
+          onPostMessage: () => {
+            if (fail) throw new ApiError(500, problem(500, { errorCode: 'EXT_MESSAGES_POST_FAILED' }));
+            return { sprk_communicationid: guid(961), isMine: true };
+          },
+        })
+      );
+      const dialog = await openDetail('sr');
+      await deleteTheRequest(dialog);
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'Send recall request' }, SLOW));
+
+      const box = await recallDialog();
+      const input = within(box).getByRole('textbox', { name: 'Recall request message' }) as HTMLTextAreaElement;
+      fireEvent.change(input, { target: { value: 'My own words' } });
+      await waitFor(() => expect(input.value).toBe('My own words'));
+      fireEvent.click(within(box).getByRole('button', { name: 'Send' }));
+
+      const error = await within(box).findByTestId('recall-error', undefined, SLOW);
+      expect(error.textContent).toMatch(/could not be sent just now/);
+      // Still open, text kept, Send available again, no confirmation.
+      expect(screen.getByRole('dialog', { name: 'Send recall request' })).toBeTruthy();
+      expect(input.value).toBe('My own words');
+      expect((within(box).getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.queryByTestId('service-request-recalled')).toBeNull();
+      expect(messagePosts()).toHaveLength(1);
+
+      // Retry from the same box: the same text goes again, and now it works.
+      fail = false;
+      fireEvent.click(within(box).getByRole('button', { name: 'Send' }));
+      expect(await within(dialog).findByTestId('service-request-recalled', undefined, SLOW)).toBeTruthy();
+      expect(messagePosts()).toHaveLength(2);
+      expect(JSON.parse(String((messagePosts()[1][1] as RequestInit).body))).toEqual({ sprk_body: 'My own words' });
+    },
+    SLOW
+  );
+
+  it(
+    'recall: a blank or over-long message cannot be sent; Cancel closes the box and posts nothing',
+    async () => {
+      installDetailNet('sr', activityNet());
+      const dialog = await openDetail('sr');
+      await deleteTheRequest(dialog);
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'Send recall request' }, SLOW));
+
+      const box = await recallDialog();
+      const input = within(box).getByRole('textbox', { name: 'Recall request message' }) as HTMLTextAreaElement;
+      const send = (): HTMLButtonElement => within(box).getByRole('button', { name: 'Send' }) as HTMLButtonElement;
+
+      fireEvent.change(input, { target: { value: '   ' } });
+      await waitFor(() => expect(send().disabled).toBe(true));
+      fireEvent.change(input, { target: { value: 'x'.repeat(10_001) } });
+      await waitFor(() => expect(within(box).getByTestId('recall-counter').textContent).toMatch(/1 over the 10,000/));
+      expect(send().disabled).toBe(true);
+      fireEvent.change(input, { target: { value: 'x'.repeat(10_000) } });
+      await waitFor(() => expect(send().disabled).toBe(false));
+
+      fireEvent.click(within(box).getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Send recall request' })).toBeNull());
+      expect(messagePosts()).toHaveLength(0);
+      // The 409 notice (and its recall action) is still there for another try.
+      expect(await within(dialog).findByRole('button', { name: 'Send recall request' }, SLOW)).toBeTruthy();
+    },
+    SLOW
+  );
+
+  it(
+    'a recall refused with 403 shows the thread wording and keeps the box',
+    async () => {
+      installDetailNet(
+        'sr',
+        activityNet({
+          onPostMessage: () => {
+            throw new ApiError(403, problem(403, { reasonCode: 'sdap.external.messages.record_not_accessible' }));
+          },
+        })
+      );
+      const dialog = await openDetail('sr');
+      await deleteTheRequest(dialog);
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'Send recall request' }, SLOW));
+      const box = await recallDialog();
+      fireEvent.click(within(box).getByRole('button', { name: 'Send' }));
+
+      const error = await within(box).findByTestId('recall-error', undefined, SLOW);
+      expect(error.textContent).toMatch(/do not have permission to post messages on this record/);
+      expect(screen.getByRole('dialog', { name: 'Send recall request' })).toBeTruthy();
+    },
+    SLOW
+  );
+});
+
+describe('invoice documents on the detail view', () => {
+  it(
+    'list: read from the invoices documents route, with download through the invoice content route',
+    async () => {
+      installDetailNet('invoice', emptyNet({ documents: [doc(1, 'Invoice.pdf')], documentsCanCreate: false }));
+      const dialog = await openDetail('invoice');
+      const docs = await within(dialog).findByTestId('record-detail-documents');
+      await within(docs).findByText('Invoice.pdf');
+      expect(bffApiCall.mock.calls.map(c => String(c[0]))).toContain(`/api/v1/external/invoices/${INVOICE}/documents`);
+
+      const createObjectURL = vi.fn(() => 'blob:test');
+      Object.assign(window.URL, { createObjectURL, revokeObjectURL: vi.fn() });
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+      bffApiBlob.mockResolvedValue(new Blob(['bytes']));
+      fireEvent.click(within(docs).getByRole('button', { name: 'Download Invoice.pdf' }));
+      await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+      expect(bffApiBlob).toHaveBeenCalledWith(`/api/v1/external/invoices/${INVOICE}/documents/${guid(901)}/content`);
+    },
+    SLOW
+  );
+
+  it.each([
+    [true, true],
+    [false, false],
+    [undefined, false],
+  ])(
+    "upload follows the list's canCreate (%s): Upload shown = %s",
+    async (canCreate, shown) => {
+      installDetailNet('invoice', emptyNet({ documents: [doc(1, 'Invoice.pdf')], documentsCanCreate: canCreate }));
+      const dialog = await openDetail('invoice');
+      const docs = await within(dialog).findByTestId('record-detail-documents');
+      await within(docs).findByText('Invoice.pdf');
+      if (shown) {
+        expect(within(docs).getByRole('button', { name: /Upload Document/ })).toBeTruthy();
+      } else {
+        expect(within(docs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      }
+    },
+    SLOW
+  );
+
+  it(
+    'no Create (empty list): no Upload in the empty state either; with Create the empty state offers it',
+    async () => {
+      installDetailNet('invoice', emptyNet({ documents: [], documentsCanCreate: false }));
+      const denied = await openDetail('invoice');
+      const deniedDocs = await within(denied).findByTestId('record-detail-documents');
+      await within(deniedDocs).findByText(/No documents have been uploaded to this invoice yet\.$/);
+      expect(within(deniedDocs).queryByRole('button', { name: /Upload Document/ })).toBeNull();
+      cleanup();
+
+      installDetailNet('invoice', emptyNet({ documents: [], documentsCanCreate: true }));
+      const allowed = await openDetail('invoice');
+      const allowedDocs = await within(allowed).findByTestId('record-detail-documents');
+      await within(allowedDocs).findByText(/No documents have been uploaded to this invoice yet\./);
+      expect(within(allowedDocs).getByRole('button', { name: /Upload Document/ })).toBeTruthy();
+    },
+    SLOW
+  );
+
+  it(
+    'upload with Create posts multipart to the invoice documents route (the id is the route, never the body)',
+    async () => {
+      installDetailNet('invoice', emptyNet({ documents: [], documentsCanCreate: true }));
+      const dialog = await openDetail('invoice');
+      const docs = await within(dialog).findByTestId('record-detail-documents');
+      bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
+        if (options?.method === 'POST') return { sprk_documentid: guid(999) };
+        if (/\/documents$/.test(path)) return { value: [], canCreate: true };
+        if (path === '/api/v1/external/me') return { contactId: ME, projects: [] };
+        if (/\/messages$/.test(path)) return { value: [] };
+        throw new Error(`unexpected BFF call ${path}`);
+      });
+      fireEvent.click(await within(docs).findByRole('button', { name: /Upload Document/ }));
+      const input = await waitFor(() => {
+        const el = document.querySelector('input[type="file"]');
+        if (!el) throw new Error('no file input yet');
+        return el as HTMLInputElement;
+      });
+      fireEvent.change(input, { target: { files: [new File(['%PDF'], 'inv.pdf', { type: 'application/pdf' })] } });
+      fireEvent.click(await screen.findByRole('button', { name: 'Upload' }));
+      await waitFor(() => {
+        const post = bffApiCall.mock.calls.find(
+          c => (c[1] as RequestInit | undefined)?.method === 'POST' && /\/documents$/.test(String(c[0]))
+        );
+        expect(post?.[0]).toBe(`/api/v1/external/invoices/${INVOICE}/documents`);
+        expect((post?.[1] as RequestInit).body).toBeInstanceOf(FormData);
+      });
+    },
+    SLOW
+  );
+
+  it(
+    "an invoice document is deletable like any other when the caller created it (the document's own delete route)",
+    async () => {
+      installDetailNet(
+        'invoice',
+        emptyNet({ documents: mixedDocs(), documentsCanCreate: true, onDelete: () => undefined })
+      );
+      const dialog = await openDetail('invoice');
+      const docs = await within(dialog).findByTestId('record-detail-documents');
+      await within(docs).findByText('Mine.pdf');
+      await waitFor(() => expect(within(docs).queryAllByRole('button', { name: /^Delete / })).toHaveLength(1));
+      fireEvent.click(within(docs).getByRole('button', { name: 'Delete Mine.pdf' }));
+      fireEvent.click(within(await confirmDialog()).getByRole('button', { name: 'Delete' }));
+      await waitFor(() => expect(within(docs).queryByText('Mine.pdf')).toBeNull());
+      expect(deleteCalls().map(c => c[0])).toEqual([`/api/v1/external/documents/${guid(901)}`]);
+    },
+    SLOW
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Review fixes (2026-10-12): a deleted request stays deleted when paged back to; the grid re-reads after a delete
+// ---------------------------------------------------------------------------
+
+describe('service request: after a delete (review fixes 2026-10-12)', () => {
+  const SR_2 = guid(602);
+  const SR_3 = guid(603);
+
+  /** The id-filtered detail reads made for one request. */
+  const readsOf = (id: string): unknown[][] =>
+    bffApiCall.mock.calls.filter(c => {
+      const path = String(c[0]);
+      if (!path.endsWith('/api/dataverse/fetch')) return false;
+      const body = JSON.parse(String((c[1] as RequestInit).body)) as { entityName: string; fetchXml: string };
+      return body.entityName === 'sprk_servicerequest' && body.fetchXml.includes(id);
+    });
+
+  it(
+    'paging away from a deleted request and back shows "was deleted", reads it no more, and never shows a denial',
+    async () => {
+      installDetailNet('sr', emptyNet({ record: requestedByMe, onDelete: () => undefined }));
+      // Like the real server, a deleted request is no longer in the caller's set: its read answers no row (a denial).
+      const base = bffApiCall.getMockImplementation()!;
+      let gone = false;
+      bffApiCall.mockImplementation(async (path: string, options?: RequestInit) => {
+        if (gone && String(path).endsWith('/api/dataverse/fetch')) {
+          const body = JSON.parse(String(options?.body)) as { entityName: string; fetchXml: string };
+          if (body.entityName === 'sprk_servicerequest' && body.fetchXml.includes(SR_2)) {
+            return { entities: [], moreRecords: false };
+          }
+        }
+        const result = await base(path, options);
+        if (options?.method === 'DELETE') gone = true;
+        return result;
+      });
+
+      const Host: React.FC = () => {
+        const [index, setIndex] = React.useState(1);
+        return (
+          <RecordDetailModal
+            open
+            onClose={() => undefined}
+            entityName="sprk_servicerequest"
+            recordIds={[SERVICE_REQUEST, SR_2, SR_3]}
+            index={index}
+            onIndexChange={setIndex}
+          />
+        );
+      };
+      renderInTheme(<Host />);
+      const dialog = await screen.findByRole('dialog');
+      await within(dialog).findByTestId('record-detail-fields');
+      await within(dialog).findByText('2 of 3');
+      await deleteTheRequest(dialog);
+      expect(await within(dialog).findByTestId('record-detail-deleted', undefined, SLOW)).toBeTruthy();
+      const readsAfterDelete = readsOf(SR_2).length;
+
+      await settleModalizer();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Next record' }));
+      await within(dialog).findByText('3 of 3');
+      await within(dialog).findByTestId('record-detail-fields');
+      expect(within(dialog).queryByTestId('record-detail-deleted')).toBeNull();
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Previous record' }));
+      await within(dialog).findByText('2 of 3');
+      expect(await within(dialog).findByTestId('record-detail-deleted', undefined, SLOW)).toBeTruthy();
+      expect(within(dialog).getByText('This service request was deleted')).toBeTruthy();
+      // Give a wrongly started read time to land, then check there was none and no denial is shown.
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(readsOf(SR_2)).toHaveLength(readsAfterDelete);
+      expect(within(dialog).queryByTestId('record-detail-denied')).toBeNull();
+      expect(within(dialog).queryByRole('alert')).toBeNull();
+      expect(within(dialog).queryByTestId('record-detail-notfound')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'onRecordDeleted fires once on the 204 and not on a refused delete',
+    async () => {
+      let refuse = true;
+      installDetailNet(
+        'sr',
+        emptyNet({
+          record: requestedByMe,
+          onDelete: () => {
+            if (refuse) throw new ApiError(503, problem(503, { reasonCode: 'sdap.access.delete_own_unavailable' }));
+            return undefined;
+          },
+        })
+      );
+      const onRecordDeleted = vi.fn();
+      renderInTheme(
+        <RecordDetailModal
+          open
+          onClose={() => undefined}
+          entityName="sprk_servicerequest"
+          recordIds={[SERVICE_REQUEST]}
+          index={0}
+          onIndexChange={() => undefined}
+          onRecordDeleted={onRecordDeleted}
+        />
+      );
+      const dialog = await screen.findByRole('dialog');
+      await within(dialog).findByTestId('record-detail-fields');
+      await deleteTheRequest(dialog);
+      await within(dialog).findByTestId('delete-own-error', undefined, SLOW);
+      expect(onRecordDeleted).not.toHaveBeenCalled();
+
+      refuse = false;
+      await deleteTheRequest(dialog);
+      await within(dialog).findByTestId('record-detail-deleted', undefined, SLOW);
+      expect(onRecordDeleted).toHaveBeenCalledTimes(1);
+    },
+    SLOW
+  );
+
+  it(
+    'the grid is remounted (re-reads) when the modal closes after a delete, and the deleted row is not reopenable',
+    async () => {
+      installDetailNet('sr', emptyNet({ record: requestedByMe, onDelete: () => undefined }));
+      const dialog = await openDetail('sr');
+      expect(gridMounts.count).toBe(1);
+      await deleteTheRequest(dialog);
+      await within(dialog).findByTestId('record-detail-deleted', undefined, SLOW);
+      // The grid is not re-read while the modal is open.
+      expect(gridMounts.count).toBe(1);
+
+      // What the server would now return on the grid's re-read: the request is gone.
+      gridSpecs[GRID.sr.configId].rows = [];
+      await settleModalizer();
+      fireEvent.click(within(dialog).getAllByRole('button', { name: 'Close' })[0]);
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull(), SLOW);
+
+      expect(gridMounts.count).toBe(2);
+      expect(screen.queryByText('grid-sr')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'closing without a delete leaves the grid mounted (no needless re-read)',
+    async () => {
+      installDetailNet('sr', emptyNet({ record: requestedByMe, onDelete: () => undefined }));
+      const dialog = await openDetail('sr');
+      await settleModalizer();
+      fireEvent.click(within(dialog).getAllByRole('button', { name: 'Close' })[0]);
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull(), SLOW);
+      expect(gridMounts.count).toBe(1);
+      expect(screen.getByText('grid-sr')).toBeTruthy();
     },
     SLOW
   );

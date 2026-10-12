@@ -89,9 +89,9 @@ type ThreadState =
   | { status: 'access'; failure: BffAccessFailure };
 
 /** What a failed send shows: the shared sign-in state for a 401, else a sentence. */
-type SendError = { kind: 'signin' } | { kind: 'text'; text: string };
+export type SendError = { kind: 'signin' } | { kind: 'text'; text: string };
 
-function sendErrorOf(err: unknown): SendError {
+export function sendErrorOf(err: unknown): SendError {
   if (accessFailureOf(err) === 'signin') return { kind: 'signin' };
   if (!(err instanceof ApiError)) return { kind: 'text', text: SEND_FAILED };
   const problem = messageProblemOf(err);
@@ -290,9 +290,10 @@ interface MessageThreadProps {
   root: string;
   recordId: string;
   onSendingChange?: (sending: boolean) => void;
+  refreshSignal?: number;
 }
 
-const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSendingChange }) => {
+const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSendingChange, refreshSignal = 0 }) => {
   const styles = useStyles();
   const [thread, setThread] = React.useState<ThreadState>({ status: 'loading' });
   const [refreshFailed, setRefreshFailed] = React.useState(false);
@@ -360,6 +361,15 @@ const MessageThread: React.FC<MessageThreadProps> = ({ root, recordId, onSending
     return dropPendingReads;
     // `attempt` re-runs the initial read for "Try again".
   }, [read, attempt, dropPendingReads]);
+
+  // A host that posted to this thread itself (the service request recall) bumps `refreshSignal`: re-read, never append.
+  // The first value is the initial read's own, so only a later change refreshes.
+  const lastRefreshSignal = React.useRef(refreshSignal);
+  React.useEffect(() => {
+    if (lastRefreshSignal.current === refreshSignal) return;
+    lastRefreshSignal.current = refreshSignal;
+    void read('refresh');
+  }, [refreshSignal, read]);
 
   const text = draft.trim();
   const tooLong = text.length > MAX_MESSAGE_BODY_LENGTH;
@@ -502,12 +512,16 @@ export interface RecordMessagesProps {
   recordId: string;
   /** Called with `true` while a send is in flight and `false` otherwise (and on unmount), so a host can hold navigation. */
   onSendingChange?: (sending: boolean) => void;
+  /** Changing this number re-reads the thread (a host posted to it elsewhere, e.g. the service request recall). */
+  refreshSignal?: number;
 }
 
-export const RecordMessages: React.FC<RecordMessagesProps> = ({ entity, recordId, onSendingChange }) => {
+export const RecordMessages: React.FC<RecordMessagesProps> = ({ entity, recordId, onSendingChange, refreshSignal }) => {
   const root = messageRootFor(entity);
   if (!root) return null;
-  return <MessageThread root={root} recordId={recordId} onSendingChange={onSendingChange} />;
+  return (
+    <MessageThread root={root} recordId={recordId} onSendingChange={onSendingChange} refreshSignal={refreshSignal} />
+  );
 };
 
 export default RecordMessages;

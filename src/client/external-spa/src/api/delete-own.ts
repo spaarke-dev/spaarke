@@ -76,18 +76,58 @@ export function isCreatedByCaller(row: CreatorStamps, caller: CallerIdentity | n
   return caller.contactId !== null && byContact === caller.contactId;
 }
 
+/**
+ * The contact id a service request record names as its requester (`sprk_requestedby`), or null when it names none. The
+ * module fetch serialises a lookup as an entity reference (`{ id, logicalName, name }`); a bare id string and the Web API
+ * `_sprk_requestedby_value` shape are accepted too. Only an id is read, never a name.
+ */
+export function requestedByIdOf(record: Record<string, unknown> | null | undefined): string | null {
+  if (!record) return null;
+  const raw = record['sprk_requestedby'] ?? record['_sprk_requestedby_value'];
+  if (typeof raw === 'string') return usableId(raw);
+  if (raw && typeof raw === 'object') {
+    const ref = raw as { id?: unknown; Id?: unknown };
+    const id = ref.id ?? ref.Id;
+    return typeof id === 'string' ? usableId(id) : null;
+  }
+  return null;
+}
+
+/**
+ * True when the signed-in caller is the service request's requester: the request names a requester and it is the caller's
+ * contact (for a workforce user, the linked contact). A convenience for showing Delete; the server's requester gate
+ * (`RightsForDocumentParentAsync`) re-checks the DELETE and answers a uniform 403 when this guess is wrong.
+ */
+export function isRequestedByCaller(
+  record: Record<string, unknown> | null | undefined,
+  caller: CallerIdentity | null | undefined
+): boolean {
+  if (!caller || !caller.contactId) return false;
+  return requestedByIdOf(record) === caller.contactId;
+}
+
 // ---------------------------------------------------------------------------
 // What to say when a delete does not happen
 // ---------------------------------------------------------------------------
 
 /** What a failed delete is shown as: the sign-in state (401), or a plain error message. */
-export type DeleteFailure = { kind: 'signin' } | { kind: 'error'; status: number | null; message: string };
+export type DeleteFailure =
+  | { kind: 'signin' }
+  | {
+      kind: 'error';
+      status: number | null;
+      message: string;
+      /** The server's `reasonCode` (null when none); lets a host offer a follow-up such as a recall. */
+      reasonCode: string | null;
+    };
 
-/** `reasonCode`s the document delete route answers with (`ExternalProjectDataEndpoints`, task 032). */
+/** `reasonCode`s the delete routes answer with (`ExternalProjectDataEndpoints`, tasks 032 and the 2026-10-11 owner decisions). */
 const REASON_DOCUMENT_LOCKED = 'document_locked';
+/** 409 on a service request that has documents, messages or other records: it cannot be deleted, but legal can be asked to recall it. */
+export const REASON_HAS_RELATED_RECORDS = 'has_related_records';
 
 /**
- * Maps a failed delete to what the user sees. `noun` is the row type ("document", "task", "event").
+ * Maps a failed delete to what the user sees. `noun` is the row type ("document", "task", "event", "service request").
  *
  * The messages are the client's own: a server `detail` is not echoed (a 403 is deliberately uniform and a 500 may name
  * internals). Anything not listed gets the generic retry sentence. 401, a failed Teams token acquisition and a token
@@ -102,8 +142,13 @@ export function deleteFailureOf(err: unknown, noun: string): DeleteFailure {
   const message = ((): string => {
     switch (status) {
       case 403:
-        return `You cannot delete this ${noun}: only the person who created it can, and only while they can still see the record it belongs to. Nothing was deleted.`;
+        return noun === 'service request'
+          ? 'Only the person who submitted this request can delete it. Nothing was deleted.'
+          : `You cannot delete this ${noun}: only the person who created it can, and only while they can still see the record it belongs to. Nothing was deleted.`;
       case 409:
+        if (problem.reasonCode === REASON_HAS_RELATED_RECORDS) {
+          return `This ${noun} already has activity (documents, messages or other records), so it can't be deleted. You can ask legal to recall it. Nothing was deleted.`;
+        }
         return problem.reasonCode === REASON_DOCUMENT_LOCKED
           ? 'This document is checked out, so it cannot be deleted right now. Ask for it to be checked back in, then try again. Nothing was deleted.'
           : `This ${noun} could not be deleted because its stored file could not be verified. Nothing was deleted. Try again later, or contact the record team.`;
@@ -115,5 +160,5 @@ export function deleteFailureOf(err: unknown, noun: string): DeleteFailure {
         return `The ${noun} could not be deleted. Check your connection and try again.`;
     }
   })();
-  return { kind: 'error', status, message };
+  return { kind: 'error', status, message, reasonCode: problem.reasonCode };
 }
