@@ -33,8 +33,8 @@ namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
 /// <see cref="DocumentCheckoutService"/>, the internal plane's delete, reused), and <see cref="SpeFileStore.DeleteFileAsync"/>.
 /// The pointer check is the REAL <c>RecordContainerResolver</c> over a
 /// world whose business unit claims every <c>drive-*</c> container.</para>
-/// <para>Service requests have no delete route: task 032 escalated it (the request's related rows, some created by staff,
-/// are only unlinked by Dataverse — <c>CascadeDelete=RemoveLink</c>).</para>
+/// <para>The service request delete (owner decision 2026-10-11, option A, plus recall) is tested in
+/// <c>ExternalDeleteServiceRequestTests</c> on this fixture; this class pins that there are FOUR delete routes.</para>
 /// </remarks>
 [Trait("category", "external-access")]
 public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTests.Fixture>
@@ -426,11 +426,11 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
     }
 
     // =====================================================================
-    // AC 7: no DELETE route for communications (messages), nor for service requests (escalated)
+    // AC 7: no DELETE route for communications (messages); the service request route is the fourth (owner decision 2026-10-11)
     // =====================================================================
 
     [Fact]
-    public void TheExternalPlane_MapsExactlyThreeDeleteRoutes()
+    public void TheExternalPlane_MapsExactlyFourDeleteRoutes()
     {
         var deletes = _fixture.Services.GetRequiredService<EndpointDataSource>().Endpoints
             .OfType<RouteEndpoint>()
@@ -442,14 +442,14 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         deletes.Should().BeEquivalentTo(
             "/api/v1/external/documents/{id:guid}",
             "/api/v1/external/todos/{id:guid}",
-            "/api/v1/external/events/{id:guid}");
+            "/api/v1/external/events/{id:guid}",
+            "/api/v1/external/servicerequests/{id:guid}");
     }
 
     [Theory]
     [InlineData("messages")]
     [InlineData("communications")]
-    [InlineData("servicerequests")]
-    public async Task NoDeleteRoute_ForMessagesOrServiceRequests(string segment)
+    public async Task NoDeleteRoute_ForMessages(string segment)
     {
         _fixture.Principal = ContactOn(RecordA, ExternalAccessLevel.FullAccess);
 
@@ -930,8 +930,20 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
         public Exception? RequesterFault { get; set; }
 
+        /// <summary>Related rows per (entity, service request): what the real probe would find in each relationship.</summary>
+        public ConcurrentDictionary<(string Entity, Guid ServiceRequest), bool> RelatedRows { get; } = new();
+
+        /// <summary>The entity whose relationship probe is unreadable (the real probe throws for it).</summary>
+        public string? UnreadableRelationship { get; set; }
+
+        /// <summary>Every service request id a row delete was sent for (none when the delete is refused).</summary>
+        public ConcurrentQueue<Guid> ServiceRequestDeletes { get; } = new();
+
         public void Reset()
         {
+            RelatedRows.Clear();
+            UnreadableRelationship = null;
+            ServiceRequestDeletes.Clear();
             Targets.Clear();
             Requesters.Clear();
             TargetFault = null;
@@ -952,7 +964,20 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
                 throw new InvalidOperationException("A document must be deleted through DocumentCheckoutService.");
             if (DeleteFault is { } fault)
                 return Task.FromException<bool>(fault);
+            if (kind == DeletableKind.ServiceRequest)
+            {
+                ServiceRequestDeletes.Enqueue(id);
+                return Task.FromResult(Requesters.TryRemove(id, out _));
+            }
             return Task.FromResult(Targets.TryRemove((kind, id), out _));
+        }
+
+        public override Task<bool> HasRelatedRecordsAsync(Guid serviceRequestId, CancellationToken ct = default)
+        {
+            // One probe per relationship, as the real method runs them: an unreadable one makes the answer unknown.
+            if (UnreadableRelationship is { } entity)
+                return Task.FromException<bool>(new DataverseUnavailableException("relationship unreadable: " + entity));
+            return Task.FromResult(ServiceRequestRelations.Any(r => RelatedRows.ContainsKey((r.EntityLogicalName, serviceRequestId))));
         }
 
         public override Task<Guid?> GetServiceRequestRequesterAsync(Guid serviceRequestId, CancellationToken ct = default)

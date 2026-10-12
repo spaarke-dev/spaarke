@@ -391,8 +391,8 @@ public static class ExternalProjectDataEndpoints
         // Read on every parent this plane authorizes (the modelled parent lookups; other lookups on the row are not
         // consulted). One check decides all three (AuthorizeDeleteOwnAsync); no access level
         // and no Dataverse role lets a caller delete someone else's row here. General delete stays a Dataverse role in the
-        // model-driven app. There is no DELETE for messages (owner 2026-10-10: messages are not deletable), and none for
-        // service requests yet (task 032 escalation: what happens to the staff records filed to one is an owner decision).
+        // model-driven app. There is no DELETE for messages (owner 2026-10-10: messages are not deletable). The service
+        // request delete (owner 2026-10-11, option A) is the fourth route below.
         // ---------------------------------------------------------------------------------------
 
         group.MapDelete("/documents/{id:guid}", DeleteOwnDocument)
@@ -419,6 +419,19 @@ public static class ExternalProjectDataEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        // Owner decision 2026-10-11 (task 032 follow-up, FR-26), option A: the REQUESTER may delete a service request that has
+        // no related row at all; any related row (documents, messages, threads, events, to-dos, memos, analyses, signals)
+        // is a 409 has_related_records, and the requester asks legal to recall it by posting on the request's thread
+        // (POST /servicerequests/{id}/messages, task 034). Hard delete.
+        group.MapDelete("/servicerequests/{id:guid}", DeleteOwnServiceRequest)
+            .WithName("DeleteOwnExternalServiceRequest")
+            .WithSummary("Delete a service request the caller requested, while it has no related records (else 409 has_related_records)")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
@@ -1680,9 +1693,71 @@ public static class ExternalProjectDataEndpoints
         return await DeleteAuthorizedRowAsync(ExternalDataService.DeletableKind.Event, id, dataService, logger, ct);
     }
 
+    /// <summary>The 409 reason code when a service request has related records (owner decision 2026-10-11, option A).</summary>
+    internal const string HasRelatedRecordsReasonCode = "has_related_records";
+
     /// <summary>
-    /// The to-do and event row delete, app-only. Call ONLY after <see cref="AuthorizeDeleteOwnAsync"/> returned
-    /// <see langword="null"/>.
+    /// DELETE /api/v1/external/servicerequests/{id} — hard-delete a service request the caller REQUESTED, while NOTHING is
+    /// related to it (owner decision 2026-10-11, option A; FR-26).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>1. Requester only.</b> <c>sprk_requestedby</c> must be the caller's contact: the same requester scope the
+    /// message and document routes use (<see cref="RightsForDocumentParentAsync"/>, the Service Requests module's accessible
+    /// set), so the partner switch (<c>ExternalAccess:PartnerServiceRequestsEnabled</c>) is honoured. Absent, someone
+    /// else's and a no-access caller get the SAME 403 as the other delete routes (<see cref="DeleteOwnDeniedReasonCode"/>);
+    /// an unreadable requester is the existing 503 (<see cref="ServiceRequestUnreadableReasonCode"/>).</para>
+    /// <para><b>2. Option A.</b> If ANY row is related (every 1:N relationship from <c>sprk_servicerequest</c>:
+    /// documents, messages, threads, events, to-dos, memos, analyses, signals - active or not), nothing is deleted and the
+    /// answer is 409 <c>has_related_records</c>: all eight relationships are <c>RemoveLink</c>, so a delete would orphan
+    /// staff records. The relationship probes are app-only; one that cannot be read is a 503 and nothing is deleted.</para>
+    /// <para><b>3. Recall.</b> The 409 tells the user to ask legal to recall it. That request is a plain message posted on
+    /// the request's own thread, <c>POST /api/v1/external/servicerequests/{id}/messages</c> (task 034, requester only, no
+    /// email) - no endpoint or column of its own.</para>
+    /// <para>Known limit: the probe and the delete are separate calls; a related row created between them (for example by
+    /// staff) is unlinked, not deleted.</para>
+    /// </remarks>
+    private static async Task<IResult> DeleteOwnServiceRequest(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        ILogger<Program> logger, CancellationToken ct)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        var (rights, fault) = await RightsForDocumentParentAsync(
+            callerContext, ExternalDataService.DocumentParentKind.ServiceRequest, id, dataService, modules, ct);
+        if (fault is not null)
+            return fault;
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
+        {
+            logger.LogWarning("[EXT-DELETE] Refused ServiceRequest {Id}: absent or not requested by the caller", id);
+            return DenyDeleteOwn();
+        }
+
+        bool hasRelated;
+        try
+        {
+            hasRelated = await dataService.HasRelatedRecordsAsync(id, ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return DeleteOwnUnavailable();
+        }
+
+        if (hasRelated)
+        {
+            logger.LogInformation("[EXT-DELETE] Refused ServiceRequest {Id}: it has related records", id);
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Service request has activity",
+                detail: "This request already has activity (documents, messages or other records), so it can't be deleted. "
+                        + "You can ask legal to recall it by sending a request to recall.",
+                extensions: new Dictionary<string, object?> { ["reasonCode"] = HasRelatedRecordsReasonCode });
+        }
+
+        return await DeleteAuthorizedRowAsync(ExternalDataService.DeletableKind.ServiceRequest, id, dataService, logger, ct);
+    }
+
+    /// <summary>
+    /// The to-do, event and service request row delete, app-only. Call ONLY after <see cref="AuthorizeDeleteOwnAsync"/>
+    /// returned <see langword="null"/> (a service request: after <see cref="DeleteOwnServiceRequest"/>'s own checks).
     /// </summary>
     private static async Task<IResult> DeleteAuthorizedRowAsync(
         ExternalDataService.DeletableKind kind,

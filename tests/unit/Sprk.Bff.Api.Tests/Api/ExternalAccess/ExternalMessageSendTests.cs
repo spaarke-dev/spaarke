@@ -678,6 +678,26 @@ public class ExternalMessageSendTests
         _recordReads.Should().ContainSingle().Which.Select.Should().Equal("sprk_requestedby");
     }
 
+    /// <summary>
+    /// Owner decision 2026-10-11 (service-request delete, option A): a request with activity is not deletable, and the
+    /// requester asks legal to RECALL it. The recall IS this post on the request's own thread - no endpoint or column of
+    /// its own - and, like every external post, sends no email.
+    /// </summary>
+    [Fact]
+    public async Task Recall_TheRequesterPostsARecallRequestOnTheirServiceRequestThread_AndNothingIsEmailed()
+    {
+        var me = Guid.NewGuid();
+        var request = ServiceRequestRequestedBy(me);
+
+        Created(await Post("servicerequests", request, WorkforceContact(contactId: me), "Please recall this request."));
+
+        var row = TheRow();
+        row.GetAttributeValue<EntityReference>("sprk_regardingservicerequest").Id.Should().Be(request);
+        row.GetAttributeValue<EntityReference>("sprk_createdbycontact").Id.Should().Be(me);
+        row.GetAttributeValue<string>("sprk_body").Should().Be("Please recall this request.");
+        ShouldHaveSentNothing();
+    }
+
     [Fact]
     public async Task SomeoneElsesServiceRequest_Is403_AndCreatesNoRow()
     {
