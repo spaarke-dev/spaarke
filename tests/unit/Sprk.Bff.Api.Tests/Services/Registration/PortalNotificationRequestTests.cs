@@ -22,9 +22,10 @@ public class PortalNotificationRequestTests
 
     private static SendCommunicationRequest Build(
         string headline = "You were given access", string message = "Open it.", string link = "https://portal.test/?a=1&b=2",
-        string linkText = "Open the matter", string subject = "Subject", string to = "partner@outside.test", int year = 2026)
+        string linkText = "Open the matter", string subject = "Subject", string to = "partner@outside.test", int year = 2026,
+        string fromMailbox = "mailbox-central@spaarke.com")
         => RegistrationEmailService.BuildPortalNotificationRequest(
-            Template(), to, subject, headline, message, link, linkText, "corr-1", year);
+            Template(), to, subject, headline, message, link, linkText, "corr-1", year, fromMailbox);
 
     [Fact]
     public void TheRequest_IsAddressedToTheRecipient_FromTheSharedMailbox_InSharedMailboxMode()
@@ -32,7 +33,7 @@ public class PortalNotificationRequestTests
         var request = Build();
 
         request.To.Should().Equal("partner@outside.test");
-        request.FromMailbox.Should().Be("demo@demo.spaarke.com");
+        request.FromMailbox.Should().Be("mailbox-central@spaarke.com");
         request.SendMode.Should().Be(SendMode.SharedMailbox, "app-only through the shared mailbox; never the user's mailbox");
         request.BodyFormat.Should().Be(BodyFormat.HTML);
         request.Subject.Should().Be("Subject");
