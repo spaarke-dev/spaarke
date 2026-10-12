@@ -297,20 +297,24 @@ Spaarke.KpiSubgrid._recalculateAndRefresh = function (formContext, entityId) {
         Spaarke.KpiSubgrid._refreshTimer = null;
     }
 
-    var entityPath = Spaarke.KpiSubgrid._entityType === "project" ? "projects" : "matters";
-    var apiUrl = Spaarke.KpiSubgrid._apiBaseUrl + "/api/" + entityPath + "/" + entityId + "/recalculate-grades";
-
-    console.log("[KPI Subgrid] Calling calculator API: POST " + apiUrl);
-
     // Task 030 / FR-17: the endpoint requires an Azure AD bearer token. Acquire it via the shared
     // Spaarke.BffAuth helper (sprk_/scripts/bff_auth.js, registered before this library on the form)
-    // and attach it. If the helper is missing or a token can't be acquired, skip gracefully — an
-    // unauthenticated request would just 401.
-    if (typeof Spaarke.BffAuth === "undefined" || !Spaarke.BffAuth.getToken) {
+    // and attach it. If the helper is missing (or predates normalizeBaseUrl, #1655) or a token can't
+    // be acquired, skip gracefully — an unauthenticated request would just 401.
+    if (typeof Spaarke.BffAuth === "undefined" || !Spaarke.BffAuth.getToken ||
+        typeof Spaarke.BffAuth.normalizeBaseUrl !== "function") {
         console.error("[KPI Subgrid] Spaarke.BffAuth helper not loaded (register sprk_/scripts/bff_auth.js " +
             "before this library on the form). Skipping recalculate call.");
         return;
     }
+
+    // #1655: sprk_BffApiBaseUrl holds "https://host/api" and the route carries its own /api - the shared
+    // helper strips the suffix (no /api/api/...).
+    var entityPath = Spaarke.KpiSubgrid._entityType === "project" ? "projects" : "matters";
+    var apiUrl = Spaarke.BffAuth.normalizeBaseUrl(Spaarke.KpiSubgrid._apiBaseUrl) +
+        "/api/" + entityPath + "/" + entityId + "/recalculate-grades";
+
+    console.log("[KPI Subgrid] Calling calculator API: POST " + apiUrl);
 
     Spaarke.BffAuth.getToken(Spaarke.KpiSubgrid._apiBaseUrl).then(function (token) {
         if (!token) {

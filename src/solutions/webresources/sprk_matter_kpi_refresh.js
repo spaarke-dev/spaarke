@@ -273,19 +273,23 @@ Spaarke.MatterKpi._recalculateAndRefresh = function (formContext, matterId) {
         Spaarke.MatterKpi._refreshTimer = null;
     }
 
-    var apiUrl = Spaarke.MatterKpi._apiBaseUrl + "/api/matters/" + matterId + "/recalculate-grades";
-
-    console.log("[Matter KPI] Calling calculator API: POST " + apiUrl);
-
     // Task 030 / FR-17: the endpoint requires an Azure AD bearer token. Acquire it via the shared
     // Spaarke.BffAuth helper (sprk_/scripts/bff_auth.js, registered before this library on the form)
-    // and attach it. If the helper is missing or a token can't be acquired, skip gracefully — an
-    // unauthenticated request would just 401.
-    if (typeof Spaarke.BffAuth === "undefined" || !Spaarke.BffAuth.getToken) {
+    // and attach it. If the helper is missing (or predates normalizeBaseUrl, #1655) or a token can't
+    // be acquired, skip gracefully — an unauthenticated request would just 401.
+    if (typeof Spaarke.BffAuth === "undefined" || !Spaarke.BffAuth.getToken ||
+        typeof Spaarke.BffAuth.normalizeBaseUrl !== "function") {
         console.error("[Matter KPI] Spaarke.BffAuth helper not loaded (register sprk_/scripts/bff_auth.js " +
             "before this library on the form). Skipping recalculate call.");
         return;
     }
+
+    // #1655: sprk_BffApiBaseUrl holds "https://host/api" and the route carries its own /api - the shared
+    // helper strips the suffix (no /api/api/...).
+    var apiUrl = Spaarke.BffAuth.normalizeBaseUrl(Spaarke.MatterKpi._apiBaseUrl) +
+        "/api/matters/" + matterId + "/recalculate-grades";
+
+    console.log("[Matter KPI] Calling calculator API: POST " + apiUrl);
 
     Spaarke.BffAuth.getToken(Spaarke.MatterKpi._apiBaseUrl).then(function (token) {
         if (!token) {

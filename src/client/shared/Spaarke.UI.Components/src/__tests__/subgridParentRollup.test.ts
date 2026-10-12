@@ -6,7 +6,9 @@
  *  - a subgrid row-count change POSTs the recalculate route through Spaarke.BffAuth.authenticatedFetch, then refreshes;
  *  - no token (a null Response) -> no refresh, nothing thrown;
  *  - Spaarke.BffAuth not registered on the form -> no call, an error logged, nothing thrown;
- *  - the script carries no MSAL code of its own (no CDN load, no PublicClientApplication, no display-name hint).
+ *  - the script carries no MSAL code of its own (no CDN load, no PublicClientApplication, no display-name hint);
+ *  - sprk_BffApiBaseUrl as configured in dev ("https://host/api") gives ONE /api in the URL, via the helper's
+ *    normalizeBaseUrl (no /api/api/...); a bff_auth.js without normalizeBaseUrl is treated as not loaded.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -18,6 +20,13 @@ const SOLUTION_COPY = path.resolve(
 );
 const BFF = 'https://bff.example.test';
 const MATTER_ID = '1b4e28ba-2fa1-11d2-883f-0016d3cca427';
+/** The helper's rule (@spaarke/auth normalizeBffBaseUrl): drop trailing slashes, then one trailing /api. */
+const normalizeBaseUrl = (raw: string): string =>
+  String(raw ?? '')
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api$/i, '');
+let envValue = BFF;
 
 type Win = typeof window & { Spaarke?: any; Xrm?: any };
 const win = window as Win;
@@ -39,7 +48,7 @@ function installXrm(): void {
     WebApi: {
       retrieveMultipleRecords: jest.fn(async (entity: string) => {
         if (entity === 'environmentvariabledefinition') {
-          return { entities: [{ environmentvariabledefinitionid: 'def-1', defaultvalue: BFF }] };
+          return { entities: [{ environmentvariabledefinitionid: 'def-1', defaultvalue: envValue }] };
         }
         return { entities: [] };
       }),
@@ -90,10 +99,11 @@ beforeEach(() => {
     win.Spaarke.SubgridRollup = undefined;
     win.Spaarke.BffAuth = undefined;
   }
+  envValue = BFF;
   inject();
   installXrm();
   authenticatedFetch = jest.fn(async () => ({ ok: true, status: 200 }));
-  win.Spaarke.BffAuth = { authenticatedFetch, getToken: jest.fn() };
+  win.Spaarke.BffAuth = { authenticatedFetch, getToken: jest.fn(), normalizeBaseUrl: jest.fn(normalizeBaseUrl) };
   fetchSpy = jest.fn();
   (global as any).fetch = fetchSpy;
   jest.spyOn(console, 'log').mockImplementation(() => {});
@@ -106,6 +116,7 @@ afterEach(() => {
 });
 
 async function loadAndChangeRows() {
+  installXrm(); // picks up envValue
   const form = makeForm();
   win.Spaarke.SubgridRollup.onLoad({ getFormContext: () => form }, CONFIG);
   await flush();
@@ -146,6 +157,31 @@ describe('sprk_subgrid_parent_rollup.js 3.0.0 (#1655)', () => {
     const form = await loadAndChangeRows();
 
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(form.refresh).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Spaarke.BffAuth is not loaded'));
+  });
+
+  it.each([`${BFF}/api`, `${BFF}/api/`, `${BFF}/API`, `${BFF}/`])(
+    'sprk_BffApiBaseUrl = %s: one /api in the URL (no /api/api/...)',
+    async value => {
+      envValue = value;
+
+      await loadAndChangeRows();
+
+      expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+      const [url, , baseUrl] = authenticatedFetch.mock.calls[0];
+      expect(url).toBe(`${BFF}/api/finance/matters/${MATTER_ID.toUpperCase()}/recalculate`);
+      expect(url).not.toMatch(/\/api\/api\//i);
+      expect(baseUrl).toBe(value); // the helper resolves the BFF origin itself
+    }
+  );
+
+  it('treats a bff_auth.js without normalizeBaseUrl (pre-#1655) as not loaded: no call', async () => {
+    win.Spaarke.BffAuth = { authenticatedFetch, getToken: jest.fn() };
+
+    const form = await loadAndChangeRows();
+
+    expect(authenticatedFetch).not.toHaveBeenCalled();
     expect(form.refresh).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining('Spaarke.BffAuth is not loaded'));
   });

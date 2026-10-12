@@ -19,6 +19,13 @@
  *   Library: sprk_/scripts/kpi_subgrid_refresh.js
  *   Function: Spaarke.KpiSubgrid.onLoad
  *   Pass execution context: Yes
+ *
+ * AUTH (task 030 / spec FR-17): the BFF recalculate-grades endpoint requires an Azure AD bearer
+ * token (@spaarke/auth, ADR-028). This caller acquires it via the shared `Spaarke.BffAuth` helper
+ * (sprk_/scripts/bff_auth.js). That library MUST be registered on BOTH the Matter and Project main
+ * forms and ORDERED BEFORE this one. If it is not loaded, the recalculate call is skipped gracefully
+ * (the form never breaks). ⚠ Silent-SSO cannot be validated offline — needs a live signed-in
+ * Dataverse session + the BFF app-reg SPA-redirect + user_impersonation consent prereqs.
  */
 
 /* eslint-disable no-undef */
@@ -74,7 +81,7 @@ Spaarke.KpiSubgrid._refreshTimer = null;
 /**
  * Version for console logging.
  */
-Spaarke.KpiSubgrid._version = "1.1.0";
+Spaarke.KpiSubgrid._version = "2.0.0"; // 2.0.0 — @spaarke/auth Bearer via shared Spaarke.BffAuth (task 030 / FR-17)
 
 // =============================================================================
 // ENVIRONMENT VARIABLE RESOLUTION
@@ -290,32 +297,54 @@ Spaarke.KpiSubgrid._recalculateAndRefresh = function (formContext, entityId) {
         Spaarke.KpiSubgrid._refreshTimer = null;
     }
 
+    // Task 030 / FR-17: the endpoint requires an Azure AD bearer token. Acquire it via the shared
+    // Spaarke.BffAuth helper (sprk_/scripts/bff_auth.js, registered before this library on the form)
+    // and attach it. If the helper is missing (or predates normalizeBaseUrl, #1655) or a token can't
+    // be acquired, skip gracefully — an unauthenticated request would just 401.
+    if (typeof Spaarke.BffAuth === "undefined" || !Spaarke.BffAuth.getToken ||
+        typeof Spaarke.BffAuth.normalizeBaseUrl !== "function") {
+        console.error("[KPI Subgrid] Spaarke.BffAuth helper not loaded (register sprk_/scripts/bff_auth.js " +
+            "before this library on the form). Skipping recalculate call.");
+        return;
+    }
+
+    // #1655: sprk_BffApiBaseUrl holds "https://host/api" and the route carries its own /api - the shared
+    // helper strips the suffix (no /api/api/...).
     var entityPath = Spaarke.KpiSubgrid._entityType === "project" ? "projects" : "matters";
-    var apiUrl = Spaarke.KpiSubgrid._apiBaseUrl + "/api/" + entityPath + "/" + entityId + "/recalculate-grades";
+    var apiUrl = Spaarke.BffAuth.normalizeBaseUrl(Spaarke.KpiSubgrid._apiBaseUrl) +
+        "/api/" + entityPath + "/" + entityId + "/recalculate-grades";
 
     console.log("[KPI Subgrid] Calling calculator API: POST " + apiUrl);
 
-    fetch(apiUrl, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
+    Spaarke.BffAuth.getToken(Spaarke.KpiSubgrid._apiBaseUrl).then(function (token) {
+        if (!token) {
+            console.warn("[KPI Subgrid] No BFF token acquired; skipping recalculate call.");
+            return;
         }
-    }).then(function (response) {
-        if (response.ok) {
-            console.log("[KPI Subgrid] Calculator API succeeded. Refreshing form in " +
-                Spaarke.KpiSubgrid._refreshDelayMs + "ms...");
 
-            // Wait for Dataverse to commit, then refresh form data
-            Spaarke.KpiSubgrid._refreshTimer = setTimeout(function () {
-                Spaarke.KpiSubgrid._refreshTimer = null;
-                Spaarke.KpiSubgrid._refreshFormData(formContext);
-            }, Spaarke.KpiSubgrid._refreshDelayMs);
-        } else {
-            console.warn("[KPI Subgrid] Calculator API returned " + response.status);
-        }
-    }).catch(function (error) {
-        console.warn("[KPI Subgrid] Calculator API call failed:", error);
+        fetch(apiUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Authorization": "Bearer " + token
+            }
+        }).then(function (response) {
+            if (response.ok) {
+                console.log("[KPI Subgrid] Calculator API succeeded. Refreshing form in " +
+                    Spaarke.KpiSubgrid._refreshDelayMs + "ms...");
+
+                // Wait for Dataverse to commit, then refresh form data
+                Spaarke.KpiSubgrid._refreshTimer = setTimeout(function () {
+                    Spaarke.KpiSubgrid._refreshTimer = null;
+                    Spaarke.KpiSubgrid._refreshFormData(formContext);
+                }, Spaarke.KpiSubgrid._refreshDelayMs);
+            } else {
+                console.warn("[KPI Subgrid] Calculator API returned " + response.status);
+            }
+        }).catch(function (error) {
+            console.warn("[KPI Subgrid] Calculator API call failed:", error);
+        });
     });
 };
 

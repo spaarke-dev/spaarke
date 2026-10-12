@@ -268,22 +268,27 @@ Spaarke.KpiAssessment._getParentInfo = function (formContext) {
  * @returns {Promise<void>} Resolves when API call completes (success or failure)
  */
 Spaarke.KpiAssessment._callCalculatorApi = async function (entityType, entityId) {
-    var apiUrl = Spaarke.KpiAssessment.Config.apiBaseUrl +
-        Spaarke.KpiAssessment.Config.recalculateGradesEndpoint(entityType, entityId);
     var maxAttempts = Spaarke.KpiAssessment.Config.maxRetryAttempts;
     var baseDelay = Spaarke.KpiAssessment.Config.retryBaseDelay;
 
-    console.log("[KPI Assessment] Calling calculator API: POST " + apiUrl);
-
     // Task 030 / FR-17: acquire an Azure AD bearer token via the shared Spaarke.BffAuth helper
     // (sprk_/scripts/bff_auth.js, registered before this library on the form). Acquire once, up
-    // front, then reuse across retry attempts. If the helper is missing or no token is available,
-    // skip gracefully — the record is already saved and an unauthenticated request would just 401.
-    if (typeof Spaarke.BffAuth === "undefined" || !Spaarke.BffAuth.getToken) {
+    // front, then reuse across retry attempts. If the helper is missing (or predates normalizeBaseUrl,
+    // #1655) or no token is available, skip gracefully — the record is already saved and an
+    // unauthenticated request would just 401.
+    if (typeof Spaarke.BffAuth === "undefined" || !Spaarke.BffAuth.getToken ||
+        typeof Spaarke.BffAuth.normalizeBaseUrl !== "function") {
         console.error("[KPI Assessment] Spaarke.BffAuth helper not loaded (register sprk_/scripts/bff_auth.js " +
             "before this library on the form). Skipping recalculate call.");
         return;
     }
+
+    // #1655: sprk_BffApiBaseUrl holds "https://host/api" and the endpoint path carries its own /api - the
+    // shared helper strips the suffix (no /api/api/...).
+    var apiUrl = Spaarke.BffAuth.normalizeBaseUrl(Spaarke.KpiAssessment.Config.apiBaseUrl) +
+        Spaarke.KpiAssessment.Config.recalculateGradesEndpoint(entityType, entityId);
+
+    console.log("[KPI Assessment] Calling calculator API: POST " + apiUrl);
 
     var bffToken = await Spaarke.BffAuth.getToken(Spaarke.KpiAssessment.Config.apiBaseUrl);
     if (!bffToken) {

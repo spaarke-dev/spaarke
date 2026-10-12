@@ -33,6 +33,10 @@ const OTHER_TENANT = '99999999-8888-7777-6666-555555555555';
 const UI_CLIENT_ID = 'aaaaaaaa-0000-0000-0000-00000000c11e'; // sprk_MsalClientId — the PCFs' client
 const BFF_APP_ID = 'bbbbbbbb-0000-0000-0000-000000000bff'; // sprk_BffApiAppId (also the BFF's AzureAd:ClientId)
 const DISPLAY_NAME = 'Test User One';
+const OID_A = 'a0000000-0000-0000-0000-00000000000a';
+const OID_B = 'b0000000-0000-0000-0000-00000000000b'; // the signed-in Dataverse user (systemuser.azureactivedirectoryobjectid)
+const OID_B_HOME = 'c0000000-0000-0000-0000-00000000000c';
+const SYSTEMUSER_ID = '5c6b1d2e-0000-0000-0000-000000000001';
 
 type Win = typeof window & { Spaarke?: any; Xrm?: any; msal?: any };
 const win = window as Win;
@@ -45,24 +49,31 @@ function jwt(claims: Record<string, unknown>): string {
 const USER_B = {
   homeAccountId: `oid-b.${TENANT}`,
   tenantId: TENANT,
+  localAccountId: OID_B,
+  idTokenClaims: { oid: OID_B },
   username: 'userb@spaarke.test',
   name: 'User B',
 };
 const USER_A = {
   homeAccountId: `oid-a.${TENANT}`,
   tenantId: TENANT,
+  localAccountId: OID_A,
+  idTokenClaims: { oid: OID_A },
   username: 'usera@spaarke.test',
   name: 'User A',
 };
 const GUEST_HOME = {
   homeAccountId: `oid-b.${OTHER_TENANT}`,
   tenantId: OTHER_TENANT,
+  localAccountId: OID_B_HOME,
+  idTokenClaims: { oid: OID_B_HOME },
   username: 'userb@home.test',
   name: 'User B (home)',
 };
-const TOKEN_A = jwt({ oid: 'oid-a', tid: TENANT });
-const TOKEN_B = jwt({ oid: 'oid-b', tid: TENANT });
-const TOKEN_SSO = jwt({ oid: 'oid-session', tid: TENANT });
+const TOKEN_A = jwt({ oid: OID_A, tid: TENANT });
+const TOKEN_B = jwt({ oid: OID_B, tid: TENANT });
+/** What the browser's Entra session (user B's) answers to a no-hint ssoSilent. */
+const TOKEN_SSO = jwt({ oid: OID_B, tid: TENANT, sid: 'session' });
 
 function result(accessToken: string, account: unknown) {
   return { accessToken, account, expiresOn: new Date(Date.now() + 3600_000) };
@@ -114,9 +125,12 @@ const ENV_VARS: Record<string, string> = {
 
 let fetchMock: jest.Mock;
 let bffAnswer: { body: unknown; status: number };
+/** What Dataverse answers for the signed-in user's systemuser row (#1656); a number is an HTTP failure. */
+let systemUserAnswer: { azureactivedirectoryobjectid: string } | number;
 
 function installFetch(): void {
   bffAnswer = { body: { ok: true }, status: 200 };
+  systemUserAnswer = { azureactivedirectoryobjectid: OID_B };
   fetchMock = jest.fn(async (url: string) => {
     if (url.includes('/api/data/v9.2/environmentvariabledefinitions')) {
       return response({
@@ -126,6 +140,9 @@ function installFetch(): void {
           defaultvalue: ENV_VARS[name],
         })),
       });
+    }
+    if (url.startsWith(`${ORG}/api/data/v9.2/systemusers(${SYSTEMUSER_ID})`)) {
+      return typeof systemUserAnswer === 'number' ? response({}, systemUserAnswer) : response(systemUserAnswer);
     }
     if (url.includes('/api/data/v9.2/environmentvariablevalues')) {
       return response({ value: [] });
@@ -221,6 +238,7 @@ beforeEach(() => {
   });
   try {
     localStorage.clear();
+    sessionStorage.clear();
   } catch {
     /* jsdom */
   }
@@ -269,7 +287,7 @@ describe.each(IMPLS)('Spaarke.BffAuth — $name', impl => {
   });
 
   describe('root cause 2: which cached account is used (security)', () => {
-    it("never uses another user's account cached first; with two candidates it guesses none and ssoSilent runs with no hint", async () => {
+    it("never uses another user's account cached first; with two cached it uses the signed-in Dataverse user's (#1656)", async () => {
       mockMsal.getAllAccounts.mockReturnValue([USER_A, USER_B]);
       const api = impl.load();
 
@@ -279,9 +297,8 @@ describe.each(IMPLS)('Spaarke.BffAuth — $name', impl => {
       expect(token).not.toBe(TOKEN_A);
       for (const req of ssoRequests()) {
         expect(req.loginHint).not.toBe(USER_A.username);
-        expect(req.loginHint).toBeUndefined();
       }
-      expect(token).toBe(TOKEN_SSO);
+      expect(token).toBe(TOKEN_B);
     });
 
     it("uses the signed-in user's tenant account, not a home-tenant account cached ahead of it", async () => {
@@ -304,6 +321,60 @@ describe.each(IMPLS)('Spaarke.BffAuth — $name', impl => {
       expect(bffCalls()).toHaveLength(1);
       const sent = bffCalls()[0][1] as { headers: Record<string, string> };
       expect(sent.headers['Authorization']).not.toBe('Bearer ' + TOKEN_A);
+    });
+  });
+
+  describe('#1656: a shared workstation (A signed out, B is the signed-in Dataverse user)', () => {
+    it("only A's account cached: acquireTokenSilent is never called with it, and ssoSilent runs with NO hint", async () => {
+      mockMsal.getAllAccounts.mockReturnValue([USER_A]);
+      const api = impl.load();
+
+      const token = await api.getToken(BFF);
+
+      expect(silentAccounts()).not.toContainEqual(USER_A);
+      expect(ssoRequests().length).toBeGreaterThan(0);
+      for (const req of ssoRequests()) expect(req.loginHint).toBeUndefined();
+      expect(token).toBe(TOKEN_SSO);
+    });
+
+    it("only A's account cached: the Access ribbon's call never carries A's token", async () => {
+      mockMsal.getAllAccounts.mockReturnValue([USER_A]);
+      const api = impl.load();
+
+      await api.authenticatedFetch(`{BFF}/api/v1/access/unshare`, { method: 'POST', body: '{}' }, BFF);
+
+      for (const call of bffCalls()) {
+        expect((call[1] as { headers: Record<string, string> }).headers['Authorization']).not.toBe('Bearer ' + TOKEN_A);
+      }
+    });
+
+    it("a no-hint ssoSilent answered by A's Entra session: A's token is discarded and the result is null", async () => {
+      mockMsal.ssoSilent.mockImplementation(async () => result(TOKEN_A, USER_A));
+      const api = impl.load();
+
+      await expect(api.getToken(BFF)).resolves.toBeNull();
+    });
+
+    it("only B's account cached and it matches the Dataverse user: used silently, with no extra ssoSilent iframe", async () => {
+      mockMsal.getAllAccounts.mockReturnValue([USER_B]);
+      const api = impl.load();
+
+      const token = await api.getToken(BFF);
+
+      expect(silentAccounts()).toEqual([USER_B]);
+      expect(mockMsal.ssoSilent).not.toHaveBeenCalled();
+      expect(token).toBe(TOKEN_B);
+    });
+
+    it('the systemuser read fails: no cached account is used (fails closed to a no-hint ssoSilent)', async () => {
+      systemUserAnswer = 503;
+      mockMsal.getAllAccounts.mockReturnValue([USER_B]);
+      const api = impl.load();
+
+      await api.getToken(BFF);
+
+      expect(mockMsal.acquireTokenSilent).not.toHaveBeenCalled();
+      for (const req of ssoRequests()) expect(req.loginHint).toBeUndefined();
     });
   });
 
@@ -340,6 +411,58 @@ describe.each(IMPLS)('Spaarke.BffAuth — $name', impl => {
 });
 
 describe('Spaarke.BffAuth — the caller contract and MSAL config (#1655 wrapper)', () => {
+  describe('the token goes only to the BFF origin', () => {
+    it.each([
+      ['another host', 'https://evil.example.test/api/v1/records/sprk_matter/x/no-access'],
+      ['the BFF host over http', 'http://bff.example.test/api/v1/x'],
+      ['a BFF look-alike host', 'https://bff.example.test.evil.example/api/v1/x'],
+      ['a page-relative URL (the Dataverse origin)', '/api/data/v9.2/accounts'],
+    ])('%s: null, no request, no token acquired', async (_label, url) => {
+      mockMsal.getAllAccounts.mockReturnValue([USER_B]);
+      const api = LIBRARY.load();
+
+      const res = await api.authenticatedFetch(url, { method: 'POST', body: '{}' }, BFF);
+
+      expect(res).toBeNull();
+      expect(fetchMock.mock.calls.filter(c => (c[1] as any)?.headers?.Authorization)).toHaveLength(0);
+      expect(fetchMock.mock.calls.map(c => String(c[0]))).not.toContain(url);
+    });
+
+    it('the BFF origin (any path, with or without /api in the base URL handed in): sent with the token', async () => {
+      mockMsal.getAllAccounts.mockReturnValue([USER_B]);
+      const api = LIBRARY.load();
+
+      const a = await api.authenticatedFetch(`${BFF}/api/v1/records/sprk_matter/x/no-access`, {}, `${BFF}/api`);
+      const b = await api.authenticatedFetch(`${BFF}/api/finance/matters/x/recalculate`, { method: 'POST' }, BFF);
+
+      expect(a.status).toBe(200);
+      expect(b.status).toBe(200);
+      expect(fetchMock.mock.calls.filter(c => (c[1] as any)?.headers?.Authorization)).toHaveLength(2);
+    });
+  });
+
+  it('normalizeBaseUrl strips a trailing slash and a trailing /api (the sprk_BffApiBaseUrl shape)', () => {
+    const api = LIBRARY.load();
+    expect(api.normalizeBaseUrl('https://spaarke-bff-dev.azurewebsites.net/api')).toBe(
+      'https://spaarke-bff-dev.azurewebsites.net'
+    );
+    expect(api.normalizeBaseUrl(' https://host.test/API/ ')).toBe('https://host.test');
+    expect(api.normalizeBaseUrl('https://host.test')).toBe('https://host.test');
+  });
+
+  it('with no session, the first call runs the silent chain ONCE (not again after the eager acquisition)', async () => {
+    const interactionRequired = Object.assign(new Error('login_required'), { errorCode: 'login_required' });
+    mockMsal.ssoSilent.mockRejectedValue(interactionRequired);
+    const api = LIBRARY.load();
+
+    await expect(api.getToken(BFF)).resolves.toBeNull();
+    expect(mockMsal.ssoSilent).toHaveBeenCalledTimes(1);
+
+    // A later call (e.g. a ribbon click after the user signed in elsewhere) does try again.
+    await api.getToken(BFF);
+    expect(mockMsal.ssoSilent).toHaveBeenCalledTimes(2);
+  });
+
   it('attaches the Bearer token, keeps method/body/headers/signal, and returns a non-OK Response as-is', async () => {
     mockMsal.getAllAccounts.mockReturnValue([USER_B]);
     bffAnswer = { body: { title: 'Forbidden', status: 403, detail: 'nope', reasonCode: 'sdap.x' }, status: 403 };

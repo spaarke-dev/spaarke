@@ -131,10 +131,11 @@ Spaarke.SubgridRollup._getApiBaseUrl = function () {
 // sprk_/scripts/bff_auth.js (the Matter main form does). If it is missing, the recalculate call is
 // skipped and an error is logged; the form never breaks.
 
-/** True when the shared sign-in helper is loaded on this form. */
+/** True when the shared sign-in helper (with normalizeBaseUrl, #1655) is loaded on this form. */
 Spaarke.SubgridRollup._bffAuthLoaded = function () {
     return typeof Spaarke.BffAuth !== "undefined" && Spaarke.BffAuth !== null &&
-        typeof Spaarke.BffAuth.authenticatedFetch === "function";
+        typeof Spaarke.BffAuth.authenticatedFetch === "function" &&
+        typeof Spaarke.BffAuth.normalizeBaseUrl === "function";
 };
 
 // =============================================================================
@@ -292,14 +293,6 @@ Spaarke.SubgridRollup._callApiAndRefresh = function (formContext, key, entityId)
         inst.refreshTimer = null;
     }
 
-    // Build API URL from template
-    var apiUrl = inst.apiBaseUrl +
-        inst.config.apiPathTemplate
-            .replace("{entityPath}", inst.entityPath)
-            .replace("{entityId}", entityId);
-
-    console.log("[SubgridRollup:" + key + "] POST " + apiUrl);
-
     // Task 023 / FR-09, #1655: the call goes through the shared Spaarke.BffAuth helper (@spaarke/auth).
     // No token -> it resolves null WITHOUT sending the request, and the recalculate is skipped (the
     // endpoint requires auth; an unauthenticated request would just 401).
@@ -308,6 +301,15 @@ Spaarke.SubgridRollup._callApiAndRefresh = function (formContext, key, entityId)
             "sprk_/scripts/bff_auth.js on this form); skipping recalculate call.");
         return;
     }
+
+    // Build API URL from template. #1655: sprk_BffApiBaseUrl holds "https://host/api" and the template
+    // carries its own /api - the shared helper strips the suffix (no /api/api/...).
+    var apiUrl = Spaarke.BffAuth.normalizeBaseUrl(inst.apiBaseUrl) +
+        inst.config.apiPathTemplate
+            .replace("{entityPath}", inst.entityPath)
+            .replace("{entityId}", entityId);
+
+    console.log("[SubgridRollup:" + key + "] POST " + apiUrl);
 
     Spaarke.BffAuth.authenticatedFetch(apiUrl, {
         method: "POST",
