@@ -1344,6 +1344,7 @@ public partial class SignalReevaluationJobTests
         public SignalEvaluator Evaluator { get; }
         public SignalReevaluationJob Job { get; }
         public SignalClosureService Closure { get; }
+        public SignalSuppressionService Suppression { get; }
 
         public Harness(DateTimeOffset? runAt = null, string? writerClientId = null)
         {
@@ -1365,7 +1366,8 @@ public partial class SignalReevaluationJobTests
             var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, Clock), Logger<PolicyVersionValidator>());
             Evaluator = new SignalEvaluator(validator, Sysadmin, Writer, Logger<SignalEvaluator>());
             Closure = new SignalClosureService(Writer, Sysadmin, Clock, Logger<SignalClosureService>());
-            Job = new SignalReevaluationJob(Evaluator, Writer, Closure, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
+            Suppression = new SignalSuppressionService(Sysadmin, writerClient, Clock, Logger<SignalSuppressionService>());
+            Job = new SignalReevaluationJob(Evaluator, Writer, Suppression, Closure, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
             Sysadmin.Stub(new Entity("sprk_matter", MatterId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
             Sysadmin.Stub(new Entity("sprk_project", ProjectId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
         }
