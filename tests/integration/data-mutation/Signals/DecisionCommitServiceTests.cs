@@ -617,23 +617,6 @@ public sealed class DecisionCommitServiceTests
     }
 
     [Fact]
-    public async Task WhenTheLedgerHasForgotten_TheRecordItselfAnswersTheRepeat()
-    {
-        var rig = new Rig();
-        rig.ExistingRecords.Add(new Entity("sprk_decisionrecord", RecordId));
-
-        var result = await rig.CommitAsync(PathBReview());
-
-        result.Status.Should().Be(DecisionCommitStatus.Recorded);
-        result.Replayed.Should().BeTrue();
-        result.DecisionRecordId.Should().Be(RecordId);
-        rig.Log.Should().NotContain(l => l.StartsWith("execute:", StringComparison.Ordinal) || l.StartsWith("record:", StringComparison.Ordinal),
-            "nothing is run or recorded again");
-        rig.LinkedRecord(Primary).Should().Be(RecordId, "a Signal the first run never closed is closed with the record found");
-        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionActed);
-    }
-
-    [Fact]
     public async Task TheRecordLookup_IsByThisCallerAndThisReviewIdInSprkSteps()
     {
         var rig = new Rig();
@@ -1475,6 +1458,365 @@ public sealed class DecisionCommitServiceTests
         var update = rig.SignalUpdates.Single(u => u.Id == Primary).Fields;
         update["sprk_lastevaluated"].Should().Be(update["sprk_resolvedon"], "D-120: never a lastevaluated later than resolvedon");
         rig.Signals[Primary].GetAttributeValue<DateTime>("sprk_lastevaluated").Should().Be(rig.Signals[Primary].GetAttributeValue<DateTime>("sprk_resolvedon"));
+    }
+
+    // ── Second review (deb4bbbc6) and uac-r2's review of #1665 ─────────────────────────────────────────────────
+
+    private static readonly Guid Third = Guid.Parse("c0430000-0000-4000-8000-000000000034");
+
+    private static Task ForgetLedger(Rig rig, DecisionReview review) =>
+        rig.Ledger.RemoveAsync(Tenant, DecisionCommitService.LedgerResource, $"{CallerOid:D}:{review.ReviewId:D}", DecisionCommitService.LedgerVersion);
+
+    /// <summary>The ledger forgets the outcome (7-day TTL or eviction); the record written by the first run is what the lookup finds.</summary>
+    private static async Task LedgerForgetsButTheRecordStays(Rig rig, DecisionReview review)
+    {
+        var written = rig.Records.Single();
+        written.Id = RecordId;
+        rig.ExistingRecords.Add(written);
+        await ForgetLedger(rig, review);
+    }
+
+    /// <summary>The first run's close fails once (after the record), so the Signal is still open and a repeat has a close to finish.</summary>
+    private static void FirstCloseFails(Rig rig) =>
+        rig.BeforeSignalUpdate = _ =>
+        {
+            rig.BeforeSignalUpdate = null;
+            throw new TimeoutException("no answer");
+        };
+
+    [Fact]
+    public async Task F1_AStoredRecordFoundByItsReviewId_NeverClosesOtherSignals_UnderIt()
+    {
+        var rig = new Rig();
+        rig.AddSignal(Second, DecisionLane.Decide, Matter, PathB);
+        rig.AddSignal(Third, DecisionLane.Decide, Matter, PathB);
+        var review = PathBReview(inquiry: false, todo: false);
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        await LedgerForgetsButTheRecordStays(rig, review);
+        var closes = rig.SignalUpdates.Count;
+
+        // Days later: the same review id on ANOTHER item, also resolving a third, all items the caller can only read.
+        var reused = await rig.CommitAsync(review with { AlsoResolve = [Third] }, Second);
+
+        reused.Status.Should().Be(DecisionCommitStatus.Refused);
+        reused.ReasonCode.Should().Be(DecisionCommitReasons.ReviewChanged);
+        rig.SignalUpdates.Should().HaveCount(closes, "nothing is closed under another review's record");
+        rig.Status(Second).Should().Be(Open);
+        rig.Status(Third).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task F1_AStoredRecordForTheSameSignals_ButADifferentReview_OrWithoutAStoredHash_ClosesNothing()
+    {
+        var rig = new Rig();
+        FirstCloseFails(rig);
+        var review = PathBReview(inquiry: false, todo: false);
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        await LedgerForgetsButTheRecordStays(rig, review);
+        Steps(rig.ExistingRecords.Single()).GetProperty("reviewHash").GetString().Should().Be(DecisionCommitService.ContentHash(Primary, review),
+            "the record stores the review's content hash");
+
+        var changed = await rig.CommitAsync(review with { Because = "something else" });
+        changed.ReasonCode.Should().Be(DecisionCommitReasons.ReviewChanged);
+
+        var steps = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(rig.ExistingRecords.Single().GetAttributeValue<string>("sprk_steps"))!;
+        steps.Remove("reviewHash");
+        rig.ExistingRecords.Single()["sprk_steps"] = JsonSerializer.Serialize(steps);
+        var unproven = await rig.CommitAsync(review);
+        unproven.ReasonCode.Should().Be(DecisionCommitReasons.ReviewChanged, "a record that cannot prove it is this review answers nothing");
+
+        rig.Status(Primary).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task WhenTheLedgerHasForgotten_TheRecordItselfAnswersTheRepeat()
+    {
+        var rig = new Rig();
+        FirstCloseFails(rig);
+        var review = PathBReview(inquiry: false, todo: false);
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.Status(Primary).Should().Be(Open);
+        await LedgerForgetsButTheRecordStays(rig, review);
+        var executes = rig.Log.Count(l => l.StartsWith("execute:", StringComparison.Ordinal));
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        result.Replayed.Should().BeTrue();
+        result.DecisionRecordId.Should().Be(RecordId);
+        rig.Log.Count(l => l.StartsWith("execute:", StringComparison.Ordinal)).Should().Be(executes, "nothing is run again");
+        rig.Records.Should().ContainSingle("nothing is recorded again");
+        rig.LinkedRecord(Primary).Should().Be(RecordId, "a Signal the first run never closed is closed with the record found");
+        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionActed, "the record's resolution: it recorded a revision");
+    }
+
+    [Fact]
+    public async Task F1_AStoredRecordRepeat_AsksFr51Again_AndARevokedRightClosesNothing()
+    {
+        var rig = new Rig();
+        FirstCloseFails(rig);
+        var review = PathBReview(inquiry: false, todo: false);
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        await LedgerForgetsButTheRecordStays(rig, review);
+        rig.Rights[("sprk_matters", Matter)] = AccessRights.Read;
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.Forbidden);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.NotAuthorized);
+        rig.Status(Primary).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task K6_AStoredRecordRepeatThatDismisses_AppliesSuppression()
+    {
+        var rig = new Rig();
+        FirstCloseFails(rig);
+        var review = Dismissal("not-material");
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        await LedgerForgetsButTheRecordStays(rig, review);
+        var handed = rig.DismissedHandedOn.Count;
+
+        var result = await rig.CommitAsync(review);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionDismissed, "the record's resolution: it recorded a dismissal");
+        rig.Signals[Primary].GetAttributeValue<string>("sprk_resolutionnotes").Should().StartWith("not-material", "the record's own reason");
+        rig.DismissedHandedOn.Should().HaveCount(handed + 1);
+        rig.DismissedHandedOn[^1].Select(r => r.Id).Should().Equal(Primary);
+    }
+
+    [Fact]
+    public async Task K6_ARecordedReplayThatDismisses_AppliesSuppression()
+    {
+        var rig = new Rig();
+        FirstCloseFails(rig);
+        var review = Dismissal("not-material");
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        var handed = rig.DismissedHandedOn.Count;
+
+        var replay = await rig.CommitAsync(review);
+
+        replay.Replayed.Should().BeTrue();
+        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionDismissed);
+        rig.DismissedHandedOn.Should().HaveCount(handed + 1);
+        rig.DismissedHandedOn[^1].Select(r => r.Id).Should().Equal(Primary);
+    }
+
+    [Fact]
+    public async Task F4_ARevisionThatLanded_BeforeTheRecordCreateFaulted_StillQueuesItsTrigger()
+    {
+        var rig = new Rig { FailRecordWith = new TimeoutException("no answer") };
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Failed);
+        result.FailedStep.Should().Be(5);
+        rig.FailedHandedOn.Should().ContainSingle()
+            .Which.Should().Contain(s => s.Code == "revise-budget" && s.Written.Any(w => w.Entity == "sprk_budgetrevision" && w.Id == RevisionId));
+    }
+
+    [Fact]
+    public async Task F4_AFaultAfterTheFirstWrite_StillQueuesTheTriggerForALandedRevision()
+    {
+        var rig = new Rig();
+        rig.FollowUps.Setup(f => f.AfterRecordedAsync(It.IsAny<Guid?>(), It.IsAny<IReadOnlyList<DecisionCommitStep>>(),
+                It.IsAny<IReadOnlyList<DecisionCommitService.SignalRow>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("unexpected"));
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Failed);
+        rig.FailedHandedOn.Should().ContainSingle()
+            .Which.Should().Contain(s => s.Code == "revise-budget" && s.Written.Any(w => w.Entity == "sprk_budgetrevision"));
+    }
+
+    [Fact]
+    public async Task K1_ASecondReviewIdOnTheSameSignal_WhileTheFirstHoldsIt_IsInProgress_AndSendsNothing()
+    {
+        var rig = new Rig();
+        var first = PathBReview();
+        var second = PathBReview();
+        // The first review is committing Primary on another instance: it holds the Signal's lock.
+        var held = await rig.Lease.TryAcquireAsync(DecisionCommitService.SignalLeaseId(Tenant, Primary), null, TimeSpan.FromMinutes(1), CancellationToken.None);
+        held.Status.Should().Be(ScheduledJobLeaseStatus.Granted);
+
+        var result = await rig.CommitAsync(second);
+
+        result.Status.Should().Be(DecisionCommitStatus.InProgress);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.ReviewInProgress);
+        rig.Log.Should().NotContain("execute:send-budget-inquiry", "no second inquiry goes out");
+        rig.Writes.Should().BeEmpty();
+
+        await rig.Lease.ReleaseAsync(DecisionCommitService.SignalLeaseId(Tenant, Primary), held.Token!, CancellationToken.None);
+        (await rig.CommitAsync(first)).Status.Should().Be(DecisionCommitStatus.Recorded, "the review lock of the refused one was released");
+        (await rig.CommitAsync(second)).Status.Should().Be(DecisionCommitStatus.Conflict, "once the first is recorded the item is closed");
+    }
+
+    [Fact]
+    public async Task K3_AResumeAfterTheReviewWindow_DoesNotRecloseASystemResolutionOlderThanTheWindow()
+    {
+        var rig = new Rig();
+        rig.Executors["add-todo"].Result = DecisionActionOutcome.Refused("add-todo", DecisionActionReasons.WriteFailed, "no");
+        var review = PathBReview(inquiry: false);
+        (await rig.CommitAsync(review)).Resumable.Should().BeTrue(); // the review started at Now
+
+        // The system closed the Signal 30 minutes after the review started; the resume comes five hours later.
+        rig.Signals[Primary]["sprk_signalstatus"] = new OptionSetValue(Resolved);
+        rig.Signals[Primary]["sprk_resolutiontype"] = new OptionSetValue(SignalWriter.ResolutionConditionCleared);
+        rig.Signals[Primary]["sprk_resolvedon"] = Now.UtcDateTime.AddMinutes(30);
+        rig.Versions[Primary]++;
+        rig.Clock.Advance(TimeSpan.FromHours(5));
+        rig.Executors["add-todo"].Result = null;
+
+        var retried = await rig.CommitAsync(review with { Retry = true });
+
+        retried.Status.Should().Be(DecisionCommitStatus.Conflict, "the window is the plan-read window (4 h), not the ledger's 7 days");
+        rig.Resolution(Primary).Should().Be(SignalWriter.ResolutionConditionCleared);
+        rig.Records.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task K5_ARecordedReplay_AsksFr51Again_ARevokedRightLeavesTheSignalOpen_AndSaysSo()
+    {
+        var rig = new Rig();
+        FirstCloseFails(rig);
+        var review = PathBReview(inquiry: false, todo: false);
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.Rights[("sprk_matters", Matter)] = AccessRights.Read;
+
+        var replay = await rig.CommitAsync(review);
+
+        // Stated behaviour: the stored outcome comes back (200, Replayed) with the open Signal listed Unchanged and the warning.
+        replay.Status.Should().Be(DecisionCommitStatus.Recorded);
+        replay.Replayed.Should().BeTrue();
+        replay.Signals.Single().Should().Be(new DecisionCommitSignal(Primary, "Unchanged", "signal_close_not_authorized"));
+        replay.Warnings.Should().Contain("signal_close_not_authorized");
+        rig.Status(Primary).Should().Be(Open);
+
+        rig.Rights.Remove(("sprk_matters", Matter));
+        var restored = await rig.CommitAsync(review);
+        restored.Signals.Single().Warning.Should().BeNull("the stored outcome was not overwritten, so a later repeat still finishes the close");
+        rig.LinkedRecord(Primary).Should().Be(RecordId);
+    }
+
+    /// <summary>A lock store whose take lands and THEN observes the request's cancellation (a Redis SET that committed before the
+    /// await saw the cancel).</summary>
+    private sealed class CancelDuringTakeLease(IScheduledJobLease inner, CancellationTokenSource cts) : IScheduledJobLease
+    {
+        public bool Armed { get; set; } = true;
+
+        public bool IsDistributed => inner.IsDistributed;
+
+        public async Task<ScheduledJobLeaseGrant> TryAcquireAsync(string jobId, DateTimeOffset? occurrenceUtc, TimeSpan duration, CancellationToken cancellationToken)
+        {
+            var grant = await inner.TryAcquireAsync(jobId, occurrenceUtc, duration, CancellationToken.None);
+            if (Armed)
+            {
+                Armed = false;
+                cts.Cancel();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            return grant;
+        }
+
+        public Task<bool> RenewAsync(string jobId, string token, TimeSpan duration, CancellationToken cancellationToken) =>
+            inner.RenewAsync(jobId, token, duration, cancellationToken);
+
+        public Task ReleaseAsync(string jobId, string token, CancellationToken cancellationToken) => inner.ReleaseAsync(jobId, token, cancellationToken);
+    }
+
+    [Fact]
+    public async Task K7_ACancellationWhileTheLockIsTaken_ReleasesIt_SoTheSameReviewRunsAtOnce()
+    {
+        var rig = new Rig();
+        using var cts = new CancellationTokenSource();
+        rig.Lease = new CancelDuringTakeLease(new ProcessLocalScheduledJobLease(), cts);
+        var review = PathBReview();
+
+        var cancelled = () => rig.CommitAsync(review, ct: cts.Token);
+        await cancelled.Should().ThrowAsync<OperationCanceledException>();
+        rig.Writes.Should().BeEmpty();
+
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded, "the lock was released, not held for its 10 minutes");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task UacF4a_ACallerWhoCannotWriteANoCoreSubject_GetsTheSame403_WhetherOrNotItsOwnerResolves(bool ownerResolves)
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, null, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        rig.Signals[DoSignal]["ownerid"] = new EntityReference("systemuser", Caller);
+        rig.Rights[("sprk_todos", ItemTodo)] = AccessRights.Read;
+        if (!ownerResolves)
+        {
+            rig.Entities.Setup(e => e.RetrieveAsync("sprk_todo", ItemTodo, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217) }, "missing"));
+        }
+
+        var result = await rig.CommitAsync(new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] }, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Forbidden);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.NotAuthorized);
+        result.Detail.Should().Be("You do not have permission to change an item in this decision.");
+        rig.Entities.Verify(e => e.RetrieveAsync("sprk_todo", ItemTodo, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never(),
+            "the owner row is read only after FR-51");
+    }
+
+    [Fact]
+    public async Task UacF4b_ACoreTypeReadFault_Is503_AMissingCoreType_Is422()
+    {
+        // The caller's access check reads the record type first (task 036); the commit's own read is the second.
+        var matterType = new Entity("sprk_recordtype_ref", TypeMatter) { ["sprk_recordlogicalname"] = "sprk_matter" };
+        var faulted = new Rig();
+        faulted.Entities.SetupSequence(e => e.RetrieveAsync("sprk_recordtype_ref", TypeMatter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(matterType)
+            .ThrowsAsync(new TimeoutException("no answer"));
+        var missing = new Rig();
+        missing.Entities.SetupSequence(e => e.RetrieveAsync("sprk_recordtype_ref", TypeMatter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(matterType)
+            .ThrowsAsync(new FaultException<OrganizationServiceFault>(new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217) }, "missing"));
+
+        var fault = await faulted.CommitAsync(Dismissal("not-material"));
+        var gone = await missing.CommitAsync(Dismissal("not-material"));
+
+        fault.Status.Should().Be(DecisionCommitStatus.Unavailable, "a fault after authorization is 503");
+        gone.Status.Should().Be(DecisionCommitStatus.Refused, "a catalog row that does not exist is 422");
+        gone.ReasonCode.Should().Be(DecisionCommitReasons.CoreUnsupported);
+        faulted.Writes.Should().BeEmpty();
+        missing.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task UacF4b_AnItemOwnerReadFault_Is503_ATeamOwner_Is422()
+    {
+        Rig NoCore()
+        {
+            var rig = new Rig();
+            rig.AddSignal(DoSignal, DecisionLane.Do, null, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+            rig.Signals[DoSignal]["ownerid"] = new EntityReference("systemuser", Caller);
+            return rig;
+        }
+
+        var faulted = NoCore();
+        faulted.Entities.Setup(e => e.RetrieveAsync("sprk_todo", ItemTodo, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("no answer"));
+        var team = NoCore();
+        team.Entities.Setup(e => e.RetrieveAsync("sprk_todo", ItemTodo, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_todo", ItemTodo) { ["ownerid"] = new EntityReference("team", Guid.NewGuid()) });
+        DecisionReview Review() => new() { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] };
+
+        var fault = await faulted.CommitAsync(Review(), DoSignal);
+        var unsupported = await team.CommitAsync(Review(), DoSignal);
+
+        fault.Status.Should().Be(DecisionCommitStatus.Unavailable);
+        unsupported.Status.Should().Be(DecisionCommitStatus.Refused);
+        unsupported.ReasonCode.Should().Be(DecisionCommitReasons.ItemOwnerUnsupported);
+        faulted.Writes.Should().BeEmpty();
+        team.Writes.Should().BeEmpty();
     }
 
     // ── The HTTP mapping ─────────────────────────────────────────────────────────────────────────────────────────

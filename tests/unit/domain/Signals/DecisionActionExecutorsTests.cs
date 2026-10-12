@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.PowerPlatform.Dataverse.Client;
@@ -948,6 +949,36 @@ public class DecisionActionExecutorsTests
         var sendFailed = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.SendFailed, sr));
         sendFailed.Status.Should().Be(DecisionActionStatus.Failed);
         sendFailed.Written.Should().Equal(new[] { new DecisionRecordRef("sprk_servicerequest", sr) }, "the row exists; the email did not go");
+    }
+
+    /// <summary>Captures what is logged, to show where the inquiry's raw error text goes.</summary>
+    private sealed class CapturingLogger : ILogger
+    {
+        public List<string> Lines { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Lines.Add(formatter(state, exception));
+    }
+
+    [Theory]
+    [InlineData(BudgetInquiryOutcome.Refused, DecisionActionReasons.InvalidState)]
+    [InlineData(BudgetInquiryOutcome.Invalid, DecisionActionReasons.InvalidParameter)]
+    [InlineData(BudgetInquiryOutcome.CreateFailed, DecisionActionReasons.WriteFailed)]
+    [InlineData(BudgetInquiryOutcome.SendFailed, DecisionActionReasons.WriteFailed)]
+    public void InquiryAdapter_NeverPassesTheRawErrorText_ToTheCaller_OnlyAFixedMessageAndTheCode_UacK4(BudgetInquiryOutcome outcome, string reason)
+    {
+        const string raw = "0x80040220 SecLib::AccessCheckEx failed. Returned hr = -2147187962, ObjectID: 1a2b..., OwnerId: 3c4d...";
+        var logger = new CapturingLogger();
+
+        var mapped = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(outcome, Error: raw), logger);
+
+        mapped.ReasonCode.Should().Be(reason);
+        mapped.Detail.Should().NotContain("0x80040220").And.NotContain("SecLib").And.EndWith($"({reason})");
+        logger.Lines.Should().ContainSingle(l => l.Contains(raw), "the raw text is logged server-side only");
     }
 
     [Fact]

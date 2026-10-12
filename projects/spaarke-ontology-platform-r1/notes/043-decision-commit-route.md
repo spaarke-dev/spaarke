@@ -68,7 +68,7 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 - A Signal a person resolved is left alone, with the warning `resolved_by_another_decision`.
 - **D-120 (025, owner 2026-10-11).** Every close (including the re-close of a system-resolved Signal) writes `sprk_lastevaluated` in the same update with the same timestamp as `sprk_resolvedon`, as `SignalWriter.CloseAsync` does. `CloseAsync` itself takes system resolutions only, so the commit route cannot call it. Test: `AClosedSignal_HasLastEvaluatedEqualToResolvedOn_D120` (open close and re-close).
 - The review start is:
-  - on a resume, the first attempt's review start, stored in the ledger entry (review fix F-2; it used to be the first attempt's "now");
+  - on a resume or a Recorded replay, the first attempt's review start, stored in the ledger entry (review fix F-2; it used to be the first attempt's "now"), but never earlier than now minus the plan-read window of 4 hours (second review K3: a resume days later cannot reach back to re-close a system resolution);
   - otherwise the server's own plan-read stamp (K4, below);
   - otherwise now.
 - **K4: the review start is never client-sent.** I chose the server-issued stamp over a clamp. `DecisionPlanReadStamp` records, in the same tenant cache, when the decision-plan route last served this caller this Signal's plan (key `{oid}:{signalId}`, 4-hour TTL; the latest read wins, which can only move the start later, the fail-closed direction). The commit reads it. `DecisionReview.planReadOn` is removed. The plan route takes the stamp as an optional `[FromServices]` parameter and stamps best-effort after the plan resolves; a stamp that cannot be written or read means "the review started now".
@@ -83,6 +83,20 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 - After a Dismissed commit, each dismissed Signal's grain is passed to `SignalSuppressionService.ApplyAsync(policyId, policyCode, grain)`. The grain is (policy, core) or (policy, item from the dedupe key), as 034 keys it.
 - A failure is non-fatal: a Warning log, the metric `decision_commit_suppression_failed` and the result warning `suppression_not_applied`.
 - **Nothing from `ApplyAsync` reaches the caller (uac-r2 on 034).** Its status and counts are computed app-only over every Signal of the grain, Secure-team rows the caller cannot read included, so the route discards them: the response carries only the fixed warning above, never a count or a suppressed state. Test: `SuppressionOverSignalsTheCallerCannotRead_ReachesTheCallerAsNothing_NoStatusNoCount`.
+
+**Second review (deb4bbbc6) and uac-r2's review of #1665 (CHANGES REQUESTED).**
+- **F1 (both reviewers): the stored-record repeat is now a full check.** The record `sprk_steps` stores the review's content hash (`reviewHash`, right after `reviewId`; `DecisionRecordRequest.ReviewHash`). A record found by (caller, review id) answers a repeat only when its stored hash equals this request's and its stored `resolvedSignalIds` are exactly this request's Signals; otherwise `review_changed` and nothing is closed. A record that cannot prove either (no hash, unreadable envelope) answers nothing. Before any close the Signals are re-read and `PrepareAsync` and FR-51 (`CallerMayDecideAsync`) run as for a first commit; a Signal already closed with that record is not a conflict. The resolution and dismissal text come from the RECORD (its taken steps, follow-ons and `sprk_reason`), never the body. Tests: `F1_AStoredRecordFoundByItsReviewId_NeverClosesOtherSignals_UnderIt`, `F1_AStoredRecordForTheSameSignals_ButADifferentReview_OrWithoutAStoredHash_ClosesNothing`, `F1_AStoredRecordRepeat_AsksFr51Again_AndARevokedRightClosesNothing`, `WhenTheLedgerHasForgotten_TheRecordItselfAnswersTheRepeat` (now a real round trip).
+- **F4: a landed revision is queued on every failure path.** Both record-write failures (writer refusal, create fault) and the unexpected fault after the first write call `AfterFailedCommitAsync` (once; a flag stops a second call after the follow-ups ran). Tests: `F4_ARevisionThatLanded_BeforeTheRecordCreateFaulted_StillQueuesItsTrigger`, `F4_AFaultAfterTheFirstWrite_StillQueuesTheTriggerForALandedRevision`.
+- **K1: one review per Signal at a time.** Besides the review-id lock, a lock `decision-signal:{tid}:{signalId}` is taken for every covered Signal (sorted by id), released in the same finally. A Signal held by another review is 409 `review_in_progress` and nothing runs. Test: `K1_ASecondReviewIdOnTheSameSignal_...`.
+- **K3:** see the review start above. Test: `K3_AResumeAfterTheReviewWindow_...`.
+- **K5: a Recorded replay asks FR-51 again** before it repairs a close. Stated behaviour: the stored outcome is returned (200, `replayed`) with each still-open Signal listed `Unchanged` and the warning `signal_close_not_authorized` (or `signal_close_not_checked` when a read or the metadata lookup failed); nothing is closed and the stored outcome is not overwritten, so a later repeat with the rights restored finishes the close. Test: `K5_ARecordedReplay_AsksFr51Again_...`.
+- **K6: replay and stored-record closes run suppression** for the Signals they dismissed (`AfterRecordedAsync` with no steps, so no revision trigger); the result is discarded as on the first run. Tests: `K6_AStoredRecordRepeatThatDismisses_...`, `K6_ARecordedReplayThatDismisses_...`.
+- **K7: a lock is never stranded by a cancellation.** Locks are taken with `CancellationToken.None` inside the try/finally; the request token is checked once each is held, so a cancellation releases it. Test: `K7_ACancellationWhileTheLockIsTaken_...`.
+- **uac-r2 F4-a: no existence oracle.** The no-core item's owner is read app-only only AFTER FR-51, so a caller without Write on the subject gets the same 403 whether or not the row exists or its owner resolves. Test: `UacF4a_ACallerWhoCannotWriteANoCoreSubject_...` (both cases; the owner row is never read).
+- **uac-r2 F4-b: faults are 503, not 422.** The core-type and item-owner reads return "not found or unsupported" (a missing row, `0x80040217`, a team owner, a non-core type) as 422 and a thrown fault as 503 `Unavailable`, per the agreed mapping. Tests: `UacF4b_ACoreTypeReadFault_Is503_AMissingCoreType_Is422`, `UacF4b_AnItemOwnerReadFault_Is503_ATeamOwner_Is422`.
+- **uac-r2 K4: no raw Dataverse text to the caller.** The inquiry adapter (`BudgetInquiryActionExecutor.ToOutcome`) returns a fixed message per outcome ending in the refusal code; 070's error text is logged server-side only. Test: `InquiryAdapter_NeverPassesTheRawErrorText_..._UacK4`.
+- **uac-r2 NIT:** the census HandlerDecision now says the item owner comes from the Signal's subject row, read after FR-51.
+- **uac-r2 K2** (`CallerRecordAccessProbe` answers 403 on a transient WhoAmI/OBO fault) is uac-r2's to fix; their probe is unchanged here.
 
 **EventIds.** 50360-50364 are used, from the 50360-50369 range the coordinator assigned.
 
@@ -135,12 +149,12 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 
 ## Known limits (K-class)
 
-- **With Redis disabled the review lock is process-local** (`ProcessLocalScheduledJobLease`): two instances could each take it. Production runs with Redis.
+- **With Redis disabled the review and Signal locks are process-local** (`ProcessLocalScheduledJobLease`): two instances could each take them. Production runs with Redis.
+- **A Signal lock outlives a commit longer than 10 minutes** (the lock TTL); a commit that slow could overlap a second review of the same Signal. The executors' own timeouts are far shorter.
 - **A crash between a write and the outcome store.** The 10-minute marker expires, and the record lookup finds a written record. A crash before step 5 leaves landed writes that a repeat would run again.
 - **The outcome is kept 7 days.** After that, only a written record answers a repeat.
 - **A `send-email` Next step whose communication row was not saved after the send** has no id. It is recorded in `sprk_followons` as a follow-on without an id (`{"actionCode":"send-email","entity":null,"id":null}`), and "nothing taken" is decided from the Next steps that actually ran, so the record is Judgement, not a refused dismissal (review fix F-4, coordinator item 4).
 - **K3: the durable lookup has not run against Dataverse.** `sprk_steps LIKE %"reviewId":"<id>"%` on a memo column is pinned only against the writer's serialized text in unit tests.
-- **The durable lookup cannot compare the content hash.** When the ledger has forgotten the outcome, the record found by review id answers the repeat without a hash check (the record does not store the hash).
 - **A crash during a resume.** The resumed failure lives in the 10-minute in-progress marker; if the process dies mid-resume and the marker expires, the failure is forgotten and a later retry runs from the start (the durable record lookup still prevents a second record).
 - **Also resolve is capped at 25 items**; a longer list is `review_invalid`.
 - **A decision-created work assignment has the business-unit search-index cascade issue F-60 (#1607).** This is the same as the wizard and already filed.
@@ -158,6 +172,7 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 | `AFailureAtEachStepBeforeTheRecord_...` (steps 2, 3 and 4), `AFailureWritingTheRecord_...` (step 5), `AnExecutorThatThrows_...` | AC3 |
 | `ARevisionThatLanded_BeforeAFailure_...` | The coordinator's failure-path trigger |
 | `TheSameReviewIdTwice_...`, `...AfterAFailure_...`, `WhenTheLedgerHasForgotten_...`, `TheRecordLookup_...` | AC4, including the durable lookup and its pattern matching what the writer stores |
+| `F1_...` (x3), `F4_...` (x2), `K1_...`, `K3_...`, `K5_...`, `K6_...` (x2), `K7_...`, `UacF4a_...` (Theory), `UacF4b_...` (x2) | Second review and uac-r2 review of #1665 (above); each fails with its fix reverted |
 | `AReviewInProgress_...` | The 409 |
 | `ARefusedReview_CanBeCorrected...` | A refusal is not an outcome |
 | `AlsoResolve_...` (x2), `ADoItem_NeverResolvesAnother` | AC5 |
@@ -196,6 +211,7 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 - Moving the inquiry first fails AC1 and AC3.
 - Disabling the system-closure rule fails the re-close and retry tests.
 - Review fixes: disabling each fix (F-1 put-back, F-2 stored start, F-3 detached token and the cancellation release, F-4 unnamed Next steps, F-5 rights check, K2 cap) fails exactly its new test(s); all nine new tests failed under the mutations and pass on the fix.
+- Second review and uac-r2 round: reverting each of F1 (record covers the review), F4 (both failure paths), K1, K3, K5, K6, K7, uac F4-b (core type and item owner) and uac K4 one at a time fails its own new test(s); all pass on the fix.
 
 **`DecisionRecordWriterTests.cs` additions:** an unnamed Next step that is not a Next-step creator is refused; an unnamed `send-email` makes a Judgement record listed under `unnamedNextSteps`, and the `"reviewId":"<id>"` lookup text is still present.
 

@@ -65,6 +65,8 @@ public sealed record DecisionRecordFollowOn(string ActionCode, string Entity, Gu
 /// <param name="UnnamedNextSteps">Next steps that ran but created no row the record can name (a notification email whose
 /// communication row was not saved after the send; task 043). Catalog Next-step codes; listed in <c>sprk_followons</c> as
 /// follow-ons without an id, and they count as something done (not a dismissal), exactly as a follow-on does.</param>
+/// <param name="ReviewHash">The commit route's content hash of the review (task 043, F1), stored in <c>sprk_steps</c> so a repeat
+/// that finds this record by its review id can prove it is the same review before closing anything with it.</param>
 public sealed record DecisionRecordRequest(
     Guid ReviewId,
     Guid PolicyVersionId,
@@ -82,7 +84,8 @@ public sealed record DecisionRecordRequest(
     string? Reason,
     bool Denied = false,
     bool PrivilegeFlagged = false,
-    IReadOnlyList<string>? UnnamedNextSteps = null);
+    IReadOnlyList<string>? UnnamedNextSteps = null,
+    string? ReviewHash = null);
 
 /// <summary>The result of <see cref="DecisionRecordWriter.WriteAsync(DecisionRecordRequest, CancellationToken)"/>.</summary>
 /// <param name="RecordId">The new <c>sprk_decisionrecord</c> id: the caller sets it on every resolved Signal.</param>
@@ -653,6 +656,15 @@ public sealed class DecisionRecordWriter
                 written = (s.Step.Written ?? Array.Empty<DecisionRecordRef>()).Select(w => new { entity = w.Entity, id = w.Id }),
             }),
         };
+        if (r.ReviewHash is { Length: > 0 } reviewHash)
+        {
+            // Task 043 (F1): kept right after the review id, so the stored-record lookup can prove the repeat is the same review.
+            var ordered = new Dictionary<string, object?>(StringComparer.Ordinal) { ["reviewId"] = envelope["reviewId"], ["reviewHash"] = reviewHash };
+            foreach (var (key, value) in envelope.Where(kv => kv.Key != "reviewId"))
+                ordered[key] = value;
+            envelope = ordered;
+        }
+
         e["sprk_steps"] = Memo("sprk_steps", JsonMemoMaxLength, envelope);
 
         // Task 043: a Next step that ran but created no row the record can name (a notification whose communication row was

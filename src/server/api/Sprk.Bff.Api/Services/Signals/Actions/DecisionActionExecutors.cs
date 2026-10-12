@@ -1215,9 +1215,13 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
     private static readonly char[] RecipientSeparators = [';', ',', ' ', '\n', '\r', '\t'];
 
     private readonly BudgetInquiryExecutor _inquiry;
+    private readonly ILogger? _logger;
 
-    public BudgetInquiryActionExecutor(BudgetInquiryExecutor inquiry) =>
+    public BudgetInquiryActionExecutor(BudgetInquiryExecutor inquiry, ILogger<BudgetInquiryActionExecutor>? logger = null)
+    {
         _inquiry = inquiry ?? throw new ArgumentNullException(nameof(inquiry));
+        _logger = logger;
+    }
 
     public string Code => BudgetInquiryExecutor.ActionCode;
 
@@ -1226,7 +1230,7 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
         var (inquiry, refusal) = Map(request);
         if (refusal is not null || inquiry is null)
             return refusal;
-        return await _inquiry.PreflightAsync(inquiry, ct).ConfigureAwait(false) is { } refused ? ToOutcome(refused) : null;
+        return await _inquiry.PreflightAsync(inquiry, ct).ConfigureAwait(false) is { } refused ? ToOutcome(refused, _logger) : null;
     }
 
     public async Task<DecisionActionOutcome> ExecuteAsync(DecisionActionRequest request, CancellationToken ct)
@@ -1234,7 +1238,7 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
         var (inquiry, refusal) = Map(request);
         if (refusal is not null || inquiry is null)
             return refusal ?? DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "The inquiry could not be prepared.");
-        return ToOutcome(await _inquiry.ExecuteAsync(inquiry, ct).ConfigureAwait(false));
+        return ToOutcome(await _inquiry.ExecuteAsync(inquiry, ct).ConfigureAwait(false), _logger);
     }
 
     /// <summary>The inquiry request for a decision action. <c>Confirmed</c> is true because the commit route runs an executor only
@@ -1268,10 +1272,14 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
     }
 
     /// <summary>070's outcome as a decision-action outcome (the mapping the #1512/#1515 reviews fixed).</summary>
-    internal static DecisionActionOutcome ToOutcome(BudgetInquiryResult result)
+    /// <remarks>uac-r2 K4 on #1665: 070's <see cref="BudgetInquiryResult.Error"/> can carry Dataverse's own error text (a client
+    /// failure, an ownership or plan refusal). It is logged here, server-side only; the caller gets a fixed message per outcome
+    /// with the refusal code.</remarks>
+    internal static DecisionActionOutcome ToOutcome(BudgetInquiryResult result, ILogger? logger = null)
     {
         const string code = BudgetInquiryExecutor.ActionCode;
-        var detail = result.Error ?? "The inquiry was not sent.";
+        if (result.Outcome != BudgetInquiryOutcome.Sent && !string.IsNullOrEmpty(result.Error))
+            logger?.LogWarning("Decision commit: the budget inquiry ended {Outcome}: {InquiryError}", result.Outcome, result.Error);
         switch (result.Outcome)
         {
             case BudgetInquiryOutcome.Sent:
@@ -1280,14 +1288,20 @@ public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
                 if (result.CommunicationId is { } communication) written.Add(new DecisionRecordRef("sprk_communication", communication));
                 return DecisionActionOutcome.Done(code, [.. written]);
             case BudgetInquiryOutcome.NotConfirmed or BudgetInquiryOutcome.Invalid:
-                return DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidParameter, detail);
+                return DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidParameter,
+                    Fixed("The inquiry is not complete; nothing was created or sent.", DecisionActionReasons.InvalidParameter));
             case BudgetInquiryOutcome.Refused:
-                return DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidState, detail);
+                return DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidState,
+                    Fixed("The inquiry cannot be sent from here; nothing was created or sent.", DecisionActionReasons.InvalidState));
             case BudgetInquiryOutcome.SendFailed:
-                return DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed, detail,
+                return DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed,
+                    Fixed("The service request was created but the email was not sent.", DecisionActionReasons.WriteFailed),
                     written: result.ServiceRequestId is { } created ? [new DecisionRecordRef(BudgetInquiryExecutor.Table, created)] : null);
             default:
-                return DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed, detail);
+                return DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed,
+                    Fixed("The inquiry could not be created; nothing was sent.", DecisionActionReasons.WriteFailed));
         }
+
+        static string Fixed(string message, string reasonCode) => $"{message} ({reasonCode})";
     }
 }
