@@ -254,16 +254,26 @@ public class ExternalDataService
     // Constructor
     // ---------------------------------------------------------------------------
 
+    /// <summary>
+    /// Task 039 section 12 (option B, effective status): the app-only reader the ONE filing walk
+    /// (<see cref="EffectiveRootFlags.ReadAncestryAsync"/>) reads through, so <see cref="GetNonSecureRootsAsync"/> answers a
+    /// root's EFFECTIVE secure status. Registered unconditionally (GraphModule), so the typed-client factory supplies it. A
+    /// null reader (a test double that passes none) makes every work assignment or project read as secure (fail closed).
+    /// </summary>
+    private readonly IGenericEntityService? _filing;
+
     public ExternalDataService(
         HttpClient httpClient,
         IConfiguration configuration,
         TokenCredential credential,
-        ILogger<ExternalDataService> logger)
+        ILogger<ExternalDataService> logger,
+        IGenericEntityService? filing = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _credential = credential;
         _logger = logger;
+        _filing = filing;
     }
 
     // ---------------------------------------------------------------------------
@@ -1485,17 +1495,25 @@ public class ExternalDataService
         ExternalMultiRootRule.ReadFlagsAsync(GetNonSecureRootsAsync, caller, rowRoots, _logger, ct);
 
     /// <summary>
-    /// Of <paramref name="roots"/>, the ones whose <c>sprk_issecure</c> was read APP-ONLY and is <c>false</c> (owner decision
-    /// 2026-10-12, option B: only a SECURE linked root the caller cannot read withholds a row).
+    /// Of <paramref name="roots"/>, the ones whose EFFECTIVE secure status, read APP-ONLY, is not secure (owner decision
+    /// 2026-10-12, option B: only a SECURE linked root the caller cannot read withholds a row; main-session decision: secure
+    /// means effectively secure, task 174's rule).
     /// </summary>
     /// <remarks>
-    /// <para><b>Batched.</b> One query per root entity per <see cref="IdFilterChunkSize"/> ids (<see cref="GetByIdsAsync{TRow}"/>,
-    /// an <c>or</c> filter on the ids), selecting only the id and <c>sprk_issecure</c>. All three roots carry the column
-    /// (live metadata, <c>SecureRecordRoot</c>).</para>
-    /// <para><b>Fail closed.</b> Only an explicit JSON <c>false</c> on a returned row whose id was asked for opens a root. A
-    /// failed chunk, a record not returned (missing, or invisible to the app identity), an absent or null
-    /// <c>sprk_issecure</c> (a masked field-secured value reads empty) and any non-boolean value all leave the root out of
-    /// the answer, so it counts as secure. No cache: a staff change to the flag applies on the next request.</para>
+    /// <para><b>Own flag.</b> One query per root entity per <see cref="IdFilterChunkSize"/> ids
+    /// (<see cref="GetByIdsAsync{TRow}"/>, an <c>or</c> filter on the ids), selecting only the id and <c>sprk_issecure</c>. All
+    /// three roots carry the column (live metadata, <c>SecureRecordRoot</c>).</para>
+    /// <para><b>Effective flag.</b> A work assignment or project whose own flag is <c>false</c> is still secure when anything it
+    /// is filed under is effectively secure (a child whose own flag has not caught up). Those ids, per table, go through the
+    /// ONE filing walk (<see cref="EffectiveRootFlags.ReadAncestryAsync"/>, batched level by level and bounded by
+    /// <see cref="SecureRootInheritance.MaxFilingDepth"/>) and its fold (<see cref="EffectiveRootFlags.Fold(IReadOnlyDictionary{Guid, RootRecordFlags}, IReadOnlyDictionary{Guid, SecureParentsAnswer}?)"/>).
+    /// A matter files under nothing; its own flag is its effective flag (no walk).</para>
+    /// <para><b>Fail closed.</b> Only an explicit JSON <c>false</c> on a returned row whose id was asked for, and then an
+    /// ancestry the walk decided with no secure ancestor, opens a root. A failed chunk, a record not returned (missing, or
+    /// invisible to the app identity), an absent or null <c>sprk_issecure</c> (a masked field-secured value reads empty), any
+    /// non-boolean value, an ancestor read that faults or is missing or empty, a chain past the bound and a missing filing
+    /// reader all leave the root out of the answer, so it counts as secure. No cache: a staff change to the flag applies on
+    /// the next request.</para>
     /// <para><c>virtual</c> per ADR-038 section 4 (substitution seam); the tests drive the real read over a fake Web API.</para>
     /// </remarks>
     public virtual async Task<IReadOnlySet<(ExternalGrantRootType Root, Guid Id)>> GetNonSecureRootsAsync(
@@ -1512,12 +1530,13 @@ public class ExternalDataService
                 asked.Select(id => id.ToString("D")).ToList(),
                 $"{idColumn},{SecureFlagColumn}", $"{idColumn} asc", ct);
 
+            var ownOpen = new HashSet<Guid>();
             foreach (var row in read.Rows)
             {
                 if (GuidValue(row, idColumn) is { } id && asked.Contains(id)
                     && row.TryGetValue(SecureFlagColumn, out var flag) && flag.ValueKind == JsonValueKind.False)
                 {
-                    notSecure.Add((group.Key, id));
+                    ownOpen.Add(id);
                 }
             }
 
@@ -1526,6 +1545,24 @@ public class ExternalDataService
                 _logger.LogWarning(
                     "[EXT-DATA] secure-flag read for {Count} {Root} id(s) was incomplete ({Outcome}); the unread ones count as secure.",
                     asked.Count, group.Key, read.Outcome);
+            }
+
+            if (ownOpen.Count == 0)
+            {
+                continue;
+            }
+
+            // Effective status (task 174's rule): the ONE filing walk, batched for the own-open ids of this table; null for a
+            // matter (files under nothing). The fold makes an id with no decided ancestry secure.
+            var ancestry = await EffectiveRootFlags.ReadAncestryAsync(
+                _filing, _logger, ExternalGrantRoot.LogicalNameFor(group.Key), ownOpen, ct);
+            var effective = EffectiveRootFlags.Fold(ownOpen.ToDictionary(id => id, _ => RootRecordFlags.None), ancestry);
+            foreach (var (id, flags) in effective)
+            {
+                if (!flags.IsSecure)
+                {
+                    notSecure.Add((group.Key, id));
+                }
             }
         }
 

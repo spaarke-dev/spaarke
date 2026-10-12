@@ -325,6 +325,155 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
     }
 
     // =====================================================================
+    // Main-session decision 2026-10-12 (stricter reading of option B): "secure" means EFFECTIVELY secure (UAC-r2 task 174).
+    // An unreadable work assignment W whose OWN flag is false but which is filed under a secure matter M is secure, even when
+    // the row carries no stamp for M. The own flag comes over the Web API; the filing chain over the fake filing reader.
+    // =====================================================================
+
+    private static readonly Guid FiledWorkAssignment = Guid.Parse("a0390000-0000-4000-8000-0000000000e1");
+    private static readonly Guid FilingMatter = Guid.Parse("a0390000-0000-4000-8000-0000000000e2");
+
+    /// <summary>W (own flag FALSE) filed under matter M, which is <paramref name="matterSecure"/>. The caller reads neither.</summary>
+    private void SeedWorkAssignmentUnderMatter(bool matterSecure)
+    {
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, FiledWorkAssignment);
+        _fixture.Data.AddRoot(ExternalGrantRootType.Matter, FilingMatter, matterSecure);
+        _fixture.Data.FileWorkAssignmentUnder(FiledWorkAssignment, ExternalGrantRootType.Matter, FilingMatter);
+    }
+
+    public static TheoryData<string, string> KindsAndProjectOrMatterRoutes
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var kind in new[] { "events", "todos", "documents" })
+                foreach (var segment in new[] { "projects", "matters" })
+                    data.Add(kind, segment);
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(KindsAndProjectOrMatterRoutes))]
+    public async Task Effective_ARowFiledToAWorkAssignmentWithAFalseOwnFlag_UnderASecureMatter_IsWithheld_EvenWithNoStampForTheMatter(
+        string kind, string segment)
+    {
+        _fixture.Principal = Principal(segment, RecordA);
+        SeedWorkAssignmentUnderMatter(matterSecure: true);
+        var plain = AddRow(kind, segment, RecordA, "Single root");
+        AddRow(kind, segment, RecordA, "Filed to W only; W is under a secure matter", "workassignments", FiledWorkAssignment);
+
+        (await ListIds(kind, segment)).Should().Equal(plain);
+    }
+
+    [Theory]
+    [MemberData(nameof(KindsAndProjectOrMatterRoutes))]
+    public async Task Effective_ARowFiledToAWorkAssignmentWithAFalseOwnFlag_UnderANonSecureMatter_IsListed(string kind, string segment)
+    {
+        _fixture.Principal = Principal(segment, RecordA);
+        SeedWorkAssignmentUnderMatter(matterSecure: false);
+        var plain = AddRow(kind, segment, RecordA, "Single root");
+        var dual = AddRow(kind, segment, RecordA, "Filed to W only; W is under a non-secure matter", "workassignments", FiledWorkAssignment);
+
+        (await ListIds(kind, segment)).Should().BeEquivalentTo(new[] { plain, dual });
+    }
+
+    public static TheoryData<string, string> KindsAndAncestryFailures
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var kind in new[] { "events", "todos", "documents" })
+                foreach (var failure in new[] { "walk-throws", "ancestor-read-throws", "ancestor-flag-empty" })
+                    data.Add(kind, failure);
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(KindsAndAncestryFailures))]
+    public async Task Effective_WhenTheFilingChainCannotBeRead_TheRowIsWithheld_FailClosed(string kind, string failure)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        SeedWorkAssignmentUnderMatter(matterSecure: false);
+        switch (failure)
+        {
+            case "walk-throws": _fixture.Data.FilingReadThrows = true; break;
+            case "ancestor-read-throws": _fixture.Data.FilingFaultEntity = "sprk_matter"; break;
+            case "ancestor-flag-empty": _fixture.Data.AddRoot(ExternalGrantRootType.Matter, FilingMatter, isSecure: null); break;
+        }
+
+        var plain = AddRow(kind, "projects", RecordA, "Single root");
+        AddRow(kind, "projects", RecordA, "Filed to W; its ancestry cannot be decided", "workassignments", FiledWorkAssignment);
+
+        (await ListIds(kind, "projects")).Should().Equal(plain);
+    }
+
+    [Theory]
+    [MemberData(nameof(Kinds))]
+    public async Task Effective_ManyRowsLinkedToTheSameWorkAssignment_CostABoundedNumberOfReads(string kind)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        SeedWorkAssignmentUnderMatter(matterSecure: false);
+        var secondWorkAssignment = Guid.Parse("a0390000-0000-4000-8000-0000000000e3");
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, secondWorkAssignment);
+        _fixture.Data.FileWorkAssignmentUnder(secondWorkAssignment, ExternalGrantRootType.Matter, FilingMatter);
+        var listed = new List<string>();
+        for (var i = 0; i < 12; i++)
+            listed.Add(AddRow(kind, "projects", RecordA, $"Row {i}", "workassignments", i % 4 == 0 ? secondWorkAssignment : FiledWorkAssignment));
+
+        (await ListIds(kind, "projects")).Should().BeEquivalentTo(listed);
+        _fixture.Data.FlagReads.Should().ContainSingle("one own-flag query for the two work assignments, never one per row");
+        _fixture.Data.FilingReadLog.Should().Equal(
+            new[] { "sprk_workassignment", "sprk_matter" }, "one batched read of the two work assignments, one of their matter");
+    }
+
+    [Fact]
+    public async Task Effective_DocumentsModuleFetch_AWorkAssignmentWithAFalseOwnFlag_UnderASecureMatter_IsWithheld()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        SeedWorkAssignmentUnderMatter(matterSecure: true);
+
+        var (body, _) = await RunDocumentsFetchAsync(
+            caller, ProjectOnlyGridFetch,
+            new[]
+            {
+                DocRow("Project only", project: RecordA),
+                DocRow("W under a secure matter", project: RecordA, workAssignment: FiledWorkAssignment),
+                DocRow("W under a secure matter, through the twin", project: RecordA, extra: ("sprk_relatedworkassignment", FiledWorkAssignment)),
+            });
+
+        body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("Project only");
+    }
+
+    [Fact]
+    public async Task Effective_DocumentsModuleFetch_AWorkAssignmentWithAFalseOwnFlag_UnderANonSecureMatter_IsListed()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        SeedWorkAssignmentUnderMatter(matterSecure: false);
+
+        var (body, _) = await RunDocumentsFetchAsync(
+            caller, ProjectOnlyGridFetch,
+            new[] { DocRow("Project only", project: RecordA), DocRow("W under a non-secure matter", project: RecordA, workAssignment: FiledWorkAssignment) });
+
+        body.Entities.Select(r => r["sprk_documentname"]).Should().BeEquivalentTo(new[] { "Project only", "W under a non-secure matter" });
+    }
+
+    [Fact]
+    public async Task Effective_DocumentsModuleFetch_WhenTheFilingChainCannotBeRead_TheRowIsWithheld_FailClosed()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        SeedWorkAssignmentUnderMatter(matterSecure: false);
+        _fixture.Data.FilingFaultEntity = "sprk_matter";
+
+        var (body, _) = await RunDocumentsFetchAsync(
+            caller, ProjectOnlyGridFetch,
+            new[] { DocRow("Project only", project: RecordA), DocRow("W with an unreadable ancestry", project: RecordA, workAssignment: FiledWorkAssignment) });
+
+        body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("Project only");
+    }
+
+    // =====================================================================
     // The module grid's documents module (GET /data/savedquery/...): ScopeRows
     // =====================================================================
 

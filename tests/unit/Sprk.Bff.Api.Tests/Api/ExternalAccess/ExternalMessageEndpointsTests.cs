@@ -348,6 +348,48 @@ public class ExternalMessageEndpointsTests
             .Should().Equal(plain.ToString("D"));
     }
 
+    // Main-session decision 2026-10-12: "secure" means EFFECTIVELY secure (UAC-r2 task 174). A stamped work assignment W whose
+    // OWN flag is false but which is filed under a secure matter is secure, even when the message carries no stamp for it.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AMessageFiledToAWorkAssignmentWithAFalseOwnFlag_IsWithheldOnlyWhenItsMatterIsSecure(bool matterSecure)
+    {
+        var project = Guid.NewGuid();
+        var workAssignment = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _roots.AddOpenRoot(ExternalGrantRootType.WorkAssignment, workAssignment);
+        _roots.AddRoot(ExternalGrantRootType.Matter, matter, matterSecure);
+        _roots.FileWorkAssignmentUnder(workAssignment, ExternalGrantRootType.Matter, matter);
+        var plain = Guid.NewGuid();
+        var dual = Guid.NewGuid();
+        var dualRow = MessageRow(dual, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
+        dualRow["_sprk_regardingworkassignment_value"] = El(workAssignment.ToString("D"));
+        SetupMessages(MessageRow(plain, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"), dualRow);
+
+        Messages(await Get("projects", project, Ciam(project: project))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(matterSecure ? new[] { plain.ToString("D") } : new[] { plain.ToString("D"), dual.ToString("D") });
+    }
+
+    [Fact]
+    public async Task AMessageFiledToAWorkAssignment_WhoseFilingChainCannotBeRead_IsWithheld_FailClosed()
+    {
+        var project = Guid.NewGuid();
+        var workAssignment = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _roots.AddOpenRoot(ExternalGrantRootType.WorkAssignment, workAssignment);
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter);
+        _roots.FileWorkAssignmentUnder(workAssignment, ExternalGrantRootType.Matter, matter);
+        _roots.FilingFaultEntity = "sprk_matter";
+        var plain = Guid.NewGuid();
+        var dualRow = MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
+        dualRow["_sprk_regardingworkassignment_value"] = El(workAssignment.ToString("D"));
+        SetupMessages(MessageRow(plain, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"), dualRow);
+
+        Messages(await Get("projects", project, Ciam(project: project))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(plain.ToString("D"));
+    }
+
     [Fact]
     public async Task ManyMessagesStampedWithTheSameUnreadableRoots_CostOneFlagQueryPerRootType()
     {

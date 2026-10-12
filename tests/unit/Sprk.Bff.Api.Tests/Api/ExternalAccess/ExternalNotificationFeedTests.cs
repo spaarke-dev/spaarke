@@ -826,6 +826,48 @@ public class ExternalNotificationFeedTests
         Body(await Feed(caller)).Value.Select(i => i.Id).Should().Equal(IdOf(plain));
     }
 
+    // Main-session decision 2026-10-12: "secure" means EFFECTIVELY secure (UAC-r2 task 174). A stamped work assignment W whose
+    // OWN flag is false but which is filed under a secure matter is secure, even when the message carries no stamp for it.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AMessageFiledToAWorkAssignmentWithAFalseOwnFlag_IsInTheFeedOnlyWhenItsMatterIsNotSecure(bool matterSecure)
+    {
+        var project = Guid.NewGuid();
+        var workAssignment = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _roots.AddOpenRoot(ExternalGrantRootType.WorkAssignment, workAssignment);
+        _roots.AddRoot(ExternalGrantRootType.Matter, matter, matterSecure);
+        _roots.FileWorkAssignmentUnder(workAssignment, ExternalGrantRootType.Matter, matter);
+        var caller = Ciam(Guid.NewGuid(), project: project);
+        var plain = Message("sprk_regardingproject", project, Now.AddHours(-2));
+        var dual = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        dual["_sprk_regardingworkassignment_value"] = El(workAssignment.ToString("D"));
+        _data.Name(project, "Project Alpha");
+
+        Body(await Feed(caller)).Value.Select(i => i.Id).Should().Equal(
+            matterSecure ? new[] { IdOf(plain) } : new[] { IdOf(dual), IdOf(plain) });
+    }
+
+    [Fact]
+    public async Task AMessageFiledToAWorkAssignment_WhoseFilingChainCannotBeRead_IsNotInTheFeed_FailClosed()
+    {
+        var project = Guid.NewGuid();
+        var workAssignment = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        _roots.AddOpenRoot(ExternalGrantRootType.WorkAssignment, workAssignment);
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter);
+        _roots.FileWorkAssignmentUnder(workAssignment, ExternalGrantRootType.Matter, matter);
+        _roots.FilingReadThrows = true;
+        var caller = Ciam(Guid.NewGuid(), project: project);
+        var plain = Message("sprk_regardingproject", project, Now.AddHours(-2));
+        var dual = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        dual["_sprk_regardingworkassignment_value"] = El(workAssignment.ToString("D"));
+        _data.Name(project, "Project Alpha");
+
+        Body(await Feed(caller)).Value.Select(i => i.Id).Should().Equal(IdOf(plain));
+    }
+
     [Fact]
     public async Task ManyFeedMessagesStampedWithTheSameUnreadableRoot_CostOneFlagQuery()
     {
@@ -900,7 +942,7 @@ public class ExternalNotificationFeedTests
         private readonly Dictionary<Guid, string> _names = new();
         private readonly HashSet<Guid> _deleted = new();
 
-        public FeedData(HttpMessageHandler dataverse)
+        public FeedData(ExternalRootEventReadTests.FakeDataverse dataverse)
             : base(
                 new HttpClient(dataverse),
                 new ConfigurationBuilder()
@@ -908,7 +950,8 @@ public class ExternalNotificationFeedTests
                     .Build(),
                 // A test token, so the base secure-flag read reaches the fake Web API (the three feed reads are overridden).
                 new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
-                NullLogger<ExternalDataService>.Instance)
+                NullLogger<ExternalDataService>.Instance,
+                dataverse.FilingReader)
         {
         }
 

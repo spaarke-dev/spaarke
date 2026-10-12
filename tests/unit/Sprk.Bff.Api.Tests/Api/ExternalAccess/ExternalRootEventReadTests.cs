@@ -9,6 +9,9 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -428,7 +431,8 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
                         .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
                         .Build(),
                     new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
-                    NullLogger<ExternalDataService>.Instance));
+                    NullLogger<ExternalDataService>.Instance,
+                    Data.FilingReader));
             });
         }
     }
@@ -468,13 +472,75 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         public IReadOnlyList<string> FlagReads =>
             Urls.Where(u => RootSets.Keys.Any(set => u.Contains($"/{set}?", StringComparison.Ordinal))).ToList();
 
+        public FakeDataverse()
+        {
+            // The filing walk's queries (the ONE walk, EffectiveRootFlags), answered from _filing by the id condition each one
+            // carries (Equal or In), like DocumentIndexParentResolverTests does.
+            _filingReader.Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((QueryExpression query, CancellationToken _) =>
+                {
+                    FilingReadLog.Enqueue(query.EntityName);
+                    if (FilingReadThrows || string.Equals(FilingFaultEntity, query.EntityName, StringComparison.OrdinalIgnoreCase))
+                        throw new TimeoutException("The filing read failed (test).");
+
+                    var ids = query.Criteria.Conditions
+                        .Where(c => string.Equals(c.AttributeName, query.EntityName + "id", StringComparison.OrdinalIgnoreCase))
+                        .SelectMany(c => c.Values.Select(v => (Guid)v))
+                        .ToHashSet();
+                    lock (_filing)
+                    {
+                        return new EntityCollection(_filing
+                            .Where(kv => string.Equals(kv.Key.Table, query.EntityName, StringComparison.OrdinalIgnoreCase) && ids.Contains(kv.Key.Id))
+                            .Select(kv => kv.Value)
+                            .ToList());
+                    }
+                });
+        }
+
+        // ---- The filing world (effective secure status: a work assignment filed under a secure matter is secure) ----
+
+        private readonly Dictionary<(string Table, Guid Id), Entity> _filing = new();
+        private readonly Mock<IGenericEntityService> _filingReader = new(MockBehavior.Strict);
+
+        /// <summary>The app-only reader the REAL <see cref="ExternalDataService"/> climbs the filing chain through.</summary>
+        public IGenericEntityService FilingReader => _filingReader.Object;
+
+        /// <summary>The entity name of every filing-walk query sent, in order.</summary>
+        public ConcurrentQueue<string> FilingReadLog { get; } = new();
+
+        /// <summary>When true, every filing-walk read throws (a transport fault).</summary>
+        public bool FilingReadThrows { get; set; }
+
+        /// <summary>When set (e.g. <c>sprk_matter</c>), only the filing-walk reads of that entity throw.</summary>
+        public string? FilingFaultEntity { get; set; }
+
         public void Reset()
         {
             lock (_sets) _sets.Clear();
+            lock (_filing) _filing.Clear();
             Urls.Clear();
+            FilingReadLog.Clear();
             Fault = null;
             FlagFault = null;
             FlagReadThrows = false;
+            FilingReadThrows = false;
+            FilingFaultEntity = null;
+        }
+
+        /// <summary>
+        /// Files work assignment <paramref name="workAssignment"/> under <paramref name="parent"/> (its typed
+        /// <c>sprk_regardingmatter</c> / <c>sprk_regardingproject</c>): the walk then reads the parent's own flag. Seed both
+        /// with <see cref="AddRoot"/> first; the HTTP side (each root's OWN flag) is unaffected.
+        /// </summary>
+        public void FileWorkAssignmentUnder(Guid workAssignment, ExternalGrantRootType parent, Guid parentId)
+        {
+            var (column, table) = parent switch
+            {
+                ExternalGrantRootType.Matter => ("sprk_regardingmatter", "sprk_matter"),
+                ExternalGrantRootType.Project => ("sprk_regardingproject", "sprk_project"),
+                _ => throw new NotSupportedException("A work assignment files under a matter or a project."),
+            };
+            lock (_filing) _filing[("sprk_workassignment", workAssignment)][column] = new EntityReference(table, parentId);
         }
 
         /// <summary>
@@ -485,6 +551,16 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         public void AddRoot(ExternalGrantRootType root, Guid id, bool? isSecure)
         {
             var set = ExternalGrantRoot.BindFor(root).EntitySet;
+
+            // The same record in the filing world, as the walk reads it: filed under nothing until FileWorkAssignmentUnder.
+            var table = ExternalGrantRoot.LogicalNameFor(root);
+            var filingRow = new Entity(table, id);
+            if (isSecure is { } secure) filingRow["sprk_issecure"] = secure;
+            filingRow["sprk_accesspermission"] = new OptionSetValue(100000000);
+            if (root == ExternalGrantRootType.Matter) filingRow["sprk_mattername"] = $"root {id}";
+            if (root == ExternalGrantRootType.Project) filingRow["sprk_projectname"] = $"root {id}";
+            lock (_filing) _filing[(table, id)] = filingRow;
+
             Seed(set, new Dictionary<string, object?>
             {
                 [RootSets[set]] = id.ToString(),
@@ -502,13 +578,14 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         public void AddOpenRoot(ExternalGrantRootType root, Guid id) => AddRoot(root, id, isSecure: false);
 
         /// <summary>A REAL <see cref="ExternalDataService"/> over this fake, e.g. for its secure-flag read.</summary>
-        public ExternalDataService NewService() => new(
+        public ExternalDataService NewService(bool withFilingReader = true) => new(
             new HttpClient(this),
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
                 .Build(),
             new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
-            NullLogger<ExternalDataService>.Instance);
+            NullLogger<ExternalDataService>.Instance,
+            withFilingReader ? FilingReader : null);
 
         private void Seed(string set, Dictionary<string, object?> row)
         {

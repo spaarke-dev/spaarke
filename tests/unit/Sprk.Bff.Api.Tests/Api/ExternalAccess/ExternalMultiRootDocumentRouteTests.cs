@@ -287,6 +287,120 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
     }
 
     // =====================================================================
+    // Main-session decision 2026-10-12 (stricter reading of option B): "secure" means EFFECTIVELY secure (UAC-r2 task 174).
+    // A document filed to a work assignment W whose OWN flag is false, but which is filed under a secure matter M, is refused
+    // when the document carries no stamp for M. The own flag comes over the Web API; the filing chain over the fake filing reader.
+    // =====================================================================
+
+    private static readonly Guid FiledWorkAssignment = Guid.Parse("a0390000-0000-4000-8000-0000000000e1");
+    private static readonly Guid FilingMatter = Guid.Parse("a0390000-0000-4000-8000-0000000000e2");
+
+    private void SeedWorkAssignmentUnderMatter(bool matterSecure)
+    {
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.WorkAssignment, FiledWorkAssignment);
+        _fixture.Data.AddRoot(ExternalGrantRootType.Matter, FilingMatter, matterSecure);
+        _fixture.Data.FileWorkAssignmentUnder(FiledWorkAssignment, ExternalGrantRootType.Matter, FilingMatter);
+    }
+
+    public static TheoryData<string, string> ProjectAndMatterRoutes
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var segment in new[] { "projects", "matters" })
+                foreach (var route in new[] { "content", "versions" })
+                    data.Add(segment, route);
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(ProjectAndMatterRoutes))]
+    public async Task Effective_ADocumentFiledToAWorkAssignmentWithAFalseOwnFlag_UnderASecureMatter_IsRefused_AsNotUnderTheParent(
+        string segment, string route)
+    {
+        _fixture.Principal = Principal(segment, RecordA);
+        SeedWorkAssignmentUnderMatter(matterSecure: true);
+        var reference = await RefusalOf(segment, route);
+
+        foreach (var link in new[] { "_sprk_workassignment_value", "_sprk_relatedworkassignment_value" })
+        {
+            _fixture.ResetCalls();
+            var id = _fixture.Data.AddDocument(segment, RecordA, "Filed to W; W is under a secure matter", (link, FiledWorkAssignment));
+
+            using var response = await Get(segment, id, route);
+
+            (await Summarise(response)).Should().Be(reference, $"{link} links a work assignment that is effectively secure");
+            _fixture.PointerResolutions.Should().Be(0, "authorization precedes pointer resolution");
+            _fixture.FileReads.Should().Be(0);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(ProjectAndMatterRoutes))]
+    public async Task Effective_ADocumentFiledToAWorkAssignmentWithAFalseOwnFlag_UnderANonSecureMatter_IsServed(string segment, string route)
+    {
+        _fixture.Principal = Principal(segment, RecordA);
+        SeedWorkAssignmentUnderMatter(matterSecure: false);
+        var id = _fixture.Data.AddDocument(
+            segment, RecordA, "Filed to W; W is under a non-secure matter", ("_sprk_workassignment_value", FiledWorkAssignment));
+
+        using var response = await Get(segment, id, route);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.PointerResolutions.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("content", "walk-throws")]
+    [InlineData("content", "ancestor-read-throws")]
+    [InlineData("content", "ancestor-flag-empty")]
+    [InlineData("versions", "walk-throws")]
+    [InlineData("versions", "ancestor-read-throws")]
+    [InlineData("versions", "ancestor-flag-empty")]
+    public async Task Effective_WhenTheFilingChainCannotBeRead_TheDocumentIsRefused_FailClosed(string route, string failure)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        var reference = await RefusalOf("projects", route);
+        SeedWorkAssignmentUnderMatter(matterSecure: false);
+        switch (failure)
+        {
+            case "walk-throws": _fixture.Data.FilingReadThrows = true; break;
+            case "ancestor-read-throws": _fixture.Data.FilingFaultEntity = "sprk_matter"; break;
+            case "ancestor-flag-empty": _fixture.Data.AddRoot(ExternalGrantRootType.Matter, FilingMatter, isSecure: null); break;
+        }
+
+        var id = _fixture.Data.AddDocument("projects", RecordA, "Filed to W", ("_sprk_workassignment_value", FiledWorkAssignment));
+        _fixture.ResetCalls();
+
+        using var response = await Get("projects", id, route);
+
+        (await Summarise(response)).Should().Be(reference);
+        _fixture.PointerResolutions.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("content")]
+    [InlineData("versions")]
+    public async Task Effective_ADocumentLinkedToTheSameWorkAssignmentTwice_CostsOneWalk_AndAMisfiledOneNone(string route)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        SeedWorkAssignmentUnderMatter(matterSecure: false);
+        var id = _fixture.Data.AddDocument(
+            "projects", RecordA, "Typed and twin to one work assignment",
+            ("_sprk_workassignment_value", FiledWorkAssignment), ("_sprk_relatedworkassignment_value", FiledWorkAssignment));
+        var misfiled = _fixture.Data.AddDocument("projects", RecordB, "Another record's", ("_sprk_workassignment_value", FiledWorkAssignment));
+
+        using (var response = await Get("projects", id, route))
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.Data.FilingReadLog.Should().Equal("sprk_workassignment", "sprk_matter");
+
+        using (var refused = await Get("projects", misfiled, route))
+            refused.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.FilingReadLog.Should().HaveCount(2, "a document not under the route parent is refused without a walk");
+    }
+
+    // =====================================================================
     // The read itself: all six root links, through the route's lookup too
     // =====================================================================
 
@@ -450,7 +564,8 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
                 .Build(),
             new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
-            NullLogger<ExternalDataService>.Instance);
+            NullLogger<ExternalDataService>.Instance,
+            Data.FilingReader);
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
