@@ -29,6 +29,22 @@ public static class PlaybookRunEndpoints
     /// </summary>
     public const string RunFailedMessage = "The playbook run failed. See the server log for details.";
 
+    /// <summary>
+    /// The stable <c>errorCode</c> of the terminal run-failed event written when a run stream fails after it has
+    /// started (ADR-019).
+    /// </summary>
+    public const string RunFailedErrorCode = "playbook.run-failed";
+
+    /// <summary>
+    /// The ONE construction site for the terminal SSE error event of a playbook run stream that fails after it has
+    /// started (ADR-019). Takes NO exception input by design: the safe copy cannot regress into interpolating server
+    /// internals. The caller logs the exception; <paramref name="correlationId"/> (the request trace id) ties the
+    /// event to that log entry.
+    /// </summary>
+    internal static PlaybookStreamEvent BuildRunFailedEvent(Guid runId, Guid playbookId, string correlationId) =>
+        PlaybookStreamEvent.RunFailed(
+            runId, playbookId, RunFailedMessage, errorCode: RunFailedErrorCode, correlationId: correlationId);
+
     public static IEndpointRouteBuilder MapPlaybookRunEndpoints(this IEndpointRouteBuilder app)
     {
         var playbookGroup = app.MapGroup("/api/ai/playbooks/{id:guid}")
@@ -183,6 +199,10 @@ public static class PlaybookRunEndpoints
             "Starting playbook execution - PlaybookId: {PlaybookId}, Documents: [{DocumentIds}], TraceId: {TraceId}",
             id, string.Join(",", request.DocumentIds), context.TraceIdentifier);
 
+        // The run id is learned from the first event; until then the error event carries Guid.Empty.
+        var runId = Guid.Empty;
+        var terminalWritten = false;
+
         try
         {
             var runRequest = new PlaybookRunRequest
@@ -191,20 +211,24 @@ public static class PlaybookRunEndpoints
                 DocumentIds = request.DocumentIds,
                 UserContext = request.UserContext,
                 Parameters = request.Parameters,
-                // Owner round 16 item 3 (task 164): the run acts for the authenticated caller — the systemuserid the
-                // run-mode filter resolved (WhoAmI over OBO) — never for a caller-supplied userId.
+                // Owner round 16 item 3 (task 164): the run acts for the authenticated caller - the systemuserid the
+                // run-mode filter resolved (WhoAmI over OBO) - never for a caller-supplied userId.
                 RunUserId = PlaybookAuthorizationFilter.GetRunUserId(context)
             };
 
             await foreach (var evt in orchestrationService.ExecuteAsync(runRequest, context, cancellationToken))
             {
+                runId = evt.RunId;
                 await WriteSSEAsync(response, evt, cancellationToken);
+                terminalWritten |= evt.Done;
             }
 
             logger.LogInformation("Playbook execution completed for PlaybookId: {PlaybookId}, TraceId: {TraceId}",
                 id, context.TraceIdentifier);
         }
-        catch (OperationCanceledException)
+        // Only the CLIENT going away is silent. A cancellation the client did not ask for (an upstream timeout) is a
+        // failure and falls through to the terminal error event below instead of ending the stream with nothing.
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             logger.LogInformation(
                 "Client disconnected during playbook execution, PlaybookId: {PlaybookId}, TraceId: {TraceId}",
@@ -215,11 +239,13 @@ public static class PlaybookRunEndpoints
             logger.LogError(ex, "Error during playbook execution, PlaybookId: {PlaybookId}, TraceId: {TraceId}",
                 id, context.TraceIdentifier);
 
-            if (!cancellationToken.IsCancellationRequested)
+            // ADR-019 (task 164): fixed text - the exception message stays in the server log above. Exactly one
+            // terminal event ends the stream: none is added when the run already ended with its own
+            // (completed / failed / cancelled).
+            if (!cancellationToken.IsCancellationRequested && !terminalWritten)
             {
-                // ADR-019 (task 164): fixed text — the exception message stays in the server log above.
-                var errorEvent = PlaybookStreamEvent.RunFailed(Guid.Empty, id, RunFailedMessage);
-                await WriteSSEAsync(response, errorEvent, CancellationToken.None);
+                await TryWriteTerminalErrorAsync(
+                    response, BuildRunFailedEvent(runId, id, context.TraceIdentifier), logger);
             }
         }
     }
@@ -270,6 +296,7 @@ public static class PlaybookRunEndpoints
         var logger = loggerFactory.CreateLogger("PlaybookRunEndpoints");
         var cancellationToken = context.RequestAborted;
         var response = context.Response;
+        var knownPlaybookId = Guid.Empty;
 
         try
         {
@@ -282,6 +309,8 @@ public static class PlaybookRunEndpoints
                 return;
             }
 
+            knownPlaybookId = status.PlaybookId;
+
             // If run is complete, return immediately with final status
             if (status.State is PlaybookRunState.Completed or PlaybookRunState.Failed or PlaybookRunState.Cancelled)
             {
@@ -291,10 +320,12 @@ public static class PlaybookRunEndpoints
                 return;
             }
 
-            // Set SSE headers for active run
+            // Set SSE headers for active run and commit to the stream: from here a failure can no longer become an
+            // HTTP error, so it ends in the terminal error event below.
             response.ContentType = "text/event-stream";
             response.Headers.CacheControl = "no-cache";
             response.Headers.Connection = "keep-alive";
+            await response.StartAsync(cancellationToken);
 
             logger.LogInformation("Client reconnecting to run {RunId}", runId);
 
@@ -312,18 +343,30 @@ public static class PlaybookRunEndpoints
             // Note: Full reconnection support would require storing events
             // and replaying from a checkpoint. This is Phase 2 scope.
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             logger.LogInformation("Client disconnected from run stream {RunId}", runId);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error streaming run {RunId}", runId);
-            // A failure before the first SSE frame is a plain HTTP error. Once the stream has started the status
-            // and content type are already on the wire and cannot be changed, so nothing more is written.
-            if (!cancellationToken.IsCancellationRequested && !response.HasStarted)
+            logger.LogError(ex, "Error streaming run {RunId}, TraceId: {TraceId}", runId, context.TraceIdentifier);
+            if (cancellationToken.IsCancellationRequested)
             {
-                await ProblemDetailsHelper.FromLegacyError(StatusCodes.Status500InternalServerError, "Stream error")
+                return;
+            }
+
+            if (response.HasStarted)
+            {
+                // The status and content type are already on the wire and cannot be changed: end the stream with
+                // the one terminal error event (ADR-019) rather than closing it silently.
+                await TryWriteTerminalErrorAsync(
+                    response, BuildRunFailedEvent(runId, knownPlaybookId, context.TraceIdentifier), logger);
+            }
+            else
+            {
+                // A failure before the first SSE frame is a plain HTTP error.
+                await ProblemDetailsHelper.FromLegacyError(
+                        StatusCodes.Status500InternalServerError, "Stream error", context.TraceIdentifier)
                     .ExecuteAsync(context);
             }
         }
@@ -452,6 +495,27 @@ public static class PlaybookRunEndpoints
                 statusCode: 500,
                 title: "Internal Server Error",
                 detail: "Failed to get run detail");
+        }
+    }
+
+    /// <summary>
+    /// Writes the terminal error event of a stream that has already started. A failure to write it (the client is
+    /// gone, the connection is torn) is logged and swallowed: there is nobody left to tell, and it must not replace
+    /// the original failure.
+    /// </summary>
+    private static async Task TryWriteTerminalErrorAsync(
+        HttpResponse response,
+        PlaybookStreamEvent errorEvent,
+        ILogger logger)
+    {
+        try
+        {
+            await WriteSSEAsync(response, errorEvent, CancellationToken.None);
+        }
+        catch (Exception writeEx)
+        {
+            logger.LogWarning(writeEx, "Could not write the terminal error event, CorrelationId: {CorrelationId}",
+                errorEvent.CorrelationId);
         }
     }
 

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
@@ -11,6 +12,8 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
@@ -155,6 +158,107 @@ public class AnalysisEndpointsExecuteDispatchContractTests
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
+
+    // =========================================================================================
+    // Terminal error event (ADR-019): a run that fails after the stream has started
+    // =========================================================================================
+
+    [Fact]
+    public async Task Post_EngineRunFailsAfterTheFirstEvent_EndsWithExactlyOneSafeTerminalErrorChunk()
+    {
+        _fx.Reset();
+        const string secret = "SENTINEL-upstream-provider-internal tools[3].function.parameters";
+        _fx.PlaybookOrchestratorMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns(FailsAfterFirstEvent(new InvalidOperationException(secret, new TimeoutException("SENTINEL-inner"))));
+
+        var response = await _fx.CreateAuthenticatedClient().PostAsJsonAsync("/api/ai/analysis/execute", new
+        {
+            documentIds = new[] { Guid.NewGuid() },
+            playbookId = Guid.NewGuid(),
+        });
+        var body = await response.Content.ReadAsStringAsync();
+
+        // The stream was already committed, so the failure surfaces as an SSE frame on a 200.
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var chunks = ParseChunks(body);
+        chunks.Select(c => c.GetProperty("type").GetString()).Should().Equal("metadata", "error");
+
+        var error = chunks.Last();
+        error.GetProperty("done").GetBoolean().Should().BeTrue();
+        error.GetProperty("error").GetString().Should().Be(PlaybookRunEndpoints.RunFailedMessage);
+        error.GetProperty("errorCode").GetString().Should().Be("playbook.run-failed");
+        error.GetProperty("correlationId").GetString().Should().NotBeNullOrWhiteSpace(
+            "ADR-019: the user can quote the correlation id so support finds the server log entry");
+
+        // Nothing from the exception reaches the wire, and nothing follows the error.
+        body.Should().NotContain("SENTINEL", "the exception and inner-exception messages must never reach the wire");
+        body.Should().NotContain(nameof(InvalidOperationException), "the exception type must never reach the wire");
+        body.Should().NotContain(nameof(TimeoutException), "the inner exception type must never reach the wire");
+        body.Should().NotContain(" at Sprk.", "no stack frame may reach the wire");
+        body.Should().NotContain("[DONE]", "the error chunk is the terminal event");
+    }
+
+    [Fact]
+    public async Task Post_EngineRunEndsInItsOwnRunFailedEvent_ShowsTheError_AndSendsNoCompletionNotification()
+    {
+        _fx.Reset();
+        var playbookId = Guid.NewGuid();
+        _fx.PlaybookOrchestratorMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns(EndsInRunFailed(playbookId));
+        var notificationLookup = _fx.WatchForNotificationLookup();
+
+        var response = await _fx.CreateAuthenticatedClient().PostAsJsonAsync("/api/ai/analysis/execute", new
+        {
+            documentIds = new[] { Guid.NewGuid() },
+            playbookId,
+        });
+        var body = await response.Content.ReadAsStringAsync();
+
+        var chunks = ParseChunks(body);
+        chunks.Select(c => c.GetProperty("type").GetString()).Should().Equal("metadata", "error");
+        chunks.Last().GetProperty("error").GetString().Should().Be(PlaybookRunEndpoints.RunFailedMessage);
+
+        // The "AI analysis complete" notification is fire-and-forget (no handle to await), so give it a generous
+        // window to start: a pre-fix run sends it within milliseconds of the response ending.
+        var completed = await Task.WhenAny(notificationLookup, Task.Delay(TimeSpan.FromSeconds(2)));
+        completed.Should().NotBeSameAs(notificationLookup,
+            "a failed run must not tell the user their analysis is complete");
+    }
+
+    private static List<JsonElement> ParseChunks(string body)
+    {
+        var chunks = new List<JsonElement>();
+        foreach (var frame in body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
+        {
+            frame.Should().StartWith("data: ");
+            var payload = frame["data: ".Length..];
+            if (payload == "[DONE]")
+            {
+                continue;
+            }
+
+            chunks.Add(JsonDocument.Parse(payload).RootElement.Clone());
+        }
+
+        return chunks;
+    }
+
+    private static async IAsyncEnumerable<PlaybookStreamEvent> FailsAfterFirstEvent(Exception toThrow)
+    {
+        yield return PlaybookStreamEvent.RunStarted(Guid.NewGuid(), Guid.NewGuid(), 1);
+        await Task.Yield();
+        throw toThrow;
+    }
+
+    private static async IAsyncEnumerable<PlaybookStreamEvent> EndsInRunFailed(Guid playbookId)
+    {
+        var runId = Guid.NewGuid();
+        yield return PlaybookStreamEvent.RunStarted(runId, playbookId, 1);
+        await Task.Yield();
+        yield return PlaybookStreamEvent.RunFailed(runId, playbookId, "The playbook run failed. See the server log for details.");
+    }
 }
 
 /// <summary>
@@ -174,6 +278,24 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
     public Mock<IConsumerRoutingService> ConsumerRoutingMock { get; } = new();
     public Mock<IPlaybookOrchestrationService> PlaybookOrchestratorMock { get; } = new();
     public Mock<IActionResolver> ActionResolverMock { get; } = new();
+
+    /// <summary>The Dataverse boundary of the fire-and-forget "analysis complete" notification.</summary>
+    public Mock<IGenericEntityService> EntityServiceMock { get; } = new();
+
+    /// <summary>
+    /// Completes when the notification path first looks up the caller's systemuser - the first thing it does. Used to
+    /// observe whether a run sent the completion notification.
+    /// </summary>
+    public Task WatchForNotificationLookup()
+    {
+        var seen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        EntityServiceMock.Reset();
+        EntityServiceMock
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback(() => seen.TrySetResult())
+            .ReturnsAsync(new EntityCollection());
+        return seen.Task;
+    }
 
     private WebApplication? _app;
 
@@ -250,7 +372,7 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
         builder.Services.AddSingleton(Mock.Of<IPostUploadIndexingEnqueuer>());
 
         // Real NotificationService (fire-and-forget completion notification path).
-        builder.Services.AddSingleton(Mock.Of<IGenericEntityService>());
+        builder.Services.AddSingleton(EntityServiceMock.Object);
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership); // task 146 — the owner resolver at its module boundary
         builder.Services.AddSingleton<NotificationService>();
 

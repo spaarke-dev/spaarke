@@ -357,7 +357,7 @@ public static class AnalysisEndpoints
                 logger.LogError(ex, "Error during Linear Document Profile, TraceId={TraceId}", context.TraceIdentifier);
                 if (!cancellationToken.IsCancellationRequested)
                 {
-                    await WriteSSEAsync(response, AnalysisStreamChunk.FromError(ex.Message), CancellationToken.None);
+                    await TryWriteTerminalErrorAsync(response, context.TraceIdentifier, logger);
                 }
             }
             return;
@@ -427,6 +427,7 @@ public static class AnalysisEndpoints
 
         try
         {
+            var runFailed = false;
             await foreach (var evt in playbookOrchestrationService.ExecuteAsync(playbookRequest, context, cancellationToken))
             {
                 var chunk = BridgePlaybookEventToAnalysisChunk(evt, request.PlaybookId.Value);
@@ -434,12 +435,20 @@ public static class AnalysisEndpoints
                 {
                     continue; // Event type has no AnalysisStreamChunk equivalent (e.g., section_* events)
                 }
+                runFailed |= chunk.Type == "error";
                 await WriteSSEAsync(response, chunk, cancellationToken);
             }
 
             // Send SSE terminator so clients know the stream is complete
             await response.WriteAsync("data: [DONE]\n\n", cancellationToken);
             await response.Body.FlushAsync(cancellationToken);
+
+            if (runFailed)
+            {
+                // The run ended in its own error event (already on the wire): there is no completed analysis to announce.
+                logger.LogWarning("Analysis execution ended in an error event for TraceId={TraceId}", context.TraceIdentifier);
+                return;
+            }
 
             logger.LogInformation("Analysis execution completed for TraceId={TraceId}", context.TraceIdentifier);
 
@@ -453,7 +462,9 @@ public static class AnalysisEndpoints
                 logger,
                 context.TraceIdentifier);
         }
-        catch (OperationCanceledException)
+        // Only the CLIENT going away is silent; any other cancellation (an upstream timeout) is a failure and ends
+        // in the terminal error event below.
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             logger.LogInformation(
                 "Client disconnected during analysis execution, TraceId={TraceId}",
@@ -465,18 +476,7 @@ public static class AnalysisEndpoints
 
             if (!cancellationToken.IsCancellationRequested)
             {
-                // Include exception type and inner details for diagnostics
-                var errorDetail = $"{ex.GetType().Name}: {ex.Message}";
-                if (ex.InnerException != null)
-                    errorDetail += $" | Inner: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}";
-                // Include first relevant stack frame for quick diagnosis
-                var stackLines = ex.StackTrace?.Split('\n') ?? [];
-                var relevantFrame = stackLines.FirstOrDefault(l => l.Contains("Sprk.Bff.Api"));
-                if (relevantFrame != null)
-                    errorDetail += $" | At: {relevantFrame.Trim()}";
-
-                var errorChunk = new AnalysisStreamChunk("error", null, true, Error: errorDetail);
-                await WriteSSEAsync(response, errorChunk, CancellationToken.None);
+                await TryWriteTerminalErrorAsync(response, context.TraceIdentifier, logger);
             }
         }
     }
@@ -524,7 +524,7 @@ public static class AnalysisEndpoints
 
             // RunFailed → error chunk; preserves the existing client error path.
             PlaybookEventType.RunFailed =>
-                AnalysisStreamChunk.FromError(evt.Error ?? "Playbook execution failed"),
+                AnalysisStreamChunk.FromError(evt.Error ?? "Playbook execution failed", evt.ErrorCode, evt.CorrelationId),
 
             // NodeFailed → error chunk (single-node failure terminates the run per orchestrator semantics).
             PlaybookEventType.NodeFailed =>
@@ -713,6 +713,27 @@ public static class AnalysisEndpoints
         }
 
         return result.Entities[0].Id;
+    }
+
+    /// <summary>
+    /// Ends a stream that has already started with its ONE terminal error chunk (ADR-019): the fixed message, the
+    /// stable error code and the trace id that finds the logged exception. No exception text, type or stack ever
+    /// reaches the wire. A failure to write it (the client is gone) is logged and swallowed.
+    /// </summary>
+    private static async Task TryWriteTerminalErrorAsync(HttpResponse response, string correlationId, ILogger logger)
+    {
+        try
+        {
+            await WriteSSEAsync(
+                response,
+                AnalysisStreamChunk.FromError(
+                    PlaybookRunEndpoints.RunFailedMessage, PlaybookRunEndpoints.RunFailedErrorCode, correlationId),
+                CancellationToken.None);
+        }
+        catch (Exception writeEx)
+        {
+            logger.LogWarning(writeEx, "Could not write the terminal error chunk, TraceId={TraceId}", correlationId);
+        }
     }
 
     /// <summary>
@@ -1330,6 +1351,8 @@ public static class AnalysisEndpoints
 /// <param name="PartialStorage">Whether storage partially succeeded (outputs in sprk_analysisoutput but field mapping failed). Set on done event for Document Profile.</param>
 /// <param name="StorageMessage">User-friendly message about storage result. Set when PartialStorage is true.</param>
 /// <param name="Step">Pipeline step identifier for progress events (e.g. "extracting_text"). Set on progress events.</param>
+/// <param name="ErrorCode">Stable machine-readable code of a terminal failure (ADR-019). Set on the error event written when the stream fails after it started.</param>
+/// <param name="CorrelationId">Request trace id a user can quote to find the server log entry (ADR-019). Set together with <paramref name="ErrorCode"/>.</param>
 public record AnalysisStreamChunk(
     string Type,
     string? Content,
@@ -1340,7 +1363,9 @@ public record AnalysisStreamChunk(
     string? Error = null,
     bool? PartialStorage = null,
     string? StorageMessage = null,
-    string? Step = null)
+    string? Step = null,
+    string? ErrorCode = null,
+    string? CorrelationId = null)
 {
     public static AnalysisStreamChunk Metadata(Guid analysisId, string documentName) =>
         new("metadata", null, false, AnalysisId: analysisId, DocumentName: documentName);
@@ -1359,8 +1384,8 @@ public record AnalysisStreamChunk(
             PartialStorage: partialStorage,
             StorageMessage: storageMessage);
 
-    public static AnalysisStreamChunk FromError(string error) =>
-        new("error", null, true, Error: error);
+    public static AnalysisStreamChunk FromError(string error, string? errorCode = null, string? correlationId = null) =>
+        new("error", null, true, Error: error, ErrorCode: errorCode, CorrelationId: correlationId);
 
     public static AnalysisStreamChunk Progress(string step, string message) =>
         new("progress", message, false, Step: step);

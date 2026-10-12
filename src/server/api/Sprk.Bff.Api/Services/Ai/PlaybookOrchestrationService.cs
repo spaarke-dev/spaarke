@@ -282,8 +282,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         {
             _logger.LogError(ex, "Playbook execution failed - RunId: {RunId}", context.RunId);
             context.MarkFailed(ex.Message);
-            await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
-                context.RunId, context.PlaybookId, ex.Message), CancellationToken.None);
+            // ADR-019: this event goes to the caller's SSE stream. The exception stays in the log above; the stream
+            // gets the fixed text, the stable code and the trace id that finds the log entry.
+            await writer.WriteAsync(PlaybookRunEndpoints.BuildRunFailedEvent(
+                context.RunId, context.PlaybookId, context.HttpContext?.TraceIdentifier ?? context.RunId.ToString()),
+                CancellationToken.None);
         }
         finally
         {

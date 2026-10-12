@@ -1526,8 +1526,14 @@ public class PlaybookOrchestrationServiceTests
         // Assert
         var failedEvent = events.FirstOrDefault(e => e.Type == PlaybookEventType.RunFailed);
         failedEvent.Should().NotBeNull();
-        failedEvent!.Error.Should().Contain("Test exception");
-        failedEvent.Done.Should().BeTrue();
+        failedEvent!.Done.Should().BeTrue();
+
+        // ADR-019: the event goes to the caller's SSE stream - fixed text, stable code and the trace id; the exception
+        // text stays in the server log.
+        failedEvent.Error.Should().Be(PlaybookRunEndpoints.RunFailedMessage);
+        failedEvent.Error.Should().NotContain("Test exception");
+        failedEvent.ErrorCode.Should().Be(PlaybookRunEndpoints.RunFailedErrorCode);
+        failedEvent.CorrelationId.Should().Be(_mockHttpContext.TraceIdentifier);
     }
 
     [Fact]

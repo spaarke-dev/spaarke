@@ -197,6 +197,18 @@ public record PlaybookStreamEvent
     public string? Error { get; init; }
 
     /// <summary>
+    /// Stable machine-readable code of a terminal failure (ADR-019). Set only on the run-failed event the
+    /// endpoints write when execution throws; <c>null</c> on every other event.
+    /// </summary>
+    public string? ErrorCode { get; init; }
+
+    /// <summary>
+    /// Correlation id (the request trace id) a user can quote to support so the server log entry can be found
+    /// (ADR-019). Set only together with <see cref="ErrorCode"/>.
+    /// </summary>
+    public string? CorrelationId { get; init; }
+
+    /// <summary>
     /// Node output (for NodeCompleted events).
     /// </summary>
     public NodeOutput? NodeOutput { get; init; }
@@ -314,14 +326,22 @@ public record PlaybookStreamEvent
     };
 
     /// <summary>Creates a RunFailed event.</summary>
-    public static PlaybookStreamEvent RunFailed(Guid runId, Guid playbookId, string error, PlaybookRunMetrics? metrics = null) => new()
+    public static PlaybookStreamEvent RunFailed(
+        Guid runId,
+        Guid playbookId,
+        string error,
+        PlaybookRunMetrics? metrics = null,
+        string? errorCode = null,
+        string? correlationId = null) => new()
     {
         Type = PlaybookEventType.RunFailed,
         RunId = runId,
         PlaybookId = playbookId,
         Done = true,
         Error = error,
-        Metrics = metrics
+        Metrics = metrics,
+        ErrorCode = errorCode,
+        CorrelationId = correlationId
     };
 
     /// <summary>Creates a RunCancelled event.</summary>

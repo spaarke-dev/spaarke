@@ -1007,14 +1007,14 @@ public class PlaybookRouteAuthorizationContractTests
         public Mock<IPlaybookOrchestrationService> Orchestration { get; } = new(MockBehavior.Strict);
         public Mock<IPlaybookSharingService> Sharing { get; } = new(MockBehavior.Strict);
 
-        public static async Task<PlaybookAuthHost> StartAsync()
+        public static async Task<PlaybookAuthHost> StartAsync(Action<IServiceCollection>? configureServices = null)
         {
             var host = new PlaybookAuthHost();
-            await host.InitializeAsync();
+            await host.InitializeAsync(configureServices);
             return host;
         }
 
-        private async Task InitializeAsync()
+        private async Task InitializeAsync(Action<IServiceCollection>? configureServices)
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
@@ -1057,6 +1057,8 @@ public class PlaybookRouteAuthorizationContractTests
             builder.Services.AddScoped<SprkChatAgentFactory>(_ =>
                 throw new InvalidOperationException("POST /api/agent/message is not exercised by this host"));
 
+            configureServices?.Invoke(builder.Services);
+
             builder.WebHost.UseTestServer();
             _app = builder.Build();
             _app.UseRouting();
@@ -1073,6 +1075,10 @@ public class PlaybookRouteAuthorizationContractTests
         }
 
         public Task<HttpResponseMessage> SendAsync(HttpRequestMessage request) => _client!.SendAsync(request);
+
+        public Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, HttpCompletionOption completionOption, CancellationToken cancellationToken) =>
+            _client!.SendAsync(request, completionOption, cancellationToken);
 
         /// <summary>The create body passes the service's own validation.</summary>
         public void CreateIsValid() =>
