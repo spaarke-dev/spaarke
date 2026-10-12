@@ -939,8 +939,15 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         /// <summary>Every service request id a row delete was sent for (none when the delete is refused).</summary>
         public ConcurrentQueue<Guid> ServiceRequestDeletes { get; } = new();
 
+        private int _relationshipProbeCalls;
+
+        /// <summary>How many times the relationship probe ran (a refused delete must not reach it).</summary>
+        public int RelationshipProbeCalls => Volatile.Read(ref _relationshipProbeCalls);
+
         public void Reset()
         {
+            RelatedRows.Clear();
+            Volatile.Write(ref _relationshipProbeCalls, 0);
             RelatedRows.Clear();
             UnreadableRelationship = null;
             ServiceRequestDeletes.Clear();
@@ -974,6 +981,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
         public override Task<bool> HasRelatedRecordsAsync(Guid serviceRequestId, CancellationToken ct = default)
         {
+            Interlocked.Increment(ref _relationshipProbeCalls);
             // One probe per relationship, as the real method runs them: an unreadable one makes the answer unknown.
             if (UnreadableRelationship is { } entity)
                 return Task.FromException<bool>(new DataverseUnavailableException("relationship unreadable: " + entity));

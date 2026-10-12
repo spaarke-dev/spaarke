@@ -136,6 +136,22 @@ public sealed class ExternalDeleteServiceRequestTests : IClassFixture<ExternalDe
     }
 
     [Fact]
+    public async Task AWorkforcePrincipal_WithNoContact_Is403_NoDelete_AndNoRelationshipProbe()
+    {
+        // ContactId == Guid.Empty: the caller has no contact, so they can be nobody's requester. Even a request whose stored
+        // requester is the empty id, with no related rows, must not be deleted.
+        var id = SeedRequest(Guid.Empty);
+        _fixture.Principal = Workforce(Guid.Empty);
+
+        using var response = await Delete(id);
+
+        await ShouldBeTheUniformDenial(response);
+        _fixture.Data.ServiceRequestDeletes.Should().BeEmpty();
+        _fixture.Data.Requesters.ContainsKey(id).Should().BeTrue();
+        _fixture.Data.RelationshipProbeCalls.Should().Be(0, "a refused caller never reaches the relationship probe");
+    }
+
+    [Fact]
     public async Task ACiamPartner_WithThePartnerSwitchOff_Is403_EvenForTheirOwnContact()
     {
         var id = SeedRequest(Me);
@@ -288,26 +304,120 @@ public sealed class ExternalDeleteServiceRequestTests : IClassFixture<ExternalDe
     public void TheRelationshipList_IsExactlyTheSolutionsOneToManyRelationships()
     {
         // The solution source is the authority: a relationship added there must be added to ServiceRequestRelations, or a
-        // delete would orphan its rows without the check noticing. Read from the repo, not from a copy of the list.
+        // delete would orphan its rows without the check noticing. Read from the repo, not from a copy of the list, and from
+        // EVERY solution file (a relationship is exported under the referencing entity, or the referenced one, or as
+        // ManyToMany), not just sprk_ServiceRequest.xml.
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "src", "dataverse", "solutions", "SpaarkeMaster",
-                   "Other", "Relationships", "sprk_ServiceRequest.xml")))
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "dataverse", "solutions")))
             dir = dir.Parent;
         dir.Should().NotBeNull("the solution source is part of the repository checkout");
 
-        var xml = System.Xml.Linq.XDocument.Load(Path.Combine(dir!.FullName, "src", "dataverse", "solutions", "SpaarkeMaster",
-            "Other", "Relationships", "sprk_ServiceRequest.xml"));
-        var fromSolution = xml.Descendants("EntityRelationship")
-            .Where(r => string.Equals((string?)r.Element("ReferencedEntityName"), "sprk_ServiceRequest", StringComparison.OrdinalIgnoreCase))
-            .Select(r => ((string)r.Element("ReferencingEntityName")!).ToLowerInvariant()
-                         + "." + ((string)r.Element("ReferencingAttributeName")!).ToLowerInvariant())
-            .OrderBy(x => x)
-            .ToList();
+        var documents = new List<System.Xml.Linq.XDocument>();
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(dir!.FullName, "src", "dataverse", "solutions"), "*.xml", SearchOption.AllDirectories))
+        {
+            var text = File.ReadAllText(file);
+            // Cheap pre-filter: only a file that has relationships AND names the entity can matter.
+            if (!text.Contains("<EntityRelationship ", StringComparison.Ordinal)
+                || !text.Contains("sprk_servicerequest", StringComparison.OrdinalIgnoreCase))
+                continue;
+            documents.Add(System.Xml.Linq.XDocument.Parse(text));
+        }
+        documents.Should().NotBeEmpty("sprk_ServiceRequest.xml itself names the entity");
 
-        fromSolution.Should().Equal(ServiceRequestRelations
+        var found = FindServiceRequestParentRelationships(documents);
+
+        found.UnsupportedRelationships.Should().BeEmpty(
+            "ServiceRequestRelations models 1:N lookups only; a ManyToMany naming sprk_servicerequest needs its own check before delete");
+        found.OneToMany.OrderBy(x => x).Should().Equal(ServiceRequestRelations
             .Select(r => r.EntityLogicalName + "." + r.LookupAttribute)
             .OrderBy(x => x));
-        fromSolution.Should().HaveCount(8);
+        found.OneToMany.Should().HaveCount(8);
+    }
+
+    // Must-fire / must-not-fire controls for the scan above, on injected documents (a relationship exported under the
+    // referencing entity's file, a ManyToMany, and the request as the CHILD of another entity).
+
+    private static System.Xml.Linq.XDocument Doc(string relationships)
+        => System.Xml.Linq.XDocument.Parse($"<ImportExportXml><EntityRelationships>{relationships}</EntityRelationships></ImportExportXml>");
+
+    private const string OneToManyFromRequest = @"<EntityRelationship Name=""sprk_widget_RegardingServiceRequest"">
+        <EntityRelationshipType>OneToMany</EntityRelationshipType>
+        <ReferencingEntityName>sprk_Widget</ReferencingEntityName>
+        <ReferencedEntityName>sprk_ServiceRequest</ReferencedEntityName>
+        <ReferencingAttributeName>sprk_RegardingServiceRequest</ReferencingAttributeName>
+        <CascadeDelete>RemoveLink</CascadeDelete></EntityRelationship>";
+
+    [Fact]
+    public void TheScan_ReportsANewOneToMany_ExportedUnderTheReferencingEntitysFile()
+    {
+        var found = FindServiceRequestParentRelationships(new[] { Doc(OneToManyFromRequest) });
+
+        found.OneToMany.Should().Equal("sprk_widget.sprk_regardingservicerequest");
+        found.OneToMany.Except(ServiceRequestRelations.Select(r => r.EntityLogicalName + "." + r.LookupAttribute))
+            .Should().NotBeEmpty("a relationship missing from ServiceRequestRelations must make the pin test fail");
+    }
+
+    [Fact]
+    public void TheScan_ReportsAManyToMany_NamingTheRequestOnEitherSide()
+    {
+        const string first = @"<EntityRelationship Name=""a_nn""><EntityRelationshipType>ManyToMany</EntityRelationshipType>
+            <FirstEntityName>sprk_ServiceRequest</FirstEntityName><SecondEntityName>sprk_Widget</SecondEntityName>
+            <IntersectEntityName>sprk_a_nn</IntersectEntityName></EntityRelationship>";
+        const string second = @"<EntityRelationship Name=""b_nn""><EntityRelationshipType>ManyToMany</EntityRelationshipType>
+            <FirstEntityName>sprk_Widget</FirstEntityName><SecondEntityName>sprk_servicerequest</SecondEntityName>
+            <IntersectEntityName>sprk_b_nn</IntersectEntityName></EntityRelationship>";
+
+        var found = FindServiceRequestParentRelationships(new[] { Doc(first + second) });
+
+        found.OneToMany.Should().BeEmpty();
+        found.UnsupportedRelationships.Should().BeEquivalentTo("a_nn", "b_nn");
+    }
+
+    [Fact]
+    public void TheScan_IgnoresRelationships_WhereTheRequestIsTheChild()
+    {
+        // sprk_servicerequest -> contact (sprk_requestedby): the request holds the lookup, so deleting it orphans nothing.
+        const string requestAsChild = @"<EntityRelationship Name=""sprk_servicerequest_RequestedBy_contact"">
+            <EntityRelationshipType>OneToMany</EntityRelationshipType>
+            <ReferencingEntityName>sprk_ServiceRequest</ReferencingEntityName>
+            <ReferencedEntityName>Contact</ReferencedEntityName>
+            <ReferencingAttributeName>sprk_RequestedBy</ReferencingAttributeName></EntityRelationship>";
+        const string unrelated = @"<EntityRelationship Name=""x""><EntityRelationshipType>OneToMany</EntityRelationshipType>
+            <ReferencingEntityName>sprk_A</ReferencingEntityName><ReferencedEntityName>sprk_B</ReferencedEntityName>
+            <ReferencingAttributeName>sprk_b</ReferencingAttributeName></EntityRelationship>";
+
+        var found = FindServiceRequestParentRelationships(new[] { Doc(requestAsChild + unrelated) });
+
+        found.OneToMany.Should().BeEmpty();
+        found.UnsupportedRelationships.Should().BeEmpty();
+    }
+
+    /// <summary>Every relationship in the documents that makes <c>sprk_servicerequest</c> a PARENT: a 1:N where it is the
+    /// referenced entity (as <c>referencingEntity.lookup</c>, lower case), and any ManyToMany that names it.</summary>
+    private static (List<string> OneToMany, List<string> UnsupportedRelationships) FindServiceRequestParentRelationships(
+        IEnumerable<System.Xml.Linq.XDocument> documents)
+    {
+        const string request = "sprk_servicerequest";
+        var oneToMany = new List<string>();
+        var unsupported = new List<string>();
+        foreach (var relationship in documents.SelectMany(d => d.Descendants("EntityRelationship")))
+        {
+            string? Text(string name) => (string?)relationship.Element(name);
+            bool IsRequest(string? v) => string.Equals(v?.Trim(), request, StringComparison.OrdinalIgnoreCase);
+
+            if (string.Equals(Text("EntityRelationshipType"), "ManyToMany", StringComparison.OrdinalIgnoreCase))
+            {
+                if (IsRequest(Text("FirstEntityName")) || IsRequest(Text("SecondEntityName")))
+                    unsupported.Add((string?)relationship.Attribute("Name") ?? "(unnamed)");
+            }
+            else if (IsRequest(Text("ReferencedEntityName")))
+            {
+                oneToMany.Add(Text("ReferencingEntityName")!.Trim().ToLowerInvariant()
+                              + "." + Text("ReferencingAttributeName")!.Trim().ToLowerInvariant());
+            }
+        }
+
+        return (oneToMany, unsupported);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────────────────────────────────────────

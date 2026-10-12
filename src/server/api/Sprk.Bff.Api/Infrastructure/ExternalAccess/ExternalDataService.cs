@@ -1651,7 +1651,7 @@ public class ExternalDataService
     /// <c>src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_ServiceRequest.xml</c>, 8 relationships, all
     /// <c>CascadeDelete=RemoveLink</c>): deleting the request would orphan every row listed here, so ANY row (active or not)
     /// blocks the delete. A relationship added to the solution must be added here; the pinned test
-    /// <c>ServiceRequestRelations_AreExactlyTheEightSolutionRelationships</c> reads the solution XML and fails until it is.
+    /// <c>TheRelationshipList_IsExactlyTheSolutionsOneToManyRelationships</c> reads the solution XML and fails until it is.
     /// </summary>
     internal static readonly IReadOnlyList<ServiceRequestRelation> ServiceRequestRelations = new ServiceRequestRelation[]
     {
