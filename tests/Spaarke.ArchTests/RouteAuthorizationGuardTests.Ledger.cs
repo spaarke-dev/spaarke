@@ -350,6 +350,11 @@ public partial class RouteAuthorizationGuardTests
             + "(ModuleEntitlementResolver.IsEntitledAsync — the /me/entitlements set, partner switch included) and has a "
             + "contact; the one row it writes app-only names that contact as sprk_requestedby, so it lands only in the "
             + "caller's own Service Requests set. Takes no record id."),
+        new GovernedFile("Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs", Scope.GroupGated,
+            "GET /api/v1/external/notifications and POST /api/v1/external/notifications/seen "
+            + "(spaarke-SPA-external-access-platform-r3 task 037, FR-08) on the COLLABORATION group. Neither takes an id: the "
+            + "feed is the caller principal's own (grants to its contact, each re-checked with CallerPrincipal.RightsOn; "
+            + "messages only on its accessible set and own service requests) and the marker is keyed by its own id."),
         new GovernedFile("Api/ExternalAccess/GrantExternalAccessEndpoint.cs", Scope.GroupGated,
             "POST /grant under the DelegationRuleFilter admin group."),
         new GovernedFile("Api/ExternalAccess/RevokeExternalAccessEndpoint.cs", Scope.GroupGated,
@@ -717,7 +722,14 @@ public partial class RouteAuthorizationGuardTests
     //            Front Door intake submit, on the COLLABORATION group. Governed GroupGated with a HandlerDecision (the
     //            legal-front-door module entitlement, ModuleEntitlementResolver.IsEntitledAsync, before the app-only create).
     //            Pinned by tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalIntakeEndpointsTests.cs.
-    private const int ExpectedEndpointFileCount = 120;
+    //
+    // 120 -> 121 (2026-10-12, spaarke-SPA-external-access-platform-r3 task 037, FR-08):
+    //
+    //   037  +1  Api/ExternalAccess/ExternalNotificationFeedEndpoints.cs ADDED — GET /api/v1/external/notifications (the
+    //            derived in-portal feed) and POST /api/v1/external/notifications/seen (the caller's last-seen marker), on the
+    //            COLLABORATION group. Governed GroupGated; both routes take no id and are Permanent CallerScopedOnly (the
+    //            /me precedent). Pinned by tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ExternalNotificationFeedTests.cs.
+    private const int ExpectedEndpointFileCount = 121;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -2607,6 +2619,14 @@ public partial class RouteAuthorizationGuardTests
             + "caller.ReadableProjects). Takes no id."),
         Permanent("GET /api/v1/external/me/entitlements", PermanentBasis.CallerScopedOnly, "167",
             "The caller principal's own module entitlements (MeEntitlementsEndpoint.cs:32). Takes no id."),
+        Permanent("GET /api/v1/external/notifications", PermanentBasis.CallerScopedOnly, "r3-037",
+            "The caller principal's own feed: grants naming its own contact, each kept only with Read on its root "
+            + "(CallerPrincipal.RightsOn, ExternalNotificationFeedEndpoints.cs:233), and messages read only for its accessible "
+            + "set (:244) and its own service requests (the module's ScopeRows, :269), under the external read rules (:284). "
+            + "Takes no id."),
+        Permanent("POST /api/v1/external/notifications/seen", PermanentBasis.CallerScopedOnly, "r3-037",
+            "Writes the caller principal's own last-seen marker, keyed by its own systemuser or contact id "
+            + "(ExternalNotificationFeedEndpoints.cs:161, :181). Takes no id and no body."),
         Permanent("GET /api/users/me/memberships/{entityType}", PermanentBasis.CallerScopedOnly, "167",
             "Memberships of the caller's own systemuserid, resolved from the oid claim "
             + "(MembershipEndpoints.cs:192-209). {entityType} is a table name; no caller-chosen principal or "

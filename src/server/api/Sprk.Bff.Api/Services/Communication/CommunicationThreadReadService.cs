@@ -419,11 +419,7 @@ public sealed class CommunicationThreadReadService
                 "IAppOnlyCommunicationQuery is not registered; the external-plane message read cannot run (fail closed).");
 
         var regardingValue = $"_{regardingField}_value";
-        var select = string.Join(',', new[]
-        {
-            PkField, BodyField, BodyFormatField, SubjectField, DirectionField, SentByValue, CreatedByContactValue,
-            CreatedOnField, InternalOnlyField, PrivilegeField, StatusCodeAttribute, regardingValue,
-        });
+        var select = ExternalSelect(new[] { regardingValue });
         // Newest first with one over-fetched row (detects a cut-short list without a COUNT query): when the record has
         // more rows than the bound, the NEWEST ones are kept and the oldest dropped; the page is reversed to oldest→newest
         // below. Active AND sent/received only (ExternalStatusClause) — a Draft/Queued/Failed/Bounded/Recalled row is
@@ -439,24 +435,10 @@ public sealed class CommunicationThreadReadService
         // Re-check every row (defence in depth — the query is not the only gate): it must regard THIS record and carry a
         // sent/received status. A row with a missing or unreadable status is dropped (fail closed).
         var scoped = bounded
-            .Where(r => TryGuid(r, regardingValue) == recordId
-                        && IsExternallyReadableStatus(TryInt(r, StatusCodeAttribute))
-                        && !IsHiddenFromExternal(TryInt(r, PrivilegeField)))
+            .Where(r => TryGuid(r, regardingValue) == recordId && IsExternallyVisibleRow(r))
             .ToList();
 
-        var isInternal = callerSystemUserId is { } systemUserId
-            && systemUserId != Guid.Empty
-            && !await _identityResolver.IsExternalAsync(systemUserId, ct);
-        var context = new CommunicationAccessContext(
-            CallerSystemUserId: callerSystemUserId ?? Guid.Empty, IsInternalUser: isInternal);
-
-        var parsed = scoped.Select(ParseMessageRow).Where(p => p.MessageId != Guid.Empty).ToList();
-        var filtered = _accessFilter.FilterMessages(context, parsed.Select(p => p.Entity).ToList());
-        var byId = parsed.ToDictionary(p => p.MessageId);
-        var messages = filtered.Decisions
-            .Where(d => d.Decision.IsVisible)
-            .Select(d => BuildDto(byId[d.Message.Id], d.Decision, EmptyAttachments))
-            .ToList();
+        var (messages, isInternal) = await FilterExternalMessagesAsync(scoped, callerSystemUserId, ct);
 
         _logger.LogDebug(
             "[BY-REGARDING-APPONLY] {EntityType}={RecordId} internalCaller={Internal} returned={Returned} " +
@@ -469,6 +451,158 @@ public sealed class CommunicationThreadReadService
     /// <summary>True only for a Status Reason that means the message was actually sent or received (see the allow-list).</summary>
     private static bool IsExternallyReadableStatus(int? statusCode)
         => statusCode is StatusSend or StatusDelivered;
+
+    /// <summary>
+    /// The per-row re-check every EXTERNAL read applies after its query (defence in depth — the query is not the only
+    /// gate): a sent/received status (a missing or unreadable one is dropped) and a privilege classification an external
+    /// caller may receive (<see cref="IsHiddenFromExternal"/>).
+    /// </summary>
+    private static bool IsExternallyVisibleRow(Dictionary<string, JsonElement> row)
+        => IsExternallyReadableStatus(TryInt(row, StatusCodeAttribute)) && !IsHiddenFromExternal(TryInt(row, PrivilegeField));
+
+    /// <summary>The explicit external projection (no attachments, no recipient addresses) plus the regarding lookups read.</summary>
+    private static string ExternalSelect(IEnumerable<string> regardingValues)
+        => string.Join(',', new[]
+        {
+            PkField, BodyField, BodyFormatField, SubjectField, DirectionField, SentByValue, CreatedByContactValue,
+            CreatedOnField, InternalOnlyField, PrivilegeField, StatusCodeAttribute,
+        }.Concat(regardingValues));
+
+    /// <summary>
+    /// The shared tail of every EXTERNAL read: the internal-only decision (an internal systemuser only — the same
+    /// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/> bit the impersonated reads use, #675), the shared
+    /// <see cref="ICommunicationAccessFilter"/>, and the shared DTO builder. Returns the visible messages in input order.
+    /// </summary>
+    private async Task<(List<ThreadMessageDto> Messages, bool IsInternal)> FilterExternalMessagesAsync(
+        IReadOnlyList<Dictionary<string, JsonElement>> rows, Guid? callerSystemUserId, CancellationToken ct)
+    {
+        var isInternal = callerSystemUserId is { } systemUserId
+            && systemUserId != Guid.Empty
+            && !await _identityResolver.IsExternalAsync(systemUserId, ct);
+        var context = new CommunicationAccessContext(
+            CallerSystemUserId: callerSystemUserId ?? Guid.Empty, IsInternalUser: isInternal);
+
+        var parsed = rows.Select(ParseMessageRow).Where(p => p.MessageId != Guid.Empty).ToList();
+        var filtered = _accessFilter.FilterMessages(context, parsed.Select(p => p.Entity).ToList());
+        var byId = parsed.ToDictionary(p => p.MessageId);
+        var messages = filtered.Decisions
+            .Where(d => d.Decision.IsVisible)
+            .Select(d => BuildDto(byId[d.Message.Id], d.Decision, EmptyAttachments))
+            .ToList();
+        return (messages, isInternal);
+    }
+
+    // ── app-only RECENT messages across many records, for the EXTERNAL notification feed (r3 task 037 / FR-08) ──
+
+    /// <summary>Records per feed query: one OR-filter over this many regarding ids keeps the GET URL well inside the limit.</summary>
+    internal const int RecentRecordChunkSize = 50;
+
+    /// <summary>
+    /// The most records one feed read scans (<see cref="RecentRecordChunkSize"/> × 20 queries). A caller with more is
+    /// answered from the first this-many and the result says <c>Truncated</c> — a cap is never silent.
+    /// </summary>
+    internal const int MaxRecentRecords = 1000;
+
+    /// <summary>
+    /// The newest messages filed regarding ANY of <paramref name="records"/> since <paramref name="since"/>, read APP-ONLY
+    /// for the external notification feed, newest first, at most <paramref name="max"/>. Every row passes the SAME external
+    /// rules as <see cref="ReadRegardingAppOnlyAsync"/>: active and sent/received only, the privilege rule
+    /// (<see cref="ExternalPrivilegeFilterClause"/> in the query, <see cref="IsHiddenFromExternal"/> per row), and the
+    /// shared internal-only filter (an internal systemuser only).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Record access is the caller's job, and must already be done.</b> <paramref name="records"/> must be the
+    /// caller's accessible set (the feed endpoint passes the principal's Read-bearing roots and its own service requests).
+    /// The query is keyed on those records through the typed <see cref="RegardingFieldMap"/> lookups, and every returned row
+    /// is re-checked: it is kept only when one of its regarding values IS one of <paramref name="records"/>, and that record
+    /// (the first in <paramref name="records"/> order) is the one reported. A row that matches none is dropped.</para>
+    /// <para><b>Bounded.</b> At most <see cref="MaxRecentRecords"/> records, queried <see cref="RecentRecordChunkSize"/> at
+    /// a time, each query <c>$top</c> = <paramref name="max"/> + 1 newest; merged, newest first, cut to
+    /// <paramref name="max"/>. <c>Truncated</c> says a bound cut the answer (more records, or more messages, than read).</para>
+    /// </remarks>
+    /// <param name="records">The caller's accessible records as (entity logical name, id); unsupported types are ignored.</param>
+    /// <param name="since">The window start; only messages created at or after it are read.</param>
+    /// <param name="callerSystemUserId">The caller's <c>systemuserid</c> when the caller is a systemuser; <c>null</c> for a contact.</param>
+    /// <param name="max">The most messages to return (newest first).</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<AppOnlyRecentReadResult> ReadRecentForRecordsAppOnlyAsync(
+        IReadOnlyList<(string EntityType, Guid RecordId)> records,
+        DateTimeOffset since,
+        Guid? callerSystemUserId,
+        int max,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        if (max <= 0)
+            throw new ArgumentOutOfRangeException(nameof(max), "The feed read needs a positive bound.");
+
+        var appOnlyQuery = _appOnlyQuery
+            ?? throw new InvalidOperationException(
+                "IAppOnlyCommunicationQuery is not registered; the external-plane message read cannot run (fail closed).");
+
+        // Supported, non-empty, distinct records, in the caller's order (that order picks the reported record for a row
+        // filed under two of them).
+        var keyed = records
+            .Where(r => r.RecordId != Guid.Empty && RegardingFieldMap.FieldFor(r.EntityType) is not null)
+            .Select(r => (Entity: r.EntityType, r.RecordId, Value: $"_{RegardingFieldMap.FieldFor(r.EntityType)}_value"))
+            .DistinctBy(r => (r.Value, r.RecordId))
+            .ToList();
+        var truncated = keyed.Count > MaxRecentRecords;
+        if (truncated)
+            keyed = keyed.Take(MaxRecentRecords).ToList();
+
+        if (keyed.Count == 0)
+            return new AppOnlyRecentReadResult(Array.Empty<RecentRecordMessage>(), truncated);
+
+        var rows = new List<Dictionary<string, JsonElement>>();
+        foreach (var chunk in keyed.Chunk(RecentRecordChunkSize))
+        {
+            var regardingValues = chunk.Select(r => r.Value).Distinct().ToList();
+            var idFilter = string.Join(" or ", chunk.Select(r => $"{r.Value} eq {r.RecordId}"));
+            var odata =
+                $"$select={ExternalSelect(regardingValues)}" +
+                $"&$filter=({idFilter}) and {ActiveOnlyClause} and {ExternalStatusClause} and {ExternalPrivilegeFilterClause}" +
+                $" and {CreatedOnField} ge {FormatOData(since)}" +
+                $"&$orderby={CreatedOnField} desc,{PkField} desc&$top={max + 1}";
+            var chunkRows = await appOnlyQuery.QueryAsync(CommunicationSet, odata, ct);
+            truncated |= chunkRows.Count > max;
+            rows.AddRange(chunkRows.Take(max));
+        }
+
+        // Re-check every row: the window, the external status/privilege rules, and that it regards one of THE records.
+        var matched = new Dictionary<Guid, (string Entity, Guid RecordId)>();
+        var scoped = new List<Dictionary<string, JsonElement>>();
+        foreach (var row in rows)
+        {
+            if (TryGuid(row, PkField) is not { } messageId || messageId == Guid.Empty || matched.ContainsKey(messageId))
+                continue;
+            if (TryDateTimeOffset(row, CreatedOnField) is not { } createdOn || createdOn < since || !IsExternallyVisibleRow(row))
+                continue;
+            var match = keyed.FirstOrDefault(r => TryGuid(row, r.Value) == r.RecordId);
+            if (match.Value is null)
+                continue;
+            matched[messageId] = (match.Entity, match.RecordId);
+            scoped.Add(row);
+        }
+
+        var (messages, isInternal) = await FilterExternalMessagesAsync(scoped, callerSystemUserId, ct);
+        var ordered = messages
+            .OrderByDescending(m => m.CreatedOn)
+            .ThenByDescending(m => m.MessageId)
+            .ToList();
+        truncated |= ordered.Count > max;
+        var result = ordered
+            .Take(max)
+            .Select(m => new RecentRecordMessage(m, matched[m.MessageId].Entity, matched[m.MessageId].RecordId))
+            .ToList();
+
+        _logger.LogDebug(
+            "[RECENT-APPONLY] records={Records} since={Since:o} internalCaller={Internal} returned={Returned} " +
+            "(read={Read}, kept-after-recheck={Kept}, truncated={Truncated})",
+            keyed.Count, since, isInternal, result.Count, rows.Count, scoped.Count, truncated);
+
+        return new AppOnlyRecentReadResult(result, truncated);
+    }
 
     // ── list all threads (R3 task 003 / FR-16) ───────────────────────────────────────────────────────
 
