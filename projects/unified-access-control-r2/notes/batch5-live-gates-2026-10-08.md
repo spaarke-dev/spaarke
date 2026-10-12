@@ -528,6 +528,23 @@ Final sweep 20:15Z: 0 `# gate17*` / `# gate18*` matters or events, 0 grant rows 
 - BFF deployed to dev from `C:\wtdep` at `67e06a626`: all 4 critical files match (SHA-256), `healthz` passes, and both CORS origins are present.
 - Behaviour now live: a recycle-bin container whose ownership this stamp cannot prove answers the uniform 404, not 503. Protected B (an ownership record that survives deletion, #1652) is next, on `fix/uac-r2-1652-recyclebin-ownership-record`.
 
+## 2026-10-12 #1732 rollout (F-165-RB part 1, "protected B": an ownership record that survives deletion, #1652)
+
+- **Reviews.** Round 1 verifier: CHANGES REQUESTED (F1 concurrent-restore race; F2 untested gate branches). Round 2 (`f32d26e17`): ETag-conditional record changes (Cosmos If-Match), three branch tests, pre-POST credential faults rethrown. The independent Opus re-check came back CLEAN. Known limits K1–K4 are recorded in the PR body (no purge on any path; recoverable within 93 days).
+- **Tests at `f32d26e17`.** 1047/1047 SPE admin, recycle-bin, tenant, container and ownership tests. ArchTests 940/940. The executor's full suite had 3–5 TestHost timeouts in unrelated classes under 73–96% machine load; all passed when re-run alone. CI full unit tests (Tier 2) passed.
+- **CI.** Router green. "Server tests (office scope)" failed with no failed step after 20 minutes, the same as the cancelled/timed-out runs of that gate on master. Not related to this change.
+- **Merged** as `4b0057b5b`: squash, pinned to `f32d26e17`, `merge-tree` clean against `1ce87fa79`.
+- **Deployed.** The BFF went to dev from `C:\wtdep` at `4b0057b5b`. All 4 critical files match (SHA-256), `healthz` returns 200, and both CORS origins are present.
+- **Filed.** #1755: `ProvisionProjectEndpoint` Step 7 runs on the request token, so a client disconnect leaves an orphan container. Not uac-r2-impacting.
+- **Live gate: PASS** (2026-10-12 20:57:56–20:59:16Z, root admin, `spaarke-bff-dev` at `4b0057b5b`).
+  - Throwaway container `zz-uac-1732-gate-20261012205759`, type `8a6ce34c…`, config `c3a25b9a…`. It is in the bin with its ownership record and has been added to `Remove-TestContainers.ps1`.
+  - **A, listed in the bin:** the pre-check bin was empty (containers deleted before this deploy have no record). After create (201; marker and BU stamp present) and a bulk soft delete (202; 1/1), the bin listed the container on the first read.
+  - **B, restore:** `POST /recyclebin/{id}/restore` answered 200. The container was then live, with the marker `spaarkeCustomerId=spaarke` and the BU stamp `06fbf21c…` both back, and it was no longer in the bin.
+  - **Clean-up:** a second bulk soft delete (202; 1/1). The live read answers 404 and the bin lists it again.
+  - **App Insights:** the traces show "Recorded the ownership … before its soft delete" on both deletes, and "Restored container … re-marked and re-bound … from its ownership record". No rollback Critical log appeared.
+  - **Found, not caused by #1732:** `SpeAuditService` fails every audit-row create with a Dataverse 400, including on the 2026-10-11 gate 165 run. The failure is swallowed, so no `sprk_speauditlog` rows are written on dev. Filed as #1779.
+  - **Cosmetic:** the bin list returns `deletedDateTime: null`. The soft delete also does not evict the live-marker cache key, but nothing leaks: the live read still answers 404.
+
 ## 2026-10-12 #1657 + ADR-028 A7 rollout (form-script sign-in, #1655/#1656)
 
 - #1667 (ADR-028 Amendment A7) merged as `32f8e7712`. #1657 merged as `9695a4ca7` (head `709652dba`). The round-2 re-check PASSED with no F-class findings: Spaarke.Auth 249/249, form scripts 303/303, bundle fresh. Known limits K2 (redirects) and K3 (`http:` base URL) are added to #1671.

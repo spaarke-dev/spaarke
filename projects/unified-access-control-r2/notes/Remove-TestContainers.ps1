@@ -39,7 +39,8 @@ $ids = @(
   'b!WIEh0AfQbkSHzeuucOCsydNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-10 batch-4 sweep secure project (deleted)
   'b!KDQEkLSGukOQnI4nJV1qUtNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-10 gate 179 step 3 secure matter (deleted)
   'b!bgjWxybhAUOq_wfSmPgY39NtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-11 gate 165 throwaway container 1 (deleted)
-  'b!axaKTtLekUqgkVfbYrmcl9NtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y'   # 2026-10-11 gate 165 throwaway container 2 (deleted)
+  'b!axaKTtLekUqgkVfbYrmcl9NtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y',  # 2026-10-11 gate 165 throwaway container 2 (deleted)
+  'b!vNrUKH68Tke7Lleqzg7hldNtZCRkudVMkCm7XnMdUkAEyFUFBjlmQJQzNXlrHp-y'   # 2026-10-12 gate #1732 throwaway container (deleted; has an ownership record)
 )
 foreach ($id in $ids) {
   try {
