@@ -216,7 +216,7 @@ public partial class SignalReevaluationJobTests
     {
         var h = new Harness();
         var handler = new SignalEvaluationTriggerHandler(
-            new SignalReevaluationJob(h.Evaluator, h.Writer, h.Closure, new ThrowingReads(), h.Cache, h.Clock, new SinkLogger<SignalReevaluationJob>(h.Log)),
+            new SignalReevaluationJob(h.Evaluator, h.Writer, h.Suppression, h.Closure, new ThrowingReads(), h.Cache, h.Clock, new SinkLogger<SignalReevaluationJob>(h.Log)),
             new SinkLogger<SignalEvaluationTriggerHandler>(h.Log));
 
         var outcome = await handler.ProcessAsync(TriggerJob(SignalTriggerKind.Classification, "sprk_matter", MatterId, CommunicationId), default);
