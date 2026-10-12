@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="057" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Detail view events and to-dos for Matter and Work Assignment (FR-03 client)</title>
+    <phase>5 SPA features</phase>
+    <gate>after 039 and 055</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend over new read endpoints (tags frontend); modifies RecordDetailModal</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Frontend over defined APIs; copies the project events/to-dos section</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>modifies RecordDetailModal; chain 050 → 051 → 054 → 055 → 057</parallel-reason>
+    <deps>039, 055</deps>
+    <tags>frontend, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Show events and to-dos on the Matter and Work Assignment detail views, the same way the Project detail view shows them, using the task 039 read routes.</prompt>
+  <role>SPAARKE platform developer. React + Fluent UI v9 developer. Follow ADRs strictly.</role>
+  <goal>Opening a Matter or Work Assignment the caller can read lists its events and to-dos (read-only lists plus the existing delete-own action from task 054) instead of the static "No events or tasks to show for this record yet." empty state; empty, 403 and error states match the project section.</goal>
+
+  <context>
+    <background>Task 050 built the detail view; the Matter and Work Assignment sections show a static empty state because the server had no routes (RecordDetailModal.tsx:35, :452). Task 039 added GET /api/v1/external/{matters|workassignments}/{id}/events and /todos (ExternalProjectDataEndpoints.cs:172, :188, :400, :407), same row shape as the project routes. The server applies the interim every-root rule (notes/task-039-notes.md §11): a row linked to a root the caller cannot read is withheld server-side; the client does no filtering of its own.</background>
+    <relevant-files>
+      <file role="modify">src/client/external-spa/src/components/detail/RecordDetailModal.tsx</file>
+      <file role="modify">src/client/external-spa/src/api/web-api-client.ts</file>
+      <file role="modify">src/client/external-spa/src/mocks/mock-service.ts</file>
+      <file role="new-artifact">src/client/external-spa/tests/DetailEventsTodosRoots.test.tsx</file>
+    </relevant-files>
+    <reference-implementation>The project events/to-dos section of RecordDetailModal.tsx and getProjectEvents / getProjectTodos in web-api-client.ts (:517, :548). Generalise them by root kind; do not fork.</reference-implementation>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 semantic tokens only; dark mode correct.</constraint>
+    <constraint source="ADR-012">Reuse the existing project section components; no new component unless the project one cannot take a root kind.</constraint>
+    <constraint source="project">Every call goes through bffApiCall to /api/v1/external/** with the active token acquirer; no URL or scope from a link or query string.</constraint>
+    <constraint source="project">Read-only plus the existing delete-own action (task 054: shown only when the creator stamp matches; server decides; 403 shows an error). No create or edit of events/to-dos on Matter or Work Assignment in this task.</constraint>
+    <constraint source="project">Project, Invoice and Service Request detail views behave exactly as before.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Add getRootEvents(rootKind, id) / getRootTodos(rootKind, id) in web-api-client.ts; make the project functions call them (same URLs for projects).</step>
+    <step>Replace the static Matter / Work Assignment empty state with the generalised section.</step>
+    <step>Add matching dev-mock routes (behind isDevMockEnabled only).</step>
+    <step>Tests at the bffApiCall seam with the real RecordDetailModal.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Matter and Work Assignment detail views call /matters/{id}/events + /todos and /workassignments/{id}/events + /todos and render the rows.</criterion>
+    <criterion>Empty lists show the same empty state text as the project section; a 403 shows the denied state; a 5xx shows the retryable error; none of these breaks the rest of the detail view.</criterion>
+    <criterion>Delete-own appears only on rows whose creator stamp matches the signed-in principal, as on projects.</criterion>
+    <criterion>Negative: the Project view still calls /projects/{id}/events and /todos (unchanged URLs); Invoice and Service Request views make no events/to-dos calls.</criterion>
+    <criterion>The static "No events or tasks to show for this record yet." is no longer rendered for Matter or Work Assignment when the server returns rows.</criterion>
+    <criterion>npm run typecheck, lint, full vitest, build and check:dist pass.</criterion>
+  </acceptance-criteria>
+</task>

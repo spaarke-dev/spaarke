@@ -1,7 +1,7 @@
 # Task Index — Spaarke External Access Platform R3
 
 > **Status**: Initialized 2026-10-10 by `/project-pipeline`; execution not started.
-> **Total**: 34 tasks (P0: 3 · P1: 3 · P2: 1 · P3: 10 · P4: 4 · P5: 7 · P6: 1 · P7: 4 · wrap-up: 1).
+> **Total**: 35 tasks (P0: 3 · P1: 3 · P2: 1 · P3: 10 · P4: 4 · P5: 8 · P6: 1 · P7: 4 · wrap-up: 1).
 > **Source**: `spec.md` (FR-01–FR-26). Plan: `plan.md`. Operating manual: `CLAUDE.md`.
 
 Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `[wip]` `[done]` `[escalated]` `[blocked]` (the ASCII token is mandatory; FAILURE-MODES G-16).
@@ -36,8 +36,9 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 054 | Detail documents + delete-own actions (FR-24/FR-26 client) | P5 | ✅ [done] | 051, 032 | S/h | FULL | Wave 6 |
 | 055 | Notification bell + deep-link record open (FR-08/FR-07 client) | P5 | ✅ [done] | 054, 037, 041 | S/h | FULL | Wave 7 |
 | 056 | Join page (FR-13), flagged until 060 | P5 | ✅ [done] | 003, 041 | O/h | FULL | Wave 8 |
+| 057 | Detail events + to-dos for Matter and Work Assignment (FR-03 client) | P5 | 🔄 [wip] | 039, 055 | S/h | FULL | Wave 8 |
 | 060 | Registration service: owner host decision, then build or R4 hand-off (FR-14) | P6 | 🔲 [open] | 003 + owner decision | O/h | FULL | — (blocked on owner) |
-| 070 | Deploy SPA + dev Teams package to dev | P7 | 🔲 [open] | 038, 042, 043, 053, 055, 056 | S/h | STANDARD | — (live, owner-gated) |
+| 070 | Deploy SPA + dev Teams package to dev | P7 | 🔲 [open] | 038, 042, 043, 053, 055, 056, 057 | S/h | STANDARD | — (live, owner-gated) |
 | 071 | Teams live check with the test guest (FR-21) | P7 | 🔲 [open] | 070 | S/h | STANDARD | — (owner-driven) |
 | 072 | Both-plane E2E on dev, success criteria 1–12 + FR-10 | P7 | 🔲 [open] | 002, 070, 071 | S/h | STANDARD | — (live) |
 | 073 | Production deploy to external.spaarke.com (gated) | P7 | 🔲 [open] | 072 + T240c, T240d, DNS, owner go | S/h | STANDARD | — (blocked until gates) |

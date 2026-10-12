@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>live deployment</parallel-reason>
-    <deps>038, 042, 043, 053, 055, 056</deps>
+    <deps>038, 042, 043, 053, 055, 056, 057</deps>
     <tags>deploy, ci-cd</tags>
     <estimated-effort>2-4 hours</estimated-effort>
   </metadata>
