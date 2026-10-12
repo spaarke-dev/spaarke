@@ -1,4 +1,6 @@
 using System.Reflection;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 
@@ -16,7 +18,14 @@ namespace Sprk.Bff.Api.Services.Registration;
 /// </remarks>
 public class RegistrationEmailService
 {
-    private const string FromMailbox = "demo@demo.spaarke.com";
+    // The system sender is configuration (owner decision 2026-10-11), not a literal: it was the constant "demo@demo.spaarke.com".
+    // It reuses Communication:DefaultMailbox - the platform's one central mailbox (the canonical manifest's
+    // Communication-DefaultMailbox, intake-supplied per stamp). ENFORCED invariant: CommunicationOptionsValidator fails the
+    // host's start outside Development/Testing unless DefaultMailbox is non-blank AND equals the Email of an entry in
+    // Communication:ApprovedSenders (the send path rejects any other explicit FromMailbox as InvalidSender). Deployed hosts
+    // therefore need App Settings Communication__DefaultMailbox and a matching Communication__ApprovedSenders__N__Email.
+    private string FromMailbox => ResolveFromMailbox(_communicationOptions.Value);
+
     private const string SupportEmail = "support@spaarke.com";
     private const string QuickStartGuideUrl = "https://www.spaarke.com/quick-start";
     private const string ProductionAccessUrl = "https://www.spaarke.com/contact";
@@ -24,14 +33,32 @@ public class RegistrationEmailService
     private const string TemplateNamespace = "Sprk.Bff.Api.Services.Registration.EmailTemplates";
 
     private readonly CommunicationService _communicationService;
+    private readonly IOptions<CommunicationOptions> _communicationOptions;
     private readonly ILogger<RegistrationEmailService> _logger;
 
     public RegistrationEmailService(
         CommunicationService communicationService,
+        IOptions<CommunicationOptions> communicationOptions,
         ILogger<RegistrationEmailService> logger)
     {
         _communicationService = communicationService;
+        _communicationOptions = communicationOptions;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// The system sender mailbox: <c>Communication:DefaultMailbox</c>. Throws when it is blank - there is no fallback
+    /// address, so a missing setting fails the send (every caller treats a send failure as best effort or an error)
+    /// instead of mailing from an unintended mailbox. Outside Development/Testing a blank value never reaches here: the
+    /// host does not start (<see cref="CommunicationOptionsValidator"/>).
+    /// </summary>
+    internal static string ResolveFromMailbox(CommunicationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (string.IsNullOrWhiteSpace(options.DefaultMailbox))
+            throw new InvalidOperationException(
+                "Communication:DefaultMailbox is not configured, so the system sender mailbox is unknown and no email was sent.");
+        return options.DefaultMailbox.Trim();
     }
 
     /// <summary>
@@ -82,7 +109,7 @@ public class RegistrationEmailService
 
     /// <summary>
     /// Sends an acknowledgement email to the applicant confirming their request was received.
-    /// BCC: demo@demo.spaarke.com for record keeping (BCC avoids Graph self-CC issues when sender == CC).
+    /// BCC: the system sender mailbox for record keeping (BCC avoids Graph self-CC issues when sender == CC).
     /// </summary>
     public async Task SendAcknowledgementEmailAsync(
         string recipientEmail,
@@ -105,7 +132,7 @@ public class RegistrationEmailService
         var request = new SendCommunicationRequest
         {
             To = [recipientEmail],
-            Bcc = [FromMailbox], // BCC demo@demo.spaarke.com — BCC avoids Graph issues when sender == recipient
+            Bcc = [FromMailbox], // BCC the system sender - BCC avoids Graph issues when sender == recipient
             Subject = "We Received Your Spaarke Demo Request",
             Body = body,
             BodyFormat = BodyFormat.HTML,
@@ -123,7 +150,7 @@ public class RegistrationEmailService
 
     /// <summary>
     /// Sends a welcome email with demo credentials to the user.
-    /// CC: demo@demo.spaarke.com for record keeping.
+    /// BCC: the system sender mailbox for record keeping.
     /// </summary>
     public async Task SendWelcomeEmailAsync(
         string recipientEmail,
@@ -151,7 +178,7 @@ public class RegistrationEmailService
         var request = new SendCommunicationRequest
         {
             To = [recipientEmail],
-            Bcc = [FromMailbox], // BCC demo@demo.spaarke.com for record keeping
+            Bcc = [FromMailbox], // BCC the system sender for record keeping
             Subject = "Your Spaarke Demo Access is Ready!",
             Body = body,
             BodyFormat = BodyFormat.HTML,
@@ -231,7 +258,8 @@ public class RegistrationEmailService
         var templateHtml = await LoadTemplateAsync("PortalNotificationTemplate.html");
 
         var request = BuildPortalNotificationRequest(
-            templateHtml, recipientEmail, subject, headline, message, linkUrl, linkText, correlationId, DateTime.UtcNow.Year);
+            templateHtml, recipientEmail, subject, headline, message, linkUrl, linkText, correlationId, DateTime.UtcNow.Year,
+            FromMailbox);
 
         _logger.LogInformation(
             "Sending portal notification email | CorrelationId: {CorrelationId}", correlationId);
@@ -255,7 +283,8 @@ public class RegistrationEmailService
         string linkUrl,
         string linkText,
         string correlationId,
-        int year)
+        int year,
+        string fromMailbox)
         => new()
         {
             To = [recipientEmail],
@@ -270,7 +299,7 @@ public class RegistrationEmailService
                 ["Year"] = year.ToString(System.Globalization.CultureInfo.InvariantCulture),
             }),
             BodyFormat = BodyFormat.HTML,
-            FromMailbox = FromMailbox,
+            FromMailbox = fromMailbox,
             SendMode = SendMode.SharedMailbox,
             CorrelationId = correlationId
         };

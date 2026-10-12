@@ -1573,7 +1573,8 @@ public class ExternalDataService
     // holds Read on the record's parent. The endpoint (ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync) composes
     // the two halves; this service supplies the facts (GetDeleteTargetAsync), the stamp rule (IsCreatedByCaller) and the
     // app-only row delete for to-dos and events (DeleteRecordAsync). A document is deleted through
-    // DocumentCheckoutService so its SPE file goes too. Service requests are NOT here: escalated (task 032 notes).
+    // DocumentCheckoutService so its SPE file goes too. A service request (owner decision 2026-10-11, option A) is
+    // deleted by its REQUESTER only, and only while NO row is related to it (HasRelatedRecordsAsync).
     // ---------------------------------------------------------------------------
 
     /// <summary>The record types an external caller can delete-own (FR-26).</summary>
@@ -1582,6 +1583,13 @@ public class ExternalDataService
         Document = 1,
         Todo = 2,
         Event = 3,
+
+        /// <summary>
+        /// A service request the caller REQUESTED (owner decision 2026-10-11, option A + recall). Its "creator" fact is the
+        /// requester (<c>sprk_requestedby</c>), decided by the requester scope, not by <see cref="GetDeleteTargetAsync"/>;
+        /// it is refused when ANY related row exists (<see cref="HasRelatedRecordsAsync"/>).
+        /// </summary>
+        ServiceRequest = 4,
     }
 
     /// <summary>One parent lookup of a deletable row: the parent type and the row's <c>_..._value</c> attribute for it.</summary>
@@ -1634,6 +1642,9 @@ public class ExternalDataService
                 DocumentParents.Values.Select(b => new DeletableParentLookup(b.Kind, b.LookupValueAttribute)).ToList()),
             [DeletableKind.Todo] = new(DeletableKind.Todo, "sprk_todo", "sprk_todos", RootParentLookups),
             [DeletableKind.Event] = new(DeletableKind.Event, "sprk_event", "sprk_events", RootParentLookups),
+            // No parent and no creator stamp: the requester scope decides (ExternalProjectDataEndpoints.DeleteOwnServiceRequest).
+            [DeletableKind.ServiceRequest] = new(DeletableKind.ServiceRequest, "sprk_servicerequest", "sprk_servicerequests",
+                Array.Empty<DeletableParentLookup>()),
         };
 
     /// <summary>The binding for a deletable kind. Throws for a value outside the table: a programming error.</summary>
@@ -1664,6 +1675,10 @@ public class ExternalDataService
     /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
     public virtual async Task<DeleteTarget?> GetDeleteTargetAsync(DeletableKind kind, Guid id, CancellationToken ct = default)
     {
+        if (kind == DeletableKind.ServiceRequest)
+            throw new ArgumentOutOfRangeException(nameof(kind), kind,
+                "A service request is authorized through its requester (GetServiceRequestRequesterAsync), not the creator stamps.");
+
         var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(
             BuildDeleteTargetUrl(GetApiUrl(), kind, id), ct);
         return row is null ? null : ParseDeleteTarget(kind, row);
@@ -1780,6 +1795,117 @@ public class ExternalDataService
         {
             _logger.LogError(ex, "[EXT-DATA] Error deleting {Entity} {Id}", binding.EntityLogicalName, id);
             throw new DataverseUnavailableException("Dataverse could not complete the delete.", ex);
+        }
+    }
+
+    /// <summary>
+    /// One 1:N relationship from <c>sprk_servicerequest</c>: the child entity, its entity set and the lookup that points at
+    /// the request.
+    /// </summary>
+    internal sealed record ServiceRequestRelation(string EntityLogicalName, string EntitySet, string LookupAttribute);
+
+    /// <summary>
+    /// EVERY 1:N relationship from <c>sprk_servicerequest</c> (solution source
+    /// <c>src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_ServiceRequest.xml</c>, 8 relationships, all
+    /// <c>CascadeDelete=RemoveLink</c>): deleting the request would orphan every row listed here, so ANY row (active or not)
+    /// blocks the delete. A relationship added to the solution must be added here; the pinned test
+    /// <c>TheRelationshipList_IsExactlyTheSolutionsOneToManyRelationships</c> reads the solution XML and fails until it is.
+    /// </summary>
+    internal static readonly IReadOnlyList<ServiceRequestRelation> ServiceRequestRelations = new ServiceRequestRelation[]
+    {
+        new("sprk_analysis", "sprk_analysises", "sprk_regardingservicerequest"),
+        new("sprk_communication", "sprk_communications", "sprk_regardingservicerequest"),
+        new("sprk_communicationthread", "sprk_communicationthreads", "sprk_regardingservicerequest"),
+        new("sprk_document", "sprk_documents", "sprk_relatedservicerequest"),
+        new("sprk_event", "sprk_events", "sprk_regardingservicerequest"),
+        new("sprk_memo", "sprk_memos", "sprk_regardingservicerequest"),
+        new("sprk_signal", "sprk_signals", "sprk_regardingservicerequest"),
+        new("sprk_todo", "sprk_todos", "sprk_regardingservicerequest"),
+    };
+
+    /// <summary>The one-row existence probe for one relationship: no <c>statecode</c> filter, so inactive rows count. Pure.</summary>
+    internal static string BuildRelatedRowProbeUrl(string apiUrl, ServiceRequestRelation relation, Guid serviceRequestId)
+    {
+        var value = $"_{relation.LookupAttribute}_value";
+        return $"{apiUrl}/{relation.EntitySet}?$select={value}&$filter={value} eq {serviceRequestId}&$top=1";
+    }
+
+    /// <summary>
+    /// Whether ANY row is related to the service request, across every 1:N relationship (<see cref="ServiceRequestRelations"/>),
+    /// active or inactive, app-only (owner decision 2026-10-11, option A: a request with activity is not deletable).
+    /// </summary>
+    /// <remarks>
+    /// All eight probes run; a probe that FAILS (non-success status of any kind, transport error, token failure) makes the
+    /// whole answer unknown and throws <see cref="DataverseUnavailableException"/>, even when another probe found a row:
+    /// "could not tell" is never reported as "none". Nothing is deleted on an exception (the caller answers 503).
+    /// <c>virtual</c> per ADR-038 §4 (substitution seam).
+    /// </remarks>
+    /// <exception cref="DataverseUnavailableException">A relationship could not be read.</exception>
+    public virtual async Task<bool> HasRelatedRecordsAsync(Guid serviceRequestId, CancellationToken ct = default)
+    {
+        try
+        {
+            var apiUrl = GetApiUrl();
+            var probes = ServiceRequestRelations
+                .Select(r => AnyRowAsync(BuildRelatedRowProbeUrl(apiUrl, r, serviceRequestId), ct))
+                .ToArray();
+            var found = await Task.WhenAll(probes);
+            return found.Any(f => f);
+        }
+        catch (DataverseUnavailableException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[EXT-DATA] Error probing the rows related to service request {Id}", serviceRequestId);
+            throw new DataverseUnavailableException("Dataverse could not be read.", ex);
+        }
+    }
+
+    /// <summary>A one-row collection probe: true when the page holds a row. Any non-success (a 404 included: an unknown
+    /// entity set is a broken check, not "no rows") throws <see cref="DataverseUnavailableException"/>.</summary>
+    private async Task<bool> AnyRowAsync(string url, CancellationToken ct)
+    {
+        try
+        {
+            var token = await GetAppOnlyTokenAsync(ct);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("OData-MaxVersion", "4.0");
+            request.Headers.Add("OData-Version", "4.0");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await _httpClient.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[EXT-DATA] Related-row probe failed: {Status} — {Url}", response.StatusCode, url);
+                throw new DataverseUnavailableException($"Dataverse answered {(int)response.StatusCode}.");
+            }
+
+            var page = await response.Content.ReadFromJsonAsync<ODataResult<Dictionary<string, JsonElement>>>(ct)
+                ?? throw new DataverseUnavailableException("Dataverse returned an empty body.");
+            // A 200 with no "value" array is not "no rows": it is a body this check cannot read (fail closed).
+            if (page.Value is null)
+                throw new DataverseUnavailableException("Dataverse returned a body with no value array.");
+            return page.Value.Count > 0;
+        }
+        catch (DataverseUnavailableException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[EXT-DATA] Error probing related rows: {Url}", url);
+            throw new DataverseUnavailableException("Dataverse could not be read.", ex);
         }
     }
 

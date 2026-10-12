@@ -1609,6 +1609,16 @@ public partial class RouteAuthorizationGuardTests
             new[] { "ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync", "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
             "Creator stamp + Read on every modelled root (AuthorizeDeleteOwnAsync, ExternalProjectDataEndpoints.cs:1499-1546) before "
             + "the app-only row delete (ExternalProjectDataEndpoints.cs:1679, DeleteAuthorizedRowAsync)."),
+        // Owner decision 2026-10-11 (task 032 follow-up, FR-26), option A: the REQUESTER deletes a service request that has no
+        // related row. Requester only through the same requester scope as the service-request document routes
+        // (RightsForDocumentParentAsync -> the Service Requests module's IsRecordAccessible: sprk_requestedby = the caller's
+        // contact; the partner switch is honoured); then every 1:N relationship is probed app-only (HasRelatedRecordsAsync)
+        // and any related row is a 409 has_related_records. Absent / not-requester: the same 403 as the other delete routes.
+        new HandlerDecision("DELETE /api/v1/external/servicerequests/{id:guid}", "DeleteOwnServiceRequest", "IsRecordAccessible",
+            new[] { "ExternalProjectDataEndpoints.RightsForDocumentParentAsync" },
+            "Requester only (RightsForDocumentParentAsync -> module.IsRecordAccessible, ExternalProjectDataEndpoints.cs:1726) and "
+            + "no related row in any of the 8 relationships (ExternalDataService.HasRelatedRecordsAsync, "
+            + "ExternalProjectDataEndpoints.cs:1739) before the app-only row delete (DeleteAuthorizedRowAsync, :1755)."),
         new HandlerDecision("POST /api/v1/external/api/dataverse/fetch", "ExecuteScopedFetchAsync", "Tier2ScopeFilterInjector", Array.Empty<string>(),
             "The caller's FetchXML is rewritten to their accessible-record set before it runs "
             + "(Tier2ScopeFilterInjector.Inject, ExternalModuleDataEndpoints.cs:264), then ScopeRows trims the "

@@ -805,7 +805,10 @@ internal static class AssignedAccessTestDoubles
     internal sealed class RecordingEmailService : Sprk.Bff.Api.Services.Registration.RegistrationEmailService
     {
         public RecordingEmailService()
-            : base(null!, NullLogger<Sprk.Bff.Api.Services.Registration.RegistrationEmailService>.Instance)
+            : base(
+                null!,
+                Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.CommunicationOptions { DefaultMailbox = "mailbox-central@spaarke.com" }),
+                NullLogger<Sprk.Bff.Api.Services.Registration.RegistrationEmailService>.Instance)
         {
         }
 

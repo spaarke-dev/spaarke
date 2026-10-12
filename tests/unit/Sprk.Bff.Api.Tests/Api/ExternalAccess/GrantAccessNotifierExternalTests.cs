@@ -415,7 +415,10 @@ public class GrantAccessNotifierExternalTests
     /// <summary>The email seam: records each send; <see cref="Fail"/> makes a send throw instead.</summary>
     private sealed class RecordingEmails : RegistrationEmailService
     {
-        public RecordingEmails() : base(null!, NullLogger<RegistrationEmailService>.Instance)
+        public RecordingEmails() : base(
+            null!,
+            Options.Create(new CommunicationOptions { DefaultMailbox = "mailbox-central@spaarke.com" }),
+            NullLogger<RegistrationEmailService>.Instance)
         {
         }
 

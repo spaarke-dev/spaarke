@@ -37,6 +37,11 @@ public class ExternalMessageEndpointsTests
     private const int Incoming = 100000000;
     private const int Outgoing = 100000001;
 
+    // sprk_privilegeclassification (CommunicationPrivilegeClassification).
+    private const int PrivilegeNone = 100000000;
+    private const int PrivilegePotentiallyPrivileged = 100000001;
+    private const int PrivilegePrivileged = 100000002;
+
     // sprk_communication Status Reason (Entity.xml statuscode optionset / CommunicationStatus).
     private const int StatusDraft = 1;
     private const int StatusDeleted = 2;
@@ -155,7 +160,8 @@ public class ExternalMessageEndpointsTests
         string createdOn,
         string subject = "Subject",
         int direction = Incoming,
-        int? status = StatusDelivered)
+        int? status = StatusDelivered,
+        int? privilege = PrivilegeNone)
     {
         var row = new Dictionary<string, JsonElement>
         {
@@ -167,7 +173,7 @@ public class ExternalMessageEndpointsTests
             ["_sprk_sentby_value"] = El(Guid.NewGuid().ToString("D")),
             ["_sprk_sentby_value@OData.Community.Display.V1.FormattedValue"] = El("Pat Lawyer"),
             ["createdon"] = El(createdOn),
-            ["sprk_privilegeclassification"] = El(100000000),
+            ["sprk_privilegeclassification"] = El(privilege),
             [$"_{regardingField}_value"] = El(regardingId.ToString("D")),
             // Columns that must never cross the external surface even if Dataverse returned them.
             ["sprk_from"] = El("pat.lawyer@spaarke.test"),
@@ -655,6 +661,71 @@ public class ExternalMessageEndpointsTests
             "only a Send / Delivered (sent or inbound-received) message is returned; Draft, Deleted, Recalled, Queued, " +
             "Failed, Bounded and a row with no readable status are not");
         _lastOData.Should().Contain("(statuscode eq 659490002 or statuscode eq 659490003)");
+    }
+
+    // ── privilege: hidden from external callers (owner decision 2026-10-11, task 033 follow-up) ─────
+
+    private const string ExpectedPrivilegeClause =
+        "(sprk_privilegeclassification eq null or (sprk_privilegeclassification ne 100000001 and sprk_privilegeclassification ne 100000002))";
+
+    [Theory]
+    [MemberData(nameof(PrincipalKinds))]
+    public async Task PrivilegedAndPotentiallyPrivilegedMessages_AreAbsent_NoneAndNullAreShown_ForEveryPrincipalKind(string kind)
+    {
+        var project = Guid.NewGuid();
+        var none = Guid.NewGuid();
+        var nullClassification = Guid.NewGuid();
+        SetupMessages(
+            MessageRow(none, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z", privilege: PrivilegeNone),
+            MessageRow(nullClassification, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z", privilege: null),
+            MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-03T09:00:00Z", privilege: PrivilegePotentiallyPrivileged),
+            MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-04T09:00:00Z", privilege: PrivilegePrivileged),
+            // A classification this code does not define is unreadable, so it is hidden too (fail closed).
+            MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-05T09:00:00Z", privilege: 7));
+
+        var messages = Messages(await Get("projects", project, PrincipalOfKind(kind, project)));
+
+        messages.Select(m => m.SprkCommunicationid).Should().Equal(
+            none.ToString("D"), nullClassification.ToString("D"));
+    }
+
+    [Fact]
+    public async Task ThePrivilegeRule_IsInTheDataverseFilter_NotOnlyAfterTheRowsCame_SoPagingCannotShortChangeIt()
+    {
+        var project = Guid.NewGuid();
+        SetupMessages(MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"));
+
+        await Get("projects", project, Ciam(project: project));
+
+        _lastOData.Should().Contain($" and {ExpectedPrivilegeClause}&$orderby=")
+            .And.Contain("$top=501", "the bound is applied to rows that already passed the filter");
+        CommunicationThreadReadService.ExternalPrivilegeFilterClause.Should().Be(ExpectedPrivilegeClause);
+    }
+
+    [Fact]
+    public void TheHiddenSet_IsOneNamedList_PotentiallyPrivilegedAndPrivileged()
+    {
+        CommunicationThreadReadService.ExternallyHiddenPrivilege.Should().Equal(
+            CommunicationPrivilegeClassification.PotentiallyPrivileged, CommunicationPrivilegeClassification.Privileged);
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData(PrivilegeNone, false)]
+    [InlineData(PrivilegePotentiallyPrivileged, true)]
+    [InlineData(PrivilegePrivileged, true)]
+    [InlineData(7, true)]
+    [InlineData(0, true)]
+    public void IsHiddenFromExternal_FollowsTheNamedSet(int? classification, bool hidden) =>
+        CommunicationThreadReadService.IsHiddenFromExternal(classification).Should().Be(hidden);
+
+    [Fact]
+    public async Task ThePostResponse_NeverCarriesAClassification_ItIsTheAuthorsOwnPlainRow()
+    {
+        // A post's 201 body is built from the values written (no read-back), and ExternalMessageDto has no privilege
+        // member at all, so there is nothing for the rule to hide; the row a post writes never sets a classification.
+        typeof(ExternalMessageDto).GetProperties().Select(p => p.Name)
+            .Should().NotContain(n => n.Contains("rivilege", StringComparison.OrdinalIgnoreCase));
     }
 
     // ── a fault anywhere in the endpoint is its coded 500 ──────────────────────────────────────────
