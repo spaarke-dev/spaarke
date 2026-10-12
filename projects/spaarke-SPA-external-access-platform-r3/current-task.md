@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-12 (039/055 done; 057 running; by context-handoff)
+> **Last Updated**: 2026-10-12 (057 done; waiting on owner; by context-handoff)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 057 (matter/WA events + to-dos in the detail view, SPA, this worktree, uncommitted) is with a sonnet implementer |
-| **Step** | 055 done (`b4d0cf101`), 039 merged + done (build 0/0, filtered unit 2885, arch 941; agent worktree removed). R3 pushed |
-| **Status** | Clean apart from 057 agent work |
-| **Next Action** | 057 done -> one fable review, fix, commit by path, SPA suite, mark done. Then wait on owner answers (002, 052/053, multi-root A/B/C, dispatch go) |
+| **Task** | None active. 057 done (`39d2712ce`) |
+| **Step** | 039, 055, 057 done and pushed. All agent-runnable tasks without an owner gate are complete |
+| **Status** | Clean. Waiting on owner answers |
+| **Next Action** | Owner answers unblock: 002 (columns), 052/053 (intake), multi-root A/B/C, dev dispatch go (070 -> 071 -> 072, 040 step 5), 060 host. Before the BFF PR: /conflict-check + actionlint |
 
 ### Critical Context
 - **Parallel pattern:** BFF tasks run in isolated worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-*` (`git reset --hard <R3 sha>` first), commit there, main session merges `--no-ff`. SPA tasks run in this worktree, uncommitted; the main session commits by explicit path. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
@@ -33,7 +33,7 @@
 8. **Go for dev dispatch:** Teams package + SPA (`external-spa-dev`), then task 071 live sign-in; 040 step 5 after it (never remove the Copilot `access_as_user`).
 
 ## Next actions (in order)
-1. Land 057 (FR-03 client; 070 depends on it).
+1. (done) 057.
 2. Known limits recorded in notes/task-039-notes.md section 11 (truncated one-bit signal, thinned grid pages, invoice documents vs thread).
 3. 002 after the column answers; 052/053 after the intake answers.
 4. 060 (self-registration service; co-host with T240c, own MI; registry field `CustomerTenantIds`).

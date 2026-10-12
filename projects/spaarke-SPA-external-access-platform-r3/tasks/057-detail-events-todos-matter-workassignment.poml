@@ -4,7 +4,7 @@
     <title>Detail view events and to-dos for Matter and Work Assignment (FR-03 client)</title>
     <phase>5 SPA features</phase>
     <gate>after 039 and 055</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend over new read endpoints (tags frontend); modifies RecordDetailModal</rigor-reason>
     <model-tier>sonnet</model-tier>
