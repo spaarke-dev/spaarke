@@ -104,6 +104,30 @@ public interface IThreadResolver
     Task ReconcileThreadForFilingAsync(Guid communicationId, CancellationToken ct = default);
 
     /// <summary>
+    /// spaarkeai-word-add-in-r1 task 129 (backfill sweep): gives an ACTIVE, Open thread that is anchored to a record (a typed
+    /// regarding lookup — the one anchor rule, <see cref="ThreadResolver"/>'s <c>ThreadAnchorOf</c>) the owner S6 gives such a
+    /// thread: the anchor record's team, resolved by the SAME step the filing reconcile and the thread-create paths use. Fixes
+    /// threads created before S6 reached them (owned by the BFF's app user in the root business unit, so a child-business-unit
+    /// user could not read them). Changes the owner and nothing else.
+    /// <list type="bullet">
+    /// <item>the thread is unreadable, inactive, not Open, unanchored, or anchored to a record that owns no thread (a party:
+    /// account / contact / organization) → <see cref="ThreadOwnerReconcileOutcome.NotApplicable"/>;</item>
+    /// <item>S6 refuses the anchor record's owner → <see cref="ThreadOwnerReconcileOutcome.Refused"/>, the thread is left;</item>
+    /// <item>the thread's current owner, or the owner S6 gives, is the Secure Record team — or that cannot be told (the same
+    /// detection as the filing reconcile's whole-thread move: <c>SecureChildShareSynchronizer</c> / <c>IsSecureOwner</c>) →
+    /// <see cref="ThreadOwnerReconcileOutcome.SkippedSecure"/>, the thread is left (a secure record's mirrored shares are not
+    /// written here);</item>
+    /// <item>already owned by that team → <see cref="ThreadOwnerReconcileOutcome.AlreadyCorrect"/>, no write;</item>
+    /// <item>otherwise the owner is assigned → <see cref="ThreadOwnerReconcileOutcome.Assigned"/>.</item>
+    /// </list>
+    /// With <paramref name="dryRun"/> the same answer is computed and NOTHING is written (<c>Assigned</c> then means "would
+    /// be assigned"). Best-effort / non-fatal (NFR-02): never throws; a fault is logged and answers
+    /// <see cref="ThreadOwnerReconcileOutcome.Failed"/>.
+    /// </summary>
+    Task<ThreadOwnerReconcileOutcome> ReconcileAnchoredThreadOwnerAsync(
+        Guid threadId, bool dryRun = false, CancellationToken ct = default);
+
+    /// <summary>
     /// FR-17 rename (task 004): sets <c>sprk_name</c> AND flips the naming-edited marker
     /// (<c>sprk_nameisautoderived</c> → Edited/<c>false</c>) in ONE write, so a later
     /// <see cref="ReDeriveThreadNameAsync"/> short-circuits at the marker gate and never overwrites the
@@ -163,6 +187,28 @@ public interface IThreadResolver
 /// denormalized <c>sprk_regardingrecord*</c> pointer the resolver already stamps at thread create.
 /// </summary>
 public sealed record RecordThreadAnchor(string EntityType, string RecordId, string? RecordName);
+
+/// <summary>What <see cref="IThreadResolver.ReconcileAnchoredThreadOwnerAsync"/> did (or, on a dry run, would do) for a thread.</summary>
+public enum ThreadOwnerReconcileOutcome
+{
+    /// <summary>The owner was set to the anchor record's team (on a dry run: would be set).</summary>
+    Assigned,
+
+    /// <summary>The thread is already owned by the anchor record's team; nothing written.</summary>
+    AlreadyCorrect,
+
+    /// <summary>Its current owner or the owner S6 gives is the Secure Record team, or that could not be told; left as it is.</summary>
+    SkippedSecure,
+
+    /// <summary>Not a thread this applies to (unreadable, inactive, not Open, unanchored, or anchored to a party); left as it is.</summary>
+    NotApplicable,
+
+    /// <summary>S6 refused the anchor record's owner; left as it is.</summary>
+    Refused,
+
+    /// <summary>A fault (logged); left as it is.</summary>
+    Failed,
+}
 
 /// <summary>Whose read grant a message gets from the thread it joined (#1629).</summary>
 public enum ThreadGrantAudience

@@ -164,8 +164,13 @@ public class ReconciledEmailFilingTests
                 {
                     Candidates = decision.Provenance.Candidates.Append(new CandidateTrace
                     {
-                        Field = "sprk_regardingperson", TargetEntity = "contact", TargetId = contactId.ToString("D"),
-                        ReinforcedConfidence = 0.9, DeterministicConfidence = 0.9, Written = true, Conflict = false,
+                        Field = "sprk_regardingperson",
+                        TargetEntity = "contact",
+                        TargetId = contactId.ToString("D"),
+                        ReinforcedConfidence = 0.9,
+                        DeterministicConfidence = 0.9,
+                        Written = true,
+                        Conflict = false,
                         Contributors = new[] { new ContributorTrace { Rung = "ParticipantCorrelation", Confidence = 0.9, Provenance = "sender" } },
                     }).ToList(),
                 },
@@ -329,7 +334,8 @@ public class ReconciledEmailFilingTests
     public async Task Capture_ANewlyCapturedEmail_JoinsItsThread_AndIsGrantedTheAudienceTheJoinFixed()
     {
         // F2(a): an Office add-in save created a filed communication with NO thread, so it never showed on the record's
-        // Messages panel. The capture now joins (or starts) its thread like the mailbox and send paths, then grants it.
+        // Messages panel. The capture now resolves a thread through the same path as the mailbox and send paths, then
+        // grants it.
         var world = new World(reconciled: false, Unfiled());
         var assignment = ThreadAssignment.Anchored(Guid.NewGuid(), "sprk_matter", MatterId);
         ThreadResolutionRequest? asked = null;
@@ -344,7 +350,7 @@ public class ReconciledEmailFilingTests
         asked.Should().NotBeNull();
         asked!.CommunicationId.Should().Be(CanonicalId);
         asked.ChannelType.Should().Be(Sprk.Bff.Api.Services.Communication.Models.CommunicationType.Email);
-        asked.Message.InternetMessageId.Should().Be("<CAF0a1b2c3@mail.example.com>", "the join keys on the email's own headers");
+        asked.Message.InternetMessageId.Should().Be("<CAF0a1b2c3@mail.example.com>", "the resolution receives the email's own envelope");
         world.Grants.Verify(g => g.GrantMessageAccessAsync(CanonicalId, assignment, It.IsAny<CancellationToken>()), Times.Once);
         world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
             "a new row is not a re-file");

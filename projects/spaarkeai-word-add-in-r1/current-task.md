@@ -2,20 +2,21 @@
 
 > **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas" (incl. "Multi-customer add-in (Model 1)" and "Guest sign-in, PCFs and telemetry" blocks). History: git log + `notes/handoff-history/` (do not load on recovery).
 
-> **Last Updated**: 2026-10-10 (task 127 rollout complete in dev; 14 PCFs re-synced to master in dev).
+> **Last Updated**: 2026-10-11 (tasks 128 + Reconciliation page fix deployed to dev; task 129 being implemented).
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | None active. Task 127 is rolled out to dev (all 4 steps; record in `notes/127-client-telemetry.md` "Rollout record"). |
-| **Status** | Waiting on owner live checks (below). Task 126 blocked on UAC-r2. |
-| **Next Action** | Wait for the owner's UAT results and fix what they find. If the Matter footer still shows v1.1.84 after a hard refresh, the next step is an owner-approved publish that moves `customcontrols.version` (see #1591 / project CLAUDE.md Deploy). |
+| **Task** | 129 (filed email visible on the record's Messages panel) — an Opus implementer subagent is building `IThreadResolver.ReconcileThreadForFilingAsync` per `notes/129-filed-email-messages.md`, adapted to #1639's join-time grant audience. Owner-confirmed rules: first filing anchors the thread; a re-filed email that is the only filed email in its thread takes the thread with it; a mixed thread / master thread → only the email moves to the new record's Tier-2 default thread. |
+| **Status** | 128 done in code + deployed, awaiting owner retest. 129 implementation running (uncommitted BFF edits in this worktree). |
+| **Next Action** | When the implementer reports: review the diff, run 2 adversarial-verifier passes (security-adjacent: grants), measure BFF publish size (§10), commit, then ask the owner for the dev BFF deploy go and write/dry-run the backfill (`scripts/Backfill-ThreadFiling.ps1` + `sprk_communicationthread` in `Backfill-RecordOwnership.ps1`). Also send UAC-r2 the T126 message (Q3: `Set-ExternalFlagForB2BGuests.ps1` must exclude the customer workforce tenants before any Model-1 `-Apply`; Q2: provisioning customer record is canonical; Q4: Events type=Task carry documents, OOB task activity unused) — first confirm how a B2B guest's home tenant appears at sign-in (`tid` vs `idp`). |
 
 ### Unpushed / uncommitted
-- None after the docs PR for this checkpoint merges.
+- Task 129 BFF edits (implementer, in progress). Branch otherwise pushed at `a70019e3e`; no PR open.
 
-## Live in dev (2026-10-08/10)
+## Live in dev (2026-10-08/11)
+- 2026-10-12 03:12 UTC (evening of 10-11 local): `sprk_communicationreconciliation` (fix: page loads again — `4fb7c8da6`) and `sprk_documentuploadwizard` (task 128 — `db37e6a31`) built from `a70019e3e`, published, read back byte-equal.
 - Guest sign-in fix (#1453, tasks 122-125): @spaarke/auth + 10 PCFs + 8 code pages + 3 web resources.
 - Task 121 (pane Message-ID, per-caller duplicate check, file-if-unfiled): #1495, add-in + BFF.
 - Task 127 (#1537): BFF `cc9fd0809`; code pages DailyBriefing/EmailPage/CommunicationReconciliation from `9c04c4320`; SemanticSearchControl **1.1.85** + VisualHost **1.4.40** from `f022544d6`; Matter main form static `appInsightsKey` + `tenantId` removed, `sprk_matter` published.

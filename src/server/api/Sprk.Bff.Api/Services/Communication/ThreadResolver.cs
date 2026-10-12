@@ -587,21 +587,34 @@ public sealed class ThreadResolver : IThreadResolver
             var current = ThreadAnchorOf(thread);
             var isOpen = thread.GetAttributeValue<OptionSetValue>(PrivacyStateField)?.Value == PrivacyStateOpen;
 
+            // An inactive (deactivated) thread does not show on a record's panel (behaviour review F3): it is never left as
+            // the email's thread by rule 1, and never moved whole — only the email moves, to R's active default thread.
+            var isActive = (thread.GetAttributeValue<OptionSetValue>(StateCodeFilterField)?.Value ?? StateActive) == StateActive;
+
+            // A DEFAULT thread — the per-user master (Tier 3) or a record's per-record default (Tier 2) — is a catch-all and is
+            // never moved whole (owner decision 2026-10-11): moving R_old's default would strip R_old of it and give R two.
+            var isDefaultThread = thread.GetAttributeValue<bool?>(DefaultThreadMarkerField) == true;
+
+            // Final re-check F3: a non-default, active thread the email leaves is retired when nothing is left in it.
+            var retireIfEmpty = isActive && !isDefaultThread;
+
             if (regarding is null)
             {
                 // Behaviour review F3 (unlink): the email was un-filed, but its thread still shows it on the record it was
                 // filed to. It leaves that thread for the one the unfiled ingest would pick (the fallback ladder: no regarding
                 // → the per-user master of the email's owner), with no grant to any record. A private thread keeps it.
                 if (current.HasAnchor && isOpen)
+                {
                     await MoveUnfiledEmailOutAsync(threadId, communicationId, current, ct);
+                    if (retireIfEmpty)
+                        await RetireIfEmptyAsync(threadId, ct);
+                }
                 else
+                {
                     _logger.LogDebug("Filing reconcile skipped: {CommunicationId} is unfiled", communicationId);
+                }
                 return;
             }
-
-            // An inactive (deactivated) thread does not show on a record's panel (behaviour review F3): it is never left as
-            // the email's thread by rule 1, and never moved whole — only the email moves, to R's active default thread.
-            var isActive = (thread.GetAttributeValue<OptionSetValue>(StateCodeFilterField)?.Value ?? StateActive) == StateActive;
 
             // Rule 1 (F1-a): T already shows on a record the email is filed to — ANY of its typed regarding lookups, not only
             // the primary. A sharee adding matter M to an email filed to secure project P makes M primary; T, anchored to P,
@@ -622,10 +635,6 @@ public sealed class ThreadResolver : IThreadResolver
                 return;
             }
 
-            // A DEFAULT thread — the per-user master (Tier 3) or a record's per-record default (Tier 2) — is a catch-all and is
-            // never moved whole (owner decision 2026-10-11): moving R_old's default would strip R_old of it and give R two.
-            var isDefaultThread = thread.GetAttributeValue<bool?>(DefaultThreadMarkerField) == true;
-
             // Rule 2 (owner clarification 2026-10-11): any other ACTIVE thread — unanchored, or anchored to a previous record —
             // follows the filing as a whole when every active message in it is an email (F1-c) and none other is filed to a
             // different record — and neither its owner nor R's is the Secure team (F1-b; AnchorThreadForFilingAsync answers
@@ -637,12 +646,111 @@ public sealed class ThreadResolver : IThreadResolver
                 return;
             }
 
-            await MoveToRecordDefaultThreadAsync(threadId, communicationId, regarding, ct);
+            if (await MoveToRecordDefaultThreadAsync(threadId, communicationId, regarding, ct) && retireIfEmpty)
+                await RetireIfEmptyAsync(threadId, ct);
         }
         catch (Exception ex)
         {
             // NFR-02: best-effort / non-fatal — the filing already stands.
             _logger.LogWarning(ex, "Filing thread reconcile failed (non-fatal) | CommunicationId: {CommunicationId}", communicationId);
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The owner S6 gives an anchored thread is resolved by <see cref="ResolveRecordThreadOwnershipAsync"/> — the step
+    /// <see cref="AnchorThreadForFilingAsync"/> and the create paths use — and the Secure-team guard is
+    /// <see cref="AnchorThreadForFilingAsync"/>'s (<c>ownership.IsSecureOwner || ThreadOwnerMayBeSecureAsync</c>). The one
+    /// write is the owner; no other column of the thread, no message, and no grant is touched (a message's own owner is its
+    /// own, and its read grants do not depend on the thread's owner).
+    /// </remarks>
+    public async Task<ThreadOwnerReconcileOutcome> ReconcileAnchoredThreadOwnerAsync(
+        Guid threadId, bool dryRun = false, CancellationToken ct = default)
+    {
+        try
+        {
+            var thread = await _entityService.RetrieveAsync(
+                "sprk_communicationthread",
+                threadId,
+                ThreadRegardingColumns
+                    .Append(PrivacyStateField).Append(OwningTeamField).Append(OwnerIdField).Append(StateCodeFilterField)
+                    .ToArray(),
+                ct);
+            if (thread is null)
+            {
+                _logger.LogWarning("Thread owner reconcile skipped: thread {ThreadId} could not be read", threadId);
+                return ThreadOwnerReconcileOutcome.NotApplicable;
+            }
+
+            var isActive = (thread.GetAttributeValue<OptionSetValue>(StateCodeFilterField)?.Value ?? StateActive) == StateActive;
+            var isOpen = thread.GetAttributeValue<OptionSetValue>(PrivacyStateField)?.Value == PrivacyStateOpen;
+            var anchor = ThreadAnchorOf(thread);
+            if (!isActive || !isOpen || !anchor.HasAnchor)
+            {
+                _logger.LogDebug(
+                    "Thread owner reconcile skipped: thread {ThreadId} is {Shape}", threadId,
+                    !isActive ? "inactive" : !isOpen ? "not Open" : "not anchored to a record");
+                return ThreadOwnerReconcileOutcome.NotApplicable;
+            }
+
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? ownership;
+            try
+            {
+                ownership = await ResolveRecordThreadOwnershipAsync(
+                    new RegardingAnchor(anchor.RecordId!.Value.ToString(), anchor.RecordType!, null, null), ct);
+            }
+            catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Thread owner reconcile left thread {ThreadId}: the owner of {RecordType}:{RecordId} could not be resolved",
+                    threadId, anchor.RecordType, anchor.RecordId);
+                return ThreadOwnerReconcileOutcome.Refused;
+            }
+
+            if (ownership?.OwningTeamId is not { } teamId)
+            {
+                _logger.LogDebug(
+                    "Thread owner reconcile skipped: {RecordType}:{RecordId} owns no thread (thread {ThreadId})",
+                    anchor.RecordType, anchor.RecordId, threadId);
+                return ThreadOwnerReconcileOutcome.NotApplicable;
+            }
+
+            // The same guard as the whole-thread move (F1-b): never take a thread out of the Secure team, nor into it — the
+            // sharee mirror of a secure record's children is not written here. An undeterminable owner counts as Secure.
+            if (ownership.IsSecureOwner || await ThreadOwnerMayBeSecureAsync(thread, ct))
+            {
+                _logger.LogInformation(
+                    "Thread owner reconcile left thread {ThreadId}: it or {RecordType}:{RecordId} belongs to a secure record " +
+                    "(or that cannot be told)", threadId, anchor.RecordType, anchor.RecordId);
+                return ThreadOwnerReconcileOutcome.SkippedSecure;
+            }
+
+            var currentTeam = thread.GetAttributeValue<EntityReference>(OwningTeamField)?.Id
+                ?? (thread.GetAttributeValue<EntityReference>(OwnerIdField) is { } owner
+                    && string.Equals(owner.LogicalName, "team", StringComparison.OrdinalIgnoreCase) ? owner.Id : (Guid?)null);
+            if (currentTeam == teamId)
+                return ThreadOwnerReconcileOutcome.AlreadyCorrect;
+
+            if (!dryRun)
+            {
+                await _entityService.UpdateAsync(
+                    "sprk_communicationthread",
+                    threadId,
+                    new Dictionary<string, object> { ["ownerid"] = new EntityReference("team", teamId) },
+                    ct);
+            }
+
+            _logger.LogInformation(
+                "Thread owner reconcile {Action} thread {ThreadId} (anchored to {RecordType}:{RecordId}) to team {TeamId}",
+                dryRun ? "would assign" : "assigned", threadId, anchor.RecordType, anchor.RecordId, teamId);
+            return ThreadOwnerReconcileOutcome.Assigned;
+        }
+        catch (Exception ex)
+        {
+            // NFR-02: best-effort / non-fatal — the thread is left as it was.
+            _logger.LogWarning(ex, "Thread owner reconcile failed (non-fatal) | ThreadId: {ThreadId}", threadId);
+            return ThreadOwnerReconcileOutcome.Failed;
         }
     }
 
@@ -841,7 +949,7 @@ public sealed class ThreadResolver : IThreadResolver
     /// Rule 1 (F1-a): <c>true</c> when <paramref name="anchor"/> is one of the records <paramref name="email"/> is filed to —
     /// any of its typed ADR-024 regarding lookups, not only the primary.
     /// </summary>
-    private static bool IsFiledTo(DataverseEntity email, ThreadAnchor anchor)
+    internal static bool IsFiledTo(DataverseEntity email, ThreadAnchor anchor)
     {
         foreach (var (entityLogicalName, field) in RegardingFieldMap.All)
         {
@@ -858,14 +966,15 @@ public sealed class ThreadResolver : IThreadResolver
 
     /// <summary>
     /// Rule 3: moves the email to R's per-record default thread (Tier 2) through the S6 join, then grants it to R's
-    /// members — the Tier-2 audience, from the email's own regarding (#1629 F-C), never a re-read of the thread.
+    /// members — the Tier-2 audience, from the email's own regarding (#1629 F-C), never a re-read of the thread. Answers
+    /// whether the email left <paramref name="fromThreadId"/>.
     /// </summary>
-    private async Task MoveToRecordDefaultThreadAsync(
+    private async Task<bool> MoveToRecordDefaultThreadAsync(
         Guid fromThreadId, Guid communicationId, RegardingAnchor regarding, CancellationToken ct)
     {
         var recordThreadId = await FindOrCreateDefaultThreadAsync(regarding.RecordType, regarding.RecordId, regarding, ct);
         if (recordThreadId == fromThreadId)
-            return;
+            return false;
 
         await AssignThreadReconcilingOwnerAsync(communicationId, recordThreadId, ct);
         _logger.LogInformation(
@@ -874,6 +983,43 @@ public sealed class ThreadResolver : IThreadResolver
 
         if (AssignmentFor(recordThreadId, regarding) is { } assignment)
             await GrantAsync(communicationId, assignment, ct);
+        return true;
+    }
+
+    /// <summary>
+    /// Final re-check F3: the Messages panel lists a record's threads by their anchor, so a thread the email has just left
+    /// stays on its record's panel with nothing in it. A non-default thread left with no active message is deactivated (a
+    /// default thread is a catch-all and is never passed here). Best-effort and fail-safe: when the check cannot tell the
+    /// thread is empty, it is left as it is; the move already stands.
+    /// </summary>
+    private async Task RetireIfEmptyAsync(Guid threadId, CancellationToken ct)
+    {
+        try
+        {
+            var query = new QueryExpression("sprk_communication")
+            {
+                ColumnSet = new ColumnSet(false),
+                TopCount = 1,
+                Criteria =
+                {
+                    Conditions =
+                    {
+                        new ConditionExpression(MessageThreadLookup, ConditionOperator.Equal, threadId),
+                        new ConditionExpression(StateCodeFilterField, ConditionOperator.Equal, StateActive),
+                    },
+                },
+            };
+            var remaining = await _entityService.RetrieveMultipleAsync(query, ct);
+            if (remaining?.Entities is not { Count: 0 })
+                return;
+
+            await DeactivateThreadAsync(threadId, ct);
+            _logger.LogInformation("Filing reconcile retired thread {ThreadId}: no active message is left in it", threadId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Retiring the emptied thread {ThreadId} failed (non-fatal)", threadId);
+        }
     }
 
     /// <summary>

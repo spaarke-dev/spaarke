@@ -1784,6 +1784,150 @@ public class ThreadResolverTests
         VerifyNoGrant();
     }
 
+    /// <summary>The check after the email left T: T's active messages, at most one.</summary>
+    private void SetupRemainingMessages(Guid threadId, params DataverseEntity[] remaining) =>
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsRemainingMessageCheck(q, threadId)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(remaining.ToList()));
+
+    private static bool IsRemainingMessageCheck(QueryExpression q, Guid threadId) =>
+        q.EntityName == "sprk_communication"
+        && q.TopCount == 1
+        && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_communicationthread"
+            && c.Operator == ConditionOperator.Equal && c.Values.Count == 1 && Equals(c.Values[0], threadId))
+        && q.Criteria.Conditions.Any(c => c.AttributeName == "statecode"
+            && c.Operator == ConditionOperator.Equal && c.Values.Count == 1 && Equals(c.Values[0], 0));
+
+    private void VerifyThreadRetired(Guid threadId, Times times) =>
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread", threadId,
+            It.Is<Dictionary<string, object>>(d => d.ContainsKey("statecode") && ((OptionSetValue)d["statecode"]).Value == 1),
+            It.IsAny<CancellationToken>()), times);
+
+    /// <summary>Unlink from a record thread: the email moves to the owner's master (an existing one).</summary>
+    private void SetupUnlinkToMaster(Guid communicationId, Guid threadId, DataverseEntity thread)
+    {
+        SetupFiledEmail(communicationId, threadId, entityType: null, Guid.Empty);
+        SetupReconcileThreadRead(threadId, thread);
+        SetupOwnerRead(communicationId, Guid.NewGuid());
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection { Entities = { new DataverseEntity("sprk_communicationthread") { Id = Guid.NewGuid() } } });
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_UnlinkThatEmptiesARecordThread_RetiresIt()
+    {
+        // Final re-check F3: the panel lists a record's threads by anchor, so the emptied thread would stay on the old
+        // record's panel with nothing in it.
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        SetupUnlinkToMaster(communicationId, threadId,
+            OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: "sprk_project", regardingId: Guid.NewGuid()));
+        SetupRemainingMessages(threadId);
+
+        await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        VerifyThreadRetired(threadId, Times.Once());
+        VerifyNoGrant();
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_UnlinkThatLeavesAMessageInTheThread_KeepsIt()
+    {
+        // F3 control (must not fire): another message is still in T.
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        SetupUnlinkToMaster(communicationId, threadId,
+            OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: "sprk_project", regardingId: Guid.NewGuid()));
+        SetupRemainingMessages(threadId, Message(Guid.NewGuid(), "sprk_project", Guid.NewGuid()));
+
+        await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        VerifyThreadNeverWritten(threadId);
+    }
+
+    [Theory]
+    [InlineData("unlink")]
+    [InlineData("re-file")]
+    public async Task ReconcileThreadForFiling_ADefaultThreadTheEmailLeaves_IsNeverRetired_EvenWhenEmpty(string how)
+    {
+        // F3 control (must not fire): a record's per-record default thread is its catch-all and stays.
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var oldProject = Guid.NewGuid();
+        var thread = OpenThread(threadId, ThreadTypeRecordAnchored, isDefault: true, regardingType: "sprk_project", regardingId: oldProject);
+        if (how == "unlink")
+        {
+            SetupUnlinkToMaster(communicationId, threadId, thread);
+        }
+        else
+        {
+            var matter = Guid.NewGuid();
+            SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
+            SetupReconcileThreadRead(threadId, thread);
+            SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter));
+            SetupRecordsDefaultThread("sprk_matter", matter);
+        }
+        SetupRemainingMessages(threadId);
+
+        await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        VerifyThreadNeverWritten(threadId);
+        _entity.Verify(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsRemainingMessageCheck(q, threadId)), It.IsAny<CancellationToken>()),
+            Times.Never, "a default thread is never checked for retirement");
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_EmailOnlyMoveThatEmptiesTheThread_RetiresIt()
+    {
+        // F3: a Secure-team thread whose only message is re-filed to an ordinary record cannot follow it (F1-b), so only
+        // the email moves — and the thread it leaves is empty.
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        var secureTeam = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
+        var thread = OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: "sprk_project", regardingId: Guid.NewGuid());
+        thread["owningteam"] = new EntityReference("team", secureTeam);
+        thread["ownerid"] = new EntityReference("team", secureTeam);
+        SetupReconcileThreadRead(threadId, thread);
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter));
+        SetupTeams(secureTeam);
+        var recordThread = SetupRecordsDefaultThread("sprk_matter", matter);
+        SetupRemainingMessages(threadId);
+
+        await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        VerifyAssigned(communicationId, recordThread, Times.Once());
+        _grants.Verify(g => g.GrantMessageAccessAsync(
+            communicationId, ThreadAssignment.Anchored(recordThread, "sprk_matter", matter), It.IsAny<CancellationToken>()), Times.Once);
+        VerifyThreadRetired(threadId, Times.Once());
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread", threadId,
+            It.Is<Dictionary<string, object>>(d => d.ContainsKey("ownerid")), It.IsAny<CancellationToken>()), Times.Never,
+            "the thread is retired, never re-owned");
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_WhenRetiringTheEmptiedThreadThrows_TheMoveStands()
+    {
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        SetupUnlinkToMaster(communicationId, threadId,
+            OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: "sprk_project", regardingId: Guid.NewGuid()));
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => IsRemainingMessageCheck(q, threadId)), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated Dataverse fault"));
+
+        var act = () => CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", communicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce, "the email still left the thread");
+        VerifyThreadNeverWritten(threadId);
+    }
+
     [Fact]
     public async Task ReconcileThreadForFiling_UnfiledEmail_InAPrivateRecordThread_KeepsItsThread()
     {
@@ -1822,5 +1966,194 @@ public class ThreadResolverTests
         await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
 
         scans.Should().ContainSingle().Which.Should().Match<QueryExpression>(q => IsThreadMessageScan(q, threadId));
+    }
+
+    // ── The backfill sweep: an anchored thread gets its S6 owner (ReconcileAnchoredThreadOwnerAsync) ────────────────
+
+    private static readonly Guid RecordTeam = Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId;
+
+    /// <summary>An Open, active thread anchored to <paramref name="entityType"/> and owned by the app user (the pre-S6 shape).</summary>
+    private static DataverseEntity AppUserOwnedAnchoredThread(Guid threadId, string entityType, Guid recordId)
+    {
+        var thread = OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: entityType, regardingId: recordId);
+        thread["ownerid"] = new EntityReference("systemuser", Guid.NewGuid());
+        return thread;
+    }
+
+    private void VerifyOwnerWrittenOnce(Guid threadId, Guid teamId) =>
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread", threadId,
+            It.Is<Dictionary<string, object>>(d => IsOwnerOnlyWrite(d, teamId)),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+    /// <summary>The write is exactly <c>ownerid</c> = the team — no other column.</summary>
+    private static bool IsOwnerOnlyWrite(Dictionary<string, object> fields, Guid teamId) =>
+        fields.Count == 1 && fields.TryGetValue("ownerid", out var owner) && owner is EntityReference r
+        && r.LogicalName == "team" && r.Id == teamId;
+
+    private void VerifyNothingWritten() =>
+        _entity.Verify(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+
+    [Fact]
+    public async Task ReconcileAnchoredThreadOwner_AppUserOwnedThread_OfAnOrdinaryRecord_IsOwnedByTheRecordsTeam_AndNothingElseChanges()
+    {
+        var threadId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        SetupReconcileThreadRead(threadId, AppUserOwnedAnchoredThread(threadId, "sprk_matter", matter));
+        SetupTeams(secureTeam: Guid.NewGuid());
+
+        var outcome = await CreateFilingSut().ReconcileAnchoredThreadOwnerAsync(threadId, ct: CancellationToken.None);
+
+        outcome.Should().Be(ThreadOwnerReconcileOutcome.Assigned);
+        VerifyOwnerWrittenOnce(threadId, RecordTeam); // the owner, and only the owner
+        _owners.Requests.Should().ContainSingle(r => r.TargetEntityLogicalName == "sprk_matter" && r.TargetRecordId == matter,
+            "S6: the record's team, asked of the one resolver");
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        VerifyNoGrant();
+    }
+
+    [Fact]
+    public async Task ReconcileAnchoredThreadOwner_ThreadOwnedByAnotherOrdinaryTeam_IsReOwnedToTheRecordsTeam()
+    {
+        var threadId = Guid.NewGuid();
+        var otherTeam = Guid.NewGuid();
+        var thread = AppUserOwnedAnchoredThread(threadId, "sprk_project", Guid.NewGuid());
+        thread["owningteam"] = new EntityReference("team", otherTeam);
+        thread["ownerid"] = new EntityReference("team", otherTeam);
+        SetupReconcileThreadRead(threadId, thread);
+        SetupTeams(secureTeam: Guid.NewGuid(), otherTeam);
+
+        var outcome = await CreateFilingSut().ReconcileAnchoredThreadOwnerAsync(threadId, ct: CancellationToken.None);
+
+        outcome.Should().Be(ThreadOwnerReconcileOutcome.Assigned);
+        VerifyOwnerWrittenOnce(threadId, RecordTeam);
+    }
+
+    [Fact]
+    public async Task ReconcileAnchoredThreadOwner_AlreadyOwnedByTheRecordsTeam_WritesNothing()
+    {
+        var threadId = Guid.NewGuid();
+        var thread = AppUserOwnedAnchoredThread(threadId, "sprk_matter", Guid.NewGuid());
+        thread["owningteam"] = new EntityReference("team", RecordTeam);
+        thread["ownerid"] = new EntityReference("team", RecordTeam);
+        SetupReconcileThreadRead(threadId, thread);
+        SetupTeams(secureTeam: Guid.NewGuid(), RecordTeam);
+
+        var outcome = await CreateFilingSut().ReconcileAnchoredThreadOwnerAsync(threadId, ct: CancellationToken.None);
+
+        outcome.Should().Be(ThreadOwnerReconcileOutcome.AlreadyCorrect);
+        VerifyNothingWritten();
+    }
+
+    [Theory]
+    [InlineData(true)]  // the thread's current owner IS the named Secure Record team
+    [InlineData(false)] // no Secure Record names configured: a team-owned thread may be secure (fail closed)
+    public async Task ReconcileAnchoredThreadOwner_ThreadOwnedBySecureTeam_IsLeftUntouched(bool configured)
+    {
+        var threadId = Guid.NewGuid();
+        var secureTeam = Guid.NewGuid();
+        var thread = AppUserOwnedAnchoredThread(threadId, "sprk_project", Guid.NewGuid());
+        thread["owningteam"] = new EntityReference("team", secureTeam);
+        thread["ownerid"] = new EntityReference("team", secureTeam);
+        SetupReconcileThreadRead(threadId, thread);
+        SetupTeams(secureTeam);
+
+        var outcome = await CreateFilingSut(withConfiguration: configured).ReconcileAnchoredThreadOwnerAsync(threadId, ct: CancellationToken.None);
+
+        outcome.Should().Be(ThreadOwnerReconcileOutcome.SkippedSecure);
+        VerifyNothingWritten();
+    }
+
+    [Fact]
+    public async Task ReconcileAnchoredThreadOwner_WhenTheRecordsOwnerIsTheSecureTeam_LeavesTheThreadUntouched()
+    {
+        // The thread is app-user owned (ordinary) but its anchor record is secure: moving it into the Secure team would need
+        // the sharee mirror, which is not written here.
+        var threadId = Guid.NewGuid();
+        SetupReconcileThreadRead(threadId, AppUserOwnedAnchoredThread(threadId, "sprk_project", Guid.NewGuid()));
+        _owners.IsSecureOwner = true;
+
+        var outcome = await CreateFilingSut().ReconcileAnchoredThreadOwnerAsync(threadId, ct: CancellationToken.None);
+
+        outcome.Should().Be(ThreadOwnerReconcileOutcome.SkippedSecure);
+        VerifyNothingWritten();
+    }
+
+    [Fact]
+    public async Task ReconcileAnchoredThreadOwner_WhenS6RefusesTheRecordsOwner_LeavesTheThreadUntouched()
+    {
+        var threadId = Guid.NewGuid();
+        SetupReconcileThreadRead(threadId, AppUserOwnedAnchoredThread(threadId, "sprk_matter", Guid.NewGuid()));
+        _owners.TeamId = null; // S6 refusal
+
+        var outcome = await CreateFilingSut().ReconcileAnchoredThreadOwnerAsync(threadId, ct: CancellationToken.None);
+
+        outcome.Should().Be(ThreadOwnerReconcileOutcome.Refused);
+        VerifyNothingWritten();
+    }
+
+    [Fact]
+    public async Task ReconcileAnchoredThreadOwner_ThreadAnchoredToAParty_IsLeftUntouched()
+    {
+        // account / contact / organization are not ownership parents: a party owns no thread, so there is no team to give.
+        var threadId = Guid.NewGuid();
+        SetupReconcileThreadRead(threadId, AppUserOwnedAnchoredThread(threadId, "account", Guid.NewGuid()));
+
+        var outcome = await CreateFilingSut().ReconcileAnchoredThreadOwnerAsync(threadId, ct: CancellationToken.None);
+
+        outcome.Should().Be(ThreadOwnerReconcileOutcome.NotApplicable);
+        VerifyNothingWritten();
+        _owners.Requests.Should().BeEmpty("a party is never asked of the ownership resolver");
+    }
+
+    [Theory]
+    [InlineData("inactive")]
+    [InlineData("private")]
+    [InlineData("unanchored")]
+    public async Task ReconcileAnchoredThreadOwner_InactivePrivateOrUnanchoredThread_IsLeftUntouched(string shape)
+    {
+        var threadId = Guid.NewGuid();
+        var thread = shape == "unanchored"
+            ? OpenThread(threadId)
+            : AppUserOwnedAnchoredThread(threadId, "sprk_matter", Guid.NewGuid());
+        if (shape == "inactive") thread["statecode"] = new OptionSetValue(1);
+        if (shape == "private") thread["sprk_privacystate"] = new OptionSetValue(PrivacyStatePrivate);
+        SetupReconcileThreadRead(threadId, thread);
+
+        var outcome = await CreateFilingSut().ReconcileAnchoredThreadOwnerAsync(threadId, ct: CancellationToken.None);
+
+        outcome.Should().Be(ThreadOwnerReconcileOutcome.NotApplicable);
+        VerifyNothingWritten();
+    }
+
+    [Fact]
+    public async Task ReconcileAnchoredThreadOwner_DryRun_AnswersAssigned_AndWritesNothing()
+    {
+        var threadId = Guid.NewGuid();
+        SetupReconcileThreadRead(threadId, AppUserOwnedAnchoredThread(threadId, "sprk_matter", Guid.NewGuid()));
+        SetupTeams(secureTeam: Guid.NewGuid());
+
+        var outcome = await CreateFilingSut().ReconcileAnchoredThreadOwnerAsync(threadId, dryRun: true, CancellationToken.None);
+
+        outcome.Should().Be(ThreadOwnerReconcileOutcome.Assigned, "on a dry run, 'would be assigned'");
+        VerifyNothingWritten();
+    }
+
+    [Fact]
+    public async Task ReconcileAnchoredThreadOwner_WhenTheWriteFaults_NeverThrows_AndAnswersFailed()
+    {
+        var threadId = Guid.NewGuid();
+        SetupReconcileThreadRead(threadId, AppUserOwnedAnchoredThread(threadId, "sprk_matter", Guid.NewGuid()));
+        _entity
+            .Setup(e => e.UpdateAsync("sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated Dataverse fault"));
+
+        var outcome = ThreadOwnerReconcileOutcome.Assigned;
+        var act = async () => outcome = await CreateFilingSut().ReconcileAnchoredThreadOwnerAsync(threadId, ct: CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+        outcome.Should().Be(ThreadOwnerReconcileOutcome.Failed);
     }
 }

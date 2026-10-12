@@ -51,8 +51,9 @@ public sealed class EmailUploadCaptureService
     private readonly IThreadResolver? _threadResolver;
     private readonly Access.IDirectThreadAccessService? _directThreadAccess;
 
-    /// <param name="threadResolver">Spaarkeai-word-add-in-r1 task 129: the captured email joins (or starts) its thread, as the
-    /// mailbox and send paths do — without one it never shows on its record's Messages panel, which lists threads. Optional
+    /// <param name="threadResolver">Spaarkeai-word-add-in-r1 task 129: the captured email gets a thread through the same
+    /// resolution the mailbox and send paths use — without one it never shows on its record's Messages panel, which lists
+    /// threads. Optional
     /// like theirs; the host registers it unconditionally.</param>
     /// <param name="directThreadAccess">The #1629 per-message grant for the thread the join returned (the same join→grant
     /// sequence as <see cref="CommunicationService"/>).</param>
@@ -256,8 +257,10 @@ public sealed class EmailUploadCaptureService
     }
 
     /// <summary>
-    /// Joins (or starts) the captured email's thread and grants it to that thread's audience (#1629: the audience the join
-    /// fixed). Never throws: a failure leaves the email without a thread, which the next filing reconcile resolves.
+    /// Gives the captured email a thread through the shared resolution and grants it to that thread's audience (#1629: the
+    /// audience the resolution fixed). The upload envelope carries no reply-chain headers (In-Reply-To / References), which
+    /// are what the email key strategy joins on, so in practice a capture starts a new thread anchored to the record it is
+    /// filed to. Never throws: a failure leaves the email without a thread, which the next filing reconcile resolves.
     /// </summary>
     private async Task ResolveThreadAsync(Guid communicationId, NormalizedMessage envelope, CancellationToken ct)
     {

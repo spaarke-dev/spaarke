@@ -421,6 +421,9 @@ public class RecordOwnerAssignmentCensusTests
             "A record's default thread — its record's team; the per-user master thread keeps its user (E2)."),
         new OwnerWriteEntry("ThreadResolver.cs", "AnchorThreadForFilingAsync", 1, OwnerWriteKind.Routed, // word-add-in-r1 task 129
             "A thread that follows its email's filing — re-anchored to the record and owned by its team (S6); a refusal leaves it untouched."),
+        new OwnerWriteEntry("ThreadResolver.cs", "ReconcileAnchoredThreadOwnerAsync", 1, OwnerWriteKind.Routed, // word-add-in-r1 task 129 sweep
+            "An existing anchored thread gets its anchor record's team (S6, the same ResolveRecordThreadOwnershipAsync); a refusal, a " +
+            "secure current owner or target, or a party anchor leaves it untouched; only the owner is written."),
         new OwnerWriteEntry("TaskActionCore.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
             "AI create-task — ForChild over the stamped parents."),
         new OwnerWriteEntry("OwnedChildWrite.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
