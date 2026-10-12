@@ -1514,13 +1514,14 @@ internal sealed class StubExternalDataService : ExternalDataService
         return Task.FromResult(new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalCollectionResponse<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalOrganizationDto> { Truncated = TruncatedRequested });
     }
 
-    public override Task<(Guid? ParentId, string? DocumentName)> GetDocumentParentAndNameAsync(
+    public override Task<DocumentScopeRead> GetDocumentParentAndNameAsync(
         DocumentParentKind parentKind, Guid documentId, CancellationToken ct = default)
     {
         var raw = _accessor.HttpContext?.Request.Headers.TryGetValue("X-Test-DocProject", out var v) == true ? v.ToString() : null;
+        // A single-root document (no other root link), so the every-root rule has nothing further to refuse.
         return Guid.TryParse(raw, out var projectId)
-            ? Task.FromResult<(Guid?, string?)>((projectId, "external-doc.bin"))
-            : Task.FromResult<(Guid?, string?)>((null, null));
+            ? Task.FromResult(new DocumentScopeRead(projectId, "external-doc.bin", default))
+            : Task.FromResult(DocumentScopeRead.Absent);
     }
 }
 

@@ -1267,12 +1267,17 @@ public sealed class ExternalRecordDocumentRoutesTests : IClassFixture<ExternalRe
             });
         }
 
-        public override Task<(Guid? ParentId, string? DocumentName)> GetDocumentParentAndNameAsync(
+        // Every document here is filed to ONE parent (the builder binds one), so it has no other root link: the every-root
+        // rule (task 039 fix round) has nothing to refuse. Documents with several roots are
+        // ExternalMultiRootDocumentRouteTests, over the real service.
+        public override Task<DocumentScopeRead> GetDocumentParentAndNameAsync(
             DocumentParentKind parentKind, Guid documentId, CancellationToken ct = default)
         {
             DocumentReads.Enqueue($"scope:{parentKind}:{documentId}");
             var row = Documents.SingleOrDefault(d => d.Id == documentId);
-            return Task.FromResult<(Guid?, string?)>(row is null ? (null, null) : (ParentOf(row, parentKind), row.Name));
+            return Task.FromResult(row is null
+                ? DocumentScopeRead.Absent
+                : new DocumentScopeRead(ParentOf(row, parentKind), row.Name, default));
         }
 
         // The real seam's body without the transport: build the payload, stamp it (task 030), store it.

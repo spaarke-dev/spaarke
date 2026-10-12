@@ -614,15 +614,18 @@ public static class ExternalProjectDataEndpoints
         //     that record type's own lookup. A mismatch OR a non-existent document is a uniform 403 (do not
         //     leak document existence). This is an app-only Dataverse authorization read — it resolves NO
         //     Graph pointer.
-        var (documentParentId, documentName) =
-            await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
-        if (documentParentId is null || documentParentId.Value != id)
+        //     Fix round for task 039 (INTERIM, ExternalMultiRootRule): a document also filed to a root the caller cannot
+        //     read is withheld exactly as one not under this parent, with the SAME response, so the answer cannot be used
+        //     to tell whether such a document exists. Without it a reader of project P who knew the id of a document filed
+        //     to P and to secure matter M downloaded it through P's route.
+        var document = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
+        var documentName = document.DocumentName;
+        if (!document.IsReadableUnder(id, callerContext))
         {
             logger.LogWarning(
-                "[EXT-DOWNLOAD] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}",
+                "[EXT-DOWNLOAD] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, or also filed to a record the caller cannot read",
                 callerContext.ContactId, documentId, parentKind, id);
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: $"This document is not part of the requested {DocumentParentNoun(parentKind)}");
+            return DenyDocumentNotUnderParent(parentKind);
         }
 
         // ── AUTHORIZED — only now resolve SPE pointers (server-side) and stream app-only ──
@@ -975,6 +978,15 @@ public static class ExternalProjectDataEndpoints
     private static IResult DenyDocumentParent(ExternalDataService.DocumentParentKind parentKind) =>
         Results.Problem(statusCode: 403, title: "Forbidden",
             detail: $"You do not have access to this {DocumentParentNoun(parentKind)}");
+
+    /// <summary>
+    /// The ONE response for "this document is not (readably) under this record": not filed to the route's parent, absent, or
+    /// (fix round for task 039) also filed to a root the caller cannot read. A single body for all three, so the refusal
+    /// cannot be used to probe whether a document exists or where else it is filed.
+    /// </summary>
+    private static IResult DenyDocumentNotUnderParent(ExternalDataService.DocumentParentKind parentKind) =>
+        Results.Problem(statusCode: 403, title: "Forbidden",
+            detail: $"This document is not part of the requested {DocumentParentNoun(parentKind)}");
 
     // Route adapters (task 031). Each names its parent kind; the behaviour lives in the four *ForParent handlers.
 
@@ -1385,14 +1397,15 @@ public static class ExternalProjectDataEndpoints
             return DenyDocumentParent(parentKind);
         }
 
-        var (documentParentId, _) = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
-        if (documentParentId is null || documentParentId.Value != id)
+        // Fix round for task 039 (INTERIM, ExternalMultiRootRule): as the download route, a document also filed to a root
+        // the caller cannot read is the same uniform 403 as one not under this parent.
+        var document = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
+        if (!document.IsReadableUnder(id, callerContext))
         {
             logger.LogWarning(
-                "[EXT-VERSIONS] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}",
+                "[EXT-VERSIONS] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, or also filed to a record the caller cannot read",
                 callerContext.ContactId, documentId, parentKind, id);
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: $"This document is not part of the requested {DocumentParentNoun(parentKind)}");
+            return DenyDocumentNotUnderParent(parentKind);
         }
 
         // ── AUTHORIZED — resolve SPE pointers server-side and read app-only ──
@@ -1718,7 +1731,7 @@ public static class ExternalProjectDataEndpoints
         }
 
         // (2) Read on every parent this plane authorizes (the modelled lookups only).
-        if (target.Parents.Count == 0)
+        if (target.Parents.Count == 0 || target.HasUnreadableParentLink)
         {
             logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: filed to no parent this plane authorizes", kind, id);
             return DenyDeleteOwn();

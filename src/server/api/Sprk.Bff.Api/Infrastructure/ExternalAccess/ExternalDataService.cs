@@ -429,14 +429,85 @@ public class ExternalDataService
     }
 
     private static bool DocumentRootsReadable(CallerPrincipal caller, DocumentRow row) =>
-        ExternalMultiRootRule.AllRootsReadable(
-            caller,
-            (ExternalGrantRootType.Project, row.SprkProjectidValue),
-            (ExternalGrantRootType.Project, row.SprkRelatedprojectValue),
-            (ExternalGrantRootType.Matter, row.SprkMatterValue),
-            (ExternalGrantRootType.Matter, row.SprkRelatedmatterValue),
-            (ExternalGrantRootType.WorkAssignment, row.SprkWorkassignmentValue),
-            (ExternalGrantRootType.WorkAssignment, row.SprkRelatedworkassignmentValue));
+        new DocumentRootLinks(
+            row.SprkProjectidValue, row.SprkRelatedprojectValue,
+            row.SprkMatterValue, row.SprkRelatedmatterValue,
+            row.SprkWorkassignmentValue, row.SprkRelatedworkassignmentValue).AllReadableBy(caller);
+
+    /// <summary>
+    /// The six root links of a <c>sprk_document</c> (a typed lookup and its related twin, per root: project, matter, work
+    /// assignment) as raw <c>_..._value</c> strings, and the one place the every-root rule is applied to them
+    /// (<see cref="ExternalMultiRootRule"/>). Shared by the document LIST (<see cref="GetDocumentsAsync"/>) and every
+    /// single-document route (download, versions), so one document is not readable on one path and hidden on another.
+    /// </summary>
+    /// <remarks>
+    /// The columns are the root subset of <see cref="DocumentLinkFields"/> (pinned by test). A value that is null or blank
+    /// is "not filed to this root"; a value that is not a GUID reads as unreadable (fail closed).
+    /// </remarks>
+    public readonly record struct DocumentRootLinks(
+        string? Project, string? RelatedProject,
+        string? Matter, string? RelatedMatter,
+        string? WorkAssignment, string? RelatedWorkAssignment)
+    {
+        /// <summary>The <c>_..._value</c> select columns of the six links, in the order of this record's members.</summary>
+        internal static readonly IReadOnlyList<string> SelectColumns = new[]
+        {
+            "_sprk_project_value", "_sprk_relatedproject_value",
+            "_sprk_matter_value", "_sprk_relatedmatter_value",
+            "_sprk_workassignment_value", "_sprk_relatedworkassignment_value",
+        };
+
+        /// <summary>Whether <paramref name="caller"/> holds Read on EVERY root this document is filed to.</summary>
+        public bool AllReadableBy(CallerPrincipal caller) =>
+            ExternalMultiRootRule.AllRootsReadable(
+                caller,
+                (ExternalGrantRootType.Project, Project),
+                (ExternalGrantRootType.Project, RelatedProject),
+                (ExternalGrantRootType.Matter, Matter),
+                (ExternalGrantRootType.Matter, RelatedMatter),
+                (ExternalGrantRootType.WorkAssignment, WorkAssignment),
+                (ExternalGrantRootType.WorkAssignment, RelatedWorkAssignment));
+
+        /// <summary>The links a single-row read returned. A present value that is not a JSON string reads as malformed.</summary>
+        internal static DocumentRootLinks From(IReadOnlyDictionary<string, JsonElement> row) => new(
+            Raw(row, SelectColumns[0]), Raw(row, SelectColumns[1]),
+            Raw(row, SelectColumns[2]), Raw(row, SelectColumns[3]),
+            Raw(row, SelectColumns[4]), Raw(row, SelectColumns[5]));
+
+        private static string? Raw(IReadOnlyDictionary<string, JsonElement> row, string column)
+        {
+            if (!row.TryGetValue(column, out var value)) return null;
+            return value.ValueKind switch
+            {
+                JsonValueKind.Null or JsonValueKind.Undefined => null,
+                JsonValueKind.String => value.GetString(),
+                _ => "malformed", // not a GUID: AllRootsReadable reads it as unreadable
+            };
+        }
+    }
+
+    /// <summary>
+    /// What the single-document routes decide on: the document's parent through the ROUTE's lookup, its display name, and
+    /// every root link it carries (<see cref="DocumentRootLinks"/>). Deconstructs to <c>(ParentId, DocumentName)</c>.
+    /// </summary>
+    public sealed record DocumentScopeRead(Guid? ParentId, string? DocumentName, DocumentRootLinks Roots)
+    {
+        /// <summary>The document does not exist, or could not be read.</summary>
+        public static readonly DocumentScopeRead Absent = new(null, null, default);
+
+        public void Deconstruct(out Guid? parentId, out string? documentName)
+        {
+            parentId = ParentId;
+            documentName = DocumentName;
+        }
+
+        /// <summary>
+        /// Whether the document is under <paramref name="routeParentId"/> through the route's lookup AND the caller holds
+        /// Read on every root it is filed to. False answers the route's one "not part of this record" response.
+        /// </summary>
+        public bool IsReadableUnder(Guid routeParentId, CallerPrincipal caller) =>
+            ParentId is { } parent && parent == routeParentId && Roots.AllReadableBy(caller);
+    }
 
     /// <summary>The document list URL for one parent. Pure, so a test can read the filter (task 031).</summary>
     internal static string BuildDocumentListUrl(string apiUrl, DocumentParentKind parentKind, Guid parentId)
@@ -694,27 +765,35 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// Returns the document's parent id THROUGH THE LOOKUP OF <paramref name="parentKind"/>, and its display name. The
-    /// external download and versions endpoints use it (task 027; generalized by task 031) for document→parent
-    /// authorization scoping BEFORE any SPE pointer resolution or Graph content read.
+    /// Returns the document's parent id THROUGH THE LOOKUP OF <paramref name="parentKind"/>, its display name, and every
+    /// root link it carries. The external download and versions endpoints use it (task 027; generalized by task 031) for
+    /// document→parent authorization scoping BEFORE any SPE pointer resolution or Graph content read.
     /// </summary>
     /// <remarks>
-    /// App-only Dataverse read. Returns (null, null) when the document does not exist or cannot be read, and
-    /// (null, name) when it is not linked through that lookup. Does NOT expose any Graph pointer (driveId/itemId).
+    /// <para>App-only Dataverse read. Returns <see cref="DocumentScopeRead.Absent"/> when the document does not exist or
+    /// cannot be read, and a null parent when it is not linked through that lookup. Does NOT expose any Graph pointer
+    /// (driveId/itemId).</para>
+    /// <para>Fix round for task 039: the select also reads the six root links (<see cref="DocumentRootLinks"/>), so a
+    /// route can apply the every-root rule (<see cref="ExternalMultiRootRule"/>) to ONE document as the list does to many.
+    /// Without it a reader of project P who knew the id of a document filed to P AND to a secure matter M downloaded it
+    /// through P's route.</para>
     /// </remarks>
-    public virtual async Task<(Guid? ParentId, string? DocumentName)> GetDocumentParentAndNameAsync(
+    public virtual async Task<DocumentScopeRead> GetDocumentParentAndNameAsync(
         DocumentParentKind parentKind, Guid documentId, CancellationToken ct = default)
     {
         var binding = GetDocumentParentBinding(parentKind);
-        var url = $"{GetApiUrl()}/sprk_documents({documentId})?$select=sprk_documentname,{binding.LookupValueAttribute}";
+        var columns = new[] { "sprk_documentname", binding.LookupValueAttribute }
+            .Concat(DocumentRootLinks.SelectColumns)
+            .Distinct(StringComparer.Ordinal);
+        var url = $"{GetApiUrl()}/sprk_documents({documentId})?$select={string.Join(",", columns)}";
 
         var row = await GetSingleAsync<Dictionary<string, JsonElement>>(url, ct);
-        if (row is null) return (null, null);
+        if (row is null) return DocumentScopeRead.Absent;
 
         var name = row.TryGetValue("sprk_documentname", out var n) && n.ValueKind == JsonValueKind.String
             ? n.GetString()
             : null;
-        return (GuidValue(row, binding.LookupValueAttribute), name);
+        return new DocumentScopeRead(GuidValue(row, binding.LookupValueAttribute), name, DocumentRootLinks.From(row));
     }
 
     /// <summary>
@@ -1887,8 +1966,17 @@ public class ExternalDataService
     private static readonly IReadOnlyDictionary<DeletableKind, DeletableBinding> Deletables =
         new Dictionary<DeletableKind, DeletableBinding>
         {
+            // Fix round for task 039: plus the related twin of each root (sprk_relatedproject / _relatedmatter /
+            // _relatedworkassignment), the same six root links the list, download and versions apply the every-root rule to.
             [DeletableKind.Document] = new(DeletableKind.Document, "sprk_document", "sprk_documents",
-                DocumentParents.Values.Select(b => new DeletableParentLookup(b.Kind, b.LookupValueAttribute)).ToList()),
+                DocumentParents.Values.Select(b => new DeletableParentLookup(b.Kind, b.LookupValueAttribute))
+                    .Concat(new[]
+                    {
+                        new DeletableParentLookup(DocumentParentKind.Project, "_sprk_relatedproject_value"),
+                        new DeletableParentLookup(DocumentParentKind.Matter, "_sprk_relatedmatter_value"),
+                        new DeletableParentLookup(DocumentParentKind.WorkAssignment, "_sprk_relatedworkassignment_value"),
+                    })
+                    .ToList()),
             [DeletableKind.Todo] = new(DeletableKind.Todo, "sprk_todo", "sprk_todos", RootParentLookups),
             [DeletableKind.Event] = new(DeletableKind.Event, "sprk_event", "sprk_events", RootParentLookups),
             // No parent and no creator stamp: the requester scope decides (ExternalProjectDataEndpoints.DeleteOwnServiceRequest).
@@ -1909,7 +1997,13 @@ public class ExternalDataService
     /// The facts the delete-own check decides on: the row's two creator stamps (null when absent) and every parent its
     /// lookups name (empty when none is set).
     /// </summary>
-    public sealed record DeleteTarget(Guid? CreatedByPerson, Guid? CreatedByContact, IReadOnlyList<DeleteTargetParent> Parents);
+    /// <remarks>
+    /// <paramref name="HasUnreadableParentLink"/> (fix round for task 039): a parent lookup carried a value that is not a
+    /// GUID. The delete is refused (fail closed): the row names a parent the caller's rights cannot be checked against.
+    /// </remarks>
+    public sealed record DeleteTarget(
+        Guid? CreatedByPerson, Guid? CreatedByContact, IReadOnlyList<DeleteTargetParent> Parents,
+        bool HasUnreadableParentLink = false);
 
     /// <summary>
     /// Reads a deletable row's creator stamps and parent lookups, app-only (FR-26). Null when the row does not exist
@@ -1946,16 +2040,22 @@ public class ExternalDataService
     internal static DeleteTarget ParseDeleteTarget(DeletableKind kind, IReadOnlyDictionary<string, JsonElement> row)
     {
         var parents = new List<DeleteTargetParent>();
+        var unreadable = false;
         foreach (var lookup in GetDeletableBinding(kind).Parents)
         {
             if (GuidValue(row, lookup.LookupValueAttribute) is { } parentId)
                 parents.Add(new DeleteTargetParent(lookup.Parent, parentId));
+            else if (row.TryGetValue(lookup.LookupValueAttribute, out var raw)
+                     && raw.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+                     && !(raw.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(raw.GetString())))
+                unreadable = true; // present, but not a GUID
         }
 
         return new DeleteTarget(
             GuidValue(row, CreatedByPersonValueAttribute),
             GuidValue(row, CreatedByContactValueAttribute),
-            parents);
+            parents,
+            unreadable);
     }
 
     /// <summary>

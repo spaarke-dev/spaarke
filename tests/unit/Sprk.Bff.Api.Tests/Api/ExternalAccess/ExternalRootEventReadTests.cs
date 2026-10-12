@@ -539,6 +539,19 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
             return id;
         }
 
+        /// <summary><see cref="AddDocument"/> with a link column set to an arbitrary raw value (a malformed lookup).</summary>
+        public string AddDocumentRaw(string segment, Guid record, string name, (string Column, object? Value) rawLink)
+        {
+            var id = AddDocument(segment, record, name);
+            lock (_sets)
+            {
+                var row = _sets["sprk_documents"].Single(r => (string?)r["sprk_documentid"] == id);
+                row[rawLink.Column] = rawLink.Value;
+            }
+
+            return id;
+        }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var url = Uri.UnescapeDataString(request.RequestUri!.ToString());
@@ -546,6 +559,34 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
 
             if (Fault is { } fault)
                 return Task.FromResult(new HttpResponseMessage(fault));
+
+            // A single-row read, `sprk_documents({id})?$select=...`: the row whose primary key is {id}, projected through
+            // $select, as the document / delete scoping reads send it (fix round for task 039). 404 when there is none.
+            var single = Regex.Match(request.RequestUri.AbsolutePath, @"/(\w+)\(([0-9a-fA-F-]{36})\)$");
+            if (single.Success)
+            {
+                var wanted = single.Groups[2].Value;
+                Dictionary<string, object?>? hit;
+                lock (_sets)
+                {
+                    hit = _sets.TryGetValue(single.Groups[1].Value, out var seededRows)
+                        ? seededRows.FirstOrDefault(r => new[] { "sprk_documentid", "sprk_todoid", "sprk_eventid" }
+                            .Any(k => r.TryGetValue(k, out var v) && string.Equals(v as string, wanted, StringComparison.OrdinalIgnoreCase)))
+                        : null;
+                }
+
+                if (hit is null)
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+
+                var selected = Regex.Match(url, @"\$select=([^&]*)");
+                var wantedColumns = selected.Success ? selected.Groups[1].Value.Split(',').ToHashSet(StringComparer.Ordinal) : null;
+                var projectedRow = hit.Where(kv => wantedColumns is null || wantedColumns.Contains(kv.Key))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(projectedRow), System.Text.Encoding.UTF8, "application/json"),
+                });
+            }
 
             var set = request.RequestUri.AbsolutePath[(request.RequestUri.AbsolutePath.LastIndexOf('/') + 1)..];
             var filter = Regex.Match(url, @"(_sprk_\w+_value) eq ([0-9a-fA-F-]{36})");
