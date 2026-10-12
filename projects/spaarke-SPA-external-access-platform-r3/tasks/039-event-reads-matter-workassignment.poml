@@ -4,7 +4,7 @@
     <title>External event reads for Matter and Work Assignment (FR-03 server)</title>
     <phase>3 BFF features</phase>
     <gate>after 032 and 037</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New external read routes (tags bff-api, auth)</rigor-reason>
     <model-tier>sonnet</model-tier>
