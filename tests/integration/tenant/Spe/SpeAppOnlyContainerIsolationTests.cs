@@ -655,6 +655,141 @@ public class SpeAppOnlyContainerIsolationTests
         graph.Requests.Should().NotContain(r => r.Method == "DELETE");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // #1652 round 2: two restores of one container — a completing one and a rolling-back one — never leave it in the bin
+    // without a record, nor delete it after it was reported restored. Each test runs one request for real and lands the
+    // other's record step at an exact moment (the fake's BeforeNext / the route's Before), with the ETag both gate reads saw.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static SpeDeletedContainerRecord FreshOwnRecord() => new(
+        OwnContainer, Customer, OwnUnit, Config().ConfigId, Config().ContainerTypeId, DateTimeOffset.UtcNow);
+
+    /// <summary>A restores (POST 2xx), re-marks, and its read-back is wrong — so A rolls back.</summary>
+    private static RoutedGraph RestoreThatRollsBack() => DeletedList(OwnContainer)
+        .Respond("POST", OwnRestorePath, $$"""{"id":"{{OwnContainer}}"}""")
+        .Respond("PATCH", OwnPropertiesPath, "{}")
+        .Respond("GET", OwnLivePath, LiveContainerJson(OwnContainer, Customer, Guid.Parse("0b000000-0000-0000-0000-0000000000bb")))
+        .Respond("DELETE", OwnLivePath, "", HttpStatusCode.NoContent);
+
+    /// <summary>B's POST reads 404 (A restored it first); B's live read sees <paramref name="liveJson"/>.</summary>
+    private static RoutedGraph RestoreThatFindsItLive(string liveJson) => DeletedList(OwnContainer)
+        .Respond("POST", OwnRestorePath, """{"error":{"code":"itemNotFound","message":"x"}}""", HttpStatusCode.NotFound)
+        .Respond("GET", OwnLivePath, liveJson)
+        .Respond("DELETE", OwnLivePath, "", HttpStatusCode.NoContent);
+
+    [Fact]
+    public async Task SpeAdmin_Restore_RollingBack_WhenAConcurrentRestoreCompletedFirst_LeavesItLive_AndDeletesNothing()
+    {
+        var graph = RestoreThatRollsBack();
+        var records = new FakeSpeDeletedContainerRecords();
+        records.Seed(OwnContainer, Customer, OwnUnit, Config().ContainerTypeId);
+        var gate = records.ETagOf(OwnContainer);
+        var completed = (SpeDeletedContainerRecordChange?)null;
+        // B (already-ours branch) removes the record just before A's rollback re-writes it.
+        records.BeforeNext("Replace", async () => completed = await records.Store.RemoveIfUnchangedAsync(OwnContainer, gate));
+
+        var act = () => SpeAdmin(graph, records).RestoreContainerForConfigAsync(Config(), OwnContainer, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*concurrent restore*");
+        completed.Should().Be(SpeDeletedContainerRecordChange.Done, "B completed and reported the container restored");
+        graph.Requests.Should().NotContain(r => r.Method == "DELETE",
+            "A must not delete a container B reported restored — it stays live, marked, its record spent");
+        records.DocumentOf(OwnContainer).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SpeAdmin_Restore_RollingBack_WhenAConcurrentRestoreCompletesAfterTheReWrite_ThatRestoreIsRefused_AndTheBinKeepsTheRecord()
+    {
+        var records = new FakeSpeDeletedContainerRecords();
+        records.Seed(OwnContainer, Customer, OwnUnit, Config().ContainerTypeId);
+        var gate = records.ETagOf(OwnContainer);
+        var completed = (SpeDeletedContainerRecordChange?)null;
+        // B's remove lands after A's re-write, just before A's re-delete.
+        var graph = RestoreThatRollsBack().Before("DELETE", OwnLivePath, async _ =>
+            completed = await records.Store.RemoveIfUnchangedAsync(OwnContainer, gate));
+
+        var act = () => SpeAdmin(graph, records).RestoreContainerForConfigAsync(Config(), OwnContainer, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*moved back to the recycle bin*");
+        completed.Should().Be(SpeDeletedContainerRecordChange.Changed, "B's remove is refused, so B does not report it restored");
+        graph.Requests.Should().ContainSingle(r => r.Method == "DELETE" && r.Path == OwnLivePath);
+        records.RecordOf(OwnContainer).Should().NotBeNull("the container is in the bin WITH its record");
+    }
+
+    [Fact]
+    public async Task SpeAdmin_Restore_Completing_WhenAConcurrentRollbackReWroteTheRecordFirst_IsNotReportedRestored_AndKeepsTheRecord()
+    {
+        var graph = RestoreThatFindsItLive(LiveContainerJson(OwnContainer, Customer, OwnUnit));
+        var records = new FakeSpeDeletedContainerRecords();
+        records.Seed(OwnContainer, Customer, OwnUnit, Config().ContainerTypeId);
+        var gate = records.ETagOf(OwnContainer);
+        var rolledBack = (SpeDeletedContainerRecordChange?)null;
+        // A's rollback re-writes the record just before B's completing remove.
+        records.BeforeNext("Delete", async () => rolledBack = await records.Store.ReplaceIfUnchangedAsync(FreshOwnRecord(), gate));
+
+        var restored = await SpeAdmin(graph, records).RestoreContainerForConfigAsync(Config(), OwnContainer, CancellationToken.None);
+
+        rolledBack.Should().Be(SpeDeletedContainerRecordChange.Done);
+        restored.Should().BeFalse("A is returning it to the bin — B must not report it restored");
+        graph.Requests.Should().NotContain(r => r.Method == "PATCH" || r.Method == "DELETE");
+        records.RecordOf(OwnContainer).Should().NotBeNull("the record A re-wrote is kept, so the bin still admits it");
+    }
+
+    [Fact]
+    public async Task SpeAdmin_Restore_Completing_BeforeAConcurrentRollbackReWrites_IsRestored_AndThatRollbackFindsTheRecordGone()
+    {
+        var graph = RestoreThatFindsItLive(LiveContainerJson(OwnContainer, Customer, OwnUnit));
+        var records = new FakeSpeDeletedContainerRecords();
+        records.Seed(OwnContainer, Customer, OwnUnit, Config().ContainerTypeId);
+        var gate = records.ETagOf(OwnContainer);
+
+        var restored = await SpeAdmin(graph, records).RestoreContainerForConfigAsync(Config(), OwnContainer, CancellationToken.None);
+        // A's rollback re-write lands after B completed: it finds the record gone (and so does not re-delete — see the
+        // first test of this group).
+        var rolledBack = await records.Store.ReplaceIfUnchangedAsync(FreshOwnRecord(), gate);
+
+        restored.Should().BeTrue();
+        rolledBack.Should().Be(SpeDeletedContainerRecordChange.Gone);
+        records.DocumentOf(OwnContainer).Should().BeNull("the rollback re-write did not resurrect the record");
+    }
+
+    [Fact]
+    public async Task SpeAdmin_Restore_BareBranchRollingBack_WhenAConcurrentRestoreCompletedFirst_DoesNotDeleteWhatItRestored()
+    {
+        // The mirror: B finds it live and bare, its PATCH fails, so B rolls back — after A completed and reported it.
+        var graph = RestoreThatFindsItLive(LiveContainerJson(OwnContainer, null, null))
+            .Respond("PATCH", OwnPropertiesPath, """{"error":{"code":"accessDenied","message":"x"}}""", HttpStatusCode.Forbidden);
+        var records = new FakeSpeDeletedContainerRecords();
+        records.Seed(OwnContainer, Customer, OwnUnit, Config().ContainerTypeId);
+        var gate = records.ETagOf(OwnContainer);
+        records.BeforeNext("Replace", async () => await records.Store.RemoveIfUnchangedAsync(OwnContainer, gate));
+
+        var act = () => SpeAdmin(graph, records).RestoreContainerForConfigAsync(Config(), OwnContainer, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*concurrent restore*");
+        graph.Requests.Should().NotContain(r => r.Method == "DELETE", "A reported it restored; B must not delete it");
+        records.DocumentOf(OwnContainer).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SpeAdmin_Restore_WhenNoTokenCanBeAcquired_FailsWithTheCredentialFault_AndLooksAtNothingLive()
+    {
+        // The POST was never sent: there is nothing to look for, and no "may be stranded" alarm to raise (#1652 round 2).
+        var graph = DeletedList(OwnContainer)
+            .Respond("POST", OwnRestorePath, "{}")
+            .Before("POST", OwnRestorePath, _ => throw new Azure.Identity.AuthenticationFailedException("no token"))
+            .Respond("GET", OwnLivePath, "{}")
+            .Before("GET", OwnLivePath, _ => throw new Azure.Identity.AuthenticationFailedException("no token"));
+        var records = new FakeSpeDeletedContainerRecords();
+        records.Seed(OwnContainer, Customer, OwnUnit, Config().ContainerTypeId);
+
+        var act = () => SpeAdmin(graph, records).RestoreContainerForConfigAsync(Config(), OwnContainer, CancellationToken.None);
+
+        await act.Should().ThrowAsync<Azure.Identity.AuthenticationFailedException>();
+        graph.Requests.Should().NotContain(r => r.Method == "GET" && r.Path == OwnLivePath);
+        records.RecordOf(OwnContainer).Should().NotBeNull();
+    }
+
     [Fact]
     public void DeletedContainerRecord_SerializesThroughTheStampsCosmosOptions_WithTheNamesCosmosNeeds()
     {

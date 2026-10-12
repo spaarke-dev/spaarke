@@ -324,6 +324,55 @@ public sealed class SpeAdminContainerOwnershipRefusalTests : IClassFixture<Admin
         _fixture.DeletedRecords.RecordOf("rb-own").Should().NotBeNull("the record is left as it was");
     }
 
+    // ── #1652 round 2: each safety condition of the unconfirmed-restore branch, on its own ─────────────────────────
+
+    [Fact]
+    public async Task Restore_WhenGraphSaysNotFound_AndTheLiveContainerHasOurMarker_ButAnotherUnit_IsUntouched_AndTheUniform404()
+    {
+        Seed(callerUnit: Root);
+        _fixture.Graph.StubPostExact($"{DeletedPath}/rb-own/restore", """{"error":{"code":"itemNotFound","message":"x"}}""", 404);
+        _fixture.Graph.StubGet($"{ContainersPath}/rb-own", LiveJson("rb-own", OwnCustomer, UnitB));
+        using var client = Admin();
+
+        var problem = await Problem(await client.SendAsync(RecycleBinRequest("POST", "rb-own")));
+
+        AssertUniformNotFound(problem, "rb-own", recycleBin: true);
+        _fixture.Graph.AllRequests.Should().NotContain(r => r.Method == "PATCH" || r.Method == "DELETE",
+            "our marker on ANOTHER unit is not the record's container state — never completed, never written");
+        _fixture.DeletedRecords.RecordOf("rb-own").Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Restore_WhenGraphSaysNotFound_AndTheLiveContainerIsBare_ButOfAnotherType_IsUntouched_AndTheUniform404()
+    {
+        Seed(callerUnit: Root);
+        _fixture.Graph.StubPostExact($"{DeletedPath}/rb-own/restore", """{"error":{"code":"itemNotFound","message":"x"}}""", 404);
+        _fixture.Graph.StubGet($"{ContainersPath}/rb-own", LiveJson("rb-own", null, null, TypeX));
+        using var client = Admin();
+
+        var problem = await Problem(await client.SendAsync(RecycleBinRequest("POST", "rb-own")));
+
+        AssertUniformNotFound(problem, "rb-own", recycleBin: true);
+        _fixture.Graph.AllRequests.Should().NotContain(r => r.Method == "PATCH" || r.Method == "DELETE",
+            "a bare container of another type is not this record's container — never marked");
+        _fixture.DeletedRecords.RecordOf("rb-own").Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Restore_WhenGraphSaysNotFound_AndTheLiveContainerAlreadyCarriesTheRecordsMarkerAndUnit_IsDone_WithoutAWrite()
+    {
+        Seed(callerUnit: Root);
+        _fixture.Graph.StubPostExact($"{DeletedPath}/rb-own/restore", """{"error":{"code":"itemNotFound","message":"x"}}""", 404);
+        _fixture.Graph.StubGet($"{ContainersPath}/rb-own", LiveJson("rb-own", OwnCustomer, Root));
+        using var client = Admin();
+
+        var response = await client.SendAsync(RecycleBinRequest("POST", "rb-own"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Graph.AllRequests.Should().NotContain(r => r.Method == "PATCH" || r.Method == "DELETE");
+        _fixture.DeletedRecords.DocumentOf("rb-own").Should().BeNull("the restore is complete, so its record is spent");
+    }
+
     [Fact]
     public async Task Restore_WhenGraphGivesNoAnswer_AndTheLiveStateIsUnreadable_FailsLoud_WritesNothing_AndKeepsTheRecord()
     {
@@ -450,7 +499,7 @@ public sealed class SpeAdminContainerOwnershipRefusalTests : IClassFixture<Admin
     }
 
     /// <summary>A live container's single read, with optional marker and stamp (none of either = what Graph restores).</summary>
-    private static string LiveJson(string id, string? marker, Guid? unit)
+    private static string LiveJson(string id, string? marker, Guid? unit, string type = TypeT)
     {
         var properties = new List<string>();
         if (unit is { } u)
@@ -463,7 +512,7 @@ public sealed class SpeAdminContainerOwnershipRefusalTests : IClassFixture<Admin
             properties.Add("\"" + SpeContainerOwnershipGuard.MarkerPropertyName + "\":{\"value\":\"" + marker + "\",\"isSearchable\":false}");
         }
 
-        return "{\"id\":\"" + id + "\",\"displayName\":\"Container " + id + "\",\"containerTypeId\":\"" + TypeT +
+        return "{\"id\":\"" + id + "\",\"displayName\":\"Container " + id + "\",\"containerTypeId\":\"" + type +
                "\",\"status\":\"active\",\"customProperties\":{" + string.Join(",", properties) + "}}";
     }
 

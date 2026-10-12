@@ -630,15 +630,19 @@ public sealed class SpeAdminGraphService
         CancellationToken ct = default)
         => (await GetDeletedContainerAccessAsync(config, containerId, ct).ConfigureAwait(false)).Client;
 
-    /// <summary><see cref="GetClientForDeletedContainerAsync"/>, with the binding the container's ownership record gives.</summary>
-    private async Task<(GraphServiceClient Client, Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead Binding)> GetDeletedContainerAccessAsync(
+    /// <summary>
+    /// <see cref="GetClientForDeletedContainerAsync"/>, with the binding the container's ownership record gives and the
+    /// ETag of THAT record read — what this request's later record changes are conditioned on (#1652 round 2).
+    /// </summary>
+    private async Task<(GraphServiceClient Client, Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead Binding, string? RecordETag)> GetDeletedContainerAccessAsync(
         ContainerTypeConfig config,
         string containerId,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(config);
         var ownership = RequireOwnership();
-        var reads = await GetDeletedContainerBindingsForConfigAsync(config, new[] { containerId }, ct).ConfigureAwait(false);
+        var etags = new ConcurrentDictionary<string, string?>(StringComparer.Ordinal);
+        var reads = await GetDeletedContainerBindingsCoreAsync(config, new[] { containerId }, etags, ct).ConfigureAwait(false);
         if (reads.GetValueOrDefault(containerId) is not { } binding)
         {
             throw new SdapProblemException(
@@ -648,7 +652,7 @@ public sealed class SpeAdminGraphService
                 StatusCodes.Status404NotFound);
         }
 
-        return (ownership.ForTypeWideOperation(), binding);
+        return (ownership.ForTypeWideOperation(), binding, etags.GetValueOrDefault(containerId));
     }
 
     /// <summary>
@@ -662,10 +666,17 @@ public sealed class SpeAdminGraphService
     /// <exception cref="SpaarkeStorageException">Graph's deleted list could not be read.</exception>
     /// <exception cref="Sprk.Bff.Api.Services.SpeAdmin.SpeDeletedContainerRecordUnavailableException">The record store
     /// gave no answer. Either way the caller refuses (503) — never reads a fault as "not there".</exception>
-    public async Task<IReadOnlyDictionary<string, Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead?>> GetDeletedContainerBindingsForConfigAsync(
+    public Task<IReadOnlyDictionary<string, Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead?>> GetDeletedContainerBindingsForConfigAsync(
         ContainerTypeConfig config,
         IEnumerable<string> containerIds,
         CancellationToken ct = default)
+        => GetDeletedContainerBindingsCoreAsync(config, containerIds, etags: null, ct);
+
+    private async Task<IReadOnlyDictionary<string, Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead?>> GetDeletedContainerBindingsCoreAsync(
+        ContainerTypeConfig config,
+        IEnumerable<string> containerIds,
+        ConcurrentDictionary<string, string?>? etags,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(containerIds);
@@ -674,7 +685,7 @@ public sealed class SpeAdminGraphService
         try { listed = await ListDeletedContainersAsync(client, config.ContainerTypeId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListDeletedContainers({config.ContainerTypeId})"); }
 
-        return await ReadDeletedContainerBindingsAsync(config, containerIds, listed.Select(c => c.Id), ct).ConfigureAwait(false);
+        return await ReadDeletedContainerBindingsAsync(config, containerIds, listed.Select(c => c.Id), ct, etags).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -685,7 +696,8 @@ public sealed class SpeAdminGraphService
         ContainerTypeConfig config,
         IEnumerable<string> containerIds,
         IEnumerable<string> listedAsDeleted,
-        CancellationToken ct)
+        CancellationToken ct,
+        ConcurrentDictionary<string, string?>? etags = null)
     {
         var ownership = RequireOwnership();
         var records = RequireDeletedRecords();
@@ -708,8 +720,13 @@ public sealed class SpeAdminGraphService
                 }
 
                 // (a) A store fault throws — the whole read refuses (fail closed).
-                var record = await records.ReadAsync(id, token).ConfigureAwait(false);
-                result[id] = DecideDeletedContainer(config, ownership, id, record);
+                var version = await records.ReadVersionedAsync(id, token).ConfigureAwait(false);
+                if (etags is not null)
+                {
+                    etags[id] = version?.ETag;
+                }
+
+                result[id] = DecideDeletedContainer(config, ownership, id, version?.Record);
             }).ConfigureAwait(false);
 
         return result;
@@ -2675,7 +2692,7 @@ public sealed class SpeAdminGraphService
     public async Task<bool> RestoreContainerForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
-        var (client, binding) = await GetDeletedContainerAccessAsync(config, containerId, ct).ConfigureAwait(false);
+        var (client, binding, recordETag) = await GetDeletedContainerAccessAsync(config, containerId, ct).ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
 
         // From the restore POST on, nothing is cancellable by the caller (#1652 round 1): a restore that Graph carries
@@ -2689,6 +2706,12 @@ public sealed class SpeAdminGraphService
             {
                 // A definite refusal: nothing was restored.
                 throw ex.ToSpaarkeStorageException($"RestoreContainer({containerId})");
+            }
+            catch (Exception ex) when (IsCredentialFault(ex))
+            {
+                // No token, so the POST was never sent (#1652 round 2): nothing was restored, and there is nothing to
+                // look at — the live read would fail the same way and raise a false "may be stranded" alarm.
+                throw;
             }
             catch (Exception ex)
             {
@@ -2704,7 +2727,7 @@ public sealed class SpeAdminGraphService
         {
             // Graph said "not in the bin" — which is also what an SDK retry reads after a restore whose 2xx was lost
             // (#1652 round 1) — or gave no answer at all. The live container decides.
-            if (await CompleteUnconfirmedRestoreAsync(client, config, containerId, binding).ConfigureAwait(false))
+            if (await CompleteUnconfirmedRestoreAsync(client, config, containerId, binding, recordETag).ConfigureAwait(false))
             {
                 return true;
             }
@@ -2721,23 +2744,27 @@ public sealed class SpeAdminGraphService
         }
 
         // Give the live container back its marker and stamp from the record; only then is the record spent (#1652).
-        await RebindRestoredContainerAsync(client, config, containerId, binding).ConfigureAwait(false);
-        await CompleteRestoreAsync(containerId).ConfigureAwait(false);
-        return true;
+        await RebindRestoredContainerAsync(client, config, containerId, binding, recordETag).ConfigureAwait(false);
+        return await CompleteRestoreAsync(containerId, recordETag).ConfigureAwait(false);
     }
+
+    /// <summary>The app-only token could not be acquired, so Graph was never called (#1652 round 2).</summary>
+    private static bool IsCredentialFault(Exception ex) =>
+        ex is Azure.Identity.AuthenticationFailedException or Microsoft.Identity.Client.MsalException;
 
     /// <summary>
     /// A restore Graph did not confirm (it answered "not found", or nothing): the container — still admitted by this
     /// stamp's ownership record — is read LIVE. Live with NO marker and NO stamp (Graph restored it and the answer was
     /// lost): it is re-marked from the record, exactly as a confirmed restore. Live with this stamp's marker and the
     /// record's unit: already complete. Live carrying anything else: not touched (false — the uniform 404). Not live:
-    /// false.
+    /// false. Completing either way is conditional on <paramref name="recordETag"/> (<see cref="CompleteRestoreAsync"/>).
     /// </summary>
     private async Task<bool> CompleteUnconfirmedRestoreAsync(
         GraphServiceClient graphClient,
         ContainerTypeConfig config,
         string containerId,
-        Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead binding)
+        Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead binding,
+        string? recordETag)
     {
         (Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead? Read, string? Marker) live;
         try
@@ -2772,15 +2799,13 @@ public sealed class SpeAdminGraphService
             _logger.LogWarning(
                 "Restore of container {ContainerId} was not confirmed by Graph, but the container is live with no marker " +
                 "or stamp — re-marking it from its ownership record.", containerId);
-            await RebindRestoredContainerAsync(graphClient, config, containerId, binding).ConfigureAwait(false);
-            await CompleteRestoreAsync(containerId).ConfigureAwait(false);
-            return true;
+            await RebindRestoredContainerAsync(graphClient, config, containerId, binding, recordETag).ConfigureAwait(false);
+            return await CompleteRestoreAsync(containerId, recordETag).ConfigureAwait(false);
         }
 
         if (sameType && alreadyOurs)
         {
-            await CompleteRestoreAsync(containerId).ConfigureAwait(false);
-            return true;
+            return await CompleteRestoreAsync(containerId, recordETag).ConfigureAwait(false);
         }
 
         _logger.LogWarning(
@@ -2789,12 +2814,43 @@ public sealed class SpeAdminGraphService
         return false;
     }
 
-    /// <summary>The restore is done: the record is spent, and no stale "no marker" is served for the live container.</summary>
-    private async Task CompleteRestoreAsync(string containerId)
+    /// <summary>
+    /// The restore is done: the record is spent, and no stale "no marker" is served for the live container. The record is
+    /// removed ONLY if it is still the version this request's gate read (<paramref name="recordETag"/>, Cosmos If-Match;
+    /// #1652 round 2). A concurrent restore that is rolling back re-writes the record before it re-deletes the container,
+    /// so a changed record means the container is going back to the bin: this restore is NOT reported done (false — the
+    /// uniform 404; a retry finds it in the bin, with its record). A record already gone was removed by a concurrent
+    /// restore that completed: done.
+    /// </summary>
+    private async Task<bool> CompleteRestoreAsync(string containerId, string? recordETag)
     {
-        await RequireDeletedRecords().RemoveAsync(containerId, CancellationToken.None).ConfigureAwait(false);
+        var removal = Sprk.Bff.Api.Services.SpeAdmin.SpeDeletedContainerRecordChange.Done;
+        try
+        {
+            using var step = new CancellationTokenSource(UncancellableStepTimeout);
+            removal = await RequireDeletedRecords().RemoveIfUnchangedAsync(containerId, recordETag, step.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // The store gave no answer. The container is live and re-marked; a record left behind is inert while it is
+            // live (Graph does not list it as deleted) and expires with its ttl.
+            _logger.LogWarning(ex,
+                "Restored container {ContainerId}: its ownership record could not be removed; it is inert and expires with its ttl.",
+                containerId);
+        }
+
         // After the re-mark (#1652 round 1): a read between the first invalidation and the PATCH may have cached "none".
         await RequireOwnership().ForgetContainerAsync(containerId).ConfigureAwait(false);
+
+        if (removal == Sprk.Bff.Api.Services.SpeAdmin.SpeDeletedContainerRecordChange.Changed)
+        {
+            _logger.LogWarning(
+                "Restore of container {ContainerId} is not reported done: a concurrent request re-wrote its ownership record " +
+                "to return it to the recycle bin.", containerId);
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -2810,7 +2866,8 @@ public sealed class SpeAdminGraphService
         GraphServiceClient graphClient,
         ContainerTypeConfig config,
         string containerId,
-        Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead binding)
+        Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead binding,
+        string? recordETag)
     {
         try
         {
@@ -2856,12 +2913,18 @@ public sealed class SpeAdminGraphService
         catch (Exception ex)
         {
             // Every failure, cancellation and timeout included: this section has no caller token to honour.
-            var returned = await ReturnRestoredContainerToBinAsync(graphClient, config, containerId, binding).ConfigureAwait(false);
+            var rollback = await ReturnRestoredContainerToBinAsync(graphClient, config, containerId, binding, recordETag)
+                .ConfigureAwait(false);
             throw new InvalidOperationException(
                 $"Container '{containerId}' was restored but its ownership marker and business-unit stamp could not be " +
-                "re-written" + (returned
-                    ? "; it was moved back to the recycle bin, where its ownership record still admits it — retry the restore."
-                    : "; moving it back to the recycle bin failed too, so it is live but unreachable until an operator re-marks it."),
+                "re-written" + (rollback switch
+                {
+                    RestoreRollback.ReturnedToBin =>
+                        "; it was moved back to the recycle bin, where its ownership record still admits it — retry the restore.",
+                    RestoreRollback.CompletedElsewhere =>
+                        "; a concurrent restore of it completed meanwhile, so it was left live, as that restore reported it.",
+                    _ => "; moving it back to the recycle bin failed too, so it is live but unreachable until an operator re-marks it.",
+                }),
                 ex);
         }
     }
@@ -2872,17 +2935,25 @@ public sealed class SpeAdminGraphService
     /// soft-deletes the container. A record that cannot be written does not stop the delete (a live, unmarked container
     /// is worse than one in the bin with an expiring record); it is logged critical. Each call has its own timeout.
     /// </summary>
-    /// <returns>True when the container is back in the recycle bin.</returns>
-    private async Task<bool> ReturnRestoredContainerToBinAsync(
+    /// <remarks>
+    /// The record re-write is conditional on <paramref name="recordETag"/>, the version this request's gate read (Cosmos
+    /// If-Match; #1652 round 2). A record that is GONE was removed by a concurrent restore that completed and reported the
+    /// container restored: it is not deleted from under that report. A record re-written meanwhile (another rollback)
+    /// still admits the container in the bin, so the delete goes ahead. With the conditional remove in
+    /// <see cref="CompleteRestoreAsync"/>, exactly one of a completing restore and a rolling-back one wins: the container
+    /// ends live, marked and with no record, or in the bin with a record — never in the bin without one.
+    /// </remarks>
+    private async Task<RestoreRollback> ReturnRestoredContainerToBinAsync(
         GraphServiceClient graphClient,
         ContainerTypeConfig config,
         string containerId,
-        Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead binding)
+        Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead binding,
+        string? recordETag)
     {
         try
         {
             using var write = new CancellationTokenSource(UncancellableStepTimeout);
-            await RequireDeletedRecords().WriteAsync(
+            var change = await RequireDeletedRecords().ReplaceIfUnchangedAsync(
                 new Sprk.Bff.Api.Services.SpeAdmin.SpeDeletedContainerRecord(
                     ContainerId: containerId,
                     CustomerId: RequireOwnership().RequireCustomerId(),
@@ -2890,7 +2961,16 @@ public sealed class SpeAdminGraphService
                     ConfigId: config.ConfigId,
                     ContainerTypeId: binding.ContainerTypeId ?? config.ContainerTypeId,
                     DeletedAt: DateTimeOffset.UtcNow),
+                recordETag,
                 write.Token).ConfigureAwait(false);
+            if (change == Sprk.Bff.Api.Services.SpeAdmin.SpeDeletedContainerRecordChange.Gone)
+            {
+                _logger.LogWarning(
+                    "Restored container {ContainerId} could not be re-marked by this request, but a concurrent restore " +
+                    "completed it and removed its ownership record — left live, not returned to the recycle bin.",
+                    containerId);
+                return RestoreRollback.CompletedElsewhere;
+            }
         }
         catch (Exception recordEx)
         {
@@ -2903,7 +2983,9 @@ public sealed class SpeAdminGraphService
         try
         {
             using var delete = new CancellationTokenSource(UncancellableStepTimeout);
-            return await SoftDeleteContainerAsync(graphClient, containerId, delete.Token).ConfigureAwait(false);
+            return await SoftDeleteContainerAsync(graphClient, containerId, delete.Token).ConfigureAwait(false)
+                ? RestoreRollback.ReturnedToBin
+                : RestoreRollback.Failed;
         }
         catch (Exception deleteEx)
         {
@@ -2911,8 +2993,21 @@ public sealed class SpeAdminGraphService
                 "Restored container {ContainerId} could not be re-marked AND could not be moved back to the recycle bin: " +
                 "it is live but unmarked and unbound, unreachable by every admin until an operator re-marks it.",
                 containerId);
-            return false;
+            return RestoreRollback.Failed;
         }
+    }
+
+    /// <summary>How <see cref="ReturnRestoredContainerToBinAsync"/> ended.</summary>
+    private enum RestoreRollback
+    {
+        /// <summary>The container is back in the recycle bin, with a record.</summary>
+        ReturnedToBin,
+
+        /// <summary>A concurrent restore completed it and removed its record: left live.</summary>
+        CompletedElsewhere,
+
+        /// <summary>It could not be moved back: live and unreachable (logged critical).</summary>
+        Failed,
     }
 
     /// <summary>

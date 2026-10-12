@@ -20,6 +20,25 @@ public sealed record SpeDeletedContainerRecord(
     DateTimeOffset DeletedAt);
 
 /// <summary>
+/// A record with the Cosmos ETag of the read that returned it (#1652 round 2): the version a later conditional remove or
+/// replace is made against, so two requests racing on the same container cannot both act on it.
+/// </summary>
+public sealed record SpeDeletedContainerRecordVersion(SpeDeletedContainerRecord Record, string? ETag);
+
+/// <summary>The outcome of a conditional (ETag) change to a record (#1652 round 2).</summary>
+public enum SpeDeletedContainerRecordChange
+{
+    /// <summary>The record was still the version read, and the change was made.</summary>
+    Done,
+
+    /// <summary>There is no record any more (a concurrent restore or purge removed it). Nothing was changed.</summary>
+    Gone,
+
+    /// <summary>The record was re-written since it was read (a concurrent request). Nothing was changed.</summary>
+    Changed,
+}
+
+/// <summary>
 /// The store of <see cref="SpeDeletedContainerRecord"/>s: one document per deleted container in the stamp's EXISTING
 /// per-customer Cosmos DB <c>memory</c> container (#1652, owner decision "protected B" 2026-10-12).
 /// </summary>
@@ -123,16 +142,25 @@ public class SpeDeletedContainerRecordStore
     /// store gives no answer — the caller refuses, never reads that as "no record".
     /// </summary>
     public virtual async Task<SpeDeletedContainerRecord?> ReadAsync(string containerId, CancellationToken ct = default)
+        => (await ReadVersionedAsync(containerId, ct).ConfigureAwait(false))?.Record;
+
+    /// <summary>
+    /// As <see cref="ReadAsync"/>, with the ETag of this read — what <see cref="RemoveIfUnchangedAsync"/> and
+    /// <see cref="ReplaceIfUnchangedAsync"/> are conditioned on (#1652 round 2).
+    /// </summary>
+    public virtual async Task<SpeDeletedContainerRecordVersion?> ReadVersionedAsync(string containerId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
 
         RecordDocument? document;
+        string? etag;
         try
         {
             var response = await GetContainer()
                 .ReadItemAsync<RecordDocument>(DocumentId(containerId), new PartitionKey(PartitionValue), cancellationToken: ct)
                 .ConfigureAwait(false);
             document = response.Resource;
+            etag = response.ETag;
         }
         catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
         {
@@ -150,9 +178,79 @@ public class SpeDeletedContainerRecordStore
             _logger.LogWarning(
                 "The ownership record document of container {ContainerId} is not a well-formed record of that container — ignored (no record).",
                 containerId);
+            return null;
         }
 
-        return record;
+        return new SpeDeletedContainerRecordVersion(record, etag);
+    }
+
+    /// <summary>
+    /// Removes the record of <paramref name="containerId"/> only if it is still the version <paramref name="etag"/> names
+    /// (Cosmos <c>If-Match</c>) — a restore completing (#1652 round 2). <see cref="SpeDeletedContainerRecordChange.Changed"/>
+    /// means a concurrent request re-wrote it (a rollback returning the container to the bin): the caller must not report
+    /// the restore done. Throws <see cref="SpeDeletedContainerRecordUnavailableException"/> when the store gives no answer.
+    /// </summary>
+    public virtual async Task<SpeDeletedContainerRecordChange> RemoveIfUnchangedAsync(
+        string containerId, string? etag, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
+        try
+        {
+            await GetContainer()
+                .DeleteItemAsync<RecordDocument>(
+                    DocumentId(containerId), new PartitionKey(PartitionValue), new ItemRequestOptions { IfMatchEtag = etag }, ct)
+                .ConfigureAwait(false);
+            return SpeDeletedContainerRecordChange.Done;
+        }
+        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return SpeDeletedContainerRecordChange.Gone;
+        }
+        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
+        {
+            return SpeDeletedContainerRecordChange.Changed;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new SpeDeletedContainerRecordUnavailableException(
+                $"The ownership record of container '{containerId}' could not be removed.", ex);
+        }
+    }
+
+    /// <summary>
+    /// Re-writes the record of <paramref name="record"/>'s container only if it is still the version
+    /// <paramref name="etag"/> names (Cosmos <c>If-Match</c>) — a rollback returning a restored container to the bin
+    /// (#1652 round 2). <see cref="SpeDeletedContainerRecordChange.Gone"/> means a concurrent restore completed and
+    /// removed it: the caller must not delete a container another request reported restored. Throws
+    /// <see cref="SpeDeletedContainerRecordUnavailableException"/> when the store gives no answer.
+    /// </summary>
+    public virtual async Task<SpeDeletedContainerRecordChange> ReplaceIfUnchangedAsync(
+        SpeDeletedContainerRecord record, string? etag, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        ArgumentException.ThrowIfNullOrWhiteSpace(record.ContainerId);
+        var document = RecordDocument.From(record);
+        try
+        {
+            await GetContainer()
+                .ReplaceItemAsync(
+                    document, document.Id!, new PartitionKey(PartitionValue), new ItemRequestOptions { IfMatchEtag = etag }, ct)
+                .ConfigureAwait(false);
+            return SpeDeletedContainerRecordChange.Done;
+        }
+        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return SpeDeletedContainerRecordChange.Gone;
+        }
+        catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
+        {
+            return SpeDeletedContainerRecordChange.Changed;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            throw new SpeDeletedContainerRecordUnavailableException(
+                $"The ownership record of container '{record.ContainerId}' could not be re-written.", ex);
+        }
     }
 
     /// <summary>
