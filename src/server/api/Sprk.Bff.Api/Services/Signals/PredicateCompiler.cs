@@ -56,6 +56,9 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// query left out: the evaluator (task 031) must therefore widen the query for these fields (for example anchor
 /// at a day boundary and widen each Date Only bound by one day) before judging per item. Recorded as a 031 input
 /// in <c>notes/024-progress.md</c>.</param>
+/// <param name="Threshold">For a <see cref="RuleType.Threshold"/> body, the one comparison it makes (task 025b); null for Existence.
+/// When <see cref="ThresholdComparison.BaseDerived"/> the compared column is NOT trusted from the stored row: the evaluator
+/// removes this comparison's condition from <see cref="FetchXml"/> and judges the comparison itself from the base rows.</param>
 public sealed record CompiledPredicate(
     string SubjectEntity,
     string SubjectIdAttribute,
@@ -65,7 +68,16 @@ public sealed record CompiledPredicate(
     IReadOnlySet<string> AmbiguousTemplateFields,
     IReadOnlySet<string> UnpinnedTemplateFields,
     int QuietWindowDays,
-    IReadOnlySet<string> DateOnlyWhenFields);
+    IReadOnlySet<string> DateOnlyWhenFields,
+    ThresholdComparison? Threshold = null);
+
+/// <summary>
+/// The comparison of a Threshold body (task 025b). <see cref="FetchOperator"/> is <c>ge/gt/le/lt</c>; <see cref="Operand"/> is the
+/// text the compiled condition carries (so the evaluator can find that exact condition); <see cref="Value"/> is the same number.
+/// </summary>
+/// <param name="BaseDerived">True when the column is one of <see cref="Sprk.Bff.Api.Services.Finance.FinanceBaseValues"/>'s derived
+/// columns (a plain stored column that only a form edit refreshes): the evaluator computes it from the invoice and budget rows.</param>
+public sealed record ThresholdComparison(string Field, string FetchOperator, string Operand, decimal Value, bool BaseDerived);
 
 /// <summary>
 /// Thrown when a rule body cannot be compiled into a single FetchXML filter. The message names the offending
@@ -244,12 +256,18 @@ public sealed partial class PredicateCompiler
             [("sprk_matter", "sprk_budgetutilizationpercent")] = (-100000000000m, 100000000000m),
             [("sprk_matter", "sprk_totalbudget")] = (-922337203685477m, 922337203685477m),
             [("sprk_matter", "sprk_totalspendtodate")] = (-922337203685477m, 922337203685477m),
+            // Task 025b (D-122): the same three columns on the project, same live metadata (Decimal/Money, same bounds, 2026-10-12).
+            [("sprk_project", "sprk_budgetutilizationpercent")] = (-100000000000m, 100000000000m),
+            [("sprk_project", "sprk_totalbudget")] = (-922337203685477m, 922337203685477m),
+            [("sprk_project", "sprk_totalspendtodate")] = (-922337203685477m, 922337203685477m),
         }.ToFrozenDictionary();
 
     /// <summary>
-    /// The columns a <see cref="RuleType.Threshold"/> body may compare: the numeric spend roll-ups on the matter
-    /// (<c>sprk_totalbudget</c> and <c>sprk_totalspendtodate</c> Currency, <c>sprk_budgetutilizationpercent</c> Decimal; v4
-    /// finding #8, task 025). A closed list for the same reason as <see cref="VerifiedJoins"/>: the body cannot say a column
+    /// The columns a <see cref="RuleType.Threshold"/> body may compare: the numeric spend roll-ups on the matter and the project
+    /// (<c>sprk_totalbudget</c> and <c>sprk_totalspendtodate</c> Currency, <c>sprk_budgetutilizationpercent</c> Decimal, a PERCENT
+    /// where 100 means fully spent; v4 finding #8, task 025; project added by task 025b, D-122). They are plain stored columns that
+    /// only a form edit refreshes, so a Threshold on them is judged by the evaluator from the invoice and budget rows
+    /// (<see cref="Sprk.Bff.Api.Services.Finance.FinanceBaseValues"/>), never from the stored copy. A closed list for the same reason as <see cref="VerifiedJoins"/>: the body cannot say a column
     /// is numeric, and a threshold on a text, lookup or date column would not fail at save time. The seam test
     /// <c>SignalPredicateTests.ThresholdColumns_AreNumericOnTheLiveSchema</c> fails if a listed column is missing or not
     /// numeric. Adding a column is a schema check plus a code change with review; its table must also be in
@@ -471,9 +489,12 @@ public sealed partial class PredicateCompiler
         }
 
         var thresholdConditionCount = 0;
+        ThresholdComparison? thresholdComparison = null;
         if (ruleType == RuleType.Threshold)
         {
-            rootConditions.Add(CompileThreshold(subject, root, nowUtc, positiveUses));
+            var (condition, comparison) = CompileThreshold(subject, root, nowUtc, positiveUses);
+            rootConditions.Add(condition);
+            thresholdComparison = comparison;
             thresholdConditionCount = 1;
         }
 
@@ -484,6 +505,16 @@ public sealed partial class PredicateCompiler
             var whenConditions = CompileFilterConditions(subject, when, nowUtc, "when",
                 (field, _) =>
                 {
+                    if (Sprk.Bff.Api.Services.Finance.FinanceBaseValues.IsDerived(subject, field))
+                    {
+                        // Task 025b: spend, budget and utilization are judged from the base rows, but a 'when' on the stored columns
+                        // reads the STORED copy (stale until a form edit). That is wrong for ANY rule type (Existence too), so the
+                        // refusal does not depend on the rule type.
+                        throw new PredicateCompilationException(
+                            $"when.{field}: spend, budget and utilization on '{subject}' are derived from the invoice and " +
+                            "budget rows; a 'when' on the stored column would read a value that is not kept current. Scope the rule with another column.");
+                    }
+
                     UseOf(positiveUses, field).RecordWhen(subject);
                     if (DateOnlyColumns.Contains((subject, field)))
                     {
@@ -585,7 +616,8 @@ public sealed partial class PredicateCompiler
             AmbiguousTemplateFields: ambiguous.ToFrozenSet(StringComparer.Ordinal),
             UnpinnedTemplateFields: unpinned.ToFrozenSet(StringComparer.Ordinal),
             QuietWindowDays: quietWindowDays,
-            DateOnlyWhenFields: dateOnlyWhenFields.ToFrozenSet(StringComparer.Ordinal));
+            DateOnlyWhenFields: dateOnlyWhenFields.ToFrozenSet(StringComparer.Ordinal),
+            Threshold: thresholdComparison);
     }
 
     /// <summary>
@@ -594,7 +626,7 @@ public sealed partial class PredicateCompiler
     /// template may name it and the evaluator supplies the subject's own value (section 0.3). The declared number itself is
     /// not a token. Re-checked here because <see cref="CompileSchemaValidated"/> skips the schema.
     /// </summary>
-    private static XElement CompileThreshold(
+    private static (XElement Condition, ThresholdComparison Comparison) CompileThreshold(
         string subject, JsonElement root, DateTimeOffset nowUtc, Dictionary<string, PositiveFieldUse> positiveUses)
     {
         const string at = "threshold";
@@ -636,12 +668,21 @@ public sealed partial class PredicateCompiler
         if (declared < min || declared > max)
         {
             throw new PredicateCompilationException(
-                $"{at}.value: {operand} is outside the range Dataverse holds for '{subject}.{field}' ({min.ToString(CultureInfo.InvariantCulture)} to {max.ToString(CultureInfo.InvariantCulture)}).");
+                $"{at}.value: {operand} is outside the range Dataverse holds for '{subject}.{field}' ({min.ToString(CultureInfo.InvariantCulture)} to {max.ToString(CultureInfo.InvariantCulture)})." +
+                UnitHint(field));
         }
 
         UseOf(positiveUses, field).RecordWhen(subject);
-        return Condition(field, op, operand);
+        return (Condition(field, op, operand),
+            new ThresholdComparison(field, op, operand, declared, Sprk.Bff.Api.Services.Finance.FinanceBaseValues.IsDerived(subject, field)));
     }
+
+    /// <summary>The unit of a Threshold column, appended to a validation message so an author does not write a fraction (0.85) for a
+    /// percent (85). Empty for the money columns.</summary>
+    private static string UnitHint(string field) =>
+        field == Sprk.Bff.Api.Services.Finance.FinanceBaseValues.UtilizationColumn
+            ? " Budget utilization is a PERCENT: 85 means 85 percent of the budget spent and 100 means fully spent."
+            : string.Empty;
 
     /// <summary>The optional <c>quietWindowDays</c> knob (D-13, FR-17a): absent → <see cref="DefaultQuietWindowDays"/>;
     /// otherwise an integer in 0..<see cref="MaxQuietWindowDays"/>. Re-checked here because
