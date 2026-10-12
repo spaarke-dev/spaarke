@@ -222,7 +222,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
             var superseded = await _closure.SupersedeInPassAsync(policy.Code, versionId, existing, ct).ConfigureAwait(false);
             existing = superseded.Existing;
             counts.AddClosure(superseded.Outcome, retired: false);
-            var plan = SignalEpisodePlanner.Plan(lane, evaluation.QuietWindowDays, _timeProvider.GetUtcNow(), evaluation.Hits, existing);
+            var plan = SignalEpisodePlanner.Plan(lane, evaluation.QuietWindowDays, _timeProvider.GetUtcNow(), evaluation.Hits, existing,
+                isThreshold: RuleBodySchemaValidator.TryParseRuleType(spec.RuleType, out var ruleType) && ruleType == RuleType.Threshold);
             if (superseded.NotClosed.Count > 0)
             {
                 // A supersede close that did not land (changed since read / failed) is already counted; the planner must not
@@ -230,6 +231,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 plan.Closes.RemoveAll(c => superseded.NotClosed.Contains(c.Id));
                 plan.Reconciles.RemoveAll(r => superseded.NotClosed.Contains(r.Signal.Id));
                 plan.Reassigns.RemoveAll(r => superseded.NotClosed.Contains(r.Signal.Id));
+                plan.ClearedMarks.RemoveAll(m => superseded.NotClosed.Contains(m.Id));
             }
 
             counts.Add(plan);
@@ -308,6 +310,15 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 {
                     counts.ChangedSinceRead++;
                 }
+            }).ConfigureAwait(false);
+        }
+
+        foreach (var signal in plan.ClearedMarks)
+        {
+            await GuardAsync(policy, "cleared-marker", signal.SubjectId, counts, writerLogged: true, async () =>
+            {
+                if (await _writer.MarkClearedObservedAsync(signal.Id, signal.RowVersion, policy.Code, ct).ConfigureAwait(false)) counts.ClearedMarked++;
+                else counts.ChangedSinceRead++;
             }).ConfigureAwait(false);
         }
 
@@ -552,7 +563,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         {
             ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon",
                 "sprk_suppresseduntil", "sprk_duedate", "sprk_corerecordtype", "sprk_corerecordid", "ownerid", "versionnumber",
-                "sprk_policyversion"),
+                "sprk_policyversion", "sprk_lastevaluated"),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition("sprk_dedupekey", ConditionOperator.BeginsWith, prefix);
@@ -608,7 +619,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
                     CoreTypeRefId: row.GetAttributeValue<EntityReference>("sprk_corerecordtype")?.Id,
                     CoreRecordId: Guid.TryParse(row.GetAttributeValue<string>("sprk_corerecordid")?.Trim(), out var coreId) ? coreId : null,
                     Owner: row.GetAttributeValue<EntityReference>("ownerid"),
-                    PolicyVersionId: row.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id));
+                    PolicyVersionId: row.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id,
+                    LastEvaluated: row.GetAttributeValue<DateTime?>("sprk_lastevaluated")));
             }
 
             if (!result.MoreRecords)
@@ -636,7 +648,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         public int PoliciesEvaluated, DecideLanePolicies, DoLanePolicies, InvalidPolicies, PolicyFailures, ScopedNotEvaluated;
         public int Hits, Written, Reraised, Updated, Closed, Reassigned, Refused, ChangedSinceRead;
         public int SupersededClosed, RetiredClosed;
-        public int Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred, NotApplicable;
+        public int ClearedMarked, Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred, NotApplicable;
 
         /// <summary>A scoped policy that is silently skipped, or a Signal left untouched as an anomaly, is not a healthy run.</summary>
         public bool IsSuccess =>
@@ -734,8 +746,16 @@ internal sealed record ExistingSignal(
     Guid? CoreTypeRefId,
     Guid? CoreRecordId,
     EntityReference? Owner,
-    Guid? PolicyVersionId = null)
+    Guid? PolicyVersionId = null,
+    DateTime? LastEvaluated = null)
 {
+    /// <summary>D-120: how much later than <c>sprk_resolvedon</c> <c>sprk_lastevaluated</c> must be to read as "the job observed the
+    /// condition cleared after the resolution" (a person's commit may stamp both within moments of each other).</summary>
+    internal static readonly TimeSpan ClearedMarkerTolerance = TimeSpan.FromMinutes(1);
+
+    /// <summary>D-120: a resolved Signal carries the cleared-observed marker when it was last evaluated after it was resolved.</summary>
+    public bool ClearedObserved => ResolvedOn is { } resolved && LastEvaluated is { } evaluated && evaluated > resolved + ClearedMarkerTolerance;
+
     public bool IsOpen => Status is SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged;
 
     public bool IsResolved => Status == SignalWriter.SignalStatusResolved;
@@ -765,6 +785,10 @@ internal sealed class EpisodePlan
     /// <summary>D-119: Decide-lane Acted Signals held un-raised because the hit carries no dated evidence (or the resolution time is unknown).</summary>
     public int NoDatedEvidence { get; set; }
     public int Anomalies { get; set; }
+
+    /// <summary>D-120: Acted-resolved Threshold Signals whose subject is NOT a hit and that carry no cleared-observed marker yet;
+    /// the pass stamps each once.</summary>
+    public List<ExistingSignal> ClearedMarks { get; } = new();
 }
 
 /// <summary>
@@ -794,7 +818,8 @@ internal static class SignalEpisodePlanner
     private readonly record struct Grain(Guid? CoreTypeRefId, Guid CoreId, string? SubjectEntity, Guid SubjectId);
 
     public static EpisodePlan Plan(
-        int lane, int quietWindowDays, DateTimeOffset nowUtc, IReadOnlyList<SignalHit> hits, IReadOnlyList<ExistingSignal> existing)
+        int lane, int quietWindowDays, DateTimeOffset nowUtc, IReadOnlyList<SignalHit> hits, IReadOnlyList<ExistingSignal> existing,
+        bool isThreshold = false)
     {
         var plan = new EpisodePlan();
         var now = nowUtc.UtcDateTime;
@@ -887,6 +912,15 @@ internal static class SignalEpisodePlanner
             else if (lane == SignalWriter.LaneDecide && latest.Resolution == SignalWriter.ResolutionActed)
             {
                 // D-119: an Acted decision is not undone by the predicate still holding. Only evidence newer than it re-raises.
+                if (isThreshold)
+                {
+                    // D-120: a Threshold hit has no dated witness. It re-raises after a RE-CROSSING: the job observed the
+                    // condition false after the resolution (the marker), and it holds again now. Never cleared: silent.
+                    if (latest.ClearedObserved) plan.Creates.Add(new PlannedCreate(hit, latest.Episode + 1));
+                    else plan.AwaitingEvidence++;
+                    continue;
+                }
+
                 switch (EvidenceAfter(hit, latest.ResolvedOn))
                 {
                     case EvidenceVerdict.Newer: plan.Creates.Add(new PlannedCreate(hit, latest.Episode + 1)); break;
@@ -905,6 +939,21 @@ internal static class SignalEpisodePlanner
             if (signal.IsOpen && !hitSubjects.Contains((signal.SubjectEntity, signal.SubjectId)))
             {
                 plan.Closes.Add(signal);
+            }
+        }
+
+        if (isThreshold && lane == SignalWriter.LaneDecide)
+        {
+            // D-120: the latest episode of a subject that is not a hit, resolved Acted, is stamped ONCE (D-61: never an unchanged row
+            // nightly). A subject whose latest episode is open or otherwise resolved is not this case.
+            foreach (var (subject, episodes) in bySubject)
+            {
+                var latest = episodes[0];
+                if (!hitSubjects.Contains(subject) && latest.IsResolved && latest.Resolution == SignalWriter.ResolutionActed
+                    && !latest.ClearedObserved)
+                {
+                    plan.ClearedMarks.Add(latest);
+                }
             }
         }
 

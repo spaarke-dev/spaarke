@@ -42,3 +42,9 @@ Rigor FULL, sonnet @ high. Branch `task/ontology-025-threshold` from `origin/doc
 5. **K2** noted next to F-68 in defer-issues.md.
 6. **Test fake.** `HoldsNumericConditions` now compares only Money/decimal columns, ignores option set and other non-numeric values (statecode eq 0), and still excludes a missing value for ordered comparisons. Control: `Run_ThresholdPolicy_WithAnOptionSetWhenCondition_IsNotExcludedByTheFake_ControlForTheNumericFilter`.
 
+
+## D-120: Acted Threshold Signals re-raise after a re-crossing
+
+- **Marker = existing column `sprk_lastevaluated`, no new schema.** Checked sprk_signal on spaarkedev1 (2026-10-11): there is no cleared/observed column. `sprk_lastevaluated` is "last evaluated, written only when the result changes" (D-61; staleness is told from the run-level gauge, never a per-row stamp), and a closure already sets it equal to `sprk_resolvedon`. So an Acted-resolved Signal with `lastevaluated` more than 1 minute after `resolvedon` means "the job observed the condition cleared after the resolution" (`ExistingSignal.ClearedObserved`; the minute absorbs a commit that stamps both).
+- **Pass behaviour (Threshold policies only, Decide lane).** Latest episode Acted, subject NOT a hit, no marker: `SignalWriter.MarkClearedObservedAsync` stamps `sprk_lastevaluated` once (row-version guarded). Later hit with the marker: episode n+1 (D-13 key, current version). Hit without the marker (never cleared): silent, counted as awaitingEvidence. A second cleared pass finds the marker and writes nothing. Existence bodies take the unchanged D-119 path and are never stamped.
+- **Not proven live:** the stamp is a write to a Resolved sprk_signal row as the writer principal; no Dataverse writes were allowed in this task, so it is proven in the unit harness only (the writer already updates the same column on resolved rows in CloseAsync).

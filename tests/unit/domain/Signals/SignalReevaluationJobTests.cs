@@ -1024,6 +1024,108 @@ public partial class SignalReevaluationJobTests
         fetch.Descendants("link-entity").Should().BeEmpty("a threshold reads only its subject");
     }
 
+    // ---- D-120: a Threshold Signal resolved Acted re-raises only after a RE-CROSSING ---------------------------------------
+
+    private static readonly DateTime ActedOn = RunAt.UtcDateTime.AddDays(-2);
+
+    private Harness ThresholdActedHarness(decimal utilization, DateTime? lastEvaluated = null)
+    {
+        var h = new Harness().WithThresholdPolicy().WithMatterUtilization(MatterId, utilization, "MAT-ACTED");
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionActed, resolvedOn: ActedOn, coreId: MatterId, lastEvaluated: lastEvaluated ?? ActedOn);
+        return h;
+    }
+
+    [Fact]
+    public async Task Run_ThresholdActed_ClearedThenCrossingAgain_StampsOnce_AndRaisesEpisodeTwo()
+    {
+        var h = ThresholdActedHarness(utilization: 62m); // the condition is FALSE now
+
+        (await h.RunAsync()).Success.Should().BeTrue();
+        var stamp = h.Org.ConditionalUpdates.Should().ContainSingle("the cleared observation is recorded once").Subject;
+        stamp.Fields.Keys.Should().Equal("sprk_lastevaluated");
+        h.Org.CreateCalls.Should().Be(0);
+
+        // A second cleared pass writes nothing (D-61).
+        h.Org.ResetCounts();
+        (await h.RunAsync()).Success.Should().BeTrue();
+        h.Org.ConditionalUpdates.Should().BeEmpty();
+        h.Org.Updates.Should().BeEmpty();
+        h.Org.CreateCalls.Should().Be(0);
+
+        // The matter crosses the threshold again: a new episode (D-13 key, episode 2).
+        h.Sysadmin.SubjectRows["sprk_matter"].Single()["sprk_budgetutilizationpercent"] = 95m;
+        (await h.RunAsync()).Success.Should().BeTrue();
+        h.Org.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_dedupekey")
+            .Should().Be($"{PolicyCode}|sprk_matter|{Lower(MatterId)}|2");
+    }
+
+    [Fact]
+    public async Task Run_ThresholdActed_NeverCleared_StaysSilentWhileItHolds()
+    {
+        var h = ThresholdActedHarness(utilization: 95m); // still over the threshold, never observed false
+
+        (await h.RunAsync()).Success.Should().BeTrue();
+
+        h.Org.WriteCalls.Should().Be(0);
+        h.Org.CreateCalls.Should().Be(0);
+        h.Org.ConditionalUpdates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Run_ThresholdActed_AlreadyMarked_ClearedPassWritesNothing()
+    {
+        var h = ThresholdActedHarness(utilization: 62m, lastEvaluated: ActedOn.AddDays(1));
+
+        (await h.RunAsync()).Success.Should().BeTrue();
+
+        h.Org.WriteCalls.Should().Be(0);
+        h.Org.ConditionalUpdates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Plan_ThresholdActed_Marker_DecidesTheReRaise_AndTheStamp()
+    {
+        var hit = CommHit(MatterId);
+        var unmarked = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed, resolvedOn: ActedOn);
+        var marked = unmarked with { LastEvaluated = ActedOn.AddHours(6) };
+        var withinTolerance = unmarked with { LastEvaluated = ActedOn.AddSeconds(5) };
+
+        // Holds, no marker: silent. Holds, marker: episode 2. A stamp within moments of the resolution is not a marker.
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { unmarked }, isThreshold: true)
+            .Creates.Should().BeEmpty();
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { withinTolerance }, isThreshold: true)
+            .Creates.Should().BeEmpty();
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { marked }, isThreshold: true)
+            .Creates.Should().ContainSingle().Which.Episode.Should().Be(2);
+
+        // Not a hit: an unmarked Acted signal is stamped; a marked one is not; a Dismissed one is not.
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { unmarked }, isThreshold: true)
+            .ClearedMarks.Should().ContainSingle();
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { marked }, isThreshold: true)
+            .ClearedMarks.Should().BeEmpty();
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(),
+            new[] { unmarked with { Resolution = SignalWriter.ResolutionDismissed } }, isThreshold: true).ClearedMarks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Plan_ExistenceActed_IsUnchangedByTheMarkerAndNeverStamps()
+    {
+        var resolvedOn = RunAt.UtcDateTime.AddDays(-3);
+        var hit = WithEvidence(CommHit(MatterId), Iso(resolvedOn.AddDays(-1)));
+        var markedActed = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed, resolvedOn: resolvedOn)
+            with { LastEvaluated = resolvedOn.AddDays(1) };
+
+        // D-119 still rules: older evidence does not re-raise, whatever lastevaluated says.
+        var holds = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { markedActed });
+        holds.Creates.Should().BeEmpty();
+        holds.AwaitingEvidence.Should().Be(1);
+
+        // Not a hit: nothing is stamped for an Existence body.
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(),
+            new[] { markedActed with { LastEvaluated = null } }).ClearedMarks.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Run_ThresholdPolicy_WithAnOptionSetWhenCondition_IsNotExcludedByTheFake_ControlForTheNumericFilter()
     {
@@ -1958,7 +2060,8 @@ public partial class SignalReevaluationJobTests
         public string VersionOf(Guid id) => _versions[id].ToString();
 
         public Guid SeedSignal(string key, int status, int? resolution = null, DateTime? resolvedOn = null, Guid? coreId = null,
-            DateTime? suppressedUntil = null, DateTime? due = null, Guid? policyId = null, Guid? versionId = null)
+            DateTime? suppressedUntil = null, DateTime? due = null, Guid? policyId = null, Guid? versionId = null,
+            DateTime? lastEvaluated = null)
         {
             var id = Guid.NewGuid();
             var row = new Entity("sprk_signal", id)
@@ -1972,6 +2075,7 @@ public partial class SignalReevaluationJobTests
             if (resolution is { } r) row["sprk_resolutiontype"] = new OptionSetValue(r);
             if (resolvedOn is { } on) row["sprk_resolvedon"] = on;
             if (suppressedUntil is { } until) row["sprk_suppresseduntil"] = until;
+            if (lastEvaluated is { } evaluated) row["sprk_lastevaluated"] = evaluated;
             if (due is { } d) row["sprk_duedate"] = d;
             if (coreId is { } c)
             {
