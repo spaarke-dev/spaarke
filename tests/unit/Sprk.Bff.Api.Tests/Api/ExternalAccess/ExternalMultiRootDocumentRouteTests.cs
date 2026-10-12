@@ -72,10 +72,11 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
 
     [Theory]
     [MemberData(nameof(SegmentsAndRoutes))]
-    public async Task ADocumentAlsoFiledToARootTheCallerCannotRead_IsRefused_AsNotUnderTheParent_AndNoPointerIsResolved(
+    public async Task ADocumentAlsoFiledToASecureRootTheCallerCannotRead_IsRefused_AsNotUnderTheParent_AndNoPointerIsResolved(
         string segment, string route)
     {
         _fixture.Principal = Principal(segment, RecordA);
+        SeedHidden(isSecure: true);
         var reference = await RefusalOf(segment, route); // a document that is not under this record: the route's own answer
 
         // Typed link to each of the OTHER two roots, and the related twin of each of the THREE (the six root links).
@@ -107,6 +108,7 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
     public async Task TheRefusal_IsIdentical_ForAMissingDocument_AMisfiledOne_AndAMultiRootOne(string segment, string route)
     {
         _fixture.Principal = Principal(segment, RecordA);
+        SeedHidden(isSecure: true);
         var misfiled = _fixture.Data.AddDocument(segment, RecordB, "Another record's");
         var multiRoot = _fixture.Data.AddDocument(segment, RecordA, "Also in a hidden record", ("_sprk_relatedmatter_value", Hidden));
 
@@ -189,6 +191,102 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
     }
 
     // =====================================================================
+    // Owner decision 2026-10-12, option B: only a SECURE linked root the caller cannot read refuses the document
+    // =====================================================================
+
+    [Theory]
+    [MemberData(nameof(SegmentsAndRoutes))]
+    public async Task ADocumentAlsoFiledToANonSecureRootTheCallerCannotRead_IsServed_OptionB(string segment, string route)
+    {
+        _fixture.Principal = Principal(segment, RecordA);
+        SeedHidden(isSecure: false);
+        var other = segment == "matters" ? "_sprk_project_value" : "_sprk_matter_value";
+
+        foreach (var link in new[] { (other, Hidden), ("_sprk_relatedworkassignment_value", Hidden) })
+        {
+            _fixture.ResetCalls();
+            var id = _fixture.Data.AddDocument(segment, RecordA, "Also in a non-secure record", link);
+
+            using var response = await Get(segment, id, route);
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK, $"{link.Item1} links a non-secure root");
+            _fixture.PointerResolutions.Should().Be(1);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(SegmentsAndRoutes))]
+    public async Task ADocumentAlsoFiledToASecureRootTheCallerCanRead_IsServed_WithoutAFlagRead(string segment, string route)
+    {
+        var second = segment == "matters" ? "projects" : "matters";
+        _fixture.Principal = PrincipalHolding((segment, RecordA), (second, RecordB));
+        _fixture.Data.AddSecureRoot(second == "projects" ? ExternalGrantRootType.Project : ExternalGrantRootType.Matter, RecordB);
+        var id = _fixture.Data.AddDocument(
+            segment, RecordA, "Readable secure second root",
+            (second == "projects" ? "_sprk_project_value" : "_sprk_matter_value", RecordB));
+
+        using var response = await Get(segment, id, route);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.Data.FlagReads.Should().BeEmpty("a root the caller can read never needs its secure flag");
+    }
+
+    public static TheoryData<string, string> RoutesAndFailures
+    {
+        get
+        {
+            var data = new TheoryData<string, string>();
+            foreach (var route in new[] { "content", "versions" })
+                foreach (var failure in new[] { "throws", "fault", "missing", "flag-null" })
+                    data.Add(route, failure);
+            return data;
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(RoutesAndFailures))]
+    public async Task ADocumentWhoseOtherRootsSecureStateCannotBeRead_IsRefused_AsNotUnderTheParent_FailClosed(string route, string failure)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        var reference = await RefusalOf("projects", route);
+        switch (failure)
+        {
+            case "throws": _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden); _fixture.Data.FlagReadThrows = true; break;
+            case "fault": _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden); _fixture.Data.FlagFault = HttpStatusCode.InternalServerError; break;
+            case "flag-null": _fixture.Data.AddRoot(ExternalGrantRootType.Matter, Hidden, isSecure: null); break;
+            // "missing": the matter record does not exist.
+        }
+
+        var id = _fixture.Data.AddDocument("projects", RecordA, "Unknown secure state", ("_sprk_matter_value", Hidden));
+        _fixture.ResetCalls();
+
+        using var response = await Get("projects", id, route);
+
+        (await Summarise(response)).Should().Be(reference, "the deny cannot be used to tell whether such a document exists");
+        _fixture.PointerResolutions.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("content")]
+    [InlineData("versions")]
+    public async Task ADocumentLinkedToTheSameUnreadableRootTwice_CostsOneFlagQuery_AndAMisfiledOneNone(string route)
+    {
+        _fixture.Principal = Principal("projects", RecordA);
+        SeedHidden(isSecure: false);
+        var id = _fixture.Data.AddDocument(
+            "projects", RecordA, "Typed and twin to one matter", ("_sprk_matter_value", Hidden), ("_sprk_relatedmatter_value", Hidden));
+        var misfiled = _fixture.Data.AddDocument("projects", RecordB, "Another record's", ("_sprk_matter_value", Hidden));
+
+        using (var response = await Get("projects", id, route))
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.Data.FlagReads.Should().ContainSingle().Which.Should().Contain("$select=sprk_matterid,sprk_issecure");
+
+        using (var refused = await Get("projects", misfiled, route))
+            refused.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.Data.FlagReads.Should().ContainSingle("a document not under the route parent is refused without a flag read");
+    }
+
+    // =====================================================================
     // The read itself: all six root links, through the route's lookup too
     // =====================================================================
 
@@ -231,17 +329,25 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
     }
 
     [Fact]
-    public void DocumentScopeRead_IsReadableUnder_NeedsTheRouteParentAndEveryRoot()
+    public void DocumentScopeRead_IsReadableUnder_NeedsTheRouteParentAndEverySecureRoot()
     {
         var caller = Principal("projects", RecordA);
+        var none = SecureRootFlags.None;
         var projectOnly = new ExternalDataService.DocumentRootLinks(RecordA.ToString(), null, null, null, null, null);
         var withHidden = projectOnly with { RelatedMatter = Hidden.ToString() };
 
-        new ExternalDataService.DocumentScopeRead(RecordA, "x", projectOnly).IsReadableUnder(RecordA, caller).Should().BeTrue();
-        new ExternalDataService.DocumentScopeRead(RecordA, "x", withHidden).IsReadableUnder(RecordA, caller).Should().BeFalse();
-        new ExternalDataService.DocumentScopeRead(RecordB, "x", projectOnly).IsReadableUnder(RecordA, caller).Should().BeFalse();
-        new ExternalDataService.DocumentScopeRead(null, "x", projectOnly).IsReadableUnder(RecordA, caller).Should().BeFalse();
-        ExternalDataService.DocumentScopeRead.Absent.IsReadableUnder(RecordA, caller).Should().BeFalse();
+        new ExternalDataService.DocumentScopeRead(RecordA, "x", projectOnly).IsReadableUnder(RecordA, caller, none).Should().BeTrue();
+        new ExternalDataService.DocumentScopeRead(RecordA, "x", withHidden).IsReadableUnder(RecordA, caller, none)
+            .Should().BeFalse("with no flag known, an unreadable root counts as secure");
+        new ExternalDataService.DocumentScopeRead(RecordB, "x", projectOnly).IsReadableUnder(RecordA, caller, none).Should().BeFalse();
+        new ExternalDataService.DocumentScopeRead(null, "x", projectOnly).IsReadableUnder(RecordA, caller, none).Should().BeFalse();
+        ExternalDataService.DocumentScopeRead.Absent.IsReadableUnder(RecordA, caller, none).Should().BeFalse();
+    }
+
+    private void SeedHidden(bool isSecure)
+    {
+        foreach (var root in new[] { ExternalGrantRootType.Project, ExternalGrantRootType.Matter, ExternalGrantRootType.WorkAssignment })
+            _fixture.Data.AddRoot(root, Hidden, isSecure);
     }
 
     // =====================================================================

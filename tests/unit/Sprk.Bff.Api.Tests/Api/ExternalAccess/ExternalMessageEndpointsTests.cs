@@ -61,6 +61,10 @@ public class ExternalMessageEndpointsTests
     private readonly Dictionary<(string Entity, Guid Id), IReadOnlyDictionary<string, object?>> _records = new();
     private string? _lastOData;
 
+    // The secure-flag read (owner option B) runs through the REAL ExternalDataService over this fake Web API, which answers
+    // the root-set query through $select and omits a null flag.
+    private readonly ExternalRootEventReadTests.FakeDataverse _roots = new();
+
     // ── principals ──────────────────────────────────────────────────────────────────────────────────
 
     private static CallerPrincipal Ciam(
@@ -148,8 +152,8 @@ public class ExternalMessageEndpointsTests
 
     private Task<IResult> Get(string root, Guid id, CallerPrincipal caller, ExternalModuleRegistry? registry = null) =>
         ExternalMessageEndpoints.GetMessagesCoreAsync(
-            root, id, caller, registry ?? ProductionRegistry(), ReadRecord, ReadService(), NullLogger.Instance,
-            CancellationToken.None);
+            root, id, caller, registry ?? ProductionRegistry(), ReadRecord, ReadService(),
+            _roots.NewService().GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None);
 
     /// <summary>A lookup value as RecordService projects it.</summary>
     private static Dictionary<string, object?> Lookup(Guid id, string entity) =>
@@ -244,27 +248,33 @@ public class ExternalMessageEndpointsTests
         _impersonated.VerifyNoOtherCalls();
     }
 
-    // ── a message filed to SEVERAL core roots is listed only if the caller can read EVERY one (fix round, task 039) ──
+    // ── a message filed to SEVERAL core roots (fix round, task 039; owner decision 2026-10-12, option B) ──
     // A communication filed under an invoice of secure matter M and project P is stamped with both. The thread read is
-    // keyed on one lookup, so P's thread used to list M's message to a reader of P alone.
+    // keyed on one lookup, so P's thread used to list M's message to a reader of P alone. It is withheld when a stamped
+    // root the caller cannot read is SECURE, or its secure state cannot be read; a non-secure one no longer hides it.
+
+    /// <summary>A caller holding Read on <paramref name="record"/> of the route's root type, its regarding field, and the
+    /// stamp column and root type of ANOTHER root (a matter for a project route, a project otherwise).</summary>
+    private static (string RegardingField, CallerPrincipal Caller, string OtherStamp, ExternalGrantRootType OtherRoot) RouteOf(
+        string root, Guid record) => root switch
+    {
+        "projects" => ("sprk_regardingproject", Ciam(project: record), "_sprk_regardingmatter_value", ExternalGrantRootType.Matter),
+        "matters" => ("sprk_regardingmatter", Ciam(matter: record), "_sprk_regardingproject_value", ExternalGrantRootType.Project),
+        _ => ("sprk_regardingworkassignment", Ciam(workAssignment: record), "_sprk_regardingproject_value", ExternalGrantRootType.Project),
+    };
 
     [Theory]
     [InlineData("projects")]
     [InlineData("matters")]
     [InlineData("workassignments")]
-    public async Task AMessageAlsoFiledToARootTheCallerCannotRead_IsWithheld_OnEveryRootRoute(string root)
+    public async Task AMessageAlsoFiledToASecureRootTheCallerCannotRead_IsWithheld_OnEveryRootRoute(string root)
     {
         var record = Guid.NewGuid();
         var hidden = Guid.NewGuid();
-        var (regardingField, caller) = root switch
-        {
-            "projects" => ("sprk_regardingproject", Ciam(project: record)),
-            "matters" => ("sprk_regardingmatter", Ciam(matter: record)),
-            _ => ("sprk_regardingworkassignment", Ciam(workAssignment: record)),
-        };
+        var (regardingField, caller, otherStamp, otherRoot) = RouteOf(root, record);
+        _roots.AddSecureRoot(otherRoot, hidden);
         var plain = Guid.NewGuid();
         var dual = Guid.NewGuid();
-        var otherStamp = root == "projects" ? "_sprk_regardingmatter_value" : "_sprk_regardingproject_value";
         var dualRow = MessageRow(dual, regardingField, record, internalOnly: false, "2026-10-02T09:00:00Z", "Secure matter message");
         dualRow[otherStamp] = El(hidden.ToString("D"));
         SetupMessages(
@@ -274,13 +284,33 @@ public class ExternalMessageEndpointsTests
         var messages = Messages(await Get(root, record, caller));
 
         messages.Select(m => m.SprkCommunicationid).Should().Equal(plain.ToString("D"));
+        _roots.FlagReads.Should().ContainSingle().Which.Should().Contain(hidden.ToString());
+    }
+
+    [Theory]
+    [InlineData("projects")]
+    [InlineData("matters")]
+    [InlineData("workassignments")]
+    public async Task AMessageAlsoFiledToANonSecureRootTheCallerCannotRead_IsListed_OptionB(string root)
+    {
+        var record = Guid.NewGuid();
+        var open = Guid.NewGuid();
+        var (regardingField, caller, otherStamp, otherRoot) = RouteOf(root, record);
+        _roots.AddOpenRoot(otherRoot, open);
+        var dual = Guid.NewGuid();
+        var dualRow = MessageRow(dual, regardingField, record, internalOnly: false, "2026-10-02T09:00:00Z");
+        dualRow[otherStamp] = El(open.ToString("D"));
+        SetupMessages(dualRow);
+
+        Messages(await Get(root, record, caller)).Select(m => m.SprkCommunicationid).Should().Equal(dual.ToString("D"));
     }
 
     [Fact]
-    public async Task AMessageAlsoFiledToARootTheCallerCanRead_IsListed()
+    public async Task AMessageAlsoFiledToASecureRootTheCallerCanRead_IsListed_WithoutAFlagRead()
     {
         var project = Guid.NewGuid();
         var matter = Guid.NewGuid();
+        _roots.AddSecureRoot(ExternalGrantRootType.Matter, matter);
         var dual = Guid.NewGuid();
         var row = MessageRow(dual, "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
         row["_sprk_regardingmatter_value"] = El(matter.ToString("D"));
@@ -289,6 +319,65 @@ public class ExternalMessageEndpointsTests
         var messages = Messages(await Get("projects", project, Ciam(project: project, matter: matter)));
 
         messages.Select(m => m.SprkCommunicationid).Should().Equal(dual.ToString("D"));
+        _roots.FlagReads.Should().BeEmpty("a root the caller can read never needs its secure flag");
+    }
+
+    [Theory]
+    [InlineData("throws")]
+    [InlineData("fault")]
+    [InlineData("missing")]
+    [InlineData("flag-null")]
+    public async Task AMessageWhoseOtherRootsSecureStateCannotBeRead_IsWithheld_FailClosed(string failure)
+    {
+        var project = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        switch (failure)
+        {
+            case "throws": _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter); _roots.FlagReadThrows = true; break;
+            case "fault": _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter); _roots.FlagFault = System.Net.HttpStatusCode.InternalServerError; break;
+            case "flag-null": _roots.AddRoot(ExternalGrantRootType.Matter, matter, isSecure: null); break;
+            // "missing": no matter record at all.
+        }
+
+        var plain = Guid.NewGuid();
+        var row = MessageRow(Guid.NewGuid(), "sprk_regardingproject", project, internalOnly: false, "2026-10-02T09:00:00Z");
+        row["_sprk_regardingmatter_value"] = El(matter.ToString("D"));
+        SetupMessages(MessageRow(plain, "sprk_regardingproject", project, internalOnly: false, "2026-10-01T09:00:00Z"), row);
+
+        Messages(await Get("projects", project, Ciam(project: project))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(plain.ToString("D"));
+    }
+
+    [Fact]
+    public async Task ManyMessagesStampedWithTheSameUnreadableRoots_CostOneFlagQueryPerRootType()
+    {
+        var project = Guid.NewGuid();
+        var openMatter = Guid.NewGuid();
+        var secureMatter = Guid.NewGuid();
+        var openWorkAssignment = Guid.NewGuid();
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, openMatter);
+        _roots.AddSecureRoot(ExternalGrantRootType.Matter, secureMatter);
+        _roots.AddOpenRoot(ExternalGrantRootType.WorkAssignment, openWorkAssignment);
+        var rows = new List<Dictionary<string, JsonElement>>();
+        var listed = new List<string>();
+        for (var i = 0; i < 6; i++)
+        {
+            var id = Guid.NewGuid();
+            var row = MessageRow(id, "sprk_regardingproject", project, internalOnly: false, $"2026-10-0{i + 1}T09:00:00Z");
+            row["_sprk_regardingmatter_value"] = El((i % 3 == 0 ? secureMatter : openMatter).ToString("D"));
+            row["_sprk_regardingworkassignment_value"] = El(openWorkAssignment.ToString("D"));
+            rows.Add(row);
+            if (i % 3 != 0) listed.Add(id.ToString("D"));
+        }
+
+        SetupMessages(rows.ToArray());
+
+        Messages(await Get("projects", project, Ciam(project: project))).Select(m => m.SprkCommunicationid)
+            .Should().Equal(listed);
+        _roots.FlagReads.Should().HaveCount(2, "one query per root entity, never one per row");
+        _roots.FlagReads.Should().ContainSingle(u => u.Contains("/sprk_matters?"))
+            .Which.Should().Contain(openMatter.ToString()).And.Contain(secureMatter.ToString())
+            .And.Contain("$select=sprk_matterid,sprk_issecure");
     }
 
     [Fact]
@@ -347,14 +436,16 @@ public class ExternalMessageEndpointsTests
     }
 
     [Fact]
-    public async Task AnInvoiceThread_IsExemptFromTheEveryRootRule_ItIsReachedThroughTheUnionOfItsParents()
+    public async Task AnInvoiceThread_IsExemptFromTheMultiRootRule_ItIsReachedThroughTheUnionOfItsParents()
     {
         // Owner decision 2026-10-11 (option A "inherit"): a caller who reaches the invoice through ONE of its parents reads
-        // its thread. Every message under an invoice is stamped with exactly the invoice's parents, so the every-root rule
-        // would empty that thread for the very caller the owner chose to admit.
+        // its thread. Every message under an invoice is stamped with exactly the invoice's parents, so the multi-root rule
+        // could empty that thread for the very caller the owner chose to admit. Kept under option B (2026-10-12): even a
+        // SECURE other parent does not withhold it, and no flag is read.
         var matter = Guid.NewGuid();
         var project = Guid.NewGuid();
         var invoice = Guid.NewGuid();
+        _roots.AddSecureRoot(ExternalGrantRootType.Project, project);
         _records[("sprk_invoice", invoice)] = new Dictionary<string, object?>
         {
             ["id"] = invoice,
@@ -367,6 +458,7 @@ public class ExternalMessageEndpointsTests
         SetupMessages(row);
 
         Messages(await Get("invoices", invoice, Ciam(matter: matter))).Should().HaveCount(1);
+        _roots.FlagReads.Should().BeEmpty();
     }
 
     [Theory]
@@ -875,7 +967,7 @@ public class ExternalMessageEndpointsTests
         var result = await ExternalMessageEndpoints.GetMessagesCoreAsync(
             "invoices", invoice, Ciam(matter: matter), ProductionRegistry(),
             (_, _, _, _) => throw new HttpRequestException("Dataverse unavailable"),
-            ReadService(), NullLogger.Instance, CancellationToken.None);
+            ReadService(), _roots.NewService().GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None);
 
         var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
         problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
@@ -893,7 +985,7 @@ public class ExternalMessageEndpointsTests
         var result = await ExternalMessageEndpoints.GetMessagesCoreAsync(
             "invoices", Guid.NewGuid(), Ciam(matter: matter), ProductionRegistry(),
             (entity, id, _, _) => throw new RecordNotFoundException(entity, id),
-            ReadService(), NullLogger.Instance, CancellationToken.None);
+            ReadService(), _roots.NewService().GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None);
 
         ShouldBeForbiddenNotAccessible(result);
         ShouldNotHaveReadMessages();

@@ -317,7 +317,9 @@ public class ExternalMessageSendTests
             Mock.Of<ILogger<CommunicationThreadReadService>>(),
             _appOnly.Object);
         return ExternalMessageEndpoints.GetMessagesCoreAsync(
-            root, id, caller, ProductionRegistry(), ReadRecord, read, NullLogger.Instance, CancellationToken.None);
+            root, id, caller, ProductionRegistry(), ReadRecord, read,
+            new ExternalRootEventReadTests.FakeDataverse().NewService().GetNonSecureRootsAsync,
+            NullLogger.Instance, CancellationToken.None);
     }
 
     private static IReadOnlyList<ExternalMessageDto> Messages(IResult result) =>

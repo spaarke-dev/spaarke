@@ -400,15 +400,15 @@ public sealed class CommunicationThreadReadService
     /// <param name="rootsReadable">
     /// REQUIRED (no default, so a caller cannot forget it): whether the caller may see a message carrying these core-root
     /// stamps. A communication filed under an invoice of secure matter M and project P is stamped with both, so the
-    /// keyed lookup alone would list it on P's thread to a reader of P only. A row it refuses is dropped, not counted
-    /// as truncation.
+    /// keyed lookup alone would list it on P's thread to a reader of P only. Called once with the stamps of every row that
+    /// passed the other re-checks; a row it refuses is dropped, not counted as truncation.
     /// </param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AppOnlyRegardingReadResult> ReadRegardingAppOnlyAsync(
         string entityType,
         Guid recordId,
         Guid? callerSystemUserId,
-        Func<MessageRootLookups, bool> rootsReadable,
+        MessageRootsFilter rootsReadable,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(rootsReadable);
@@ -442,9 +442,12 @@ public sealed class CommunicationThreadReadService
         var bounded = rows.Take(MaxRegardingScan).Reverse().ToList();
         // Re-check every row (defence in depth — the query is not the only gate): it must regard THIS record and carry a
         // sent/received status. A row with a missing or unreadable status is dropped (fail closed).
-        var scoped = bounded
-            .Where(r => TryGuid(r, regardingValue) == recordId && IsExternallyVisibleRow(r) && rootsReadable(RootsOf(r)))
+        var candidates = bounded
+            .Where(r => TryGuid(r, regardingValue) == recordId && IsExternallyVisibleRow(r))
             .ToList();
+        // The multi-root rule, prepared once for every candidate's stamps (one batched secure-flag read, not one per row).
+        var readable = await rootsReadable(candidates.Select(RootsOf).ToList(), ct);
+        var scoped = candidates.Where(r => readable(RootsOf(r))).ToList();
 
         var (messages, isInternal) = await FilterExternalMessagesAsync(scoped, callerSystemUserId, ct);
 
@@ -585,7 +588,7 @@ public sealed class CommunicationThreadReadService
         DateTimeOffset since,
         Guid? callerSystemUserId,
         int max,
-        Func<MessageRootLookups, bool> rootsReadable,
+        MessageRootsFilter rootsReadable,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(records);
@@ -628,22 +631,25 @@ public sealed class CommunicationThreadReadService
 
         // Re-check every row: the window, the external status/privilege rules, and that it regards one of THE records.
         var matched = new Dictionary<Guid, (string Entity, Guid RecordId)>();
-        var scoped = new List<Dictionary<string, JsonElement>>();
+        var candidates = new List<Dictionary<string, JsonElement>>();
         foreach (var row in rows)
         {
             if (TryGuid(row, PkField) is not { } messageId || messageId == Guid.Empty || matched.ContainsKey(messageId))
                 continue;
             if (TryDateTimeOffset(row, CreatedOnField) is not { } createdOn || createdOn < since || !IsExternallyVisibleRow(row))
                 continue;
-            if (!rootsReadable(RootsOf(row)))
-                continue; // also filed to a root the caller cannot read
 
             var match = keyed.FirstOrDefault(r => TryGuid(row, r.Value) == r.RecordId);
             if (match.Value is null)
                 continue;
             matched[messageId] = (match.Entity, match.RecordId);
-            scoped.Add(row);
+            candidates.Add(row);
         }
+
+        // The multi-root rule, prepared once for every candidate's stamps (one batched secure-flag read, not one per row):
+        // a message also filed to a root the caller may not see is not reported.
+        var readable = await rootsReadable(candidates.Select(RootsOf).ToList(), ct);
+        var scoped = candidates.Where(r => readable(RootsOf(r))).ToList();
 
         var (messages, isInternal) = await FilterExternalMessagesAsync(scoped, callerSystemUserId, ct);
         var ordered = messages

@@ -53,11 +53,15 @@ public class ExternalNotificationFeedTests
     private readonly Mock<ISystemUserIdentityResolver> _identity = new(MockBehavior.Strict);
     private readonly List<string?> _queries = new();
     private readonly List<Dictionary<string, JsonElement>> _messageRows = new();
-    private readonly FeedData _data = new();
+    // The secure-flag read (owner option B) is FeedData's REAL base read over this fake Web API, which answers the root-set
+    // query through $select and omits a null flag.
+    private readonly ExternalRootEventReadTests.FakeDataverse _roots = new();
+    private readonly FeedData _data;
     private ITenantCache _cache = new InMemoryTenantCache();
 
     public ExternalNotificationFeedTests()
     {
+        _data = new FeedData(_roots);
         _appOnly
             .Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .Callback<string, string?, CancellationToken>((_, odata, _) => _queries.Add(odata))
@@ -735,18 +739,24 @@ public class ExternalNotificationFeedTests
         _queries.Single().Should().Contain("$top=101");
     }
 
-    // ── a message filed to SEVERAL core roots is reported only if the caller can read EVERY one (fix round, task 039) ──
+    // ── a message filed to SEVERAL core roots (fix round, task 039; owner decision 2026-10-12, option B) ──
+    // Not reported when a stamped root the caller cannot read is SECURE, or its secure state cannot be read.
+
+    private static ExternalGrantRootType RootOfStamp(string column) =>
+        column == "_sprk_regardingmatter_value" ? ExternalGrantRootType.Matter : ExternalGrantRootType.WorkAssignment;
 
     [Theory]
     [InlineData("_sprk_regardingmatter_value")]
     [InlineData("_sprk_regardingworkassignment_value")]
-    public async Task AMessageAlsoFiledToARootTheCallerCannotRead_IsNotInTheFeed(string otherRootColumn)
+    public async Task AMessageAlsoFiledToASecureRootTheCallerCannotRead_IsNotInTheFeed(string otherRootColumn)
     {
         var project = Guid.NewGuid();
+        var hidden = Guid.NewGuid();
+        _roots.AddSecureRoot(RootOfStamp(otherRootColumn), hidden);
         var caller = Ciam(Guid.NewGuid(), project: project);
         var plain = Message("sprk_regardingproject", project, Now.AddHours(-2));
         var dual = Message("sprk_regardingproject", project, Now.AddHours(-1));
-        dual[otherRootColumn] = El(Guid.NewGuid().ToString("D"));
+        dual[otherRootColumn] = El(hidden.ToString("D"));
         _data.Name(project, "Project Alpha");
 
         var feed = Body(await Feed(caller));
@@ -755,11 +765,28 @@ public class ExternalNotificationFeedTests
         feed.UnreadCount.Should().Be(1);
     }
 
+    [Theory]
+    [InlineData("_sprk_regardingmatter_value")]
+    [InlineData("_sprk_regardingworkassignment_value")]
+    public async Task AMessageAlsoFiledToANonSecureRootTheCallerCannotRead_IsInTheFeed_OptionB(string otherRootColumn)
+    {
+        var project = Guid.NewGuid();
+        var open = Guid.NewGuid();
+        _roots.AddOpenRoot(RootOfStamp(otherRootColumn), open);
+        var caller = Ciam(Guid.NewGuid(), project: project);
+        var dual = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        dual[otherRootColumn] = El(open.ToString("D"));
+        _data.Name(project, "Project Alpha");
+
+        Body(await Feed(caller)).Value.Select(i => i.Id).Should().Equal(IdOf(dual));
+    }
+
     [Fact]
-    public async Task AMessageAlsoFiledToARootTheCallerCanRead_IsInTheFeed_Once()
+    public async Task AMessageAlsoFiledToASecureRootTheCallerCanRead_IsInTheFeed_Once_WithoutAFlagRead()
     {
         var project = Guid.NewGuid();
         var matter = Guid.NewGuid();
+        _roots.AddSecureRoot(ExternalGrantRootType.Matter, matter);
         var caller = Ciam(Guid.NewGuid(), project: project, matter: matter);
         var dual = Message("sprk_regardingproject", project, Now.AddHours(-1));
         dual["_sprk_regardingmatter_value"] = El(matter.ToString("D"));
@@ -769,6 +796,53 @@ public class ExternalNotificationFeedTests
         var feed = Body(await Feed(caller));
 
         feed.Value.Select(i => i.Id).Should().Equal(IdOf(dual));
+        _roots.FlagReads.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("throws")]
+    [InlineData("fault")]
+    [InlineData("missing")]
+    [InlineData("flag-null")]
+    [InlineData("malformed")]
+    public async Task AMessageWhoseOtherRootsSecureStateCannotBeRead_IsNotInTheFeed_FailClosed(string failure)
+    {
+        var project = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        switch (failure)
+        {
+            case "throws": _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter); _roots.FlagReadThrows = true; break;
+            case "fault": _roots.AddOpenRoot(ExternalGrantRootType.Matter, matter); _roots.FlagFault = System.Net.HttpStatusCode.ServiceUnavailable; break;
+            case "flag-null": _roots.AddRoot(ExternalGrantRootType.Matter, matter, isSecure: null); break;
+            // "missing": no matter record; "malformed": the stamp is not a GUID.
+        }
+
+        var caller = Ciam(Guid.NewGuid(), project: project);
+        var plain = Message("sprk_regardingproject", project, Now.AddHours(-2));
+        var dual = Message("sprk_regardingproject", project, Now.AddHours(-1));
+        dual["_sprk_regardingmatter_value"] = El(failure == "malformed" ? "not-a-guid" : matter.ToString("D"));
+        _data.Name(project, "Project Alpha");
+
+        Body(await Feed(caller)).Value.Select(i => i.Id).Should().Equal(IdOf(plain));
+    }
+
+    [Fact]
+    public async Task ManyFeedMessagesStampedWithTheSameUnreadableRoot_CostOneFlagQuery()
+    {
+        var project = Guid.NewGuid();
+        var open = Guid.NewGuid();
+        _roots.AddOpenRoot(ExternalGrantRootType.Matter, open);
+        var caller = Ciam(Guid.NewGuid(), project: project);
+        for (var i = 1; i <= 5; i++)
+        {
+            var row = Message("sprk_regardingproject", project, Now.AddHours(-i));
+            row["_sprk_regardingmatter_value"] = El(open.ToString("D"));
+        }
+
+        _data.Name(project, "Project Alpha");
+
+        Body(await Feed(caller)).Value.Should().HaveCount(5);
+        _roots.FlagReads.Should().ContainSingle().Which.Should().Contain(open.ToString());
     }
 
     [Fact]
@@ -826,8 +900,15 @@ public class ExternalNotificationFeedTests
         private readonly Dictionary<Guid, string> _names = new();
         private readonly HashSet<Guid> _deleted = new();
 
-        public FeedData()
-            : base(new HttpClient(), new ConfigurationBuilder().Build(), new NoCredential(), NullLogger<ExternalDataService>.Instance)
+        public FeedData(HttpMessageHandler dataverse)
+            : base(
+                new HttpClient(dataverse),
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
+                    .Build(),
+                // A test token, so the base secure-flag read reaches the fake Web API (the three feed reads are overridden).
+                new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
+                NullLogger<ExternalDataService>.Instance)
         {
         }
 
@@ -886,15 +967,6 @@ public class ExternalNotificationFeedTests
             var names = ids.Where(id => !_deleted.Contains(id))
                 .ToDictionary(id => id, id => (string?)(_names.TryGetValue(id, out var name) ? name : "Record"));
             return Task.FromResult(new RecordNamesRead(names, Complete: true));
-        }
-
-        private sealed class NoCredential : TokenCredential
-        {
-            public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
-                => throw new InvalidOperationException("The in-memory store never acquires a token.");
-
-            public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
-                => throw new InvalidOperationException("The in-memory store never acquires a token.");
         }
     }
 }

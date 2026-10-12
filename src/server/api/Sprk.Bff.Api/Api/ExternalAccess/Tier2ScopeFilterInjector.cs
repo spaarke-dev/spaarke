@@ -151,7 +151,7 @@ internal static class Tier2ScopeFilterInjector
     /// <summary>
     /// Adds an <c>&lt;attribute name='…'/&gt;</c> to the primary <c>&lt;entity&gt;</c> for each of
     /// <paramref name="attributes"/> the FetchXML does not already project, so a module can read a column its caller's
-    /// FetchXML did not ask for (fix round for r3 task 039: the related-twin root links the documents module's every-root
+    /// FetchXML did not ask for (fix round for r3 task 039: the related-twin root links the documents module's multi-root
     /// rule checks). Call it AFTER the column guard: the added columns are the server's, not the caller's, and the response
     /// strip removes them unless they are readable columns.
     /// </summary>

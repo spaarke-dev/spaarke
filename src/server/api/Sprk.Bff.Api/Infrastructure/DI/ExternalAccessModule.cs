@@ -40,7 +40,7 @@ public static class ExternalAccessModule
 
     /// <summary>
     /// The related twin of each core-root link on <c>sprk_document</c> (project, matter, work assignment), from the one
-    /// canonical declaration (<see cref="DocumentLinkFields"/>), as the documents module's extra every-root lookups.
+    /// canonical declaration (<see cref="DocumentLinkFields"/>), as the documents module's extra multi-root lookups.
     /// </summary>
     private static RootLookup[] DocumentRelatedRootTwins() => DocumentLinkFields.All
         .Where(f => f.LogicalName.StartsWith("sprk_related", StringComparison.Ordinal))
@@ -392,9 +392,9 @@ public static class ExternalAccessModule
         {
             Name = "documents",
             RecordEntity = "sprk_document",
-            // Fix round for r3 task 039 (INTERIM, ExternalMultiRootRule): a document also filed to a root the caller cannot
-            // read is not listed by the grid, as on the record-detail document routes.
-            RequireReadOnEveryRoot = true,
+            // Fix round for r3 task 039 (ExternalMultiRootRule, owner decision 2026-10-12, option B): a document also filed
+            // to a SECURE root the caller cannot read is not listed by the grid, as on the record-detail document routes.
+            RequireReadOnSecureRoots = true,
             // ... including a root reached only through the related twin of a typed link (K3): the fetch endpoint projects
             // these three server-side, after the column guard; they are not readable columns and never reach the caller.
             AdditionalRootLookups = DocumentRelatedRootTwins(),

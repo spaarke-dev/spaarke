@@ -288,6 +288,7 @@ public static class ExternalMessageEndpoints
         ExternalModuleRegistry registry,
         RecordService recordService,
         CommunicationThreadReadService threadReadService,
+        ExternalDataService dataService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -300,7 +301,8 @@ public static class ExternalMessageEndpoints
         }
 
         return GetMessagesCoreAsync(
-            root, id, principal, registry, recordService.GetRecordAsync, threadReadService, logger, ct);
+            root, id, principal, registry, recordService.GetRecordAsync, threadReadService, dataService.GetNonSecureRootsAsync,
+            logger, ct);
     }
 
     /// <summary>
@@ -316,9 +318,11 @@ public static class ExternalMessageEndpoints
         ExternalModuleRegistry registry,
         Func<string, Guid, string[]?, CancellationToken, Task<IReadOnlyDictionary<string, object?>>> readRecord,
         CommunicationThreadReadService threadReadService,
+        NonSecureRootReader readNonSecureRoots,
         ILogger logger,
         CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(readNonSecureRoots);
         if (string.IsNullOrWhiteSpace(root) || !Roots.TryGetValue(root, out var messageRoot))
         {
             return Results.Problem(
@@ -346,7 +350,8 @@ public static class ExternalMessageEndpoints
             // CIAM or workforce — passes null, so the shared filter hides every internal-only row from it.
             var read = await threadReadService
                 .ReadRegardingAppOnlyAsync(
-                    messageRoot.EntityLogicalName, id, principal.SystemUserId, RootsReadableFor(messageRoot, principal), ct)
+                    messageRoot.EntityLogicalName, id, principal.SystemUserId,
+                    RootsReadableFor(messageRoot, principal, readNonSecureRoots, logger), ct)
                 .ConfigureAwait(false);
 
             return Results.Ok(new ExternalCollectionResponse<ExternalMessageDto>
@@ -372,20 +377,40 @@ public static class ExternalMessageEndpoints
 
     /// <summary>
     /// Which messages of a thread the caller may see by the core roots they are stamped with (fix round for r3 task 039;
-    /// the one rule is <see cref="ExternalMultiRootRule"/>): a message also filed to a project, matter or work assignment
-    /// the caller cannot read is withheld, so a secure matter's message does not show on a project thread.
+    /// the one rule is <see cref="ExternalMultiRootRule"/>, owner decision 2026-10-12, option B): a message also filed to a
+    /// SECURE project, matter or work assignment the caller cannot read (or one whose secure state cannot be read) is
+    /// withheld, so a secure matter's message does not show on a project thread. The secure flags are read once per thread.
     /// </summary>
     /// <remarks>
     /// <b>Invoice threads are exempt, by the owner's decision (2026-10-11, option A "inherit").</b> An invoice is not a root;
     /// its thread is reached through the UNION of the caller's rights on its parents (the gate above), and every message
-    /// filed under it is stamped with exactly those parents. Applying the every-root rule there would empty the thread for
+    /// filed under it is stamped with exactly those parents. Applying the multi-root rule there could empty the thread for
     /// a caller who reaches the invoice through only one of its parents, which is the case the owner chose to allow. The
-    /// exposure is the invoice's own, not a second lookup. Service-request threads are NOT exempt (requester scope).
+    /// exposure is the invoice's own, not a second lookup. No flag is read for it. Service-request threads are NOT exempt
+    /// (requester scope).
     /// </remarks>
-    internal static Func<MessageRootLookups, bool> RootsReadableFor(MessageRoot root, CallerPrincipal principal) =>
+    internal static MessageRootsFilter RootsReadableFor(
+        MessageRoot root, CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger) =>
         string.Equals(root.EntityLogicalName, "sprk_invoice", StringComparison.OrdinalIgnoreCase)
-            ? _ => true
-            : roots => ExternalMultiRootRule.AllRootsReadable(principal, roots.Project, roots.Matter, roots.WorkAssignment);
+            ? (_, _) => Task.FromResult<Func<MessageRootLookups, bool>>(_ => true)
+            : SecureRootsFilter(principal, readNonSecureRoots, logger);
+
+    /// <summary>
+    /// The multi-root rule as a message-read filter (<see cref="MessageRootsFilter"/>): the secure flags of the candidate
+    /// rows' unreadable stamps are read in ONE batch, then each row is decided by
+    /// <see cref="ExternalMultiRootRule.SecureRootsReadable(CallerPrincipal, SecureRootFlags, string?, string?, string?)"/>.
+    /// Shared by the thread read and the notification feed.
+    /// </summary>
+    internal static MessageRootsFilter SecureRootsFilter(
+        CallerPrincipal principal, NonSecureRootReader readNonSecureRoots, ILogger logger) =>
+        async (candidates, ct) =>
+        {
+            var flags = await ExternalMultiRootRule.ReadFlagsAsync(
+                readNonSecureRoots, principal,
+                candidates.Select(r => ExternalMultiRootRule.Stamps(r.Project, r.Matter, r.WorkAssignment)),
+                logger, ct).ConfigureAwait(false);
+            return r => ExternalMultiRootRule.SecureRootsReadable(principal, flags, r.Project, r.Matter, r.WorkAssignment);
+        };
 
     /// <summary>
     /// The record gate. Fail-closed: no registered module, an empty accessible set, a missing record and a record outside

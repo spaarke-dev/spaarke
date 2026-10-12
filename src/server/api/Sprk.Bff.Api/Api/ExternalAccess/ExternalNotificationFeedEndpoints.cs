@@ -324,8 +324,9 @@ public static class ExternalNotificationFeedEndpoints
             var recent = await threadReadService
                 .ReadRecentForRecordsAppOnlyAsync(
                     records, cutoff, principal.SystemUserId, MaxItems,
-                    // A message also filed to a root the caller cannot read is not reported (ExternalMultiRootRule).
-                    roots => ExternalMultiRootRule.AllRootsReadable(principal, roots.Project, roots.Matter, roots.WorkAssignment),
+                    // A message also filed to a SECURE root the caller cannot read is not reported (ExternalMultiRootRule,
+                    // owner decision 2026-10-12, option B); the secure flags are read once for the whole feed.
+                    ExternalMessageEndpoints.SecureRootsFilter(principal, dataService.GetNonSecureRootsAsync, logger),
                     ct)
                 .ConfigureAwait(false);
             truncated |= recent.Truncated;

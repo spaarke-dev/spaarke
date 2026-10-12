@@ -450,12 +450,65 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
         /// <summary>When set, every request answers with this status.</summary>
         public HttpStatusCode? Fault { get; set; }
 
+        /// <summary>When set, only the secure-flag reads (a GET to a root entity set) answer with this status.</summary>
+        public HttpStatusCode? FlagFault { get; set; }
+
+        /// <summary>When true, the secure-flag reads throw (a transport fault).</summary>
+        public bool FlagReadThrows { get; set; }
+
+        /// <summary>The root entity sets and their primary keys: the secure-flag reads (owner option B) query these.</summary>
+        private static readonly IReadOnlyDictionary<string, string> RootSets = new Dictionary<string, string>
+        {
+            ["sprk_projects"] = "sprk_projectid",
+            ["sprk_matters"] = "sprk_matterid",
+            ["sprk_workassignments"] = "sprk_workassignmentid",
+        };
+
+        /// <summary>Every secure-flag query sent (a GET to a root entity set), unescaped.</summary>
+        public IReadOnlyList<string> FlagReads =>
+            Urls.Where(u => RootSets.Keys.Any(set => u.Contains($"/{set}?", StringComparison.Ordinal))).ToList();
+
         public void Reset()
         {
             lock (_sets) _sets.Clear();
             Urls.Clear();
             Fault = null;
+            FlagFault = null;
+            FlagReadThrows = false;
         }
+
+        /// <summary>
+        /// Seeds a root record (project, matter, work assignment) with its <c>sprk_issecure</c>. A <c>null</c> flag is OMITTED
+        /// from the response, as Dataverse omits a null (or a field-security-masked) value. The row carries other columns too,
+        /// so a read that did not project through <c>$select</c> would be visible.
+        /// </summary>
+        public void AddRoot(ExternalGrantRootType root, Guid id, bool? isSecure)
+        {
+            var set = ExternalGrantRoot.BindFor(root).EntitySet;
+            Seed(set, new Dictionary<string, object?>
+            {
+                [RootSets[set]] = id.ToString(),
+                ["sprk_issecure"] = isSecure,
+                ["sprk_name"] = $"root {id}",
+                ["sprk_accesspermission"] = 100000000,
+                ["statecode"] = 0,
+            });
+        }
+
+        /// <summary>A secure root (<c>sprk_issecure = true</c>).</summary>
+        public void AddSecureRoot(ExternalGrantRootType root, Guid id) => AddRoot(root, id, isSecure: true);
+
+        /// <summary>A Standard, non-secure root (<c>sprk_issecure = false</c>).</summary>
+        public void AddOpenRoot(ExternalGrantRootType root, Guid id) => AddRoot(root, id, isSecure: false);
+
+        /// <summary>A REAL <see cref="ExternalDataService"/> over this fake, e.g. for its secure-flag read.</summary>
+        public ExternalDataService NewService() => new(
+            new HttpClient(this),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://org.test" })
+                .Build(),
+            new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
+            NullLogger<ExternalDataService>.Instance);
 
         private void Seed(string set, Dictionary<string, object?> row)
         {
@@ -559,6 +612,36 @@ public sealed class ExternalRootEventReadTests : IClassFixture<ExternalRootEvent
 
             if (Fault is { } fault)
                 return Task.FromResult(new HttpResponseMessage(fault));
+
+            // The secure-flag read: `sprk_matters?$filter=sprk_matterid eq {a} or sprk_matterid eq {b}&$select=...`. Answers the
+            // seeded rows whose key is one of the ids, projected through $select, a null value omitted (as Dataverse does).
+            var path = request.RequestUri!.AbsolutePath;
+            if (RootSets.TryGetValue(path[(path.LastIndexOf('/') + 1)..], out var rootKey))
+            {
+                if (FlagReadThrows)
+                    throw new HttpRequestException("The secure-flag read failed (test).");
+                if (FlagFault is { } flagFault)
+                    return Task.FromResult(new HttpResponseMessage(flagFault));
+
+                var ids = Regex.Matches(url, $@"{rootKey} eq ([0-9a-fA-F-]{{36}})")
+                    .Select(m => m.Groups[1].Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var rootSelect = Regex.Match(url, @"\$select=([^&]*)");
+                var rootColumns = rootSelect.Success ? rootSelect.Groups[1].Value.Split(',').ToHashSet(StringComparer.Ordinal) : null;
+                List<Dictionary<string, object?>> roots;
+                lock (_sets)
+                {
+                    roots = (_sets.TryGetValue(path[(path.LastIndexOf('/') + 1)..], out var seededRoots) ? seededRoots : new())
+                        .Where(r => r[rootKey] is string key && ids.Contains(key))
+                        .Select(r => r.Where(kv => kv.Value is not null && (rootColumns is null || rootColumns.Contains(kv.Key)))
+                            .ToDictionary(kv => kv.Key, kv => kv.Value))
+                        .ToList();
+                }
+
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new { value = roots }), System.Text.Encoding.UTF8, "application/json"),
+                });
+            }
 
             // A single-row read, `sprk_documents({id})?$select=...`: the row whose primary key is {id}, projected through
             // $select, as the document / delete scoping reads send it (fix round for task 039). 404 when there is none.
