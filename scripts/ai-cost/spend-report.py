@@ -7,11 +7,13 @@ get-project-cost.py and applies the same cost rules (dedup on
 (message.id, requestId), skip <synthetic>, cache-write 5m=1.25x / 1h=2x input,
 speed=="fast" = 2x).
 
-Days are UTC (the transcript timestamp date), same as get-project-cost.py.
+Days are calendar days in --tz (default: the machine's local timezone, DST-aware;
+--tz utc buckets by the UTC date of the transcript timestamp). Every output states the tz.
 
 Usage:
-  python spend-report.py [--days N | --since YYYY-MM-DD] [--project SUBSTR ...]
-                         [--format text|json|csv|html] [--out PATH] [--open]
+  python spend-report.py [--days N | --since YYYY-MM-DD | --today] [--tz local|utc]
+                         [--project SUBSTR ...] [--format text|json|csv|html]
+                         [--out PATH] [--open]
 """
 import argparse, csv, glob, importlib.util, io, json, os, sys, tempfile, time
 from collections import defaultdict
@@ -46,13 +48,77 @@ def new_row():
     return dict.fromkeys(FIELDS, 0)
 
 
-def collect(since_day):
-    """Single pass. Returns (rows keyed (day, project, model, kind), stats)."""
+# A transcript file's mtime is its LAST write, so a file whose mtime is before the start of the
+# first requested day cannot hold calls from that day. The start of the day is measured in the
+# bucketing tz (local midnight can be hours before UTC midnight), and the cutoff is moved back by
+# MTIME_SLACK_S to absorb DST shifts and clock skew. Reading a few extra files is cheap; dropping
+# one that holds requested calls is not.
+MTIME_SLACK_S = 86400
+
+
+# --- timezone handling --------------------------------------------------------------------
+# `tz` is a tzinfo, or None for the machine's local zone (resolved by the system, DST-aware).
+
+def resolve_tz(name):
+    return timezone.utc if name == "utc" else None
+
+
+def in_tz(dt, tz):
+    return dt.astimezone(tz) if tz is not None else dt.astimezone()
+
+
+def day_of(ts, tz):
+    """Calendar day (YYYY-MM-DD) of an ISO-8601 transcript timestamp, in tz."""
+    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return in_tz(dt, tz).date().isoformat()
+
+
+def today_in(tz, now=None):
+    return in_tz(now or datetime.now(timezone.utc), tz).date()
+
+
+def tz_label(name, now=None):
+    """Human-readable description of the day boundaries, for headers."""
+    if name == "utc":
+        return "UTC"
+    n = in_tz(now or datetime.now(timezone.utc), None)
+    z = n.strftime("%z")
+    off = f"UTC{z[:3]}:{z[3:5]}" if z else "UTC"
+    return f"local time ({n.tzname()}, {off})"
+
+
+def day_start_epoch(day, tz):
+    """Epoch seconds of 00:00 on `day` (YYYY-MM-DD) in tz."""
+    naive = datetime.strptime(day, "%Y-%m-%d")
+    aware = naive.replace(tzinfo=tz) if tz is not None else naive.astimezone()
+    return aware.timestamp()
+
+
+def mtime_cutoff(since_day, tz):
+    return day_start_epoch(since_day, tz) - MTIME_SLACK_S
+
+
+def resolve_window(days, since, today, tz, now=None):
+    """(since_day, until_day) as YYYY-MM-DD strings, both in tz."""
+    t = today_in(tz, now)
+    if today:
+        return t.isoformat(), t.isoformat()
+    if since:
+        return since, t.isoformat()
+    return (t - timedelta(days=(14 if days is None else days) - 1)).isoformat(), t.isoformat()
+
+
+def collect(since_day, tz=None, root=None):
+    """Single pass. Returns (rows keyed (day, project, model, kind), stats).
+
+    Days are calendar days in tz (None = machine local zone)."""
     rows = defaultdict(new_row)
     seen = set()
-    cutoff = datetime.strptime(since_day, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()
+    cutoff = mtime_cutoff(since_day, tz)
     nfiles = 0
-    root = gpc.CLAUDE_PROJECTS
+    root = root or gpc.CLAUDE_PROJECTS
     for f in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
         try:
             if os.path.getmtime(f) < cutoff:
@@ -83,7 +149,10 @@ def collect(since_day):
                 if k[0] and k in seen:
                     continue
                 seen.add(k)
-                day = ts[:10]
+                try:
+                    day = day_of(ts, tz)
+                except (ValueError, OverflowError, OSError):
+                    continue
                 if day < since_day:
                     continue
                 model = m.get("model", "") or "unknown"
@@ -119,13 +188,14 @@ def total_cost(r):
     return r["cost_cache_read"] + r["cost_cache_write"] + r["cost_input"] + r["cost_output"]
 
 
-def flat(rows, projects):
+def flat(rows, projects, tz_name="local"):
     out = []
     for (day, proj, model, kind), r in sorted(rows.items()):
         if projects and not any(p.lower() in proj.lower() for p in projects):
             continue
         d = {"day": day, "project": proj, "model": model, "kind": kind}
         d.update({k: (round(v, 6) if isinstance(v, float) else v) for k, v in r.items()})
+        d["tz"] = tz_name
         out.append(d)
     return out
 
@@ -139,11 +209,11 @@ def agg(rows, key):
     return g
 
 
-def text_report(rows, since, until):
+def text_report(rows, since, until, tzl="UTC"):
     L = []
     tot = agg(rows, lambda r: "all")["all"]
     T = total_cost(tot) or 1e-9
-    L.append(f"AI spend (est., list price) {since}..{until} UTC  total ${total_cost(tot):,.0f}  calls {tot['calls']:,}")
+    L.append(f"AI spend (est., list price) {since}..{until}, days in {tzl}  total ${total_cost(tot):,.0f}  calls {tot['calls']:,}")
     L.append("")
     L.append(f"{'day':<11}{'calls':>7}{'sub%':>6}{'avg ctx':>9}{'>200k%':>8}{'est $':>9}{'cacheRd$':>9}{'cacheWr$':>9}{'out$':>7}")
     byday = agg(rows, lambda r: r["day"])
@@ -183,9 +253,13 @@ def text_report(rows, since, until):
     return "\n".join(L) + "\n"
 
 
+# `tz` is last so the positions of the pre-existing columns do not move.
+CSV_COLUMNS = ["day", "project", "model", "kind"] + FIELDS + ["tz"]
+
+
 def csv_report(flatrows):
     buf = io.StringIO()
-    w = csv.DictWriter(buf, fieldnames=["day", "project", "model", "kind"] + FIELDS)
+    w = csv.DictWriter(buf, fieldnames=CSV_COLUMNS)
     w.writeheader()
     for r in flatrows:
         w.writerow(r)
@@ -244,7 +318,7 @@ const col=i=>cs('--c'+((i%9)+1));
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
 const cost=r=>r.cost_cache_read+r.cost_cache_write+r.cost_input+r.cost_output;
 const usd=v=>'$'+Math.round(v).toLocaleString();
-$('range').textContent=D.since+' to '+D.until+' (UTC days)';
+$('range').textContent=D.since+' to '+D.until+' (days in '+D.tz_label+')';
 $('gen').textContent=' Generated '+D.generated+'.';
 const projs=[...new Set(R.map(r=>r.project))].sort();
 $('proj').innerHTML='<option value="">All projects</option>'+projs.map(p=>'<option>'+esc(p)+'</option>').join('');
@@ -289,8 +363,8 @@ render();
 """
 
 
-def html_report(flatrows, since, until):
-    data = {"since": since, "until": until,
+def html_report(flatrows, since, until, tz_name="local", tzl="UTC"):
+    data = {"since": since, "until": until, "tz": tz_name, "tz_label": tzl,
             "generated": datetime.now().strftime("%Y-%m-%d %H:%M"), "rows": flatrows}
     blob = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     return HTML.replace("__DATA__", blob)
@@ -298,27 +372,38 @@ def html_report(flatrows, since, until):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--days", type=int, default=14)
-    ap.add_argument("--since")
+    ap.add_argument("--days", type=int, help="last N calendar days incl. today (default 14)")
+    ap.add_argument("--since", help="first day, YYYY-MM-DD")
+    ap.add_argument("--today", action="store_true",
+                    help="the current calendar day only, 00:00 to now (in --tz); not with --days/--since")
+    ap.add_argument("--tz", choices=["local", "utc"], default="local",
+                    help="timezone whose calendar days are used for bucketing (default: local)")
     ap.add_argument("--project", action="append", default=[])
     ap.add_argument("--format", choices=["text", "json", "csv", "html"], default="text")
     ap.add_argument("--out")
     ap.add_argument("--open", action="store_true")
     a = ap.parse_args()
-    today = datetime.now(timezone.utc).date()
-    since = a.since or (today - timedelta(days=a.days - 1)).isoformat()
-    until = today.isoformat()
+    if a.today and (a.days is not None or a.since):
+        ap.error("--today cannot be combined with --days or --since")
+    if a.since:
+        try:
+            datetime.strptime(a.since, "%Y-%m-%d")
+        except ValueError:
+            ap.error("--since must be YYYY-MM-DD")
+    tz = resolve_tz(a.tz)
+    tzl = tz_label(a.tz)
+    since, until = resolve_window(a.days, a.since, a.today, tz)
     t0 = time.time()
-    rows, st = collect(since)
-    fr = flat(rows, a.project)
+    rows, st = collect(since, tz)
+    fr = flat(rows, a.project, a.tz)
     if a.format == "text":
-        out = text_report(fr, since, until)
+        out = text_report(fr, since, until, tzl)
     elif a.format == "json":
-        out = json.dumps({"since": since, "until": until, "rows": fr}, indent=1)
+        out = json.dumps({"tz": a.tz, "tz_label": tzl, "since": since, "until": until, "rows": fr}, indent=1)
     elif a.format == "csv":
         out = csv_report(fr)
     else:
-        out = html_report(fr, since, until)
+        out = html_report(fr, since, until, a.tz, tzl)
         if not a.out:
             a.out = os.path.join(tempfile.gettempdir(), "spaarke-ai-spend.html")
     if a.out:
