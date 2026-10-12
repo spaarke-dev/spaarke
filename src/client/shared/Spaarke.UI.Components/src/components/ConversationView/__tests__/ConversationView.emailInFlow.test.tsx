@@ -195,7 +195,11 @@ describe('ConversationView email-in-flow (FR-04)', () => {
     // The extended dialog appears, carrying the regarding record (folded into
     // the composer's association chips) — proving thread + regarding context.
     // SendEmailDialog uses modalType="alert" (no light dismiss) → role="alertdialog".
-    const dialog = await screen.findByRole('alertdialog', {}, { timeout: 4000 });
+    // `hidden: true`: when the dialog is opened from a click (not mounted open), Fluent's tabster modalizer
+    // leaves the surface `aria-hidden="true"` in jsdom until focus moves inside it — so the default
+    // accessibility-tree query races the attribute and loses. This test asserts the context the dialog
+    // carries, not its accessibility-tree exposure, so it queries the DOM node directly.
+    const dialog = await screen.findByRole('alertdialog', { hidden: true }, { timeout: 4000 });
     expect(within(dialog).getByText(/Smith v Jones/)).toBeInTheDocument();
   });
 
