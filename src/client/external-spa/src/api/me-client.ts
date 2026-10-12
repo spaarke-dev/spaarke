@@ -49,13 +49,22 @@ export interface MeEntitlementsResponse {
   email: string;
   plane: Plane;
   entitlements: string[];
+  /**
+   * The Legal Front Door intake types (`sprk_requesttype` option values) the caller may submit - the rule the submit
+   * route enforces (r3 task 052; `MeEntitlementsResponse.IntakeRequestTypes`). `[]` means none; `undefined` means the
+   * server did not say (an older BFF, or the `PLANE_DEFAULTS` rollout fallback below) - NOT "none" and NOT "all": the
+   * entry points then fall back to the plane/entitlement rule in `intake/intakeRegistry.ts` (`isIntakeTypeAvailable`).
+   */
+  intakeRequestTypes?: number[];
 }
 
 /**
  * Plane defaults for the production ROLLOUT fallback (a 5xx / network failure of the live call): the plane's default
  * modules and NO identity — the fallback never presents a user (task 042, FR-18: no mock or default user in a
  * production build). Entitlement ids match `widgetRegistry.ts`'s `requiredEntitlement` values and the server's
- * defaults (workforce = legal-front-door + policy-library; CIAM = assigned-work).
+ * defaults (workforce = legal-front-door + policy-library; CIAM = assigned-work). `intakeRequestTypes` is deliberately
+ * absent from the fallback: the client cannot know the per-customer partner switches, so it leaves the field
+ * `undefined` and the intake entry points apply their documented fallback rule.
  */
 const PLANE_DEFAULTS: Record<Plane, MeEntitlementsResponse> = {
   workforce: { displayName: '', email: '', plane: 'workforce', entitlements: ['legal-front-door', 'policy-library'] },

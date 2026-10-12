@@ -6,9 +6,9 @@
  * `sprk_requestedby == caller contact`; BFF A7 / r3 task 011: workforce see their own rows, CIAM partners
  * only when ExternalAccess:PartnerServiceRequestsEnabled is on, otherwise 0 rows).
  *
- * Registered with `planes: ['workforce']`, so the client currently hides it from the outside-counsel
- * partner SPA; widening the client plane is task 052. The BFF, not the client gate, is the boundary
- * (NFR-06).
+ * Registered for both real planes and gated by the `legal-front-door` entitlement from `/me` (task 052, review 011 K3):
+ * a CIAM partner sees it only when the partner switch gives it that entitlement. The BFF, not the client gate, is the
+ * boundary (NFR-06).
  */
 import { createGridWidgetBody } from './GridWidgetBody';
 

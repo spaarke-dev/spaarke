@@ -91,6 +91,14 @@ const serviceRequestsLoader = (): Promise<{ default: WidgetBodyComponent }> =>
   import('../widgets/ServiceRequestsWidget').then(m => ({ default: m.ServiceRequestsWidgetBody }));
 
 /**
+ * The planes a legal-front-door widget may appear in. Review 011 K3: those widgets used to be `['workforce']`, which hid
+ * them from a CIAM partner even when `ExternalAccess:PartnerServiceRequestsEnabled` gave that partner the
+ * `legal-front-door` entitlement. The plane gate now admits both real planes and the ENTITLEMENT (from `/me`) decides:
+ * switch on -> the partner holds `legal-front-door` and sees them; switch off -> it does not, and they stay hidden.
+ */
+const LEGAL_FRONT_DOOR_PLANES: Plane[] = ['workforce', 'ciam'];
+
+/**
  * All registered widgets. Role-default coverage (workspace-shell-foundation.md):
  *   - workforce: My Requests · Inventions · Messages · Policy Library
  *   - ciam (outside counsel): Projects · Matters · Work Assignments · Documents · Invoices
@@ -106,7 +114,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     icon: ClipboardTaskListLtrRegular,
     ariaLabel: 'Open My Requests — track your submitted requests',
     description: 'Track your own requests and legal’s responses.',
-    planes: ['workforce'],
+    planes: LEGAL_FRONT_DOOR_PLANES,
     requiredEntitlement: 'legal-front-door',
     // R2 task 072 (owner tab set): entitled via legal-front-door but NOT an owner internal DEFAULT tab
     // (internal defaults = Quick Start pinned + Service Requests + Policy Library). Openable from the library.
@@ -119,7 +127,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     icon: LightbulbRegular,
     ariaLabel: 'Open Inventions — your invention submissions',
     description: 'Your invention disclosures and their review stage.',
-    planes: ['workforce'],
+    planes: LEGAL_FRONT_DOOR_PLANES,
     requiredEntitlement: 'legal-front-door',
     // R2 task 072 (owner tab set): entitled via legal-front-door but NOT an owner internal DEFAULT tab.
     defaultForRoles: [],
@@ -137,20 +145,21 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     lazyLoader: placeholderLoader,
   },
   {
-    // Workforce tab for now (task 028): the concrete data-backed read of the caller's OWN submitted
-    // service requests (sprk_requestedby == caller contact). planes:['workforce'] currently keeps it OFF
-    // the outside-counsel partner SPA; the BFF (A7, r3 task 011) returns own rows for workforce and for
-    // CIAM only when ExternalAccess:PartnerServiceRequestsEnabled is on, so widening the client plane is
-    // task 052. (Distinct from the P3 'my-requests' placeholder, which will become the broader Legal
-    // Front Door request tracker; they may reconcile in P3.)
+    // The concrete data-backed read of the caller's OWN submitted service requests (task 028;
+    // sprk_requestedby == caller contact). The BFF (A7, r3 task 011) returns own rows for workforce and
+    // for CIAM only when ExternalAccess:PartnerServiceRequestsEnabled is on - and only then does a CIAM
+    // caller hold the legal-front-door entitlement. Task 052 (review 011 K3): the client gate is that
+    // entitlement, not the plane, so a partner sees this tab (library + default) exactly when the switch
+    // is on. (Distinct from the P3 'my-requests' placeholder, which will become the broader Legal Front
+    // Door request tracker; they may reconcile in P3.)
     id: 'service-requests',
     title: 'Service Requests',
     icon: DocumentBulletListRegular,
     ariaLabel: 'Open Service Requests — requests you have submitted',
     description: 'Service requests you have submitted and their status.',
-    planes: ['workforce'],
+    planes: LEGAL_FRONT_DOOR_PLANES,
     requiredEntitlement: 'legal-front-door',
-    defaultForRoles: ['workforce'],
+    defaultForRoles: ['workforce', 'ciam'],
     lazyLoader: serviceRequestsLoader,
   },
   {
@@ -159,9 +168,11 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     icon: DocumentAddRegular,
     ariaLabel: 'Open NDA Assessment — upload and assess an NDA',
     description: 'Upload an NDA and get an AI compliance assessment.',
-    planes: ['workforce'],
+    planes: LEGAL_FRONT_DOOR_PLANES,
     requiredEntitlement: 'legal-front-door',
-    defaultForRoles: [], // opened via the Quick Start card, not a default tab
+    // Task 052: the Quick Start NDA card now opens the NDA Assessment WIZARD (intake/), not this placeholder; the
+    // widget stays registered (library only).
+    defaultForRoles: [],
     lazyLoader: placeholderLoader,
   },
   // ── Cross-plane — available to workforce + admin (not a ciam default) ─────

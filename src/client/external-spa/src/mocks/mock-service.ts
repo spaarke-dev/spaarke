@@ -175,6 +175,11 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
     return delay(undefined as unknown as T, 300);
   }
 
+  // POST /api/v1/external/servicerequests (Legal Front Door intake, r3 task 052): echo a created id.
+  if (method === 'POST' && path === '/api/v1/external/servicerequests') {
+    return delay({ sprk_servicerequestid: '00000000-0000-4000-8000-0000000c0001' } as unknown as T, 600);
+  }
+
   // Contact-side Grant Access (task 140) — POST/GET /api/v1/external/contact-grants, POST …/contact-grants/revoke.
   // The mock keeps the issued grants in memory for the session, mirroring the server's response shapes.
   if (method === 'POST' && path === '/api/v1/external/contact-grants') {
