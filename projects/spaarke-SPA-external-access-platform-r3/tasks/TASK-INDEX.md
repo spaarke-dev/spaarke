@@ -16,8 +16,8 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 012 | Member-test branch for registered guests (FR-15) | P1 | ✅ [done] | 001 | O/h | FULL | Wave 2 |
 | 020 | R3 schema: sprk_createdbycontact + intake columns (FR-25, FR-05) | P2 | ✅ [done] dev import 2026-10-11, verify pass (Merge cascade = Cascade, platform-forced) | none | S/h | FULL | Wave 1 (owner-gated import) |
 | 030 | Creator stamping on every external create (FR-25) | P3 | ✅ [done] | 020 | O/h | FULL | Wave 2 |
-| 031 | Document routes for Matter/WA/Invoice/Service Request (FR-24) | P3 | 🔄 [wip] matter/WA/SR routes merged; invoices await owner decision | 030 | O/h | FULL | Wave 3 |
-| 032 | DELETE own documents/to-dos/events/service requests (FR-26) | P3 | 🔄 [wip] | 031 | O/h | FULL | Wave 4 |
+| 031 | Document routes for Matter/WA/Invoice/Service Request (FR-24) | P3 | ✅ [done] | 030 | O/h | FULL | Wave 3 |
+| 032 | DELETE own documents/to-dos/events/service requests (FR-26) | P3 | ✅ [done] | 031 | O/h | FULL | Wave 4 |
 | 033 | External message read endpoint (FR-04) | P3 | ✅ [done] | 011 | O/h | FULL | Wave 3 |
 | 034 | External message send endpoint (FR-11) | P3 | ✅ [done] | 030, 033 | O/h | FULL | Wave 4 |
 | 035 | Intake submit endpoint (FR-05, FR-06) | P3 | ✅ [done] | 011, 020, 033 | O/h | FULL | Wave 5 |
