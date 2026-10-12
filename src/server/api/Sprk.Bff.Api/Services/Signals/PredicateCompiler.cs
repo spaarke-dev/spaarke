@@ -505,12 +505,13 @@ public sealed partial class PredicateCompiler
             var whenConditions = CompileFilterConditions(subject, when, nowUtc, "when",
                 (field, _) =>
                 {
-                    if (ruleType == RuleType.Threshold && Sprk.Bff.Api.Services.Finance.FinanceBaseValues.IsDerived(subject, field))
+                    if (Sprk.Bff.Api.Services.Finance.FinanceBaseValues.IsDerived(subject, field))
                     {
-                        // Task 025b: the Threshold is judged from the base rows, but a 'when' on the same family of columns would
-                        // read the STORED copy (stale until a form edit), so a rule mixing the two would be right by accident.
+                        // Task 025b: spend, budget and utilization are judged from the base rows, but a 'when' on the stored columns
+                        // reads the STORED copy (stale until a form edit). That is wrong for ANY rule type (Existence too), so the
+                        // refusal does not depend on the rule type.
                         throw new PredicateCompilationException(
-                            $"when.{field}: a Threshold body on '{subject}' reads spend, budget and utilization from the invoice and " +
+                            $"when.{field}: spend, budget and utilization on '{subject}' are derived from the invoice and " +
                             "budget rows; a 'when' on the stored column would read a value that is not kept current. Scope the rule with another column.");
                     }
 

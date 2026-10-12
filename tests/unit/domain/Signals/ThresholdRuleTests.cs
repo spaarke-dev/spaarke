@@ -137,10 +137,22 @@ public class ThresholdRuleTests
         result.Errors.Should().ContainSingle().Which.Should().Contain("when.sprk_totalspendtodate").And.Contain("not kept current");
     }
 
+    [Theory]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_project")]
+    public void AWhenOnADerivedColumn_InAnExistenceBody_IsRefusedToo_BecauseItWouldReadTheSameStaleStoredCopy(string subject)
+    {
+        var body = ("""{"type":"Existence","subject":"sprk_matter","when":{"sprk_totalspendtodate":{">=":5000}},"all":[]}""")
+            .Replace("\"sprk_matter\"", $"\"{subject}\"", StringComparison.Ordinal);
+
+        Compiler().Invoking(c => c.Compile(body)).Should().Throw<PredicateCompilationException>()
+            .Which.Message.Should().Contain("when.sprk_totalspendtodate").And.Contain("not kept current");
+    }
+
     [Fact]
-    public void AnExistenceBody_MayStillScopeOnAStoredColumn_ThisTaskChangesOnlyThresholdBodies() =>
+    public void AnExistenceBody_MayStillScopeOnAColumnThatIsNotDerived() =>
         Compiler().Invoking(c => c.Compile(
-            """{"type":"Existence","subject":"sprk_matter","when":{"sprk_totalspendtodate":{">=":5000}},"all":[]}""")).Should().NotThrow();
+            """{"type":"Existence","subject":"sprk_matter","when":{"statecode":0},"all":[]}""")).Should().NotThrow();
 
     [Theory]
     [InlineData("12.50", "12.50")]
@@ -471,12 +483,12 @@ public class ThresholdRuleTests
     [InlineData("<", "is less than")]
     public async Task TheDescriber_UsesNumericWording_ForANumericWhenComparison_InThresholdAndExistenceBodies(string op, string words)
     {
-        var existence = "{\"type\":\"Existence\",\"subject\":\"sprk_matter\",\"when\":{\"sprk_totalspendtodate\":{\"" + op + "\":5000}},\"all\":[]}";
+        var existence = "{\"type\":\"Existence\",\"subject\":\"sprk_matter\",\"when\":{\"statuscode\":{\"" + op + "\":5000}},\"all\":[]}";
 
         var result = await Describer().DescribeAsync(existence, CancellationToken.None);
 
         result.IsRefused.Should().BeFalse(result.Refusal);
-        result.Description!.Clauses.Single().Text.Should().Contain($"total spend to date {words} 5000").And.NotContain("after").And.NotContain("before");
+        result.Description!.Clauses.Single().Text.Should().Contain($"status {words} 5000").And.NotContain("after").And.NotContain("before");
 
     }
 
