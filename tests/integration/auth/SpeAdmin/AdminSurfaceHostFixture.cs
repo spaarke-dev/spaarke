@@ -124,6 +124,12 @@ public class AdminSurfaceHostFixture : WorkspaceTestFixture
     /// </summary>
     public RecordingLoggerProvider Logs { get; } = new();
 
+    /// <summary>
+    /// The deleted-container ownership records (#1652): the REAL store over an in-memory Cosmos container. A container in
+    /// the recycle bin is this stamp's only when a record here says so — Graph keeps no marker on a deleted container.
+    /// </summary>
+    public FakeSpeDeletedContainerRecords DeletedRecords { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
@@ -173,7 +179,8 @@ public class AdminSurfaceHostFixture : WorkspaceTestFixture
                 // so the guard admits every container (tests/integration/tenant covers the refusals).
                 OwnershipCustomerId is { } customer
                     ? TestSpeOwnership.Real(new FakeGraphClientFactory(Graph), customer)
-                    : TestSpeOwnership.AllowAll(new FakeGraphClientFactory(Graph))));
+                    : TestSpeOwnership.AllowAll(new FakeGraphClientFactory(Graph)),
+                DeletedRecords.Store));
         });
     }
 
@@ -215,6 +222,7 @@ public class AdminSurfaceHostFixture : WorkspaceTestFixture
         IndexSync.Reset();
         Graph.Reset();
         Logs.Clear();
+        DeletedRecords.Reset();
     }
 
     protected override void Dispose(bool disposing)

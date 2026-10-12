@@ -81,6 +81,11 @@ public static class SpeAdminModule
         // Full implementation: Infrastructure/Graph/SpeAdminGraphService.cs
         services.AddSingleton<SpeAdminGraphService>();
 
+        // Ownership records of containers the BFF soft-deletes (#1652): Graph keeps no marker on a deleted
+        // container, so the recycle bin trusts only these. One document type in the stamp's existing Cosmos
+        // `memory` container (CosmosClient from AiPersistenceModule) — no new resource. Stateless singleton.
+        services.AddSingleton<Sprk.Bff.Api.Services.SpeAdmin.SpeDeletedContainerRecordStore>();
+
         // Per-request audit logging to sprk_speauditlog Dataverse table.
         // Scoped: captures HttpContext identity for the audit actor per request.
         services.AddScoped<SpeAuditService>();

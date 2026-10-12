@@ -135,6 +135,25 @@ public sealed class GraphWireMockFixture : IDisposable
         return this;
     }
 
+    /// <summary>
+    /// As <see cref="StubGetExact"/>, but REPLACES the previous <c>ReplaceGetExact</c> stub of the same path (one mapping
+    /// per path, keyed by a GUID derived from it) — for a collection a test grows item by item, such as the recycle bin's
+    /// <c>deletedContainers</c> list. Do not mix it with <see cref="StubGetExact"/> on the same path.
+    /// </summary>
+    public GraphWireMockFixture ReplaceGetExact(string path, string jsonBody, int statusCode = 200)
+    {
+        var key = new Guid(System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes("GET-exact:" + path)));
+        _server
+            .Given(Request.Create().WithPath(path).UsingGet())
+            .WithGuid(key)
+            .RespondWith(Response.Create()
+                .WithStatusCode(statusCode)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(jsonBody));
+
+        return this;
+    }
+
     /// <summary>Serves <paramref name="jsonBody"/> for a POST on EXACTLY <paramref name="path"/> (see <see cref="StubGetExact"/>).</summary>
     public GraphWireMockFixture StubPostExact(string path, string jsonBody, int statusCode = 200)
     {

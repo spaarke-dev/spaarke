@@ -403,51 +403,158 @@ public class SpeAppOnlyContainerIsolationTests
     }
 
     [Fact]
-    public async Task SpeAdmin_DeletedContainerList_ShowsOnlyThisStampsContainers()
+    public async Task SpeAdmin_DeletedContainerList_ShowsOnlyThisStampsRecordedContainers()
     {
-        var graph = new RoutedGraph()
-            .Respond("GET", "/v1.0/storage/fileStorage/deletedContainers",
-                $$"""{"value":[{"id":"{{OwnContainer}}","displayName":"Ours"},{"id":"{{ForeignContainer}}","displayName":"Theirs"}]}""")
-            .DeletedContainer(OwnContainer, marker: Customer)
-            .DeletedContainer(ForeignContainer, marker: OtherCustomer);
+        // #1652: a deleted container carries no marker (Graph discards customProperties on soft delete), so the bin is
+        // trimmed by the ownership records the BFF wrote before deleting — never by a per-container marker read.
+        var graph = DeletedList(OwnContainer, ForeignContainer, "unrecorded-container")
+            .DeletedContainer(OwnContainer, marker: null)
+            .DeletedContainer(ForeignContainer, marker: null);
+        var records = new FakeSpeDeletedContainerRecords();
+        records.Seed(OwnContainer, Customer, OwnUnit, Config().ContainerTypeId);
+        records.Seed(ForeignContainer, OtherCustomer, OwnUnit, Config().ContainerTypeId);
 
-        var deleted = await SpeAdmin(graph).ListDeletedContainersForConfigAsync(Config(), Config().ContainerTypeId);
+        var deleted = await SpeAdmin(graph, records).ListDeletedContainersForConfigAsync(Config(), Config().ContainerTypeId);
 
         deleted.Select(c => c.Id).Should().Equal(OwnContainer);
+        graph.Requests.Should().ContainSingle("only the bin's list was read — no per-container marker read")
+            .Which.Path.Should().Be("/v1.0/storage/fileStorage/deletedContainers");
     }
 
     [Theory]
-    [InlineData(false, OtherCustomer)]
-    [InlineData(false, null)]
-    [InlineData(true, OtherCustomer)]
-    [InlineData(true, null)]   // what Graph returns for a deleted container today (F-165-RB, dev 2026-10-11)
-    public async Task SpeAdmin_BindingRead_OfAContainerThisStampDoesNotOwn_IsNotThere_NotAFault(bool deleted, string? marker)
+    [InlineData(OtherCustomer)]
+    [InlineData(null)]
+    public async Task SpeAdmin_ActiveBindingRead_OfAContainerThisStampDoesNotOwn_IsNotThere_NotAFault(string? marker)
     {
         // F-165-RB: the guard's refusal is a final answer about the id. Thrown on, the per-container rule read it as an
         // unreadable binding and answered 503 "try again" instead of the uniform 404.
-        var graph = deleted
-            ? new RoutedGraph().DeletedContainer(ForeignContainer, marker)
-            : new RoutedGraph().Container(ForeignContainer, marker);
+        var graph = new RoutedGraph().Container(ForeignContainer, marker);
 
-        var read = await SpeAdmin(graph).GetContainerBindingForConfigAsync(Config(), ForeignContainer, deleted);
+        var read = await SpeAdmin(graph).GetContainerBindingForConfigAsync(Config(), ForeignContainer, deleted: false);
 
         read.Should().BeNull();
         graph.Requests.Should().ContainSingle("only the ownership marker was read");
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SpeAdmin_BindingRead_WhenTheOwnershipReadGetsNoAnswer_Throws_NeverNotThere(bool deleted)
+    [InlineData(OtherCustomer, false, true)]   // the record names another customer (c)
+    [InlineData(null, false, true)]            // no record: deleted outside the BFF, or before records existed (a)
+    [InlineData(Customer, true, true)]         // the record is of another container type
+    [InlineData(Customer, false, false)]       // a valid record, but Graph does not list the id as deleted (b)
+    public async Task SpeAdmin_DeletedBindingRead_WithoutAValidListedRecordOfThisStamp_IsNotThere_NotAFault(
+        string? recordCustomer, bool otherType, bool listed)
     {
-        var path = deleted
-            ? $"/v1.0/storage/fileStorage/deletedContainers/{ForeignContainer}"
-            : $"/v1.0/storage/fileStorage/containers/{ForeignContainer}";
-        var graph = new RoutedGraph().Error("GET", path, HttpStatusCode.ServiceUnavailable);
+        var graph = listed ? DeletedList(ForeignContainer) : DeletedList();
+        var records = new FakeSpeDeletedContainerRecords();
+        if (recordCustomer is not null)
+        {
+            records.Seed(ForeignContainer, recordCustomer, OwnUnit,
+                otherType ? "99999999-0000-0000-0000-000000000099" : Config().ContainerTypeId);
+        }
 
-        var act = () => SpeAdmin(graph).GetContainerBindingForConfigAsync(Config(), ForeignContainer, deleted);
+        var read = await SpeAdmin(graph, records).GetContainerBindingForConfigAsync(Config(), ForeignContainer, deleted: true);
+
+        read.Should().BeNull();
+        graph.Requests.Should().OnlyContain(r => r.Method == "GET" && r.Path == "/v1.0/storage/fileStorage/deletedContainers");
+    }
+
+    [Fact]
+    public async Task SpeAdmin_DeletedBindingRead_OfThisStampsRecordedListedContainer_IsTheRecordsBusinessUnit()
+    {
+        var graph = DeletedList(OwnContainer).DeletedContainer(OwnContainer, marker: null);
+        var records = new FakeSpeDeletedContainerRecords();
+        records.Seed(OwnContainer, Customer, OwnUnit, Config().ContainerTypeId);
+
+        var read = await SpeAdmin(graph, records).GetContainerBindingForConfigAsync(Config(), OwnContainer, deleted: true);
+
+        read.Should().NotBeNull();
+        read!.Binding.BusinessUnitId.Should().Be(OwnUnit);
+        read.Binding.IsMalformed.Should().BeFalse();
+        read.ContainerTypeId.Should().Be(Config().ContainerTypeId);
+        records.CallsOf("Read").Should().ContainSingle().Which.Partition.Should().Be(FakeSpeDeletedContainerRecords.RecordPartition);
+    }
+
+    [Fact]
+    public async Task SpeAdmin_ActiveBindingRead_WhenTheOwnershipReadGetsNoAnswer_Throws_NeverNotThere()
+    {
+        var graph = new RoutedGraph().Error("GET", $"/v1.0/storage/fileStorage/containers/{ForeignContainer}", HttpStatusCode.ServiceUnavailable);
+
+        var act = () => SpeAdmin(graph).GetContainerBindingForConfigAsync(Config(), ForeignContainer, deleted: false);
 
         await act.Should().ThrowAsync<SpaarkeStorageException>("no answer is no decision — the caller refuses with the 503");
+    }
+
+    [Fact]
+    public async Task SpeAdmin_DeletedBindingRead_WhenGraphsDeletedListGetsNoAnswer_Throws_NeverNotThere()
+    {
+        var graph = new RoutedGraph().Error("GET", "/v1.0/storage/fileStorage/deletedContainers", HttpStatusCode.ServiceUnavailable);
+        var records = new FakeSpeDeletedContainerRecords();
+        records.Seed(OwnContainer, Customer, OwnUnit, Config().ContainerTypeId);
+
+        var act = () => SpeAdmin(graph, records).GetContainerBindingForConfigAsync(Config(), OwnContainer, deleted: true);
+
+        await act.Should().ThrowAsync<SpaarkeStorageException>("no answer is no decision — the caller refuses with the 503");
+    }
+
+    [Fact]
+    public async Task SpeAdmin_DeletedBindingRead_WhenTheRecordStoreGetsNoAnswer_Throws_NeverNotThere()
+    {
+        var graph = DeletedList(OwnContainer);
+        var records = new FakeSpeDeletedContainerRecords();
+        records.Seed(OwnContainer, Customer, OwnUnit, Config().ContainerTypeId);
+        records.FaultReads = true;
+
+        var act = () => SpeAdmin(graph, records).GetContainerBindingForConfigAsync(Config(), OwnContainer, deleted: true);
+
+        await act.Should().ThrowAsync<SpeDeletedContainerRecordUnavailableException>(
+            "a store with no answer is no decision — never 'no record' (a 404 hiding an outage)");
+    }
+
+    [Fact]
+    public async Task SpeAdmin_RecordAndSoftDelete_WritesThisStampsRecordFirst_ThenDeletes()
+    {
+        var graph = new RoutedGraph().Respond("DELETE", $"/v1.0/storage/fileStorage/containers/{OwnContainer}", "", HttpStatusCode.NoContent);
+        var records = new FakeSpeDeletedContainerRecords();
+
+        var deleted = await SpeAdmin(graph, records).RecordAndSoftDeleteContainerAsync(
+            graph.Client, Config(), OwnContainer, BoundRead(OwnContainer), CancellationToken.None);
+
+        deleted.Should().BeTrue();
+        var record = records.RecordOf(OwnContainer);
+        record.Should().NotBeNull();
+        record!.CustomerId.Should().Be(Customer);
+        record.BusinessUnitId.Should().Be(OwnUnit);
+        record.ConfigId.Should().Be(Config().ConfigId);
+        record.ContainerTypeId.Should().Be(Config().ContainerTypeId);
+        graph.Requests.Should().ContainSingle(r => r.Method == "DELETE");
+    }
+
+    [Fact]
+    public async Task SpeAdmin_RecordAndSoftDelete_WhenTheRecordCannotBeWritten_DeletesNothing()
+    {
+        var graph = new RoutedGraph().Respond("DELETE", $"/v1.0/storage/fileStorage/containers/{OwnContainer}", "", HttpStatusCode.NoContent);
+        var records = new FakeSpeDeletedContainerRecords { FaultWrites = true };
+
+        var act = () => SpeAdmin(graph, records).RecordAndSoftDeleteContainerAsync(
+            graph.Client, Config(), OwnContainer, BoundRead(OwnContainer), CancellationToken.None);
+
+        await act.Should().ThrowAsync<SpeDeletedContainerRecordUnavailableException>();
+        graph.Requests.Should().BeEmpty("a container whose record could not be written is not deleted — it would be stranded");
+    }
+
+    [Fact]
+    public async Task SpeAdmin_RecordAndSoftDelete_OfAnUnboundContainer_WritesNothing_AndDeletesNothing()
+    {
+        var graph = new RoutedGraph().Respond("DELETE", $"/v1.0/storage/fileStorage/containers/{OwnContainer}", "", HttpStatusCode.NoContent);
+        var records = new FakeSpeDeletedContainerRecords();
+        var unbound = new SpeContainerBindingRead(OwnContainer, Config().ContainerTypeId, new SpeContainerBinding(null, false));
+
+        var act = () => SpeAdmin(graph, records).RecordAndSoftDeleteContainerAsync(
+            graph.Client, Config(), OwnContainer, unbound, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        records.Calls.Should().BeEmpty();
+        graph.Requests.Should().BeEmpty();
     }
 
     [Fact]
@@ -551,7 +658,18 @@ public class SpeAppOnlyContainerIsolationTests
         TenantId: BffTenant,
         SecretKeyVaultName: "");
 
-    private static SpeAdminGraphService SpeAdmin(RoutedGraph graph)
+    private static readonly Guid OwnUnit = Guid.Parse("1a000000-0000-0000-0000-0000000000a1");
+
+    /// <summary>Graph's recycle bin listing exactly <paramref name="ids"/> for the config's container type.</summary>
+    private static RoutedGraph DeletedList(params string[] ids)
+        => new RoutedGraph().Respond("GET", "/v1.0/storage/fileStorage/deletedContainers",
+            "{\"value\":[" + string.Join(",", ids.Select(id =>
+                "{\"id\":\"" + id + "\",\"displayName\":\"Deleted " + id + "\",\"containerTypeId\":\"" + Config().ContainerTypeId + "\"}")) + "]}");
+
+    private static SpeContainerBindingRead BoundRead(string id)
+        => new(id, Config().ContainerTypeId, SpeContainerBinding.BoundTo(OwnUnit));
+
+    private static SpeAdminGraphService SpeAdmin(RoutedGraph graph, FakeSpeDeletedContainerRecords? records = null)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -565,7 +683,8 @@ public class SpeAppOnlyContainerIsolationTests
             configuration: configuration,
             logger: NullLogger<SpeAdminGraphService>.Instance,
             graphClientFactory: factory,
-            ownership: Guard(graph));
+            ownership: Guard(graph),
+            deletedRecords: (records ?? new FakeSpeDeletedContainerRecords()).Store);
     }
 
     private static string SearchResponse(int total, bool more, params (string Drive, string Name)[] hits)
