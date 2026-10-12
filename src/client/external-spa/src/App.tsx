@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Button, FluentProvider, makeStyles, tokens, Text, webDarkTheme } from '@fluentui/react-components';
 import type { Theme } from '@fluentui/react-components';
 import { useMsal } from '@azure/msal-react';
+import { InteractionStatus } from '@azure/msal-browser';
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
   resolveCodePageTheme,
@@ -17,6 +18,9 @@ import { accountsForActivePlane } from './auth/msal-auth';
 import { AppHeader } from './components/AppHeader';
 import { AuthGuard } from './components/AuthGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { NotificationBell } from './components/shell/NotificationBell';
+import { RecordOpenerProvider } from './components/detail/RecordOpener';
+import { RecordDeepLink } from './components/detail/RecordDeepLink';
 import { WorkspaceHomePage } from './pages/WorkspaceHomePage';
 import { ProjectPage } from './pages/ProjectPage';
 import { DocumentUploadPage } from './pages/DocumentUploadPage';
@@ -127,6 +131,7 @@ const AppShell: React.FC<{
   const styles = useStyles();
   const navigate = useNavigate();
   const location = useLocation();
+  const { inProgress } = useMsal();
 
   return (
     <div className={styles.root}>
@@ -138,11 +143,16 @@ const AppShell: React.FC<{
         teamsHost={teamsHost}
         // The tall welcome band only reads on the workspace landing.
         showWelcomeBand={location.pathname === '/'}
+        // Only for a signed-in user with no MSAL interaction running: the bell reads the BFF as soon as it mounts, which
+        // must neither precede sign-in nor compete with a redirect or token renewal that is still in progress.
+        bell={portalUser && inProgress === InteractionStatus.None ? <NotificationBell /> : null}
       />
 
       <main className={styles.content}>
         <AuthGuard teamsHost={teamsHost}>
           <ErrorBoundary>
+            {/* Opens the record a `?record={type}:{id}` link names, once signed in (task 055, FR-07). */}
+            <RecordDeepLink teamsHost={teamsHost} />
             <Routes>
               <Route path="/" element={<WorkspaceHomePage teamsHost={teamsHost} />} />
               <Route path="/project/:id" element={<ProjectPage />} />
@@ -236,13 +246,16 @@ export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) =>
       <TeamsHostProvider teamsHost={teamsHost}>
         <FluentProvider theme={theme} style={{ height: '100%' }}>
           <BrowserRouter>
-            <AppShell
-              isDark={isDark}
-              onToggleDark={handleToggleDark}
-              portalUser={portalUser}
-              teamsHost={teamsHost}
-              onSignOut={handleSignOut}
-            />
+            {/* One record opener for the shell: the notification bell and a `?record=` deep link open the same detail view. */}
+            <RecordOpenerProvider>
+              <AppShell
+                isDark={isDark}
+                onToggleDark={handleToggleDark}
+                portalUser={portalUser}
+                teamsHost={teamsHost}
+                onSignOut={handleSignOut}
+              />
+            </RecordOpenerProvider>
           </BrowserRouter>
         </FluentProvider>
       </TeamsHostProvider>

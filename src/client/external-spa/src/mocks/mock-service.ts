@@ -34,8 +34,48 @@ function collection<T>(items: T[]): { value: T[] } {
   return { value: items };
 }
 
+/** Local-dev notification feed (task 055): two items on the first mock project; `/seen` marks them read. */
+let mockNotificationsSeenAt: string | null = null;
+const MOCK_NOTIFICATION_TIMES = [new Date(Date.now() - 20 * 60_000), new Date(Date.now() - 3 * 3_600_000)];
+
+function mockNotificationFeed() {
+  const value = [
+    {
+      kind: 'message',
+      id: '00000000-0000-4000-8000-0000000a0001',
+      recordType: 'projects',
+      recordId: '00000000-0000-4000-8000-0000000b0001',
+      recordTitle: 'Mock project',
+      occurredOn: MOCK_NOTIFICATION_TIMES[0].toISOString(),
+      senderName: 'Sam Rivera',
+    },
+    {
+      kind: 'grant',
+      id: '00000000-0000-4000-8000-0000000a0002',
+      recordType: 'matters',
+      recordId: '00000000-0000-4000-8000-0000000b0002',
+      recordTitle: null,
+      occurredOn: MOCK_NOTIFICATION_TIMES[1].toISOString(),
+      senderName: null,
+    },
+  ].map(item => ({
+    ...item,
+    isUnread: mockNotificationsSeenAt === null || Date.parse(item.occurredOn) > Date.parse(mockNotificationsSeenAt),
+  }));
+  return { value, unreadCount: value.filter(i => i.isUnread).length, lastSeenAt: mockNotificationsSeenAt };
+}
+
 export function getMockResponse<T>(path: string, options: RequestInit = {}): Promise<T> {
   const method = (options.method ?? 'GET').toUpperCase();
+
+  // GET / POST /api/v1/external/notifications[/seen] (task 055)
+  if (method === 'GET' && path === '/api/v1/external/notifications') {
+    return delay(mockNotificationFeed() as unknown as T);
+  }
+  if (method === 'POST' && path === '/api/v1/external/notifications/seen') {
+    mockNotificationsSeenAt = new Date().toISOString();
+    return delay({ lastSeenAt: mockNotificationsSeenAt } as unknown as T);
+  }
 
   // GET /api/v1/external/me
   if (method === 'GET' && path === '/api/v1/external/me') {

@@ -55,7 +55,7 @@
  * See: .claude/AUDIT-FINDINGS-AUTH-SYSTEM.md — external SPA out-of-scope rationale
  */
 
-import { acquireActiveBffToken } from './msal-auth';
+import { acquireActiveBffToken, type BffTokenAcquireOptions } from './msal-auth';
 import { bffRequestUrl, getActiveBackend } from './backend-selection';
 import { ApiError } from '../types';
 import { getMockResponse } from '../mocks/mock-service';
@@ -178,14 +178,21 @@ export interface ExternalUserContextResponse {
  *
  * @param path    Root-relative API path on the active backend (e.g. "/api/v1/external/me")
  * @param options Standard RequestInit options (method, body, headers, etc.)
+ * @param auth    Token-acquisition options. `{ noInteraction: true }` is for a TIMER-driven background read only (the
+ *                notification bell's poll): if the token cannot be had silently the call rejects with
+ *                `SignInRequiredError` instead of starting a sign-in redirect. Absent, every call acquires exactly as before.
  * @returns Parsed JSON response body typed as T.
  */
-export async function bffApiCall<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function bffApiCall<T>(
+  path: string,
+  options: RequestInit = {},
+  auth?: Pick<BffTokenAcquireOptions, 'noInteraction'>
+): Promise<T> {
   if (isDevMockEnabled()) {
     return getMockResponse<T>(path, options);
   }
 
-  return parseResponse<T>(await authorizedFetch(path, options));
+  return parseResponse<T>(await authorizedFetch(path, options, auth));
 }
 
 /**
@@ -228,17 +235,23 @@ export async function bffApiBlob(path: string, options: RequestInit = {}): Promi
  * The URL and the scope come from the same snapshot, so a backend switch mid-request cannot pair one backend's token
  * with another backend's host.
  */
-async function authorizedFetch(path: string, options: RequestInit): Promise<Response> {
+async function authorizedFetch(
+  path: string,
+  options: RequestInit,
+  auth?: Pick<BffTokenAcquireOptions, 'noInteraction'>
+): Promise<Response> {
   const backend = getActiveBackend();
   const url = bffRequestUrl(backend, path);
+  // Passed only when set, so the default call shapes (`acquire(backend)`, `acquire(backend, { forceRefresh: true })`) stay.
+  const noInteraction = auth?.noInteraction ? ({ noInteraction: true } as const) : undefined;
 
-  const token = await acquireActiveBffToken(backend);
+  const token = await acquireActiveBffToken(backend, noInteraction);
   const response = await executeFetch(url, options, token);
 
   // On 401, force a NETWORK refresh (MSAL redeems the refresh token, or redirects) and retry once. Without
   // `forceRefresh` MSAL would return the cached access token the BFF just refused: the same 401, a sign-in loop.
   if (response.status === 401) {
-    const freshToken = await acquireActiveBffToken(backend, { forceRefresh: true });
+    const freshToken = await acquireActiveBffToken(backend, { forceRefresh: true, ...noInteraction });
     return executeFetch(url, options, freshToken);
   }
 

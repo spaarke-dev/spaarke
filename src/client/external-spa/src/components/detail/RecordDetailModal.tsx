@@ -476,6 +476,12 @@ export interface RecordDetailModalProps {
    * re-read its list: this modal unmounts on close, so what it knows about deleted rows does not outlive it.
    */
   onRecordDeleted?: () => void;
+  /**
+   * Called when the shown record reaches a settled state: loaded, denied, or not found (NOT while loading, and not for a
+   * retryable error, where nothing was learned yet). The shared opener tells its caller (the `?record=` deep link, which
+   * keeps the link in the address bar until then so a token redirect during the read still carries it).
+   */
+  onSettled?: () => void;
 }
 
 export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
@@ -486,6 +492,7 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
   index,
   onIndexChange,
   onRecordDeleted,
+  onSettled,
 }) => {
   const styles = useStyles();
   const cfg = getRecordDetailEntity(entityName);
@@ -504,6 +511,10 @@ export const RecordDetailModal: React.FC<RecordDetailModalProps> = ({
   const isDeleted = !!id && deletedIds.has(id);
 
   const state = useRecord(cfg, open && !isDeleted ? id : undefined, attempt);
+  const settled = !isDeleted && (state.status === 'ready' || state.status === 'denied' || state.status === 'notfound');
+  React.useEffect(() => {
+    if (settled) onSettled?.();
+  }, [settled, id, onSettled]);
   // Who the caller is (for Delete on their own rows) and their project level (for Upload): read once per opening. Identity
   // does not change from record to record, so paging does not read it again; `caller` is memoised so the sections that
   // take it as a prop see a new object only when the identity changes.

@@ -89,12 +89,19 @@ export function resolveStandalonePlane(realm: Realm): StandalonePlane {
 export function applyStandalonePlane(plane: StandalonePlane): void {
   // `scope` is the active backend's scope passed by bff-client.ts (the same record as the request URL); the plane's
   // scope is the fallback for callers that pass none.
-  // `options.forceRefresh` is set only by the 401 retry (bff-client.ts); every other call shapes the request as before.
+  // `options.forceRefresh` is set only by the 401 retry (bff-client.ts), `options.noInteraction` only by the bell's timer
+  // poll; every other call shapes the request as before.
   setActiveBffTokenAcquirer((scope, options) =>
     acquireStandaloneBffToken(
       plane.instance,
       scope ?? plane.bffScope,
-      options?.forceRefresh ? { ...plane.acquireOptions, forceRefresh: true } : plane.acquireOptions
+      options?.forceRefresh || options?.noInteraction
+        ? {
+            ...plane.acquireOptions,
+            ...(options.forceRefresh ? { forceRefresh: true } : {}),
+            ...(options.noInteraction ? { noInteraction: true } : {}),
+          }
+        : plane.acquireOptions
     )
   );
   setActiveLoginScope(plane.bffScope);

@@ -67,6 +67,29 @@ export function consumeReturnTo(): string | null {
 }
 
 /**
+ * Consume the captured return-to route ONLY when it is a safe in-app path AND `accept(path)` holds; otherwise leave it in
+ * storage for its owner. For a consumer that wants one kind of captured route (task 055: the Teams host restores a captured
+ * `?record=` deep link itself, because the account gate that normally restores it never runs inside Teams) without
+ * swallowing a route that belongs to someone else.
+ */
+export function consumeReturnToWhere(accept: (path: string) => boolean): string | null {
+  let raw: string | null = null;
+  try {
+    raw = sessionStorage.getItem(RETURN_TO_KEY);
+  } catch {
+    return null;
+  }
+  const path = safeRelativePath(raw);
+  if (!path || !accept(path)) return null;
+  try {
+    sessionStorage.removeItem(RETURN_TO_KEY);
+  } catch {
+    // sessionStorage unavailable: the path is still returned once for this call.
+  }
+  return path;
+}
+
+/**
  * Only in-app root-relative paths are restorable. Guards against an open-redirect via an
  * absolute (`http://evil`) or protocol-relative (`//evil`) URL smuggled into the return route.
  */
@@ -126,6 +149,13 @@ export interface StandaloneAcquireOptions {
    * returning it again would repeat the 401 (a sign-in loop). Absent, every request is shaped exactly as before.
    */
   forceRefresh?: boolean;
+  /**
+   * BACKGROUND callers only (the notification bell's timer poll): when the token cannot be had silently, throw
+   * {@link SignInRequiredError} instead of capturing the return-to and starting a redirect. A timer must never navigate
+   * the page to Entra with no user action (a half-typed form or an open record would be lost). Records NO sign-in failure,
+   * so a later user-initiated redirect is not blocked by it. Absent, behaviour is exactly as before.
+   */
+  noInteraction?: boolean;
 }
 
 /** The accounts of one instance, optionally scoped to a tenant (case-insensitive GUID). */
@@ -281,6 +311,12 @@ export class SignInRequiredError extends Error {
   }
 }
 
+/**
+ * The failure a `noInteraction` acquisition reports: nothing failed and nothing is recorded; the token simply needs an
+ * interactive sign-in that a background caller must not start.
+ */
+const NO_INTERACTION_FAILURE: SignInFailure = { errorCode: 'interaction_required', aadsts: null };
+
 /** Throws {@link SignInRequiredError} when a redirect for this instance already failed (see there). */
 function assertRedirectAllowed(instance: IPublicClientApplication): void {
   const failure = getSignInFailure(instance);
@@ -306,6 +342,7 @@ function assertRedirectAllowed(instance: IPublicClientApplication): void {
  *   3. On InteractionRequiredAuthError or a timed-out silent iframe renewal, trigger a redirect login — unless a
  *      redirect for this instance already failed in this page load: then throw `SignInRequiredError` (no redirect).
  *   4. Throw after initiating redirect so callers abort the current request.
+ *   `options.noInteraction` (background callers): steps 3-4 are replaced by a `SignInRequiredError`; no redirect.
  *
  * MSAL handles token caching internally — no manual cache management needed.
  *
@@ -323,6 +360,8 @@ export async function acquireStandaloneBffToken(
   const accounts = accountsFor(instance, options.tenantId);
 
   if (accounts.length === 0) {
+    // A background caller never starts a sign-in (and records nothing).
+    if (options.noInteraction) throw new SignInRequiredError(NO_INTERACTION_FAILURE);
     // No authenticated account — trigger login redirect (preserving the current route), unless one already failed
     assertRedirectAllowed(instance);
     captureReturnTo();
@@ -346,6 +385,9 @@ export async function acquireStandaloneBffToken(
     return token;
   } catch (err) {
     if (isInteractionNeeded(err)) {
+      // A background caller (the bell's poll) gets the sign-in state instead of a redirect: no return-to capture, no
+      // navigation, no recorded failure.
+      if (options.noInteraction) throw new SignInRequiredError(NO_INTERACTION_FAILURE);
       // Token expired, consent needed, MFA required, silent renewal timed out, etc. — fall back to
       // the interactive redirect (preserving the route) — unless a redirect already FAILED in this page load
       // (cancelled / declined / MFA abandoned): then answer with the `signin` state instead of redirecting again.
@@ -455,9 +497,15 @@ export async function acquireBffToken(): Promise<string> {
 
 /** The default (CIAM) acquirer: `scope` is the active backend's, passed by bff-client.ts; else the active CIAM scope. */
 function acquireCiamBffToken(scope?: string, options?: BffTokenAcquireOptions): Promise<string> {
-  return options?.forceRefresh
-    ? acquireStandaloneBffToken(msalInstance, scope ?? activeBffScope('ciam'), { forceRefresh: true })
-    : acquireStandaloneBffToken(msalInstance, scope ?? activeBffScope('ciam'));
+  const resolved = scope ?? activeBffScope('ciam');
+  // Options are passed only when set, so the default call shape is `acquireStandaloneBffToken(instance, scope)` as before.
+  if (options?.forceRefresh || options?.noInteraction) {
+    return acquireStandaloneBffToken(msalInstance, resolved, {
+      ...(options.forceRefresh ? { forceRefresh: true } : {}),
+      ...(options.noInteraction ? { noInteraction: true } : {}),
+    });
+  }
+  return acquireStandaloneBffToken(msalInstance, resolved);
 }
 
 /**
@@ -480,6 +528,21 @@ export type BffTokenAcquirer = (scope?: string, options?: BffTokenAcquireOptions
  */
 export interface BffTokenAcquireOptions {
   forceRefresh?: boolean;
+  /**
+   * Passed ONLY by a timer-driven background read (the notification bell's poll): if the token cannot be had without the
+   * user, throw {@link SignInRequiredError} rather than redirect (browser) or open a popup (Teams). See
+   * {@link StandaloneAcquireOptions.noInteraction}.
+   */
+  noInteraction?: boolean;
+}
+
+/** The options to hand an acquirer, carrying only what is set (so the default call shape never changes), or undefined. */
+function definedAcquireOptions(options?: BffTokenAcquireOptions): BffTokenAcquireOptions | undefined {
+  if (!options?.forceRefresh && !options?.noInteraction) return undefined;
+  return {
+    ...(options.forceRefresh ? { forceRefresh: true } : {}),
+    ...(options.noInteraction ? { noInteraction: true } : {}),
+  };
 }
 
 let activeBffTokenAcquirer: BffTokenAcquirer = acquireCiamBffToken;
@@ -502,10 +565,9 @@ export function acquireActiveBffToken(
   backend?: Pick<ActiveBackend, 'bffScope' | 'plane'>,
   options?: BffTokenAcquireOptions
 ): Promise<string> {
+  const passed = definedAcquireOptions(options);
   if (backend === undefined) {
-    return options?.forceRefresh
-      ? activeBffTokenAcquirer(undefined, { forceRefresh: true })
-      : activeBffTokenAcquirer(undefined);
+    return passed ? activeBffTokenAcquirer(undefined, passed) : activeBffTokenAcquirer(undefined);
   }
   const scope = typeof backend === 'object' && backend !== null ? backend.bffScope : undefined;
   if (!isUserImpersonationScope(scope)) {
@@ -516,7 +578,7 @@ export function acquireActiveBffToken(
     );
   }
   // The options argument is passed only when set, so the first-attempt call shape is `acquirer(scope)` as before.
-  return options?.forceRefresh ? activeBffTokenAcquirer(scope, { forceRefresh: true }) : activeBffTokenAcquirer(scope);
+  return passed ? activeBffTokenAcquirer(scope, passed) : activeBffTokenAcquirer(scope);
 }
 
 /**
@@ -741,7 +803,8 @@ export function getTeamsWorkforceSignedInInstance(): IPublicClientApplication | 
 async function acquireBffTokenViaNaa(
   instance: IPublicClientApplication,
   bffScope: string,
-  forceRefresh = false
+  forceRefresh = false,
+  noInteraction = false
 ): Promise<string> {
   const scopes = [bffScope];
   const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0] ?? null;
@@ -758,6 +821,8 @@ async function acquireBffTokenViaNaa(
     return result.accessToken;
   } catch (err) {
     if (err instanceof InteractionRequiredAuthError) {
+      // A background caller (the bell's poll) opens no popup.
+      if (noInteraction) throw new SignInRequiredError(NO_INTERACTION_FAILURE);
       // Broker popup — Teams resolves this without a visible second login for a consented user.
       const result = await instance.acquireTokenPopup({ scopes });
       if (!instance.getActiveAccount() && result.account) {
@@ -782,7 +847,8 @@ async function acquireBffTokenViaPopup(
   instance: IPublicClientApplication,
   bffScope: string,
   trySilentFirst: boolean,
-  forceRefresh = false
+  forceRefresh = false,
+  noInteraction = false
 ): Promise<string> {
   const scopes = [bffScope];
   const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0] ?? null;
@@ -799,6 +865,9 @@ async function acquireBffTokenViaPopup(
       // Fall through to the popup, as OfficeNaaStrategy._tryAcquireWith does.
     }
   }
+
+  // A background caller (the bell's poll) opens no popup: the silent attempt above was its only try.
+  if (noInteraction) throw new SignInRequiredError(NO_INTERACTION_FAILURE);
 
   const result = await instance.acquireTokenPopup({
     scopes,
@@ -868,6 +937,7 @@ export async function acquireTeamsWorkforceBffToken(
   options?: BffTokenAcquireOptions
 ): Promise<string> {
   const forceRefresh = options?.forceRefresh === true;
+  const noInteraction = options?.noInteraction === true;
   try {
     await ensureTeamsInitialized();
   } catch (initError) {
@@ -881,11 +951,13 @@ export async function acquireTeamsWorkforceBffToken(
     if (isNaaChannelRecommended()) {
       try {
         const instance = await getTeamsWorkforceMsalInstance(cfg);
-        const token = await acquireBffTokenViaNaa(instance, cfg.bffScope, forceRefresh);
+        const token = await acquireBffTokenViaNaa(instance, cfg.bffScope, forceRefresh, noInteraction);
         teamsWorkforcePath = 'naa';
         teamsWorkforceSignedInInstance = instance;
         return token;
       } catch (err) {
+        // Sign-in needed and the caller may not interact: no popup fallback, no state change.
+        if (err instanceof SignInRequiredError) throw err;
         // NAA unavailable (no host bridge) or failed — fall through to the MSAL popup fallback.
         naaError = err;
       }
@@ -904,8 +976,9 @@ export async function acquireTeamsWorkforceBffToken(
   try {
     // Bootstrap / renewal path: no user gesture to protect, so the silent attempt (a signed-in popup
     // account's cache) is worth trying first.
-    return await signInViaPopupInstance(cfg, true, forceRefresh);
+    return await signInViaPopupInstance(cfg, true, forceRefresh, noInteraction);
   } catch (popupError) {
+    if (popupError instanceof SignInRequiredError) throw popupError; // background caller: leave the path state alone
     teamsWorkforcePath = null;
     prewarmTeamsWorkforcePopupInstance(cfg);
     throw teamsWorkforceFailure(naaError, popupError);
@@ -925,10 +998,11 @@ function prewarmTeamsWorkforcePopupInstance(cfg: TeamsWorkforceAuthConfig): void
 async function signInViaPopupInstance(
   cfg: TeamsWorkforceAuthConfig,
   trySilentFirst: boolean,
-  forceRefresh = false
+  forceRefresh = false,
+  noInteraction = false
 ): Promise<string> {
   const instance = await getTeamsWorkforcePopupMsalInstance(cfg);
-  const token = await acquireBffTokenViaPopup(instance, cfg.bffScope, trySilentFirst, forceRefresh);
+  const token = await acquireBffTokenViaPopup(instance, cfg.bffScope, trySilentFirst, forceRefresh, noInteraction);
   teamsWorkforcePath = 'popup';
   teamsWorkforceSignedInInstance = instance;
   return token;
