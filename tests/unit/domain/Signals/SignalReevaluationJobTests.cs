@@ -1332,6 +1332,32 @@ public partial class SignalReevaluationJobTests
         row.GetAttributeValue<EntityReference>("sprk_corerecordtype")?.Id,
         Guid.TryParse(row.GetAttributeValue<string>("sprk_corerecordid"), out var c) ? c : null, null);
 
+    [Fact]
+    public async Task Run_HandsThePlanner_TheSecureFamilyPartitionsOfTheRowsAndOfTheHits_1661()
+    {
+        // The matter is a secure root. Its three earlier episodes, dismissed 20, 18 and 16 days ago (past the 14-day quiet window), are
+        // the family's own three dismissals and carry its live stamp. The rows are still the writer's (no owner team): only the lineage
+        // walk places them, and only the hit's own placement puts the new episode in the same family.
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        h.Sysadmin.SecureMatter(MatterId);
+        var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
+        var until = RunAt.UtcDateTime.AddDays(-16).AddDays(30);
+        foreach (var (episode, days) in new[] { (1, 20), (2, 18), (3, 16) })
+        {
+            var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, episode), SignalWriter.SignalStatusResolved,
+                SignalWriter.ResolutionDismissed, resolvedOn: RunAt.UtcDateTime.AddDays(-days), coreId: MatterId, suppressedUntil: until, policyId: policyId);
+            h.Org.Rows[id]["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId);
+            h.Org.Rows[id]["sprk_matter"] = new EntityReference("sprk_matter", MatterId);
+        }
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        h.Org.CreateCalls.Should().Be(0, "the family's stamp mutes the family's new episode: both were placed by the same truth");
+        System.Text.Json.JsonDocument.Parse(result.ResultJson!).RootElement.GetProperty("suppressed").GetInt32().Should().Be(1);
+        h.Org.Rows.Values.Should().OnlyContain(r => r.GetAttributeValue<DateTime?>("sprk_suppresseduntil") == until, "a justified stamp is not rewritten (D-61)");
+    }
+
     private sealed class Harness
     {
         public FakeTimeProvider Clock { get; }
@@ -1366,7 +1392,13 @@ public partial class SignalReevaluationJobTests
             var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, Clock), Logger<PolicyVersionValidator>());
             Evaluator = new SignalEvaluator(validator, Sysadmin, Writer, Logger<SignalEvaluator>());
             Closure = new SignalClosureService(Writer, Sysadmin, Clock, Logger<SignalClosureService>());
-            Suppression = new SignalSuppressionService(Sysadmin, writerClient, Clock, new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(), Logger<SignalSuppressionService>());
+            // #1661: uac-r2's real synchronizer (its walk reads the same World), scoped as in ExternalAccessModule.
+            var configuration = new ConfigurationBuilder().Build();
+            var services = new ServiceCollection();
+            services.AddScoped(_ => new Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer(
+                Sysadmin, null!, null!, configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>.Instance));
+            Suppression = new SignalSuppressionService(Sysadmin, writerClient, Clock, configuration,
+                services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), Logger<SignalSuppressionService>());
             Job = new SignalReevaluationJob(Evaluator, Writer, Suppression, Closure, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
             Sysadmin.Stub(new Entity("sprk_matter", MatterId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
             Sysadmin.Stub(new Entity("sprk_project", ProjectId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
@@ -1531,6 +1563,18 @@ public partial class SignalReevaluationJobTests
         public List<string> Fetches { get; } = new();
         public int WriteCalls { get; private set; }
 
+        /// <summary>#1661: the Secure Record owner team (null: this World has none, so nothing is secure and nothing is walked).</summary>
+        public Guid? SecureTeamId { get; private set; }
+
+        private static readonly Guid SecureBusinessUnitId = Guid.Parse("5ec0be00-0000-4000-8000-0000000000b1");
+
+        /// <summary>#1661: the Secure Record owner team exists and <paramref name="matterId"/> is a secure root it owns.</summary>
+        public World SecureMatter(Guid matterId)
+        {
+            SecureTeamId = Guid.Parse("5ec0be00-0000-4000-8000-000000000001");
+            return Stub(new Entity("sprk_matter", matterId) { ["owningteam"] = new EntityReference("team", SecureTeamId.Value), ["sprk_issecure"] = true });
+        }
+
         public World Stub(Entity row)
         {
             if (_rows.TryGetValue((row.LogicalName, row.Id), out var existing))
@@ -1672,6 +1716,17 @@ public partial class SignalReevaluationJobTests
                         result.Entities.Add(copy);
                     }
 
+                    break;
+                // #1661: uac-r2's Secure Record owner team rule and its root read (owner team + sprk_issecure), only once a team exists.
+                case "businessunit" when SecureTeamId is not null:
+                    result.Entities.Add(new Entity("businessunit", SecureBusinessUnitId));
+                    break;
+                case "team" when SecureTeamId is { } team && Equals(Value("businessunitid"), SecureBusinessUnitId):
+                    result.Entities.Add(new Entity("team", team));
+                    break;
+                case "sprk_matter" when SecureTeamId is not null && query.ColumnSet.Columns.Contains("sprk_issecure")
+                                         && Value("sprk_matterid") is Guid rootId && _rows.TryGetValue(("sprk_matter", rootId), out var root):
+                    result.Entities.Add(root);
                     break;
                 case "timezonedefinition" when Value("timezonecode") is int zoneCode && _zones.TryGetValue(zoneCode, out var name):
                     result.Entities.Add(new Entity("timezonedefinition", Guid.NewGuid()) { ["standardname"] = name });

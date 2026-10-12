@@ -224,10 +224,16 @@ public sealed class SignalReevaluationJob : IScheduledJob
             // the subjects the current version still holds as new episodes in this same pass.
             var superseded = await _closure.SupersedeInPassAsync(policy.Code, versionId, read, ct).ConfigureAwait(false);
             counts.AddClosure(superseded.Outcome, retired: false);
-            // Task 034 (FR-17): stamp a grain found at the dismissal threshold with no live stamp, so the planner below sees it.
+            // Task 034 (FR-17) and #1661: place every stamped or countable Signal in its secure-family partition, stamp a partition
+            // found at the threshold and withdraw a stamp its partition no longer justifies, so the planner below sees the result.
             var (existing, suppressionFailures) = await _suppression.ReconcileAsync(policy.Id, policy.Code, policy.CountsTowardSuppression, superseded.Existing, ct).ConfigureAwait(false);
             counts.PolicyFailures += suppressionFailures;
-            var plan = SignalEpisodePlanner.Plan(lane, evaluation.QuietWindowDays, _timeProvider.GetUtcNow(), evaluation.Hits, existing);
+            // #1661 R1 (D-123): a hit's new episode belongs to the partition the writer's truth gives it NOW, never its previous
+            // episode's. Asked only for hits on a record that carries a live stamp (where the answer can change the outcome).
+            var now = _timeProvider.GetUtcNow();
+            var hitPartitions = await _suppression.PartitionsOfHitsAsync(
+                policy.Code, SignalEpisodePlanner.HitsOnStampedGrains(evaluation.Hits, existing, now), ct).ConfigureAwait(false);
+            var plan = SignalEpisodePlanner.Plan(lane, evaluation.QuietWindowDays, now, evaluation.Hits, existing, hitPartitions);
             if (superseded.NotClosed.Count > 0)
             {
                 // A supersede close that did not land (changed since read / failed) is already counted; the planner must not
@@ -239,6 +245,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
             counts.Add(plan);
             LogRefusedCores(policy, plan);
+            if (plan.PartitionUnresolved > 0)
+            {
+                _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "Policy {PolicyCode}: {Count} hit(s) on a suppressed record were neither raised nor muted because their secure-family " +
+                    "partition could not be determined; the next pass retries.", policy.Code, plan.PartitionUnresolved);
+            }
+
             if (plan.Anomalies > 0)
             {
                 _logger.LogWarning(
@@ -556,9 +569,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
             : SignalWriter.DedupeKeyPolicyPrefix(policyCode);
         var query = new QueryExpression("sprk_signal")
         {
-            ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon",
+            // #1661: the lineage lookups too, so the suppression pass can place each Signal in its secure-family partition.
+            ColumnSet = new ColumnSet(new[]
+            {
+                "sprk_dedupekey", "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon",
                 "sprk_suppresseduntil", "sprk_duedate", "sprk_corerecordtype", "sprk_corerecordid", "ownerid", "versionnumber",
-                "sprk_policyversion", "sprk_decisionrecord"),
+                "sprk_policyversion", "sprk_decisionrecord",
+            }.Concat(SignalSuppressionService.SignalLineageColumns).Distinct(StringComparer.Ordinal).ToArray()),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition("sprk_dedupekey", ConditionOperator.BeginsWith, prefix);
@@ -615,7 +632,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
                     CoreRecordId: Guid.TryParse(row.GetAttributeValue<string>("sprk_corerecordid")?.Trim(), out var coreId) ? coreId : null,
                     Owner: row.GetAttributeValue<EntityReference>("ownerid"),
                     PolicyVersionId: row.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id,
-                    DecisionRecordId: row.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id));
+                    DecisionRecordId: row.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id,
+                    LineageRow: row));
             }
 
             if (!result.MoreRecords)
@@ -644,10 +662,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
         public int Hits, Written, Reraised, Updated, Closed, Reassigned, Refused, ChangedSinceRead;
         public int SupersededClosed, RetiredClosed;
         public int Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred, NotApplicable;
+        public int PartitionUnresolved;
 
-        /// <summary>A scoped policy that is silently skipped, or a Signal left untouched as an anomaly, is not a healthy run.</summary>
+        /// <summary>A scoped policy that is silently skipped, a Signal left untouched as an anomaly, or a hit skipped because its
+        /// secure-family partition is unknown (#1661), is not a healthy run.</summary>
         public bool IsSuccess =>
-            Refused == 0 && InvalidPolicies == 0 && PolicyFailures == 0 && UnparseableKeys == 0 && Anomalies == 0 && ScopedNotEvaluated == 0;
+            Refused == 0 && InvalidPolicies == 0 && PolicyFailures == 0 && UnparseableKeys == 0 && Anomalies == 0 && ScopedNotEvaluated == 0
+            && PartitionUnresolved == 0;
 
         /// <summary>Task 033: a system closure by the closure service. A failed close is a refusal (the run fails); a Signal a
         /// person resolved after the read is the same benign skip as the job's own closes.</summary>
@@ -670,11 +691,12 @@ public sealed class SignalReevaluationJob : IScheduledJob
             NoDatedEvidence += plan.NoDatedEvidence;
             Refused += plan.RefusedHits.Count;
             Anomalies += plan.Anomalies;
+            PartitionUnresolved += plan.PartitionUnresolved;
         }
 
         public string FailureSummary() =>
             $"refused={Refused}, invalidPolicies={InvalidPolicies}, policyFailures={PolicyFailures}, unparseableKeys={UnparseableKeys}, " +
-            $"anomalies={Anomalies}, scopedNotEvaluated={ScopedNotEvaluated}";
+            $"anomalies={Anomalies}, scopedNotEvaluated={ScopedNotEvaluated}, partitionUnresolved={PartitionUnresolved}";
 
         public IReadOnlyDictionary<string, long> ByAction() => new Dictionary<string, long>(StringComparer.Ordinal)
         {
@@ -714,6 +736,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             unparseableKeys = UnparseableKeys,
             anomalies = Anomalies,
             createsDeferred = CreatesDeferred,
+            partitionUnresolved = PartitionUnresolved,
             attempt,
         };
     }
@@ -726,9 +749,10 @@ public sealed class SignalReevaluationJob : IScheduledJob
 /// <param name="Raised">New Signals raised (first episodes and re-raised episodes, including those citing the new version).</param>
 public sealed record PolicyReevaluationResult(bool Success, int SupersededClosed, int Raised, string FailureSummary);
 
-/// <summary>One existing <c>sprk_signal</c> of a policy, as the planner needs it (task 031). <c>SecureOwned</c> (#1661, D-123): the Signal is
-/// owned by the Secure Record owner team; set by <see cref="SignalSuppressionService.ReconcileAsync"/> (the only reader of the owner team),
-/// so the planner reads a suppression stamp only within the partition it was written for.</summary>
+/// <summary>One existing <c>sprk_signal</c> of a policy, as the planner needs it (task 031). <c>Partition</c> (#1661, D-123): the Signal's
+/// secure-family partition, set by <see cref="SignalSuppressionService.ReconcileAsync"/> for every Signal of a record that carries a live
+/// stamp (null: not placed, read as ordinary by the pure planner), so the planner reads a stamp only within the partition it was written
+/// for. <c>LineageRow</c>: the row as read, with its lineage lookups (the partition's input).</summary>
 internal sealed record ExistingSignal(
     Guid Id,
     string? RowVersion,
@@ -745,7 +769,8 @@ internal sealed record ExistingSignal(
     EntityReference? Owner,
     Guid? PolicyVersionId = null,
     Guid? DecisionRecordId = null,
-    bool SecureOwned = false)
+    SuppressionPartition? Partition = null,
+    Entity? LineageRow = null)
 {
     public bool IsOpen => Status is SignalWriter.SignalStatusOpen or SignalWriter.SignalStatusAcknowledged;
 
@@ -773,6 +798,10 @@ internal sealed class EpisodePlan
     /// <summary>D-119: Decide-lane Acted Signals whose predicate still holds but whose evidence is all older than the resolution.</summary>
     public int AwaitingEvidence { get; set; }
 
+    /// <summary>#1661 R1: hits on a record carrying a live stamp whose secure-family partition could not be determined. Neither raised
+    /// nor muted (an open Signal is left as it is); the run is not successful and the next pass retries.</summary>
+    public int PartitionUnresolved { get; set; }
+
     /// <summary>D-119: Decide-lane Acted Signals held un-raised because the hit carries no dated evidence (or the resolution time is unknown).</summary>
     public int NoDatedEvidence { get; set; }
     public int Anomalies { get; set; }
@@ -786,9 +815,10 @@ internal sealed class EpisodePlan
 /// <item><b>Grain (FR-17 as amended, D-34/D-36/D-39).</b> Suppression is read per (policy, core-record type, core-record id),
 /// from the generic <c>sprk_corerecordtype</c> + <c>sprk_corerecordid</c> pair, for EVERY core type alike; an item with no core
 /// record is its own grain (policy, item). A Signal of the pair with <c>sprk_suppresseduntil</c> in the future suppresses
-/// the pair: no first Signal and no re-raise. <b>#1661 (D-123):</b> only within its secure partition: a stamp on a Secure-owned
-/// Signal mutes only a subject whose latest episode is Secure-owned, a stamp on an ordinary one only the rest (a subject with no
-/// episode yet counts as ordinary).</item>
+/// the pair: no first Signal and no re-raise. <b>#1661 (D-123, audit F6):</b> only within its secure-family partition: a stamp
+/// mutes a hit only when the hit's NEW episode is in the stamped row's partition, decided from the current truth
+/// (<see cref="SignalSuppressionService.PartitionsOfHitsAsync"/>), never from a previous episode. A hit on a stamped record whose
+/// partition is unknown is skipped (<see cref="EpisodePlan.PartitionUnresolved"/>); the undetermined bucket never mutes.</item>
 /// <item><b>No Signal yet</b>: episode 1, unless suppressed.</item>
 /// <item><b>Latest Open or Acknowledged</b>: the same episode. Its core record re-derived and different (re-filed), it is
 /// closed as ConditionCleared and episode n+1 opens under the new core (unless suppressed); a no-core Signal whose item has
@@ -806,8 +836,12 @@ internal static class SignalEpisodePlanner
 {
     private readonly record struct Grain(Guid? CoreTypeRefId, Guid CoreId, string? SubjectEntity, Guid SubjectId);
 
+    /// <param name="hitPartitions">#1661 R1: each hit's partition from the truth (<see cref="SignalSuppressionService.PartitionsOfHitsAsync"/>);
+    /// a hit on a stamped record that is absent is skipped. Null only for callers with no partition truth at all (the pure rule tests):
+    /// every hit and every unplaced Signal is then ordinary.</param>
     public static EpisodePlan Plan(
-        int lane, int quietWindowDays, DateTimeOffset nowUtc, IReadOnlyList<SignalHit> hits, IReadOnlyList<ExistingSignal> existing)
+        int lane, int quietWindowDays, DateTimeOffset nowUtc, IReadOnlyList<SignalHit> hits, IReadOnlyList<ExistingSignal> existing,
+        IReadOnlyDictionary<(string SubjectEntity, Guid SubjectId), SuppressionPartition>? hitPartitions = null)
     {
         var plan = new EpisodePlan();
         var now = nowUtc.UtcDateTime;
@@ -816,11 +850,19 @@ internal static class SignalEpisodePlanner
             .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.Episode).ToList());
         var hitSubjects = new HashSet<(string, Guid)>();
 
-        // #1661 (D-123): a stamp mutes only its own secure partition. A hit's partition is its subject's latest episode's; a subject with
-        // no episode yet is unknown, and is read as ordinary (a Secure-owned stamp never mutes a hit that may be readable; the nightly
-        // reconcile stamps a new Secure-owned Signal of a suppressed Secure partition the same night).
-        bool Suppressed(Grain grain, bool secureOwned) =>
-            existing.Any(s => s.SecureOwned == secureOwned && GrainOf(s) == grain && s.SuppressedUntil is { } until && until > now);
+        // #1661 (D-123, audit F6): a stamp mutes only its own secure-family partition, and a hit's partition is the one its NEW episode
+        // will have: the writer decides the new Signal's owner from the current truth, so the previous episode's partition is not the
+        // hit's (a subject that left a secure family must not be muted by that family's stamp, nor the reverse). The truth comes in
+        // hitPartitions; a hit on a stamped record without one is skipped and counted, never raised or muted on a guess.
+        Verdict Suppression(SignalHit hit, Grain grain)
+        {
+            var stamped = StampedPartitions(existing, grain, now);
+            if (stamped.Count == 0) return Verdict.Live;
+            SuppressionPartition partition;
+            if (hitPartitions is null) partition = SuppressionPartition.Ordinary;
+            else if (!hitPartitions.TryGetValue((hit.SubjectEntity, hit.SubjectId), out partition) || partition.IsUndetermined) return Verdict.Unresolved;
+            return stamped.Contains(partition) ? Verdict.Suppressed : Verdict.Live;
+        }
 
         foreach (var hit in hits)
         {
@@ -832,9 +874,11 @@ internal static class SignalEpisodePlanner
             }
 
             var grain = GrainOf(hit, core);
+            var verdict = Suppression(hit, grain);
             if (!bySubject.TryGetValue((hit.SubjectEntity, hit.SubjectId), out var episodes))
             {
-                if (Suppressed(grain, secureOwned: false)) plan.Suppressed++;
+                if (verdict == Verdict.Unresolved) plan.PartitionUnresolved++;
+                else if (verdict == Verdict.Suppressed) plan.Suppressed++;
                 else plan.Creates.Add(new PlannedCreate(hit, 1));
                 continue;
             }
@@ -846,8 +890,14 @@ internal static class SignalEpisodePlanner
             {
                 if (CoreChanged(latest, core))
                 {
+                    if (verdict == Verdict.Unresolved)
+                    {
+                        plan.PartitionUnresolved++; // the old episode stays open: neither the close nor the new episode on a guess
+                        continue;
+                    }
+
                     plan.Closes.Add(latest);
-                    if (Suppressed(grain, latest.SecureOwned)) plan.Suppressed++;
+                    if (verdict == Verdict.Suppressed) plan.Suppressed++;
                     else plan.Creates.Add(new PlannedCreate(hit, latest.Episode + 1, latest.Id));
                     continue;
                 }
@@ -877,7 +927,11 @@ internal static class SignalEpisodePlanner
                 continue;
             }
 
-            if (Suppressed(grain, latest.SecureOwned))
+            if (verdict == Verdict.Unresolved)
+            {
+                plan.PartitionUnresolved++;
+            }
+            else if (verdict == Verdict.Suppressed)
             {
                 plan.Suppressed++;
             }
@@ -929,6 +983,26 @@ internal static class SignalEpisodePlanner
     }
 
     private enum EvidenceVerdict { Newer, Older, Undated }
+
+    private enum Verdict { Live, Suppressed, Unresolved }
+
+    /// <summary>The partitions that carry a live stamp on <paramref name="grain"/> (an unplaced Signal reads as ordinary; the
+    /// undetermined bucket never mutes).</summary>
+    private static HashSet<SuppressionPartition> StampedPartitions(IReadOnlyList<ExistingSignal> existing, Grain grain, DateTime now) =>
+        existing
+            .Where(s => GrainOf(s) == grain && s.SuppressedUntil is { } until && until > now)
+            .Select(s => s.Partition ?? SuppressionPartition.Ordinary)
+            .Where(p => !p.IsUndetermined)
+            .ToHashSet();
+
+    /// <summary>#1661 R1: the hits whose partition can change the outcome, those on a record (or item) that carries a live stamp. Only
+    /// these are placed (<see cref="SignalSuppressionService.PartitionsOfHitsAsync"/>); every other hit is not suppressed whatever its
+    /// partition.</summary>
+    public static IReadOnlyList<SignalHit> HitsOnStampedGrains(IReadOnlyList<SignalHit> hits, IReadOnlyList<ExistingSignal> existing, DateTimeOffset nowUtc)
+    {
+        var now = nowUtc.UtcDateTime;
+        return hits.Where(h => h.Core is { } core && StampedPartitions(existing, GrainOf(h, core), now).Count > 0).ToList();
+    }
 
     /// <summary>D-119 (generic, no policy knowledge): the hit's witness lines (the rows the Existence clauses matched, each carrying
     /// its clause date as <c>AsOf</c>) against the resolution time. <see cref="EvidenceVerdict.Newer"/> when at least one is dated
