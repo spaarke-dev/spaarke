@@ -179,6 +179,59 @@ Decide the owning BU of a workforce contact (a per-stamp customer BU, or the mat
 
 ---
 
+### DEF-001 — Generate and send the standard NDA from the intake request (separate project)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-12 |
+| **Source** | Owner answer 2026-10-12 (intake Q5): NDA covers review and issuing our standard NDA; generating signable documents is a separate project |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1736 |
+
+**Description**
+
+R3's NDA wizard collects an "issue our standard NDA" request (signer name and email, term, governing law, needed-by date). Nothing generates the document from those answers or sends it for signature, so Legal fills every such request by hand.
+
+**Entry-points**
+
+- `notes/intake-form-design.md` §1, §6.1, §6.2
+- `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalIntakeEndpoints.cs`; `sprk_servicerequest.sprk_intakedata`
+- Related project: `projects/ai-advanced-capabilities-nda-r1`
+
+**Suggested fix**: a new project for templates, generation, delivery and e-signature.
+
+**Estimated effort**: unknown; needs a design.
+**Blockers**: template ownership; e-signature provider.
+
+---
+
+### DEF-002 — Incident alerting for Policy Questions (email to a designated mailbox)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-12 |
+| **Source** | Owner answer 2026-10-12 (intake Q3): keep R3 simple; alerting (e.g. email to a designated mailbox) later |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1737 |
+
+**Description**
+
+A Policy Question about something that already happened (breach, bribery, misconduct) waits in the normal service-request queue; nobody handling incidents is alerted.
+
+**Entry-points**
+
+- `notes/intake-form-design.md` §2, §6.1 answer 3
+- `Communication:DefaultMailbox` / `ApprovedSenders` (`CommunicationOptionsValidator`)
+
+**Suggested fix**: an incident flag or topic code, and a server-side notification to a per-customer designated mailbox through the approved shared mailbox, with no answer text in the email.
+
+**Estimated effort**: 1-2 days once the per-customer mailbox exists.
+**Blockers**: per-customer designated mailbox (#1562).
+
+---
+
 ## Closed
 
 (none)
