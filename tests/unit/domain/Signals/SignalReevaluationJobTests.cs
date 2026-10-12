@@ -39,7 +39,7 @@ namespace Sprk.Bff.Api.Tests.Domain.Signals;
 /// here was read from spaarkedev1 on 2026-10-10 (notes/031-evaluator-progress.md, "Live schema read for this task");
 /// <c>sprk_signal</c> writes are additionally exercised against the live schema by <c>SignalWriterSeamTests</c>.</para>
 /// </remarks>
-public class SignalReevaluationJobTests
+public partial class SignalReevaluationJobTests
 {
     private static readonly DateTimeOffset RunAt = new(2026, 10, 10, 3, 0, 0, TimeSpan.Zero);
     private static readonly Guid PolicyId = Guid.Parse("4d204810-61bf-f111-aaaf-0022482913fc");
