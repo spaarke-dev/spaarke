@@ -31,11 +31,9 @@ public sealed record RuleBodyValidationResult(bool IsValid, IReadOnlyList<string
 /// rule type is a code change with review, never a configuration row.
 /// </para>
 /// <para>
-/// <b>Scope of this task (020).</b> Only <see cref="RuleType.Existence"/> has a shipped schema — it is the
-/// one differentiated capability that is otherwise literally unsavable (spec FR-05 rationale). No
-/// <see cref="RuleType.Threshold"/> or <see cref="RuleType.Switch"/> <c>sprk_policyversion</c> rows exist yet
-/// in this project; authoring their schemas is explicitly out of this task's scope and is deferred to
-/// whichever future task first seeds a row of that type.
+/// <b>Scope.</b> <see cref="RuleType.Existence"/> (task 020) and <see cref="RuleType.Threshold"/> (task 025, D-16)
+/// have a shipped schema; <see cref="RuleType.Switch"/> has none and stays refused (D-16 defers it). Adding a type's
+/// schema is a code change with review, never a configuration row.
 /// </para>
 /// <para>
 /// <b>ADR-013 compliance.</b> This validator consumes only the raw <c>sprk_rulebody</c> JSON string and
@@ -53,8 +51,10 @@ public sealed record RuleBodyValidationResult(bool IsValid, IReadOnlyList<string
 public sealed class RuleBodySchemaValidator
 {
     private const string ExistenceSchemaResourceSuffix = "Services.Signals.Schemas.existence-rule.schema.json";
+    private const string ThresholdSchemaResourceSuffix = "Services.Signals.Schemas.threshold-rule.schema.json";
 
-    private static readonly Lazy<JsonSchema> ExistenceSchema = new(LoadExistenceSchema);
+    private static readonly Lazy<JsonSchema> ExistenceSchema = new(() => LoadSchema(ExistenceSchemaResourceSuffix));
+    private static readonly Lazy<JsonSchema> ThresholdSchema = new(() => LoadSchema(ThresholdSchemaResourceSuffix));
 
     /// <summary>Serializes every call into <c>JsonSchema.Evaluate</c> against the shared
     /// <see cref="ExistenceSchema"/> instance — see <see cref="Validate"/>'s own remarks for the measured
@@ -109,11 +109,11 @@ public sealed class RuleBodySchemaValidator
     /// <remarks>
     /// <para><b>Exactly one thing throws</b> (task 022 rework round 2, finding F9 — the previous "never throws
     /// for ANY input" claim was false): a <paramref name="ruleType"/> with no authored schema
-    /// (<see cref="RuleType.Threshold"/> / <see cref="RuleType.Switch"/>, task 020 scope) throws
+    /// (<see cref="RuleType.Switch"/>, deferred by D-16) throws
     /// <see cref="NotSupportedException"/>, for ANY body, before the body is read — that is a caller-contract
     /// question about the TYPE, not a property of the authored content. <see cref="PolicyVersionValidator"/>
     /// never reaches it (it refuses those types first as <c>rule_type_unsupported</c>).</para>
-    /// <para>For <see cref="RuleType.Existence"/> it never throws for any body, however pathological: blank,
+    /// <para>For <see cref="RuleType.Existence"/> and <see cref="RuleType.Threshold"/> it never throws for any body, however pathological: blank,
     /// over-length (refused before parsing, finding F2), malformed or duplicate-key JSON, an unpaired UTF-16
     /// surrogate escape in a property name or a value (round 3, finding M1), a forbidden <c>messageTemplate</c>
     /// property (finding F8), the reserved <c>then</c> property (round 3, finding L2), or a number such as
@@ -355,23 +355,24 @@ public sealed class RuleBodySchemaValidator
     private static JsonSchema ResolveSchema(RuleType ruleType) => ruleType switch
     {
         RuleType.Existence => ExistenceSchema.Value,
-        RuleType.Threshold or RuleType.Switch => throw new NotSupportedException(
-            $"Schema validation for rule type '{ruleType}' has not been authored yet (task 020 scope: " +
-            "Existence only — spec FR-05). No sprk_policyversion row of this type exists in this project."),
+        RuleType.Threshold => ThresholdSchema.Value,
+        RuleType.Switch => throw new NotSupportedException(
+            $"Schema validation for rule type '{ruleType}' has not been authored: Switch is deferred (D-16); " +
+            "the shipped types are Existence and Threshold."),
         _ => throw new NotSupportedException(
             $"'{ruleType}' is not a member of the closed RuleType set (design.md CM-7/CM-8)."),
     };
 
-    private static JsonSchema LoadExistenceSchema()
+    private static JsonSchema LoadSchema(string resourceSuffix)
     {
         var assembly = typeof(RuleBodySchemaValidator).Assembly;
         var resourceName = assembly.GetManifestResourceNames()
-            .FirstOrDefault(n => n.EndsWith(ExistenceSchemaResourceSuffix, StringComparison.Ordinal));
+            .FirstOrDefault(n => n.EndsWith(resourceSuffix, StringComparison.Ordinal));
 
         if (resourceName is null)
         {
             throw new InvalidOperationException(
-                $"Embedded resource ending in '{ExistenceSchemaResourceSuffix}' was not found in assembly " +
+                $"Embedded resource ending in '{resourceSuffix}' was not found in assembly " +
                 $"'{assembly.FullName}'. Check the EmbeddedResource glob in Sprk.Bff.Api.csproj covers " +
                 "Services/Signals/Schemas/*.json.");
         }

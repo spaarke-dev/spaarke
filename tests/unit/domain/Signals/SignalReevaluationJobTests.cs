@@ -59,6 +59,13 @@ public partial class SignalReevaluationJobTests
     private const string PolicyCode = "POL-COMMIT-BUDGET";
     private const string TodoPolicyCode = "POL-TODO-OVERDUE";
     private const int Existence = 100000002;
+    private const int Threshold = 100000000;
+
+    /// <summary>Task 025: a spend threshold, the same compiled-predicate contract as Existence (D-16).</summary>
+    private const string UtilizationBody =
+        """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_budgetutilizationpercent","operator":">=","value":90}}""";
+
+    private const string UtilizationTemplate = "Budget utilization has reached {{sprk_budgetutilizationpercent}} percent.";
 
     /// <summary>The live Path B shape (dev policy POL-COMMIT-BUDGET v2), with a one-value category list so its token pins.</summary>
     private const string PathBBody = """
@@ -574,6 +581,22 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task Evaluate_DateOnlyBoundOnRespondedOn_IsWidenedLikeTheOtherDateOnlyColumns()
+    {
+        // F-68: sprk_workassignment.sprk_respondedon is Date Only, so its relative bound is widened by DateOnlyWideningDays (2)
+        // before the per-item judgement; sprk_responseduedate is the reference (same widening).
+        var h = new Harness();
+        const string body = """{"type":"Existence","subject":"sprk_workassignment","when":{"sprk_respondedon":{"<=":"now"}},"all":[]}""";
+        var policy = new SignalEvaluationPolicy(PolicyId, PolicyCode, SignalWriter.LaneDo, VersionId, Existence.ToString(), body, "Responded.");
+
+        await h.Evaluator.EvaluateAsync(policy, subjectId: null);
+
+        var conditions = XElement.Parse(h.Sysadmin.Fetches.Single()).Element("entity")!.Element("filter")!.Elements("condition")
+            .Select(c => (c.Attribute("attribute")!.Value, c.Attribute("operator")!.Value, c.Attribute("value")!.Value)).ToList();
+        conditions.Should().Equal(new[] { ("sprk_respondedon", "le", "2026-10-12T03:00:00Z") }, "the same widening the To Do due date gets");
+    }
+
+    [Fact]
     public async Task Evaluate_InvalidPolicyVersion_ReturnsNoHits_AndReadsNothing()
     {
         var h = new Harness();
@@ -972,6 +995,247 @@ public partial class SignalReevaluationJobTests
         var cache = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
         var clock = new FakeTimeProvider(RunAt);
         return (new SignalEvaluatorHealthCheck(cache, new ConfigurationBuilder().Build(), clock), cache, clock);
+    }
+
+    // =====================================================================================
+    // Task 025: a Threshold policy runs through the unchanged job and evaluator (D-16)
+    // =====================================================================================
+
+    [Fact]
+    public async Task Run_ThresholdPolicy_WritesASignalForTheMatterOverTheThreshold_AndNoneForTheMatterUnder()
+    {
+        var h = new Harness().WithThresholdPolicy()
+            .WithMatterUtilization(MatterId, 94.5000000000m, "MAT-OVER") // scale 10, as the SDK returns it (live spaarkedev1)
+            .WithMatterUtilization(OtherMatterId, 62m, "MAT-UNDER");
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        var created = h.Org.CreatedPayloads.Should().ContainSingle("only the matter at 94.5 meets >= 90").Subject;
+        created.GetAttributeValue<string>("sprk_dedupekey").Should().Be($"{PolicyCode}|sprk_matter|{Lower(MatterId)}|1");
+        created.GetAttributeValue<string>("sprk_sentence").Should().Be("Budget utilization has reached 94.5 percent.",
+            "the sentence states the subject own value of the column the rule compared (section 0.3)");
+
+        // The compiled query is the same contract Existence uses: one subject query, one condition for the comparison.
+        var fetch = XElement.Parse(h.Sysadmin.Fetches.Should().ContainSingle().Subject);
+        var condition = fetch.Descendants("condition").Should().ContainSingle().Subject;
+        (condition.Attribute("attribute")!.Value, condition.Attribute("operator")!.Value, condition.Attribute("value")!.Value)
+            .Should().Be(("sprk_budgetutilizationpercent", "ge", "90"));
+        fetch.Descendants("link-entity").Should().BeEmpty("a threshold reads only its subject");
+    }
+
+    // ---- D-120: a Threshold Signal resolved Acted re-raises only after a RE-CROSSING ---------------------------------------
+
+    private static readonly DateTime ActedOn = RunAt.UtcDateTime.AddDays(-2);
+
+    private Harness ThresholdActedHarness(decimal utilization, DateTime? lastEvaluated = null)
+    {
+        var h = new Harness().WithThresholdPolicy().WithMatterUtilization(MatterId, utilization, "MAT-ACTED");
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionActed, resolvedOn: ActedOn, coreId: MatterId, lastEvaluated: lastEvaluated ?? ActedOn);
+        return h;
+    }
+
+    [Fact]
+    public async Task Run_ThresholdActed_ClearedThenCrossingAgain_StampsOnce_AndRaisesEpisodeTwo()
+    {
+        var h = ThresholdActedHarness(utilization: 62m); // the condition is FALSE now
+
+        (await h.RunAsync()).Success.Should().BeTrue();
+        var stamp = h.Org.ConditionalUpdates.Should().ContainSingle("the cleared observation is recorded once").Subject;
+        stamp.Fields.Keys.Should().Equal("sprk_lastevaluated");
+        h.Org.CreateCalls.Should().Be(0);
+
+        // A second cleared pass writes nothing (D-61).
+        h.Org.ResetCounts();
+        (await h.RunAsync()).Success.Should().BeTrue();
+        h.Org.ConditionalUpdates.Should().BeEmpty();
+        h.Org.Updates.Should().BeEmpty();
+        h.Org.CreateCalls.Should().Be(0);
+
+        // The matter crosses the threshold again: a new episode (D-13 key, episode 2).
+        h.Sysadmin.SubjectRows["sprk_matter"].Single()["sprk_budgetutilizationpercent"] = 95m;
+        (await h.RunAsync()).Success.Should().BeTrue();
+        h.Org.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_dedupekey")
+            .Should().Be($"{PolicyCode}|sprk_matter|{Lower(MatterId)}|2");
+    }
+
+    [Fact]
+    public async Task Run_ThresholdActed_NeverCleared_StaysSilentWhileItHolds()
+    {
+        var h = ThresholdActedHarness(utilization: 95m); // still over the threshold, never observed false
+
+        (await h.RunAsync()).Success.Should().BeTrue();
+
+        h.Org.WriteCalls.Should().Be(0);
+        h.Org.CreateCalls.Should().Be(0);
+        h.Org.ConditionalUpdates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Run_ThresholdActed_AlreadyMarked_ClearedPassWritesNothing()
+    {
+        var h = ThresholdActedHarness(utilization: 62m, lastEvaluated: ActedOn.AddDays(1));
+
+        (await h.RunAsync()).Success.Should().BeTrue();
+
+        h.Org.WriteCalls.Should().Be(0);
+        h.Org.ConditionalUpdates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Plan_ThresholdActed_UnknownResolutionTime_NeverStampsAndNeverReRaises()
+    {
+        var hit = CommHit(MatterId);
+        var unknown = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed, resolvedOn: null);
+
+        var cleared = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { unknown }, isThreshold: true);
+        cleared.ClearedMarks.Should().BeEmpty("a stamp cannot register as a marker without a resolution time; stamping would repeat every pass (D-61)");
+        cleared.NoDatedEvidence.Should().Be(1);
+
+        var holds = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { unknown with { LastEvaluated = RunAt.UtcDateTime } },
+            isThreshold: true);
+        holds.Creates.Should().BeEmpty();
+        holds.NoDatedEvidence.Should().Be(1);
+    }
+
+    [Fact]
+    public void Plan_ThresholdActed_ClearedWithinTheToleranceOfTheResolution_DoesNotStampYet()
+    {
+        var hit = CommHit(MatterId);
+        var justResolved = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed,
+            resolvedOn: RunAt.UtcDateTime.AddSeconds(-30));
+        var justPast = justResolved with { ResolvedOn = RunAt.UtcDateTime - ExistingSignal.ClearedMarkerTolerance - TimeSpan.FromSeconds(1) };
+
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { justResolved }, isThreshold: true)
+            .ClearedMarks.Should().BeEmpty("a stamp within the tolerance is not a marker, so the next pass would stamp again");
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { justPast }, isThreshold: true)
+            .ClearedMarks.Should().ContainSingle("the stamp now registers as a marker");
+    }
+
+    [Fact]
+    public async Task Run_ThresholdActed_TheSignalChangedBeforeTheStamp_WritesNothing_CountsChangedSinceRead_AndTheRunSucceeds()
+    {
+        var h = new Harness().WithThresholdPolicy().WithMatterUtilization(MatterId, 62m, "MAT-ACTED");
+        var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionActed, resolvedOn: ActedOn, coreId: MatterId, lastEvaluated: ActedOn);
+        h.Org.ResolveByPersonBeforeConditionalUpdate.Add(id); // the row changes between the job's read and its stamp
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        result.ResultJson.Should().Contain("\"changedSinceRead\":1").And.Contain("\"clearedMarked\":0");
+        h.Org.ConditionalUpdates.Should().BeEmpty("the row-version check refused the stamp");
+        h.Org.Rows[id].GetAttributeValue<DateTime>("sprk_lastevaluated").Should().Be(ActedOn, "no stamp was written");
+    }
+
+    [Fact]
+    public void Plan_ThresholdActed_Marker_DecidesTheReRaise_AndTheStamp()
+    {
+        var hit = CommHit(MatterId);
+        var unmarked = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed, resolvedOn: ActedOn);
+        var marked = unmarked with { LastEvaluated = ActedOn.AddHours(6) };
+        var withinTolerance = unmarked with { LastEvaluated = ActedOn.AddSeconds(5) };
+
+        // Holds, no marker: silent. Holds, marker: episode 2. A stamp within moments of the resolution is not a marker.
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { unmarked }, isThreshold: true)
+            .Creates.Should().BeEmpty();
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { withinTolerance }, isThreshold: true)
+            .Creates.Should().BeEmpty();
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { marked }, isThreshold: true)
+            .Creates.Should().ContainSingle().Which.Episode.Should().Be(2);
+
+        // Not a hit: an unmarked Acted signal is stamped; a marked one is not; a Dismissed one is not.
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { unmarked }, isThreshold: true)
+            .ClearedMarks.Should().ContainSingle();
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { marked }, isThreshold: true)
+            .ClearedMarks.Should().BeEmpty();
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(),
+            new[] { unmarked with { Resolution = SignalWriter.ResolutionDismissed } }, isThreshold: true).ClearedMarks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Plan_ExistenceActed_IsUnchangedByTheMarkerAndNeverStamps()
+    {
+        var resolvedOn = RunAt.UtcDateTime.AddDays(-3);
+        var hit = WithEvidence(CommHit(MatterId), Iso(resolvedOn.AddDays(-1)));
+        var markedActed = Existing(hit, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed, resolvedOn: resolvedOn)
+            with { LastEvaluated = resolvedOn.AddDays(1) };
+
+        // D-119 still rules: older evidence does not re-raise, whatever lastevaluated says.
+        var holds = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, new[] { hit }, new[] { markedActed });
+        holds.Creates.Should().BeEmpty();
+        holds.AwaitingEvidence.Should().Be(1);
+
+        // Not a hit: nothing is stamped for an Existence body.
+        SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(),
+            new[] { markedActed with { LastEvaluated = null } }).ClearedMarks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Run_ThresholdPolicy_WithAnOptionSetWhenCondition_IsNotExcludedByTheFake_ControlForTheNumericFilter()
+    {
+        // statecode = 0 is an OptionSetValue: the fake must ignore it (not read it as a null number) and still judge the comparison.
+        const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_budgetutilizationpercent","operator":">=","value":90},"when":{"statecode":0}}""";
+        var h = new Harness().WithThresholdPolicy(body, UtilizationTemplate)
+            .WithMatterUtilization(MatterId, 94.5m, "MAT-OVER");
+        h.Sysadmin.SubjectRows["sprk_matter"][0]["statecode"] = new OptionSetValue(0);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        h.Org.CreatedPayloads.Should().ContainSingle("the active matter at 94.5 meets >= 90; an option set condition is not a number");
+        XElement.Parse(h.Sysadmin.Fetches.Should().ContainSingle().Subject).Descendants("condition")
+            .Select(c => c.Attribute("attribute")!.Value).Should().Contain("statecode");
+    }
+
+    [Fact]
+    public async Task Run_ThresholdPolicy_ReadsACurrencyColumnAsAPlainNumber_AndEqualsTheDeclaredValueCounts()
+    {
+        const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_totalspendtodate","operator":">=","value":50000}}""";
+        var h = new Harness().WithThresholdPolicy(body, "Spend to date is {{sprk_totalspendtodate}}.");
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId)
+        {
+            ["sprk_matterid"] = MatterId, ["sprk_totalspendtodate"] = new Money(50000.0000000000m), // scale 10, as the SDK returns it
+        });
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", OtherMatterId)
+        {
+            ["sprk_matterid"] = OtherMatterId, ["sprk_totalspendtodate"] = new Money(49999.99m),
+        });
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        h.Org.CreatedPayloads.Should().ContainSingle()
+            .Which.GetAttributeValue<string>("sprk_sentence").Should().Be("Spend to date is 50000.");
+    }
+
+    [Fact]
+    public async Task Run_ThresholdPolicy_WhenTheMatterFallsBelow_ClosesTheOpenSignalAsConditionCleared()
+    {
+        var h = new Harness().WithThresholdPolicy().WithMatterUtilization(MatterId, 71m, "MAT-OVER");
+        var signalId = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        var update = h.Org.ConditionalUpdates.Should().ContainSingle().Subject;
+        update.Id.Should().Be(signalId);
+        update.Fields["sprk_resolutiontype"].Should().BeEquivalentTo(new OptionSetValue(SignalWriter.ResolutionConditionCleared));
+        h.Org.CreateCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Run_ThresholdPolicyWhoseTemplateNamesAFieldItDoesNotRead_IsRefusedAtEvaluation_AndWritesNothing()
+    {
+        var h = new Harness()
+            .WithThresholdPolicy(template: "Utilization {{sprk_budgetutilizationpercent}} on {{sprk_matterstatus}}.")
+            .WithMatterUtilization(MatterId, 94.5m, "MAT-OVER");
+
+        await h.RunAsync();
+
+        h.Org.WriteCalls.Should().Be(0, "section 0.3: a template may not assert a field the rule did not read");
+        h.Log.Should().Contain(e => e.EventId.Id == OntologyWriterEvents.PolicyVersionInvalid.Id);
     }
 
     // =====================================================================================
@@ -1387,6 +1651,24 @@ public partial class SignalReevaluationJobTests
             return this;
         }
 
+        public Harness WithThresholdPolicy(string body = UtilizationBody, string template = UtilizationTemplate)
+        {
+            Sysadmin.AddPolicy(PolicyCode, SignalWriter.LaneDecide, true, body, template, ruleType: Threshold);
+            return this;
+        }
+
+        public Harness WithMatterUtilization(Guid matterId, decimal percent, string number)
+        {
+            Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", matterId)
+            {
+                ["sprk_matterid"] = matterId,
+                ["sprk_mattername"] = "Matter " + number,
+                ["sprk_matternumber"] = number,
+                ["sprk_budgetutilizationpercent"] = percent,
+            });
+            return this;
+        }
+
         public Harness WithTodoPolicy()
         {
             Sysadmin.AddPolicy(TodoPolicyCode, SignalWriter.LaneDo, true, TodoOverdueBody, "This To Do is past its due date.");
@@ -1581,7 +1863,7 @@ public partial class SignalReevaluationJobTests
             policy["statecode"] = new OptionSetValue(statecode);
         }
 
-        public void AddPolicy(string code, int lane, bool enabled, string body, string template, string? tenant = null)
+        public void AddPolicy(string code, int lane, bool enabled, string body, string template, string? tenant = null, int ruleType = Existence)
         {
             var versionId = Guid.NewGuid();
             var policy = new Entity("sprk_policy", Guid.NewGuid())
@@ -1599,7 +1881,7 @@ public partial class SignalReevaluationJobTests
             Stub(policy);
             Stub(new Entity("sprk_policyversion", versionId)
             {
-                ["sprk_ruletype"] = new OptionSetValue(Existence),
+                ["sprk_ruletype"] = new OptionSetValue(ruleType),
                 ["sprk_rulebody"] = body,
                 ["sprk_messagetemplate"] = template,
             });
@@ -1684,6 +1966,38 @@ public partial class SignalReevaluationJobTests
             return Task.FromResult(result);
         }
 
+        /// <summary>
+        /// The subject's OWN numeric comparisons (task 025): a root-filter <c>ge/gt/le/lt/eq</c> condition with a numeric
+        /// value must hold for the row's value (a Money or decimal; a null never satisfies it, as in Dataverse). Every other
+        /// condition (dates, ids, joins) is left to the test's rows, as before this task.
+        /// </summary>
+        private static bool HoldsNumericConditions(Entity row, XElement entity) =>
+            (entity.Element("filter")?.Elements("condition") ?? Enumerable.Empty<XElement>())
+            .Where(c => c.Attribute("entityname") is null
+                        && decimal.TryParse((string?)c.Attribute("value"), System.Globalization.NumberStyles.Number,
+                            System.Globalization.CultureInfo.InvariantCulture, out _))
+            .All(c =>
+            {
+                var expected = decimal.Parse((string)c.Attribute("value")!, System.Globalization.CultureInfo.InvariantCulture);
+                var op = (string?)c.Attribute("operator");
+                var present = row.Attributes.TryGetValue((string)c.Attribute("attribute")!, out var v);
+
+                // Only a numeric column is compared. An option set, lookup or string column (statecode eq 0) is not modelled
+                // here and never excludes a row; a missing value never satisfies an ordered comparison (Dataverse: null).
+                if (present && v is not (Money or decimal)) return true;
+                if (!present) return op == "eq";
+                decimal? actual = v switch { Money m => m.Value, decimal d => d, _ => null };
+                return actual is { } a && op switch
+                {
+                    "ge" => a >= expected,
+                    "gt" => a > expected,
+                    "le" => a <= expected,
+                    "lt" => a < expected,
+                    "eq" => a == expected,
+                    _ => true,
+                };
+            });
+
         private static bool Matches(Entity row, string attribute, object expected) => row.Attributes.TryGetValue(attribute, out var actual) && actual switch
         {
             OptionSetValue o => Equals(o.Value, expected),
@@ -1698,7 +2012,7 @@ public partial class SignalReevaluationJobTests
             var result = new EntityCollection();
             if (SubjectRows.TryGetValue(name, out var subjects))
             {
-                foreach (var row in subjects.Where(r => InnerLinksSatisfied(entity, r))) result.Entities.Add(row);
+                foreach (var row in subjects.Where(r => HoldsNumericConditions(r, entity) && InnerLinksSatisfied(entity, r))) result.Entities.Add(row);
             }
             else if (WitnessRows.TryGetValue(name, out var witnesses))
             {
@@ -1794,7 +2108,8 @@ public partial class SignalReevaluationJobTests
         public string VersionOf(Guid id) => _versions[id].ToString();
 
         public Guid SeedSignal(string key, int status, int? resolution = null, DateTime? resolvedOn = null, Guid? coreId = null,
-            DateTime? suppressedUntil = null, DateTime? due = null, Guid? policyId = null, Guid? versionId = null)
+            DateTime? suppressedUntil = null, DateTime? due = null, Guid? policyId = null, Guid? versionId = null,
+            DateTime? lastEvaluated = null)
         {
             var id = Guid.NewGuid();
             var row = new Entity("sprk_signal", id)
@@ -1808,6 +2123,7 @@ public partial class SignalReevaluationJobTests
             if (resolution is { } r) row["sprk_resolutiontype"] = new OptionSetValue(r);
             if (resolvedOn is { } on) row["sprk_resolvedon"] = on;
             if (suppressedUntil is { } until) row["sprk_suppresseduntil"] = until;
+            if (lastEvaluated is { } evaluated) row["sprk_lastevaluated"] = evaluated;
             if (due is { } d) row["sprk_duedate"] = d;
             if (coreId is { } c)
             {

@@ -262,23 +262,20 @@ public class RuleBodySchemaValidatorTests
         ((int)RuleType.Existence).Should().Be(100000002);
     }
 
-    [Theory]
-    [InlineData(RuleType.Threshold)]
-    [InlineData(RuleType.Switch)]
-    public void Validate_WithRuleTypeHavingNoAuthoredSchemaYet_ThrowsNotSupported(RuleType ruleType)
+    [Fact]
+    public void Validate_Switch_ThrowsNotSupported()
     {
-        // Threshold/Switch are closed-set members but this task's scope is Existence only (spec FR-05);
-        // no sprk_policyversion row of either type exists yet. The validator must fail loudly, not
-        // silently accept an unvalidated body under a known-but-unimplemented type.
-        var act = () => _sut.Validate(ruleType, "{}");
+        // Switch is a closed-set member that D-16 defers (Existence and Threshold are the shipped types). The
+        // validator must fail loudly, not silently accept an unvalidated body under a known-but-unimplemented type.
+        var act = () => _sut.Validate(RuleType.Switch, "{}");
 
         act.Should().Throw<NotSupportedException>();
     }
 
     [Theory]
-    [InlineData(RuleType.Threshold, null)]
+    [InlineData(RuleType.Switch, null)]
     [InlineData(RuleType.Switch, "{ not valid json")]
-    public void Validate_WithRuleTypeHavingNoAuthoredSchemaYet_ThrowsWhateverTheBody(RuleType ruleType, string? body)
+    public void Validate_WithRuleTypeHavingNoAuthoredSchema_ThrowsWhateverTheBody(RuleType ruleType, string? body)
     {
         // Task 022 rework round 2, finding F9: the documented throwing contract is about the TYPE, so it must
         // not depend on the body -- previously a blank or malformed body returned a Failure for these types
