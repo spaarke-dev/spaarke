@@ -176,6 +176,7 @@ public static class HandlerEndpoints
     /// </summary>
     private static IResult GetHandler(
         string handlerId,
+        HttpContext httpContext,
         IToolHandlerRegistry registry,
         ILoggerFactory loggerFactory)
     {
@@ -185,13 +186,13 @@ public static class HandlerEndpoints
         if (handler == null)
         {
             logger.LogWarning("[HANDLERS] Handler {HandlerId} not found or disabled", handlerId);
-            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Handler '{handlerId}' not found or is disabled.");
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Handler '{handlerId}' not found or is disabled.", httpContext.TraceIdentifier);
         }
 
         var handlerInfo = registry.GetAllHandlerInfo().FirstOrDefault(h => h.HandlerId == handlerId);
         if (handlerInfo == null)
         {
-            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Handler info for '{handlerId}' not found.");
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Handler info for '{handlerId}' not found.", httpContext.TraceIdentifier);
         }
 
         var dto = new HandlerDto(

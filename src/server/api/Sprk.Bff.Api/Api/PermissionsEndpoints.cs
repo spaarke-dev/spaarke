@@ -44,7 +44,7 @@ public static class PermissionsEndpoints
             .WithDescription("Returns what operations the current user can perform on the specified document. A caller with no access to the document receives all capabilities false.")
             .Produces<DocumentCapabilities>(200)
             .Produces(401) // Unauthorized
-            .Produces(404); // Document not found
+            .ProducesProblem(404); // Document not found
 
         // POST /api/documents/permissions/batch
         group.MapPost("permissions/batch", GetBatchPermissionsAsync)
@@ -52,7 +52,7 @@ public static class PermissionsEndpoints
             .WithSummary("Get the CALLING user's capabilities for multiple documents")
             .WithDescription("Batch endpoint to get permissions for multiple documents in one request (performance optimization for galleries). Always scoped to the authenticated caller.")
             .Produces<BatchPermissionsResponse>(200)
-            .Produces(400) // Bad request
+            .ProducesProblem(400) // Bad request
             .Produces(401); // Unauthorized
     }
 
@@ -131,14 +131,14 @@ public static class PermissionsEndpoints
         // Validate request
         if (request.DocumentIds == null || request.DocumentIds.Count == 0)
         {
-            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "DocumentIds cannot be empty");
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "DocumentIds cannot be empty", httpContext.TraceIdentifier);
         }
 
         // Limit batch size to prevent abuse
         const int MaxBatchSize = 100;
         if (request.DocumentIds.Count > MaxBatchSize)
         {
-            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, $"Maximum batch size is {MaxBatchSize} documents");
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, $"Maximum batch size is {MaxBatchSize} documents", httpContext.TraceIdentifier);
         }
 
         // Identity comes from the validated token ONLY (task 006 / FR-05).

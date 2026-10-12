@@ -46,9 +46,9 @@ public static class NavMapEndpoints
             .WithSummary("Get plural entity set name for an entity")
             .WithDescription("Returns the EntitySetName (plural collection name) for a given entity logical name. Example: sprk_document → sprk_documents")
             .Produces<EntitySetNameResponse>(200)
-            .Produces(400) // Bad request
+            .ProducesProblem(400) // Bad request
             .Produces(401) // Unauthorized
-            .Produces(404) // Entity not found
+            .ProducesProblem(404) // Entity not found
             .Produces(500); // Server error
 
         // GET /api/navmap/{childEntity}/{relationship}/lookup
@@ -57,9 +57,9 @@ public static class NavMapEndpoints
             .WithSummary("Get lookup navigation property metadata (CRITICAL for @odata.bind)")
             .WithDescription("Returns case-sensitive navigation property metadata for a child → parent relationship. This is the MOST CRITICAL endpoint for solving the sprk_Matter vs sprk_matter case-sensitivity issue.")
             .Produces<LookupNavigationResponse>(200)
-            .Produces(400) // Bad request
+            .ProducesProblem(400) // Bad request
             .Produces(401) // Unauthorized
-            .Produces(404) // Entity or relationship not found
+            .ProducesProblem(404) // Entity or relationship not found
             .Produces(500); // Server error
 
         // GET /api/navmap/{parentEntity}/{relationship}/collection
@@ -68,9 +68,9 @@ public static class NavMapEndpoints
             .WithSummary("Get collection navigation property name")
             .WithDescription("Returns the collection navigation property name for a parent → child relationship. Used for relationship URL creation.")
             .Produces<CollectionNavigationResponse>(200)
-            .Produces(400) // Bad request
+            .ProducesProblem(400) // Bad request
             .Produces(401) // Unauthorized
-            .Produces(404) // Entity or relationship not found
+            .ProducesProblem(404) // Entity or relationship not found
             .Produces(500); // Server error
     }
 
@@ -86,6 +86,7 @@ public static class NavMapEndpoints
     /// </summary>
     private static async Task<IResult> GetEntitySetNameAsync(
         string entityLogicalName,
+        HttpContext httpContext,
         IGenericEntityService dataverseService,
         IEndpointResponseCache cache,
         ILogger<Program> logger,
@@ -93,7 +94,7 @@ public static class NavMapEndpoints
     {
         if (string.IsNullOrWhiteSpace(entityLogicalName))
         {
-            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "entityLogicalName cannot be empty");
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "entityLogicalName cannot be empty", httpContext.TraceIdentifier);
         }
 
         var cacheKey = $"{CacheKeyPrefix}entityset:{entityLogicalName}";
@@ -147,14 +148,14 @@ public static class NavMapEndpoints
                 });
             }
 
-            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Entity '{entityLogicalName}' not found in Dataverse metadata");
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Entity '{entityLogicalName}' not found in Dataverse metadata", httpContext.TraceIdentifier);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error retrieving EntitySetName for {Entity}", entityLogicalName);
             return TypedResults.Problem(
                 title: "Error retrieving entity set name",
-                detail: ex.Message,
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving the entity set name.", ex),
                 statusCode: 500);
         }
     }
@@ -175,6 +176,7 @@ public static class NavMapEndpoints
     private static async Task<IResult> GetLookupNavigationAsync(
         string childEntity,
         string relationship,
+        HttpContext httpContext,
         IGenericEntityService dataverseService,
         IEndpointResponseCache cache,
         ILogger<Program> logger,
@@ -182,12 +184,12 @@ public static class NavMapEndpoints
     {
         if (string.IsNullOrWhiteSpace(childEntity))
         {
-            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "childEntity cannot be empty");
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "childEntity cannot be empty", httpContext.TraceIdentifier);
         }
 
         if (string.IsNullOrWhiteSpace(relationship))
         {
-            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "relationship cannot be empty");
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "relationship cannot be empty", httpContext.TraceIdentifier);
         }
 
         var cacheKey = $"{CacheKeyPrefix}lookup:{childEntity}:{relationship}";
@@ -256,14 +258,14 @@ public static class NavMapEndpoints
                 });
             }
 
-            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Lookup navigation not found for {childEntity}.{relationship}");
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Lookup navigation not found for {childEntity}.{relationship}", httpContext.TraceIdentifier);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error retrieving lookup navigation for {Child}.{Relationship}", childEntity, relationship);
             return TypedResults.Problem(
                 title: "Error retrieving lookup navigation metadata",
-                detail: ex.Message,
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving lookup navigation metadata.", ex),
                 statusCode: 500);
         }
     }
@@ -281,6 +283,7 @@ public static class NavMapEndpoints
     private static async Task<IResult> GetCollectionNavigationAsync(
         string parentEntity,
         string relationship,
+        HttpContext httpContext,
         IGenericEntityService dataverseService,
         IEndpointResponseCache cache,
         ILogger<Program> logger,
@@ -288,12 +291,12 @@ public static class NavMapEndpoints
     {
         if (string.IsNullOrWhiteSpace(parentEntity))
         {
-            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "parentEntity cannot be empty");
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "parentEntity cannot be empty", httpContext.TraceIdentifier);
         }
 
         if (string.IsNullOrWhiteSpace(relationship))
         {
-            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "relationship cannot be empty");
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "relationship cannot be empty", httpContext.TraceIdentifier);
         }
 
         var cacheKey = $"{CacheKeyPrefix}collection:{parentEntity}:{relationship}";
@@ -353,14 +356,14 @@ public static class NavMapEndpoints
                 });
             }
 
-            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Collection navigation not found for {parentEntity}.{relationship}");
+            return ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, $"Collection navigation not found for {parentEntity}.{relationship}", httpContext.TraceIdentifier);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Error retrieving collection navigation for {Parent}.{Relationship}", parentEntity, relationship);
             return TypedResults.Problem(
                 title: "Error retrieving collection navigation metadata",
-                detail: ex.Message,
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving collection navigation metadata.", ex),
                 statusCode: 500);
         }
     }

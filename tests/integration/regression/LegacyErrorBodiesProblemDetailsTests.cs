@@ -41,6 +41,7 @@ public class LegacyErrorBodiesProblemDetailsTests
         // ProblemHttpResult.ExecuteAsync resolves ILoggerFactory from RequestServices.
         RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
         Response = { Body = new MemoryStream() },
+        TraceIdentifier = "trace-legacy-error-bodies",
     };
 
     private static async Task InvokeAsync(
@@ -92,6 +93,8 @@ public class LegacyErrorBodiesProblemDetailsTests
         body.GetProperty("title").GetString().Should().NotBeNullOrEmpty();
         body.GetProperty("detail").GetString().Should().Be(detail);
         body.GetProperty("error").GetString().Should().Be(detail, "the legacy member is kept for any reader of it (NavMapClient)");
+        body.GetProperty("correlationId").GetString().Should().Be(httpContext.TraceIdentifier,
+            "ADR-019: every ProblemDetails carries a correlation id so support can find the request");
     }
 
     // ── HandlerEndpoints: GET /api/ai/handlers/{handlerId} ───────────────────────────────────────
@@ -158,6 +161,41 @@ public class LegacyErrorBodiesProblemDetailsTests
     private static Task NavMapAsync(HttpContext ctx, string method, params (string Name, object? Value)[] named) =>
         InvokeAsync(typeof(NavMapEndpoints), method, ctx, Named(named),
             NotFoundDataverse(), new Mock<IEndpointResponseCache>().Object);
+
+    // A Dataverse failure whose message carries a secret VALUE (the shape Graph/MSAL put in upstream errors).
+    private const string LeakedSecret = "SUPERSECRET-0123456789";
+
+    private static IGenericEntityService FailingDataverse()
+    {
+        var failure = new HttpRequestException($"upstream rejected the call: client_secret={LeakedSecret}");
+        var svc = new Mock<IGenericEntityService>();
+        svc.Setup(s => s.GetEntitySetNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(failure);
+        svc.Setup(s => s.GetLookupNavigationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(failure);
+        svc.Setup(s => s.GetCollectionNavigationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(failure);
+        return svc.Object;
+    }
+
+    [Theory]
+    [InlineData("GetEntitySetNameAsync", "entityLogicalName", "sprk_x", "Error retrieving entity set name")]
+    [InlineData("GetLookupNavigationAsync", "childEntity", "sprk_x", "Error retrieving lookup navigation metadata")]
+    [InlineData("GetCollectionNavigationAsync", "parentEntity", "sprk_x", "Error retrieving collection navigation metadata")]
+    public async Task NavMap_UnexpectedFailure_Is500WithoutLeakingSecrets(string method, string firstArg, string value, string title)
+    {
+        var ctx = NewContext();
+        await InvokeAsync(typeof(NavMapEndpoints), method, ctx,
+            Named((firstArg, value), ("relationship", "sprk_r")),
+            FailingDataverse(), new Mock<IEndpointResponseCache>().Object);
+
+        ctx.Response.StatusCode.Should().Be(500);
+        ctx.Response.Body.Position = 0;
+        var raw = await new StreamReader(ctx.Response.Body).ReadToEndAsync();
+        raw.Should().NotContain(LeakedSecret, "the catch-all 500 must not echo a raw exception message (secret values)");
+
+        var body = JsonSerializer.Deserialize<JsonElement>(raw);
+        body.GetProperty("title").GetString().Should().Be(title);
+        body.GetProperty("detail").GetString().Should().Contain("client_secret=[redacted]",
+            "the cause is still surfaced for the operator, with the secret value redacted");
+    }
 
     [Fact]
     public async Task NavMap_EntitySet_EmptyEntity_Is400Problem()
