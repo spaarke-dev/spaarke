@@ -70,11 +70,13 @@ export const InventionSubmissionWizard: React.FC<IntakeWizardProps> = ({ open, o
   const set = <K extends keyof InventionForm>(key: K, value: InventionForm[K]): void =>
     setForm(prev => ({ ...prev, [key]: value }));
 
-  // Props every text/choice row takes for one field (a key may be nested, e.g. `coInventors.0.name`).
-  const row = (key: string) => ({
+  // Props every text/choice row takes for one field. `key` is the error key (nested keys are by row position, e.g.
+  // `coInventors.0.name`); `touchKey` is the touched-state key, which for a co-inventor field uses the row's id so that
+  // removing a row does not hand its touched state to the row that shifts into its position.
+  const row = (key: string, touchKey: string = key) => ({
     error: errors[key],
-    showError: shows(key),
-    onBlur: () => touch(key),
+    showError: shows(touchKey),
+    onBlur: () => touch(touchKey),
   });
 
   const setCoInventor = (index: number, field: 'name' | 'email' | 'organization', value: string): void =>
@@ -201,7 +203,7 @@ export const InventionSubmissionWizard: React.FC<IntakeWizardProps> = ({ open, o
               anyone outside the company.
             </Text>
             {form.coInventors.map((c, i) => (
-              <div key={i} className={s.inventor}>
+              <div key={c.id} className={s.inventor}>
                 <div className={s.inventorHead}>
                   <Text weight="semibold">Inventor {i + 1}</Text>
                   <Button
@@ -225,22 +227,22 @@ export const InventionSubmissionWizard: React.FC<IntakeWizardProps> = ({ open, o
                   value={c.name}
                   onChange={v => setCoInventor(i, 'name', v)}
                   maxLength={INVENTION_LIMITS.coInventorName.max}
-                  {...row(`coInventors.${i}.name`)}
+                  {...row(`coInventors.${i}.name`, `coInventors.${c.id}.name`)}
                 />
                 <TextRow
                   label={`Inventor ${i + 1} email`}
                   type="email"
                   value={c.email}
                   onChange={v => setCoInventor(i, 'email', v)}
-                  maxLength={254}
-                  {...row(`coInventors.${i}.email`)}
+                  maxLength={INVENTION_LIMITS.coInventorEmail.max}
+                  {...row(`coInventors.${i}.email`, `coInventors.${c.id}.email`)}
                 />
                 <TextRow
                   label={`Inventor ${i + 1} organization`}
                   value={c.organization}
                   onChange={v => setCoInventor(i, 'organization', v)}
                   maxLength={INVENTION_LIMITS.coInventorOrganization.max}
-                  {...row(`coInventors.${i}.organization`)}
+                  {...row(`coInventors.${i}.organization`, `coInventors.${c.id}.organization`)}
                 />
               </div>
             ))}
@@ -370,6 +372,8 @@ export const InventionSubmissionWizard: React.FC<IntakeWizardProps> = ({ open, o
                 value={form.productDate}
                 onChange={v => set('productDate', v)}
                 maxLength={10}
+                min={INVENTION_LIMITS.earliestPast}
+                max={addDaysIso(today, INVENTION_LIMITS.futureDays)}
                 {...row('productDate')}
               />
             </>

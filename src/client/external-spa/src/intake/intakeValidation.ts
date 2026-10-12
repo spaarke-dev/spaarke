@@ -84,11 +84,11 @@ export function dateError(value: string, required: boolean, min: string, max: st
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** Required email address: format check, at most 254 characters. */
-export function emailError(value: string, label: string): FieldError {
+/** Required email address: format check, at most `maxLength` (default 254) characters. */
+export function emailError(value: string, label: string, maxLength = 254): FieldError {
   const v = value.trim();
   if (v.length === 0) return `Enter ${label}.`;
-  if (v.length > 254 || !EMAIL.test(v)) return `Enter a valid email address for ${label}.`;
+  if (v.length > maxLength || !EMAIL.test(v)) return `Enter a valid email address for ${label}.`;
   return null;
 }
 

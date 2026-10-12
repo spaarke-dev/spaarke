@@ -32,7 +32,9 @@ import {
 } from '../src/intake/policyModel';
 import { getPolicyTopics, policyTopicLabel } from '../src/intake/policyTopics';
 import {
+  INVENTION_LIMITS,
   buildInventionAnswers,
+  emptyCoInventor,
   emptyInventionForm,
   inventionReviewRows,
   inventionTitle,
@@ -382,7 +384,7 @@ describe('Invention Submission model', () => {
     expect(validateInvention(invention({ submitterIsInventor: 'no' }), TODAY).coInventors).toBe(
       'Add at least one inventor.'
     );
-    const row = { name: 'Pat Doe', email: '', organization: '' };
+    const row = { id: 'row-a', name: 'Pat Doe', email: '', organization: '' };
     expect(validateInvention(invention({ submitterIsInventor: 'no', coInventors: [row] }), TODAY)).toEqual({});
     expect(validateInvention(invention({ coInventors: [{ ...row, name: ' ' }] }), TODAY)['coInventors.0.name']).toBe(
       'Enter the inventor’s name.'
@@ -429,6 +431,39 @@ describe('Invention Submission model', () => {
     expect(
       validateInvention({ ...planned, disclosureDate: '2026-12-01', disclosureMethod: 'bogus' }, TODAY).disclosureMethod
     ).toMatch(/from the list/);
+  });
+
+  it('upper bound: a planned disclosure and a product release date reach today + 3650 days, not 3651', () => {
+    const planned = invention({ publicDisclosure: 'planned', disclosureMethod: 'publication' });
+    const product = invention({ productUse: 'planned', productName: 'Widget' });
+    const limit = addDaysIso(TODAY, 3650);
+    const over = addDaysIso(TODAY, 3651);
+    expect(validateInvention({ ...planned, disclosureDate: over }, TODAY).disclosureDate).toMatch(/ten years/);
+    expect(validateInvention({ ...planned, disclosureDate: limit }, TODAY)).toEqual({});
+    expect(validateInvention({ ...product, productDate: over }, TODAY).productDate).toMatch(/ten years/);
+    expect(validateInvention({ ...product, productDate: limit }, TODAY)).toEqual({});
+  });
+
+  it('a co-inventor row carries a client-only id that is never sent', () => {
+    const a = emptyCoInventor();
+    const b = emptyCoInventor();
+    expect(a.id).toBeTruthy();
+    expect(a.id).not.toBe(b.id);
+    const answers = buildInventionAnswers(
+      invention({ coInventors: [{ id: 'row-a', name: 'Pat Doe', email: 'pat@contoso.example', organization: 'C' }] })
+    );
+    expect(answers.coInventors).toEqual([{ name: 'Pat Doe', email: 'pat@contoso.example', organization: 'C' }]);
+    expect(JSON.stringify(answers)).not.toContain('row-a');
+  });
+
+  it('the co-inventor email is capped by INVENTION_LIMITS.coInventorEmail (254)', () => {
+    const at = (length: number): string => `${'a'.repeat(length - '@x.co'.length)}@x.co`;
+    const row = { id: 'row-a', name: 'Pat Doe', organization: '' };
+    expect(INVENTION_LIMITS.coInventorEmail.max).toBe(254);
+    expect(validateInvention(invention({ coInventors: [{ ...row, email: at(254) }] }), TODAY)).toEqual({});
+    expect(
+      validateInvention(invention({ coInventors: [{ ...row, email: at(255) }] }), TODAY)['coInventors.0.email']
+    ).toMatch(/valid email/);
   });
 
   it('disclosure warning: shown for "already"; for "planned" only with a valid date within 60 days', () => {
@@ -482,7 +517,7 @@ describe('Invention Submission model', () => {
     const stale = buildInventionAnswers(
       invention({
         submitterIsInventor: 'no',
-        coInventors: [{ name: ' Pat Doe ', email: ' ', organization: 'Contoso' }],
+        coInventors: [{ id: 'row-a', name: ' Pat Doe ', email: ' ', organization: 'Contoso' }],
         publicDisclosure: 'none',
         disclosureDate: '2026-09-01',
         disclosureMethod: 'demo',
@@ -584,6 +619,13 @@ describe('Trademark Search model', () => {
     expect(validateTrademark(trademark({ currentUse: 'internal', firstUseDate: '2099-01-01' }), TODAY)).toEqual({});
     expect(validateTrademark(trademark({ launchDate: '2026-10-11' }), TODAY).launchDate).toMatch(/Choose a date/);
     expect(validateTrademark(trademark({ launchDate: '2027-03-01' }), TODAY)).toEqual({});
+  });
+
+  it('upper bound: the launch date reaches today + 3650 days, not 3651', () => {
+    expect(validateTrademark(trademark({ launchDate: addDaysIso(TODAY, 3651) }), TODAY).launchDate).toMatch(
+      /ten years/
+    );
+    expect(validateTrademark(trademark({ launchDate: addDaysIso(TODAY, 3650) }), TODAY).launchDate).toBeUndefined();
   });
 
   it('neededBy: today up to the launch date when set, else a year; never after launch', () => {

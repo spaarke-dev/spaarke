@@ -70,6 +70,8 @@ export const INVENTION_LIMITS = {
   knownAlternatives: { min: 0, max: 3000 },
   coInventorName: { min: 2, max: 150 },
   coInventorOrganization: { min: 0, max: 200 },
+  /** An email address (RFC 5321 path limit); `emailError` enforces the same 254. */
+  coInventorEmail: { max: 254 },
   /** Rows in the co-inventor list. */
   maxCoInventors: 20,
   disclosureVenue: { min: 0, max: 300 },
@@ -86,12 +88,22 @@ export const INVENTION_LIMITS = {
 } as const;
 
 export interface CoInventor {
+  /** Client-only row identity (React key and touched-state key). Never sent: `buildInventionAnswers` picks fields. */
+  id: string;
   name: string;
   email: string;
   organization: string;
 }
 
-export const emptyCoInventor = (): CoInventor => ({ name: '', email: '', organization: '' });
+let coInventorSeq = 0;
+
+/** A unique row id: `crypto.randomUUID()` where it exists (it needs a secure context), else a counter. */
+const newCoInventorId = (): string =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `co-inventor-${++coInventorSeq}`;
+
+export const emptyCoInventor = (): CoInventor => ({ id: newCoInventorId(), name: '', email: '', organization: '' });
 
 export interface InventionForm {
   shortTitle: string;
@@ -254,7 +266,8 @@ export function validateInvention(f: InventionForm, today: string): Record<strin
       `coInventors.${i}.name`,
       textError(c.name, 'the inventor’s name', INVENTION_LIMITS.coInventorName.min, INVENTION_LIMITS.coInventorName.max)
     );
-    if (c.email.trim() !== '') set(`coInventors.${i}.email`, emailError(c.email, 'the inventor'));
+    if (c.email.trim() !== '')
+      set(`coInventors.${i}.email`, emailError(c.email, 'the inventor', INVENTION_LIMITS.coInventorEmail.max));
     set(
       `coInventors.${i}.organization`,
       textError(

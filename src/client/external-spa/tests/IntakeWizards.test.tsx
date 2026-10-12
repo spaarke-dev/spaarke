@@ -899,6 +899,42 @@ describe('Invention Submission wizard', () => {
     expect(nextButton().disabled).toBe(true);
   });
 
+  it('removing a row does not hand its touched state to the row that shifts up (rows are keyed by id, not position)', () => {
+    fillInventionStep1();
+    radioIn(/Are you one of the inventors/, 'Yes');
+    const add = screen.getByRole('button', { name: 'Add inventor' });
+    fireEvent.click(add);
+    fireEvent.click(add);
+    fireEvent.blur(screen.getByLabelText(/Inventor 1 name/)); // row 1: touched and empty, so its error shows
+    expect(screen.getAllByText('Enter the inventor’s name.')).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove inventor 1' }));
+    // The untouched, still-empty row 2 is now "Inventor 1": it is invalid but must not inherit row 1's touched state.
+    expect(screen.getByLabelText(/Inventor 1 name/)).toBeTruthy();
+    expect(screen.queryByLabelText(/Inventor 2 name/)).toBeNull();
+    expect(screen.queryByText('Enter the inventor’s name.')).toBeNull();
+    expect(nextButton().disabled).toBe(true);
+  });
+
+  it('the co-inventor id never reaches the POST body', async () => {
+    fillInventionStep1();
+    radioIn(/Are you one of the inventors/, 'No');
+    fireEvent.click(screen.getByRole('button', { name: 'Add inventor' }));
+    change(/Inventor 1 name/, 'Pat Doe');
+    next();
+    radioIn(/shared publicly/, 'No');
+    radioIn(/outside the company, even under NDA/, 'No');
+    radioIn(/used in a product or service/, 'No');
+    radioIn(/developed with, or funded by/, 'No');
+    next();
+    tickConfirm();
+    fireEvent.click(submitButton('Submit disclosure'));
+    await screen.findByText('Invention disclosure submitted');
+    const { body } = lastSubmit();
+    expect(body.answers.coInventors).toEqual([{ name: 'Pat Doe' }]);
+    expect(JSON.stringify(body)).not.toMatch(/"id"/);
+  });
+
   it('"I am an inventor" needs no list; the list is capped at 20 inventors', () => {
     fillInventionStep1();
     radioIn(/Are you one of the inventors/, 'Yes');
@@ -1257,6 +1293,34 @@ describe('Trademark Search wizard', () => {
     expect(within(group).getAllByRole('checkbox')).toHaveLength(10);
     expect(within(group).getAllByRole('checkbox').at(-1)).toBe(within(group).getByRole('checkbox', { name: 'Other' }));
     expect(screen.queryByLabelText(/class/i)).toBeNull(); // the hint says Legal works out the classes; no field asks
+  });
+
+  it('the checkbox group is described by its hint, and by the error message (and marked invalid) once the step is tried', () => {
+    fillTrademarkStep1();
+    const group = (): HTMLElement => screen.getByRole('group', { name: /Where will it be used/ });
+    const describedBy = (): HTMLElement[] =>
+      (group().getAttribute('aria-describedby') ?? '')
+        .split(' ')
+        .filter(Boolean)
+        .map(id => document.getElementById(id) as HTMLElement);
+
+    // fresh: the hint only, not invalid
+    expect(describedBy().map(e => e.textContent)).toEqual([
+      'Where it will be sold, offered or marketed, now and within about 2 years.',
+    ]);
+    expect(group().getAttribute('aria-invalid')).toBeNull();
+
+    // tick then clear: the group is touched and empty, so the message appears and comes before the hint
+    checkbox('United States');
+    checkbox('United States');
+    expect(describedBy().map(e => e.textContent)).toEqual([
+      'Choose at least one place.',
+      'Where it will be sold, offered or marketed, now and within about 2 years.',
+    ]);
+    expect(group().getAttribute('aria-invalid')).toBe('true');
+
+    // the checkboxes keep their own names
+    expect(within(group()).getByRole('checkbox', { name: 'United States' })).toBeTruthy();
   });
 
   it('step 3: current use is required; "publicly" asks since-when and where; launch and need-by dates are optional', () => {

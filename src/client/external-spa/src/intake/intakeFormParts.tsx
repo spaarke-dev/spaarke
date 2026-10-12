@@ -18,6 +18,7 @@ import {
   Textarea,
   makeStyles,
   tokens,
+  useFieldContext_unstable,
 } from '@fluentui/react-components';
 import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 import type { CodedOption } from './ndaModel';
@@ -137,27 +138,42 @@ export interface CheckboxRowProps extends RowBase {
  * `Field` otherwise takes the Field's one control id and `aria-labelledby`, so every checkbox would share an id (a label
  * click toggles the first box) and be named by the group label instead of its own.
  */
-export const CheckboxRow: React.FC<CheckboxRowProps> = p => {
+export const CheckboxRow: React.FC<CheckboxRowProps> = p => (
+  <Field label={p.label} required={p.required} hint={p.hint} {...validation(p)}>
+    <CheckboxGroup {...p} />
+  </Field>
+);
+
+/**
+ * The `role="group"` element and its checkboxes. It reads the Field's context BEFORE overriding it for the checkboxes, so
+ * the group itself carries what the single-control wiring would have put on an input: `aria-describedby` (the validation
+ * message, then the hint) and `aria-invalid`.
+ */
+const CheckboxGroup: React.FC<CheckboxRowProps> = p => {
   const s = useStyles();
+  const field = useFieldContext_unstable();
+  const describedBy = [field?.validationMessageId, field?.hintId].filter(Boolean).join(' ');
   return (
-    <Field label={p.label} required={p.required} hint={p.hint} {...validation(p)}>
-      <div role="group" aria-label={p.label} className={s.group}>
-        <FieldContextProvider value={undefined}>
-          {p.options.map(o => (
-            <Checkbox
-              key={o.code}
-              label={o.label}
-              checked={p.value.includes(o.code)}
-              onChange={(_e, d) =>
-                p.onChange(
-                  d.checked ? [...p.value.filter(c => c !== o.code), o.code] : p.value.filter(c => c !== o.code)
-                )
-              }
-            />
-          ))}
-        </FieldContextProvider>
-      </div>
-    </Field>
+    <div
+      role="group"
+      aria-label={p.label}
+      aria-describedby={describedBy || undefined}
+      aria-invalid={field?.validationState === 'error' ? true : undefined}
+      className={s.group}
+    >
+      <FieldContextProvider value={undefined}>
+        {p.options.map(o => (
+          <Checkbox
+            key={o.code}
+            label={o.label}
+            checked={p.value.includes(o.code)}
+            onChange={(_e, d) =>
+              p.onChange(d.checked ? [...p.value.filter(c => c !== o.code), o.code] : p.value.filter(c => c !== o.code))
+            }
+          />
+        ))}
+      </FieldContextProvider>
+    </div>
   );
 };
 
