@@ -96,7 +96,7 @@ With the `$filter` clause and the in-memory re-check removed: **5 tests fail** (
 
 ### SPA contract
 
-No route or body change. `GET /api/v1/external/{root}/{id}/messages` and `…/messages/{messageId}` simply never contain privileged / potentially privileged messages; the count in a list is the count of what is returned; a hidden message by id is the same 404 as an absent one. Nothing in the response signals that anything was hidden.
+No route or body change. The only message routes are `GET` and `POST /api/v1/external/{root}/{id}/messages`; there is no `…/messages/{messageId}` route, so a message cannot be requested by id from the SPA. The list never contains privileged / potentially privileged messages, and the count in a list is the count of what is returned. Nothing in the response signals that anything was hidden. (The by-id 404 in the "What was built" list above is the service-level rule of `CommunicationThreadReadService`; no external route exposes it.)
 
 ---
 
@@ -107,7 +107,7 @@ No route or body change. `GET /api/v1/external/{root}/{id}/messages` and `…/me
 - **Key reused:** `Communication:DefaultMailbox` (`CommunicationOptions.DefaultMailbox`), the platform's existing default mailbox. No new key. The stamp channel already supplies it (`Communication__DefaultMailbox`, Key Vault secret `Communication-DefaultMailbox`).
 - **`RegistrationEmailService`.** The `FromMailbox` constant is gone. The service takes `IOptions<CommunicationOptions>`, and `ResolveFromMailbox` returns the trimmed `DefaultMailbox` or throws `InvalidOperationException` when it is blank (no substitute sender is ever used). `BuildPortalNotificationRequest` takes the mailbox as a parameter. Used by registration, CIAM onboarding and the R3 grant / portal notification emails.
 - **`appsettings.template.json`.** `Communication:DefaultMailbox` = `mailbox-central@spaarke.com` with `_DefaultMailbox_comment`; the `ApprovedSenders` entry now has the same address. `ApprovedSenderValidator` requires the sender to be approved, so the two must stay equal. The old `#{COMMUNICATION_DEFAULT_MAILBOX}#` token is no longer used anywhere. No tracked dev appsettings carries the key.
-- **Fail fast.** `CommunicationOptionsValidator` (`IValidateOptions<CommunicationOptions>`, registered in `CommunicationModule`) fails when `DefaultMailbox` is empty outside Development and Testing, with a message naming the key. `StartupValidationService` reads `IOptions<CommunicationOptions>.Value` at host start, so a deployed host with no sender refuses to start instead of failing on its first grant email. `CommunicationOptions` as a whole is deliberately not validated at start (it carries four `[Required]` webhook members that exist only where Graph webhooks are provisioned), so the validator checks this one member only. The `IOptionsDriftTests` ratchet tracks `ValidateOnStart` chains only, so it is unaffected.
+- **Fail fast.** `CommunicationOptionsValidator` (`IValidateOptions<CommunicationOptions>`, registered in `CommunicationModule`) fails when `DefaultMailbox` is empty outside Development and Testing, with a message naming the key. `StartupValidationService` reads `IOptions<CommunicationOptions>.Value` at host start, so a deployed host with no sender refuses to start instead of failing on its first grant email. `CommunicationOptions` as a whole is deliberately not validated at start (it carries four `[Required]` webhook members that exist only where Graph webhooks are provisioned), so the validator checks `DefaultMailbox` and, since the F3 fix round below, its membership in `ApprovedSenders` only. The `IOptionsDriftTests` ratchet tracks `ValidateOnStart` chains only, so it is unaffected.
 - **Other hard-coded `demo@demo.spaarke.com` occurrences** (grep of the tracked tree):
   - Source: none left. (Comments in `RegistrationEmailService.cs`, `CommunicationOptionsValidator.cs` and the template comment mention the old literal.)
   - Tests: `tests/integration/auth/UnifiedAccessControl/IdentityBinding/IdentityLinkReconciliationTests.cs:51` — a test fixture email, unrelated to sending. Left alone.
@@ -130,10 +130,38 @@ With `ResolveFromMailbox` returning the old literal: **2 tests fail** (`TheConfi
 
 1. The mailbox `mailbox-central@spaarke.com` must exist in the Spaarke tenant.
 2. The stamp identity that sends needs Exchange RBAC for Applications scoped to that mailbox (H14a). Until then a send fails at Graph, not at start.
-3. Spaarke's own platform BFF must set `Communication__DefaultMailbox` (the template value now supplies it where the template is used). Customer stamps get their own value from the intake.
-4. The mailbox must be listed in `Communication:ApprovedSenders`; the template keeps the two equal, an override of one must override both.
+3. **The template never ships.** `appsettings.template.json` is `CopyToPublishDirectory=Never`, so a deployed host does not receive it. Every deployed host needs the App Settings `Communication__DefaultMailbox` AND a matching `Communication__ApprovedSenders__N__Email` (with `Communication__ApprovedSenders__N__IsDefault=true`). `scripts/Configure-ProductionAppSettings.ps1` and the canonical secret catalog (`scripts/canonical-secret-catalog/manifest.yaml`, generated `Configure-AppServiceSettings.generated.ps1`) now set both, from the same `Communication-DefaultMailbox` Key Vault value (see the F3 section below). Customer stamps get their value from the intake.
+4. The mailbox must be listed in `Communication:ApprovedSenders` with an `Email` equal to `DefaultMailbox` (case-insensitive). Since the F3 fix round the host refuses to start outside Development/Testing if it is not.
+5. The production Key Vault placeholder for `Communication-DefaultMailbox` (`scripts/Seed-ProductionKeyVault.ps1:224-227`) is `noreply@spaarke.com`. Whether the production sender should stay that or become `mailbox-central@spaarke.com` is an operator decision; **not changed here.**
 
 ---
+
+## F3 fix round (review findings, 2026-10-12)
+
+Commits: see `git log` on this branch after `a0597b6cc` (subjects begin `fix(external-access-r3):`).
+
+### F3 — the sender fail-fast proved the wrong invariant
+
+- **Problem.** `CommunicationOptionsValidator` only checked that `DefaultMailbox` was non-blank. The send path (`CommunicationService` -> `ApprovedSenderValidator.ResolveExplicit`) rejects any explicit `FromMailbox` that is not in `Communication:ApprovedSenders` with `InvalidSender`, and `GrantAccessNotifier` then logs and drops the email. A host with a mailbox but no matching approved sender started cleanly and sent nothing.
+- **Fix.** Outside Development/Testing, validation also fails when no `ApprovedSenders` entry has an `Email` equal to `DefaultMailbox` (OrdinalIgnoreCase; `DefaultMailbox` trimmed, as `RegistrationEmailService.ResolveFromMailbox` trims it; the entry's `Email` is compared as the send path compares it). The message names `Communication:DefaultMailbox` and `Communication:ApprovedSenders` (and the `Communication__ApprovedSenders__N__Email` setting).
+- **Deploy scripts.** Both `scripts/Configure-ProductionAppSettings.ps1` and the canonical catalog now emit `Communication__ApprovedSenders__0__Email` (the same `Communication-DefaultMailbox` Key Vault reference), `__0__IsDefault=true` and `__0__DisplayName=Spaarke Central`. The catalog change is in the source manifest (`scripts/canonical-secret-catalog/manifest.yaml`: the `Email` key is added to the `Communication-DefaultMailbox` secret's `app_settings`; `IsDefault` and `DisplayName` are `per_env_settings` literals) and the generated files were regenerated with `scripts/canonical-secret-catalog/Invoke-CatalogGenerator.ps1` (`-Verify`: in sync).
+- **Dev inventory.** `config/spaarke-resources.yaml` (dev BFF) now lists `Communication__DefaultMailbox` and `Communication__ApprovedSenders__0__*` (non-secret values). Live `spaarke-bff-dev` was read-only checked 2026-10-12: `DefaultMailbox=mailbox-central@spaarke.com`, `ApprovedSenders__0` = the same address, `IsDefault=true`.
+- **Tests (`SystemSenderMailboxConfigurationTests`).** Validator fails when `DefaultMailbox` is not an approved sender (Production, Staging, Demo), fails with no approved senders at all, passes when it is (any entry, any case), is unaffected in Development/Testing, and reading the options in Production throws `OptionsValidationException` as host start does. Script-content tests assert both scripts emit the `ApprovedSenders__0__Email` / `IsDefault` / `DisplayName` lines next to `DefaultMailbox`.
+- **Template-pinning test.** `TheTemplate_CarriesTheCentralMailbox_AsDefaultAndAsAnApprovedSender` documents intent only (the template never ships); the script tests pin the deployed behaviour.
+
+### K items fixed
+
+- The service-request relationship pin (`TheRelationshipList_IsExactlyTheSolutionsOneToManyRelationships`) now reads every `*.xml` under `src/dataverse/solutions/**` that holds an `EntityRelationship` naming `sprk_servicerequest`. A relationship where the request is the REFERENCED entity (the request is the parent, 1:N) must be in `ServiceRequestRelations`, wherever the solution exports it (including under the referencing entity's file, not just `sprk_ServiceRequest.xml`); any `ManyToMany` naming the request fails the test (the list models 1:N lookups only). Relationships where the request is the REFERENCING entity (it holds the lookup: `sprk_requestedby`, `OwnerId`, `CreatedBy`, ...) are deliberately ignored: deleting the request orphans nothing there. Must-fire / must-not-fire controls run on injected documents.
+- The `ExternalDataService.ServiceRequestRelations` doc comment now names the real test.
+- New test: a Workforce principal with `ContactId == Guid.Empty` calling `DELETE /servicerequests/{id}` gets the uniform 403 `sdap.access.deny.delete_own`, no delete, and the relationship probe is never called (the fixture now counts probe calls).
+
+### Known limits (both reviews left these open)
+
+- **Check/delete race.** `HasRelatedRecordsAsync` and the delete are separate calls; a row created between them is unlinked, not deleted. Accepted: all eight relationships are `RemoveLink`, so nothing is lost, only unlinked.
+- **BFF app user needs `prvDelete` on `sprk_servicerequest`.** The delete is app-only. Verify live that the BFF application user's role grants delete on the table; nothing in this change confirms it.
+- **Dev staging slot.** `spaarke-bff-dev`'s `staging` slot needs the same `Communication__DefaultMailbox` and `Communication__ApprovedSenders__*` settings, or a swap to it fails the host's start (not yet checked).
+- **Closed-request deletability is open with the owner.** The delete has no status gate; whether a closed request may be deleted is an owner question, so no gate was added.
+- **Validator is config-only.** The start-time check reads `Communication:ApprovedSenders` from configuration; the send path's async resolver can also approve senders from Dataverse accounts. A mailbox approved only there would fail the start check; deployed hosts are expected to carry the config entry.
 
 ## Build, tests, publish size
 
