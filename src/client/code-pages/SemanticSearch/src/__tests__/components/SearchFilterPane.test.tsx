@@ -75,7 +75,6 @@ const DEFAULT_PROPS: SearchFilterPaneProps = {
   savedSearches: [],
   currentSearchName: null,
   onSelectSavedSearch: jest.fn(),
-  onSaveCurrentSearch: jest.fn(),
   isSavedSearchesLoading: false,
   onCancel: jest.fn(),
 };

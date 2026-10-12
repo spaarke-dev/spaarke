@@ -51,7 +51,6 @@ const DEFAULT_PROPS: SavedSearchSelectorProps = {
   savedSearches: [],
   currentSearchName: null,
   onSelectSavedSearch: jest.fn(),
-  onSaveCurrentSearch: jest.fn(),
   isLoading: false,
 };
 
