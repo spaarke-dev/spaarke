@@ -815,6 +815,55 @@ public class ExternalDataService
         return row is null ? null : GuidValue(row, "_sprk_requestedby_value");
     }
 
+    /// <summary>
+    /// Whether a service request is still open. <c>sprk_servicerequest</c> has exactly two states (live describe,
+    /// 2026-10-12): <c>statecode</c> Active (0) / Inactive (1), with <c>statuscode</c> Active (1) / Inactive (2). There is
+    /// no separate "resolved" status, so Inactive IS closed. <see cref="Unknown"/> is the zero value on purpose: a default,
+    /// an absent row and any other value fail closed (owner decision 2026-10-12).
+    /// </summary>
+    public enum ServiceRequestOpenState
+    {
+        /// <summary>Not readable as Active or Inactive (absent row, null, or a value outside 0 / 1). Treated as closed.</summary>
+        Unknown = 0,
+
+        /// <summary><c>statecode</c> = 0.</summary>
+        Open = 1,
+
+        /// <summary><c>statecode</c> = 1 (inactive / resolved).</summary>
+        Closed = 2,
+    }
+
+    /// <summary>The Dataverse <c>statecode</c> → <see cref="ServiceRequestOpenState"/> rule. Pure; anything but 0 or 1 is Unknown.</summary>
+    internal static ServiceRequestOpenState ServiceRequestStateFor(int? statecode) => statecode switch
+    {
+        0 => ServiceRequestOpenState.Open,
+        1 => ServiceRequestOpenState.Closed,
+        _ => ServiceRequestOpenState.Unknown,
+    };
+
+    /// <summary>
+    /// The open / closed state of a service request (<c>statecode</c>), app-only. A request that does not exist, or whose
+    /// state is not a readable 0 / 1, is <see cref="ServiceRequestOpenState.Unknown"/>; a read that FAILS throws, so the
+    /// caller answers 503 and nothing is deleted (same rule as <see cref="GetServiceRequestRequesterAsync"/>).
+    /// </summary>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    public virtual async Task<ServiceRequestOpenState> GetServiceRequestOpenStateAsync(
+        Guid serviceRequestId, CancellationToken ct = default)
+    {
+        var url = $"{GetApiUrl()}/sprk_servicerequests({serviceRequestId})?$select=statecode";
+
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
+        if (row is null
+            || !row.TryGetValue("statecode", out var state)
+            || state.ValueKind != JsonValueKind.Number
+            || !state.TryGetInt32(out var code))
+        {
+            return ServiceRequestOpenState.Unknown;
+        }
+
+        return ServiceRequestStateFor(code);
+    }
+
     // ---------------------------------------------------------------------------
     // Legal Front Door intake (spaarke-SPA-external-access-platform-r3 task 035, FR-05 / FR-06)
     // ---------------------------------------------------------------------------

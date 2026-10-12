@@ -730,6 +730,9 @@ public static class ExternalAccessModule
         {
             "sprk_servicerequestid", "sprk_servicerequestnumber", "sprk_name", "statuscode", "createdon",
             "sprk_requestedby",
+            // Owner decision 2026-10-12: the SPA hides Delete on a closed request. statecode is the platform's own
+            // open (0) / closed (1) flag; the delete route enforces it again server-side.
+            "statecode",
         },
     };
 }

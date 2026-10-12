@@ -94,6 +94,145 @@ public sealed class ExternalDeleteServiceRequestTests : IClassFixture<ExternalDe
         detail.Should().Contain("already has activity").And.Contain("can't be deleted").And.Contain("recall");
     }
 
+    // ── 409: a closed request is never deleted (owner decision 2026-10-12) ───────────────────────────────────────
+
+    [Fact]
+    public async Task AClosedRequest_Is409_ServiceRequestClosed_AndNoDeleteIsSent()
+    {
+        var id = SeedRequest(Me);
+        _fixture.Data.States[id] = ServiceRequestOpenState.Closed;
+        _fixture.Principal = Workforce(Me);
+
+        using var response = await Delete(id);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        ProblemCode(body).Should().Be("service_request_closed");
+        _fixture.Data.Requesters.ContainsKey(id).Should().BeTrue("a closed request is kept");
+        _fixture.Data.ServiceRequestDeletes.Should().BeEmpty("no delete call is made for a closed request");
+    }
+
+    [Fact]
+    public async Task AClosedRequest_IsDecidedBeforeTheRelatedRecordsCheck()
+    {
+        // Closed AND with activity: the closed answer wins, and the relationship probe never runs.
+        var id = SeedRequest(Me);
+        _fixture.Data.States[id] = ServiceRequestOpenState.Closed;
+        _fixture.Data.RelatedRows[("sprk_document", id)] = true;
+        _fixture.Principal = Workforce(Me);
+
+        using var response = await Delete(id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        ProblemCode(await response.Content.ReadAsStringAsync()).Should().Be("service_request_closed");
+        _fixture.Data.RelationshipProbeCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AnOpenRequest_WithActivity_IsStillTheRelatedRecordsConflict()
+    {
+        var id = SeedRequest(Me);
+        _fixture.Data.States[id] = ServiceRequestOpenState.Open;
+        _fixture.Data.RelatedRows[("sprk_document", id)] = true;
+        _fixture.Principal = Workforce(Me);
+
+        using var response = await Delete(id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        ProblemCode(await response.Content.ReadAsStringAsync()).Should().Be("has_related_records");
+    }
+
+    [Fact]
+    public async Task AnUnknownState_IsRefused_FailClosed_AndNothingIsDeleted()
+    {
+        var id = SeedRequest(Me);
+        _fixture.Data.States[id] = ServiceRequestOpenState.Unknown;
+        _fixture.Principal = Workforce(Me);
+
+        using var response = await Delete(id);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        ProblemCode(body).Should().Be("sdap.access.delete_own_unavailable");
+        _fixture.Data.ServiceRequestDeletes.Should().BeEmpty();
+        _fixture.Data.RelationshipProbeCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AnUnreadableState_Is503_AndNothingIsDeleted()
+    {
+        var id = SeedRequest(Me);
+        _fixture.Data.StateFault = new DataverseUnavailableException("throttled");
+        _fixture.Principal = Workforce(Me);
+
+        using var response = await Delete(id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        _fixture.Data.ServiceRequestDeletes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task NotTheRequester_WhoseRequestIsClosed_IsStill403_NotAConflict()
+    {
+        // The requester gate runs first: a closed 409 would tell a stranger the request exists.
+        var id = SeedRequest(SomeoneElse);
+        _fixture.Data.States[id] = ServiceRequestOpenState.Closed;
+        _fixture.Principal = Workforce(Me);
+
+        using var response = await Delete(id);
+
+        await ShouldBeTheUniformDenial(response);
+    }
+
+    [Theory]
+    [InlineData(0, ServiceRequestOpenState.Open)]
+    [InlineData(1, ServiceRequestOpenState.Closed)]
+    [InlineData(2, ServiceRequestOpenState.Unknown)]
+    [InlineData(-1, ServiceRequestOpenState.Unknown)]
+    [InlineData(null, ServiceRequestOpenState.Unknown)]
+    public void TheStateRule_OnlyZeroIsOpen_OnlyOneIsClosed_ElseUnknown(int? statecode, ServiceRequestOpenState expected)
+    {
+        ServiceRequestStateFor(statecode).Should().Be(expected);
+        default(ServiceRequestOpenState).Should().Be(ServiceRequestOpenState.Unknown, "a default value must fail closed");
+    }
+
+    [Theory]
+    [InlineData("{\"statecode\":0}", ServiceRequestOpenState.Open)]
+    [InlineData("{\"statecode\":1}", ServiceRequestOpenState.Closed)]
+    [InlineData("{\"statecode\":2}", ServiceRequestOpenState.Unknown)]
+    [InlineData("{\"statecode\":null}", ServiceRequestOpenState.Unknown)]
+    [InlineData("{\"statecode\":\"0\"}", ServiceRequestOpenState.Unknown)]
+    [InlineData("{}", ServiceRequestOpenState.Unknown)]
+    public async Task TheStateRead_IsOneAppOnlyRead_OfStatecode_AndFailsClosedOnAnythingElse(string body, ServiceRequestOpenState expected)
+    {
+        var handler = new StateHandler(HttpStatusCode.OK, body);
+        var id = Guid.NewGuid();
+
+        (await NewService(handler).GetServiceRequestOpenStateAsync(id)).Should().Be(expected);
+
+        handler.Requests.Should().Equal($"https://org.test/api/data/v9.2/sprk_servicerequests({id})?$select=statecode");
+        handler.Authorization.Should().OnlyContain(a => a == "Bearer stub-token");
+    }
+
+    [Fact]
+    public async Task TheStateRead_OfAnAbsentRequest_IsUnknown()
+    {
+        var handler = new StateHandler(HttpStatusCode.NotFound, "{}");
+
+        (await NewService(handler).GetServiceRequestOpenStateAsync(Guid.NewGuid())).Should().Be(ServiceRequestOpenState.Unknown);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task TheStateRead_ThrowsWhenDataverseFails(HttpStatusCode status)
+    {
+        var act = () => NewService(new StateHandler(status, "{}")).GetServiceRequestOpenStateAsync(Guid.NewGuid());
+
+        await act.Should().ThrowAsync<DataverseUnavailableException>();
+    }
+
     // ── 403: only the requester; no existence or activity oracle ─────────────────────────────────────────────────
 
     [Fact]
@@ -464,6 +603,26 @@ public sealed class ExternalDeleteServiceRequestTests : IClassFixture<ExternalDe
             .Build(),
         new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
         NullLogger<ExternalDataService>.Instance);
+
+    /// <summary>One service-request row read (<c>$select=statecode</c>) with a scripted status and body.</summary>
+    private sealed class StateHandler(HttpStatusCode status, string body) : HttpMessageHandler
+    {
+        public List<string> Requests { get; } = new();
+        public List<string?> Authorization { get; } = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            lock (Requests)
+            {
+                Requests.Add(Uri.UnescapeDataString(request.RequestUri!.ToString()));
+                Authorization.Add(request.Headers.Authorization?.ToString());
+            }
+            return Task.FromResult(new HttpResponseMessage(status)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+            });
+        }
+    }
 
     /// <summary>
     /// Dataverse's collection endpoints as the relationship probe uses them. By default every entity set answers an empty
