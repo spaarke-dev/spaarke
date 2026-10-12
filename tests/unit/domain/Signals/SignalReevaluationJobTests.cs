@@ -583,7 +583,7 @@ public partial class SignalReevaluationJobTests
     [Fact]
     public async Task Evaluate_DateOnlyBoundOnRespondedOn_IsWidenedLikeTheOtherDateOnlyColumns()
     {
-        // F-67: sprk_workassignment.sprk_respondedon is Date Only, so its relative bound is widened by DateOnlyWideningDays (2)
+        // F-68: sprk_workassignment.sprk_respondedon is Date Only, so its relative bound is widened by DateOnlyWideningDays (2)
         // before the per-item judgement; sprk_responseduedate is the reference (same widening).
         var h = new Harness();
         const string body = """{"type":"Existence","subject":"sprk_workassignment","when":{"sprk_respondedon":{"<=":"now"}},"all":[]}""";
@@ -1608,6 +1608,7 @@ public partial class SignalReevaluationJobTests
         public SignalEvaluator Evaluator { get; }
         public SignalReevaluationJob Job { get; }
         public SignalClosureService Closure { get; }
+        public SignalSuppressionService Suppression { get; }
 
         public Harness(DateTimeOffset? runAt = null, string? writerClientId = null)
         {
@@ -1629,7 +1630,8 @@ public partial class SignalReevaluationJobTests
             var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, Clock), Logger<PolicyVersionValidator>());
             Evaluator = new SignalEvaluator(validator, Sysadmin, Writer, Logger<SignalEvaluator>());
             Closure = new SignalClosureService(Writer, Sysadmin, Clock, Logger<SignalClosureService>());
-            Job = new SignalReevaluationJob(Evaluator, Writer, Closure, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
+            Suppression = new SignalSuppressionService(Sysadmin, writerClient, Clock, Logger<SignalSuppressionService>());
+            Job = new SignalReevaluationJob(Evaluator, Writer, Suppression, Closure, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
             Sysadmin.Stub(new Entity("sprk_matter", MatterId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
             Sysadmin.Stub(new Entity("sprk_project", ProjectId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
         }

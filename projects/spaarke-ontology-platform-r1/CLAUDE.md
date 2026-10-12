@@ -66,7 +66,9 @@ grouping Work Items** (D-34/D-36) — "row" is layout, not vocabulary. **"Flag" 
 
 **Process**
 - Deferred work and newly found issues: `/project-defer-issue-tracking` writes `notes/defer-issues.md` AND a GitHub
-  issue — never one without the other.
+  issue — never one without the other. The issue must be **self-contained** (owner 2026-10-11: no owning teams, only
+  projects): problem, verified `path:line` at a named ref, evidence, fix approach, done-when, dependencies, gaps;
+  branch-only notes summarised, not just linked (`notes/defer-issues.md` D-106 "Pickup context").
 - Done = POML acceptance criteria (closed set) pass · Step 9.5 gates for FULL rigor · POML `<status>` AND
   TASK-INDEX marker both updated (`scripts/check-task-status-drift.ps1 -Project spaarke-ontology-platform-r1`) ·
   deviations recorded in `notes/`.

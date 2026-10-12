@@ -1586,9 +1586,17 @@ public partial class RouteAuthorizationGuardTests
             + "(:205-207); an unresolvable caller is 403 before any query (EventEndpoints.cs:341-498). The query is the gate."),
         new HandlerDecision("GET /api/v1/signals/{signalId:guid}/decision-plan", "GetDecisionPlanAsync", "IDataverseUserClient",
             new[] { "SignalCoreRecordAccess.AuthorizeAsync" },
-            "Ontology task 036: the handler's first act is SignalCoreRecordAccess.AuthorizeAsync (DecisionPlanEndpoints.cs:53), which reads "
+            "Ontology task 036: the handler's first act is SignalCoreRecordAccess.AuthorizeAsync (DecisionPlanEndpoints.cs:127), which reads "
             + "the Signal (SignalCoreRecordAccess.cs:98) and then its core record (:150) through IDataverseUserClient AS THE CALLER; "
-            + "anything but Allowed returns before the plan is read (uniform 404 at DecisionPlanEndpoints.cs:69, caller_unresolved 403 at :54-56)."),
+            + "anything but Allowed returns before the plan is read (uniform 404 at DecisionPlanEndpoints.cs:135, caller_unresolved 403 at :130)."),
+        new HandlerDecision("GET /api/v1/signals/{signalId:guid}/suppression", "GetSuppressionAsync", "IDataverseUserClient",
+            new[] { "SignalCoreRecordAccess.AuthorizeAsync" },
+            "Ontology task 034: the handler's first act is SignalCoreRecordAccess.AuthorizeAsync (DecisionPlanEndpoints.cs:68), "
+            + "the same decision as decision-plan: the Signal, then its core record of any type, read AS THE CALLER through IDataverseUserClient "
+            + "(a no-core Do Signal is owner-only, D-35). Anything but Allowed returns the uniform 404 (:76) / caller_unresolved 403 (:71) before the count is "
+            + "read. The count is the caller's: the grain's Signal ids are read through the caller's own IDataverseUserClient and the app-only rows are "
+            + "trimmed to that set before anything is counted; Decision-Record facts are read app-only for those rows only. Only the counts and the "
+            + "suppressed-until date are returned. A fault after Allowed is a 503 problem with the trace id, never the 404 (that is for not-yours). Lives in the already-governed DecisionPlanEndpoints.cs, so the file count is unchanged."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — WhoAmI first (a caller it "
             + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.cs:229), the payload mapped with the "

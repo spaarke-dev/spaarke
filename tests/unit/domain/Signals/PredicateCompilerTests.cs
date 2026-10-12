@@ -857,7 +857,7 @@ public class PredicateCompilerTests
     [Fact]
     public void Compile_WorkAssignmentRespondedOn_IsReportedAsDateOnly()
     {
-        // sprk_respondedon is Date Only on sprk_workassignment (live metadata 2026-10-11; F-67), like sprk_responseduedate.
+        // sprk_respondedon is Date Only on sprk_workassignment (live metadata 2026-10-11; F-68), like sprk_responseduedate.
         Compiler().Compile(SubjectOnly("sprk_workassignment", """{"sprk_respondedon":{"<":"now-7d"}}"""))
             .DateOnlyWhenFields.Should().Equal("sprk_respondedon");
         PredicateCompiler.DateOnlyColumns.Should().Contain(("sprk_workassignment", "sprk_respondedon"));

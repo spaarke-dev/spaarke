@@ -46,6 +46,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
     private readonly SignalEvaluator _evaluator;
     private readonly SignalWriter _writer;
+    private readonly SignalSuppressionService _suppression;
     private readonly SignalClosureService _closure;
     private readonly IGenericEntityService _entities;
     private readonly IDistributedCache _cache;
@@ -55,6 +56,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     public SignalReevaluationJob(
         SignalEvaluator evaluator,
         SignalWriter writer,
+        SignalSuppressionService suppression,
         SignalClosureService closure,
         IGenericEntityService entities,
         IDistributedCache cache,
@@ -63,6 +65,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     {
         _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
+        _suppression = suppression ?? throw new ArgumentNullException(nameof(suppression));
         _closure = closure ?? throw new ArgumentNullException(nameof(closure));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
@@ -216,12 +219,14 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }
 
             counts.Hits += evaluation.Hits.Count;
-            var existing = await ReadPolicySignalsAsync(policy.Code, counts, ct, scope).ConfigureAwait(false);
+            var read = await ReadPolicySignalsAsync(policy.Code, counts, ct, scope).ConfigureAwait(false);
             // Task 033 (FR-16, D-13): Signals citing an older version close Superseded first, so the planner below re-raises
             // the subjects the current version still holds as new episodes in this same pass.
-            var superseded = await _closure.SupersedeInPassAsync(policy.Code, versionId, existing, ct).ConfigureAwait(false);
-            existing = superseded.Existing;
+            var superseded = await _closure.SupersedeInPassAsync(policy.Code, versionId, read, ct).ConfigureAwait(false);
             counts.AddClosure(superseded.Outcome, retired: false);
+            // Task 034 (FR-17): stamp a grain found at the dismissal threshold with no live stamp, so the planner below sees it.
+            var (existing, suppressionFailures) = await _suppression.ReconcileAsync(policy.Id, policy.Code, policy.CountsTowardSuppression, superseded.Existing, ct).ConfigureAwait(false);
+            counts.PolicyFailures += suppressionFailures;
             var plan = SignalEpisodePlanner.Plan(lane, evaluation.QuietWindowDays, _timeProvider.GetUtcNow(), evaluation.Hits, existing,
                 isThreshold: RuleBodySchemaValidator.TryParseRuleType(spec.RuleType, out var ruleType) && ruleType == RuleType.Threshold);
             if (superseded.NotClosed.Count > 0)
@@ -507,7 +512,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     // ── Reads ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
     internal sealed record PolicyRow(
-        Guid Id, string Code, int? Lane, int? Severity, string Headline, Guid? CurrentVersionId, bool IsScoped);
+        Guid Id, string Code, int? Lane, int? Severity, string Headline, Guid? CurrentVersionId, bool IsScoped, bool CountsTowardSuppression = true);
 
     /// <summary>Every enabled, active policy (the same filter as <see cref="PolicyScopeResolver"/>: <c>sprk_enabled</c> and
     /// <c>statecode</c> Active, so a disabled or Retired policy is not evaluated at all), with its lane, severity and headline.</summary>
@@ -516,7 +521,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         var query = new QueryExpression("sprk_policy")
         {
             ColumnSet = new ColumnSet("sprk_policycode", "sprk_lane", "sprk_severity", "sprk_shortname", "sprk_name",
-                "sprk_currentversion", "sprk_tenant", "sprk_matter"),
+                "sprk_currentversion", "sprk_tenant", "sprk_matter", "sprk_countstowardsuppression"),
         };
         query.Criteria.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
         query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
@@ -529,7 +534,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
     private static readonly string[] PolicyColumns =
     {
         "sprk_policycode", "sprk_lane", "sprk_severity", "sprk_shortname", "sprk_name", "sprk_currentversion", "sprk_tenant",
-        "sprk_matter", "sprk_enabled", "statecode",
+        "sprk_matter", "sprk_enabled", "statecode", "sprk_countstowardsuppression",
     };
 
     private static PolicyRow ToPolicyRow(Entity row)
@@ -546,7 +551,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
             headline.Length > 200 ? headline[..200] : headline,
             version is { Id: var id } && id != Guid.Empty ? id : null,
             !string.IsNullOrWhiteSpace(row.GetAttributeValue<string>("sprk_tenant"))
-                || row.GetAttributeValue<EntityReference>("sprk_matter") is { Id: var m } && m != Guid.Empty);
+                || row.GetAttributeValue<EntityReference>("sprk_matter") is { Id: var m } && m != Guid.Empty,
+            row.GetAttributeValue<bool?>("sprk_countstowardsuppression") ?? true);
     }
 
     /// <summary>Every Signal of the policy, by the begins-with query D-13 names, keyed exactly by the parsed key. A key that
@@ -563,7 +569,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         {
             ColumnSet = new ColumnSet("sprk_dedupekey", "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon",
                 "sprk_suppresseduntil", "sprk_duedate", "sprk_corerecordtype", "sprk_corerecordid", "ownerid", "versionnumber",
-                "sprk_policyversion", "sprk_lastevaluated"),
+                "sprk_policyversion", "sprk_lastevaluated", "sprk_decisionrecord"),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
         query.Criteria.AddCondition("sprk_dedupekey", ConditionOperator.BeginsWith, prefix);
@@ -620,7 +626,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
                     CoreRecordId: Guid.TryParse(row.GetAttributeValue<string>("sprk_corerecordid")?.Trim(), out var coreId) ? coreId : null,
                     Owner: row.GetAttributeValue<EntityReference>("ownerid"),
                     PolicyVersionId: row.GetAttributeValue<EntityReference>("sprk_policyversion")?.Id,
-                    LastEvaluated: row.GetAttributeValue<DateTime?>("sprk_lastevaluated")));
+                    LastEvaluated: row.GetAttributeValue<DateTime?>("sprk_lastevaluated"),
+                    DecisionRecordId: row.GetAttributeValue<EntityReference>("sprk_decisionrecord")?.Id));
             }
 
             if (!result.MoreRecords)
@@ -748,7 +755,8 @@ internal sealed record ExistingSignal(
     Guid? CoreRecordId,
     EntityReference? Owner,
     Guid? PolicyVersionId = null,
-    DateTime? LastEvaluated = null)
+    DateTime? LastEvaluated = null,
+    Guid? DecisionRecordId = null)
 {
     /// <summary>D-120: how much later than <c>sprk_resolvedon</c> <c>sprk_lastevaluated</c> must be to read as "the job observed the
     /// condition cleared after the resolution" (a person's commit may stamp both within moments of each other).</summary>
