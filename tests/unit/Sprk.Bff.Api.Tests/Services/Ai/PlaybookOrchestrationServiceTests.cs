@@ -1632,6 +1632,68 @@ public class PlaybookOrchestrationServiceTests
     }
 
     /// <summary>
+    /// The Stop button is a SEPARATE request (POST /runs/{id}/cancel -> CancelAsync -> the run context's own token), not the
+    /// SSE request token. A node blocked on its token throws OperationCanceledException while the caller's token is NOT
+    /// cancelled; that is still a user cancel, so the stream ends with RunCancelled and the run is Cancelled, not Failed.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_StopViaCancelAsync_EndsRunCancelled_NotFailed()
+    {
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        ArrangeSingleNode(playbookId, actionId, out var executor);
+        var nodeStarted = new TaskCompletionSource<Guid>(TaskCreationOptions.RunContinuationsAsynchronously);
+        executor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .Returns(async (NodeExecutionContext ctx, CancellationToken ct) =>
+            {
+                nodeStarted.TrySetResult(ctx.RunId);
+                await Task.Delay(Timeout.Infinite, ct); // blocks until the run context's token is cancelled
+                return NodeOutput.Ok(Guid.NewGuid(), "x", new { });
+            });
+
+        var events = new List<PlaybookStreamEvent>();
+        var drain = Task.Run(async () =>
+        {
+            await foreach (var evt in _service.ExecuteAsync(CreateRequest(playbookId), _mockHttpContext, CancellationToken.None))
+            {
+                events.Add(evt);
+            }
+        });
+
+        var runId = await nodeStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        (await _service.CancelAsync(runId, CancellationToken.None)).Should().BeTrue();
+        await drain.WaitAsync(TimeSpan.FromSeconds(10));
+
+        events.Should().NotContain(e => e.Type == PlaybookEventType.RunFailed, "a Stop is not a failure");
+        events.Should().ContainSingle(e => e.Type == PlaybookEventType.RunCancelled);
+        var detail = await WaitForRunToSettleAsync(runId);
+        detail!.State.Should().Be(PlaybookRunState.Cancelled.ToString());
+        detail.ErrorMessage.Should().BeNull();
+    }
+
+    /// <summary>
+    /// <c>ValidateAsync</c> returns its errors in the 200 body of the validate route, so an exception message (which can
+    /// echo <c>client_secret=...</c>) must be redacted before it is placed in the result.
+    /// </summary>
+    [Fact]
+    public async Task ValidateAsync_DependencyThrowsWithSecret_ResultTextIsRedacted()
+    {
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var node = CreateNode("Test Node", actionId);
+        _nodeServiceMock.Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync([node]);
+        _scopeResolverMock.Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Upstream rejected the request: client_secret=SUPERSECRET"));
+
+        var result = await _service.ValidateAsync(playbookId, CancellationToken.None);
+
+        result.IsValid.Should().BeFalse();
+        var text = string.Join(" ", result.Errors);
+        text.Should().NotContain("SUPERSECRET", "a credential value must never reach the validate response body");
+        text.Should().Contain("client_secret=[redacted]");
+    }
+
+    /// <summary>
     /// An exception message can carry a credential (a rejected token request echoes <c>client_secret=...</c>). Wherever
     /// a failure's text is stored or streamed - NodeFailed, RunFailed, the run detail the GET routes return - the secret
     /// value must not appear.

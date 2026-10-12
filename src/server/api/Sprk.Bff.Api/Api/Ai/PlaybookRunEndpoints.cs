@@ -342,9 +342,15 @@ public static class PlaybookRunEndpoints
                 await TryWriteTerminalErrorAsync(
                     response, PlaybookStreamEvent.BuildRunFailedEvent(runId, knownPlaybookId, context.TraceIdentifier), logger);
             }
+            else if (response.HasStarted)
+            {
+                // The already-complete path wrote its JSON status and failed part-way: the response is on the wire, so a
+                // ProblemDetails write would throw. The error is logged above; there is nothing more to send.
+                logger.LogWarning("Run status response for {RunId} had already started; not writing a problem body", runId);
+            }
             else
             {
-                // A failure before the first SSE frame is a plain HTTP error.
+                // A failure before anything was written is a plain HTTP error.
                 await ProblemDetailsHelper.FromLegacyError(
                         StatusCodes.Status500InternalServerError, "Stream error", context.TraceIdentifier)
                     .ExecuteAsync(context);

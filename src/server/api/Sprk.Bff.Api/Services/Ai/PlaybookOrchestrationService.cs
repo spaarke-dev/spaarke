@@ -224,7 +224,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
             await ExecuteNodeBasedModeAsync(context, nodes, writer, cancellationToken);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || context.CancellationToken.IsCancellationRequested)
         {
             context.MarkCancelled();
             await writer.WriteAsync(PlaybookStreamEvent.RunCancelled(
@@ -274,10 +274,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 await ExecuteNodeBasedModeAsync(context, nodes, writer, cancellationToken);
             }
         }
-        // Only a cancellation the CALLER asked for is a cancelled run. Any other OperationCanceledException (an upstream
+        // Only a cancellation the CALLER asked for is a cancelled run: the SSE request token, or the run context's own token
+        // (the Stop button: POST /runs/{id}/cancel -> context.Cancel()). Any other OperationCanceledException (an upstream
         // HTTP timeout surfaces as a TaskCanceledException) is a failure: it falls through to the RunFailed path below
         // instead of ending the stream as RunCancelled, which the Analysis bridge drops (a silent "success").
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || context.CancellationToken.IsCancellationRequested)
         {
             context.MarkCancelled();
             await writer.WriteAsync(PlaybookStreamEvent.RunCancelled(
@@ -383,7 +384,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error validating playbook {PlaybookId}", playbookId);
-            return PlaybookValidationResult.Failure($"Validation error: {ex.Message}");
+            return PlaybookValidationResult.Failure(ProblemDetailsHelper.Explain("Validation failed.", ex));
         }
     }
 
@@ -1761,7 +1762,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             }
             catch (JsonException ex)
             {
-                errors.Add($"Node '{node.Name}': JPS schema is not valid JSON — {ex.Message}");
+                errors.Add($"Node '{node.Name}': JPS schema is not valid JSON — {ProblemDetailsHelper.Redact(ex.Message)}");
                 continue;
             }
 
