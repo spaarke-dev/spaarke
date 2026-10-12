@@ -101,16 +101,17 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
     return delay(collection(MOCK_DOCUMENTS[docsByProject[1]] ?? []) as unknown as T);
   }
 
-  // GET /api/v1/external/projects/:id/events
-  const eventsByProject = path.match(/^\/api\/v1\/external\/projects\/([^/]+)\/events/);
-  if (method === 'GET' && eventsByProject) {
-    return delay(collection(MOCK_EVENTS[eventsByProject[1]] ?? []) as unknown as T);
+  // GET /api/v1/external/{projects|matters|workassignments}/:id/events (matter and work assignment: task 039 / 057;
+  // the mock has no matter or work assignment rows, so those answer an empty list)
+  const eventsByRoot = path.match(/^\/api\/v1\/external\/(?:projects|matters|workassignments)\/([^/]+)\/events/);
+  if (method === 'GET' && eventsByRoot) {
+    return delay(collection(MOCK_EVENTS[eventsByRoot[1]] ?? []) as unknown as T);
   }
 
-  // GET /api/v1/external/projects/:id/todos (NEW — R3 task 007)
-  const todosByProject = path.match(/^\/api\/v1\/external\/projects\/([^/]+)\/todos/);
-  if (method === 'GET' && todosByProject) {
-    return delay(collection(MOCK_TODOS[todosByProject[1]] ?? []) as unknown as T);
+  // GET /api/v1/external/{projects|matters|workassignments}/:id/todos (project: R3 task 007; the others: task 057)
+  const todosByRoot = path.match(/^\/api\/v1\/external\/(?:projects|matters|workassignments)\/([^/]+)\/todos/);
+  if (method === 'GET' && todosByRoot) {
+    return delay(collection(MOCK_TODOS[todosByRoot[1]] ?? []) as unknown as T);
   }
 
   // GET /api/v1/external/projects/:id/contacts

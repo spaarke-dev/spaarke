@@ -9,7 +9,9 @@
  * list format with date, title, status badge, and description.
  *
  * Props:
- *   projectId   — Dataverse GUID of the sprk_project record
+ *   projectId   — Dataverse GUID of the record whose events to list: a sprk_project unless `root` says otherwise
+ *   root        — which kind of record that is (task 057): 'projects' (default), 'matters' or 'workassignments'. Reads
+ *                 GET /api/v1/external/{root}/{id}/events; Create is a project-only action and is never offered otherwise.
  *   accessLevel — The authenticated user's access level (determines create visibility)
  *   caller      — The signed-in principal (task 054, FR-26): an event the caller CREATED shows Delete (asks first;
  *                 a refusal shows an error and the event stays). Independent of accessLevel; none without `caller`.
@@ -40,14 +42,25 @@ import {
   Select,
   MessageBar,
   MessageBarBody,
+  MessageBarActions,
 } from '@fluentui/react-components';
 import { AddRegular, CalendarEmptyRegular, DeleteRegular } from '@fluentui/react-icons';
 import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
-import { getEvents, createEvent, deleteOwnEvent, ODataEvent, CreateEventPayload } from '../api/web-api-client';
+import {
+  getRootEvents,
+  createEvent,
+  deleteOwnEvent,
+  ODataEvent,
+  CreateEventPayload,
+  EVENTS_TODOS_ROOT_NOUN,
+  type EventsTodosRoot,
+} from '../api/web-api-client';
 import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
 import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
 import { TruncatedListNotice } from './TruncatedListNotice';
+import { BffAccessState, accessFailureOf, type BffAccessFailure } from './auth/BffAccessState';
 import { AccessLevel, ApiError } from '../types';
+import { problemMessage } from '../auth/bff-client';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -514,8 +527,10 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, 
 // ---------------------------------------------------------------------------
 
 export interface EventsCalendarProps {
-  /** Dataverse GUID of the parent sprk_project record */
+  /** Dataverse GUID of the record whose events to list (a sprk_project unless `root` says otherwise). */
   projectId: string;
+  /** Which kind of record `projectId` is (task 057). Defaults to a project. */
+  root?: EventsTodosRoot;
   /** The authenticated user's access level — determines create visibility */
   accessLevel: AccessLevel;
   /** The signed-in principal. With it, events the caller created show Delete (task 054); without it, none do. */
@@ -534,7 +549,12 @@ export interface EventsCalendarProps {
  * Loading and empty states follow the SectionCard + PageContainer pattern
  * established by other SPA components.
  */
-export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, accessLevel, caller }) => {
+export const EventsCalendar: React.FC<EventsCalendarProps> = ({
+  projectId,
+  root = 'projects',
+  accessLevel,
+  caller,
+}) => {
   const styles = useStyles();
 
   // -------------------------------------------------------------------------
@@ -547,12 +567,18 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
   const [dialogOpen, setDialogOpen] = React.useState<boolean>(false);
   // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
   const [truncated, setTruncated] = React.useState<boolean>(false);
+  // A 401/403 on the list is the shared sign-in / denied state; "Try again" re-runs the read (task 057).
+  const [accessFailure, setAccessFailure] = React.useState<BffAccessFailure | null>(null);
+  const [attempt, setAttempt] = React.useState<number>(0);
+  const noun = EVENTS_TODOS_ROOT_NOUN[root];
 
   // -------------------------------------------------------------------------
   // Access level check
   // -------------------------------------------------------------------------
 
-  const canCreate = accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess;
+  // Creating an event is a project-only route (the matter and work assignment routes are read-only).
+  const canCreate =
+    root === 'projects' && (accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess);
 
   // Delete-own (task 054): the event leaves the list on the server's 204; any refusal keeps it and is shown.
   const del = useDeleteOwn<ODataEvent>({
@@ -573,10 +599,11 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
     const fetchEvents = async () => {
       setLoading(true);
       setLoadError(null);
+      setAccessFailure(null);
 
       try {
         // The BFF returns every event up to its row cap and says `truncated` when it stops short (task 105).
-        const data = await getEvents(projectId, {
+        const data = await getRootEvents(root, projectId, {
           $orderby: 'sprk_duedate asc',
         });
 
@@ -586,10 +613,12 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
         }
       } catch (err) {
         if (!cancelled) {
-          if (err instanceof ApiError) {
-            setLoadError(`Failed to load events: ${err.message}`);
+          const failure = accessFailureOf(err);
+          if (failure) {
+            setAccessFailure(failure);
           } else {
-            setLoadError('An unexpected error occurred loading events.');
+            // The server's ProblemDetails `detail` when it wrote one; never the raw response body.
+            setLoadError(problemMessage(err, 'Events could not be loaded just now.'));
           }
         }
       } finally {
@@ -604,7 +633,7 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, root, attempt]);
 
   // -------------------------------------------------------------------------
   // Handler: event created
@@ -642,10 +671,24 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
   // Render: error
   // -------------------------------------------------------------------------
 
+  if (accessFailure) {
+    return (
+      <BffAccessState
+        failure={accessFailure}
+        deniedMessage={`You do not have permission to view events on this ${noun}.`}
+      />
+    );
+  }
+
   if (loadError) {
     return (
       <MessageBar intent="error" className={styles.errorBar}>
         <MessageBarBody>{loadError}</MessageBarBody>
+        <MessageBarActions>
+          <Button appearance="secondary" size="small" onClick={() => setAttempt(n => n + 1)}>
+            Try again
+          </Button>
+        </MessageBarActions>
       </MessageBar>
     );
   }
@@ -683,8 +726,8 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
             </Text>
             <Text size={300} className={styles.emptyStateText}>
               {canCreate
-                ? 'No events have been added to this project. Use the Create Event button to add the first event.'
-                : 'No events have been added to this project yet.'}
+                ? `No events have been added to this ${noun}. Use the Create Event button to add the first event.`
+                : `No events have been added to this ${noun} yet.`}
             </Text>
           </div>
         )

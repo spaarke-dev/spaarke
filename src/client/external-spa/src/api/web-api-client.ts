@@ -486,35 +486,58 @@ export async function getRecordDocuments(root: DocumentRoot, recordId: string): 
 // ---------------------------------------------------------------------------
 
 /**
- * Retrieve all Events belonging to a Secure Project.
+ * The record kinds whose events and to-dos the external plane lists (task 039 / task 029): the `{root}` segment of
+ * `/api/v1/external/{root}/{id}/events` and `.../todos`. Same row shape on all three; the server applies the record's own
+ * rights (and the every-root rule) and the client does no filtering of its own.
+ */
+export type EventsTodosRoot = Extract<DocumentRoot, 'projects' | 'matters' | 'workassignments'>;
+
+/** What an events/to-dos section calls the record it belongs to, in its sentences. */
+export const EVENTS_TODOS_ROOT_NOUN: Readonly<Record<EventsTodosRoot, string>> = {
+  projects: 'project',
+  matters: 'matter',
+  workassignments: 'work assignment',
+};
+
+/** `/api/v1/external/{root}/{id}/events`: the events regarding one record. */
+export function rootEventsPath(root: EventsTodosRoot, recordId: string): string {
+  return `/api/v1/external/${root}/${encodeURIComponent(recordId)}/events`;
+}
+
+/** `/api/v1/external/{root}/{id}/todos`: the to-dos regarding one record. */
+export function rootTodosPath(root: EventsTodosRoot, recordId: string): string {
+  return `/api/v1/external/${root}/${encodeURIComponent(recordId)}/todos`;
+}
+
+/**
+ * Retrieve the Events regarding a project, matter or work assignment (task 057; the project route is the original).
  *
- * Events no longer carry a to-do flag — see `getProjectTodos` for project to-do
- * retrieval. `sprk_event`'s project lookup is `sprk_regardingproject` (it has no
- * `sprk_projectid` attribute), so the lookup value field is
- * `_sprk_regardingproject_value`.
+ * `sprk_event`'s project lookup is `sprk_regardingproject` (it has no `sprk_projectid` attribute); a matter or work
+ * assignment event carries `null` there. Events no longer carry a to-do flag - see `getRootTodos`.
  *
- * NOTE: the `defaults` below are inert. `getCollection` ignores its `_options`
- * argument entirely (:291) — select/filter/order/top are all applied server-side
- * by GET /api/v1/external/projects/{id}/events. They are kept only as
- * documentation of the expected projection.
+ * NOTE: `getCollection` ignores its options entirely (:291) - select/filter/order/top are all applied server-side by
+ * GET /api/v1/external/{root}/{id}/events - so the options are accepted only so existing call sites type-check.
+ *
+ * @param root      Which kind of record `recordId` is
+ * @param recordId  Dataverse GUID of the record
+ * @param options   Optional OData query overrides (currently ignored downstream)
+ */
+export async function getRootEvents(
+  root: EventsTodosRoot,
+  recordId: string,
+  options: ODataQueryOptions = {}
+): Promise<ListResult<ODataEvent>> {
+  return getCollection<ODataEvent>(rootEventsPath(root, recordId), options);
+}
+
+/**
+ * Retrieve all Events belonging to a Secure Project (`getRootEvents` for the project root).
  *
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param options    Optional OData query overrides (currently ignored downstream)
  */
 export async function getEvents(projectId: string, options: ODataQueryOptions = {}): Promise<ListResult<ODataEvent>> {
-  const defaults: ODataQueryOptions = {
-    $select: 'sprk_eventid,sprk_name,sprk_duedate,sprk_status,_sprk_regardingproject_value,createdon',
-    $filter: `_sprk_regardingproject_value eq '${projectId}'`,
-    $orderby: 'sprk_duedate asc',
-  };
-
-  const merged: ODataQueryOptions = { ...defaults, ...options };
-
-  if (options.$filter && options.$filter !== defaults.$filter) {
-    merged.$filter = `(${defaults.$filter}) and (${options.$filter})`;
-  }
-
-  return getCollection<ODataEvent>(`/api/v1/external/projects/${projectId}/events`, merged);
+  return getRootEvents('projects', projectId, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -522,15 +545,29 @@ export async function getEvents(projectId: string, options: ODataQueryOptions = 
 // ---------------------------------------------------------------------------
 
 /**
- * Retrieve all To-Dos belonging to a Secure Project.
+ * Retrieve the To-Dos regarding a project, matter or work assignment (task 057; the project route is the original).
  *
- * Calls the BFF route `/api/v1/external/projects/{id}/todos`. The BFF
- * resolves the regarding-project lookup server-side and returns DTOs
- * with the ADR-024 resolver fields populated.
+ * Calls the BFF route `/api/v1/external/{root}/{id}/todos`. The BFF resolves the regarding lookup server-side and returns
+ * DTOs with the ADR-024 resolver fields populated. Note: the BFF computes the `$select` server-side.
  *
- * Note: the BFF computes the `$select` server-side; client `$select`
- * overrides are honoured but the field list is constrained to
- * `ODataTodo` shape.
+ * @param root      Which kind of record `recordId` is
+ * @param recordId  Dataverse GUID of the record
+ * @param options   Optional OData query overrides (currently ignored downstream)
+ */
+export async function getRootTodos(
+  root: EventsTodosRoot,
+  recordId: string,
+  options: ODataQueryOptions = {}
+): Promise<ListResult<ODataTodo>> {
+  const defaults: ODataQueryOptions = {
+    $orderby: 'sprk_duedate asc',
+  };
+
+  return getCollection<ODataTodo>(rootTodosPath(root, recordId), { ...defaults, ...options });
+}
+
+/**
+ * Retrieve all To-Dos belonging to a Secure Project (`getRootTodos` for the project root).
  *
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param options    Optional OData query overrides
@@ -539,13 +576,7 @@ export async function getProjectTodos(
   projectId: string,
   options: ODataQueryOptions = {}
 ): Promise<ListResult<ODataTodo>> {
-  const defaults: ODataQueryOptions = {
-    $orderby: 'sprk_duedate asc',
-  };
-
-  const merged: ODataQueryOptions = { ...defaults, ...options };
-
-  return getCollection<ODataTodo>(`/api/v1/external/projects/${projectId}/todos`, merged);
+  return getRootTodos('projects', projectId, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -812,9 +843,11 @@ export const webApiClient = {
   deleteOwnDocument,
   // Events
   getEvents,
+  getRootEvents,
   createEvent,
   // To-Dos (NEW)
   getProjectTodos,
+  getRootTodos,
   createTodo,
   updateTodo,
   deleteOwnTodo,

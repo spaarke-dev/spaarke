@@ -31,9 +31,11 @@
  *   - messages: GET/POST /api/v1/external/{root}/{id}/messages for project, matter, work assignment, invoice and
  *               service request (`RecordMessages`, task 051; a document has no thread, so no section).
  *   - events/tasks: the existing `EventsCalendar` / `SmartTodo` (read-only: `AccessLevel.ViewOnly` hides create and
- *               toggle) for a Project. Matter and Work Assignment have no external event read yet (task 039 adds
- *               /matters/{id}/events and /workassignments/{id}/events), so their section shows an empty state.
- *               Document, Invoice and Service Request show no events section (notes/decisions.md).
+ *               toggle) for a Project, Matter and Work Assignment (task 057): GET /api/v1/external/{projects|matters|
+ *               workassignments}/{id}/events and /todos, the server applying the record's rights (and, for a row filed to
+ *               more than one root, the every-root rule: the client filters nothing). A 403 shows the shared denied state
+ *               and a failed read a retryable error, inside the section only. Document, Invoice and Service Request show
+ *               no events section (notes/decisions.md).
  *
  * DENIED (FR-01). An id that returns no row from the fetch seam (or a 403) shows "You don't have access to this record"
  * and renders NO section and NO field, so nothing of the record is on screen.
@@ -47,7 +49,7 @@ import { SprkModal } from '@spaarke/ui-components/components/SprkModal';
 import { bffApiCall } from '../../auth/bff-client';
 import { ApiError, AccessLevel } from '../../types';
 import { callerIdentityOf, type CallerIdentity } from '../../api/delete-own';
-import type { DocumentRoot } from '../../api/web-api-client';
+import type { DocumentRoot, EventsTodosRoot } from '../../api/web-api-client';
 import type { ExternalUserContextResponse } from '../../auth/bff-client';
 import { useCallerContext } from '../../hooks/useCallerContext';
 import { canUpload as levelCanUpload, mapAccessLevelString } from '../../hooks/useAccessLevel';
@@ -428,10 +430,17 @@ const InvoicesSection: React.FC<{ parentAttribute: string; parentId: string }> =
   );
 };
 
+/** The entities whose detail shows events and tasks, and the `{root}` of their task 039 / 007 routes. */
+const EVENTS_TODOS_ROOTS: Readonly<Record<string, EventsTodosRoot>> = {
+  sprk_project: 'projects',
+  sprk_matter: 'matters',
+  sprk_workassignment: 'workassignments',
+};
+
 /**
- * Events and tasks. A Project reads through the existing components, read-only (no create or toggle), except that an
- * event or task the caller created shows Delete (task 054). Matter and Work Assignment have no
- * external event read until task 039, so they show the empty state rather than a section that cannot load.
+ * Events and tasks: the existing components on the record's own routes (Project, Matter, Work Assignment), read-only (no
+ * create or toggle), except that an event or task the caller created shows Delete (task 054). An entity with no such
+ * route renders nothing (the config's `showsEventsAndTasks` never offers one).
  */
 const EventsAndTasksSection: React.FC<{ entity: string; id: string; caller: CallerIdentity | null }> = ({
   entity,
@@ -439,19 +448,13 @@ const EventsAndTasksSection: React.FC<{ entity: string; id: string; caller: Call
   caller,
 }) => {
   const styles = useStyles();
+  const root = EVENTS_TODOS_ROOTS[entity];
+  if (!root) return null;
   return (
     <section className={styles.section} aria-label="Events and tasks" data-testid="record-detail-events">
       <h3 className={styles.heading}>Events and tasks</h3>
-      {entity === 'sprk_project' ? (
-        <>
-          <EventsCalendar projectId={id} accessLevel={AccessLevel.ViewOnly} caller={caller} />
-          <SmartTodo projectId={id} accessLevel={AccessLevel.ViewOnly} caller={caller} />
-        </>
-      ) : (
-        <div className={styles.empty} role="status" data-testid="record-detail-events-unavailable">
-          No events or tasks to show for this record yet.
-        </div>
-      )}
+      <EventsCalendar projectId={id} root={root} accessLevel={AccessLevel.ViewOnly} caller={caller} />
+      <SmartTodo projectId={id} root={root} accessLevel={AccessLevel.ViewOnly} caller={caller} />
     </section>
   );
 };

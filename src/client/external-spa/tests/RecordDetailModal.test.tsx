@@ -286,8 +286,8 @@ function installNetwork(): void {
       if (body.entityName === 'sprk_invoice') return { entities: mocks.invoices[key] ?? [], moreRecords: false };
     }
     if (/\/messages$/.test(path)) return { value: [] };
-    if (/\/projects\/[^/]+\/events$/.test(path)) return { value: mocks.events };
-    if (/\/projects\/[^/]+\/todos$/.test(path)) return { value: mocks.todos };
+    if (/\/(projects|matters|workassignments)\/[^/]+\/events$/.test(path)) return { value: mocks.events };
+    if (/\/(projects|matters|workassignments)\/[^/]+\/todos$/.test(path)) return { value: mocks.todos };
     throw new Error(`unexpected BFF call ${options?.method ?? 'GET'} ${path}`);
   });
 }
@@ -658,7 +658,7 @@ describe('sections', () => {
     await within(dialog).findByText('No tasks yet');
   });
 
-  it('Matter: documents come from the matter documents route, invoices roll up by the matter lookup; events/tasks show an empty state (reads arrive with task 039)', async () => {
+  it('Matter: documents come from the matter documents route, invoices roll up by the matter lookup; events/tasks come from the matter routes (task 057)', async () => {
     const c = caseOf('sprk_matter');
     const matterId = ID.matter[0];
     mocks.documents[`matters:${matterId}`] = [
@@ -681,10 +681,13 @@ describe('sections', () => {
     await within(await within(dialog).findByTestId('record-detail-invoices')).findByText('Matter invoice');
 
     const events = within(dialog).getByTestId('record-detail-events');
-    expect(within(events).getByTestId('record-detail-events-unavailable')).toBeTruthy();
-    // No event or to-do read exists for a matter yet: none is attempted.
+    await within(events).findByText(/No events yet/);
+    await within(events).findByText('No tasks yet');
+    // The static "no reads yet" empty state is gone; the matter's own event and to-do routes are read.
+    expect(within(events).queryByTestId('record-detail-events-unavailable')).toBeNull();
     const calls = bffApiCall.mock.calls.map(call => String(call[0]));
-    expect(calls.some(p => p.endsWith('/events') || p.endsWith('/todos'))).toBe(false);
+    expect(calls).toContain(`/api/v1/external/matters/${matterId}/events`);
+    expect(calls).toContain(`/api/v1/external/matters/${matterId}/todos`);
   });
 
   it('Work assignment: documents and the events section, but no invoices section (invoices have no work-assignment lookup)', async () => {

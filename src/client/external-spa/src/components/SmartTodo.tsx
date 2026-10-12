@@ -9,7 +9,9 @@
  * `sprk_event` filtered by the legacy event-as-todo boolean toggle. To-dos
  * are now first-class `sprk_todo` records returned by the BFF route
  * `GET /api/v1/external/projects/{id}/todos` with ADR-024 polymorphic-resolver
- * fields populated server-side.
+ * fields populated server-side. Task 057: the same list reads a matter's or a work assignment's to-dos
+ * (`GET /api/v1/external/{matters|workassignments}/{id}/todos`) when `root` says so - read-only there (create and
+ * status toggle are project-only in this component).
  *
  * Design reference: @spaarke/ui-components/TodoDetail
  *   (src/client/shared/Spaarke.UI.Components/src/components/TodoDetail/TodoDetail.tsx)
@@ -52,6 +54,7 @@ import {
   DialogActions,
   MessageBar,
   MessageBarBody,
+  MessageBarActions,
   Tooltip,
   Divider,
 } from '@fluentui/react-components';
@@ -66,11 +69,21 @@ import {
 } from '@fluentui/react-icons';
 import { daysBetweenLocalMidnight, parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 
-import { getProjectTodos, createTodo, updateTodo, deleteOwnTodo, type ODataTodo } from '../api/web-api-client';
+import {
+  getRootTodos,
+  createTodo,
+  updateTodo,
+  deleteOwnTodo,
+  EVENTS_TODOS_ROOT_NOUN,
+  type EventsTodosRoot,
+  type ODataTodo,
+} from '../api/web-api-client';
 import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
 import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
 import { TruncatedListNotice } from './TruncatedListNotice';
+import { BffAccessState, accessFailureOf, type BffAccessFailure } from './auth/BffAccessState';
 import { AccessLevel } from '../types';
+import { problemMessage } from '../auth/bff-client';
 import { SectionCard } from './SectionCard';
 
 // ---------------------------------------------------------------------------
@@ -576,8 +589,10 @@ const CreateTaskDialog: React.FC<CreateTaskDialogProps> = ({
 // ---------------------------------------------------------------------------
 
 export interface SmartTodoProps {
-  /** Dataverse GUID of the sprk_project record whose to-dos to display. */
+  /** Dataverse GUID of the record whose to-dos to display (a sprk_project unless `root` says otherwise). */
   projectId: string;
+  /** Which kind of record `projectId` is (task 057). Defaults to a project. */
+  root?: EventsTodosRoot;
   /** The current user's access level — controls create/edit permissions. */
   accessLevel: AccessLevel;
   /** The signed-in principal. With it, to-dos the caller created show Delete (task 054); without it, none do. */
@@ -592,7 +607,15 @@ export interface SmartTodoProps {
  * users can only read; Collaborate and Full Access users can create to-dos
  * and toggle their completion status.
  */
-export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel, caller }) => {
+export const SmartTodo: React.FC<SmartTodoProps> = ({
+  projectId,
+  root = 'projects',
+  accessLevel: levelProp,
+  caller,
+}) => {
+  // Create and the status toggle are project routes' actions: a matter or work assignment list is read-only here whatever
+  // level the host passes (task 057). Delete-own is independent of the level.
+  const accessLevel = root === 'projects' ? levelProp : AccessLevel.ViewOnly;
   const styles = useStyles();
 
   // To-do list state
@@ -601,6 +624,9 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel, ca
   const [loadError, setLoadError] = React.useState<string | null>(null);
   // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
   const [truncated, setTruncated] = React.useState(false);
+  // A 401/403 on the list is the shared sign-in / denied state (task 057); a failed read offers "Try again".
+  const [accessFailure, setAccessFailure] = React.useState<BffAccessFailure | null>(null);
+  const noun = EVENTS_TODOS_ROOT_NOUN[root];
 
   // Status toggle state — tracks which to-do ID is currently being toggled
   const [togglingTaskId, setTogglingTaskId] = React.useState<string | null>(null);
@@ -627,26 +653,33 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel, ca
   const loadTasks = React.useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
+    setAccessFailure(null);
     // Task 105: a flag from an earlier read must not sit beside this read's error.
     setTruncated(false);
 
     try {
-      // BFF route /api/v1/external/projects/{id}/todos returns sprk_todo records
-      // regarding the given project (server-side resolver). No client-side
+      // BFF route /api/v1/external/{root}/{id}/todos returns sprk_todo records
+      // regarding the given record (server-side resolver). No client-side
       // todoflag filter is needed — the new route returns only to-dos.
       // The BFF returns every to-do up to its row cap and says `truncated` when it stops short (task 105).
-      const todos = await getProjectTodos(projectId, {
+      const todos = await getRootTodos(root, projectId, {
         $orderby: 'createdon desc',
       });
       setTasks(todos.items);
       setTruncated(todos.truncated);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load tasks';
-      setLoadError(message);
+      const failure = accessFailureOf(err);
+      if (failure) {
+        setAccessFailure(failure);
+      } else {
+        // The server's ProblemDetails `detail` when it wrote one; never the raw response body (an HTML 503 page or a JSON
+        // problem document is not a message).
+        setLoadError(problemMessage(err, 'Tasks could not be loaded just now.'));
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, root]);
 
   React.useEffect(() => {
     void loadTasks();
@@ -762,9 +795,20 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel, ca
       <SectionCard title={cardTitle} actions={cardActions}>
         <div className={styles.container}>
           {/* Errors */}
+          {accessFailure && (
+            <BffAccessState
+              failure={accessFailure}
+              deniedMessage={`You do not have permission to view tasks on this ${noun}.`}
+            />
+          )}
           {loadError && (
             <MessageBar intent="error" className={styles.errorBanner}>
               <MessageBarBody>{loadError}</MessageBarBody>
+              <MessageBarActions>
+                <Button appearance="secondary" size="small" onClick={() => void loadTasks()}>
+                  Try again
+                </Button>
+              </MessageBarActions>
             </MessageBar>
           )}
           {toggleError && (
@@ -784,7 +828,7 @@ export const SmartTodo: React.FC<SmartTodoProps> = ({ projectId, accessLevel, ca
 
           {/* Empty state */}
           {/* Task 105: an incomplete empty list is not "no tasks" — the notice says it could not be read. */}
-          {!isLoading && !loadError && !truncated && tasks.length === 0 && (
+          {!isLoading && !loadError && !accessFailure && !truncated && tasks.length === 0 && (
             <div className={styles.emptyState} role="status" aria-live="polite">
               <TaskListSquareLtrRegular className={styles.emptyStateIcon} />
               <Text>No tasks yet</Text>
