@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-12 (031/032/035 done; 037 + 054 remainder running; by context-handoff)
+> **Last Updated**: 2026-10-12 (037/054 done; 055 in review; 039 fix round; by context-handoff)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,44 +9,40 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 037 (notification feed, BFF, isolated worktree agent) and the 054 remainder (SPA: SR delete + recall, invoice documents; this worktree, uncommitted) are running |
-| **Step** | R3 head `0cd675b77` pushed. 031, 032, 035 merged, verified (build 0/0, filtered unit 4641, arch 941) and marked done |
-| **Status** | Clean apart from agent work. 037 POML/TASK-INDEX set to in-progress (uncommitted until 037 lands) |
-| **Next Action** | 037 done → two fable reviews (auth), fix, merge `--no-ff`, verify, mark done. 054 done → one fable review, fix, commit by path, verify (SPA suite), mark done. Then 055 (bell; needs 037 + 054 + 041) |
+| **Task** | 055 (bell + deep link, SPA, this worktree, uncommitted) is under two fable reviews. 039 (matter/WA event reads, BFF) is in a sonnet fix round in worktree `C:\code_files\spaarke\.claude\worktrees\agent-a0356b48145f4ef5f` (branch `worktree-agent-a0356b48145f4ef5f`, not merged) |
+| **Step** | 037 merged + done (`fc71af7fb`); 054 done (`224e06292`); 039 marked in progress (`057522ff1`) |
+| **Status** | 055 files uncommitted (list below); SPA suite 775/775 before review |
+| **Next Action** | 055 reviews → sonnet fix round → commit by path → SPA suite → mark done. 039 fix round → scoped re-check → merge `--no-ff` → build + filtered unit + arch → mark done |
+
+### 055 uncommitted files (commit by path)
+`src/client/external-spa/`: modified `src/App.tsx`, `src/auth/msal-auth.ts`, `src/components/AppHeader.tsx`, `src/components/shell/index.ts`, `src/mocks/mock-service.ts`; new `src/api/notifications-client.ts`, `src/hooks/useNotificationFeed.ts`, `src/components/shell/NotificationBell.tsx`, `src/components/detail/{record-targets.ts,RecordOpener.tsx,RecordDeepLink.tsx}`, `tests/{NotificationBell,RecordDeepLink,App.notificationBell}.test.tsx`; plus `projects/.../notes/task-055-notes.md`.
 
 ### Critical Context
 - **Parallel pattern:** BFF tasks run in isolated worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-*` (`git reset --hard <R3 sha>` first), commit there, main session merges `--no-ff`. SPA tasks run in this worktree, uncommitted; the main session commits by explicit path. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
 - **Review policy:** auth/security/tenant-isolation changes get two fable passes; other FULL tasks one. Fix rounds sonnet; a fix that changes approach gets a scoped re-check. Max 4 agents.
 - **Bookkeeping edits:** python script files in the scratchpad (sed breaks on the status emoji). Check with `pwsh -NoProfile -File scripts/check-task-status-drift.ps1`.
-- **Do not run the full BFF unit suite under load** (host contract tests time out); use filtered runs.
-
-## Done this session (2026-10-11/12)
-
-- 035 intake: owner = requester contact's BU default team; refuses unresolved (merged `44f14ba11`).
-- 031: invoice document routes (option A: union of matter/project rights); SR documents land in a secure record's container; back-reference fix (merged `8cdfa7659`).
-- Owner-decision BFF set (merged `1cfa1c5a4`): `DELETE /servicerequests/{id}` (requester only; 409 `has_related_records`; recall = 034 message post), privileged + potentially privileged messages hidden externally (`CommunicationThreadReadService.ExternallyHiddenPrivilege`), sender from `Communication:DefaultMailbox` (must be in `ApprovedSenders` outside Dev; scripts emit `ApprovedSenders__0`).
-- Live (dev): 040 steps 0-3 (Spaarke Workspace client `9f1da340-c647-4266-9d89-e09f10700593`, pre-auths), 041 CIAM `user_impersonation` `2017a8fe-…` + pre-auth `bd57e54e` + `/auth-callback.html`, 043 environments `external-spa-dev` / `external-spa-prod`. Records in task 040/041/043 notes.
-- Docs: Model 1 home-tenant explanation (deployment guide §6.5.2 + `.claude/constraints/auth.md`, owner-requested).
-- ISS-005 (#1673): binder-created contacts have no BU-team owner.
+- **Do not run the full BFF unit suite under load**; use filtered runs.
+- **039 interim rule (main session, pending owner):** an external list row with several core roots is shown only when the caller has Read on EVERY root (`ParentReadable` / `ReadableEvents`). Fix round extends it to to-dos and audits documents, messages and the feed.
 
 ## Open owner questions
 
 1. **Closed SR delete:** may a requester delete a resolved/closed SR with no related rows (today yes), or only open ones?
 2. **Invoice upload into a secure container:** union of rights lets a Collaborate-on-project caller upload into the secure matter's container of an invoice with both parents. Keep, or require Create on every parent?
-3. **Intake forms (052/053):** five questions in `notes/intake-form-design.md` (department from sign-in; Invention staff-only; incident channel; fixed vs per-customer option lists; NDA review-only vs issue standard NDA).
-4. **ISS-005:** which BU a binder-created workforce contact belongs to.
-5. **Go for dev dispatch:** Teams package + SPA (`external-spa-dev`), then FR-21 live sign-in check (task 071); 040 step 5 after it.
-6. **003 Q4 follow-up answered** (CustomerTenantIds = customer's own Entra tenant ids); R3 060 adds the registry field.
-7. **002:** grid columns to match the main entity views (owner 2026-10-11) — not started.
+3. **Multi-root visibility (039):** A every-root (interim) / B secure-roots-only (recommended) / C union.
+4. **Bell items:** staff team-membership grants; a renewed grant restored in place produces no bell item.
+5. **Intake forms (052/053):** five questions in `notes/intake-form-design.md`.
+6. **ISS-005:** which BU a binder-created workforce contact belongs to.
+7. **002:** expand the allow-list for the 15 excluded columns? active-only? sort? seed in repo? (`notes/task-002-notes.md`).
+8. **Go for dev dispatch:** Teams package + SPA (`external-spa-dev`), then task 071 live sign-in; 040 step 5 after it (never remove the Copilot `access_as_user`).
 
 ## Next actions (in order)
-1. Land 037 and the 054 remainder (reviews, merge/commit, verify).
-2. 055 (bell + deep link), then 052/053 after the intake-form answers.
-3. 060 (self-registration service; co-host with the T240c directory, own MI; registry field `CustomerTenantIds`).
-4. 002 (columns from savedqueries), 039.
+1. Land 055 and 039.
+2. New SPA task: matter/WA events and to-dos in the detail view (FR-03 consumer; RecordDetailModal shows static "No events or tasks…").
+3. 002 after the column answers; 052/053 after the intake answers.
+4. 060 (self-registration service; co-host with T240c, own MI; registry field `CustomerTenantIds`).
 5. Before the BFF PR: `/conflict-check` (`AuthorizationModule.cs`, `Api/ExternalAccess/**` shared with UAC-r2) and actionlint on both deploy workflows.
 
 ## Dependencies tracked elsewhere
-- ISS-001 (#1623) AuthorizationModule once-per-process flag; ISS-002 (#1633) streaming contract test flake; ISS-003 (#1636) shared `sanitizeEmailHtml`; ISS-004 internal document delete orphan; ISS-005 (#1673).
-- Copilot agent still uses `access_as_user` on `1e40baad`: 040 step 5 must not remove it.
+- ISS-001 (#1623), ISS-002 (#1633), ISS-003 (#1636), ISS-004, ISS-005 (#1673).
+- Copilot agent still uses `access_as_user` on `1e40baad`.
 - Operator: `mailbox-central@spaarke.com` + Exchange RBAC scoping for the stamp UAMI (H14a); BFF app user needs `prvDelete` on `sprk_servicerequest` (verify live).
