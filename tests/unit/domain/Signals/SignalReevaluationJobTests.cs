@@ -1635,7 +1635,14 @@ public partial class SignalReevaluationJobTests
                 SignalWriter.ResolutionDismissed, resolvedOn: RunAt.UtcDateTime.AddDays(-days), coreId: MatterId, suppressedUntil: until, policyId: policyId);
             h.Org.Rows[id]["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId);
             h.Org.Rows[id]["sprk_matter"] = new EntityReference("sprk_matter", MatterId);
-            h.Org.Rows[id]["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", Guid.NewGuid());
+            var recordId = Guid.NewGuid();
+            h.Org.Rows[id]["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", recordId);
+            h.Sysadmin.DecisionRecords[recordId] = new Entity("sprk_decisionrecord", recordId)
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+                ["sprk_recordclass"] = new OptionSetValue((int)RecordedDecisionClass.Dismissal),
+                ["sprk_decidedon"] = RunAt.UtcDateTime.AddDays(-days),
+            };
         }
 
         var otherMatter = Guid.Parse("2444af6d-e1f2-f011-8406-7ced8d1dc9aa");
@@ -1681,18 +1688,27 @@ public partial class SignalReevaluationJobTests
     {
         var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
         var (policyId, until, otherOpen) = SecureStampedMatterWithAnOpenNonHit(h);
-        // The suppression pass completes (its last read is the Decision Records' batch); the next placement, the hits', times out.
+        // The suppression pass completes: its last read is the Decision Records' facts batch (the one that asks for sprk_recordclass; the
+        // walk's own reads of the records ask for lookups). The next placement, the hits', times out.
         var reconciled = false;
+        var faulted = 0;
         h.Sysadmin.FaultOn = q =>
         {
-            if (q.EntityName == "sprk_decisionrecord") reconciled = true;
-            return reconciled && q.EntityName == "businessunit" ? new TimeoutException("Dataverse timed out.") : null;
+            if (q.EntityName == "sprk_decisionrecord" && q.ColumnSet.Columns.Contains("sprk_recordclass")) reconciled = true;
+            if (!reconciled || q.EntityName != "businessunit") return null;
+            faulted++;
+            return new TimeoutException("Dataverse timed out.");
         };
 
         var result = await h.RunAsync();
 
-        reconciled.Should().BeTrue("precondition: the fault is in the hits' placement, after the suppression pass");
+        reconciled.Should().BeTrue("precondition: the suppression pass read the Decision Records' facts, so it got past its own placement");
+        faulted.Should().BeGreaterThan(0, "precondition: the fault is armed on the hits' placement, after the suppression pass");
         ShouldBeSkippedForPartitions(result, h.Org, policyId, otherOpen, until);
+        h.Log.Should().Contain(e => e.EventId.Id == OntologyWriterEvents.EvaluatorPolicyFailed.Id
+            && e.Message.Contains("partitions of its hits could not be read"), "the skip comes from the hit-placement fault");
+        h.Log.Should().NotContain(e => e.Message.Contains("could not be placed in their secure-family partitions"),
+            "the suppression pass itself completed: it is not the PartitionsUnavailable skip");
     }
 
     private sealed class Harness
@@ -1918,6 +1934,9 @@ public partial class SignalReevaluationJobTests
         public List<string> Fetches { get; } = new();
         public int WriteCalls { get; private set; }
 
+        /// <summary>#1661 round 3 F-T1: Decision Records by id (<see cref="Stub"/> is for the other tables).</summary>
+        public Dictionary<Guid, Entity> DecisionRecords { get; } = new();
+
         /// <summary>#1661: the Secure Record owner team (null: this World has none, so nothing is secure and nothing is walked).</summary>
         public Guid? SecureTeamId { get; private set; }
 
@@ -2086,6 +2105,18 @@ public partial class SignalReevaluationJobTests
                 case "sprk_matter" when SecureTeamId is not null && query.ColumnSet.Columns.Contains("sprk_issecure")
                                          && Value("sprk_matterid") is Guid rootId && _rows.TryGetValue(("sprk_matter", rootId), out var root):
                     result.Entities.Add(root);
+                    break;
+                // #1661 round 3 F-T1: the Decision Records the Signals cite, for both reads of them (the lineage walk's, with the lookup
+                // columns, and the suppression pass's facts: class, reason, decided-on). A record not stubbed is absent, as in Dataverse.
+                case "sprk_decisionrecord":
+                    var wanted = query.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToHashSet();
+                    foreach (var record in DecisionRecords.Values.Where(r => wanted.Contains(r.Id)))
+                    {
+                        var copy = new Entity("sprk_decisionrecord", record.Id);
+                        foreach (var attribute in record.Attributes) copy[attribute.Key] = attribute.Value;
+                        result.Entities.Add(copy);
+                    }
+
                     break;
                 case "timezonedefinition" when Value("timezonecode") is int zoneCode && _zones.TryGetValue(zoneCode, out var name):
                     result.Entities.Add(new Entity("timezonedefinition", Guid.NewGuid()) { ["standardname"] = name });
