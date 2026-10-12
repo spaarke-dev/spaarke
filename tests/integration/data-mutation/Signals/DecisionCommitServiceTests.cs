@@ -127,7 +127,11 @@ public sealed class DecisionCommitServiceTests
         /// <summary>The caller's linked internal contact (task 141 link); null: the caller has none.</summary>
         public Guid? CallerContact { get; set; } = CallerContactId;
 
-        /// <summary>A fault of the identity service (the contact could not be read).</summary>
+        /// <summary>What the real identity service does on a read fault: it never throws, it returns the fail-soft identity
+        /// (<c>ContactId</c> null) with these <see cref="IdentityReadFaults"/> set (<see cref="PersonIdentity.ContactUnreadable"/>).</summary>
+        public IdentityReadFaults IdentityFaults { get; set; }
+
+        /// <summary>A defensive case the real service does not produce: the identity service itself throws.</summary>
         public Exception? IdentityFault { get; set; }
 
         public Mock<IIdentityNormalizationService> Identity { get; } = new();
@@ -161,7 +165,9 @@ public sealed class DecisionCommitServiceTests
 
             Identity.Setup(i => i.ResolveAsync(Caller, It.IsAny<CancellationToken>()))
                 .Returns((Guid id, CancellationToken _) =>
-                    IdentityFault is not null ? throw IdentityFault : Task.FromResult(new PersonIdentity(id, CallerContact)));
+                    IdentityFault is not null
+                        ? throw IdentityFault
+                        : Task.FromResult(new PersonIdentity(id, (IdentityFaults & (IdentityReadFaults.SystemUser | IdentityReadFaults.ContactBinding)) != 0 ? null : CallerContact) { Faults = IdentityFaults }));
 
             User.Setup(u => u.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string path, CancellationToken _) => AnswerAsCaller(path));
@@ -1156,6 +1162,8 @@ public sealed class DecisionCommitServiceTests
         var result = await rig.CommitAsync(MarkComplete(), DoSignal);
 
         result.Status.Should().Be(DecisionCommitStatus.Unavailable);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.SignalUnreadable, "a read fault on the item is not an idempotency-store fault");
+        result.Detail.Should().Be("This item could not be checked right now; nothing was done.");
         rig.OwnerAsks.Should().BeEmpty();
         rig.Writes.Should().BeEmpty();
     }
@@ -1309,14 +1317,52 @@ public sealed class DecisionCommitServiceTests
     }
 
     [Fact]
-    public async Task AContactReadThatFaults_DoesNotFailTheCommit_AndLeavesAssignedToInternalEmpty()
+    public async Task AContactReadThatFaults_Is503_AndNothingIsWritten()
+    {
+        // The real IdentityNormalizationService never throws: a failed systemuser / contact-binding read comes back as
+        // ContactId null + Faults. The Decision Record is append-only, so it must not be written without its decider.
+        var rig = new Rig { IdentityFaults = IdentityReadFaults.SystemUser };
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable);
+        rig.Writes.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+        rig.Log.Should().NotContain(l => l.StartsWith("record:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AContactBindingReadThatFaults_Is503_AndNothingIsWritten()
+    {
+        var rig = new Rig { IdentityFaults = IdentityReadFaults.ContactBinding };
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable);
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AnIdentityServiceThatThrows_Is503_AndNothingIsWritten()
     {
         var rig = new Rig { IdentityFault = new TimeoutException("no answer") };
 
         var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
 
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable);
+        rig.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AnUnrelatedIdentityFault_WithAContactResolved_StillCommitsWithTheDecider()
+    {
+        // A Teams / Account fault leaves the contact answer intact: only an UNREADABLE contact refuses.
+        var rig = new Rig { IdentityFaults = IdentityReadFaults.Teams };
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false));
+
         result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
-        rig.Record.Contains("sprk_assignedtointernal").Should().BeFalse();
+        rig.Record.GetAttributeValue<EntityReference>("sprk_assignedtointernal").Id.Should().Be(CallerContactId);
     }
 
     // ── D-128 Q18: send-reminder does not resolve the item ───────────────────────────────────────────────────────────────

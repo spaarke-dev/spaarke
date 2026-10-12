@@ -431,7 +431,7 @@ public sealed class DecisionCommitService
             if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
                 return new DecisionCommitResult { Status = DecisionCommitStatus.CallerUnresolved, ReviewId = review.ReviewId };
             if (decision.Outcome == SignalAccessOutcome.Unavailable)
-                return Unavailable(review.ReviewId);
+                return Unavailable(review.ReviewId, DecisionCommitReasons.SignalUnreadable, "This item could not be checked right now; nothing was done.");
             if (decision.Outcome != SignalAccessOutcome.Allowed)
                 return new DecisionCommitResult { Status = DecisionCommitStatus.NotFound, ReviewId = review.ReviewId };
             lanes[id] = decision;
@@ -881,8 +881,11 @@ public sealed class DecisionCommitService
         progress.MatterId = p.Primary.MatterId;
 
         // D-129: the deciding individual is the caller's linked internal contact (Assigned To Internal), never an owner. Resolved
-        // once, after FR-51; unresolvable leaves the column empty and never fails the commit.
-        var deciderContact = await DeciderContactAsync(confirmedBy, ct).ConfigureAwait(false);
+        // once, after FR-51. A user with no linked contact leaves the column empty (warning); a user whose contact could not be READ
+        // is unknown, not absent, and the record is append-only, so that answers Unavailable before anything is written.
+        var (deciderContact, deciderUnreadable) = await DeciderContactAsync(confirmedBy, ct).ConfigureAwait(false);
+        if (deciderUnreadable)
+            return Unavailable(reviewId, DecisionCommitReasons.RecordRefused, "The deciding user could not be identified right now; nothing was done. Try again shortly.");
 
         // ---- (1d) Every executor's preflight, as the caller. A resumed review skips the steps that already landed. ------
         var done = (resume?.Steps ?? []).Where(s => s.Status == nameof(DecisionActionStatus.Done)).ToDictionary(s => s.Key, StringComparer.Ordinal);
@@ -1395,26 +1398,36 @@ public sealed class DecisionCommitService
         signal.SubjectEntity is { Length: > 0 } entity && signal.SubjectId is { } subjectId ? new DecisionRecordRef(entity, subjectId) : null;
 
     /// <summary>D-129: the deciding caller's linked internal contact, through the identity service task 141 feeds (the user's
-    /// <c>sprk_primarycontact</c> link, else the contact bound to their Entra oid). Null, with a warning, when there is none or the
-    /// read faulted: the Decision Record's <c>sprk_assignedtointernal</c> then stays empty and the commit goes on.</summary>
-    private async Task<Guid?> DeciderContactAsync(Guid systemUserId, CancellationToken ct)
+    /// <c>sprk_primarycontact</c> link, else the contact bound to their Entra oid). Null, with a warning, when the user genuinely has
+    /// none: the Decision Record's <c>sprk_assignedtointernal</c> then stays empty and the commit goes on. <c>Unreadable</c> is true
+    /// when the read FAULTED (<see cref="PersonIdentity.ContactUnreadable"/>, or the service threw): the answer is unknown, so the
+    /// caller must not write the append-only record without a decider.</summary>
+    private async Task<(Guid? Contact, bool Unreadable)> DeciderContactAsync(Guid systemUserId, CancellationToken ct)
     {
         try
         {
             var identity = await _identity.ResolveAsync(systemUserId, ct).ConfigureAwait(false);
             if (identity.ContactId is { } contactId && contactId != Guid.Empty)
-                return contactId;
+                return (contactId, false);
+
+            if (identity.ContactUnreadable)
+            {
+                _logger.LogWarning("Decision commit: the deciding user's linked contact could not be read (identity read faults: {Faults}); refusing before any write.",
+                    identity.Faults);
+                return (null, true);
+            }
 
             _logger.LogWarning("Decision commit: the deciding user has no linked internal contact; the Decision Record's Assigned To Internal is left empty.");
-            return null;
+            return (null, false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning("Decision commit: the deciding user's linked contact could not be read ({ExceptionType}); the Decision Record's Assigned To Internal is left empty.",
+            _logger.LogWarning("Decision commit: the deciding user's linked contact could not be read ({ExceptionType}); refusing before any write.",
                 ex.GetType().Name);
-            return null;
+            return (null, true);
         }
     }
+
     /// <summary>A by-id read that failed because the row does not exist (<c>0x80040217</c> anywhere in the chain).</summary>
     private static bool IsNotFound(Exception ex)
     {

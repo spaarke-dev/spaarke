@@ -49,9 +49,10 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
         return new DecisionRecordWriter(client, ownership, TimeProvider.System, NullLogger<DecisionRecordWriter>.Instance);
     }
 
-    /// <summary>A live no-core subject (any <c>sprk_todo</c> the operator can read, in the environment under test); the no-core
-    /// test below returns at once when it is not set, because the owner is whatever the resolver answers for THAT row.</summary>
-    private const string NoCoreTodoEnvVar = "SPAARKE_SEAM_DECISIONRECORD_NOCORE_TODO";
+    /// <summary>Name prefix of the To Do the no-core test creates as its subject; <see cref="DisposeAsync"/> sweeps by it.</summary>
+    private const string TodoMarker = "zz-043-nocore-subject";
+
+    private readonly List<Guid> _todos = [];
 
     private static DecisionRecordRequest Request(DecisionRecordCore? core, DecisionRecordRef? subject) => new(
         Guid.NewGuid(), PolicyVersionId, core, subject, TestUser1, null,
@@ -109,7 +110,16 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
     [Fact]
     public async Task WriteAsync_NoCore_AsTheWriter_IsOwnedByTheResolversTeam_WithNullCoreColumns()
     {
-        if (!_dv.IsLive || !Guid.TryParse(Environment.GetEnvironmentVariable(NoCoreTodoEnvVar), out var todo)) return;
+        if (!_dv.IsLive) return;
+
+        // The subject is created here, with the operator client, so the test always runs when the fixture is live: it is the
+        // no-core item's To Do, attached to the positive matter so the resolver has a parent to answer for. Swept in DisposeAsync.
+        var todo = await _dv.OperatorClient.CreateAsync(new Entity("sprk_todo")
+        {
+            ["sprk_name"] = $"{TodoMarker} {Guid.NewGuid():N}",
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", PositiveMatter),
+        });
+        _todos.Add(todo);
 
         var req = Request(null, new DecisionRecordRef("sprk_todo", todo)) with
         {
@@ -164,6 +174,28 @@ public sealed class DecisionRecordWriterSeamTests : IClassFixture<SignalWriterSe
             {
                 try { await _dv.OperatorClient.DeleteAsync("sprk_decisionrecord", row.Id); }
                 catch { /* best effort: must not mask the assertion failure */ }
+            }
+        }
+        catch
+        {
+            // best effort
+        }
+
+        // The no-core test's To Do subjects (created by id above; the name prefix catches any that an aborted run left).
+        foreach (var id in _todos)
+        {
+            try { await _dv.OperatorClient.DeleteAsync("sprk_todo", id); }
+            catch { /* best effort */ }
+        }
+
+        try
+        {
+            var todos = new QueryExpression("sprk_todo") { ColumnSet = new ColumnSet("sprk_todoid") };
+            todos.Criteria.AddCondition("sprk_name", ConditionOperator.BeginsWith, TodoMarker);
+            foreach (var row in (await _dv.OperatorClient.RetrieveMultipleAsync(todos)).Entities)
+            {
+                try { await _dv.OperatorClient.DeleteAsync("sprk_todo", row.Id); }
+                catch { /* best effort */ }
             }
         }
         catch
