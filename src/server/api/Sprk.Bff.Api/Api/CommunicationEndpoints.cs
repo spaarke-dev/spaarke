@@ -88,8 +88,8 @@ public static class CommunicationEndpoints
         // shape checked first), then the ONE re-file core (OwnedChildWrite.RefileAsync — AppendTo on every record it is moved
         // under, F3 on a move out of a secure record, the owner decided and assigned; an unfiled communication keeps its
         // creator, E1), the core-ancestor re-stamp, and SecureChildReconciler.AfterRefileAsync (its mirror, and 148's pass over
-        // what is filed under it when it moved under, out of or between secure records). Then (spaarkeai-word-add-in-r1 task
-        // 129) a filed email's thread follows the filing: IThreadResolver.ReconcileThreadForFilingAsync, best-effort.
+        // what is filed under it when it moved under, out of or between secure records — and, spaarkeai-word-add-in-r1 task
+        // 129, the email's thread following the filing).
         group.MapPatch("/{id:guid}/filing", (
                 Guid id,
                 [Microsoft.AspNetCore.Mvc.FromBody] System.Text.Json.JsonElement body,
@@ -97,13 +97,12 @@ public static class CommunicationEndpoints
                 [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
                 [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
                 [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Access.SecureChildReconciler children,
-                [Microsoft.AspNetCore.Mvc.FromServices] IThreadResolver threads,
                 HttpContext httpContext,
                 ILogger<Program> logger,
                 CancellationToken ct) =>
                 ChildRecordEndpoints.UpdateAsync(
                     "sprk_communication", id, body, user, ownership, restamper, children, httpContext, logger, ct,
-                    filingOnly: true, threads: threads))
+                    filingOnly: true))
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.Refile)
             .WithName("RefileCommunication")

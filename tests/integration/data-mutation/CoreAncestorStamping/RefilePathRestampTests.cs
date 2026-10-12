@@ -161,6 +161,84 @@ public class RefilePathRestampTests
         world.Lookup("sprk_todo", TodoUnderEvent, "sprk_regardingmatter").Should().Be(MatterA);
     }
 
+    // ── spaarkeai-word-add-in-r1 task 129 (behaviour review F3): the re-file writers that do NOT run
+    //    SecureChildReconciler.AfterRefileAsync reconcile the communication's thread themselves — once per written re-file.
+
+    [Fact(DisplayName = "Task 129: an UpdateRecord node re-filing a communication reconciles its thread once")]
+    public async Task UpdateRecordActionCore_ReFilingACommunication_ReconcilesItsThreadOnce()
+    {
+        var world = CommunicationWorld();
+        var threads = new Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+        var core = CoreWith(world, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), threads.Object);
+
+        await core.UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null, LegacyFields: null,
+                Lookups: [new RenderedLookup("sprk_regardingmatter", "sprk_matter", MatterB.ToString())]),
+            CancellationToken.None);
+
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact(DisplayName = "Task 129: an UpdateRecord node whose re-file is refused, or that files nothing, never reconciles a thread")]
+    public async Task UpdateRecordActionCore_ARefusedReFile_OrAWriteThatFilesNothing_NeverReconciles()
+    {
+        var world = CommunicationWorld();
+        var threads = new Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+        var refusing = CoreWith(world, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble { TeamId = null }, threads.Object);
+        var refused = async () => await refusing.UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null, LegacyFields: null,
+                Lookups: [new RenderedLookup("sprk_regardingmatter", "sprk_matter", MatterB.ToString())]),
+            CancellationToken.None);
+        await refused.Should().ThrowAsync<RecordOwnerUnresolvedException>();
+
+        await CoreWith(world, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), threads.Object).UpdateAsync(
+            new UpdateRecordActionInput(
+                "sprk_communication", Communication, FieldMappings: null,
+                LegacyFields: new Dictionary<string, string?> { ["sprk_triagesummary"] = "x" }, Lookups: null),
+            CancellationToken.None);
+
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "Task 129: the playbook output orchestrator's DataverseUpdateHandler re-filing a communication reconciles its thread once")]
+    public async Task DataverseUpdateHandler_ReFilingACommunication_ReconcilesItsThreadOnce_AndAPlainWriteNever()
+    {
+        var world = CommunicationWorld();
+        var threads = new Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+        var handler = new DataverseUpdateHandler(
+            new Mock<IFieldMappingDataverseService>().Object, world.Service, world.Restamper,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure(), NullLogger<DataverseUpdateHandler>.Instance,
+            threads.Object);
+
+        await handler.UpdateAsync(
+            "sprk_communication", Communication,
+            new Dictionary<string, object?> { ["sprk_triagesummary"] = "x" }, ConcurrencyMode.None, maxRetries: 1,
+            CancellationToken.None);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
+            "a write that files nothing is not a re-file");
+
+        await handler.UpdateAsync(
+            "sprk_communication", Communication,
+            new Dictionary<string, object?> { ["sprk_regardingmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", MatterB) },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Communication, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private static UpdateRecordActionCore CoreWith(
+        StampWorld world, IRecordOwnershipResolver ownership, Sprk.Bff.Api.Services.Communication.IThreadResolver threads) =>
+        new(
+            new Mock<IFieldMappingDataverseService>().Object,
+            new ServiceCollection()
+                .AddSingleton(world.Restamper)
+                .AddSingleton(ownership)
+                .AddSingleton(threads)
+                .BuildServiceProvider()
+                .GetRequiredService<IServiceScopeFactory>(),
+            NullLogger.Instance);
+
     /// <summary>A document now filed under matter B, a to-do under it still copying A, and an Office carrier to-do.</summary>
     internal static StampWorld DocumentWorld() => new StampWorld()
         .Row("sprk_document", Document, [("sprk_matter", "sprk_matter", MatterB)])

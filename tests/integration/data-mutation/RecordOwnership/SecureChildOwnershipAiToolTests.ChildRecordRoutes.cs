@@ -93,7 +93,8 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// writer runs (the row's mirror, then the pass over what is filed under it). A pass below a CHILD row never reads the
     /// platform-cascade rows, so it needs no Web API client.
     /// </summary>
-    private SecureChildReconciler Children() => SecureChildShareWorld.ReconcilerOver(() => ShareWorld, _shareTable, null!);
+    private SecureChildReconciler Children(Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null) =>
+        SecureChildShareWorld.ReconcilerOver(() => ShareWorld, _shareTable, null!, threads: threads);
 
     // ── Create (G5) ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -884,6 +885,38 @@ public sealed partial class SecureChildOwnershipAiToolTests
     }
 
     [Fact]
+    public async Task UpdateTool_ReFilingACommunication_ReconcilesItsThreadOnce_ThroughTheAfterRefileStep()
+    {
+        // Behaviour review F3: dataverse.update_record re-files a communication through the ONE re-file core and then runs
+        // SecureChildReconciler.AfterRefileAsync — which now reconciles the thread, so the tool needs no call of its own.
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+
+        var result = await UpdateRecordWithShares(
+            "sprk_communication", communication, threads.Object, Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(communication, Moq.It.IsAny<CancellationToken>()), Moq.Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateTool_ARefusedReFileOfACommunication_NeverReconcilesItsThread()
+    {
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        _user.NoAppendTo.Add(SecureMatter);
+        var threads = new Moq.Mock<Sprk.Bff.Api.Services.Communication.IThreadResolver>();
+
+        var result = await UpdateRecordWithShares(
+            "sprk_communication", communication, threads.Object, Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
+
+        result.Success.Should().BeFalse();
+        threads.Verify(t => t.ReconcileThreadForFilingAsync(Moq.It.IsAny<Guid>(), Moq.It.IsAny<CancellationToken>()), Moq.Times.Never);
+    }
+
+    [Fact]
     public async Task CommunicationFiling_WithTheAssociationStatus_Is400_TheStatusIsTheCallersOwnUpdate()
     {
         var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
@@ -1086,10 +1119,15 @@ public sealed partial class SecureChildOwnershipAiToolTests
     /// <summary>The chat update tool with a scope that resolves the REAL reconciler (and its synchronizer) over this test's
     /// share world.</summary>
     private Task<Sprk.Bff.Api.Services.Ai.ToolResult> UpdateRecordWithShares(
-        string table, Guid id, params (string Column, JsonElement Value)[] item)
+        string table, Guid id, params (string Column, JsonElement Value)[] item) =>
+        UpdateRecordWithShares(table, id, threads: null, item);
+
+    private Task<Sprk.Bff.Api.Services.Ai.ToolResult> UpdateRecordWithShares(
+        string table, Guid id, Sprk.Bff.Api.Services.Communication.IThreadResolver? threads,
+        params (string Column, JsonElement Value)[] item)
     {
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped(services, _ => Children());
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped(services, _ => Children(threads));
         var provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
         var scopes = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
             .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(provider);
@@ -1314,12 +1352,14 @@ public sealed partial class SecureChildOwnershipAiToolTests
             NullLogger<Program>.Instance, CancellationToken.None);
 
     /// <summary>PATCH /api/communications/{id}/filing's handler: the ONE re-file core, filing columns only.</summary>
+    /// <remarks>Task 129: <paramref name="threads"/> is the reconciler's thread resolver — the route reaches the thread
+    /// reconcile only through SecureChildReconciler.AfterRefileAsync.</remarks>
     private Task<IResult> RefileCommunication(
         Guid communication, Dictionary<string, object?> payload,
         Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null) =>
         ChildRecordEndpoints.UpdateAsync(
-            "sprk_communication", communication, Payload(payload), _user, _world.Resolver(), Restamper(), Children(),
-            HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true, threads: threads);
+            "sprk_communication", communication, Payload(payload), _user, _world.Resolver(), Restamper(), Children(threads),
+            HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None, filingOnly: true);
 
     private static CoreAncestorRestamper Restamper() =>
         new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().Restamper;

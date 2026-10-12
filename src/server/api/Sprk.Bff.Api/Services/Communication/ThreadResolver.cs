@@ -508,6 +508,7 @@ public sealed class ThreadResolver : IThreadResolver
     // ── The thread follows the filing (spaarkeai-word-add-in-r1 task 129) ───────────────────────────────────────
 
     private const string CommunicationTypeField = "sprk_communicationtype";
+    private const string SubjectField = "sprk_subject";
     private const string OwningTeamField = "owningteam";
     private const string OwnerIdField = "ownerid";
     private const string PrivacyStateField = "sprk_privacystate";
@@ -535,6 +536,7 @@ public sealed class ThreadResolver : IThreadResolver
             var columns = MessageRegardingColumns();
             columns.Add(ThreadLookupOnCommunication);
             columns.Add(CommunicationTypeField);
+            columns.Add(SubjectField);
             var email = await _entityService.RetrieveAsync("sprk_communication", communicationId, columns.ToArray(), ct);
 
             if (email.GetAttributeValue<OptionSetValue>(CommunicationTypeField)?.Value != (int)CommunicationType.Email)
@@ -543,17 +545,26 @@ public sealed class ThreadResolver : IThreadResolver
                 return;
             }
 
-            if (email.GetAttributeValue<EntityReference>(ThreadLookupOnCommunication)?.Id is not { } threadId || threadId == Guid.Empty)
+            // R — the email's primary typed regarding, the value the filing write just validated (AppendTo as the caller).
+            // Null when the email is unfiled (an unlink clears every regarding lookup).
+            RegardingAnchor? regarding = null;
+            var recordId = Guid.Empty;
+            if (MessageRegardingAnchorOf(email) is { } filedTo && Guid.TryParse(filedTo.RecordId, out var filedToId)
+                && filedToId != Guid.Empty)
             {
-                _logger.LogDebug("Filing reconcile skipped: {CommunicationId} has no thread", communicationId);
-                return;
+                regarding = filedTo;
+                recordId = filedToId;
             }
 
-            // R — the email's primary typed regarding, the value the filing write just validated (AppendTo as the caller).
-            if (MessageRegardingAnchorOf(email) is not { } regarding
-                || !Guid.TryParse(regarding.RecordId, out var recordId) || recordId == Guid.Empty)
+            if (email.GetAttributeValue<EntityReference>(ThreadLookupOnCommunication)?.Id is not { } threadId || threadId == Guid.Empty)
             {
-                _logger.LogDebug("Filing reconcile skipped: {CommunicationId} is unfiled", communicationId);
+                // Behaviour review F2: a filed email with NO thread (an Office add-in save captured before task 129, or one
+                // whose thread resolution failed) never shows on a record's panel. Resolve its thread now, through the same
+                // join→grant sequence as the capture paths; an unfiled email without a thread is left as it is.
+                if (regarding is not null)
+                    await ResolveMissingThreadAsync(email, communicationId, ct);
+                else
+                    _logger.LogDebug("Filing reconcile skipped: {CommunicationId} is unfiled and has no thread", communicationId);
                 return;
             }
 
@@ -563,7 +574,7 @@ public sealed class ThreadResolver : IThreadResolver
                 ThreadRegardingColumns
                     .Append("sprk_threadtype").Append(DefaultThreadMarkerField).Append(PrivacyStateField)
                     .Append("sprk_regardingrecordid").Append("sprk_regardingrecordname").Append("sprk_regardingrecordurl")
-                    .Append(OwningTeamField).Append(OwnerIdField)
+                    .Append(OwningTeamField).Append(OwnerIdField).Append(StateCodeFilterField)
                     .ToArray(),
                 ct);
             if (thread is null)
@@ -573,11 +584,29 @@ public sealed class ThreadResolver : IThreadResolver
                 return;
             }
 
+            var current = ThreadAnchorOf(thread);
+            var isOpen = thread.GetAttributeValue<OptionSetValue>(PrivacyStateField)?.Value == PrivacyStateOpen;
+
+            if (regarding is null)
+            {
+                // Behaviour review F3 (unlink): the email was un-filed, but its thread still shows it on the record it was
+                // filed to. It leaves that thread for the one the unfiled ingest would pick (the fallback ladder: no regarding
+                // → the per-user master of the email's owner), with no grant to any record. A private thread keeps it.
+                if (current.HasAnchor && isOpen)
+                    await MoveUnfiledEmailOutAsync(threadId, communicationId, current, ct);
+                else
+                    _logger.LogDebug("Filing reconcile skipped: {CommunicationId} is unfiled", communicationId);
+                return;
+            }
+
+            // An inactive (deactivated) thread does not show on a record's panel (behaviour review F3): it is never left as
+            // the email's thread by rule 1, and never moved whole — only the email moves, to R's active default thread.
+            var isActive = (thread.GetAttributeValue<OptionSetValue>(StateCodeFilterField)?.Value ?? StateActive) == StateActive;
+
             // Rule 1 (F1-a): T already shows on a record the email is filed to — ANY of its typed regarding lookups, not only
             // the primary. A sharee adding matter M to an email filed to secure project P makes M primary; T, anchored to P,
             // stays where it is rather than leaving P (and P's Secure team).
-            var current = ThreadAnchorOf(thread);
-            if (current.HasAnchor && IsFiledTo(email, current))
+            if (isActive && current.HasAnchor && IsFiledTo(email, current))
             {
                 _logger.LogDebug(
                     "Filing reconcile left thread {ThreadId} as it is: it is anchored to {RecordType}:{RecordId}, a record " +
@@ -585,7 +614,7 @@ public sealed class ThreadResolver : IThreadResolver
                 return;
             }
 
-            if (thread.GetAttributeValue<OptionSetValue>(PrivacyStateField)?.Value != PrivacyStateOpen)
+            if (!isOpen)
             {
                 _logger.LogInformation(
                     "Filing reconcile left thread {ThreadId} as it is: it is not Open, so {CommunicationId} keeps the thread's " +
@@ -597,11 +626,11 @@ public sealed class ThreadResolver : IThreadResolver
             // never moved whole (owner decision 2026-10-11): moving R_old's default would strip R_old of it and give R two.
             var isDefaultThread = thread.GetAttributeValue<bool?>(DefaultThreadMarkerField) == true;
 
-            // Rule 2 (owner clarification 2026-10-11): any other thread — unanchored, or anchored to a previous record —
+            // Rule 2 (owner clarification 2026-10-11): any other ACTIVE thread — unanchored, or anchored to a previous record —
             // follows the filing as a whole when every active message in it is an email (F1-c) and none other is filed to a
             // different record — and neither its owner nor R's is the Secure team (F1-b; AnchorThreadForFilingAsync answers
             // false, and only the email moves).
-            if (!isDefaultThread
+            if (!isDefaultThread && isActive
                 && await FiledToOnlyAsync(threadId, communicationId, regarding, recordId, ct) is { } filedToRecord
                 && await AnchorThreadForFilingAsync(threadId, thread, communicationId, regarding, recordId, filedToRecord, ct))
             {
@@ -845,6 +874,58 @@ public sealed class ThreadResolver : IThreadResolver
 
         if (AssignmentFor(recordThreadId, regarding) is { } assignment)
             await GrantAsync(communicationId, assignment, ct);
+    }
+
+    /// <summary>
+    /// Behaviour review F2: a filed email that has no thread joins (or starts) one through <see cref="ResolveAndAssignAsync"/> —
+    /// the capture paths' own resolution, with the email's subject (an existing row carries no ancestry headers, so the email
+    /// key strategy creates a thread anchored to the email's regarding, owned by its record's team, S6) — and is granted to
+    /// the audience that join fixed (#1629).
+    /// </summary>
+    private async Task ResolveMissingThreadAsync(DataverseEntity email, Guid communicationId, CancellationToken ct)
+    {
+        var assignment = await ResolveAndAssignAsync(
+            new ThreadResolutionRequest
+            {
+                CommunicationId = communicationId,
+                ChannelType = CommunicationType.Email,
+                Direction = CommunicationDirection.Incoming,
+                Message = new NormalizedMessage
+                {
+                    Direction = CommunicationDirection.Incoming,
+                    Subject = email.GetAttributeValue<string>(SubjectField),
+                },
+            },
+            ct);
+        if (assignment is null)
+            return; // logged by ResolveAndAssignAsync (NFR-02)
+
+        _logger.LogInformation(
+            "Filing reconcile gave the threadless email {CommunicationId} thread {ThreadId}", communicationId, assignment.ThreadId);
+        await GrantAsync(communicationId, assignment, ct);
+    }
+
+    /// <summary>
+    /// Behaviour review F3 (unlink): an UNFILED email leaves the record thread it still sits in, for the thread the unfiled
+    /// ingest would give it — the fallback ladder (<see cref="ResolveViaFallbackLadderAsync"/>), which with no regarding is
+    /// the per-user master keyed on the email's OWNER. No grant: the master grants nobody (#1629), and the email is filed to
+    /// no record whose members it could be granted to.
+    /// </summary>
+    private async Task MoveUnfiledEmailOutAsync(Guid fromThreadId, Guid communicationId, ThreadAnchor from, CancellationToken ct)
+    {
+        var assignment = await ResolveViaFallbackLadderAsync(
+            new ThreadResolutionRequest
+            {
+                CommunicationId = communicationId,
+                ChannelType = CommunicationType.Email,
+                Direction = CommunicationDirection.Incoming,
+                Message = new NormalizedMessage { Direction = CommunicationDirection.Incoming },
+            },
+            ct);
+        _logger.LogInformation(
+            "Filing reconcile moved the un-filed email {CommunicationId} out of thread {FromThreadId} (anchored to " +
+            "{RecordType}:{RecordId}) to thread {ThreadId}", communicationId, fromThreadId, from.RecordType, from.RecordId,
+            assignment?.ThreadId);
     }
 
     /// <summary>The #1629 grant for one message, when the grant service is wired (it never grants a secure message).</summary>
@@ -1206,6 +1287,9 @@ public sealed class ThreadResolver : IThreadResolver
                 {
                     new ConditionExpression(DefaultThreadMarkerField, ConditionOperator.Equal, true),
                     new ConditionExpression("sprk_regardingrecordid", ConditionOperator.Equal, keyId),
+                    // Task 129 (behaviour review F3): an inactive (deactivated) default is never joined — a message put
+                    // there would be hidden from the record's panel. None active → a new one is created.
+                    new ConditionExpression(StateCodeFilterField, ConditionOperator.Equal, StateActive),
                 },
             },
         };
@@ -1241,12 +1325,19 @@ public sealed class ThreadResolver : IThreadResolver
         return result.Entities.Count > 0 ? result.Entities[0].Id : null;
     }
 
-    /// <summary>Reads the owning user of the persisted communication (keys the Tier-3 per-user master).</summary>
+    /// <summary>
+    /// The USER the per-user master (Tier 3) is keyed on: the message's owner when a user owns it, else (a team owns it — e.g.
+    /// an email un-filed from a record keeps that record's team as owner, task 129) the user who created it. The master's key
+    /// type is <c>systemuser</c>, so a team id is never used as one.
+    /// </summary>
     private async Task<Guid?> ReadOwnerIdAsync(Guid communicationId, CancellationToken ct)
     {
         var comm = await _entityService.RetrieveAsync(
-            "sprk_communication", communicationId, new[] { "ownerid" }, ct);
-        return comm.GetAttributeValue<EntityReference>("ownerid")?.Id;
+            "sprk_communication", communicationId, new[] { "ownerid", "createdby" }, ct);
+        var owner = comm.GetAttributeValue<EntityReference>("ownerid");
+        if (owner is not null && !string.Equals(owner.LogicalName, "team", StringComparison.OrdinalIgnoreCase))
+            return owner.Id;
+        return comm.GetAttributeValue<EntityReference>("createdby")?.Id ?? owner?.Id;
     }
 
     private static string BuildDefaultThreadName(RegardingAnchor? anchor)

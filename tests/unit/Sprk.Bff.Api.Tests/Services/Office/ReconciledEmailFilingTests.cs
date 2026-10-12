@@ -42,6 +42,12 @@ public class ReconciledEmailFilingTests
         public Mock<IDataverseService> Dataverse { get; } = new();
         public List<Dictionary<string, object>> CommunicationWrites { get; } = new();
         public RecordOwnershipResolverDouble Ownership { get; } = new();
+
+        /// <summary>Task 129: the thread resolver every step of the save reaches (capture, association, after-re-file).</summary>
+        public Mock<IThreadResolver> Threads { get; } = new();
+
+        /// <summary>Task 129: the #1629 grant the capture issues for the thread its join returned.</summary>
+        public Mock<Sprk.Bff.Api.Services.Communication.Access.IDirectThreadAccessService> Grants { get; } = new();
         public Mock<CallerRecordAccessProbe> Probe { get; } = new(
             new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance, null!)
         { CallBase = false };
@@ -76,10 +82,10 @@ public class ReconciledEmailFilingTests
             var resolver = new IncomingAssociationResolver(
                 new IAssociationRung[] { new ExplicitReferenceRung(Dataverse.Object) },
                 Dataverse.Object, Dataverse.Object, mapper, CoreAncestorResolverFixtures.Inert(), Ownership,
-                NullLogger<IncomingAssociationResolver>.Instance);
+                NullLogger<IncomingAssociationResolver>.Instance, Threads.Object);
             var capture = new EmailUploadCaptureService(
                 Dataverse.Object, resolver, Mock.Of<ICommunicationEnrichmentService>(), Ownership,
-                NullLogger<EmailUploadCaptureService>.Instance);
+                NullLogger<EmailUploadCaptureService>.Instance, Threads.Object, Grants.Object);
 
             // The reconciler's share mirror and descendant pass run over loose doubles; it never throws by contract.
             var entities = new Mock<IGenericEntityService>();
@@ -88,7 +94,7 @@ public class ReconciledEmailFilingTests
                 entities.Object, Ownership,
                 new SecureChildShareSynchronizer(entities.Object, Mock.Of<IDataverseRecordShareService>(), null!, configuration,
                     NullLogger<SecureChildShareSynchronizer>.Instance),
-                null!, configuration, NullLogger<SecureChildReconciler>.Instance);
+                null!, configuration, NullLogger<SecureChildReconciler>.Instance, threads: Threads.Object);
             var filing = new ReconciledEmailFiling(
                 resolver, Dataverse.Object, Probe.Object, children, NullLogger<ReconciledEmailFiling>.Instance);
 
@@ -288,5 +294,74 @@ public class ReconciledEmailFilingTests
 
         result.Should().Be(ReconciledFilingResult.Filed);
         ((EntityReference)world.CommunicationWrites.Should().ContainSingle().Subject["sprk_regardingmatter"]).Id.Should().Be(MatterId);
+    }
+
+    // ── spaarkeai-word-add-in-r1 task 129, behaviour review of 48a2f8687 ────────────────────────────────────────────
+
+    [Fact]
+    public async Task FileIfUnfiled_AWrittenFiling_ReconcilesTheThreadOnce_ThroughTheAfterRefileStep()
+    {
+        // F3: the reconcile runs in SecureChildReconciler.AfterRefileAsync, the step this filing (like every re-file writer)
+        // runs — once, not also inside the association write it calls.
+        var world = new World(reconciled: true, Unfiled());
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed);
+        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(CanonicalId, It.IsAny<CancellationToken>()), Times.Once);
+        world.Threads.Verify(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()), Times.Never,
+            "a save that reconciled to an existing row keeps that row's thread");
+    }
+
+    [Fact]
+    public async Task FileIfUnfiled_AFilingNotWritten_NeverReconcilesTheThread()
+    {
+        var world = new World(reconciled: true, Unfiled());
+        world.CallerMay(AccessRights.Read);
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.NotPermitted);
+        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Capture_ANewlyCapturedEmail_JoinsItsThread_AndIsGrantedTheAudienceTheJoinFixed()
+    {
+        // F2(a): an Office add-in save created a filed communication with NO thread, so it never showed on the record's
+        // Messages panel. The capture now joins (or starts) its thread like the mailbox and send paths, then grants it.
+        var world = new World(reconciled: false, Unfiled());
+        var assignment = ThreadAssignment.Anchored(Guid.NewGuid(), "sprk_matter", MatterId);
+        ThreadResolutionRequest? asked = null;
+        world.Threads
+            .Setup(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<ThreadResolutionRequest, CancellationToken>((r, _) => asked = r)
+            .ReturnsAsync(assignment);
+
+        var (capture, _) = await world.SaveAsync(PaneSave(Matter()));
+
+        capture!.ReconciledToExisting.Should().BeFalse();
+        asked.Should().NotBeNull();
+        asked!.CommunicationId.Should().Be(CanonicalId);
+        asked.ChannelType.Should().Be(Sprk.Bff.Api.Services.Communication.Models.CommunicationType.Email);
+        asked.Message.InternetMessageId.Should().Be("<CAF0a1b2c3@mail.example.com>", "the join keys on the email's own headers");
+        world.Grants.Verify(g => g.GrantMessageAccessAsync(CanonicalId, assignment, It.IsAny<CancellationToken>()), Times.Once);
+        world.Threads.Verify(t => t.ReconcileThreadForFilingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
+            "a new row is not a re-file");
+    }
+
+    [Fact]
+    public async Task Capture_WhenTheThreadResolutionThrows_TheCaptureStillSucceeds()
+    {
+        var world = new World(reconciled: false, Unfiled());
+        world.Threads
+            .Setup(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated thread fault"));
+
+        var (capture, _) = await world.SaveAsync(PaneSave(Matter()));
+
+        capture.Should().NotBeNull("thread resolution is best-effort (NFR-02/NFR-04)");
+        world.Grants.Verify(g => g.GrantMessageAccessAsync(It.IsAny<Guid>(), It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 }

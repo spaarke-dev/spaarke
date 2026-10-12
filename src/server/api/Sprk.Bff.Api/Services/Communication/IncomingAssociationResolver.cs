@@ -129,7 +129,13 @@ public sealed class IncomingAssociationResolver
         var decision = await EvaluateInternalAsync(message, context, communicationId, admitTargets: null, ct);
 
         // An EXISTING row being filed: a reparent (task 146) — the owner is re-derived before the write.
-        await ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: false, ct);
+        var refiled = await ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: false, ct);
+
+        // Spaarkeai-word-add-in-r1 task 129: the filing was written — the email's thread follows it (best-effort; never
+        // throws). Here, not in ApplyDecisionAsync: ApplyToExistingRecordAsync's caller (the Office reconciled-email filing)
+        // runs SecureChildReconciler.AfterRefileAsync, which reconciles — once per filing.
+        if (refiled && _threadResolver is not null)
+            await _threadResolver.ReconcileThreadForFilingAsync(communicationId, ct);
     }
 
     /// <summary>
@@ -153,7 +159,8 @@ public sealed class IncomingAssociationResolver
     /// before anything is written.
     /// </summary>
     /// <remarks>Only the record <paramref name="onlyRecordId"/> is filed: the decision is narrowed to it first
-    /// (<see cref="NarrowToRecord"/>), so the writes AND the provenance say the same thing.</remarks>
+    /// (<see cref="NarrowToRecord"/>), so the writes AND the provenance say the same thing. The thread is NOT reconciled
+    /// here: the caller runs <c>SecureChildReconciler.AfterRefileAsync</c>, the one step after a re-file, which does it.</remarks>
     /// <returns><c>false</c> (nothing written) when the decision does not write <paramref name="onlyRecordId"/>.</returns>
     public async Task<bool> ApplyToExistingRecordAsync(
         Guid communicationId, AssociationDecision decision, Guid onlyRecordId, CancellationToken ct)
@@ -478,7 +485,9 @@ public sealed class IncomingAssociationResolver
     /// Writes the regarding lookups, status, and provenance JSON. Populates the ADR-024 polymorphic
     /// resolver fields whenever a regarding lookup was written (Resolved or Suggested). Non-fatal writes.
     /// </summary>
-    private async Task ApplyDecisionAsync(
+    /// <returns><c>true</c> when an existing row was RE-FILED (the reparent branch wrote it) — the caller reconciles its
+    /// thread (task 129).</returns>
+    private async Task<bool> ApplyDecisionAsync(
         Guid communicationId,
         AssociationDecision decision,
         bool ownerAlreadyResolved,
@@ -486,6 +495,7 @@ public sealed class IncomingAssociationResolver
     {
         var fields = await BuildDecisionFieldsAsync(communicationId, decision, ct);
 
+        var refiled = false;
         var parentChanges = Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesIn(fields);
         if (ownerAlreadyResolved || parentChanges.Count == 0)
         {
@@ -511,16 +521,13 @@ public sealed class IncomingAssociationResolver
 
             if (reparent.IsRefused)
                 throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communication", reparent);
-
-            // Task 129: the filing was written — the email's thread follows it (best-effort; never throws). A NEW row (the
-            // branch above) has no thread yet: thread resolution after it anchors the thread it creates.
-            if (_threadResolver is not null)
-                await _threadResolver.ReconcileThreadForFilingAsync(communicationId, ct);
+            refiled = true;
         }
 
         _logger.LogDebug(
             "Applied association to communication {CommunicationId} | Status: {Status}, AutoFiled: {AutoFiled}, FieldCount: {FieldCount}",
             communicationId, AssociationStatusCodes.Name(decision.Status), decision.AutoFiled, fields.Count);
+        return refiled;
     }
 
     /// <summary>

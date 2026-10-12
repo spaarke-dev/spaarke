@@ -347,7 +347,8 @@ public class ThreadResolverTests
 
     /// <summary>
     /// The Tier-2 find query evaluated against <paramref name="rows"/> the way Dataverse would: a row is returned only when
-    /// every condition of the query holds on it (equality and null conditions; the only kinds the find uses).
+    /// every condition of the query holds on it (equality and null conditions; the only kinds the find uses). A row that
+    /// sets no <c>statecode</c> is Active (0), as every Dataverse row is until it is deactivated.
     /// </summary>
     private void SetupDefaultThreadRows(params DataverseEntity[] rows) =>
         _entity
@@ -358,7 +359,8 @@ public class ThreadResolverTests
             {
                 var matches = rows.Where(row => q.Criteria.Conditions.All(c =>
                 {
-                    var value = row.Contains(c.AttributeName) ? row[c.AttributeName] : null;
+                    var value = row.Contains(c.AttributeName) ? row[c.AttributeName]
+                        : c.AttributeName == "statecode" ? new OptionSetValue(0) : null;
                     var actual = value switch
                     {
                         EntityReference er => (object)er.Id,
@@ -425,6 +427,30 @@ public class ThreadResolverTests
         result.Should().Be(legit.Id);
         _entity.Verify(e => e.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()), Times.Never);
         VerifyAssigned(request.CommunicationId, legit.Id, Times.Once());
+    }
+
+    [Fact]
+    public async Task ResolveAndAssignThreadAsync_Tier2_NeverJoinsAnInactiveDefault_ItCreatesAnActiveOne()
+    {
+        // Task 129 behaviour review F3: a deactivated default is on no panel — a message joined to it would be hidden.
+        var request = Request(CommunicationType.Message, acsThreadId: null);
+        var matterX = Guid.NewGuid();
+        var communication = new DataverseEntity("sprk_communication") { Id = request.CommunicationId };
+        SetMessageRegarding(communication, "sprk_matter", matterX);
+        SetupRegardingRead(request.CommunicationId, communication);
+        var inactive = Thread(Guid.NewGuid(), regardingType: "sprk_matter", regardingId: matterX.ToString(),
+            isDefault: true, threadType: ThreadTypeRecordAnchored);
+        inactive["sprk_regardingrecordid"] = matterX.ToString();
+        inactive["statecode"] = new OptionSetValue(1);
+        SetupDefaultThreadRows(inactive);
+        var newThreadId = SetupThreadCreateCapture(out var created);
+        var sut = CreateSut(new StubThreadKeyStrategy(CommunicationType.Message, ThreadKeyResolution.Skip));
+
+        var result = await sut.ResolveAndAssignThreadAsync(request, CancellationToken.None);
+
+        result.Should().Be(newThreadId);
+        created.Should().ContainSingle();
+        VerifyAssigned(request.CommunicationId, inactive.Id, Times.Never());
     }
 
     [Fact]
@@ -1119,8 +1145,8 @@ public class ThreadResolverTests
     private static readonly Microsoft.Extensions.Configuration.IConfiguration SecureNames =
         new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
 
-    private ThreadResolver CreateFilingSut(bool withConfiguration = true) =>
-        new(Array.Empty<IThreadKeyStrategy>(), _entity.Object, _owners, NullLogger<ThreadResolver>.Instance, _grants.Object,
+    private ThreadResolver CreateFilingSut(bool withConfiguration = true, params IThreadKeyStrategy[] strategies) =>
+        new(strategies, _entity.Object, _owners, NullLogger<ThreadResolver>.Instance, _grants.Object,
             withConfiguration ? SecureNames : null);
 
     /// <summary>R's primary name as Dataverse holds it (K2: the anchor's display name is read server-side).</summary>
@@ -1231,12 +1257,24 @@ public class ThreadResolverTests
     }
 
     /// <summary>The thread's active messages (the reconcile's mixed-thread scan).</summary>
-    private void SetupThreadMessagesForFiling(params DataverseEntity[] messages) =>
+    private void SetupThreadMessagesForFiling(Guid threadId, params DataverseEntity[] messages) =>
         _entity
             .Setup(e => e.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"),
+                It.Is<QueryExpression>(q => IsThreadMessageScan(q, threadId)),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(messages.ToList()));
+
+    /// <summary>
+    /// Behaviour review F4: the reconcile's scan is exactly T's ACTIVE messages, bounded at the limit + 1 — a query on any
+    /// other thread, or one that drops the state filter or the bound, matches nothing (and so reads as an empty thread).
+    /// </summary>
+    private static bool IsThreadMessageScan(QueryExpression q, Guid threadId) =>
+        q.EntityName == "sprk_communication"
+        && q.TopCount == ThreadResolver.MaxFilingReconcileMessageScan + 1
+        && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_communicationthread"
+            && c.Operator == ConditionOperator.Equal && c.Values.Count == 1 && Equals(c.Values[0], threadId))
+        && q.Criteria.Conditions.Any(c => c.AttributeName == "statecode"
+            && c.Operator == ConditionOperator.Equal && c.Values.Count == 1 && Equals(c.Values[0], 0));
 
     private void VerifyThreadNeverWritten(Guid threadId) =>
         _entity.Verify(e => e.UpdateAsync(
@@ -1248,18 +1286,19 @@ public class ThreadResolverTests
             Times.Never);
 
     [Fact]
-    public async Task ReconcileThreadForFiling_UnfiledEmail_DoesNothing()
+    public async Task ReconcileThreadForFiling_UnfiledEmail_InAThreadAnchoredToNoRecord_DoesNothing()
     {
         var communicationId = Guid.NewGuid();
         var threadId = Guid.NewGuid();
         SetupFiledEmail(communicationId, threadId, entityType: null, Guid.Empty);
+        SetupReconcileThreadRead(threadId, OpenThread(threadId)); // Direct, unanchored: on no record's panel
 
         await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
 
-        _entity.Verify(e => e.RetrieveAsync("sprk_communicationthread", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
-            Times.Never);
         VerifyThreadNeverWritten(threadId);
-        VerifyAssigned(communicationId, threadId, Times.Never());
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", communicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _entity.Verify(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()), Times.Never);
         VerifyNoGrant();
     }
 
@@ -1292,7 +1331,7 @@ public class ThreadResolverTests
         var thread = OpenThread(threadId);
         thread["sprk_privacystate"] = new OptionSetValue(privacy);
         SetupReconcileThreadRead(threadId, thread);
-        SetupThreadMessagesForFiling(Message(communicationId, "sprk_matter", Guid.NewGuid()));
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", Guid.NewGuid()));
         SetupExistingDefaultThread(Guid.NewGuid());
 
         await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
@@ -1316,7 +1355,7 @@ public class ThreadResolverTests
         SetupReconcileThreadRead(threadId, OpenThread(threadId));
         var filedSibling = Message(Guid.NewGuid(), "sprk_matter", matter);
         var unfiledSibling = Message(Guid.NewGuid(), entityType: null, Guid.Empty);
-        SetupThreadMessagesForFiling(Message(communicationId, "sprk_matter", matter), filedSibling, unfiledSibling);
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter), filedSibling, unfiledSibling);
         // The re-derive reads the thread as the anchor left it (Auto marker).
         SetupThreadRead(threadId, Thread(threadId, name: "RE: invoice", nameIsAutoDerived: true,
             regardingType: "sprk_matter", regardingId: matter.ToString(), regardingName: "PAT-444023", threadType: ThreadTypeRecordAnchored));
@@ -1358,7 +1397,7 @@ public class ThreadResolverTests
         var matter = Guid.NewGuid();
         SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
         SetupReconcileThreadRead(threadId, OpenThread(threadId));
-        SetupThreadMessagesForFiling(Message(communicationId, "sprk_matter", matter));
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter));
         _owners.TeamId = null; // S6 refusal (e.g. a secure parent that is not isolated)
 
         var act = () => CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
@@ -1387,7 +1426,7 @@ public class ThreadResolverTests
         previous["sprk_regardingrecordurl"] = "https://old/project";
         SetupReconcileThreadRead(threadId, previous);
         var unfiledSibling = Message(Guid.NewGuid(), entityType: null, Guid.Empty);
-        SetupThreadMessagesForFiling(Message(communicationId, "sprk_matter", matter), unfiledSibling);
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter), unfiledSibling);
         SetupThreadRead(threadId, Thread(threadId, name: "Old project", nameIsAutoDerived: true,
             regardingType: "sprk_matter", regardingId: matter.ToString(), regardingName: "PAT-444023", threadType: ThreadTypeRecordAnchored));
         var writes = new List<Dictionary<string, object>>();
@@ -1443,7 +1482,7 @@ public class ThreadResolverTests
         SetupReconcileThreadRead(threadId, thread);
         // A default thread is excluded on its own (its only filed message is this email); the others hold a message still
         // filed to R_old.
-        SetupThreadMessagesForFiling(shape is "master" or "previous-records-default"
+        SetupThreadMessagesForFiling(threadId, shape is "master" or "previous-records-default"
             ? new[] { Message(communicationId, "sprk_matter", matter) }
             : new[] { Message(communicationId, "sprk_matter", matter), Message(Guid.NewGuid(), "sprk_project", oldProject) });
         var recordThread = Guid.NewGuid();
@@ -1486,7 +1525,7 @@ public class ThreadResolverTests
         var matter = Guid.NewGuid();
         SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
         SetupReconcileThreadRead(threadId, OpenThread(threadId));
-        SetupThreadMessagesForFiling(Message(communicationId, "sprk_matter", matter));
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter));
         _grants
             .Setup(g => g.GrantMessageAccessAsync(It.IsAny<Guid>(), It.IsAny<ThreadAssignment>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("simulated grant fault"));
@@ -1512,7 +1551,7 @@ public class ThreadResolverTests
         SetupReconcileThreadRead(threadId, OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: "sprk_project", regardingId: project));
         var both = Message(communicationId, "sprk_matter", matter);
         both["sprk_regardingproject"] = new EntityReference("sprk_project", project);
-        SetupThreadMessagesForFiling(both);
+        SetupThreadMessagesForFiling(threadId, both);
         SetupRecordsDefaultThread("sprk_matter", matter);
 
         await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
@@ -1541,7 +1580,7 @@ public class ThreadResolverTests
         thread["owningteam"] = new EntityReference("team", secureTeam);
         thread["ownerid"] = new EntityReference("team", secureTeam);
         SetupReconcileThreadRead(threadId, thread);
-        SetupThreadMessagesForFiling(Message(communicationId, "sprk_matter", matter), Message(Guid.NewGuid(), entityType: null, Guid.Empty));
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter), Message(Guid.NewGuid(), entityType: null, Guid.Empty));
         SetupTeams(secureTeam);
         var recordThread = SetupRecordsDefaultThread("sprk_matter", matter);
 
@@ -1563,7 +1602,7 @@ public class ThreadResolverTests
         var thread = OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: "sprk_project", regardingId: oldProject);
         thread["owningteam"] = new EntityReference("team", projectTeam);
         SetupReconcileThreadRead(threadId, thread);
-        SetupThreadMessagesForFiling(Message(communicationId, "sprk_matter", matter));
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter));
         SetupTeams(secureTeam: Guid.NewGuid(), projectTeam);
 
         await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
@@ -1585,7 +1624,7 @@ public class ThreadResolverTests
         var project = Guid.NewGuid();
         SetupFiledEmail(communicationId, threadId, "sprk_project", project);
         SetupReconcileThreadRead(threadId, OpenThread(threadId));
-        SetupThreadMessagesForFiling(Message(communicationId, "sprk_project", project), Message(Guid.NewGuid(), entityType: null, Guid.Empty));
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_project", project), Message(Guid.NewGuid(), entityType: null, Guid.Empty));
         _owners.IsSecureOwner = true;
         var recordThread = SetupRecordsDefaultThread("sprk_project", project);
 
@@ -1605,6 +1644,7 @@ public class ThreadResolverTests
         SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
         SetupReconcileThreadRead(threadId, OpenThread(threadId));
         SetupThreadMessagesForFiling(
+            threadId,
             Message(communicationId, "sprk_matter", matter),
             Message(Guid.NewGuid(), entityType: null, Guid.Empty, type: CommunicationTypeMessage));
         var recordThread = SetupRecordsDefaultThread("sprk_matter", matter);
@@ -1612,5 +1652,175 @@ public class ThreadResolverTests
         await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
 
         VerifyOnlyTheEmailMoved(communicationId, threadId, recordThread, "sprk_matter", matter);
+    }
+
+    // ── Behaviour review of 48a2f8687: F2, F3 ──────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_FiledEmailWithNoThread_GetsOneAnchoredToTheRecord_AndIsGrantedIt()
+    {
+        // F2(b): an Office add-in save captured without a thread (or any filed email whose resolution failed) never showed.
+        // The reconcile resolves its thread through the capture paths' own join → grant.
+        var communicationId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId: null, "sprk_matter", matter);
+        var created = SetupThreadCreateCapture(out var threads);
+
+        await CreateFilingSut(true, new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.CreateNew))
+            .ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        threads.Should().ContainSingle();
+        ((EntityReference)threads[0]["sprk_regardingmatter"]).Id.Should().Be(matter, "the new thread is anchored to the record");
+        VerifyAssigned(communicationId, created, Times.Once());
+        _grants.Verify(g => g.GrantMessageAccessAsync(
+            communicationId, ThreadAssignment.Anchored(created, "sprk_matter", matter), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_UnfiledEmailWithNoThread_DoesNothing()
+    {
+        var communicationId = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId: null, entityType: null, Guid.Empty);
+
+        await CreateFilingSut(true, new StubThreadKeyStrategy(CommunicationType.Email, ThreadKeyResolution.CreateNew))
+            .ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        _entity.Verify(e => e.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", communicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        VerifyNoGrant();
+    }
+
+    [Theory]
+    [InlineData(true)]  // T is anchored to R itself — rule 1 would leave the email in it
+    [InlineData(false)] // T is unanchored and this is its only filed email — rule 2 would move it whole
+    public async Task ReconcileThreadForFiling_InactiveThread_MovesOnlyTheEmail_ToTheRecordsActiveDefaultThread(bool anchoredToTheRecord)
+    {
+        // F3: a deactivated thread is on no panel. The email leaves it for R's ACTIVE default thread; T is never moved whole.
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
+        var thread = anchoredToTheRecord
+            ? OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: "sprk_matter", regardingId: matter)
+            : OpenThread(threadId);
+        thread["statecode"] = new OptionSetValue(1); // Inactive
+        SetupReconcileThreadRead(threadId, thread);
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "sprk_matter", matter));
+        var defaultLookups = new List<QueryExpression>();
+        var recordThread = SetupRecordsDefaultThread("sprk_matter", matter);
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((q, _) => defaultLookups.Add(q))
+            .ReturnsAsync(new EntityCollection { Entities = { new DataverseEntity("sprk_communicationthread") { Id = recordThread } } });
+
+        await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        VerifyOnlyTheEmailMoved(communicationId, threadId, recordThread, "sprk_matter", matter);
+        defaultLookups.Should().NotBeEmpty().And.OnlyContain(q => q.Criteria.Conditions.Any(c =>
+                c.AttributeName == "statecode" && c.Operator == ConditionOperator.Equal && Equals(c.Values[0], 0)),
+            "an inactive default thread is never joined");
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_UnfiledEmail_InAThreadAnchoredToARecord_MovesToItsOwnersMasterThread_WithNoGrant()
+    {
+        // F3 (unlink): clearing the regarding left the email on the old record's panel. It moves to the thread the unfiled
+        // ingest gives it — the per-user master keyed on the email's owner — and nobody is granted it.
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var oldProject = Guid.NewGuid();
+        var owner = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, entityType: null, Guid.Empty);
+        SetupReconcileThreadRead(threadId, OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: "sprk_project", regardingId: oldProject));
+        SetupOwnerRead(communicationId, owner);
+        var master = Guid.NewGuid();
+        var masterKeys = new List<object>();
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((q, _) =>
+                masterKeys.AddRange(q.Criteria.Conditions.Where(c => c.AttributeName == "sprk_regardingrecordid").Select(c => c.Values[0])))
+            .ReturnsAsync(new EntityCollection { Entities = { new DataverseEntity("sprk_communicationthread") { Id = master } } });
+
+        await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        VerifyAssigned(communicationId, master, Times.Once());
+        masterKeys.Should().Equal(owner.ToString());
+        VerifyThreadNeverWritten(threadId);
+        VerifyNoGrant();
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_UnfiledEmail_OwnedByTheRecordsTeam_MovesToItsCreatorsMasterThread()
+    {
+        // An un-filed email keeps its record's TEAM as owner. The per-user master is keyed on a systemuser, so it is keyed on
+        // the user who created the email — never on the team's id.
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var team = Guid.NewGuid();
+        var creator = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, entityType: null, Guid.Empty);
+        SetupReconcileThreadRead(threadId, OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: "sprk_project", regardingId: Guid.NewGuid()));
+        _entity
+            .Setup(e => e.RetrieveAsync("sprk_communication", communicationId, It.Is<string[]>(c => c.Contains("ownerid")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataverseEntity("sprk_communication")
+            {
+                Id = communicationId,
+                ["ownerid"] = new EntityReference("team", team),
+                ["createdby"] = new EntityReference("systemuser", creator),
+            });
+        var master = Guid.NewGuid();
+        var masterKeys = new List<object>();
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationthread"), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((q, _) =>
+                masterKeys.AddRange(q.Criteria.Conditions.Where(c => c.AttributeName == "sprk_regardingrecordid").Select(c => c.Values[0])))
+            .ReturnsAsync(new EntityCollection { Entities = { new DataverseEntity("sprk_communicationthread") { Id = master } } });
+
+        await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        VerifyAssigned(communicationId, master, Times.Once());
+        masterKeys.Should().Equal(creator.ToString());
+        VerifyNoGrant();
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_UnfiledEmail_InAPrivateRecordThread_KeepsItsThread()
+    {
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, entityType: null, Guid.Empty);
+        var thread = OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: "sprk_project", regardingId: Guid.NewGuid());
+        thread["sprk_privacystate"] = new OptionSetValue(PrivacyStatePrivate);
+        SetupReconcileThreadRead(threadId, thread);
+        SetupOwnerRead(communicationId, Guid.NewGuid());
+        SetupExistingDefaultThread(Guid.NewGuid());
+
+        await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", communicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        VerifyNoGrant();
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_TheMessageScan_IsTheThreadsActiveMessages_Bounded()
+    {
+        // F4: the scan the whole-thread move rests on. A scan of another thread, or of inactive messages too, or unbounded,
+        // would decide on the wrong set — the matcher below accepts only the exact query.
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, "sprk_matter", matter);
+        SetupReconcileThreadRead(threadId, OpenThread(threadId));
+        var scans = new List<QueryExpression>();
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((q, _) => scans.Add(q))
+            .ReturnsAsync(new EntityCollection(new List<DataverseEntity> { Message(communicationId, "sprk_matter", matter) }));
+
+        await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        scans.Should().ContainSingle().Which.Should().Match<QueryExpression>(q => IsThreadMessageScan(q, threadId));
     }
 }
