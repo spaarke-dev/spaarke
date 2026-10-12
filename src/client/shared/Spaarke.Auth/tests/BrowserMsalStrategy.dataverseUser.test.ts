@@ -17,11 +17,12 @@ const SYSTEMUSER_ID = '5c6b1d2e-0000-0000-0000-000000000001';
 const OID_A = 'a0000000-0000-0000-0000-00000000000a';
 const OID_B = 'b0000000-0000-0000-0000-00000000000b';
 
-function jwt(oid: string): string {
+function jwtClaims(claims: Record<string, unknown>): string {
   // base64url, as Entra issues it (the decoder must not rely on plain base64).
   const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
-  return `${enc({ alg: 'none' })}.${enc({ oid, tid: TENANT, exp: Math.floor(Date.now() / 1000) + 3600 })}.sig`;
+  return `${enc({ alg: 'none' })}.${enc({ tid: TENANT, exp: Math.floor(Date.now() / 1000) + 3600, ...claims })}.sig`;
 }
+const jwt = (oid: string): string => jwtClaims({ oid });
 const account = (oid: string, tenantId = TENANT, username = `${oid.slice(0, 1)}@x.test`) => ({
   homeAccountId: `${oid}.${tenantId}`,
   tenantId,
@@ -90,6 +91,9 @@ beforeEach(() => {
   mockMsal.ssoSilent.mockImplementation(async () => ok(jwt(OID_B), B));
   systemUser = { azureactivedirectoryobjectid: OID_B.toUpperCase() }; // Dataverse returns either case
   fetchMock = jest.fn(async (url: string) => {
+    if (url === `${ORG}/api/data/v9.2/WhoAmI`) {
+      return { ok: true, status: 200, json: async () => ({ UserId: SYSTEMUSER_ID }) };
+    }
     if (url === `${ORG}/api/data/v9.2/systemusers(${SYSTEMUSER_ID})?$select=azureactivedirectoryobjectid`) {
       return typeof systemUser === 'number'
         ? { ok: false, status: systemUser, json: async () => ({}) }
@@ -196,6 +200,64 @@ describe('BrowserMsalStrategy — the signed-in Dataverse user (#1656)', () => {
 
     expect(mockMsal.acquireTokenSilent).not.toHaveBeenCalled();
     expect(hints()).toEqual([undefined]);
+  });
+
+  it('the systemuser read fails and Xrm exposes a userPrincipalName: still NO hint (ADR-028 A7 falls closed)', async () => {
+    systemUser = 403;
+    win.Xrm = {
+      Utility: {
+        getGlobalContext: () => ({
+          getClientUrl: () => ORG,
+          userSettings: {
+            userId: `{${SYSTEMUSER_ID}}`,
+            userName: 'User A',
+            userPrincipalName: 'usera@spaarke.test', // e.g. a stale or wrong UPN — never trusted unverified
+          },
+        }),
+      },
+    };
+    mockMsal.getAllAccounts.mockReturnValue([A]);
+
+    await load().acquire();
+
+    expect(mockMsal.acquireTokenSilent).not.toHaveBeenCalled();
+    expect(hints()).toEqual([undefined]);
+  });
+
+  it('a token with no oid claim is rejected inside Dataverse (silent and ssoSilent alike)', async () => {
+    mockMsal.getAllAccounts.mockReturnValue([B]);
+    mockMsal.acquireTokenSilent.mockImplementation(async () => ok(jwtClaims({}), B));
+    mockMsal.ssoSilent.mockImplementation(async () => ok(jwtClaims({ sub: 'x' }), B));
+
+    const result = await load().acquire();
+
+    expect(mockMsal.acquireTokenSilent).toHaveBeenCalledTimes(1);
+    expect(mockMsal.ssoSilent).toHaveBeenCalledTimes(1);
+    expect(result.accessToken).toBe('');
+  });
+
+  it('Xrm without userSettings.userId: the user id comes from WhoAmI, then the systemuser read', async () => {
+    win.Xrm = { Utility: { getGlobalContext: () => ({ getClientUrl: () => ORG, userSettings: {} }) } };
+    mockMsal.getAllAccounts.mockReturnValue([A, B]);
+
+    const result = await load().acquire();
+
+    expect(fetchMock.mock.calls.map(c => c[0])).toEqual([
+      `${ORG}/api/data/v9.2/WhoAmI`,
+      `${ORG}/api/data/v9.2/systemusers(${SYSTEMUSER_ID})?$select=azureactivedirectoryobjectid`,
+    ]);
+    expect(silentAccounts()).toEqual([B]);
+    expect(result.accessToken).toBe(jwt(OID_B));
+  });
+
+  it('the answer is kept for the tab: another bundle on the page (a fresh library copy) does not read again', async () => {
+    mockMsal.getAllAccounts.mockReturnValue([B]);
+
+    await load().acquire(); // e.g. a PCF's own bundled copy of the library
+    await load().acquire(); // another PCF / bff_auth.js — a separate module instance, same tab
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(silentAccounts()).toEqual([B, B]);
   });
 
   it('outside a Dataverse host (no Xrm, not a Dataverse domain): unchanged — the lone cached account is used, no read', async () => {

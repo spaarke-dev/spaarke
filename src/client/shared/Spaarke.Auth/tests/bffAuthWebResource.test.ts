@@ -341,11 +341,13 @@ describe.each(IMPLS)('Spaarke.BffAuth — $name', impl => {
       mockMsal.getAllAccounts.mockReturnValue([USER_A]);
       const api = impl.load();
 
-      await api.authenticatedFetch(`{BFF}/api/v1/access/unshare`, { method: 'POST', body: '{}' }, BFF);
+      await api.authenticatedFetch(`${BFF}/api/v1/access/unshare`, { method: 'POST', body: '{}' }, BFF);
 
-      for (const call of bffCalls()) {
-        expect((call[1] as { headers: Record<string, string> }).headers['Authorization']).not.toBe('Bearer ' + TOKEN_A);
-      }
+      // Exactly one BFF call, carrying B's token from the browser's Entra session (never A's).
+      expect(bffCalls()).toHaveLength(1);
+      expect((bffCalls()[0][1] as { headers: Record<string, string> }).headers['Authorization']).toBe(
+        'Bearer ' + TOKEN_SSO
+      );
     });
 
     it("a no-hint ssoSilent answered by A's Entra session: A's token is discarded and the result is null", async () => {
@@ -461,6 +463,61 @@ describe('Spaarke.BffAuth — the caller contract and MSAL config (#1655 wrapper
     // A later call (e.g. a ribbon click after the user signed in elsewhere) does try again.
     await api.getToken(BFF);
     expect(mockMsal.ssoSilent).toHaveBeenCalledTimes(2);
+  });
+
+  it('with no session, a first authenticatedFetch runs the silent chain ONCE too, and sends nothing', async () => {
+    const interactionRequired = Object.assign(new Error('login_required'), { errorCode: 'login_required' });
+    mockMsal.ssoSilent.mockRejectedValue(interactionRequired);
+    const api = LIBRARY.load();
+
+    await expect(api.authenticatedFetch(`${BFF}/api/v1/x`, { method: 'GET' }, BFF)).resolves.toBeNull();
+    expect(mockMsal.ssoSilent).toHaveBeenCalledTimes(1);
+    expect(bffCalls()).toHaveLength(0);
+
+    // A later call does try again.
+    await expect(api.authenticatedFetch(`${BFF}/api/v1/x`, { method: 'GET' }, BFF)).resolves.toBeNull();
+    expect(mockMsal.ssoSilent).toHaveBeenCalledTimes(2);
+  });
+
+  describe("the BFF origin comes only from sprk_BffApiBaseUrl, never from the caller's apiBaseUrl", () => {
+    const EVIL = 'https://evil.example.test';
+    const withEnvBff = async (value: string, body: () => Promise<void>) => {
+      const saved = ENV_VARS.sprk_BffApiBaseUrl;
+      ENV_VARS.sprk_BffApiBaseUrl = value;
+      try {
+        await body();
+      } finally {
+        ENV_VARS.sprk_BffApiBaseUrl = saved;
+      }
+    };
+    const authorized = () => fetchMock.mock.calls.filter(c => (c[1] as any)?.headers?.Authorization);
+
+    it('a caller that passes another host as apiBaseUrl does not widen the origin: null, no request', async () => {
+      mockMsal.getAllAccounts.mockReturnValue([USER_B]);
+      const api = LIBRARY.load();
+
+      const res = await api.authenticatedFetch(`${EVIL}/api/v1/x`, { method: 'POST' }, `${EVIL}/api`);
+
+      expect(res).toBeNull();
+      expect(authorized()).toHaveLength(0);
+      expect(fetchMock.mock.calls.map(c => String(c[0]))).not.toContain(`${EVIL}/api/v1/x`);
+    });
+
+    it("sprk_BffApiBaseUrl resolves to no BFF URL: the caller's base is NOT used instead — null, nothing sent", async () => {
+      mockMsal.getAllAccounts.mockReturnValue([USER_B]);
+      await withEnvBff('/api', async () => {
+        const api = LIBRARY.load();
+
+        const res = await api.authenticatedFetch(`${EVIL}/api/v1/x`, { method: 'POST' }, `${EVIL}/api`);
+        const token = await api.getToken(`${EVIL}/api`);
+
+        expect(res).toBeNull();
+        expect(token).toBeNull();
+        expect(authorized()).toHaveLength(0);
+        expect(mockMsal.acquireTokenSilent).not.toHaveBeenCalled();
+        expect(mockMsal.ssoSilent).not.toHaveBeenCalled();
+      });
+    });
   });
 
   it('attaches the Bearer token, keeps method/body/headers/signal, and returns a non-OK Response as-is', async () => {

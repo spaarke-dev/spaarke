@@ -271,12 +271,14 @@ Spaarke.KpiAssessment._callCalculatorApi = async function (entityType, entityId)
     var maxAttempts = Spaarke.KpiAssessment.Config.maxRetryAttempts;
     var baseDelay = Spaarke.KpiAssessment.Config.retryBaseDelay;
 
-    // Task 030 / FR-17: acquire an Azure AD bearer token via the shared Spaarke.BffAuth helper
-    // (sprk_/scripts/bff_auth.js, registered before this library on the form). Acquire once, up
-    // front, then reuse across retry attempts. If the helper is missing (or predates normalizeBaseUrl,
-    // #1655) or no token is available, skip gracefully — the record is already saved and an
+    // Task 030 / FR-17, #1655: the endpoint requires an Azure AD bearer token. Every attempt goes through
+    // the shared Spaarke.BffAuth helper (sprk_/scripts/bff_auth.js = @spaarke/auth, registered before
+    // this library on the form): it attaches a token per request (from MSAL's cache after the first),
+    // and only for a URL on the BFF origin. If the helper is missing (or predates normalizeBaseUrl) or
+    // no token is available, skip gracefully (no retry) — the record is already saved and an
     // unauthenticated request would just 401.
-    if (typeof Spaarke.BffAuth === "undefined" || !Spaarke.BffAuth.getToken ||
+    if (typeof Spaarke.BffAuth === "undefined" || Spaarke.BffAuth === null ||
+        typeof Spaarke.BffAuth.authenticatedFetch !== "function" ||
         typeof Spaarke.BffAuth.normalizeBaseUrl !== "function") {
         console.error("[KPI Assessment] Spaarke.BffAuth helper not loaded (register sprk_/scripts/bff_auth.js " +
             "before this library on the form). Skipping recalculate call.");
@@ -290,23 +292,22 @@ Spaarke.KpiAssessment._callCalculatorApi = async function (entityType, entityId)
 
     console.log("[KPI Assessment] Calling calculator API: POST " + apiUrl);
 
-    var bffToken = await Spaarke.BffAuth.getToken(Spaarke.KpiAssessment.Config.apiBaseUrl);
-    if (!bffToken) {
-        console.warn("[KPI Assessment] No BFF token acquired; skipping recalculate call for " +
-            entityType + ": " + entityId + ".");
-        return;
-    }
-
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-            var response = await fetch(apiUrl, {
+            var response = await Spaarke.BffAuth.authenticatedFetch(apiUrl, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "Authorization": "Bearer " + bffToken
+                    "Accept": "application/json"
                 }
-            });
+            }, Spaarke.KpiAssessment.Config.apiBaseUrl);
+
+            if (!response) {
+                // No token (or not the BFF origin): nothing was sent, and retrying would not change that.
+                console.warn("[KPI Assessment] No BFF token acquired; skipping recalculate call for " +
+                    entityType + ": " + entityId + ".");
+                return;
+            }
 
             if (response.ok) {
                 console.log("[KPI Assessment] Calculator API succeeded for " + entityType + ": " + entityId);

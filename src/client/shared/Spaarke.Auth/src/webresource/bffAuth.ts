@@ -26,6 +26,8 @@
  *     including a non-OK one (callers read `response.ok`, `response.status` and the body); a
  *     network error or an abort rejects, as `fetch` does. The token is sent ONLY to the BFF:
  *     a `url` whose origin is not the BFF's (`sprk_BffApiBaseUrl`) gets `null` and no request.
+ *     The BFF origin comes only from that environment variable; the caller's `apiBaseUrl` only
+ *     gates the call (empty -> `null`) and can never widen where the token goes.
  *   - `normalizeBaseUrl(raw)` → the BFF host without a trailing `/api` (the env var holds
  *     `https://host/api`; callers append `/api/...` themselves). Added so the form scripts share
  *     the library's one rule instead of each copying it.
@@ -40,7 +42,8 @@
  *     display name; with several cached candidate accounts none is guessed and ssoSilent runs on
  *     the browser's Entra session (#1453).
  *   - The signed-in user (#1656): inside Dataverse only a cached account, and only a token, whose
- *     `oid` is the Dataverse user's Entra object id is used — never another user's lone account.
+ *     `oid` is the Dataverse user's Entra object id is used — never another user's lone account;
+ *     with that id unreadable, no cached account and no login hint at all (ADR-028 A7).
  *   - INV-7: the SAME client id and scope as every PCF on the form (`sprk_MsalClientId`,
  *     `api://{sprk_BffApiAppId}/user_impersonation`), so form scripts and PCFs share one MSAL
  *     localStorage cache. (The old copy used the BFF's own app id from `/api/config/client`,
@@ -96,16 +99,23 @@ export function createBffAuth(): IBffAuth {
   /** True once initialisation (and with it the library's eager first acquisition) has completed. */
   let initialized = false;
 
-  function ensureInitialized(apiBaseUrl: string): Promise<void> {
+  function ensureInitialized(): Promise<void> {
     if (!initPromise) {
       initPromise = (async () => {
         // The same Dataverse environment variables every PCF on the form reads (session cookie, no token).
         const runtime = await resolveRuntimeConfig();
+        // The BFF origin comes ONLY from sprk_BffApiBaseUrl, never from a caller's apiBaseUrl: a
+        // caller must not be able to choose where the token may go (ADR-028 A7). No resolved BFF ->
+        // initialisation fails, every call resolves null, and a later call retries.
+        const bffBaseUrl = normalizeBffBaseUrl(runtime.bffBaseUrl ?? '');
+        if (!/^https?:\/\/[^/]/i.test(bffBaseUrl)) {
+          throw new Error(`${LOG} sprk_BffApiBaseUrl did not resolve to a BFF URL; no token will be sent.`);
+        }
         await initAuth({
           clientId: runtime.msalClientId,
           bffApiScope: runtime.bffOAuthScope,
           ...(isValidTenant(runtime.tenantId) ? { tenantId: runtime.tenantId.trim() } : {}),
-          bffBaseUrl: runtime.bffBaseUrl || normalizeBffBaseUrl(apiBaseUrl),
+          bffBaseUrl,
           requireTenantAuthority: true,
           requireSilentOnly: true,
           proactiveRefresh: false,
@@ -119,13 +129,14 @@ export function createBffAuth(): IBffAuth {
     return initPromise;
   }
 
-  /** The token, or null. `apiBaseUrl` only gates the call (no base URL, no token), as before. */
-  async function acquire(apiBaseUrl: string): Promise<string | null> {
-    // A call that waited for initialisation shares its eager acquisition (initAuth acquires once
-    // when it creates the provider): with no session that acquisition already ran the silent chain,
-    // so it is not run a second time for the same answer.
-    const waitedForInit = !initialized;
-    await ensureInitialized(apiBaseUrl);
+  /**
+   * The token, or null. `waitedForInit` is whether the calling public method found the library
+   * NOT yet initialised on entry — captured there, before its own `ensureInitialized()`: such a
+   * call shares the eager acquisition `initAuth` runs when it creates the provider; with no
+   * session that acquisition already ran the silent chain, so it is not run a second time.
+   */
+  async function acquire(waitedForInit: boolean): Promise<string | null> {
+    await ensureInitialized();
     const provider = getAuthProvider();
     const token = waitedForInit && !provider.isAuthenticated() ? '' : await provider.getAccessToken();
     if (!token) {
@@ -140,7 +151,7 @@ export function createBffAuth(): IBffAuth {
       return null;
     }
     try {
-      return await acquire(apiBaseUrl);
+      return await acquire(!initialized);
     } catch (error) {
       console.warn(`${LOG} BFF token acquisition failed (the caller will skip the call):`, error);
       return null;
@@ -157,8 +168,10 @@ export function createBffAuth(): IBffAuth {
       return null;
     }
     let token: string | null;
+    // Captured BEFORE ensureInitialized(): this call may itself be the one that initialises.
+    const waitedForInit = !initialized;
     try {
-      await ensureInitialized(apiBaseUrl);
+      await ensureInitialized();
       // The token goes only to the BFF: a URL on any other origin gets no request at all.
       const bffOrigin = originOf(getAuthProvider().getConfig().bffBaseUrl);
       if (!bffOrigin || originOf(url) !== bffOrigin) {
@@ -167,7 +180,7 @@ export function createBffAuth(): IBffAuth {
         );
         return null;
       }
-      token = await acquire(apiBaseUrl);
+      token = await acquire(waitedForInit);
     } catch (error) {
       console.warn(`${LOG} BFF token acquisition failed (the caller will skip the call):`, error);
       return null;

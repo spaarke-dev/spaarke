@@ -200,9 +200,11 @@ export class BrowserMsalStrategy implements AuthStrategy {
       console.warn('[BrowserMsalStrategy] acquireTokenSilent failed:', err);
     }
 
-    // 2. ssoSilent with UPN hint
+    // 2. ssoSilent with UPN hint. Inside Dataverse with the user's id unreadable (expectedOid
+    //    === null) there is NO hint at all — not even Xrm's userPrincipalName: the call falls
+    //    closed to the browser's own Entra session (ADR-028 A7, #1656).
+    const loginHint = expectedOid === null ? undefined : resolveLoginHint(account);
     try {
-      const loginHint = resolveLoginHint(account);
       console.info('[BrowserMsalStrategy] ssoSilent', loginHint ? `hint=${loginHint}` : '(no hint)');
       const result = await msal.ssoSilent({ scopes, loginHint });
       const token = this._accept(result, expectedOid);
@@ -227,7 +229,6 @@ export class BrowserMsalStrategy implements AuthStrategy {
     }
 
     try {
-      const loginHint = resolveLoginHint(account);
       console.warn('[BrowserMsalStrategy] falling back to acquireTokenPopup (regression in steady state)');
       const result = await msal.acquireTokenPopup({ scopes, loginHint });
       const token = this._accept(result, expectedOid);
