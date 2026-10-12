@@ -39,6 +39,12 @@ public class SessionPersistenceServiceTests
     private readonly IConfiguration _configuration;
     private readonly SessionPersistenceService _sut;
 
+    // Signalled by the Cosmos container double when the fire-and-forget upsert actually runs, so tests await
+    // the write itself instead of sleeping and hoping it has landed.
+    private readonly TaskCompletionSource _cosmosUpserted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private Task CosmosUpsertedAsync() => _cosmosUpserted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
     public SessionPersistenceServiceTests()
     {
         _cache = new TrackingTenantCache();
@@ -99,7 +105,7 @@ public class SessionPersistenceServiceTests
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<StoredSession, PartitionKey?, ItemRequestOptions?, CancellationToken>(
-                (_, _, _, _) => cosmosWritten = true)
+                (_, _, _, _) => { cosmosWritten = true; _cosmosUpserted.TrySetResult(); })
             .ReturnsAsync(CreateFakeUpsertResponse());
 
         var message = BuildMessage();
@@ -107,8 +113,8 @@ public class SessionPersistenceServiceTests
         // Act
         await _sut.PersistMessageAsync(TenantId, SessionId, message);
 
-        // Wait briefly for the fire-and-forget Cosmos task to complete
-        await Task.Delay(50);
+        // Await the fire-and-forget Cosmos write (signalled by the container double)
+        await CosmosUpsertedAsync();
 
         // Assert — Redis set was called
         _cache.SetCount.Should().Be(1, "tenant cache must be written exactly once");
@@ -134,12 +140,12 @@ public class SessionPersistenceServiceTests
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<StoredSession, PartitionKey?, ItemRequestOptions?, CancellationToken>(
-                (_, pk, _, _) => capturedPartitionKey = pk)
+                (_, pk, _, _) => { capturedPartitionKey = pk; _cosmosUpserted.TrySetResult(); })
             .ReturnsAsync(CreateFakeUpsertResponse());
 
         // Act
         await _sut.PersistMessageAsync(TenantId, SessionId, BuildMessage());
-        await Task.Delay(50);
+        await CosmosUpsertedAsync();
 
         // Assert — partition key must be the tenantId (ADR-015: partition by /tenantId)
         capturedPartitionKey.Should().Be(new PartitionKey(TenantId));
@@ -163,15 +169,15 @@ public class SessionPersistenceServiceTests
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<StoredSession, PartitionKey?, ItemRequestOptions?, CancellationToken>(
-                (_, _, _, _) => cosmosWritten = true)
+                (_, _, _, _) => { cosmosWritten = true; _cosmosUpserted.TrySetResult(); })
             .ReturnsAsync(CreateFakeUpsertResponse());
 
         // Act — must NOT throw
         var act = async () => await _sut.PersistMessageAsync(TenantId, SessionId, BuildMessage());
         await act.Should().NotThrowAsync();
 
-        // Wait for fire-and-forget Cosmos task
-        await Task.Delay(50);
+        // Await the fire-and-forget Cosmos write (signalled by the container double)
+        await CosmosUpsertedAsync();
 
         // Assert — Cosmos was still written despite Redis failure
         cosmosWritten.Should().BeTrue("Cosmos write must proceed even if Redis set fails");
@@ -192,14 +198,14 @@ public class SessionPersistenceServiceTests
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<StoredSession, PartitionKey?, ItemRequestOptions?, CancellationToken>(
-                (_, _, _, _) => cosmosWritten = true)
+                (_, _, _, _) => { cosmosWritten = true; _cosmosUpserted.TrySetResult(); })
             .ReturnsAsync(CreateFakeUpsertResponse());
 
         // Act — must NOT throw
         var act = async () => await _sut.PersistMessageAsync(TenantId, SessionId, BuildMessage());
         await act.Should().NotThrowAsync();
 
-        await Task.Delay(50);
+        await CosmosUpsertedAsync();
 
         // Assert — Cosmos still written
         cosmosWritten.Should().BeTrue();
@@ -225,9 +231,7 @@ public class SessionPersistenceServiceTests
         var act = async () => await _sut.PersistMessageAsync(TenantId, SessionId, BuildMessage());
         await act.Should().NotThrowAsync();
 
-        await Task.Delay(50);
-
-        // Assert — Redis was still written
+        // Assert — Redis was still written (awaited inside PersistMessageAsync itself; nothing to wait for)
         _cache.SetCount.Should().Be(1, "Redis must be written exactly once even if Cosmos fails");
     }
 
@@ -253,9 +257,7 @@ public class SessionPersistenceServiceTests
         var act = async () => await _sut.PersistMessageAsync(TenantId, SessionId, BuildMessage());
         await act.Should().NotThrowAsync("A persistence failure must never surface to the streaming caller");
 
-        await Task.Delay(50);
-
-        // Assert — Warning was logged for at least the Redis failure
+        // Assert — Warning was logged for at least the Redis failure (logged inside the awaited Redis write)
         _loggerMock.Verify(
             l => l.Log(
                 LogLevel.Warning,

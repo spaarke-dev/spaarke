@@ -17,8 +17,10 @@
 
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Xunit;
 
@@ -38,16 +40,31 @@ public class MembershipJunctionUpdaterHostTests
         //   - No Service Bus client created. (Null host has no Service
         //     Bus deps to begin with.)
         //   - StopAsync is a no-op.
-        var sut = new NullMembershipJunctionUpdaterHost(
-            NullLogger<NullMembershipJunctionUpdaterHost>.Instance);
+        var logger = new Mock<ILogger<NullMembershipJunctionUpdaterHost>>();
+        var sut = new NullMembershipJunctionUpdaterHost(logger.Object);
 
         using var cts = new CancellationTokenSource();
 
         await sut.StartAsync(cts.Token);
+
+        // .NET 10 BackgroundService runs ExecuteAsync off the StartAsync thread. Stopping
+        // straight away can cancel it before it runs, so wait for it to finish first.
+        sut.ExecuteTask.Should().NotBeNull();
+        await sut.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
         await sut.StopAsync(CancellationToken.None);
 
-        // No exception ⇒ contract met. ExecuteAsync returns
-        // Task.CompletedTask after a single LogInformation.
+        // ExecuteAsync ran to completion (not faulted, not cancelled)...
+        sut.ExecuteTask.IsCompletedSuccessfully.Should().BeTrue();
+
+        // ...after exactly one Information line saying the updater is disabled.
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("MembershipJunctionUpdater disabled")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
     }
 
     // ─── NFR-07 30s drain ──────────────────────────────────────────────────
@@ -77,11 +94,11 @@ public class MembershipJunctionUpdaterHostTests
             options,
             NullLogger<MembershipJunctionUpdaterHost>.Instance);
 
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        await sut.StopAsync(CancellationToken.None);
-        sw.Stop();
+        // A deadlock (or a wait for the full drain timeout) fails by TimeoutException here —
+        // no wall-clock stopwatch assertion. The 5s bound is far below the 30s DrainTimeout.
+        var stop = () => sut.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
 
-        sw.Elapsed.Should().BeLessThan(MembershipJunctionUpdaterHost.DrainTimeout,
+        await stop.Should().NotThrowAsync(
             "StopAsync on never-started host must short-circuit, not wait for full drain timeout");
     }
 
