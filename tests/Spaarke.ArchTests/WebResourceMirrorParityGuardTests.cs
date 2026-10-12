@@ -308,6 +308,10 @@ public sealed class WebResourceMirrorParityGuardTests
         Assert.Contains(mirror, m => m.Path == $"{MirrorRoot}/sprk_SidePaneManager");
         Assert.Contains(sources, s => s.Path == "src/solutions/NavigatorPane/bootstrap/sprk_SidePaneManager.js");
 
+        // a mirror JScript with no other source was adopted as its own canonical source, so it is now paired and guarded
+        Assert.Contains(mirror, m => m.Path == $"{MirrorRoot}/sprk_OpenDocumentQuickCreate");
+        Assert.Contains(sources, s => s.Path == "src/client/webresources/js/sprk_OpenDocumentQuickCreate.js");
+
         // ...but not an unprefixed file, test/spec files, or build output
         Assert.DoesNotContain(sources, s => s.Path.StartsWith("src/solutions/", StringComparison.Ordinal)
             && !s.Path.StartsWith("src/solutions/webresources/", StringComparison.Ordinal)
@@ -396,11 +400,25 @@ public sealed class WebResourceMirrorParityGuardTests
             [M("﻿a\r\nb\r\n", ExtensionlessMirror)],
             [S("a\nb\n", "src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js")]));
 
-    [Fact(DisplayName = "Control (must not fire): an extensionless HTML code page does not pair with an unrelated .js")]
+    [Fact(DisplayName = "Control (must not fire): an extensionless mirror file does not pair with a .js of a different name")]
     public void DoesNotFire_ExtensionlessMirror_WithoutJsSource()
         => Assert.Empty(FindMismatches(
             [M("<html/>", MirrorRoot + "/sprk_notepad")],
             [S("x", "src/client/webresources/js/sprk_other.js")]));
+
+    // The guard has NO content/type skip: an extensionless mirror whose basename matches a <name>.js source is paired
+    // even if it is an HTML page (FindMismatches/MirrorFiles decide by name only). So the protection against an HTML
+    // code page being compared with a script is the real-tree check below — if one ever collides by name, this fails
+    // and the guard needs a skip (WebResourceType != 3) rather than a baseline entry.
+    [Fact(DisplayName = "Real tree: no extensionless mirror file paired with a .js source is an HTML page")]
+    public void RealTree_NoPairedExtensionlessMirrorIsHtml()
+    {
+        var sources = SourceFiles();
+        var extensionless = MirrorFiles(sources).Where(m => !m.Path[(m.Path.LastIndexOf('/') + 1)..].Contains('.', StringComparison.Ordinal)).ToList();
+
+        Assert.NotEmpty(extensionless);   // the extensionless pairing path is exercised (subgrid_commands, SidePaneManager, ...)
+        Assert.DoesNotContain(extensionless, m => m.Content.TrimStart('\uFEFF', ' ', '\t', '\r', '\n').StartsWith('<'));
+    }
 
     [Fact(DisplayName = "Control (must not fire): the legacy namespace-different DocumentOperations.js is never paired with sprk_DocumentOperations.js")]
     public void DoesNotFire_LegacyDocumentOperations()
