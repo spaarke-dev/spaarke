@@ -143,6 +143,15 @@ on:
       - 'src/server/api/Sprk.Bff.Api/Services/Office/**'
       - 'src/server/api/Sprk.Bff.Api/Workers/Office/**'
       - 'src/server/api/Sprk.Bff.Api/Services/Documents/**'
+      # Route files outside those folders that the add-ins call (#1782 review):
+      # record search, visualization, rag send-to-index, file access, v1 documents,
+      # and the communications send the add-in's Send-email tab uses.
+      - 'src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs'
       # The suites themselves, and the project that compiles them.
       - 'tests/unit/Sprk.Bff.Api.Tests/**'
       - 'tests/unit/domain/**'
@@ -176,6 +185,15 @@ on:
       - 'src/server/api/Sprk.Bff.Api/Services/Office/**'
       - 'src/server/api/Sprk.Bff.Api/Workers/Office/**'
       - 'src/server/api/Sprk.Bff.Api/Services/Documents/**'
+      # Route files outside those folders that the add-ins call (#1782 review):
+      # record search, visualization, rag send-to-index, file access, v1 documents,
+      # and the communications send the add-in's Send-email tab uses.
+      - 'src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs'
       - 'tests/unit/Sprk.Bff.Api.Tests/**'
       - 'tests/unit/domain/**'
       - 'tests/integration/contract/Api/**'
@@ -643,22 +661,23 @@ jobs:
   # cancelled the run AFTER every test passed. The filter now keeps only what the
   # Office add-ins reach: the `/api/office/*` routes, the `/api/documents/*` identity
   # and open-links routes, `GET|PUT /api/v1/documents/{id}`, `/api/ai/search/records`,
-  # `/api/ai/visualization/related`, and the share-link authorization they depend on.
+  # `/api/ai/visualization/related`, `/api/ai/rag/send-to-index`, `/api/communications/send`,
+  # the file-access broker, and the share-link authorization they depend on.
   # Everything dropped still runs in Tier 2 (`ci-tier2-advisory.yml`: the four shards
   # `Api.Office.`, `Api.Insights.|Integration.`, `Api.|Seam.`, and everything else
-  # partition the whole of `Sprk.Bff.Api.Tests`). Selection: 1,239 tests
-  # (1,231 passed / 8 skipped / 0 failed locally). Per-term counts are in the PR body.
+  # partition the whole of `Sprk.Bff.Api.Tests`). Selection at #1748: 1,239 tests
+  # (1,231 passed / 8 skipped / 0 failed locally); #1782 added back rag send-to-index,
+  # the file-access broker and communications-send authorization (+202), giving 1,441.
   #
   # TWO PARALLEL LEGS (#1782). Narrowing alone left the test step at ~13 min on CI
   # (~16-17 min with restore/build) against a 20-minute cap - too thin under runner
-  # load. The same 1,239 tests therefore run as a 2-leg matrix, each leg its own job
+  # load. The selection therefore runs as a 2-leg matrix, each leg its own job
   # with its own cap and its own vacuous-green floor:
   #   api-office  294 tests  `Api.Office` contract suite (a full host boots per class;
   #                          ~590 of the ~1,110 CPU-seconds)
-  #   rest        945 tests  every other term
-  # The legs partition the selection: no test is in both, none in neither (proved
-  # with `dotnet test --list-tests`: 294 + 881 method rows = the 1,175 of the
-  # un-split filter, zero overlap, empty symmetric difference). WHEN YOU ADD A TERM,
+  #   rest      1,147 tests  every other term (TRX total, 2026-10-12)
+  # The legs partition the selection: no term is in both, and `rest` names no
+  # `Api.Office` prefix, so no test runs twice or not at all. WHEN YOU ADD A TERM,
   # add it to exactly ONE leg; `Api.Office` terms belong in `api-office`.
   # The check names are `Server tests (office scope) (api-office)` and `... (rest)`.
   # Nothing references the old single name: master's ruleset requires only `Router`
@@ -686,8 +705,8 @@ jobs:
             min_selected: '235'
             filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Office'
           - leg: rest
-            # ~0.8x floor on 945 selected.
-            min_selected: '756'
+            # ~0.8x floor on 1,147 selected.
+            min_selected: '917'
             # Terms, grouped by the add-in surface they protect (each is `Sprk.Bff.Api.Tests.<x>`):
             #   /api/office/*            Services.Office, Domain.Office, Seam.Office,
             #                            Auth.Office, Integration.DataMutation.OfficeVersionSave,
@@ -697,13 +716,16 @@ jobs:
             #                            OpenLinksEndpointTests, ...RecordOwnership.SecureChildOwnershipDocumentRefile,
             #                            Integration.DataMutation.SpeUploadPaths
             #   /api/ai/search|visualiz. Api.Ai.RecordSearch, Api.Ai.Visualization
+            #   /api/ai/rag/send-to-index Api.Ai.RagSendToIndex, Api.Ai.SendToIndex
+            #   /api/communications/send Api.Communication.CommunicationRecordAuthorizationContractTests
+            #   file access              AccessControl.FileAccessBroker
             #   share-link / save auth   AccessControl.ShareLink, AccessControl.OfficeSaveContainerProvenance,
             #                            Infrastructure.Graph, Infrastructure.Authentication
             #   problem+json regression  Integration.Regression
             # DO NOT widen to `Api.Ai`, `Domain.Ai` or `AccessControl` wholesale - they are
             # ~3,500 tests the add-ins do not exercise (the cause of #1748); Tier 2 runs them.
             # `Api.Office` is deliberately ABSENT here: it is the other leg.
-            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.RecordSearch|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.Visualization|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.OfficeRecordOwnership|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.SecureChildOwnershipDocumentRefile|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.SpeUploadPaths|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.Regression|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Dataverse|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Filters|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Graph|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Authentication|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.OfficeSaveContainerProvenance|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.ShareLink|FullyQualifiedName~Sprk.Bff.Api.Tests.Auth.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Regression.Issue1084_Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Regression.Issue1086_Office|FullyQualifiedName~Sprk.Bff.Api.Tests.OpenLinksEndpointTests'
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.RecordSearch|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.Visualization|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.OfficeRecordOwnership|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.SecureChildOwnershipDocumentRefile|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.SpeUploadPaths|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.Regression|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Dataverse|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Filters|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Graph|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Authentication|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.OfficeSaveContainerProvenance|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.ShareLink|FullyQualifiedName~Sprk.Bff.Api.Tests.Auth.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Regression.Issue1084_Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Regression.Issue1086_Office|FullyQualifiedName~Sprk.Bff.Api.Tests.OpenLinksEndpointTests|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.RagSendToIndex|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.SendToIndex|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.FileAccessBroker|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Communication.CommunicationRecordAuthorizationContractTests'
     # Per leg, on CI (4 vCPUs): the un-split 1,239-test selection was ~13 min of tests
     # (old 5,151-test selection: 17 m 24 s). By testhost CPU time `api-office` is
     # ~590 of ~1,110 CPU-s, so expect ~7 min of tests for `api-office` and ~6 min for
@@ -722,7 +744,7 @@ jobs:
       #
       # A FLOOR, not an equality. Unlike the typecheck debt pin above, tests are
       # EXPECTED to grow, and an exact pin would fail every PR that adds one. Set
-      # ~20% under each leg's measured count (294 / 945; set per leg in the matrix
+      # ~20% under each leg's measured count (294 / 1,147; set per leg in the matrix
       # above) so ordinary churn does not trip it while a
       # collapse does. Re-baseline UPWARD only, deliberately, in the PR that grows
       # the suites.
