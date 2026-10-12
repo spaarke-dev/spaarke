@@ -151,4 +151,23 @@ Method as `task-039-notes.md`: `dotnet publish -c Release src/server/api/Sprk.Bf
 
 1. Item 2: choose an option above (or accept none).
 2. Item 3: accept the `modifiedon` false positives, or approve a dedicated `sprk_renewedon` column.
-3. SPA: hide Delete on `statecode = 1` (or `statuscode = 2`); handle the 409 `service_request_closed` body.
+3. SPA: hide Delete on `statecode = 1` (or `statuscode = 2`); handle the 409 `service_request_closed` body. **Done: see "Review fixes" below.**
+
+## Review fixes (2026-10-12)
+
+| Item | Fix |
+|---|---|
+| F4.1 | `delete-own.ts`: `REASON_SERVICE_REQUEST_CLOSED = 'service_request_closed'`; `deleteFailureOf` answers 409 with it as "This request is closed, so it can't be deleted. Nothing was deleted." (no "try again", not the stored-file wording). |
+| F4.2 | `ServiceRequestActions.tsx`: no Delete when `isServiceRequestClosed(record)` (`statecode` 1 or `statuscode` 2; an unread state counts as open, the server decides) or after a 409 `service_request_closed` (a stale read), so the message is not retryable. With no failure to show the component renders nothing. **Recall:** unchanged. It is offered only after a `has_related_records` 409, and the server decides closed BEFORE the related-records probe, so a closed request never reaches it; the closed branch also withdraws the recall notice. Nothing is clearly wrong with it. |
+| F4.3 | `RecordDetailEntity.extraColumns` (new, optional): columns read with the record but not rendered. The service-request cfg sets `['statecode']`; `readRecord` adds them to the FetchXML. `statuscode` is already shown as "Status", so the display is unchanged. The BFF module already allows `statecode`. |
+| F4.4 | Tests in `tests/DetailDocumentsDelete.test.tsx`, describe "service request: closed": closed (statecode 1, statuscode 2) shows no Delete; open shows Delete (regression guard, passes before and after); the detail fetch includes `statecode` and it is not rendered; 409 closed shows the message, no retry, Delete withdrawn; the wording and the closed rule as units. Fail-before: 5 of the 6 `closed` tests failed with the four source files reverted (the open-request test passes both ways by design). |
+| K2 | `ExternalDataService.GetServiceRequestRequesterAndStateAsync` (one row, `$select=_sprk_requestedby_value,statecode`) replaces `GetServiceRequestOpenStateAsync` (removed; no other caller). `RightsForServiceRequestAsync` gained `withState` and returns `(Rights, State)`; the document and message routes call it with `withState: false` and keep their requester-only read. The requester gate still runs first: a non-requester gets the uniform 403 and no state is returned or used (`ANonRequester_NeverHasTheStateUsed...`). Unknown state still 503 `delete_own_unavailable`, nothing deleted. **Behaviour change:** a row read that FAILS is now the requester read's 503 `service_request_unreadable` (was `delete_own_unavailable` when only the separate state read failed); both are retryable 503s with nothing deleted. Tests: transport tests moved to the new method; the fixture counts reads and `TheDelete_ReadsTheRequestRowOnce...` pins one. |
+| K1 | Known-limit remark on `DeleteOwnServiceRequest` now says a request closed by staff between the state read and the delete is still deleted (an `If-Match` delete would close it; not done). |
+| K3 | Route summary mentions `service_request_closed`; ledger entry for `DeleteOwnServiceRequest` names the state gate, hops through `RightsForServiceRequestAsync` and carries current line refs (:988, :1985, :2001); project `CLAUDE.md` gotcha now says `MapsExactlyFourDeleteRoutes` and lists the service-request delete. |
+| K5 | `GetRecentGrantsAsync` orders by `modifiedon desc` (then id desc) when `modifiedSince` is given, else `createdon desc` as before. Pinned-filter tests assert both orders. |
+
+Known limits left as they were: the `If-Match` window (K1); `modifiedon` false positives on renewals (Item 3).
+### Verification
+
+- BFF: build 0 warnings / 0 errors; filtered unit run 552 passed, 0 failed; `Spaarke.ArchTests` 941 passed, 0 failed.
+- SPA: `typecheck`, `lint` clean; full vitest, `build` and `check:dist` results in the session report.

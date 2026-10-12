@@ -121,7 +121,7 @@ class DeniedError extends Error {}
 
 /** Reads one record's fields through the id-filtered module fetch. Throws DeniedError / ApiError. */
 async function readRecord(cfg: RecordDetailEntity, id: string): Promise<DetailRecord> {
-  const columns = Array.from(new Set(cfg.fields.map(f => f.attribute)));
+  const columns = Array.from(new Set([...cfg.fields.map(f => f.attribute), ...(cfg.extraColumns ?? [])]));
   const result = await postFetch(
     cfg.entity,
     buildFetchXml(cfg.entity, [cfg.idAttribute, ...columns], { attribute: cfg.idAttribute, value: id })

@@ -54,6 +54,11 @@ export interface RecordDetailEntity {
   /** The read-only field rows, in display order. */
   fields: readonly DetailFieldDef[];
   /**
+   * Columns read with the record but NOT shown as a field row (a fact an action needs: the service request's `statecode`
+   * hides Delete once staff have closed it). Must be on the module's allow-list like `fields`.
+   */
+  extraColumns?: readonly string[];
+  /**
    * The task 031 route root (`/api/v1/external/{root}/{id}/documents`) that serves this record's documents; absent = no
    * documents section. An invoice uses the `invoices` root (owner decision 2026-10-11, option A: access inherited from the
    * invoice's matter and project).
@@ -156,6 +161,9 @@ export const RECORD_DETAIL_ENTITIES: Readonly<Record<string, RecordDetailEntity>
       { attribute: 'createdon', label: 'Created', kind: 'date' },
       { attribute: 'sprk_requestedby', label: 'Requested by', kind: 'lookup' },
     ],
+    // Read, not shown: a closed request (statecode 1) cannot be deleted, so ServiceRequestActions hides Delete (the BFF's
+    // service-request module allows the column; the status row above already shows the user the status).
+    extraColumns: ['statecode'],
     // A service request's documents are reachable ONLY through the servicerequests route (task 031 K3/K4).
     documentsRoot: 'servicerequests',
     showsEventsAndTasks: false,

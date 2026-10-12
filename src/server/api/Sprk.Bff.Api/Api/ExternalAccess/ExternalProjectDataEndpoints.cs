@@ -489,7 +489,7 @@ public static class ExternalProjectDataEndpoints
         // (POST /servicerequests/{id}/messages, task 034). Hard delete.
         group.MapDelete("/servicerequests/{id:guid}", DeleteOwnServiceRequest)
             .WithName("DeleteOwnExternalServiceRequest")
-            .WithSummary("Delete a service request the caller requested, while it has no related records (else 409 has_related_records)")
+            .WithSummary("Delete a service request the caller requested, while it is open and has no related records (else 409 service_request_closed or has_related_records)")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -865,18 +865,14 @@ public static class ExternalProjectDataEndpoints
             case ExternalDataService.DocumentParentKind.ServiceRequest:
                 try
                 {
-                    return (await RightsForServiceRequestAsync(caller, parentId, dataService, modules, ct), null);
+                    return ((await RightsForServiceRequestAsync(caller, parentId, dataService, modules, withState: false, ct)).Rights, null);
                 }
                 catch (ExternalDataService.DataverseUnavailableException)
                 {
                     // The requester could not be READ — a fault, not an answer. "Could not tell" must never read as
                     // "no access" (a throttle would 403 the real requester), and it must not read as access either.
                     // Nothing has touched SPE or been written. The detail is generic, so it leaks nothing.
-                    return (Spaarke.Dataverse.AccessRights.None, Results.Problem(
-                        statusCode: StatusCodes.Status503ServiceUnavailable,
-                        title: "Service request unavailable",
-                        detail: "The service request could not be checked right now. Try again shortly.",
-                        extensions: new Dictionary<string, object?> { ["reasonCode"] = ServiceRequestUnreadableReasonCode }));
+                    return (Spaarke.Dataverse.AccessRights.None, ServiceRequestUnreadableProblem());
                 }
             case ExternalDataService.DocumentParentKind.Invoice:
                 try
@@ -900,6 +896,14 @@ public static class ExternalProjectDataEndpoints
 
     /// <summary>The 503 reason code when a service request's requester could not be read (task 031 review).</summary>
     internal const string ServiceRequestUnreadableReasonCode = "sdap.access.service_request_unreadable";
+
+    /// <summary>The 503 answered when a service request's row could not be read (generic detail; leaks nothing).</summary>
+    private static IResult ServiceRequestUnreadableProblem() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Service request unavailable",
+            detail: "The service request could not be checked right now. Try again shortly.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = ServiceRequestUnreadableReasonCode });
 
     /// <summary>The 503 reason code when an invoice's parents could not be read (task 031, owner option A).</summary>
     internal const string InvoiceUnreadableReasonCode = "sdap.access.invoice_unreadable";
@@ -939,30 +943,51 @@ public static class ExternalProjectDataEndpoints
         return rights;
     }
 
-    private static async Task<Spaarke.Dataverse.AccessRights> RightsForServiceRequestAsync(
-        CallerPrincipal caller,
-        Guid serviceRequestId,
-        ExternalDataService dataService,
-        ExternalModuleRegistry modules,
-        CancellationToken ct)
+    /// <summary>
+    /// The caller's rights on a service request (the requester gate) and, when <paramref name="withState"/> is set, its
+    /// open / closed state from the SAME row read (the delete route: one read, not two). The state is
+    /// <see cref="ExternalDataService.ServiceRequestOpenState.Unknown"/> unless it was asked for AND the caller holds
+    /// rights: a caller without rights never has a state to use.
+    /// </summary>
+    private static async Task<(Spaarke.Dataverse.AccessRights Rights, ExternalDataService.ServiceRequestOpenState State)>
+        RightsForServiceRequestAsync(
+            CallerPrincipal caller,
+            Guid serviceRequestId,
+            ExternalDataService dataService,
+            ExternalModuleRegistry modules,
+            bool withState,
+            CancellationToken ct)
     {
+        const ExternalDataService.ServiceRequestOpenState noState = ExternalDataService.ServiceRequestOpenState.Unknown;
         var entity = ExternalDataService
             .GetDocumentParentBinding(ExternalDataService.DocumentParentKind.ServiceRequest).EntityLogicalName;
         var module = modules.FindByEntity(entity);
         if (module is null)
-            return Spaarke.Dataverse.AccessRights.None;
+            return (Spaarke.Dataverse.AccessRights.None, noState);
 
         // The module grants this caller nothing at all (a CIAM partner with PartnerServiceRequestsEnabled off, or a
         // principal with no contact): deny BEFORE any Dataverse read. The read could not change the answer.
         if (!module.EffectiveDimensions.Any(d => d.AccessibleIds(caller).Count > 0))
-            return Spaarke.Dataverse.AccessRights.None;
+            return (Spaarke.Dataverse.AccessRights.None, noState);
 
         // A genuine "no such request" is null (uniform 403, no oracle); a read that failed throws
         // DataverseUnavailableException, which the caller turns into 503.
-        var requester = await dataService.GetServiceRequestRequesterAsync(serviceRequestId, ct);
+        Guid? requester;
+        var state = noState;
+        if (withState)
+        {
+            var read = await dataService.GetServiceRequestRequesterAndStateAsync(serviceRequestId, ct);
+            requester = read?.RequesterId;
+            state = read?.State ?? noState;
+        }
+        else
+        {
+            requester = await dataService.GetServiceRequestRequesterAsync(serviceRequestId, ct);
+        }
+
         return requester is { } requesterId && module.IsRecordAccessible(caller, requesterId)
-            ? Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Create
-            : Spaarke.Dataverse.AccessRights.None;
+            ? (Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Create, state)
+            : (Spaarke.Dataverse.AccessRights.None, noState);
     }
 
     /// <summary>The noun a document parent is named by in a ProblemDetails detail.</summary>
@@ -1898,8 +1923,9 @@ public static class ExternalProjectDataEndpoints
     /// an unreadable requester is the existing 503 (<see cref="ServiceRequestUnreadableReasonCode"/>).</para>
     /// <para><b>2. Open only (owner decision 2026-10-12).</b> A closed (inactive) request is never deleted: 409
     /// <see cref="ServiceRequestClosedReasonCode"/>, decided BEFORE the related-records probe and before any delete. The state
-    /// is <c>statecode</c> (0 open, 1 closed; the table has no other status). A state that is not a readable 0 or 1 fails
-    /// closed: refused with the retryable 503, nothing deleted.</para>
+    /// is <c>statecode</c> (0 open, 1 closed; the table has no other status), read in the SAME row read as the requester. A
+    /// state that is not a readable 0 or 1 fails closed: refused with the retryable 503 <c>delete_own_unavailable</c>,
+    /// nothing deleted.</para>
     /// <para><b>3. Option A.</b> If ANY row is related (every 1:N relationship from <c>sprk_servicerequest</c>:
     /// documents, messages, threads, events, to-dos, memos, analyses, signals - active or not), nothing is deleted and the
     /// answer is 409 <c>has_related_records</c>: all eight relationships are <c>RemoveLink</c>, so a delete would orphan
@@ -1907,8 +1933,9 @@ public static class ExternalProjectDataEndpoints
     /// <para><b>4. Recall.</b> The 409 tells the user to ask legal to recall it. That request is a plain message posted on
     /// the request's own thread, <c>POST /api/v1/external/servicerequests/{id}/messages</c> (task 034, requester only, no
     /// email) - no endpoint or column of its own.</para>
-    /// <para>Known limit: the probe and the delete are separate calls; a related row created between them (for example by
-    /// staff) is unlinked, not deleted.</para>
+    /// <para>Known limits: the state read, the probe and the delete are separate calls. A related row created between the
+    /// probe and the delete (for example by staff) is unlinked, not deleted. A request closed by staff between the state
+    /// read and the delete is still deleted (an <c>If-Match</c> delete would close that window; not done).</para>
     /// </remarks>
     private static async Task<IResult> DeleteOwnServiceRequest(
         Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
@@ -1917,10 +1944,19 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        var (rights, fault) = await RightsForDocumentParentAsync(
-            callerContext, ExternalDataService.DocumentParentKind.ServiceRequest, id, dataService, modules, ct);
-        if (fault is not null)
-            return fault;
+        // ONE row read gives the requester and the state. The requester gate decides first (a non-requester never has the
+        // state used); a read that fails is the existing 503 service_request_unreadable and nothing is deleted.
+        Spaarke.Dataverse.AccessRights rights;
+        ExternalDataService.ServiceRequestOpenState state;
+        try
+        {
+            (rights, state) = await RightsForServiceRequestAsync(callerContext, id, dataService, modules, withState: true, ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return ServiceRequestUnreadableProblem();
+        }
+
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
             logger.LogWarning("[EXT-DELETE] Refused ServiceRequest {Id}: absent or not requested by the caller", id);
@@ -1928,16 +1964,6 @@ public static class ExternalProjectDataEndpoints
         }
 
         // Owner decision 2026-10-12: no deleting once the request is closed. Before the related-records probe and any delete.
-        ExternalDataService.ServiceRequestOpenState state;
-        try
-        {
-            state = await dataService.GetServiceRequestOpenStateAsync(id, ct);
-        }
-        catch (ExternalDataService.DataverseUnavailableException)
-        {
-            return DeleteOwnUnavailable();
-        }
-
         if (state == ExternalDataService.ServiceRequestOpenState.Closed)
         {
             logger.LogInformation("[EXT-DELETE] Refused ServiceRequest {Id}: it is closed", id);

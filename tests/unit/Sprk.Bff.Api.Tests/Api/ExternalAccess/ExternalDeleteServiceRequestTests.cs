@@ -159,8 +159,9 @@ public sealed class ExternalDeleteServiceRequestTests : IClassFixture<ExternalDe
     }
 
     [Fact]
-    public async Task AnUnreadableState_Is503_AndNothingIsDeleted()
+    public async Task AnUnreadableRow_Is503_AndNothingIsDeleted()
     {
+        // The state is part of the one requester read now: a read that fails is the requester read's 503.
         var id = SeedRequest(Me);
         _fixture.Data.StateFault = new DataverseUnavailableException("throttled");
         _fixture.Principal = Workforce(Me);
@@ -168,6 +169,7 @@ public sealed class ExternalDeleteServiceRequestTests : IClassFixture<ExternalDe
         using var response = await Delete(id);
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        ProblemCode(await response.Content.ReadAsStringAsync()).Should().Be("sdap.access.service_request_unreadable");
         _fixture.Data.ServiceRequestDeletes.Should().BeEmpty();
     }
 
@@ -203,34 +205,78 @@ public sealed class ExternalDeleteServiceRequestTests : IClassFixture<ExternalDe
     [InlineData("{\"statecode\":null}", ServiceRequestOpenState.Unknown)]
     [InlineData("{\"statecode\":\"0\"}", ServiceRequestOpenState.Unknown)]
     [InlineData("{}", ServiceRequestOpenState.Unknown)]
-    public async Task TheStateRead_IsOneAppOnlyRead_OfStatecode_AndFailsClosedOnAnythingElse(string body, ServiceRequestOpenState expected)
+    public async Task TheRead_IsOneAppOnlyRow_OfRequesterAndStatecode_AndFailsClosedOnAnyOtherState(string body, ServiceRequestOpenState expected)
     {
         var handler = new StateHandler(HttpStatusCode.OK, body);
         var id = Guid.NewGuid();
 
-        (await NewService(handler).GetServiceRequestOpenStateAsync(id)).Should().Be(expected);
+        var read = await NewService(handler).GetServiceRequestRequesterAndStateAsync(id);
 
-        handler.Requests.Should().Equal($"https://org.test/api/data/v9.2/sprk_servicerequests({id})?$select=statecode");
+        read.Should().NotBeNull();
+        read!.Value.State.Should().Be(expected);
+        read.Value.RequesterId.Should().BeNull("the body names no requester");
+        handler.Requests.Should().ContainSingle("ONE read answers both the requester gate and the state").Which.Should().Be(
+            $"https://org.test/api/data/v9.2/sprk_servicerequests({id})?$select=_sprk_requestedby_value,statecode");
         handler.Authorization.Should().OnlyContain(a => a == "Bearer stub-token");
     }
 
     [Fact]
-    public async Task TheStateRead_OfAnAbsentRequest_IsUnknown()
+    public async Task TheRead_ReturnsTheRequesterBesideTheState()
+    {
+        var handler = new StateHandler(HttpStatusCode.OK, $"{{\"_sprk_requestedby_value\":\"{Me}\",\"statecode\":1}}");
+
+        var read = await NewService(handler).GetServiceRequestRequesterAndStateAsync(Guid.NewGuid());
+
+        read.Should().Be(new ServiceRequestRead(Me, ServiceRequestOpenState.Closed));
+    }
+
+    [Fact]
+    public async Task TheRead_OfAnAbsentRequest_IsNull()
     {
         var handler = new StateHandler(HttpStatusCode.NotFound, "{}");
 
-        (await NewService(handler).GetServiceRequestOpenStateAsync(Guid.NewGuid())).Should().Be(ServiceRequestOpenState.Unknown);
+        (await NewService(handler).GetServiceRequestRequesterAndStateAsync(Guid.NewGuid())).Should().BeNull();
     }
 
     [Theory]
     [InlineData(HttpStatusCode.InternalServerError)]
     [InlineData(HttpStatusCode.TooManyRequests)]
     [InlineData(HttpStatusCode.Forbidden)]
-    public async Task TheStateRead_ThrowsWhenDataverseFails(HttpStatusCode status)
+    public async Task TheRead_ThrowsWhenDataverseFails(HttpStatusCode status)
     {
-        var act = () => NewService(new StateHandler(status, "{}")).GetServiceRequestOpenStateAsync(Guid.NewGuid());
+        var act = () => NewService(new StateHandler(status, "{}")).GetServiceRequestRequesterAndStateAsync(Guid.NewGuid());
 
         await act.Should().ThrowAsync<DataverseUnavailableException>();
+    }
+
+    [Fact]
+    public async Task TheDelete_ReadsTheRequestRowOnce_RequesterAndStateTogether()
+    {
+        var id = SeedRequest(Me);
+        _fixture.Principal = Workforce(Me);
+
+        using var response = await Delete(id);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        _fixture.Data.RequesterAndStateReads.Should().Be(1, "the requester and the state share one row read");
+    }
+
+    [Fact]
+    public async Task ANonRequester_NeverHasTheStateUsed_AndDoesNotLearnItFromTheAnswer()
+    {
+        // Closed and open requests answer a stranger identically: the state decides nothing before the requester gate.
+        var closed = SeedRequest(SomeoneElse);
+        _fixture.Data.States[closed] = ServiceRequestOpenState.Closed;
+        var open = SeedRequest(SomeoneElse);
+        _fixture.Data.States[open] = ServiceRequestOpenState.Open;
+        _fixture.Principal = Workforce(Me);
+
+        using var onClosed = await Delete(closed);
+        using var onOpen = await Delete(open);
+
+        await ShouldBeTheUniformDenial(onClosed);
+        await ShouldBeTheUniformDenial(onOpen);
+        Problem(await onClosed.Content.ReadAsStringAsync()).Should().Be(Problem(await onOpen.Content.ReadAsStringAsync()));
     }
 
     // ── 403: only the requester; no existence or activity oracle ─────────────────────────────────────────────────
@@ -604,7 +650,7 @@ public sealed class ExternalDeleteServiceRequestTests : IClassFixture<ExternalDe
         new ExternalRecordDocumentRoutesTests.InMemoryExternalDataService.TestCredential(),
         NullLogger<ExternalDataService>.Instance);
 
-    /// <summary>One service-request row read (<c>$select=statecode</c>) with a scripted status and body.</summary>
+    /// <summary>One service-request row read (<c>$select=_sprk_requestedby_value,statecode</c>) with a scripted status and body.</summary>
     private sealed class StateHandler(HttpStatusCode status, string body) : HttpMessageHandler
     {
         public List<string> Requests { get; } = new();

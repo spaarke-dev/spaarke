@@ -841,27 +841,32 @@ public class ExternalDataService
         _ => ServiceRequestOpenState.Unknown,
     };
 
+    /// <summary>A service request's requester and open / closed state, from ONE row read.</summary>
+    /// <param name="RequesterId"><c>sprk_requestedby</c>; null when the request names no requester.</param>
+    /// <param name="State"><c>statecode</c> as a <see cref="ServiceRequestOpenState"/>; <see cref="ServiceRequestOpenState.Unknown"/> when not a readable 0 / 1.</param>
+    public readonly record struct ServiceRequestRead(Guid? RequesterId, ServiceRequestOpenState State);
+
     /// <summary>
-    /// The open / closed state of a service request (<c>statecode</c>), app-only. A request that does not exist, or whose
-    /// state is not a readable 0 / 1, is <see cref="ServiceRequestOpenState.Unknown"/>; a read that FAILS throws, so the
-    /// caller answers 503 and nothing is deleted (same rule as <see cref="GetServiceRequestRequesterAsync"/>).
+    /// The requester and the open / closed state (<c>statecode</c>) of a service request in ONE app-only read, for the
+    /// delete route, which needs both (the requester gate first, then the state). Null when the request does not exist
+    /// (a genuine 404); a state that is not a readable 0 / 1 is <see cref="ServiceRequestOpenState.Unknown"/>; a read that
+    /// FAILS throws, so the caller answers 503 and nothing is deleted (same rule as <see cref="GetServiceRequestRequesterAsync"/>).
     /// </summary>
     /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
-    public virtual async Task<ServiceRequestOpenState> GetServiceRequestOpenStateAsync(
+    public virtual async Task<ServiceRequestRead?> GetServiceRequestRequesterAndStateAsync(
         Guid serviceRequestId, CancellationToken ct = default)
     {
-        var url = $"{GetApiUrl()}/sprk_servicerequests({serviceRequestId})?$select=statecode";
+        var url = $"{GetApiUrl()}/sprk_servicerequests({serviceRequestId})?$select=_sprk_requestedby_value,statecode";
 
         var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
-        if (row is null
-            || !row.TryGetValue("statecode", out var state)
-            || state.ValueKind != JsonValueKind.Number
-            || !state.TryGetInt32(out var code))
-        {
-            return ServiceRequestOpenState.Unknown;
-        }
+        if (row is null) return null;
 
-        return ServiceRequestStateFor(code);
+        var state = row.TryGetValue("statecode", out var stateElement)
+                    && stateElement.ValueKind == JsonValueKind.Number
+                    && stateElement.TryGetInt32(out var code)
+            ? ServiceRequestStateFor(code)
+            : ServiceRequestOpenState.Unknown;
+        return new ServiceRequestRead(GuidValue(row, "_sprk_requestedby_value"), state);
     }
 
     // ---------------------------------------------------------------------------
@@ -1089,9 +1094,15 @@ public class ExternalDataService
         var filter = Uri.EscapeDataString(
             $"_sprk_contact_value eq {contactId} and statecode eq 0 and {window} and "
             + ExternalParticipationService.ExpiryPredicate(today));
+        // When renewals are asked for, order by modifiedon: a renewed row keeps its old createdon, so a cap on the feed
+        // would otherwise cut the renewals (the newest activity) and keep the oldest. modifiedon is >= createdon, so a new
+        // grant still sorts by its creation.
+        var orderBy = modifiedSince is null
+            ? "createdon desc,sprk_externalrecordaccessid desc"
+            : "modifiedon desc,sprk_externalrecordaccessid desc";
         var url = $"{GetApiUrl()}/sprk_externalrecordaccesses?$filter={filter}" +
                   "&$select=sprk_externalrecordaccessid,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value," +
-                  "sprk_granteddate,createdon,modifiedon&$orderby=createdon desc,sprk_externalrecordaccessid desc";
+                  $"sprk_granteddate,createdon,modifiedon&$orderby={orderBy}";
 
         var read = await GetCollectionAsync<Dictionary<string, JsonElement>>(url, ct);
         var grants = new List<RecentGrant>();

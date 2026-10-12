@@ -98,6 +98,7 @@ import {
   deleteFailureOf,
   isCreatedByCaller,
   isRequestedByCaller,
+  isServiceRequestClosed,
   requestedByIdOf,
   type CallerIdentity,
 } from '../src/api/delete-own';
@@ -1630,6 +1631,107 @@ describe('service request: delete', () => {
     expect(failure.message).not.toMatch(/stored file/);
     // The server's own detail is never echoed; the client's wording stands.
     expect(failure.message).not.toBe(HAS_ACTIVITY_DETAIL);
+  });
+});
+
+// Owner decision 2026-10-12: a closed service request cannot be deleted (409 service_request_closed).
+const SR_CLOSED_MESSAGE = "This request is closed, so it can't be deleted. Nothing was deleted.";
+
+const serviceRequestClosed = (): ApiError =>
+  new ApiError(
+    409,
+    problem(409, {
+      reasonCode: 'service_request_closed',
+      title: 'Service request is closed',
+      detail: "This request is closed, so it can't be deleted.",
+    })
+  );
+
+describe('service request: closed (owner decision 2026-10-12)', () => {
+  it.each([
+    ['statecode 1', { statecode: 1 }],
+    ['statuscode 2 (the closed status reason)', { statuscode: 2 }],
+  ])(
+    'a closed request (%s) shows no Delete, even to its requester',
+    async (_label, closedColumns) => {
+      installDetailNet('sr', emptyNet({ record: { ...requestedByMe, ...closedColumns } }));
+      const dialog = await openDetail('sr');
+      const docs = await within(dialog).findByTestId('record-detail-documents');
+      await within(docs).findByText(/No documents have been uploaded/);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(within(dialog).queryByRole('button', { name: 'Delete request' })).toBeNull();
+      expect(within(dialog).queryByTestId('service-request-actions')).toBeNull();
+    },
+    SLOW
+  );
+
+  it(
+    'an open request (statecode 0, statuscode 1) still shows Delete',
+    async () => {
+      installDetailNet('sr', emptyNet({ record: { ...requestedByMe, statecode: 0, statuscode: 1 } }));
+      const dialog = await openDetail('sr');
+      expect(await within(dialog).findByRole('button', { name: 'Delete request' }, SLOW)).toBeTruthy();
+    },
+    SLOW
+  );
+
+  it(
+    'the detail read asks for statecode, and statecode is not shown as a field',
+    async () => {
+      installDetailNet('sr', emptyNet({ record: { ...requestedByMe, statecode: 0 } }));
+      const dialog = await openDetail('sr');
+      const fetches = bffApiCall.mock.calls
+        .filter(c => String(c[0]).endsWith('/api/dataverse/fetch'))
+        .map(c => JSON.parse(String((c[1] as RequestInit).body)) as { entityName: string; fetchXml: string })
+        .filter(b => b.entityName === 'sprk_servicerequest');
+      expect(fetches.length).toBeGreaterThan(0);
+      for (const f of fetches) expect(f.fetchXml).toContain('<attribute name="statecode"/>');
+      expect(within(dialog).getByTestId('record-detail-fields').textContent).not.toMatch(/statecode/i);
+    },
+    SLOW
+  );
+
+  it(
+    '409 service_request_closed (a stale read): the closed message, nothing deleted, no retry, Delete withdrawn',
+    async () => {
+      installDetailNet(
+        'sr',
+        emptyNet({
+          record: requestedByMe,
+          onDelete: () => {
+            throw serviceRequestClosed();
+          },
+        })
+      );
+      const dialog = await openDetail('sr');
+      await deleteTheRequest(dialog);
+
+      const error = await within(dialog).findByTestId('delete-own-error', undefined, SLOW);
+      expect(error.textContent).toBe(SR_CLOSED_MESSAGE);
+      expect(error.textContent).not.toMatch(/try again|stored file/i);
+      expect(within(dialog).queryByRole('button', { name: 'Delete request' })).toBeNull();
+      expect(within(dialog).queryByTestId('service-request-has-activity')).toBeNull();
+      expect(within(dialog).queryByRole('button', { name: 'Send recall request' })).toBeNull();
+      expect(within(dialog).queryByTestId('record-detail-deleted')).toBeNull();
+      expect(deleteCalls()).toHaveLength(1);
+    },
+    SLOW
+  );
+
+  it('the refusal wording: 409 service_request_closed is the closed message, never the stored-file one', () => {
+    const failure = deleteFailureOf(serviceRequestClosed(), 'service request');
+    if (failure.kind !== 'error') throw new Error('expected an error message');
+    expect(failure.reasonCode).toBe('service_request_closed');
+    expect(failure.message).toBe(SR_CLOSED_MESSAGE);
+    expect(failure.message).not.toMatch(/stored file|try again/i);
+  });
+
+  it('the closed rule reads statecode 1 or statuscode 2 and fails open on an unread state (the server decides)', () => {
+    expect(isServiceRequestClosed({ statecode: 1 })).toBe(true);
+    expect(isServiceRequestClosed({ statuscode: 2 })).toBe(true);
+    expect(isServiceRequestClosed({ statecode: 0, statuscode: 1 })).toBe(false);
+    expect(isServiceRequestClosed({})).toBe(false);
+    expect(isServiceRequestClosed(null)).toBe(false);
   });
 });
 

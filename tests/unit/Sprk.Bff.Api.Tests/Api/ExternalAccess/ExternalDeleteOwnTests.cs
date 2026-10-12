@@ -1040,6 +1040,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             Targets.Clear();
             Requesters.Clear();
             States.Clear();
+            Volatile.Write(ref _requesterAndStateReads, 0);
             StateFault = null;
             TargetFault = null;
             DeleteFault = null;
@@ -1067,13 +1068,23 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             return Task.FromResult(Targets.TryRemove((kind, id), out _));
         }
 
-        public override Task<ServiceRequestOpenState> GetServiceRequestOpenStateAsync(Guid serviceRequestId, CancellationToken ct = default)
+        private int _requesterAndStateReads;
+
+        /// <summary>How many combined requester + state reads ran (the delete route reads the row ONCE).</summary>
+        public int RequesterAndStateReads => Volatile.Read(ref _requesterAndStateReads);
+
+        public override Task<ServiceRequestRead?> GetServiceRequestRequesterAndStateAsync(Guid serviceRequestId, CancellationToken ct = default)
         {
-            if (StateFault is { } fault)
-                return Task.FromException<ServiceRequestOpenState>(fault);
-            if (States.TryGetValue(serviceRequestId, out var state))
-                return Task.FromResult(state);
-            return Task.FromResult(Requesters.ContainsKey(serviceRequestId) ? ServiceRequestOpenState.Open : ServiceRequestOpenState.Unknown);
+            Interlocked.Increment(ref _requesterAndStateReads);
+            if (RequesterFault is { } requesterFault)
+                return Task.FromException<ServiceRequestRead?>(requesterFault);
+            if (StateFault is { } stateFault)
+                return Task.FromException<ServiceRequestRead?>(stateFault);
+            if (!Requesters.TryGetValue(serviceRequestId, out var requester))
+                return Task.FromResult<ServiceRequestRead?>(null);
+            // A row seeded without a scripted state is open.
+            var state = States.TryGetValue(serviceRequestId, out var scripted) ? scripted : ServiceRequestOpenState.Open;
+            return Task.FromResult<ServiceRequestRead?>(new ServiceRequestRead(requester, state));
         }
 
         public override Task<bool> HasRelatedRecordsAsync(Guid serviceRequestId, CancellationToken ct = default)

@@ -106,6 +106,16 @@ export function isRequestedByCaller(
   return requestedByIdOf(record) === caller.contactId;
 }
 
+/**
+ * True when a service request is closed: `statecode` 1 (inactive) or `statuscode` 2 (the closed status reason). A closed
+ * request cannot be deleted (the server answers 409 `service_request_closed`), so Delete is not offered. Unknown state
+ * (the column was not read) is treated as open: the server's gate is the authority.
+ */
+export function isServiceRequestClosed(record: Record<string, unknown> | null | undefined): boolean {
+  if (!record) return false;
+  return Number(record.statecode) === 1 || Number(record.statuscode) === 2;
+}
+
 // ---------------------------------------------------------------------------
 // What to say when a delete does not happen
 // ---------------------------------------------------------------------------
@@ -125,6 +135,8 @@ export type DeleteFailure =
 const REASON_DOCUMENT_LOCKED = 'document_locked';
 /** 409 on a service request that has documents, messages or other records: it cannot be deleted, but legal can be asked to recall it. */
 export const REASON_HAS_RELATED_RECORDS = 'has_related_records';
+/** 409 on a service request that staff have closed (statecode 1): a closed request cannot be deleted, and trying again will not change that. */
+export const REASON_SERVICE_REQUEST_CLOSED = 'service_request_closed';
 
 /**
  * Maps a failed delete to what the user sees. `noun` is the row type ("document", "task", "event", "service request").
@@ -148,6 +160,9 @@ export function deleteFailureOf(err: unknown, noun: string): DeleteFailure {
       case 409:
         if (problem.reasonCode === REASON_HAS_RELATED_RECORDS) {
           return `This ${noun} already has activity (documents, messages or other records), so it can't be deleted. You can ask legal to recall it. Nothing was deleted.`;
+        }
+        if (problem.reasonCode === REASON_SERVICE_REQUEST_CLOSED) {
+          return "This request is closed, so it can't be deleted. Nothing was deleted.";
         }
         return problem.reasonCode === REASON_DOCUMENT_LOCKED
           ? 'This document is checked out, so it cannot be deleted right now. Ask for it to be checked back in, then try again. Nothing was deleted.'

@@ -14,6 +14,9 @@
  *                to the request's own thread through the EXISTING message post (`sendMessage`, the task 034 client) - there
  *                is no recall endpoint. A 201 closes the box and says the recall request was posted (the host re-reads the thread through
  *                `onRecalled`). A failure keeps the box and the text and says why (`sendErrorOf`, the thread's own wording).
+ *   - 409 `service_request_closed`  the request is closed (staff closed it; owner decision 2026-10-12): it cannot be deleted
+ *                and trying again will not help. Delete is not offered for a closed request (`isServiceRequestClosed`, from the
+ *                `statecode` / `statuscode` the detail read now carries) and is withdrawn if the server says so after the click.
  *   - 503        nothing was deleted; the notice says to try again, and Delete is still there.
  *   - anything else: the shared `DeleteFailureNotice` wording (403 uniform refusal, 500, network).
  *
@@ -37,7 +40,13 @@ import {
 } from '@fluentui/react-components';
 import { DeleteRegular } from '@fluentui/react-icons';
 import { FormModal } from '@spaarke/ui-components/components/SprkModal';
-import { REASON_HAS_RELATED_RECORDS, isRequestedByCaller, type CallerIdentity } from '../../api/delete-own';
+import {
+  REASON_HAS_RELATED_RECORDS,
+  REASON_SERVICE_REQUEST_CLOSED,
+  isRequestedByCaller,
+  isServiceRequestClosed,
+  type CallerIdentity,
+} from '../../api/delete-own';
 import { MAX_MESSAGE_BODY_LENGTH, sendMessage } from '../../api/messages-client';
 import { deleteOwnServiceRequest } from '../../api/web-api-client';
 import { BffAccessState } from '../auth/BffAccessState';
@@ -139,6 +148,14 @@ export const ServiceRequestActions: React.FC<ServiceRequestActionsProps> = ({
   const tooLong = text.length > MAX_MESSAGE_BODY_LENGTH;
   const canSend = text.length > 0 && !tooLong && !sending;
   const hasActivity = del.failure?.kind === 'error' && del.failure.reasonCode === REASON_HAS_RELATED_RECORDS;
+  // A closed request cannot be deleted (owner decision 2026-10-12): no Delete, whether the record said so up front
+  // (statecode / statuscode) or the server's 409 service_request_closed just did (the read was stale).
+  const closed =
+    isServiceRequestClosed(record) ||
+    (del.failure?.kind === 'error' && del.failure.reasonCode === REASON_SERVICE_REQUEST_CLOSED);
+  // Recall is only ever offered after a has_related_records 409, which the server answers only for an open request, so
+  // a closed request has no recall either.
+  if (closed && !recalled && !del.failure) return null;
 
   const openRecall = (): void => {
     setRecallError(null);
@@ -183,16 +200,18 @@ export const ServiceRequestActions: React.FC<ServiceRequestActionsProps> = ({
           <MessageBarBody>{RECALLED_TEXT}</MessageBarBody>
         </MessageBar>
       ) : (
-        <div className={styles.actions}>
-          <Button
-            appearance="subtle"
-            icon={<DeleteRegular />}
-            disabled={del.busy}
-            onClick={() => del.ask(requestId, label)}
-          >
-            Delete request
-          </Button>
-        </div>
+        !closed && (
+          <div className={styles.actions}>
+            <Button
+              appearance="subtle"
+              icon={<DeleteRegular />}
+              disabled={del.busy}
+              onClick={() => del.ask(requestId, label)}
+            >
+              Delete request
+            </Button>
+          </div>
+        )
       )}
 
       <DeleteOwnConfirm del={del} />

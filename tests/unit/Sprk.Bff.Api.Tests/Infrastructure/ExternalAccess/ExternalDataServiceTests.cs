@@ -452,6 +452,9 @@ public class ExternalDataServiceTests
         decoded.Should().Contain($"_sprk_contact_value eq {FeedContact} and statecode eq 0 and (");
         decoded.Should().Contain("sprk_expiresdate ge 2026-10-12", "a lapsed grant is never announced, renewed or not");
         decoded.Should().Contain("sprk_granteddate,createdon,modifiedon");
+        decoded.Should().Contain("$orderby=modifiedon desc,sprk_externalrecordaccessid desc",
+            "a cap must cut the oldest activity, not the renewals (a renewed row keeps its old createdon)");
+        decoded.Should().NotContain("$orderby=createdon");
     }
 
     [Fact]
@@ -461,7 +464,7 @@ public class ExternalDataServiceTests
 
         await service.GetRecentGrantsAsync(FeedContact, new DateOnly(2026, 9, 12), new DateOnly(2026, 10, 12));
 
-        Decoded(handler.GetUrls.Single()).Should().NotContain("modifiedon ge");
+        Decoded(handler.GetUrls.Single()).Should().NotContain("modifiedon ge").And.NotContain("$orderby=modifiedon");
     }
 
     [Fact]
