@@ -1,3 +1,5 @@
+> **Archived 2026-10-12.** Both exemplars lived in the UniversalQuickCreate PCF, retired in `5b4cca898`; no control in `src/client/` defines a local `MsalAuthProvider` any more. Use `@spaarke/auth` — see `.claude/patterns/auth/spaarke-auth-initialization.md` and `spaarke-sso-binding.md`.
+
 # MSAL Client Pattern (Legacy)
 
 ## When
