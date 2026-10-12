@@ -90,11 +90,11 @@ public class MembershipJunctionUpdaterHostTests
             options,
             NullLogger<MembershipJunctionUpdaterHost>.Instance);
 
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        await sut.StopAsync(CancellationToken.None);
-        sw.Stop();
+        // A deadlock (or a wait for the full drain timeout) fails by TimeoutException here —
+        // no wall-clock stopwatch assertion. The 5s bound is far below the 30s DrainTimeout.
+        var stop = () => sut.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
 
-        sw.Elapsed.Should().BeLessThan(MembershipJunctionUpdaterHost.DrainTimeout,
+        await stop.Should().NotThrowAsync(
             "StopAsync on never-started host must short-circuit, not wait for full drain timeout");
     }
 
