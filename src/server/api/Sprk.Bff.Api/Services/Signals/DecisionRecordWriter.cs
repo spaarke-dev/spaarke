@@ -335,6 +335,25 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>
+    /// Task 043: every refusal <see cref="WriteAsync"/> can give WITHOUT I/O (validation, record class, column sizes, the no-core
+    /// owner), for a review projected before its first write. The commit route calls it before any action runs, because by the
+    /// time <see cref="WriteAsync"/> refuses, the review's emails have gone. Writes and reads nothing; logs nothing.
+    /// </summary>
+    /// <exception cref="DecisionRecordRefusedException">The review as projected would be refused.</exception>
+    public void Preflight(DecisionRecordRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var plan = Validate(request);
+        _ = Build(request, plan);
+        if (request.Core is null && (request.ItemOwnerUserId is null || request.ItemOwnerUserId == Guid.Empty))
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.OwnerMissing,
+                "A review of an item with no core record needs the item's owner to own its Decision Record; nothing was written.");
+        }
+    }
+
+    /// <summary>
     /// After a Secure-team create, reads <c>owningteam</c> back. A mismatch cannot be corrected on an append-only row and a
     /// failure here must not make the route retry into a duplicate, so it is logged at Error and metered, and the record id is
     /// still returned: uac-r2's secure-child reconcile re-owns the row (the table is registered in its lineage).

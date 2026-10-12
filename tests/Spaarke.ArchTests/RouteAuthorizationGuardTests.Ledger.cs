@@ -269,6 +269,12 @@ public partial class RouteAuthorizationGuardTests
             + "the closed action catalog. The record-level decision is SignalCoreRecordAccess.AuthorizeAsync, asked AS THE CALLER "
             + "through IDataverseUserClient (the Signal row, then its core record of any type; a no-core Signal is owner-only in "
             + "the Do lane, D-35): no read is the uniform 404, an unresolved caller the single 403 (D-29)."),
+        new GovernedFile("Api/Signals/DecisionCommitEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/v1/signals/{signalId}/decision (ontology platform R1 task 043, D-17) -- records ONE decision on a Signal. "
+            + "Before anything else (even the review-id lookup) every Signal in the review -- the primary and each Also-resolve -- "
+            + "goes through SignalCoreRecordAccess.AuthorizeAsync AS THE CALLER through IDataverseUserClient (no read: the uniform "
+            + "404; an unresolved caller: the single 403); then every action's preflight checks the caller's own rights before any "
+            + "write (a missing right is 403). Core record and item owner are derived server-side from the Signal, never the body."),
         new GovernedFile("Api/InquiryEndpoints.cs", Scope.RouteLevelGate,
             "POST /api/v1/inquiries/{serviceRequestId}/disposition (ontology platform R1 task 071, D-111) -- a person records how a "
             + "budget inquiry turned out. The route carries RecordRouteAccessAuthorizationFilter(\"write\", sprk_servicerequests, "
@@ -715,7 +721,11 @@ public partial class RouteAuthorizationGuardTests
     // /api/v1/inquiries/{serviceRequestId:guid}/disposition. Classified by GovernedFiles (RouteLevelGate); its record-level
     // decision is the already-credited fixed-entity-set form of RecordRouteAccessAuthorizationFilter. The main session
     // reconciles the count with the other ontology routes at integration.
-    private const int ExpectedEndpointFileCount = 120;
+    //
+    // 120 -> 121 (2026-10-11, spaarke-ontology-platform-r1 task 043). Net +1: Api/Signals/DecisionCommitEndpoints.cs ADDED --
+    // POST /api/v1/signals/{signalId:guid}/decision. Classified by GovernedFiles (RouteLevelGate) and HandlerDecisions below.
+    // The main session reconciles the count with the other ontology routes at integration.
+    private const int ExpectedEndpointFileCount = 121;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1589,6 +1599,12 @@ public partial class RouteAuthorizationGuardTests
             "Ontology task 036: the handler's first act is SignalCoreRecordAccess.AuthorizeAsync (DecisionPlanEndpoints.cs:53), which reads "
             + "the Signal (SignalCoreRecordAccess.cs:98) and then its core record (:150) through IDataverseUserClient AS THE CALLER; "
             + "anything but Allowed returns before the plan is read (uniform 404 at DecisionPlanEndpoints.cs:69, caller_unresolved 403 at :54-56)."),
+        new HandlerDecision("POST /api/v1/signals/{signalId:guid}/decision", "CommitDecisionAsync", "IDataverseUserClient",
+            new[] { "DecisionCommitService.CommitAsync", "SignalCoreRecordAccess.AuthorizeAsync" },
+            "Ontology task 043: the handler calls DecisionCommitService.CommitAsync (DecisionCommitEndpoints.cs:56), whose first I/O is "
+            + "SignalCoreRecordAccess.AuthorizeAsync for every Signal in the review (DecisionCommitService.cs:410) -- the Signal and "
+            + "its core record read AS THE CALLER through IDataverseUserClient; anything but Allowed returns before the review-id "
+            + "ledger, any app-only read or any write (uniform 404 at :413-414, caller_unresolved 403 at :411-412)."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),
             "Task 147 r1 (G5): every check is asked AS THE CALLER through IDataverseUserClient — WhoAmI first (a caller it "
             + "cannot name is the single 403, ontology task 046; ChildRecordEndpoints.cs:229), the payload mapped with the "

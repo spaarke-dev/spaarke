@@ -848,18 +848,154 @@ public class DecisionActionExecutorsTests
             new AddTodoExecutor(probe, cores, entities),
             new CreateEventExecutor(probe, cores, entities),
             new SendEmailExecutor(probe, user, cores),
+            new AssignWorkExecutor(probe, cores, entities),
+            new BudgetInquiryActionExecutor(Inquiry()),
         ];
     }
 
+    /// <summary>070's executor, built only so the adapter can be constructed; these tests never run it.</summary>
+    private static BudgetInquiryExecutor Inquiry() =>
+        new(new FakeUserClient(), Owner().Object, new Mock<IFieldMappingDataverseService>().Object,
+            new InquiryEmailSender(null!, new HttpContextAccessor()), new HttpContextAccessor(), NullLogger<BudgetInquiryExecutor>.Instance);
+
     [Fact]
-    public void Registry_EveryCatalogActionHasAnExecutor_ExceptTheTwoOwnedByOtherTasks()
+    public void Registry_EveryCatalogActionHasAnExecutor()
     {
         var registry = new DecisionActionExecutors(AllExecutors());
 
-        registry.MissingCodes().Should().BeEmpty("a catalog action without an executor cannot be committed");
-        DecisionActionExecutors.OwnedElsewhere.Should().BeEquivalentTo("send-budget-inquiry", "assign-work");
-        foreach (var owned in DecisionActionExecutors.OwnedElsewhere)
-            registry.TryGet(owned, out _).Should().BeFalse($"{owned} belongs to another task");
+        registry.MissingCodes().Should().BeEmpty("task 043 registered the inquiry adapter and Assign Work, the last two");
+        foreach (var action in DecisionActionCatalog.All)
+            registry.TryGet(action.Code, out _).Should().BeTrue($"{action.Code} must be executable by the commit route");
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // assign-work (task 043; D-113, uac-r2 pair rule on sprk_workassignment)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task AssignWork_BindsTheTypedRegardingLookupAndTheTypedPair_AndTheInternalAssignee()
+    {
+        var created = Guid.Parse("cccccccc-0000-0000-0000-0000000000a1");
+        var cores = Cores();
+        string? table = null;
+        JsonElement? sent = null;
+        cores.Setup(c => c.CreateChildAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, JsonElement, CancellationToken>((_, t, b, _) => { table = t; sent = b; })
+            .ReturnsAsync(Reply(201, body: new { id = created }));
+        var probe = Probe(CanCreate);
+
+        var outcome = await new AssignWorkExecutor(probe.Object, cores.Object, Entities()).ExecuteAsync(
+            Request(new() { ["assignee"] = ContactId.ToString("D"), ["description"] = "Review the revised budget\nwith the firm" }, null, MatterCore),
+            CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        outcome.Written.Should().Equal(new DecisionRecordRef("sprk_workassignment", created));
+        table.Should().Be("sprk_workassignment");
+        var body = sent!.Value;
+        body.GetProperty("sprk_name").GetString().Should().Be("Review the revised budget");
+        body.GetProperty("sprk_description").GetString().Should().Be("Review the revised budget\nwith the firm");
+        body.GetProperty("sprk_assignedtointernal@odata.bind").GetString().Should().Be($"/contacts({ContactId:D})");
+        body.GetProperty("sprk_regardingmatter@odata.bind").GetString().Should().Be($"/sprk_matters({MatterId:D})",
+            "uac-r2: on a work assignment the typed pair counts only when the typed regarding lookup repeats it");
+        body.GetProperty("sprk_regardingrecordtype@odata.bind").GetString().Should().Be($"/sprk_recordtype_refs({MatterCore.RecordTypeRefId:D})");
+        body.GetProperty("sprk_regardingrecordid").GetString().Should().Be(MatterId.ToString("D"));
+        probe.Verify(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), "prvCreatesprk_WorkAssignment", It.IsAny<CancellationToken>()), Times.Once,
+            "the live privilege name (spaarkedev1 2026-10-11)");
+    }
+
+    [Theory]
+    [InlineData("sprk_workassignment")]
+    [InlineData("sprk_servicerequest")]
+    [InlineData(null)]
+    public async Task AssignWork_UnderACoreThatIsNotAMatterOrProject_IsRefusedBeforeAnyWrite(string? coreEntity)
+    {
+        var cores = Cores();
+        var core = coreEntity is null ? null : new DecisionCoreRecord(coreEntity, Guid.NewGuid(), Guid.NewGuid());
+
+        var outcome = await new AssignWorkExecutor(Probe(CanCreate).Object, cores.Object, Entities()).ExecuteAsync(
+            Request(new() { ["assignee"] = ContactId.ToString("D"), ["description"] = "x" }, null, core), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.SubjectUnsupported);
+        cores.VerifyNoOtherCalls();
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // send-budget-inquiry adapter (task 043 over 070; the #1512/#1515 mapping)
+    // ---------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void InquiryAdapter_MapsEveryOutcome_AsTheReviewsFixedIt()
+    {
+        var sr = Guid.NewGuid();
+        var comm = Guid.NewGuid();
+
+        var sent = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.Sent, sr, comm));
+        sent.Status.Should().Be(DecisionActionStatus.Done);
+        sent.Written.Should().Equal(new DecisionRecordRef("sprk_servicerequest", sr), new DecisionRecordRef("sprk_communication", comm));
+
+        foreach (var refused in new[] { BudgetInquiryOutcome.NotConfirmed, BudgetInquiryOutcome.Invalid, BudgetInquiryOutcome.Refused })
+        {
+            var outcome = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(refused, Error: "no"));
+            outcome.Status.Should().Be(DecisionActionStatus.Refused, refused.ToString());
+            outcome.Written.Should().BeEmpty();
+        }
+
+        var createFailed = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.CreateFailed));
+        createFailed.Status.Should().Be(DecisionActionStatus.Failed);
+        createFailed.Written.Should().BeEmpty();
+
+        var sendFailed = BudgetInquiryActionExecutor.ToOutcome(new BudgetInquiryResult(BudgetInquiryOutcome.SendFailed, sr));
+        sendFailed.Status.Should().Be(DecisionActionStatus.Failed);
+        sendFailed.Written.Should().Equal(new[] { new DecisionRecordRef("sprk_servicerequest", sr) }, "the row exists; the email did not go");
+    }
+
+    [Fact]
+    public void InquiryAdapter_PassesTheOutsideFirmAndConfirmation_AndSplitsRecipients()
+    {
+        var (request, refusal) = BudgetInquiryActionExecutor.Map(Request(new()
+        {
+            ["to"] = "a@firm.example; b@firm.example",
+            ["subject"] = "Budget",
+            ["body"] = "Please revise",
+            ["outsideFirm"] = FirmId.ToString("D"),
+        }));
+
+        refusal.Should().BeNull();
+        request!.MatterId.Should().Be(MatterId);
+        request.To.Should().Equal("a@firm.example", "b@firm.example");
+        request.OutsideFirmId.Should().Be(FirmId);
+        request.Confirmed.Should().BeTrue("the commit route runs executors only for a confirmed review (D-52)");
+    }
+
+    [Theory]
+    [InlineData(null, "s", "b", null)]
+    [InlineData("a@x.example", null, "b", null)]
+    [InlineData("a@x.example", "s", null, null)]
+    [InlineData("a@x.example", "s", "b", "not-a-guid")]
+    public void InquiryAdapter_RefusesAnIncompleteInquiry_WithoutCallingTheInquiry(string? to, string? subject, string? body, string? firm)
+    {
+        var (request, refusal) = BudgetInquiryActionExecutor.Map(Request(new()
+        {
+            ["to"] = to,
+            ["subject"] = subject,
+            ["body"] = body,
+            ["outsideFirm"] = firm,
+        }));
+
+        request.Should().BeNull();
+        refusal!.Status.Should().Be(DecisionActionStatus.Refused);
+    }
+
+    [Fact]
+    public void InquiryAdapter_WithoutAMatter_IsRefused()
+    {
+        var (request, refusal) = BudgetInquiryActionExecutor.Map(
+            new DecisionActionRequest(new DefaultHttpContext(), SignalId, null, null, null,
+                new Dictionary<string, string?> { ["to"] = "a@x.example", ["subject"] = "s", ["body"] = "b" }));
+
+        request.Should().BeNull();
+        refusal!.ReasonCode.Should().Be(DecisionActionReasons.SubjectUnsupported);
     }
 
     [Fact]
