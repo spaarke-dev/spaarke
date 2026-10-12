@@ -271,6 +271,13 @@ public static class ExternalModuleDataEndpoints
             // 49 project-linked of 828 total → page 1 was almost all null-project rows). See
             // notes/grid-widget-empty-diagnosis.md. ScopeRows below is retained as defense-in-depth.
             var scopedFetchXml = Tier2ScopeFilterInjector.Inject(request.FetchXml, scopeDimensions);
+
+            // Fix round for r3 task 039 (K3): a module whose every-root rule checks lookups beyond its scope dimensions
+            // (the documents module's related twins) has the server project them, AFTER the column guard, so ScopeRows can
+            // withhold a row linked to a hidden root only through one. They are not readable columns; the strip drops them.
+            if (module.RequireReadOnEveryRoot && module.AdditionalRootLookups.Count > 0)
+                scopedFetchXml = Tier2ScopeFilterInjector.EnsureProjected(
+                    scopedFetchXml, module.AdditionalRootLookups.Select(l => l.Attribute));
             var scopedRequest = request with { FetchXml = scopedFetchXml };
 
             // App-only execution (broker-only, no OBO), then Tier-2 scope the rows to the caller's set

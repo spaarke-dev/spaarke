@@ -147,4 +147,55 @@ internal static class Tier2ScopeFilterInjector
 
         return document.ToString(SaveOptions.DisableFormatting);
     }
+
+    /// <summary>
+    /// Adds an <c>&lt;attribute name='…'/&gt;</c> to the primary <c>&lt;entity&gt;</c> for each of
+    /// <paramref name="attributes"/> the FetchXML does not already project, so a module can read a column its caller's
+    /// FetchXML did not ask for (fix round for r3 task 039: the related-twin root links the documents module's every-root
+    /// rule checks). Call it AFTER the column guard: the added columns are the server's, not the caller's, and the response
+    /// strip removes them unless they are readable columns.
+    /// </summary>
+    /// <remarks>
+    /// The column guard has already refused <c>all-attributes</c>, aggregates, aliases and joins, so the FetchXML here is a
+    /// flat single-entity attribute list. New attributes go straight after the last existing <c>&lt;attribute&gt;</c>
+    /// (the canonical child order: attributes, filter, order), or first when there is none.
+    /// </remarks>
+    /// <exception cref="FetchXmlParseException">If the FetchXML is not well-formed or has no entity.</exception>
+    public static string EnsureProjected(string fetchXml, IEnumerable<string> attributes)
+    {
+        ArgumentNullException.ThrowIfNull(attributes);
+
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(fetchXml);
+        }
+        catch (XmlException ex)
+        {
+            throw new FetchXmlParseException("FetchXML payload is not well-formed XML.", ex);
+        }
+
+        var entity = document.Root?.Element("entity")
+            ?? throw new FetchXmlParseException("FetchXML must contain an <entity> element.");
+
+        var projected = entity.Elements("attribute")
+            .Select(a => (string?)a.Attribute("name"))
+            .Where(n => n is not null)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in attributes.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!projected.Add(name))
+                continue;
+
+            var added = new XElement("attribute", new XAttribute("name", name));
+            var last = entity.Elements("attribute").LastOrDefault();
+            if (last is not null)
+                last.AddAfterSelf(added);
+            else
+                entity.AddFirst(added);
+        }
+
+        return document.ToString(SaveOptions.DisableFormatting);
+    }
 }

@@ -4,9 +4,14 @@ using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Spaarke.Dataverse;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.Logging.Abstractions;
+using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse.FetchXml;
+using Sprk.Bff.Api.Services.Dataverse.Models;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
@@ -219,6 +224,102 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         module.ScopeRows(caller, new[] { DocRow("Both readable", project: RecordA, matter: RecordB) }).Should().HaveCount(1);
     }
 
+    // ---- K3 (fix round 2): a root reached only through a RELATED TWIN of a typed link ----
+
+    [Theory]
+    [InlineData("sprk_relatedproject")]
+    [InlineData("sprk_relatedmatter")]
+    [InlineData("sprk_relatedworkassignment")]
+    public void DocumentsModule_ScopeRows_WithholdsADocumentLinkedToAHiddenRootOnlyThroughARelatedTwin(string twin)
+    {
+        var module = Registry().FindByEntity("sprk_document")!;
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+
+        var kept = module.ScopeRows(caller, new[]
+        {
+            DocRow("Project only", project: RecordA),
+            DocRow("Project and a hidden twin", project: RecordA, extra: (twin, (object)Hidden)),
+            DocRow("Project and a garbled twin", project: RecordA, extra: (twin, "not-a-guid")),
+        });
+
+        kept.Select(r => r["sprk_documentname"]).Should().Equal("Project only");
+    }
+
+    [Fact]
+    public void DocumentsModule_ScopeRows_ListsADocumentWhoseTwinIsARootTheCallerCanRead()
+    {
+        var module = Registry().FindByEntity("sprk_document")!;
+        var caller = PrincipalWith(
+            projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) },
+            matters: new Dictionary<Guid, AccessRights> { [RecordB] = AccessRights.Read });
+
+        module.ScopeRows(caller, new[] { DocRow("Twin readable", project: RecordA, extra: ("sprk_relatedmatter", RecordB)) })
+            .Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void DocumentsModule_DeclaresTheThreeRelatedTwins_AsRootLookups()
+    {
+        Registry().FindByEntity("sprk_document")!.AdditionalRootLookups.Should().BeEquivalentTo(new[]
+        {
+            new RootLookup("sprk_relatedproject", ExternalGrantRootType.Project),
+            new RootLookup("sprk_relatedmatter", ExternalGrantRootType.Matter),
+            new RootLookup("sprk_relatedworkassignment", ExternalGrantRootType.WorkAssignment),
+        });
+        foreach (var other in new[] { "sprk_invoice", "sprk_project", "sprk_matter", "sprk_workassignment" })
+            Registry().FindByEntity(other)!.AdditionalRootLookups.Should().BeEmpty($"{other} keeps its rule");
+    }
+
+    [Fact]
+    public async Task DocumentsModuleFetch_ProjectsTheTwinsServerSide_WithholdsOnThem_AndNeverReturnsThem()
+    {
+        // The REAL fetch pipeline over the production registry. The grid's FetchXML names only the typed columns; the server
+        // adds the twins AFTER the column guard, withholds on them, and the response strip removes them.
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        const string gridFetch = "<fetch><entity name='sprk_document'><attribute name='sprk_documentid'/>"
+            + "<attribute name='sprk_documentname'/><attribute name='sprk_project'/><attribute name='sprk_matter'/>"
+            + "<attribute name='sprk_workassignment'/><order attribute='sprk_documentname'/></entity></fetch>";
+        string? executed = null;
+        var rows = new IReadOnlyDictionary<string, object?>[]
+        {
+            DocRow("Project only", project: RecordA),
+            DocRow("Project and a hidden twin", project: RecordA, extra: ("sprk_relatedmatter", Hidden)),
+        };
+
+        var result = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
+            new FetchRequestDto("sprk_document", gridFetch, PagingCookie: null),
+            caller, Registry(), new FetchXmlEntityExtractor(),
+            (request, _) =>
+            {
+                executed = request.FetchXml;
+                return Task.FromResult(new FetchResponseDto(rows, MoreRecords: false, PagingCookie: null));
+            },
+            NullLogger.Instance, CancellationToken.None);
+
+        executed.Should().Contain("name=\"sprk_relatedproject\"").And.Contain("name=\"sprk_relatedmatter\"")
+            .And.Contain("name=\"sprk_relatedworkassignment\"");
+        var body = result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!;
+        body.Entities.Select(r => r["sprk_documentname"]).Should().Equal("Project only");
+        body.Entities.Single().Keys.Should().NotContain(k => k.StartsWith("sprk_related", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task DocumentsModule_SingleRecordRead_IsRefusedForADocumentId()
+    {
+        // /data/record/sprk_document/{id}: the module's dimensions are PARENT ids, so a document's own id is never in them and the
+        // Tier-2 gate refuses before any read. The every-root rule has no single-record path here to apply to.
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        var reads = 0;
+
+        var result = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            "sprk_document", Guid.NewGuid(), select: null, caller, Registry(),
+            (_, _, _, _) => { reads++; return Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>()); },
+            NullLogger.Instance, CancellationToken.None);
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(403);
+        reads.Should().Be(0);
+    }
+
     [Fact]
     public void InvoicesModule_ScopeRows_StaysTheUnionOfItsParents()
     {
@@ -238,7 +339,10 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
     // =====================================================================
 
     private static IReadOnlyDictionary<string, object?> DocRow(
-        string name, Guid? project = null, Guid? matter = null, Guid? workAssignment = null) => new Dictionary<string, object?>
+        string name, Guid? project = null, Guid? matter = null, Guid? workAssignment = null,
+        (string Column, object? Value)? extra = null)
+    {
+        var row = new Dictionary<string, object?>
         {
             ["@logicalName"] = "sprk_document",
             ["sprk_documentname"] = name,
@@ -246,6 +350,9 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
             ["sprk_matter"] = matter,
             ["sprk_workassignment"] = workAssignment,
         };
+        if (extra is { } e) row[e.Column] = e.Value;
+        return row;
+    }
 
     private static ExternalModuleRegistry Registry()
     {

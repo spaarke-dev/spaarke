@@ -2,6 +2,7 @@ using Azure.Core;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -36,6 +37,22 @@ public static class ExternalAccessModule
     /// return 404 for every view of these modules.
     /// </summary>
     private static readonly IReadOnlySet<Guid> NoSavedQueries = new HashSet<Guid>();
+
+    /// <summary>
+    /// The related twin of each core-root link on <c>sprk_document</c> (project, matter, work assignment), from the one
+    /// canonical declaration (<see cref="DocumentLinkFields"/>), as the documents module's extra every-root lookups.
+    /// </summary>
+    private static RootLookup[] DocumentRelatedRootTwins() => DocumentLinkFields.All
+        .Where(f => f.LogicalName.StartsWith("sprk_related", StringComparison.Ordinal))
+        .Select(f => f.TargetEntityLogicalName switch
+        {
+            "sprk_project" => (RootLookup?)new RootLookup(f.LogicalName, ExternalGrantRootType.Project),
+            "sprk_matter" => new RootLookup(f.LogicalName, ExternalGrantRootType.Matter),
+            "sprk_workassignment" => new RootLookup(f.LogicalName, ExternalGrantRootType.WorkAssignment),
+            _ => null,
+        })
+        .OfType<RootLookup>()
+        .ToArray();
 
     private static readonly IReadOnlySet<Guid> OutsideCounselGridConfigurationIds = new HashSet<Guid>
     {
@@ -378,6 +395,9 @@ public static class ExternalAccessModule
             // Fix round for r3 task 039 (INTERIM, ExternalMultiRootRule): a document also filed to a root the caller cannot
             // read is not listed by the grid, as on the record-detail document routes.
             RequireReadOnEveryRoot = true,
+            // ... including a root reached only through the related twin of a typed link (K3): the fetch endpoint projects
+            // these three server-side, after the column guard; they are not readable columns and never reach the caller.
+            AdditionalRootLookups = DocumentRelatedRootTwins(),
             ScopeDimensions = new[]
             {
                 new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },

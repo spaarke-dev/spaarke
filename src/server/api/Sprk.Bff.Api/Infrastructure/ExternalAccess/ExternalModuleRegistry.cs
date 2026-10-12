@@ -38,6 +38,10 @@ using Microsoft.Xrm.Sdk;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
+/// <summary>A lookup attribute of a module's record entity that names a core root of the given type (see
+/// <see cref="ExternalModuleDescriptor.AdditionalRootLookups"/>).</summary>
+public readonly record struct RootLookup(string Attribute, ExternalGrantRootType Root);
+
 /// <summary>
 /// One Tier-2 scope dimension of a module (spaarke-SPA-external-access-platform-r2 task 028 — polymorphic
 /// scoping): a row is accessible if, for ANY of the module's dimensions, the row's <see cref="Attribute"/>
@@ -171,6 +175,15 @@ public sealed class ExternalModuleDescriptor
     public bool RequireReadOnEveryRoot { get; init; }
 
     /// <summary>
+    /// Root lookups the every-root rule (<see cref="RequireReadOnEveryRoot"/>) must also check, beyond the scope
+    /// dimensions: for the documents module, the related twin of each typed root column (<c>sprk_relatedproject</c>,
+    /// <c>sprk_relatedmatter</c>, <c>sprk_relatedworkassignment</c>). The fetch endpoint projects them server-side after the
+    /// column guard (<c>Tier2ScopeFilterInjector.EnsureProjected</c>), so a grid's own FetchXML need not name them; they are
+    /// NOT readable columns and are stripped from the response. They are never part of the OR scope, only of the refusal.
+    /// </summary>
+    public IReadOnlyList<RootLookup> AdditionalRootLookups { get; init; } = Array.Empty<RootLookup>();
+
+    /// <summary>
     /// The module's resolved scope dimensions — either the explicit <see cref="ScopeDimensions"/> list,
     /// or a one-element list built from the <see cref="RecordIdAttribute"/> + <see cref="AccessibleRecordIds"/>
     /// shorthand. Throws if neither is configured (a wiring bug — fail fast).
@@ -254,7 +267,7 @@ public sealed class ExternalModuleDescriptor
                 if (ids.Count > 0 && TryGetAttributeId(row, attribute, out var id) && ids.Contains(id))
                 {
                     // OR across dimensions — one match is enough, unless the module also requires Read on every root.
-                    if (!RequireReadOnEveryRoot || AllRootsReadable(principal, row, resolved.Select(d => d.Attribute)))
+                    if (!RequireReadOnEveryRoot || AllRootsReadable(principal, row, resolved.Select(d => d.Attribute), AdditionalRootLookups))
                         scoped.Add(row);
                     break;
                 }
@@ -270,8 +283,19 @@ public sealed class ExternalModuleDescriptor
     /// (or is blank) is not part of the rule.
     /// </summary>
     private static bool AllRootsReadable(
-        CallerPrincipal principal, IReadOnlyDictionary<string, object?> row, IEnumerable<string> attributes)
+        CallerPrincipal principal, IReadOnlyDictionary<string, object?> row, IEnumerable<string> attributes,
+        IReadOnlyList<RootLookup> additional)
     {
+        foreach (var (attribute, rootType) in additional)
+        {
+            if (!row.TryGetValue(attribute, out var raw) || raw is null)
+                continue; // not filed to this root (Dataverse omits a null attribute)
+
+            var lookup = TryGetAttributeId(row, attribute, out var id) ? id.ToString() : "unreadable";
+            if (!ExternalMultiRootRule.AllRootsReadable(principal, (rootType, lookup)))
+                return false;
+        }
+
         foreach (var attribute in attributes)
         {
             var rootType = attribute.ToLowerInvariant() switch
