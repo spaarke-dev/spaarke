@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="142" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Child-record contract T2: DecisionRecordWriter files the DR under its subject, resolves the owner from all parents, and also-resolve refuses two secure walls</title>
+    <phase>4c Standard child-record contract (D-131)</phase>
+    <gate>blocked: 141 done; 043 (#1665) merged</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Ownership and secure-family isolation in the Decision Record write path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive (tenant/secure-family isolation) write-path change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CC3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches DecisionRecordWriter and DecisionCommitService also-resolve only; 143 must not edit those regions concurrently (143 runs after or coordinates).</parallel-reason>
+    <deps>141</deps>
+    <tags>bff-api,security,dataverse,testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the Decision Record a standard child: file it under its subject with the shared regarding builder, stamp it from the subject, own it by the resolver's answer over every parent, and refuse a commit whose Signals span different secure-root sets.</prompt>
+  <role>SPAARKE BFF engineer working to the unified-access-control-r2 child-record contract.</role>
+  <goal>Contract §4 ontology item 2 and acceptance items 1, 2, 3, 6, 7 hold in unit tests; uac-r2 has reviewed.</goal>
+
+  <context>
+    <background>D-131/D-133. Contract note C1–C3, C8, C9 (git show origin/work/unified-access-control-r2:projects/unified-access-control-r2/notes/ontology-standard-child-contract-2026-10-12.md). 043 already passes the resolver the core plus each resolved Signal's subject (audit F1); this task adds the DR's own subject and the filing columns that 140 created.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs (owner resolution ~:353-359 pre-043)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs (also-resolve ~:1079)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs (CoreAncestorLookups :116-122)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Access/SecureChildShareSynchronizer.cs (SecureRootsAboveAsync)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/TodoRegardingBuilder.cs (after 141)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="contract C1/D-133">The DR's subject lookup + pair are written by the shared regarding builder; at most one subject lookup per row; an untyped pair (communication, agreement) is valid.</constraint>
+    <constraint source="contract C2">The stamp goes in sprk_regarding{matter,project,workassignment,servicerequest} derived by CoreAncestorResolver; do not write the typed sprk_matter/sprk_project/sprk_workassignment as filing for new rows (their backfill/retirement is 145; keep them populated as today until 145 decides).</constraint>
+    <constraint source="contract C3/D-130">Owner = RecordOwnershipResolver over ALL parents: each resolved Signal's subject, every derived core, and the DR's own subject; taken exactly as returned; Refused → the commit fails with nothing written. No direct owningbusinessunit write. People go in sprk_assignedtointernal (contact), never ownerid.</constraint>
+    <constraint source="contract C9/acceptance 7">Also-resolve refuses (no write) a DR whose Signals' secure-root sets differ; Undetermined/Failed/fault counts as a distinct secure set (fail closed).</constraint>
+    <constraint source="uac-r2 #1665 N1 / #1778">The PR that first writes the DR subject lookup columns must also contain the C9 two-wall refusal and its nothing-written test. Do not split them across PRs.</constraint>
+    <constraint source="D-34/C8">sprk_corerecordid, sprk_corerecordtype, sprk_policyversion and the snapshot are written once at create and never by any later path (test).</constraint>
+    <constraint source="project">Never use --no-verify or bare git stash; you cannot write .claude/. Publish-size delta per BFF hygiene.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Read 043's merged DecisionRecordWriter/DecisionCommitService and the contract note.</step>
+    <step order="2">Implement filing + stamp + owner; then the two-wall refusal.</step>
+    <step order="3">Tests for each acceptance criterion; mutation checks on the two-wall refusal and the all-parents owner input.</step>
+    <step order="4">Build, Decision/Signal unit suites, ArchTests; draft PR; send to uac-r2 for review.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A DR whose subject is a communication filed under secure matter X is owned by Secure Record Owners and stamped X.</criterion>
+    <criterion testable="true">A DR under ordinary matter M is owned by M's BU default team; never a user.</criterion>
+    <criterion testable="true">F1 negative: a DR resolving a Signal secure through its subject while its core is ordinary M is SRO-owned or refused, never M-BU-owned.</criterion>
+    <criterion testable="true">Two-wall negative: Signals under secure roots X and Y → refused, nothing written.</criterion>
+    <criterion testable="true">Resolver Refused or a walk fault → nothing written, a failure result returned.</criterion>
+    <criterion testable="true">D-34: no code path after create writes the four context fields.</criterion>
+    <criterion testable="true">The census entries UAC task 182 left Pending/Waived against 142 (DR writer) are flipped to Routed, and the census + consistency guards pass.</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases above; anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <notes>Created 2026-10-12 (D-131..D-133). Two adversarial passes (security) per root CLAUDE.md §8.5; uac-r2 reviews. UAC task 182 carries the one-line `LineageColumnByCoreEntity` typed-core filter in DecisionRecordWriter.cs (`Roots.Contains(l.Value) &amp;&amp; l.Key == l.Value`), so the map survives the sprk_regarding* lineage columns; approved by the ontology main session 2026-10-12 (option b). Start from the code after 182 merges; do not re-add the filter.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

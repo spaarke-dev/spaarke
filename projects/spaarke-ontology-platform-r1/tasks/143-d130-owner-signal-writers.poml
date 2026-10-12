@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="143" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Child-record contract T3: D-130 owner on SignalWriter, SignalSuppressionService and DecisionCommitService; no writer-MI ownership; replace the ownerid == caller read rule (audit F3, F2 code side)</title>
+    <phase>4c Standard child-record contract (D-131)</phase>
+    <gate>blocked: 141 done; #1746 merged</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Ownership and read authorization for Signals.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/authorization-sensitive change across three services.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CC3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits SignalWriter after 141; coordinate DecisionCommitService regions with 142 (run after 142 or split by region).</parallel-reason>
+    <deps>141</deps>
+    <tags>bff-api,auth,security,testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make every Signal and Decision Record write take its owner from RecordOwnershipResolver as returned, remove the writer-managed-identity ownership and any direct owningbusinessunit write, and replace the rule that lets a caller read a row because they own it.</prompt>
+  <role>SPAARKE BFF engineer working to the child-record contract and ADR-028.</role>
+  <goal>Contract §4 ontology item 3 and acceptance items 2 and 9 hold; no row is user-owned; uac-r2 has reviewed.</goal>
+
+  <context>
+    <background>D-129, D-130, D-131. Audit F2/F3 (git show eaef7c7e7:projects/unified-access-control-r2/notes/ontology-secure-schema-audit-2026-10-12.md). F2's data side (BU default teams need Read on sprk_signal and sprk_decisionrecord, error 0x80040299) is an OPEN owner decision; this task does the code side only.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs (owner ~:459-486, no-core path)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalSuppressionService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/DecisionCommitService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalCoreRecordAccess.cs (ownerid == caller rule)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Access/RecordOwnershipResolver.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="D-130">Owner exactly as the resolver returns: secure parent → SRO; ordinary parent → that parent's BU default team; no parent → the acting user's BU default team; Refused → nothing written. No KeepCreator opt-in, no ontology-picked owner, no direct owningbusinessunit.</constraint>
+    <constraint source="D-129">A person is identified through sprk_assignedtointernal (contact) or created-by, never ownerid. The replacement read rule for no-core rows: the caller can read the Signal AND its subject (D-35 as amended) — never "caller owns the row".</constraint>
+    <constraint source="escalation-bound">Do not grant or change any security role (F2 is an owner decision). If a test or live check shows a BU default team cannot be assigned the row (0x80040299), record it as the F2 blocker; do not work around it with a user owner.</constraint>
+    <constraint source="project">Never use --no-verify or bare git stash; you cannot write .claude/. Publish-size delta per BFF hygiene.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Inventory every ownerid/owningbusinessunit write and every ownerid read in the three services and SignalCoreRecordAccess.</step>
+    <step order="2">Route all writes through the resolver; replace the read rule.</step>
+    <step order="3">Tests + mutation check on the read rule; build, suites, ArchTests; draft PR; send to uac-r2.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A no-core Signal and its DR are owned by the acting user's BU default team (resolver no-parent case), never a user.</criterion>
+    <criterion testable="true">Under ordinary M, both are owned by M's BU default team; under secure X, by SRO.</criterion>
+    <criterion testable="true">Resolver Refused → nothing written, failure counted.</criterion>
+    <criterion testable="true">No code in the three services sets owningbusinessunit or uses the writer identity as owner (grep + test).</criterion>
+    <criterion testable="true">A caller who owns a row but cannot read its subject is refused; a caller who can read both is allowed.</criterion>
+    <criterion testable="true">The census entries UAC task 182 left Pending/Waived against 143 (SignalWriter no-core owner, the owningbusinessunit write) are flipped to Routed, and the census + consistency guards pass.</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases above; anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <notes>Created 2026-10-12 (D-131). Two adversarial passes (auth/security). Absorbs the "F3 SignalWriter no-core ownership" follow-up lane.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

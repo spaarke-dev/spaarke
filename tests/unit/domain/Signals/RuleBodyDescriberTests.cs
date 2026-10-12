@@ -147,7 +147,7 @@ public class RuleBodyDescriberTests
     [Theory]
     [InlineData("""{"type":"Existence","subject":"sprk_servicerequest","when":{"statecode":0},"all":[]}""")]   // not in the allow-list
     [InlineData("""{"type":"Existence","subject":"sprk_event","when":{},"all":[]}""")]                          // matches every row
-    [InlineData("""{"type":"Threshold","subject":"sprk_event","when":{"statecode":0},"all":[]}""")]              // a shape the compiler does not accept yet
+    [InlineData("""{"type":"Threshold","subject":"sprk_event","when":{"statecode":0},"all":[]}""")]              // a Threshold body takes a threshold, not when/all
     [InlineData("{not json")]
     [InlineData("")]
     public async Task ABodyTheCompilerRefuses_IsRefusedByTheDescriberToo_AndNoNameIsRead(string body)

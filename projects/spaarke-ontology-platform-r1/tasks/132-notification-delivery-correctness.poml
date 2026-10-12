@@ -29,6 +29,10 @@
     <constraint source="project">One shared constants class for the appnotification option values (priority, toast type, icon, and any other option the writers set), with a test that the constants match a checked-in snapshot of the live metadata. Every direct writer uses it. Each fixed path gets a test that fails on the old value. Do not change who gets notified or when. Own worktree off origin/master, own PR, do not merge. BFF hygiene per root CLAUDE.md section 10. Never use --no-verify or bare git stash. You cannot write .claude/. No parking.</constraint>
   </constraints>
 
+  <steps mode="directional">
+    <step order="1">Not executed: this task was deferred under D-106 (ontology critical path only); the self-contained pickup context is the ontology-deferred GitHub issue for this task. Steps are written when the task is picked up.</step>
+  </steps>
+
   <acceptance-criteria>
     <criterion testable="true">No appnotification writer in src/ sends a priority or toast type outside the live option set (grep plus tests); the tests fail on the old values.</criterion>
     <criterion testable="true">The constants are validated against a checked-in metadata snapshot.</criterion>

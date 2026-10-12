@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="141" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Child-record contract: generalise TodoRegardingBuilder over table; SignalWriter writes the regarding pair + subject lookup through it (D-133)</title>
+    <phase>4c Standard child-record contract (D-131)</phase>
+    <gate>blocked: 140 done; #1665, #1746, #1747, #1756 merged into docs/ontology-platform-design (all touch SignalWriter)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Refactor of a shared BFF builder used by To Do and Event plus the Signal writer.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting change to a shared component with three consumers (high blast radius).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CC2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>SignalWriter is also edited by 143; run 141 first.</parallel-reason>
+    <deps>140</deps>
+    <tags>bff-api,refactoring,dataverse,testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the shared ADR-024 regarding builder usable for sprk_signal and sprk_decisionrecord, and move SignalWriter onto it, replacing its private "mirrors, does not copy" regarding code.</prompt>
+  <role>SPAARKE BFF engineer. Expert in ADR-024 polymorphic regarding and the core-ancestor stamp.</role>
+  <goal>One regarding builder serves To Do, Event, Signal and Decision Record; To Do and Event behaviour is byte-identical; Signal rows carry the Lookup pair type; the dedupe key no longer depends on reading the pair type column.</goal>
+
+  <context>
+    <background>D-133 (owner): writers use the shared regarding components, not mirrors. D-132 made Signal's pair type a Lookup (task 140). uac-r2 reviews the builder generalisation as its own commit.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/TodoRegardingBuilder.cs (ApplyResolverFieldsAsync, ApplyResolverPairAsync, RegardingLookupByEntity)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/TaskActionCore.cs (existing reuse for sprk_event)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs (~:236-245 doc, ~:695 dedupe key, ~:1202-1206 pair write)</file>
+      <file>every reader of sprk_signal.sprk_regardingrecordtype as a string: grep src/server and src/solutions, src/client; known: SignalCoreRecordAccess.cs ~:115 ($select) and ToRow ~:1354 (from #1665), SignalWriter.cs ~:1206; full list in notes/140-schema-delta.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="uac-r2">Commit 1 (own commit, uac-r2 reviews in isolation): parameterise the builder by table (lookup map per table, untyped-pair tolerance). The existing TodoRegardingBuilder and TaskActionCore tests pass UNCHANGED; add one new test per table (sprk_signal, sprk_decisionrecord). Nothing else in that commit.</constraint>
+    <constraint source="D-133">Commit 2: SignalWriter uses the builder for the pair and the subject lookup; delete its private regarding code. A subject with no sprk_recordtype_ref row (communication, agreement) gets the id-only untyped shape and is never an error.</constraint>
+    <constraint source="D-132">The dedupe key keeps its value format {policy}|{subject logical name}|{subject id}[|episode], composed from the subject logical name the writer already holds, never read back from the pair type column. Existing keys on dev rows must still match after the change (test).</constraint>
+    <constraint source="project">Update every reader that treated the Signal pair type as a string. Do not change ownership (143) or stamping registration (144). BFF hygiene: publish-size delta vs a fresh build of the docs branch base. Never use --no-verify or bare git stash; you cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Generalise the builder (commit 1) with tests; run TodoRegardingBuilder + TaskActionCore tests unchanged.</step>
+    <step order="2">Move SignalWriter onto it (commit 2); update string readers; dedupe-key compatibility test.</step>
+    <step order="3">Build, run Signal/Decision/Workspace unit tests and ArchTests; run the live SignalWriter seam test once on dev (env in current-task.md Q7 row) and verify zz- cleanup.</step>
+    <step order="4">Mutation check: revert the untyped-pair tolerance and confirm its test fails.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">TodoRegardingBuilder and TaskActionCore tests pass without edits.</criterion>
+    <criterion testable="true">A Signal on a matter writes sprk_regardingmatter + sprk_regardingrecordid + sprk_regardingrecordtype as an EntityReference to the matter's sprk_recordtype_ref row.</criterion>
+    <criterion testable="true">A Signal on a communication (no sprk_recordtype_ref row) writes the id with no type and succeeds.</criterion>
+    <criterion testable="true">At most one subject lookup is populated per row (ADR-024 invariant), on Signal and on the DR test table.</criterion>
+    <criterion testable="true">The dedupe key for an existing dev Signal is reproduced exactly by the new writer.</criterion>
+    <criterion testable="true">No code reads sprk_signal.sprk_regardingrecordtype as a string (grep evidence in the PR).</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases named above; anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <notes>Created 2026-10-12 (D-131..D-133). Review: one adversarial review + uac-r2 review of commit 1.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

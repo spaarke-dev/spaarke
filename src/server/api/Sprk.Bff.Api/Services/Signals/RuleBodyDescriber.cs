@@ -22,7 +22,7 @@ public sealed record RuleDescriptionResult(RuleDescription? Description, string?
 }
 
 /// <summary>
-/// Turns an Existence rule body into plain-language clauses, with lookup GUIDs shown as names (task 026, spec FR-48/FR-57;
+/// Turns an Existence or Threshold rule body into plain-language clauses, with lookup GUIDs shown as names (task 026, spec FR-48/FR-57;
 /// v4-prototype-vs-solution #11). Read-side only: nothing is stored and no column holds the result.
 /// </summary>
 /// <remarks>
@@ -77,6 +77,9 @@ public sealed class RuleBodyDescriber
         ["sprk_eventtype_ref"] = "event type",
         ["statuscode"] = "status",
         ["statecode"] = "state",
+        ["sprk_budgetutilizationpercent"] = "budget utilization percent",
+        ["sprk_totalbudget"] = "total budget",
+        ["sprk_totalspendtodate"] = "total spend to date",
     };
 
     private const string TriageCategoryColumn = "sprk_triagecategory";
@@ -100,7 +103,11 @@ public sealed class RuleBodyDescriber
         // The validator (schema, then the compiler: ValidateForSave is its pure, side-effect-free entry) is the authority
         // on what a body means; a body it refuses is not described. The compiler is only ever reached through the
         // validator (PredicateCompilerCallerGuardTests).
-        var validation = _validator.ValidateForSave(nameof(RuleType.Existence), ruleBodyJson, messageTemplate: null);
+        // The rule type is the body's own "type" member (the schema pins it to the type's name, so a stored version whose
+        // column disagrees with its body is refused at evaluation and is not worth describing). Anything unreadable
+        // falls back to Existence, whose validation then names the problem.
+        var ruleType = BodyRuleType(ruleBodyJson);
+        var validation = _validator.ValidateForSave(ruleType.ToString(), ruleBodyJson, messageTemplate: null);
         if (!validation.IsValid)
         {
             return new RuleDescriptionResult(null,
@@ -110,7 +117,9 @@ public sealed class RuleBodyDescriber
         try
         {
             using var doc = PredicateCompiler.ParseBounded(ruleBodyJson);
-            return await DescribeParsedAsync(doc.RootElement, ct).ConfigureAwait(false);
+            return ruleType == RuleType.Threshold
+                ? DescribeThreshold(doc.RootElement)
+                : await DescribeParsedAsync(doc.RootElement, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when ((ex is not OperationCanceledException || !ct.IsCancellationRequested)
                                    && ex is not PredicateCompilationException)
@@ -126,6 +135,63 @@ public sealed class RuleBodyDescriber
             // Unreachable for a body the validator accepted; kept so a future drift between the two fails closed.
             return new RuleDescriptionResult(null, "The rule body could not be read: " + ex.Message);
         }
+    }
+
+    /// <summary>Threshold when the body says so, otherwise Existence (also for text that does not parse).</summary>
+    private static RuleType BodyRuleType(string? ruleBodyJson)
+    {
+        try
+        {
+            using var doc = PredicateCompiler.ParseBounded(ruleBodyJson);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("type", out var type)
+                   && type.ValueKind == JsonValueKind.String
+                   && type.GetString() == nameof(RuleType.Threshold)
+                ? RuleType.Threshold
+                : RuleType.Existence;
+        }
+        catch (Exception ex) when (ex is PredicateCompilationException or JsonException or InvalidOperationException)
+        {
+            return RuleType.Existence;
+        }
+    }
+
+    /// <summary>
+    /// A Threshold body (task 025): the optional <c>when</c> scope line, then one <c>threshold</c> line stating the single
+    /// comparison. No lookup names are read (the compared column is numeric and the shared <c>when</c> grammar is described by
+    /// the same phrases as Existence), so nothing here can fail on a reference read.
+    /// </summary>
+    private static RuleDescriptionResult DescribeThreshold(JsonElement root)
+    {
+        var subject = root.GetProperty("subject").GetString()!;
+        var subjectLabel = Label(EntityLabels, subject);
+        var lines = new List<RuleClauseDescription>();
+
+        if (root.TryGetProperty("when", out var when) && when.ValueKind == JsonValueKind.Object && when.EnumerateObject().Any())
+        {
+            var phrases = Phrases(subject, when, new Dictionary<Guid, string>());
+            lines.Add(new RuleClauseDescription("when", "Subject",
+                $"Each {subjectLabel} where {Join(phrases.Words)}.",
+                $"{subject} where {string.Join(" and ", phrases.Formal)}"));
+        }
+
+        var threshold = root.GetProperty("threshold");
+        var field = threshold.GetProperty("field").GetString()!;
+        var op = threshold.GetProperty("operator").GetString()!;
+        var value = threshold.GetProperty("value");
+        var comparison = op switch
+        {
+            ">=" => "is at least",
+            ">" => "is more than",
+            "<=" => "is at most",
+            "<" => "is less than",
+            _ => throw new PredicateCompilationException($"threshold.operator: '{op}' has no description."),
+        };
+        lines.Add(new RuleClauseDescription("threshold", "Threshold",
+            $"The {subjectLabel}'s {Label(ColumnLabels, field)} {comparison} {Raw(value)}.",
+            $"{subject}.{field} {op} {Raw(value)}"));
+
+        return new RuleDescriptionResult(new RuleDescription(lines), null);
     }
 
     private RuleDescriptionResult Refused(string reason, string message, Exception? fault = null)
@@ -291,6 +357,21 @@ public sealed class RuleBodyDescriber
     private static string OperatorWords(string op, JsonElement operand, string column, bool isLookup, Dictionary<Guid, string> names)
     {
         var shown = Display(operand, isLookup, names);
+        if (operand.ValueKind == JsonValueKind.Number)
+        {
+            // A numeric operand is a quantity, never a date: "is at least 5", not "is on or after 5".
+            return op switch
+            {
+                ">=" => $"is at least {shown}",
+                ">" => $"is more than {shown}",
+                "<=" => $"is at most {shown}",
+                "<" => $"is less than {shown}",
+                "<>" => $"is not {shown}",
+                "=" => $"is {shown}",
+                _ => throw new PredicateCompilationException($"{column}: operator '{op}' has no description."),
+            };
+        }
+
         return op switch
         {
             ">=" => $"is on or after {shown}",
@@ -340,7 +421,15 @@ public sealed class RuleBodyDescriber
         return Raw(value);
     }
 
-    private static string Raw(JsonElement value) => value.ValueKind == JsonValueKind.String ? value.GetString()! : value.GetRawText();
+    /// <summary>A string as its text; a number in the compiler's canonical form (<c>PredicateCompiler.FormatScalar</c>:
+    /// plain invariant decimal), so "1e2" reads 100 and a value beyond 28 digits reads the rounded value the query
+    /// compares; anything else as raw JSON.</summary>
+    private static string Raw(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString()!,
+        JsonValueKind.Number when value.TryGetDecimal(out var number) => number.ToString(CultureInfo.InvariantCulture),
+        _ => value.GetRawText(),
+    };
 
     private static string Label(IReadOnlyDictionary<string, string> labels, string logicalName) =>
         labels.TryGetValue(logicalName, out var label) ? label : logicalName;

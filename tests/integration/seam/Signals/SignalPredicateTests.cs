@@ -213,6 +213,99 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
         PredicateCompiler.DateOnlyColumns.Should().BeEquivalentTo(live);
     }
 
+    // ── Task 025 (D-16): the Threshold rule type, compiled and run against real matters ────────────────────
+
+    // spaarkedev1 matters with finance roll-ups (read 2026-10-11): REAL-2026-123456.01 spend 25000, REAL-2026-123456.02 spend 250000
+    // and utilization 1.25, CMRCL-441482 spend 10000; every other matter has none (null).
+    private static readonly Guid SpendMatter25k = Guid.Parse("2444af6d-e1f2-f011-8406-7ced8d1dc988");
+    private static readonly Guid SpendMatter250k = Guid.Parse("b68299c6-bafb-f011-8407-7c1e520aa4df");
+    private static readonly Guid SpendMatter10k = Guid.Parse("491b1efe-e562-f111-ab0c-000d3a4d8152");
+
+    [Fact]
+    public async Task ThresholdColumns_AreNumericOnTheLiveSchema()
+    {
+        if (!_dv.IsLive) return;
+
+        // A threshold on a text, lookup or date column would not fail at save time, so each listed column must exist on
+        // its table and be a Decimal, Money, Double or Integer there.
+        foreach (var (entity, column) in PredicateCompiler.ThresholdColumns)
+        {
+            var attribute = await _dv.GetAttributeAsync(entity, column);
+            attribute.Should().Match<AttributeMetadata>(a =>
+                a is DecimalAttributeMetadata || a is MoneyAttributeMetadata || a is DoubleAttributeMetadata || a is IntegerAttributeMetadata,
+                $"{entity}.{column} must be a numeric column");
+        }
+    }
+
+    [Fact]
+    public async Task ThresholdColumns_RangesFitTheLiveColumnMetadata_AndTheSdkReturnsTheirValuesAtTheColumnScale()
+    {
+        if (!_dv.IsLive) return;
+
+        foreach (var ((entity, column), (min, max)) in PredicateCompiler.ThresholdColumnRanges)
+        {
+            var attribute = await _dv.GetAttributeAsync(entity, column);
+            var (liveMin, liveMax, precision) = attribute switch
+            {
+                DecimalAttributeMetadata d => ((decimal?)d.MinValue, (decimal?)d.MaxValue, (int?)d.Precision),
+                MoneyAttributeMetadata m => ((decimal?)m.MinValue, (decimal?)m.MaxValue, m.Precision),
+                _ => throw new InvalidOperationException($"{entity}.{column} is {attribute.GetType().Name}, not a numeric column"),
+            };
+            _out.WriteLine($"{entity}.{column}: {attribute.GetType().Name} live min {liveMin} max {liveMax} precision {precision}; compiler range {min} to {max}");
+
+            // The compiler may be narrower than the column, never wider (a wider range would let a value through that Dataverse rejects).
+            min.Should().BeGreaterThanOrEqualTo(liveMin!.Value, $"{entity}.{column} lower bound");
+            max.Should().BeLessThanOrEqualTo(liveMax!.Value, $"{entity}.{column} upper bound");
+
+            // How the SDK hands the value back (scale), for SignalWriter.FormatFactValue.
+            var rows = await _dv.RunFetchRowsAsync(
+                $"<fetch top=\"5\"><entity name=\"{entity}\"><attribute name=\"{column}\" /><filter><condition attribute=\"{column}\" operator=\"not-null\" /></filter></entity></fetch>");
+            foreach (var value in rows.Select(r => r[column]))
+            {
+                var number = value is Money money ? money.Value : (decimal)value;
+                var scale = (decimal.GetBits(number)[3] >> 16) & 0xFF;
+                _out.WriteLine($"  {column} returned as {value.GetType().Name} {number.ToString(System.Globalization.CultureInfo.InvariantCulture)} (scale {scale})");
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ThresholdFixture_ReturnsExactlyTheRowsOfTheHandWrittenFetchXml_IncludingTheBoundaryAndExcludingNulls()
+    {
+        if (!_dv.IsLive) return;
+
+        var compiled = _compiler.Compile(File.ReadAllText(FixturePath("threshold-matter-spend.rulebody.json")), null, RuleType.Threshold);
+        var reference = File.ReadAllText(FixturePath("threshold-matter-spend.reference.fetchxml"));
+
+        var fromCompiler = await RunAsync(compiled);
+        var fromReference = await _dv.RunFetchAsync(reference, "sprk_matterid");
+
+        fromCompiler.Should().BeEquivalentTo(fromReference);
+        fromCompiler.Should().Contain(new[] { SpendMatter25k, SpendMatter250k }, "spend 25000 and 250000 are at least 20000");
+        fromCompiler.Should().NotContain(SpendMatter10k, "spend 10000 is under 20000");
+        fromCompiler.Should().NotContain(Guid.Parse("ced2c3d9-47bf-f111-aaaf-0022482913fc"), "MAT-000011 has no spend roll-up, and a null never satisfies a comparison");
+        fromCompiler.Count.Should().BeLessThan(await _dv.CountMattersAsync(), "a rule that returns every row is not a filter");
+    }
+
+    [Theory]
+    // field, operator, value, rows that must come back, rows that must not
+    [InlineData("sprk_totalspendtodate", ">", "25000", "b68299c6-bafb-f011-8407-7c1e520aa4df", "2444af6d-e1f2-f011-8406-7ced8d1dc988")]            // strictly more: the 25000 row is out
+    [InlineData("sprk_totalspendtodate", "<=", "25000", "2444af6d-e1f2-f011-8406-7ced8d1dc988", "b68299c6-bafb-f011-8407-7c1e520aa4df")]           // at most: the 25000 row is in
+    [InlineData("sprk_totalbudget", "<", "100000", "491b1efe-e562-f111-ab0c-000d3a4d8152", "b68299c6-bafb-f011-8407-7c1e520aa4df")]               // budget 25000/55000 under 100000, 150000 not
+    [InlineData("sprk_budgetutilizationpercent", ">=", "1", "b68299c6-bafb-f011-8407-7c1e520aa4df", "2444af6d-e1f2-f011-8406-7ced8d1dc988")]      // the Decimal column; the null rows are out
+    public async Task EveryOperator_OnEveryKindOfColumn_ReturnsTheRightRows(string field, string op, string value, string inRow, string outRow)
+    {
+        if (!_dv.IsLive) return;
+
+        var body = "{\"type\":\"Threshold\",\"subject\":\"sprk_matter\",\"threshold\":{\"field\":\"" + field + "\",\"operator\":\"" + op +
+                   "\",\"value\":" + value + "}}";
+
+        var matters = await RunAsync(_compiler.Compile(body, null, RuleType.Threshold));
+
+        matters.Should().Contain(Guid.Parse(inRow)).And.NotContain(Guid.Parse(outRow));
+        matters.Count.Should().BeLessThan(await _dv.CountMattersAsync());
+    }
+
     private static string FixturePath(string name)
     {
         var dir = new DirectoryInfo(System.AppContext.BaseDirectory);
@@ -343,6 +436,10 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
                 """<fetch aggregate="true"><entity name="sprk_matter"><attribute name="sprk_matterid" alias="n" aggregate="count" /></entity></fetch>"""));
             return (int)((AliasedValue)result.Entities[0]["n"]).Value;
         }
+
+        /// <summary>The raw rows of a hand-written query, for reading column values as the SDK returns them.</summary>
+        public async Task<IReadOnlyList<Entity>> RunFetchRowsAsync(string fetchXml) =>
+            (await _client!.RetrieveMultipleAsync(new FetchExpression(fetchXml))).Entities.ToList();
 
         public async Task<Guid> WhoAmIAsync() =>
             ((WhoAmIResponse)await _client!.ExecuteAsync(new WhoAmIRequest())).UserId;

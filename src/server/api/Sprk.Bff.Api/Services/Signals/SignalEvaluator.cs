@@ -148,6 +148,15 @@ public sealed class SignalEvaluator
         var whenFields = root.TryGetProperty("when", out var when) && when.ValueKind == JsonValueKind.Object
             ? when.EnumerateObject().Select(p => p.Name).ToList()
             : new List<string>();
+        // Task 025: a Threshold body's compared column is read from the subject like a 'when' field, so its value is a
+        // fact too (section 0.3: a template may name it). Nothing else about the evaluation depends on the rule type.
+        if (root.TryGetProperty("threshold", out var threshold) && threshold.ValueKind == JsonValueKind.Object
+            && threshold.TryGetProperty("field", out var thresholdField) && thresholdField.GetString() is { } comparedColumn
+            && !whenFields.Contains(comparedColumn))
+        {
+            whenFields.Add(comparedColumn);
+        }
+
         var dateBounds = ReadDateOnlyBounds(when, compiled.DateOnlyWhenFields);
         var catalog = await ReadCatalogFieldsAsync(subject, ct).ConfigureAwait(false);
         SignalWriter.DueDateColumnBySubject.TryGetValue(subject, out var dueColumn);

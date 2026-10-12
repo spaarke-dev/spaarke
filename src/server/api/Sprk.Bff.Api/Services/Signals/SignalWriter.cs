@@ -821,6 +821,49 @@ public sealed partial class SignalWriter
     }
 
     /// <summary>
+    /// D-120: records, ONCE, that the job observed a Threshold subject's condition FALSE after its Signal was resolved Acted, by
+    /// stamping only <c>sprk_lastevaluated</c> on that resolved Signal (<see cref="SignalEpisodePlanner"/> reads
+    /// <c>lastevaluated</c> later than <c>resolvedon</c> as "cleared observed"). Conditional on <paramref name="rowVersion"/>; a
+    /// Signal changed since the read returns false and writes nothing (the next pass re-reads it). Never touches status,
+    /// resolution, <c>sprk_resolvedon</c> or any other column. A failure is logged at Error, metered and rethrown.
+    /// <para><b>Marker contract (D-120).</b> <c>sprk_lastevaluated</c> MORE THAN 1 minute after <c>sprk_resolvedon</c> on a resolved
+    /// Signal means "cleared observed" (<see cref="ExistingSignal.ClearedMarkerTolerance"/>). Nothing but this stamp may write
+    /// <c>sprk_lastevaluated</c> later than <c>sprk_resolvedon</c> on a resolved row; task 043's commit route, which resolves a
+    /// Signal Acted, must stamp both columns together (within the tolerance) or leave <c>lastevaluated</c> alone.</para>
+    /// </summary>
+    internal async Task<bool> MarkClearedObservedAsync(Guid signalId, string? rowVersion, string policyCode, CancellationToken ct = default)
+    {
+        if (signalId == Guid.Empty)
+            throw new ArgumentException("signalId must not be Guid.Empty.", nameof(signalId));
+        if (string.IsNullOrWhiteSpace(rowVersion))
+            throw new ArgumentException("rowVersion is required: the stamp must not overwrite a Signal changed since it was read.", nameof(rowVersion));
+
+        var fields = new Dictionary<string, object> { ["sprk_lastevaluated"] = _timeProvider.GetUtcNow().UtcDateTime };
+        try
+        {
+            await _writerClient.UpdateIfRowVersionMatchesAsync("sprk_signal", signalId, rowVersion, fields, ct).ConfigureAwait(false);
+            _logger.LogInformation(
+                "Acted Signal {SignalId} (policy {PolicyCode}): condition observed cleared after the resolution (D-120); a later crossing re-raises.",
+                signalId, policyCode);
+            return true;
+        }
+        catch (Exception ex) when (IsConcurrencyVersionMismatch(ex))
+        {
+            _logger.LogInformation(
+                "Signal {SignalId} changed since the evaluator read it; cleared-observed NOT recorded (policy {PolicyCode}).", signalId, policyCode);
+            return false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            var reason = IsDataverseAccessDenied(ex) ? OntologyWriterFailureReason.DataverseAccessDenied : OntologyWriterFailureReason.SignalCloseFailed;
+            _logger.LogError(OntologyWriterEvents.WriteRefused, ex,
+                "Cleared-observed stamp refused for policy {PolicyCode}, signal {SignalId} (reason={Reason}).", policyCode, signalId, reason);
+            OntologyWriterTelemetry.RecordFailure(reason);
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Task 031 (task 037 hand-off, D-35): a no-core Signal follows its item's owner. When the To Do or event is reassigned
     /// after its Signal was written, the Signal is reassigned to the item's CURRENT owner (the writer holds Assign) instead of
     /// the reconcile escalating <see cref="OntologyWriterFailureReason.NoCoreOwnerMismatch"/> on every pass. Logged once
@@ -1339,9 +1382,16 @@ public sealed partial class SignalWriter
     {
         DateTimeOffset dto => dto.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
         DateTime dt => dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        // The SDK hands Money and Decimal columns back at scale 10 (live spaarkedev1: 25000.0000000000, 1.2500000000), so
+        // trim the trailing zeros: a sentence reads "25000" and "94.5", not the stored scale.
+        decimal number => Normalize(number).ToString(CultureInfo.InvariantCulture),
+        Money money => Normalize(money.Value).ToString(CultureInfo.InvariantCulture),
         IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
         _ => value.ToString() ?? string.Empty,
     };
+
+    /// <summary>Dividing by 1.000...0 (28 places) drops a decimal's trailing zeros without changing its value.</summary>
+    private static decimal Normalize(decimal value) => value / 1.0000000000000000000000000000m;
 
     /// <summary>Mirrors <c>TodoRegardingBuilder.BuildRecordUrl</c> — a relative URL; the model-driven app
     /// resolves the host origin at click time. No org URL or tenant id hard-coded.</summary>
