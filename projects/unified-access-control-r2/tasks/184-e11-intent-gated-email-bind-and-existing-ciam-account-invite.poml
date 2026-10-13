@@ -3,7 +3,7 @@
   <metadata>
     <title>Two changes in UAC's binder and invite code: E11 email-binds a contact only on this environment's own intent (an active grant or a pending invite), and inviting someone who already has a CIAM account succeeds</title>
     <phase>Session 28 — UAC (owner round 96, 2026-10-12)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Identity binding and tenant isolation between customers (task 141 surface), plus the invite endpoint.</rigor-reason>
     <model-tier>opus</model-tier>

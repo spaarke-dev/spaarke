@@ -551,3 +551,48 @@ Final sweep 20:15Z: 0 `# gate17*` / `# gate18*` matters or events, 0 grant rows 
 - Read-only form check on dev: only the Matter main form loads `sprk_subgrid_parent_rollup.js` and `sprk_matter_kpi_refresh.js`, and it registers `bff_auth.js`. `sprk_kpi_subgrid_refresh.js` and `sprk_kpiassessment_quickcreate.js` are referenced by no form.
 - Deployed to dev with `Deploy-WebResourceInline.ps1 -WebResourceType 3` and a scoped PublishXml each, `bff_auth.js` first. All 5 live copies are byte-equal to the source: bff_auth 352,432 B; rollup 14,777; matter_kpi 14,078; kpi_subgrid 15,099; kpiassessment_quickcreate 20,535.
 - Still open for task 153: the owner re-checks the access banner as testuser1 in InPrivate. The expected result is no red banner and no AADSTS50058 in the console.
+
+## #1801 / task 184 live gate (2026-10-13)
+
+Run 2026-10-13 15:03–15:45Z against spaarke-bff-dev (healthz 200) and spaarkedev1. Read-only except for the BFF's own invite.
+
+**Identities.** All existing ones:
+- admin (`az` default, `1d02f31c…`, System Administrator, so its reads of the secured column are authoritative);
+- testuser1 (`8d7bad7a…`, `AZURE_CONFIG_DIR=C:/tmp/az-uac-child`, delegated Dataverse token);
+- the CIAM Test User contact `394fda9f…` (oid `b720e239…`, plane External).
+
+**Tokens.** `api://1e40baad…/.default` for the BFF; `az` tokens for Dataverse, App Insights and the Kudu VFS read; one read-only Graph `GET /users` on the CIAM tenant `7052feba…` with the admin's existing `az` login. All held in memory only.
+
+**No writes.** No Entra, Key Vault, app-setting, role or tenant-config write, and no prod vault read. The gate wrote no Dataverse row and created no CIAM user.
+
+**Files.** Session scratchpad `gate184/`: `gate184.py`, `gate184.log`, `ai.py`, `g1*.kql`, `g2*.kql`. The log's `[G2] FAIL` line is a harness defect, corrected in the log itself: the communication check selected `subject` instead of `sprk_subject`, so it answered 400.
+
+**The build is #1801.**
+- Kudu OneDeploy `2a79ead3…` ran 14:49:03–14:49:07Z. The single instance `39ab6951…` logged "Application started" at 14:49:26Z.
+- The deployed `Sprk.Bff.Api.dll` (17,521,152 B, read through Kudu VFS) contains all five 184-only strings: `sdap.access.invite.invite_marker_not_written`, `sdap.access.deny.contact_not_invited`, `sprk_externalinvitedon`, `ExistingAccount`, `CiamExistingAccountTemplate.html`.
+
+**The column on dev.** `contact.sprk_externalinvitedon` is DateTime with `IsSecured = true`, created 2026-10-13T07:41:27Z. Its field permissions:
+- **Spaarke BFF-Managed Field Readers** `42e542c8…`: read 4, create 0, update 0. Held through 6 teams, including "Spaarke Business Unit 1", which testuser1 is in.
+- **Spaarke BFF-Managed Field Writers** `917b64c5…`: read, create and update 4. Members: only the 2 BFF app users, `# mi-bff-api-dev` and `SDAP-BFF-SPE-API`.
+- **System Administrator** `572329c1…`: read, create and update 4. This is the platform default. It also lists the team "Spaarke Demo" (see #1343).
+- No contact on dev carries a marker yet: `sprk_externalinvitedon ne null` returns 0 rows.
+
+| # | Gate | Result | Evidence |
+|---|---|---|---|
+| G1 | Startup and regression | **PASS** | **Startup:** "Application started" 14:49:26Z, with no startup exception. Eight `RedisTimeoutException`s "could not take the scheduler lease for '…'" all fell at 14:50:05Z, during the cold start, one per scheduled job. The 7 days before had none and none followed. They are transient and outside 184's surface. **Exceptions since 14:45Z:** otherwise only Graph "Invalid hostname for this tenancy" (pre-existing: ~280/day since 2026-10-07, the known orphan container), and one `InvalidOperationException` "Failed to create service request: Forbidden". **5xx since deploy:** exactly one, `POST /api/v1/external/servicerequests` 500 at 14:57:35Z (op `14164aae…`). It was a WORKFORCE caller (admin, `[WF-AUTH]`), and Dataverse refused the create with 403 `0x80040299` "Read Privilege Check For Owner failed … Principal team `cf15f587…`". That is SPA-r3's known intake-403 (I-6), not #1801 code; the next try at 14:59:49Z answered 201. No 5xx on the invite routes. **`[ID-BIND]` / E11:** none since the deploy, and no CIAM-issuer (`ciamlogin`) token reached the BFF, so no CIAM sign-in happened. The last `[ID-BIND]` traces were on 2026-10-09 (25). The live E11 deny/bind is therefore **not observed**. |
+| G2 | AlreadyProvisioned unchanged | **PASS** | **Before:** `394fda9f…` oid `b720e239…`, plane 100000000, `sprk_externalinvitedon` null, versionnumber 26691587, modifiedon 2026-10-02T17:48:44Z. **The call:** admin `POST /api/v1/external-access/invite` {spaarkedev@gmail.com, project `54fb306c…` (Standard, non-secure)} → **200** `{"contactId":"394fda9f…","status":"AlreadyProvisioned"}` (op `3946a2da…`, 15:22:49Z). **After:** identical (marker null, versionnumber 26691587, modifiedon unchanged). **Traces:** `[DELEGATION] ALLOWED`, `[EXT-INVITE] Onboarding …`, then `[EXT-INVITE] Contact 394fda9f… already has a CIAM oid bound — skipping account creation`. **Dependencies:** WhoAmI, RetrievePrincipalAccess, sprk_projects, contacts GET, systemusers GET. No Graph call (no `POST /users`), no contact PATCH, no send, no exception. **No email:** `sprk_communications` created ≥ 14:00Z: 0 rows. |
+| G3 | ExistingAccount, the real Graph ObjectConflict | **NOT AVAILABLE** (no write made) | The gate cannot reach ExistingAccount on dev within its write limits. `DecideInvite` resolves the invite email over ACTIVE contacts, and with more than one row it returns **Refuse `sdap.access.invite.email_ambiguous`** (409). The binder then **writes identity-collision flags on every matching contact** (`ResolveInviteContactAsync` → `WriteFlagsAsync`). So a throwaway contact on spaarkedev@gmail.com would get a 409 and also flag the bound CIAM Test User `394fda9f…`, never reaching Graph. **Alternatives checked:** a read-only Graph `GET /users` on the CIAM tenant lists 5 email accounts: spaarkedev@gmail.com, sarah.chen@example.com, rschroeder001@gmail.com, eyal.iffergan@spaarke.com, ralph.schroeder@hotmail.com. **Each has exactly one active, bound contact** on dev (`394fda9f…`, `52bb55e7…`, `43c4e819…`, `8cb95c16…`, `2e419a4f…`), so every target has the same problem. Inviting a CIAM user's `smtp:<oid>@spaarkeextid.onmicrosoft.com` proxy address was rejected: whether Graph conflicts on it is a guess, and a wrong guess creates a CIAM user. The throwaway was therefore **not created**, and there was nothing to deactivate. **Not a #1801 defect:** the refusal is task 141's design. ExistingAccount's real case is cross-environment: the person has a CIAM account from another customer and THIS environment has no contact for them, or one unbound contact. Single-environment dev has no such email. |
+| G4 | Marker field security, read-only | **PASS (metadata and live read path); value and update legs NOT AVAILABLE** | testuser1 (non-admin) is in the Readers profile through the "Spaarke Business Unit 1" team: read 4, create 0, update 0. It is in neither the Writers profile nor the System Administrator profile. **Live:** testuser1's delegated `GET contacts?$select=contactid,fullname,sprk_externalinvitedon` → 200, 2 readable contacts, with the column present (null). A filter on the column → 200 []. A per-record read of `394fda9f…` and of testuser1's own linked contact `ac6d7b68…` → 403 `0x80048306`, a record-level ReadAccess refusal (both are owned in the root BU), not field security. **The value leg:** no contact holds a marker (G3 could not write one), so a readable null and a masked null look the same. **The update leg:** not attempted, because it would be a Dataverse write outside the gate's allowed set. Update 0 for the Readers profile is shown by the field permission above. |
+
+**Defects found in #1801:** none.
+
+**Observations:**
+- **(O-184-1) G3 is blocked by the environment, not by the code.** To prove ExistingAccount live, the owner picks one of:
+  - (a) authorise deactivating one fixture contact for the length of the gate. The Sarah Chen contact `52bb55e7…` is preferred, because example.com sends to no one. Then invite a throwaway on that email, deactivate the throwaway, and reactivate the fixture.
+  - (b) run it from a second environment (a provisioning stamp), where the person has a CIAM account but no contact. That is the real cross-customer case.
+  - (c) accept the offline proof: `ExistingCiamAccountInviteTests` and the "every 400 is ExistingAccount" mutation.
+  - The G4 value leg can follow in the same run as (a) or (b), once a marker exists.
+- **(O-184-2)** Only the BFF and System Administrators can write the marker, not the BFF alone. The System Administrator field-security profile holds read/create/update by platform default, and on dev it includes the team "Spaarke Demo". That team's 13 members are all disabled today. This is already filed as **#1343** (the Spaarke Demo team carries the System Administrator role). It now also covers `sprk_externalinvitedon`, because a System Administrator can stamp a marker and so open an unbound contact to an E11 email bind. No new issue.
+- **(O-184-3)** No CIAM sign-in has happened since the deploy, so the live E11 intent gate (`contact_not_invited`, a marker bind, a grant bind) has not been observed. It needs a real CIAM sign-in, which the agent cannot perform.
+
+**Clean-up:** none needed. Nothing was created. The CIAM Test User contact `394fda9f…` is unchanged (versionnumber 26691587, marker null, no flag written).
