@@ -93,19 +93,20 @@ Branch `task/ontology-142-dr-writer-contract` (worktree `C:\wts-142`), branched 
   `A142_WhenTheRecordTypeCatalogFaults…` pins fail-closed on the builder's catalog read; `Task142_PartitionsOfSignals…` pins the
   real partition truth the walls check reads (the route tests script it).
 
-## Verification
+## Verification (after the fix round and the base merge, `0cbef266d`)
 
-- Filters (`Sprk.Bff.Api.Tests`): DecisionRecord 84 → see final report for post-fix counts; DecisionCommit 160; RecordOwnership 428;
-  RecordCreatorPerson 17; SecureChild 501; Signal 1392. All pass.
-- ArchTests: 973 total; the 5 `Task 167` booted-BFF tests failed once under full-suite load (2-minute boot) and pass in
-  isolation (`RouteAuthorizationGuardTests` 86/86); unrelated to this change. D-34 + census + creator-person: 38/38.
+- Filters (`Sprk.Bff.Api.Tests`): DecisionRecord 87; DecisionCommit 165; RecordOwnership 428; RecordCreatorPerson 17; SecureChild
+  501; Signal 1400; CoreAncestor 145; DiGraphValidation 1. All pass.
+- ArchTests: 973/973 (the booted-BFF `Task 167` tests that once timed out under full-suite load in the first run pass now).
+  D-34 + census + creator-person: 38/38.
 - Pester `Set-ChildRecordCreatorPersonSchema.Tests.ps1`: 25/25.
-- Mutations (all killed): two-wall check removed (4 fail); derived-core parents dropped (2); Signal-subject parents dropped (8);
-  stamp before builder (6); D-34 update path added (2 ArchTests); `RequestedBy` dropped (3). Script: decisionrecord not in
-  `$Tables` (4 Pester fail); no solution home (7).
-- `-Verify` against spaarkedev1 (read-only, once): VERIFY PASS; `sprk_decisionrecord.sprk_createdbyperson` OK in (a), (c), (c2), (d).
-- Publish size vs a fresh build of `origin/docs/ontology-platform-design` (7e2caa6ae): +11,228 bytes total (`Sprk.Bff.Api.dll`
-  +9,728). No package change.
+- Mutations (all killed): two-wall check removed (5 fail); derived-core parents dropped (2); Signal-subject parents dropped (8);
+  stamp before builder (6); D-34 update path added (2 ArchTests); `RequestedBy` dropped (3); handed filing ignored (2); wall check
+  before FR-51 (1); permanent filing treated as a fault (3). Script: decisionrecord not in `$Tables` (4 Pester); no solution home (7).
+- `-Verify` against spaarkedev1 (read-only, once, before the fix round; the fix round touches no script): VERIFY PASS;
+  `sprk_decisionrecord.sprk_createdbyperson` OK in (a), (c), (c2), (d).
+- Publish size vs a fresh Release build of `origin/docs/ontology-platform-design` (`7e2caa6ae`): +17,256 bytes total
+  (`Sprk.Bff.Api.dll` +14,848). No package change, no new CVE surface.
 
 ## Incident (local tooling, fixed)
 
