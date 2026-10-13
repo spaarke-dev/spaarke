@@ -35,9 +35,12 @@
 - A missing role, an unreadable role, or an ambiguous role (the same name in several business units) denies.
 - Systemusers and partner (CIAM) contacts are unchanged.
 
-(3) THE SERVICE REQUEST GAP.
-- On dev the role has no privilege on `sprk_servicerequest`, so every Service Request Portal submission would be refused.
-- Report this to the owner with the exact privileges needed (Create and Read). The owner edits the role; do not edit it.
+(3) SERVICE REQUESTS.
+- The dev intake 403 is NOT this task's question.
+  - The intake create is app-only and sets the owner to the requester's BU default team (owner decision I-6).
+  - Dataverse's "Read Privilege Check For Owner" fails because that owning team lacks prvReadsprk_ServiceRequest.
+  - SPA-r3 put the fix to the owner on 2026-10-13: Basic-level Read on sprk_servicerequest in Spaarke Basic User. Reference that decision; do not raise a second ask.
+- This task's own question is separate: if the ceiling needs `sprk_servicerequest` privileges on the Workforce role for workforce-contact callers (the role has none today), state exactly which privileges, as part of the goal (1) decision. The owner edits the role; do not edit it.
 
 (4) No change to sign-in, registration or the stored link. Those are SPA-r3's.</goal>
 
