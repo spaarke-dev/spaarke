@@ -202,6 +202,45 @@ public sealed record SecureChildReconcileReport(
 }
 
 /// <summary>
+/// How <see cref="SecureChildReconciler.ReownOrdinaryRowAsync"/> ended (UAC task 183). A refusal is never a fault: ontology
+/// task 148 counts <see cref="RefusedSecure"/> as <c>SkippedSecure</c> and <see cref="RefusedNotTeamOwned"/> as
+/// <c>SkippedUserOwned</c>, and only <see cref="Failed"/> as a repair failure.
+/// </summary>
+public enum OrdinaryRowReownOutcome
+{
+    /// <summary>Re-owned to the team, and read back as owned by it.</summary>
+    Reowned,
+
+    /// <summary>Already owned by the team: nothing was written.</summary>
+    AlreadyOwned,
+
+    /// <summary>
+    /// The row's current owner or the target team is in the Secure Record business unit: nothing was written. Moving a row
+    /// into or out of isolation is the secure pass's alone (owner round 96).
+    /// </summary>
+    RefusedSecure,
+
+    /// <summary>The row is owned by a user, not a team: nothing was written.</summary>
+    RefusedNotTeamOwned,
+
+    /// <summary>
+    /// A read failed or could not tell (the row, a team, or which business unit is the Secure Record one — ambiguous is
+    /// never read as "not secure"), or the write did not read back. <see cref="OrdinaryRowReownResult.Detail"/> says which.
+    /// </summary>
+    Failed,
+}
+
+/// <summary>The typed result of <see cref="SecureChildReconciler.ReownOrdinaryRowAsync"/>.</summary>
+/// <param name="Outcome">How it ended.</param>
+/// <param name="Detail">Why it was refused or failed; <c>null</c> for <see cref="OrdinaryRowReownOutcome.Reowned"/> and
+/// <see cref="OrdinaryRowReownOutcome.AlreadyOwned"/>.</param>
+public sealed record OrdinaryRowReownResult(OrdinaryRowReownOutcome Outcome, string? Detail)
+{
+    /// <summary>True when the row is owned by the team now (re-owned, or already).</summary>
+    public bool IsOwnedByTeam => Outcome is OrdinaryRowReownOutcome.Reowned or OrdinaryRowReownOutcome.AlreadyOwned;
+}
+
+/// <summary>
 /// unified-access-control-r2 task 148 (C10 part 2) — brings every EXISTING child of ONE secure-capable root into the state
 /// task 146's rule gives it: re-owned to the owner <see cref="IRecordOwnershipResolver"/> answers (the named Secure Record
 /// owner team under an isolated root; the root's business-unit team once it is not), with the root's sharees mirrored
@@ -258,6 +297,7 @@ public sealed class SecureChildReconciler
     private const string OwningTeamColumn = "owningteam";
     private const string DocumentTable = "sprk_document";
     private const string OwningUserColumn = "owninguser";
+    private const string OwningBusinessUnitColumn = "owningbusinessunit";
     private const string OwnerColumn = "ownerid";
     private const string IsSecureColumn = "sprk_issecure";
     private const string CommunicationTable = "sprk_communication";
@@ -390,6 +430,240 @@ public sealed class SecureChildReconciler
     /// <summary>Task 147 r1c: whether <paramref name="teamId"/> is the Secure Record owner team (a writer that read the row's
     /// owning team before its write). See <see cref="SecureChildShareSynchronizer.IsSecureOwnerTeamAsync"/>.</summary>
     public Task<bool> IsSecureOwnerTeamAsync(Guid teamId, CancellationToken ct) => _shares.IsSecureOwnerTeamAsync(teamId, ct);
+
+    /// <summary>The two tables <see cref="ReownOrdinaryRowAsync"/> re-owns (UAC task 183, owner round 96).</summary>
+    internal static readonly IReadOnlySet<string> OrdinaryReownTables =
+        new HashSet<string>(StringComparer.Ordinal) { "sprk_decisionrecord", "sprk_signal" };
+
+    /// <summary>
+    /// UAC task 183 (owner round 96, D-135): re-owns ONE ordinary Decision Record or Signal row to an ordinary TEAM — the
+    /// entry point ontology task 148's follow-the-assignee job re-owns both tables through, so the Secure refusals live in
+    /// one place (no identity is given Write on a Decision Record). It never moves a row into or out of the Secure Record
+    /// business unit: that stays this class's own pass.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Refuses without writing</b> when the row's CURRENT owner, or <paramref name="teamId"/>, is a team in the Secure
+    /// Record business unit (<see cref="OrdinaryRowReownOutcome.RefusedSecure"/>) — ANY team there, not only the named owner
+    /// team, so the guard holds once each secure family has its own owner team (task 178); when the row is user-owned
+    /// (<see cref="OrdinaryRowReownOutcome.RefusedNotTeamOwned"/>); and when the row, a team, or which business unit is the
+    /// Secure Record one cannot be read or told (<see cref="OrdinaryRowReownOutcome.Failed"/>: two business units with the
+    /// name are ambiguous, as in <c>RecordOwnershipResolver</c>, and a Dataverse fault is never read as "not secure"). The
+    /// row's owner and both teams' business units are read fresh. A row already owned by the team is
+    /// <see cref="OrdinaryRowReownOutcome.AlreadyOwned"/>, unwritten.</para>
+    /// <para><b>Otherwise</b> it makes the pass's own owner write (<see cref="WriteOwnerAndReadBackAsync"/>, shared with
+    /// <c>AssignAsync</c>): an owner-only update, the owner-change eviction once per write attempt, and the read-back
+    /// decides — a write that faulted but landed is <see cref="OrdinaryRowReownOutcome.Reowned"/>. The application identity
+    /// and client are the reconciler's own; nothing new is granted.</para>
+    /// </remarks>
+    /// <param name="table"><c>sprk_decisionrecord</c> or <c>sprk_signal</c>; anything else throws.</param>
+    /// <param name="id">The row (not <see cref="Guid.Empty"/>).</param>
+    /// <param name="teamId">The ordinary team to own it (not <see cref="Guid.Empty"/>).</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <exception cref="ArgumentException">Another table, or an empty id or team.</exception>
+    public async Task<OrdinaryRowReownResult> ReownOrdinaryRowAsync(string table, Guid id, Guid teamId, CancellationToken ct)
+    {
+        var name = table?.Trim().ToLowerInvariant();
+        if (name is null || !OrdinaryReownTables.Contains(name))
+            throw new ArgumentException("Only a Decision Record or a Signal is re-owned here.", nameof(table));
+        if (id == Guid.Empty)
+            throw new ArgumentException("The row id is empty.", nameof(id));
+        if (teamId == Guid.Empty)
+            throw new ArgumentException("The team id is empty.", nameof(teamId));
+
+        static OrdinaryRowReownResult Result(OrdinaryRowReownOutcome outcome, string? detail = null) => new(outcome, detail);
+
+        Guid? secureBu;
+        Entity? row;
+        Guid? targetBu;
+        Guid? ownerTeamBu = null;
+        try
+        {
+            var bu = await SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync(_dataverse, _configuration, ct)
+                .ConfigureAwait(false);
+            if (bu.Ambiguous)
+            {
+                _logger.LogError("[ORDINARY-REOWN] {Table} {Id}: more than one business unit carries the Secure Record name, so " +
+                    "whether a team is in it cannot be told; refused.", name, id);
+                return Result(OrdinaryRowReownOutcome.Failed,
+                    "refused: more than one business unit carries the Secure Record name, so whether a team is in it cannot be told");
+            }
+
+            secureBu = bu.Id;
+
+            var query = new QueryExpression(name)
+            {
+                ColumnSet = new ColumnSet(OwningTeamColumn, OwningUserColumn, OwningBusinessUnitColumn),
+                TopCount = 1,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition(name + "id", ConditionOperator.Equal, id);
+            row = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            if (row is null)
+                return Result(OrdinaryRowReownOutcome.Failed, "refused: the row does not exist");
+
+            targetBu = await ReadTeamBusinessUnitAsync(teamId, ct).ConfigureAwait(false);
+            if (OwnerOf(row) is { Kind: DataversePrincipalKind.Team } owner && owner.Id != teamId)
+                ownerTeamBu = await ReadTeamBusinessUnitAsync(owner.Id, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[ORDINARY-REOWN] {Table} {Id}: the row, a team or the Secure Record business unit could not be " +
+                "read; nothing was written.", name, id);
+            return Result(OrdinaryRowReownOutcome.Failed,
+                "refused: the row, a team or the Secure Record business unit could not be read");
+        }
+
+        var current = OwnerOf(row);
+        var rowBu = row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
+        var currentTeamBu = current is { Kind: DataversePrincipalKind.Team } owning
+            ? owning.Id == teamId ? targetBu : ownerTeamBu
+            : null;
+
+        // ── The Secure guard: never OUT of the Secure Record business unit (the row's owner, or its own business unit —
+        //    which can differ from its owner's where records are owned across business units), never INTO it. ────────
+        if (secureBu is { } secureOut && (currentTeamBu == secureOut || rowBu == secureOut))
+        {
+            return Result(OrdinaryRowReownOutcome.RefusedSecure,
+                "the row is owned in the Secure Record business unit; only the secure pass moves it");
+        }
+
+        if (targetBu is null)
+            return Result(OrdinaryRowReownOutcome.Failed, $"refused: team {teamId:D} does not exist or has no business unit");
+        if (secureBu is { } secureIn && targetBu == secureIn)
+        {
+            return Result(OrdinaryRowReownOutcome.RefusedSecure,
+                $"team {teamId:D} is in the Secure Record business unit; only the secure pass moves a row into it");
+        }
+
+        if (current is { Kind: DataversePrincipalKind.SystemUser })
+            return Result(OrdinaryRowReownOutcome.RefusedNotTeamOwned, "the row is owned by a user, not a team");
+        if (current is not { Kind: DataversePrincipalKind.Team } currentTeam)
+            return Result(OrdinaryRowReownOutcome.Failed, "refused: the row's owner could not be read");
+        if (currentTeamBu is null)
+            return Result(OrdinaryRowReownOutcome.Failed,
+                $"refused: the row's owning team {currentTeam.Id:D} does not exist or has no business unit");
+        if (currentTeam.Id == teamId)
+            return Result(OrdinaryRowReownOutcome.AlreadyOwned);
+
+        // Reversal evidence BEFORE the write (as every assign of this class).
+        _logger.LogInformation("[ORDINARY-REOWN] reassign: {Table} {Id} owner {Previous} -> team {Target}.",
+            name, id, Describe(current), teamId);
+        var fault = await WriteOwnerAndReadBackAsync(
+            name, id, new Dictionary<string, object> { [OwnerColumn] = new EntityReference("team", teamId) },
+            entitySet: null, $"reown-ordinary-row:{name}:{id:D}", ct).ConfigureAwait(false);
+        return fault is null ? Result(OrdinaryRowReownOutcome.Reowned) : Result(OrdinaryRowReownOutcome.Failed, fault);
+    }
+
+    /// <summary>A team's business unit, or <c>null</c> when the team does not exist or names none. A fault propagates.</summary>
+    private async Task<Guid?> ReadTeamBusinessUnitAsync(Guid teamId, CancellationToken ct)
+    {
+        var query = new QueryExpression("team") { ColumnSet = new ColumnSet("businessunitid"), TopCount = 1, NoLock = true };
+        query.Criteria.AddCondition("teamid", ConditionOperator.Equal, teamId);
+        var team = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        return team?.GetAttributeValue<EntityReference>("businessunitid")?.Id is { } bu && bu != Guid.Empty ? bu : null;
+    }
+
+    /// <summary>
+    /// The ONE owner-write sequence of this class (UAC task 183 factored it out of the pass's <c>AssignAsync</c> and
+    /// <c>RestoreStartOwnerAsync</c>, so <see cref="ReownOrdinaryRowAsync"/> cannot drift from them): the owner-only update
+    /// its caller built, the owner-change eviction once per write ATTEMPT (a write that reports failure can have
+    /// committed), then the read-back decides (the task 133 restore rule). <c>null</c> on success, else what went wrong.
+    /// </summary>
+    /// <remarks>Each caller builds the <c>ownerid</c> value itself, so the owner-write census attributes every write to the
+    /// member that decided its owner (<c>RecordOwnerAssignmentCensusTests</c>).</remarks>
+    private async Task<string?> WriteOwnerAndReadBackAsync(
+        string table, Guid id, Dictionary<string, object> ownerUpdate, string? entitySet, string evictionReason,
+        CancellationToken ct)
+    {
+        if (ownerUpdate.Count != 1 || !ownerUpdate.TryGetValue(OwnerColumn, out var value)
+            || value is not EntityReference { Id: var ownerId } reference || ownerId == Guid.Empty)
+            throw new ArgumentException("An owner write carries the owner and nothing else.", nameof(ownerUpdate));
+        var expected = reference.LogicalName == "team" ? DataversePrincipalRef.Team(ownerId) : DataversePrincipalRef.User(ownerId);
+
+        string? writeFault = null;
+        try
+        {
+            await _dataverse.UpdateAsync(table, id, ownerUpdate, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            writeFault = ex.Message;
+            _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] Dataverse refused the owner write on {Table} {Id} ({Owner}).",
+                table, id, Describe(expected));
+        }
+
+        await EvictOwnerChangeAsync(table, id, entitySet, evictionReason).ConfigureAwait(false);
+        return await ReadBackAsync(table, id, expected, writeFault, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Batch-4 integration, 148 × 132: an owner write stales the access caches exactly as a root's re-own does. This evicts
+    /// through the ONE hook (<see cref="Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator.InvalidateRecordOwnerChangeAsync"/>)
+    /// once per write ATTEMPT, whatever its read-back says, because a write that reports failure can have committed. It
+    /// runs on <see cref="CancellationToken.None"/>, so a disconnected caller cannot leave the clean-up half done. It
+    /// never fails the caller: the hook does not throw by contract, and a fault anyway is logged and swallowed. The TTLs are
+    /// the backstop.
+    /// </summary>
+    private async Task EvictOwnerChangeAsync(string table, Guid id, string? entitySet, string reason)
+    {
+        var set = entitySet
+            ?? (SecureChildLineage.Children.TryGetValue(table, out var lineage) ? lineage.EntitySet : null);
+        if (set is null)
+        {
+            _logger.LogError("[SECURE-CHILD-RECONCILE] {Table} {Id} was re-owned, but its entity set is not known, so its cached " +
+                             "access snapshot was not evicted (the TTL backstop applies).", table, id);
+            return;
+        }
+
+        try
+        {
+            await _accessCacheInvalidator.InvalidateRecordOwnerChangeAsync(table, set, id, reason, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[SECURE-CHILD-RECONCILE] Evicting the caches after re-owning {Table} {Id} failed; the TTLs " +
+                               "are the backstop.", table, id);
+        }
+    }
+
+    /// <summary>Whether a row reads as owned by <paramref name="owner"/> after an owner write; <c>null</c> when it does.</summary>
+    private async Task<string?> ReadBackAsync(
+        string table, Guid id, DataversePrincipalRef owner, string? writeFault, CancellationToken ct)
+    {
+        try
+        {
+            var query = new QueryExpression(table)
+            {
+                ColumnSet = new ColumnSet(OwningTeamColumn, OwningUserColumn),
+                TopCount = 1,
+                NoLock = true,
+            };
+            query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, id);
+            var after = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+            if (after is not null && OwnerOf(after) == owner)
+                return null;
+
+            return writeFault is null
+                ? "the re-own was accepted but did not read back"
+                : $"Dataverse refused the re-own ({writeFault})";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} could not be read back after its re-own.", table, id);
+            return "the re-own could not be read back";
+        }
+    }
+
+    private static DataversePrincipalRef? OwnerOf(Entity row) =>
+        row.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is { } team && team != Guid.Empty
+            ? DataversePrincipalRef.Team(team)
+            : row.GetAttributeValue<EntityReference>(OwningUserColumn)?.Id is { } user && user != Guid.Empty
+                ? DataversePrincipalRef.User(user)
+                : null;
+
+    private static string Describe(DataversePrincipalRef? owner) =>
+        owner is { } o ? $"{o.Kind.ToEntitySet()}({o.Id:D})" : "(unknown)";
 
     /// <summary>
     /// unified-access-control-r2 task 147 r1c (owner round 28 item 1; round 36: "then 148/149's child pass runs when the event
@@ -1129,60 +1403,26 @@ public sealed class SecureChildReconciler
         /// <summary>
         /// Assigns the row to the team the ownership rule gave it (<paramref name="resolution"/>), in its own update, and reads
         /// it back. <c>null</c> on success, else what went wrong. A write that reports failure may still have landed, so the
-        /// read-back decides (the task 133 restore rule).
+        /// read-back decides (the task 133 restore rule). The write, eviction and read-back are the class's ONE sequence
+        /// (<see cref="WriteOwnerAndReadBackAsync"/>, UAC task 183), shared with <see cref="ReownOrdinaryRowAsync"/>.
         /// </summary>
         private async Task<string?> AssignAsync(string table, Guid id, RecordOwnerResolution resolution)
         {
             var teamId = resolution.OwningTeamId!.Value;
-            string? writeFault = null;
-            try
-            {
-                await _owner._dataverse.UpdateAsync(
-                    table, id, new Dictionary<string, object> { [OwnerColumn] = new EntityReference("team", teamId) }, _ct)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
-            {
-                writeFault = ex.Message;
-                Log.LogError(ex, "[SECURE-CHILD-RECONCILE] Dataverse refused re-owning {Table} {Id} to team {Team}.",
-                    table, id, teamId);
-            }
-
-            await EvictOwnerChangeAsync(table, id).ConfigureAwait(false);
-            return await ReadBackAsync(table, id, DataversePrincipalRef.Team(teamId), writeFault).ConfigureAwait(false);
+            return await _owner.WriteOwnerAndReadBackAsync(
+                table, id, new Dictionary<string, object> { [OwnerColumn] = new EntityReference("team", teamId) },
+                entitySet: null, EvictionReason, _ct).ConfigureAwait(false);
         }
+
+        /// <summary>The reason this pass's owner-change evictions carry (batch-4 integration, 148 × 132).</summary>
+        private string EvictionReason => $"secure-child-reconcile:{_root.EntityLogicalName}:{_root.RecordId:D}";
 
         /// <summary>
-        /// Batch-4 integration, 148 × 132: an owner write on a child of the pass stales the access caches exactly as a root's
-        /// re-own does. This evicts through the ONE hook (<see cref="Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator.InvalidateRecordOwnerChangeAsync"/>)
-        /// once per write ATTEMPT, whatever its read-back says, because a write that reports failure can have committed. It
-        /// runs on <see cref="CancellationToken.None"/>, so a disconnected caller cannot leave the clean-up half done. It
-        /// never fails the pass: the hook does not throw by contract, and a fault anyway is logged and swallowed. The TTLs are
-        /// the backstop.
+        /// Batch-4 integration, 148 × 132: an owner write on a row of the pass evicts through the ONE hook — see the class's
+        /// <see cref="SecureChildReconciler.EvictOwnerChangeAsync"/> — with this pass's reason.
         /// </summary>
-        private async Task EvictOwnerChangeAsync(string table, Guid id, string? entitySet = null)
-        {
-            var set = entitySet
-                ?? (SecureChildLineage.Children.TryGetValue(table, out var lineage) ? lineage.EntitySet : null);
-            if (set is null)
-            {
-                Log.LogError("[SECURE-CHILD-RECONCILE] {Table} {Id} was re-owned, but its entity set is not known, so its cached " +
-                             "access snapshot was not evicted (the TTL backstop applies).", table, id);
-                return;
-            }
-
-            try
-            {
-                await _owner._accessCacheInvalidator.InvalidateRecordOwnerChangeAsync(
-                    table, set, id, $"secure-child-reconcile:{_root.EntityLogicalName}:{_root.RecordId:D}", CancellationToken.None)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Log.LogWarning(ex, "[SECURE-CHILD-RECONCILE] Evicting the caches after re-owning {Table} {Id} failed; the TTLs " +
-                                   "are the backstop.", table, id);
-            }
-        }
+        private Task EvictOwnerChangeAsync(string table, Guid id, string? entitySet = null) =>
+            _owner.EvictOwnerChangeAsync(table, id, entitySet, EvictionReason);
 
         /// <summary>
         /// Puts a row back on the owner it had when THIS pass began — a compensation for a later step of the same pass, never
@@ -1201,8 +1441,8 @@ public sealed class SecureChildReconciler
         /// whose assertion requires the written value to be the pass's start-owner snapshot — while this pass also calls it
         /// with the resolver's owner for the cascade rows (owner round 13 item 1). (3) Every other read and write of these rows
         /// in the pass goes through <see cref="IGenericEntityService"/> (the resolver's own client), and this member shares the
-        /// pass's read-back (<c>ReadBackAsync</c>) with <c>AssignAsync</c>; the put-back on the Web API client would be a second
-        /// path for the same rows. It is census kind <c>Restore</c>, asserted to write only the start owner its pass recorded.
+        /// pass's owner-write sequence (<c>WriteOwnerAndReadBackAsync</c>: write, evict, read back) with <c>AssignAsync</c>;
+        /// the put-back on the Web API client would be a second path for the same rows. It is census kind <c>Restore</c>, asserted to write only the start owner its pass recorded.
         /// </remarks>
         private async Task<string?> RestoreStartOwnerAsync(string table, Guid id, DataversePrincipalRef? startOwner)
         {
@@ -1211,49 +1451,10 @@ public sealed class SecureChildReconciler
 
             Log.LogInformation("[SECURE-CHILD-RECONCILE] put back: {Table} {Id} -> {Owner} (its owner when this pass began).",
                 table, id, Describe(owner));
-            string? writeFault = null;
-            try
-            {
-                var ownerRef = new EntityReference(owner.Kind == DataversePrincipalKind.Team ? "team" : "systemuser", owner.Id);
-                await _owner._dataverse.UpdateAsync(
-                    table, id, new Dictionary<string, object> { [OwnerColumn] = ownerRef }, _ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
-            {
-                writeFault = ex.Message;
-                Log.LogError(ex, "[SECURE-CHILD-RECONCILE] Dataverse refused putting {Table} {Id} back on {Owner}.",
-                    table, id, Describe(owner));
-            }
-
-            await EvictOwnerChangeAsync(table, id).ConfigureAwait(false);
-            return await ReadBackAsync(table, id, owner, writeFault).ConfigureAwait(false);
-        }
-
-        /// <summary>Whether a row reads as owned by <paramref name="owner"/> after an owner write; <c>null</c> when it does.</summary>
-        private async Task<string?> ReadBackAsync(string table, Guid id, DataversePrincipalRef owner, string? writeFault)
-        {
-            try
-            {
-                var query = new QueryExpression(table)
-                {
-                    ColumnSet = new ColumnSet(OwningTeamColumn, OwningUserColumn),
-                    TopCount = 1,
-                    NoLock = true,
-                };
-                query.Criteria.AddCondition(table + "id", ConditionOperator.Equal, id);
-                var after = (await _owner._dataverse.RetrieveMultipleAsync(query, _ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-                if (after is not null && OwnerOf(after) == owner)
-                    return null;
-
-                return writeFault is null
-                    ? "the re-own was accepted but did not read back"
-                    : $"Dataverse refused the re-own ({writeFault})";
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !_ct.IsCancellationRequested)
-            {
-                Log.LogError(ex, "[SECURE-CHILD-RECONCILE] {Table} {Id} could not be read back after its re-own.", table, id);
-                return "the re-own could not be read back";
-            }
+            var ownerRef = new EntityReference(owner.Kind == DataversePrincipalKind.Team ? "team" : "systemuser", owner.Id);
+            return await _owner.WriteOwnerAndReadBackAsync(
+                table, id, new Dictionary<string, object> { [OwnerColumn] = ownerRef }, entitySet: null, EvictionReason, _ct)
+                .ConfigureAwait(false);
         }
 
         /// <summary>
@@ -1403,15 +1604,5 @@ public sealed class SecureChildReconciler
                 }
             }
         }
-
-        private static DataversePrincipalRef? OwnerOf(Entity row) =>
-            row.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is { } team && team != Guid.Empty
-                ? DataversePrincipalRef.Team(team)
-                : row.GetAttributeValue<EntityReference>(OwningUserColumn)?.Id is { } user && user != Guid.Empty
-                    ? DataversePrincipalRef.User(user)
-                    : null;
-
-        private static string Describe(DataversePrincipalRef? owner) =>
-            owner is { } o ? $"{o.Kind.ToEntitySet()}({o.Id:D})" : "(unknown)";
     }
 }
