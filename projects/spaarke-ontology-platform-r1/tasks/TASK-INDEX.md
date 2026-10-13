@@ -224,6 +224,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | 🔲 [open] 144 | [Register Signal + DR with the core-ancestor restamper; re-file re-stamps/re-owns](144-restamper-registration-refile.poml) | FULL | **opus**/high | 142, 143, uac-r2 C4/C7 PR, #1747 | CC4 | uac-r2 conditions: separate commit; not an intermediate; root classification; report-only reconciliation first · **[uac]** |
 | 🔲 [open] 145 | [`sprk_matter` readers (context vs filing), backfill, evidence leak](145-matter-readers-backfill-evidence-leak.poml) | FULL | **opus**/high | 141, 142, 144 | CC5 | D-34 split; uac-r2 #1747 finding (e) (D-123 leak); backfill write needs owner approval · **[uac]** |
 | 🔲 [open] 146 | [Live gate: contract §5, 11 items](146-child-contract-live-gate.poml) | FULL | sonnet/high | 140–145 | CC6 | After the BFF with 141–145 is on dev and the DR metadata cache key has expired · **[uac]** |
+| 🔲 [open] 147 | [Budget revision records its requester (`sprk_createdbyperson`); drop 182's exemption](147-budgetrevision-creator-person.poml) | FULL | sonnet/high | #1780 merged | CC2 | **D-135** (Q27; #1777). Column created on dev by the owner · **[uac]** |
 
 ### Phase 5 — The worklist surface
 
