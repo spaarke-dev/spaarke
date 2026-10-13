@@ -15,8 +15,10 @@
 
     The BFF's invite flow (/invite and /invite-and-grant, InviteExternalUserEndpoint.ProvisionAsync) writes the column
     BEFORE it creates the CIAM account, on every path that provisions (a new account, or "ExistingAccount" when the person
-    already has one). A re-invite overwrites it; nothing clears it. "Pending" = set AND no oid binding
-    (sprk_externalobjectid). The CIAM plane's E11 (ContactBindingDecision) reads it in its OWN query, so a BFF deployed
+    already has one). A re-invite overwrites it, which refreshes its window; it is still never cleared. "Pending" = set
+    AND no oid binding (sprk_externalobjectid). E11 honours the marker only while it is at most 30 days old at sign-in
+    (ContactBindingDecision.InviteMarkerWindow, owner round 97) and at most 5 minutes in the future (InviteMarkerClockSkew;
+    a later date is treated as tampering); an older or far-future marker is "no invite evidence". The CIAM plane's E11 (ContactBindingDecision) reads it in its OWN query, so a BFF deployed
     before this script reads "no invite evidence" there and the grant evidence still works. The column is NOT a binding:
     sprk_identityplane is untouched, and task 141's "plane marker with no oid = Unreadable" contract stands.
 

@@ -84,6 +84,32 @@ public class CiamContactBindingTests
         _store.Contacts[ContactA].Plane.Should().Be((int)IdentityPlaneMarker.External);
     }
 
+    /// <summary>
+    /// Owner round 97, through the binder: the marker's age is measured at the binder's clock (the decision is pure). A
+    /// marker exactly 30 days old binds; one a second older is denied <c>contact_not_invited</c>, with nothing written.
+    /// </summary>
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(-1, false)]
+    public async Task AMarkerAtTheEdgeOfItsThirtyDays_IsMeasuredAtTheBindersClock(int extraSeconds, bool binds)
+    {
+        _store.AddContact(ContactA, email: Email,
+            invitedOn: Now - ContactBindingDecision.InviteMarkerWindow + TimeSpan.FromSeconds(extraSeconds));
+
+        var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, CancellationToken.None);
+
+        if (binds)
+        {
+            result.Action.Should().Be(BindingAction.BindByEmail);
+        }
+        else
+        {
+            result.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+            _store.Writes.Should().BeEmpty();
+            _store.Contacts[ContactA].Oid.Should().BeNull();
+        }
+    }
+
     [Fact]
     public async Task AnUnboundContactThisEnvironmentNeverInvited_IsDeniedNotInvited_AndNothingIsWritten()
     {

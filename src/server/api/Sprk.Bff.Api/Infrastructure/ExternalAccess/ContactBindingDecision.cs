@@ -322,6 +322,14 @@ public sealed record BindIntentLookup(
     LookupStatus InviteStatus,
     DateTimeOffset? InvitedOn)
 {
+    /// <summary>
+    /// Task 184 (owner round 97) — the decision time the marker's age is measured at: the binder's
+    /// <see cref="TimeProvider"/>, stamped when it hands the lookup to the decision, so the decision stays pure. Left
+    /// unset (<see cref="DateTimeOffset.MinValue"/>), every marker reads as dated in the future and counts for nothing —
+    /// fail closed.
+    /// </summary>
+    public DateTimeOffset AsOf { get; init; }
+
     /// <summary>Both reads failed.</summary>
     public static BindIntentLookup Failed(Guid contactId) =>
         new(contactId, LookupStatus.Failed, false, LookupStatus.Failed, null);
@@ -510,7 +518,8 @@ public static class ContactBindingDecision
     /// <summary>
     /// CIAM plane, E11 (task 184, owner round 96): the email matches one unbound, active, unlinked contact, but THIS
     /// environment shows no intent for it — no active contact-level grant and no pending invite
-    /// (<c>sprk_externalinvitedon</c>). Nothing is written and nothing is flagged: no other person is involved.
+    /// (<c>sprk_externalinvitedon</c> set within the last 30 days — an expired or far-future marker is no invite, owner round
+    /// 97). Nothing is written and nothing is flagged: no other person is involved.
     /// </summary>
     public const string DenyContactNotInvited = "sdap.access.deny.contact_not_invited";
 
@@ -738,7 +747,9 @@ public static class ContactBindingDecision
     /// else the deny. FAIL CLOSED: a lookup for another contact, a grant read that did not complete, or a marker read that
     /// FAILED denies <see cref="DenyContactLookupFailed"/> — even when the other leg shows intent, because a fault is never
     /// half-trusted. Only a marker column that is not provisioned yet reads as "no invite evidence" (the grant leg still
-    /// decides). No intent at all denies <see cref="DenyContactNotInvited"/>.
+    /// decides). A marker counts only while <see cref="IsInviteMarkerCurrent"/> (owner round 97: at most 30 days old, at
+    /// most 5 minutes in the future); an expired or far-future marker is "no invite evidence", not a fault. No intent at all
+    /// denies <see cref="DenyContactNotInvited"/>.
     /// </summary>
     private static BindingDecision? DecideIntent(BindIntentLookup intent, Guid contactId)
     {
@@ -749,9 +760,33 @@ public static class ContactBindingDecision
             return Deny(DenyContactLookupFailed);
         }
 
-        var invitePending = intent.InviteStatus == LookupStatus.Read && intent.InvitedOn is not null;
+        var invitePending = intent.InviteStatus == LookupStatus.Read && IsInviteMarkerCurrent(intent.InvitedOn, intent.AsOf);
         return intent.HasActiveGrant || invitePending ? null : Deny(DenyContactNotInvited);
     }
+
+    /// <summary>
+    /// Task 184 (owner round 97) — a pending-invite marker counts for <see cref="InviteMarkerWindow"/> (30 days) after the
+    /// invite: an invite nobody acted on for a month is no longer this environment's intent. A re-invite overwrites the
+    /// marker and so restarts the window.
+    /// </summary>
+    public static readonly TimeSpan InviteMarkerWindow = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// Task 184 (owner round 97) — how far in the future a marker may be dated and still count: clock skew between the
+    /// BFF instance that stamped it and the one deciding. Anything later is not an invite this BFF wrote "now" (only the
+    /// BFF writes the column, from its own clock), so it is treated as tampering and counts for nothing.
+    /// </summary>
+    public static readonly TimeSpan InviteMarkerClockSkew = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// True when <paramref name="invitedOn"/> is evidence at <paramref name="asOf"/>: no more than
+    /// <see cref="InviteMarkerWindow"/> old (exactly 30 days counts) and no more than <see cref="InviteMarkerClockSkew"/> in
+    /// the future (exactly 5 minutes counts). An expired or far-future marker is "no invite evidence", not a fault. Pure.
+    /// </summary>
+    public static bool IsInviteMarkerCurrent(DateTimeOffset? invitedOn, DateTimeOffset asOf)
+        => invitedOn is { } on
+           && on - asOf <= InviteMarkerClockSkew
+           && asOf - on <= InviteMarkerWindow;
 
     /// <summary>
     /// The existing-link flow: a systemuser whose <c>sprk_primarycontact</c> is <paramref name="linkedContactId"/>.

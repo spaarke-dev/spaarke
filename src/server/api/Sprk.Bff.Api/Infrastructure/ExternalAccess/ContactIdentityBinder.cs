@@ -593,7 +593,9 @@ public sealed class ContactIdentityBinder
                 intent = BindIntentLookup.Failed(invitee);
             }
 
-            decision = ContactBindingDecision.Decide(request, oidLookup, emailLookup, refs, intent);
+            // The marker's age is measured at the decision time, from this binder's clock (owner round 97: 30 days).
+            decision = ContactBindingDecision.Decide(request, oidLookup, emailLookup, refs,
+                intent with { AsOf = _time.GetUtcNow() });
         }
 
         return (decision, emailLookup);
