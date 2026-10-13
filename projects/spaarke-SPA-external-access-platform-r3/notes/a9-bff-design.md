@@ -161,7 +161,7 @@ Fallback: if the registration POST sees that the token email matches an **enable
   - an existing-record match → the form says "We found your existing record" and asks the user to confirm the email, then binds it;
   - `registration_contact_conflict` → a message that an administrator must resolve the record.
 - **Landing page wording:** the link reads "Spaarke employee? Sign in with your work account" (`RealmChooser.tsx:76`). Under A9 it becomes "Work for {customer}? Sign in with your company account", and "Spaarke employee" goes.
-- **Teams:** unchanged (A8 NAA with the single-tenant client). Teams for workforce contacts is **deferred** (DEF item).
+- **Teams (owner, 2026-10-13: included; A9 amended):** the Teams strategy uses the multitenant client through NAA (`createNestablePublicClientApplication`), with authority = the Teams context `tid`, then the popup. Everyone in Teams, licensed users included, gets a home token, and licensed users resolve through the stored link. The silent link inside Teams uses NAA against the Spaarke tenant, falling back to the popup. The Office add-ins stay on A8.
 - **`assertTenantPinnedWorkforceAuthority`** (`msal-config.ts:80-100`): kept for the A8 client. A new assert allows `organizations` and `login.microsoftonline.com/{GUID}` **only** for the multitenant client id.
 
 ## 8. Dev setup (live, owner-gated, each with rollback)
@@ -211,11 +211,13 @@ Order:
 | 058 | SPA multitenant sign-in, `tid` → backend, silent/interactive link, profile form (replaces 056's join page) | 047, 048 | FULL / sonnet |
 | 059 | Dev Entra + settings setup (§8 steps 2–4), live, owner-gated | 044 | STANDARD / sonnet |
 | 074 | A9 live probes on dev | 058, 059 | STANDARD / sonnet |
+| 075 | SPA Teams strategy → multitenant NAA (Teams context `tid`), registration and link in Teams | 058 | FULL / sonnet |
+| 076 | Teams package and registration: `brk-multihub://` redirect on the multitenant client, manifest client and domain (dev in 059; 043 pipeline) | 075 | STANDARD / sonnet |
 
 Other task changes:
 - **Withdrawn:** 060 (registration service). **Superseded:** 012's guest branch for workforce contacts (the code stays for licensed guests; the FR-15 path becomes unused for contacts) and 056's registration-service hand-off.
 - **040:** the A8 client stays for Teams and the link acquisition.
-- **DEF:** Teams for workforce contacts.
+- **Teams:** included (075, 076). Task 071, the Teams live check, covers desktop, web and **mobile** for a workforce contact, a licensed user and a member of an unlisted directory.
 
 ## 11. Owner decisions (2026-10-13)
 
