@@ -24,8 +24,8 @@
 Option B; no delete after close; invoice upload = invoice rights only; team-access and renewal bell items wanted; contact owned by the customer's primary BU; intake (department from contact, Invention partners behind a flag, incidents simple, fixed lists, NDA review + issue); grid views from Dataverse views; 060 shared service OK if Model 1 allows; dev dispatch "ok"; 060 tenant-wide group permission approved if it cannot be scoped. Deferred: DEF-001 #1736 NDA generation, DEF-002 #1737 incident alerting.
 
 ## Open owner questions
-1. **Intake 403 (038 C-W6):** the fix for the BU default team's missing `prvReadsprk_ServiceRequest`. Asked 2026-10-13 with a recommendation.
-2. **S0a:** the CIAM API app `4a4d5126` `user_impersonation` scope. The owner checks it in the portal (CLI sign-in to `spaarkeextid` is refused).
+1. **S0a (CIAM):** the scope `user_impersonation` exists and is Enabled on `4a4d5126`, and `requestedAccessTokenVersion` = 2 (owner, 2026-10-13). But the authorized client `bd57e54e` has **no scope ticked**. The owner is asked to (A) tick `user_impersonation` for it and (B) add the delegated permission on `bd57e54e` and grant admin consent.
+Intake 403: FIXED 2026-10-13 (`5bfedfe3d` + a dev role change; C-W6 201, C-W8b 204; record in `notes/task-038-deploy-record.md`).
 Answered 2026-10-13 (project CLAUDE.md §3): grid views, bell items, ISS-005, 052, 053, licensing (outside the project), mechanical guard (not added). UAC confirmed A9 by the owner directly.
 
 ## Option B known limits (notes/task-039-notes.md §12.11) (notes/task-039-notes.md §12.11)
