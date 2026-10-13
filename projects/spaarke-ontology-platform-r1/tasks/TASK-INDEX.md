@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **125 tasks** across 15 phases (76 ✅ · 1 🔄 · 35 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-12: +140–148, Phase 4c child-record contract)
+> (spec §9) · **125 tasks** across 15 phases (77 ✅ · 1 🔄 · 34 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-12: +140–148, Phase 4c child-record contract)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -204,7 +204,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
 | ✅ [done] 036 | [Closed BFF action catalog + decision-plan read endpoint](036-action-catalog-and-decision-plan-read.poml) | FULL | sonnet/high | 007 | L | Approve variance record-only (**D-19**); dismissal reasons per lane; reassign / extend **Routine (D-45)**; adds record-the-response (D-54) and assign-work as a plan action (D-51) · **[uac]** |
-| 🔲 [open] 043 | [**The decision commit route** (record last, idempotent)](043-decision-commit-route.poml) | FULL | **opus**/high | 040, 036, 044, 046, 070 | — | 🔴 **D-17**: validate → writes → email last → one record → close. Failure = no record + which writes landed. Confirm = confirmation; gate tier from a pure `PublicContracts` function (**D-52**) · **[uac]** |
+| ✅ [done] 043 | [**The decision commit route** (record last, idempotent)](043-decision-commit-route.poml) | FULL | **opus**/high | 040, 036, 044, 046, 070 | — | 🔴 **D-17**: validate → writes → email last → one record → close. Failure = no record + which writes landed. Confirm = confirmation; gate tier from a pure `PublicContracts` function (**D-52**) · **[uac]** · **Done** 2026-10-13: [#1665](https://github.com/spaarke-dev/spaarke/pull/1665) merged `aeb9e0973` (D-129/D-130 resolver ownership, D-35 read, D-134 Assigned To; uac-r2 APPROVE; two-wall refusal → 142/#1778) |
 | ✅ [done] 044 | [Executors: Revise budget, Approve variance, Do actions, Next steps](044-decision-action-executors.poml) | FULL | sonnet/high | 036, 008, 047 | — | **D-18** writer creates the revision after a caller check; budget amount written **as the signed-in user (D-55)**; reschedule writes `sprk_duedate` (D-27); record-the-response writes the **D-54** columns (047) · **[uac]** |
 | ✅ [done] 046 | [Server-side work-assignment create](046-server-side-work-assignment-create.poml) | FULL | **opus**/high | 008, 048 | — | **D-21**; D-113: `OwnedChildWrite.CreateAsync` via `child-records` route, no new route. Preserve the wizard's BU cascade; area owner reviews · **[uac]** |
 | ✅ [done] 047 | [Schema: response columns on `sprk_workassignment` (D-54)](047-schema-work-assignment-response-columns.poml) | FULL | sonnet/high | — | — | **D-54**: responded-on + outcome (exact set agreed with the WA owner); 007 recipe; WA is a secure root · **[uac]**. Feeds 044, 061. **Start now** |
