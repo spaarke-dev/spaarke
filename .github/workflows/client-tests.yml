@@ -174,14 +174,16 @@ jobs:
       #   1. `file:`/`link:` entries in dependencies/devDependencies/
       #      optionalDependencies (recursively; built when main/types point at
       #      dist/), and
-      #   2. sibling packages whose source the package under test imports by
+      #   2. sibling packages a tsconfig `paths` entry points INTO the dist/ of
+      #      (build-time dependency of that package's own `tsc`), and
+      #   3. sibling packages whose source the package under test imports by
       #      relative path WITHOUT declaring them (install only, no build).
-      # Deliberately NOT derived from jest `moduleNameMapper`/tsconfig `paths`:
-      # those configs are written for a world where the mapped-to library has no
-      # node_modules of its own; installing one there gives it a second copy of
-      # react (office-addins: "Cannot read properties of null (reading
-      # 'useContext')"). A package whose generated PCF types are missing gets
-      # `npm run refreshTypes` (pcf-scripts) first.
+      # Deliberately NOT derived from jest `moduleNameMapper`: those are written
+      # for a world where the mapped-to library has no node_modules of its own;
+      # installing one there gives it a second copy of react (office-addins:
+      # "Cannot read properties of null (reading 'useContext')"). A package whose
+      # generated PCF types are missing gets `npm run refreshTypes`
+      # (pcf-scripts) first.
       # Libraries are processed dependencies-first. A failure here is recorded as
       # `deps-build-failed`, NOT `fail` — the tests never got a chance to run.
       - name: Install and build shared-library dependencies
@@ -261,6 +263,17 @@ jobs:
                 const d = path.resolve(dir, m[1]);
                 const dp = readPkg(d);
                 if (dp) add(d, emitsDist(dp));
+              }
+            }
+            // tsconfig `paths` that point INTO a sibling's dist/ are build-time
+            // dependencies (e.g. AI.Widgets -> ../Spaarke.AI.Context/dist/index.d.ts):
+            // that sibling must be built before this package's own `tsc` runs.
+            for (const f of fs.readdirSync(dir).filter((n) => /^tsconfig[\w.-]*\.json$/.test(n))) {
+              const text = fs.readFileSync(path.join(dir, f), 'utf8');
+              for (const m of text.matchAll(/["']((?:\.\.\/)+[^"']*?\/dist(?:\/[^"']*)?)["']/g)) {
+                const o = owner(path.resolve(dir, m[1]));
+                const op = o && readPkg(o);
+                if (op) add(o, !!(op.scripts && op.scripts.build));
               }
             }
             if (withSources) for (const d of sourceNeighbours(dir)) add(d, false);
