@@ -287,6 +287,12 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - **First production deploy waits** for provisioning's directory endpoint (their 240c) + the add-in's runtime customer selection (`{authority, bffApiScope, apiBaseUrl}` into `AuthService.initialize`), its own package ID/name (dev + prod both install in Spaarke's tenant), and a manual prod deploy job. Store (AppSource) publishing is the recommended production distribution, after that.
 - **Server Graph cannot reach a guest's mailbox** (home tenant): email body + attachments are captured IN THE ADD-IN with Office.js (task 116) — never reintroduce a server-only Graph fetch for content.
 - **Office on the web has no `openBrowserWindow`**: anything that opens Spaarke must fall back to `window.open` from the click (task 120).
+- **The add-in is for licensed core users only** (owner 2026-10-13). Workforce contact users (customer staff without a Power Apps licence) use the external SPA, not the Office add-ins.
+  - **Sign-in model (owner 2026-10-13):** licensed core users are B2B guests. Workforce contacts sign in with their company account (option A, home-directory tokens; UAC task 186, with an ADR-028 A8 amendment). Partners use CIAM.
+  - **Terms:** say "Spaarke tenant" and "customer's home directory", never a bare "tenant".
+  - **Add-in routes:** `/api/office/*` stays Spaarke-tenant only.
+  - **Teams:** Teams for workforce contacts is a soft requirement and can be deferred.
+  - **Dropped work:** the T126 home-tenant scheme of 2026-10-12 was dropped. It is parked on the local branch `wip/t126-workforce-customer`; review findings are in `notes/126-message-to-uac-r2.md`.
 - **Diagnostics view** (task 113) is on the dev site via `ADDIN_DIAGNOSTICS_ENABLED: "true"` in `deploy-office-addins.yml` — remove it once provisioning's guest tests are done.
 
 ### Guest sign-in, PCFs and telemetry — owner decisions 2026-10-08/09 (tasks 121-127)
