@@ -1789,6 +1789,121 @@ public partial class SignalReevaluationJobTests
         row.GetAttributeValue<EntityReference>("sprk_corerecordtype")?.Id,
         Guid.TryParse(row.GetAttributeValue<string>("sprk_corerecordid"), out var c) ? c : null, null);
 
+    [Fact]
+    public async Task Run_HandsThePlanner_TheSecureFamilyPartitionsOfTheRowsAndOfTheHits_1661()
+    {
+        // The matter is a secure root. Its three earlier episodes, dismissed 20, 18 and 16 days ago (past the 14-day quiet window), are
+        // the family's own three dismissals and carry its live stamp. The rows are still the writer's (no owner team): only the lineage
+        // walk places them, and only the hit's own placement puts the new episode in the same family.
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        h.Sysadmin.SecureMatter(MatterId);
+        var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
+        var until = RunAt.UtcDateTime.AddDays(-16).AddDays(30);
+        foreach (var (episode, days) in new[] { (1, 20), (2, 18), (3, 16) })
+        {
+            var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, episode), SignalWriter.SignalStatusResolved,
+                SignalWriter.ResolutionDismissed, resolvedOn: RunAt.UtcDateTime.AddDays(-days), coreId: MatterId, suppressedUntil: until, policyId: policyId);
+            h.Org.Rows[id]["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId);
+            h.Org.Rows[id]["sprk_matter"] = new EntityReference("sprk_matter", MatterId);
+        }
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        h.Org.CreateCalls.Should().Be(0, "the family's stamp mutes the family's new episode: both were placed by the same truth");
+        System.Text.Json.JsonDocument.Parse(result.ResultJson!).RootElement.GetProperty("suppressed").GetInt32().Should().Be(1);
+        h.Org.Rows.Values.Should().OnlyContain(r => r.GetAttributeValue<DateTime?>("sprk_suppresseduntil") == until, "a justified stamp is not rewritten (D-61)");
+    }
+
+    /// <summary>#1661 round 2: the secure matter's family carries a live stamp from its three dismissals (each with a Decision Record), the
+    /// matter is a hit, and another subject's open Signal is not a hit (a normal pass would close it as ConditionCleared).</summary>
+    private static (Guid PolicyId, DateTime Until, Guid OtherOpen) SecureStampedMatterWithAnOpenNonHit(Harness h)
+    {
+        h.Sysadmin.SecureMatter(MatterId);
+        var policyId = h.Sysadmin.PolicyIdOf(PolicyCode);
+        var until = RunAt.UtcDateTime.AddDays(-16).AddDays(30);
+        foreach (var (episode, days) in new[] { (1, 20), (2, 18), (3, 16) })
+        {
+            var id = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, episode), SignalWriter.SignalStatusResolved,
+                SignalWriter.ResolutionDismissed, resolvedOn: RunAt.UtcDateTime.AddDays(-days), coreId: MatterId, suppressedUntil: until, policyId: policyId);
+            h.Org.Rows[id]["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId);
+            h.Org.Rows[id]["sprk_matter"] = new EntityReference("sprk_matter", MatterId);
+            var recordId = Guid.NewGuid();
+            h.Org.Rows[id]["sprk_decisionrecord"] = new EntityReference("sprk_decisionrecord", recordId);
+            h.Sysadmin.DecisionRecords[recordId] = new Entity("sprk_decisionrecord", recordId)
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+                ["sprk_recordclass"] = new OptionSetValue((int)RecordedDecisionClass.Dismissal),
+                ["sprk_decidedon"] = RunAt.UtcDateTime.AddDays(-days),
+            };
+        }
+
+        var otherMatter = Guid.Parse("2444af6d-e1f2-f011-8406-7ced8d1dc9aa");
+        var otherOpen = h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", otherMatter, 1), SignalWriter.SignalStatusOpen,
+            coreId: otherMatter, policyId: policyId, versionId: h.Sysadmin.CurrentVersionOf(PolicyCode));
+        return (policyId, until, otherOpen);
+    }
+
+    private static void ShouldBeSkippedForPartitions(JobRunResult result, WriterOrg org, Guid policyId, Guid otherOpen, DateTime until)
+    {
+        result.Success.Should().BeFalse("a policy that was not planned is not a healthy run");
+        org.CreateCalls.Should().Be(0, "nothing is raised");
+        org.Updates.Should().BeEmpty("nothing is stamped, lowered or cleared");
+        org.ConditionalUpdates.Should().BeEmpty("nothing is closed, reconciled or reassigned");
+        org.Rows[otherOpen].GetAttributeValue<OptionSetValue>("sprk_signalstatus")!.Value.Should().Be(SignalWriter.SignalStatusOpen,
+            "the WHOLE policy is skipped, not only the hits on stamped records");
+        org.Rows.Values.Where(r => r.Id != otherOpen).Should().OnlyContain(r => r.GetAttributeValue<DateTime?>("sprk_suppresseduntil") == until);
+
+        var json = System.Text.Json.JsonDocument.Parse(result.ResultJson!).RootElement;
+        json.GetProperty("policyFailures").GetInt32().Should().Be(1);
+        var skipped = json.GetProperty("partitionSkippedPolicies").EnumerateArray().Should().ContainSingle(
+            "the skipped policy is in the run result, not only in a log line").Subject;
+        skipped.GetProperty("policyId").GetGuid().Should().Be(policyId);
+        skipped.GetProperty("policyCode").GetString().Should().Be(PolicyCode);
+        skipped.GetProperty("failures").GetInt32().Should().Be(1);
+        result.ErrorMessage.Should().Contain("partitionSkippedPolicies=1");
+    }
+
+    [Fact]
+    public async Task Run_APartitioningFault_InTheSuppressionPass_SkipsThePolicyWhole_AndTheRunNamesIt_1661R2F3()
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var (policyId, until, otherOpen) = SecureStampedMatterWithAnOpenNonHit(h);
+        h.Sysadmin.FaultOn = q => q.EntityName == "businessunit" ? new TimeoutException("Dataverse timed out.") : null;
+
+        var result = await h.RunAsync();
+
+        ShouldBeSkippedForPartitions(result, h.Org, policyId, otherOpen, until);
+    }
+
+    [Fact]
+    public async Task Run_AFaultPlacingTheHits_SkipsThePolicyWhole_NeverAPerHitAnswer_1661R2F2()
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var (policyId, until, otherOpen) = SecureStampedMatterWithAnOpenNonHit(h);
+        // The suppression pass completes: its last read is the Decision Records' facts batch (the one that asks for sprk_recordclass; the
+        // walk's own reads of the records ask for lookups). The next placement, the hits', times out.
+        var reconciled = false;
+        var faulted = 0;
+        h.Sysadmin.FaultOn = q =>
+        {
+            if (q.EntityName == "sprk_decisionrecord" && q.ColumnSet.Columns.Contains("sprk_recordclass")) reconciled = true;
+            if (!reconciled || q.EntityName != "businessunit") return null;
+            faulted++;
+            return new TimeoutException("Dataverse timed out.");
+        };
+
+        var result = await h.RunAsync();
+
+        reconciled.Should().BeTrue("precondition: the suppression pass read the Decision Records' facts, so it got past its own placement");
+        faulted.Should().BeGreaterThan(0, "precondition: the fault is armed on the hits' placement, after the suppression pass");
+        ShouldBeSkippedForPartitions(result, h.Org, policyId, otherOpen, until);
+        h.Log.Should().Contain(e => e.EventId.Id == OntologyWriterEvents.EvaluatorPolicyFailed.Id
+            && e.Message.Contains("partitions of its hits could not be read"), "the skip comes from the hit-placement fault");
+        h.Log.Should().NotContain(e => e.Message.Contains("could not be placed in their secure-family partitions"),
+            "the suppression pass itself completed: it is not the PartitionsUnavailable skip");
+    }
+
     private sealed class Harness
     {
         public FakeTimeProvider Clock { get; }
@@ -1823,7 +1938,13 @@ public partial class SignalReevaluationJobTests
             var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, Clock), Logger<PolicyVersionValidator>());
             Evaluator = new SignalEvaluator(validator, Sysadmin, Writer, Logger<SignalEvaluator>());
             Closure = new SignalClosureService(Writer, Sysadmin, Clock, Logger<SignalClosureService>());
-            Suppression = new SignalSuppressionService(Sysadmin, writerClient, Clock, Logger<SignalSuppressionService>());
+            // #1661: uac-r2's real synchronizer (its walk reads the same World), scoped as in ExternalAccessModule.
+            var configuration = new ConfigurationBuilder().Build();
+            var services = new ServiceCollection();
+            services.AddScoped(_ => new Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer(
+                Sysadmin, null!, null!, configuration, NullLogger<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>.Instance));
+            Suppression = new SignalSuppressionService(Sysadmin, writerClient, Clock, configuration,
+                services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), Logger<SignalSuppressionService>());
             Job = new SignalReevaluationJob(Evaluator, Writer, Suppression, Closure, Sysadmin, Cache, Clock, Logger<SignalReevaluationJob>());
             Sysadmin.Stub(new Entity("sprk_matter", MatterId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
             Sysadmin.Stub(new Entity("sprk_project", ProjectId) { ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId) });
@@ -2050,6 +2171,21 @@ public partial class SignalReevaluationJobTests
         public List<string> Fetches { get; } = new();
         public int WriteCalls { get; private set; }
 
+        /// <summary>#1661 round 3 F-T1: Decision Records by id (<see cref="Stub"/> is for the other tables).</summary>
+        public Dictionary<Guid, Entity> DecisionRecords { get; } = new();
+
+        /// <summary>#1661: the Secure Record owner team (null: this World has none, so nothing is secure and nothing is walked).</summary>
+        public Guid? SecureTeamId { get; private set; }
+
+        private static readonly Guid SecureBusinessUnitId = Guid.Parse("5ec0be00-0000-4000-8000-0000000000b1");
+
+        /// <summary>#1661: the Secure Record owner team exists and <paramref name="matterId"/> is a secure root it owns.</summary>
+        public World SecureMatter(Guid matterId)
+        {
+            SecureTeamId = Guid.Parse("5ec0be00-0000-4000-8000-000000000001");
+            return Stub(new Entity("sprk_matter", matterId) { ["owningteam"] = new EntityReference("team", SecureTeamId.Value), ["sprk_issecure"] = true });
+        }
+
         public World Stub(Entity row)
         {
             if (_rows.TryGetValue((row.LogicalName, row.Id), out var existing))
@@ -2159,8 +2295,12 @@ public partial class SignalReevaluationJobTests
             return Task.FromResult(entity);
         }
 
+        /// <summary>#1661 round 2: a read that faults (a Dataverse timeout), chosen per query.</summary>
+        public Func<QueryExpression, Exception?>? FaultOn { get; set; }
+
         public Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default)
         {
+            if (FaultOn?.Invoke(query) is { } fault) throw fault;
             object? Value(string attribute) => query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == attribute)?.Values[0];
             var result = new EntityCollection();
             switch (query.EntityName)
@@ -2196,6 +2336,29 @@ public partial class SignalReevaluationJobTests
                     {
                         var copy = new Entity("sprk_signal", row.Id) { RowVersion = Org.VersionOf(row.Id) };
                         foreach (var attribute in row.Attributes) copy[attribute.Key] = attribute.Value;
+                        result.Entities.Add(copy);
+                    }
+
+                    break;
+                // #1661: uac-r2's Secure Record owner team rule and its root read (owner team + sprk_issecure), only once a team exists.
+                case "businessunit" when SecureTeamId is not null:
+                    result.Entities.Add(new Entity("businessunit", SecureBusinessUnitId));
+                    break;
+                case "team" when SecureTeamId is { } team && Equals(Value("businessunitid"), SecureBusinessUnitId):
+                    result.Entities.Add(new Entity("team", team));
+                    break;
+                case "sprk_matter" when SecureTeamId is not null && query.ColumnSet.Columns.Contains("sprk_issecure")
+                                         && Value("sprk_matterid") is Guid rootId && _rows.TryGetValue(("sprk_matter", rootId), out var root):
+                    result.Entities.Add(root);
+                    break;
+                // #1661 round 3 F-T1: the Decision Records the Signals cite, for both reads of them (the lineage walk's, with the lookup
+                // columns, and the suppression pass's facts: class, reason, decided-on). A record not stubbed is absent, as in Dataverse.
+                case "sprk_decisionrecord":
+                    var wanted = query.Criteria.Conditions.SelectMany(c => c.Values).OfType<Guid>().ToHashSet();
+                    foreach (var record in DecisionRecords.Values.Where(r => wanted.Contains(r.Id)))
+                    {
+                        var copy = new Entity("sprk_decisionrecord", record.Id);
+                        foreach (var attribute in record.Attributes) copy[attribute.Key] = attribute.Value;
                         result.Entities.Add(copy);
                     }
 
