@@ -535,6 +535,9 @@ public sealed class ReviseBudgetExecutor : IDecisionActionExecutor
                 TargetRecordId = matterId,
                 Parents = [new RecordOwnershipParent(BudgetEntity, budgetId)],
                 CallerObjectId = DecisionExec.CallerObjectId(request.Http),
+                // Task 147 (D-135, #1777): the person who caused the revision, recorded as sprk_createdbyperson by
+                // owner.ApplyTo. userId is the acting user's systemuserid (resolved above, else the plan refused).
+                RequestedBy = RecordRequester.Of(userId),
             }, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
