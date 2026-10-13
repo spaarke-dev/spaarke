@@ -37,7 +37,8 @@ export type BackendPlane = Realm;
 
 /**
  * One customer backend, as the directory (or dev config) returns it for a plane. `bffAppId` is the app whose
- * `user_impersonation` scope that plane requests: the customer BFF app (T240d option 3: also its CIAM audience).
+ * `user_impersonation` scope that plane requests: the customer BFF app on the workforce plane; on the CIAM plane the
+ * per-customer CIAM API app (`ciamBffAppId`, T240d option 2: a CIAM account cannot get a workforce-tenant API token).
  */
 export interface Backend {
   /** Customer key — the only routing value a link may carry. */
