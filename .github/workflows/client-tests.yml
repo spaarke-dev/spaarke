@@ -172,11 +172,16 @@ jobs:
       # library the package depends on, TRANSITIVELY. The set is derived, never
       # hard-coded:
       #   1. `file:`/`link:` entries in dependencies/devDependencies/
-      #      optionalDependencies (recursively), and
-      #   2. sibling package directories that a package's jest/tsconfig config
-      #      reaches by relative path (moduleNameMapper -> ../Spaarke.X/src/...).
-      #      Those are source-mode libs: they are installed (so their own imports
-      #      resolve) and built only when the config points into their dist/.
+      #      optionalDependencies (recursively; built when main/types point at
+      #      dist/), and
+      #   2. sibling packages whose source the package under test imports by
+      #      relative path WITHOUT declaring them (install only, no build).
+      # Deliberately NOT derived from jest `moduleNameMapper`/tsconfig `paths`:
+      # those configs are written for a world where the mapped-to library has no
+      # node_modules of its own; installing one there gives it a second copy of
+      # react (office-addins: "Cannot read properties of null (reading
+      # 'useContext')"). A package whose generated PCF types are missing gets
+      # `npm run refreshTypes` (pcf-scripts) first.
       # Libraries are processed dependencies-first. A failure here is recorded as
       # `deps-build-failed`, NOT `fail` — the tests never got a chance to run.
       - name: Install and build shared-library dependencies
@@ -213,11 +218,34 @@ jobs:
             !!(pj && pj.scripts && pj.scripts.build) &&
             /(^|[^\w])dist\//.test(JSON.stringify([pj.main, pj.types, pj.module, pj.exports]));
 
-          const configFiles = (d) =>
-            fs.readdirSync(d).filter((f) => /^(jest\.config\.[cm]?[jt]s|tsconfig[\w.-]*\.json)$/.test(f));
+          // Source files of the package under test that import (relative path)
+          // a SIBLING package's source without declaring it as a dependency,
+          // e.g. `from '../../../solutions/LegalWorkspace/src/...'`. Jest then
+          // loads that source from where it lives, and its own imports resolve
+          // from ITS node_modules — so that package has to be installed too.
+          const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', 'generated', '.git', '__snapshots__']);
+          const SPEC = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bjest\.(?:mock|doMock|requireActual)\s*\(\s*)['"]((?:\.\.\/)+[^'"]*)['"]/g;
+          const sourceNeighbours = (dir) => {
+            const found = new Set();
+            const walk = (d) => {
+              for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+                if (ent.isDirectory()) { if (!SKIP_DIRS.has(ent.name)) walk(path.join(d, ent.name)); continue; }
+                if (!/\.(?:[cm]?[jt]sx?)$/.test(ent.name) || ent.name.endsWith('.d.ts')) continue;
+                const text = fs.readFileSync(path.join(d, ent.name), 'utf8');
+                for (const m of text.matchAll(SPEC)) {
+                  const target = path.resolve(d, m[1]);
+                  if (target === dir || target.startsWith(dir + path.sep)) continue;
+                  const o = owner(target);
+                  if (o && o !== dir && !dir.startsWith(o + path.sep) && readPkg(o)) found.add(o);
+                }
+              }
+            };
+            walk(dir);
+            return found;
+          };
 
           // Direct dependency edges of one package: Map<absDir, {build:boolean}>.
-          const edges = (dir) => {
+          const edges = (dir, withSources) => {
             const out = new Map();
             const add = (d, build) => {
               if (!d || d === dir || d === root || dir.startsWith(d + path.sep)) return;
@@ -235,16 +263,7 @@ jobs:
                 if (dp) add(d, emitsDist(dp));
               }
             }
-            for (const f of configFiles(dir)) {
-              const text = fs.readFileSync(path.join(dir, f), 'utf8');
-              for (const m of text.matchAll(/((?:\.\.\/)+[^'"`\s,;)]*)/g)) {
-                const d = owner(path.resolve(dir, m[1]));
-                if (!d) continue;
-                const dp = readPkg(d);
-                // Only build a config-reached lib when the config points INTO its dist/.
-                add(d, emitsDist(dp) && /\/dist(\/|$)/.test(m[1]));
-              }
-            }
+            if (withSources) for (const d of sourceNeighbours(dir)) add(d, false);
             return out;
           };
 
@@ -253,7 +272,7 @@ jobs:
           const post = [];
           const seen = new Set([self]);
           const visit = (dir) => {
-            for (const [d, e] of edges(dir)) {
+            for (const [d, e] of edges(dir, dir === self)) {
               build.set(d, !!build.get(d) || e.build);
               if (seen.has(d)) continue;
               seen.add(d);
@@ -271,6 +290,14 @@ jobs:
           sed 's/^/  /' "$RUNNER_TEMP/deps-order.tsv"
 
           failed=0
+          # PCF controls: generated/ManifestTypes.d.ts is gitignored and written
+          # by pcf-scripts. Tests import it (`./generated/ManifestTypes`), so
+          # without it ts-jest dies on TS2307 before any assertion runs.
+          if (cd "$PKG" && node -e "process.exit(require('./package.json').scripts?.refreshTypes ? 0 : 1)"); then
+            echo "::group::refreshTypes: $PKG"
+            (cd "$PKG" && npm run refreshTypes) || { echo "::error::npm run refreshTypes failed in $PKG"; failed=1; }
+            echo "::endgroup::"
+          fi
           while IFS=$'\t' read -r dep build; do
             [ -n "$dep" ] || continue
             echo "::group::deps: $dep (build=$build)"
