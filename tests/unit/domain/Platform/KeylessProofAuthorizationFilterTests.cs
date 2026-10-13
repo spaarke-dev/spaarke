@@ -35,6 +35,31 @@ public class KeylessProofAuthorizationFilterTests
         KeylessProofAuthorizationFilter.IsAdmitted(user, Tenant, ClientId).Should().BeTrue();
     }
 
+    private const string LegacyTenantClaim = "http://schemas.microsoft.com/identity/claims/tenantid";
+    private const string OtherTenant = "11111111-1111-1111-1111-111111111111";
+
+    [Fact]
+    public void IsAdmitted_WhenTidAndLegacyTenantClaimDisagree_AdmitsOnTidMatchingTheConfiguredTenant()
+    {
+        // `tid` is authoritative. The legacy mapped claim is only a fallback for when `tid` is absent, so a
+        // stale or conflicting legacy value must not veto a token whose `tid` is this tenant.
+        var user = Principal(("roles", KeylessProofContract.AppRoleValue), ("aud", ClientId),
+            ("tid", Tenant), (LegacyTenantClaim, OtherTenant));
+
+        KeylessProofAuthorizationFilter.IsAdmitted(user, Tenant, ClientId).Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsAdmitted_WhenTidIsAnotherTenantButLegacyTenantClaimMatches_IsRefused()
+    {
+        // The security direction: the legacy claim must never be able to launder a token whose `tid` names
+        // another tenant (the app registration is multi-tenant).
+        var user = Principal(("roles", KeylessProofContract.AppRoleValue), ("aud", ClientId),
+            ("tid", OtherTenant), (LegacyTenantClaim, Tenant));
+
+        KeylessProofAuthorizationFilter.IsAdmitted(user, Tenant, ClientId).Should().BeFalse();
+    }
+
     [Theory]
     [InlineData("scp")]
     [InlineData("http://schemas.microsoft.com/identity/claims/scope")] // the mapped scope claim type

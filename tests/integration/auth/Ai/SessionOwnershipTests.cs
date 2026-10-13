@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Services.Ai.Chat;
@@ -96,6 +97,36 @@ public sealed class SessionOwnershipTests
         await Task.CompletedTask;
         return result is IStatusCodeHttpResult s ? s.StatusCode : null;
     }
+
+    /// <summary>
+    /// A <see cref="DefaultHttpContext"/> whose <c>RequestServices</c> routes every logger through
+    /// <paramref name="logs"/>, so a test can assert what the filter SAID, not only what it answered.
+    /// </summary>
+    private static DefaultHttpContext ContextWithLogs(
+        CollectingLoggerProvider logs, string oid, string? sessionRouteValue, string tenantId = Tenant)
+    {
+        var ctx = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim("oid", oid), new Claim("tid", tenantId)],
+                authenticationType: "Test")),
+            RequestServices = new ServiceCollection()
+                .AddLogging(b => b.SetMinimumLevel(LogLevel.Trace).AddProvider(logs))
+                .BuildServiceProvider(),
+        };
+        if (sessionRouteValue is not null)
+        {
+            ctx.Request.RouteValues["sessionId"] = sessionRouteValue;
+        }
+
+        return ctx;
+    }
+
+    /// <summary>Entries the filter wrote — its logger category is <see cref="SessionOwnershipFilterMarker"/>.</summary>
+    private static IReadOnlyList<CollectedLog> FilterLogs(CollectingLoggerProvider logs, LogLevel level)
+        => logs.Entries
+            .Where(e => e.Level == level && e.Category == typeof(SessionOwnershipFilterMarker).FullName)
+            .ToList();
 
     // ─────────────────────────────────────────────────────────────────────────
     // The denial — the half #863 was missing
@@ -202,6 +233,89 @@ public sealed class SessionOwnershipTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Mutation-gap closers (issue #1800) — the branches no test reached
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Evaluate_OnARouteWithNoSessionIdValue_Answers500AndLogsAnErrorInsteadOfPassingThrough(
+        string? sessionRouteValue)
+    {
+        // The filter attached to a route that has no {sessionId} segment. Returning null here would
+        // make the ownership guard silently inert on that route — the exact regression the branch
+        // exists to prevent — so the answer must be a refusal, loudly logged.
+        var manager = BuildManager();
+        var logs = new CollectingLoggerProvider();
+        var ctx = ContextWithLogs(logs, TestSessionOwner.Oid, sessionRouteValue);
+        ctx.Request.Path = "/api/ai/chat/not-session-scoped";
+
+        var result = await SessionOwnershipFilterExtensions.EvaluateAsync(ctx, manager);
+
+        result.Should().NotBeNull("an unverifiable ownership check must refuse, not fall open");
+        (await StatusOf(result)).Should().Be(500);
+        ctx.Items.Should().NotContainKey(SessionOwnershipFilterExtensions.OwnedSessionItemKey,
+            "nothing was verified, so nothing may be marked as owned");
+
+        var errors = FilterLogs(logs, LogLevel.Error);
+        errors.Should().ContainSingle("the misconfigured route must be reported at Error so it is noticed");
+        errors[0].Message.Should().Contain("/api/ai/chat/not-session-scoped",
+            "the log is how an operator finds WHICH route lost its {sessionId}");
+    }
+
+    [Fact]
+    public async Task Evaluate_DenyLog_OwnedFieldSeparatesAnUnownedSessionFromAnotherUsersSession()
+    {
+        // The deny response is deliberately one 404. The warning log is the only place an operator can
+        // tell "a legacy session nobody owns" (owned=false) from "someone probing a colleague's
+        // session" (owned=true) during a tenant-isolation incident.
+        var manager = BuildManager();
+        var foreign = await manager.CreateSessionAsync(Tenant, TestSessionOwner.Oid, documentId: null);
+        var legacy = await manager.CreateSessionAsync(Tenant, TestSessionOwner.Oid, documentId: null);
+        await manager.UpdateSessionCacheAsync(legacy with { OwnerOid = null });
+
+        var foreignLogs = new CollectingLoggerProvider();
+        var foreignResult = await SessionOwnershipFilterExtensions.EvaluateAsync(
+            ContextWithLogs(foreignLogs, TestSessionOwner.OtherOid, foreign.SessionId), manager);
+
+        var legacyLogs = new CollectingLoggerProvider();
+        var legacyResult = await SessionOwnershipFilterExtensions.EvaluateAsync(
+            ContextWithLogs(legacyLogs, TestSessionOwner.OtherOid, legacy.SessionId), manager);
+
+        (await StatusOf(foreignResult)).Should().Be(404);
+        (await StatusOf(legacyResult)).Should().Be(404);
+
+        var foreignWarning = FilterLogs(foreignLogs, LogLevel.Warning).Should().ContainSingle().Subject;
+        var legacyWarning = FilterLogs(legacyLogs, LogLevel.Warning).Should().ContainSingle().Subject;
+
+        foreignWarning.State["IsOwned"].Should().Be(true,
+            "the session has an owner and it is not the caller");
+        legacyWarning.State["IsOwned"].Should().Be(false,
+            "a pre-#863 session has no owner at all — the one fact that separates it from a probe");
+        foreignWarning.State["SessionId"].Should().Be(foreign.SessionId);
+        foreignWarning.State["TenantId"].Should().Be(Tenant);
+        foreignWarning.State["ErrorCode"].Should().Be(SessionOwnershipFilterExtensions.NotFoundOrNotOwnedErrorCode);
+    }
+
+    [Fact]
+    public async Task Evaluate_ForTheOwner_WritesNoDenyWarning()
+    {
+        // Positive control for the log assertions above: a log that fires on every request would satisfy
+        // them and bury the one line an operator needs.
+        var manager = BuildManager();
+        var mine = await manager.CreateSessionAsync(Tenant, TestSessionOwner.Oid, documentId: null);
+        var logs = new CollectingLoggerProvider();
+
+        var result = await SessionOwnershipFilterExtensions.EvaluateAsync(
+            ContextWithLogs(logs, TestSessionOwner.Oid, mine.SessionId), manager);
+
+        result.Should().BeNull();
+        FilterLogs(logs, LogLevel.Warning).Should().BeEmpty();
+        FilterLogs(logs, LogLevel.Error).Should().BeEmpty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // The positive control — a guard that denies everyone is also broken
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -275,4 +389,55 @@ public sealed class SessionOwnershipTests
     // gap, because "ownership survives eviction" is a real risk and a reader deserves to know where
     // it is checked.
     // ─────────────────────────────────────────────────────────────────────────
+}
+
+/// <summary>One captured log call: category, level, rendered message and the structured key/values.</summary>
+internal sealed record CollectedLog(
+    string Category, LogLevel Level, string Message, IReadOnlyDictionary<string, object?> State);
+
+/// <summary>
+/// Collects every log call so a test can assert the STRUCTURED values (for example <c>IsOwned</c>) that an
+/// operator's log query filters on, not just a substring of the rendered text.
+/// </summary>
+internal sealed class CollectingLoggerProvider : ILoggerProvider
+{
+    private readonly List<CollectedLog> _entries = [];
+
+    public IReadOnlyList<CollectedLog> Entries
+    {
+        get
+        {
+            lock (_entries)
+            {
+                return _entries.ToList();
+            }
+        }
+    }
+
+    public ILogger CreateLogger(string categoryName) => new Collector(this, categoryName);
+
+    public void Dispose()
+    {
+    }
+
+    private sealed class Collector(CollectingLoggerProvider owner, string category) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            var values = state is IEnumerable<KeyValuePair<string, object?>> kvs
+                ? kvs.ToDictionary(kv => kv.Key, kv => kv.Value)
+                : new Dictionary<string, object?>();
+
+            lock (owner._entries)
+            {
+                owner._entries.Add(new CollectedLog(category, logLevel, formatter(state, exception), values));
+            }
+        }
+    }
 }
