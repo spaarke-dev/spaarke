@@ -396,7 +396,7 @@ PRQ-C-10's recipe SKIP (the PRQ-C-14 pattern).
 
 | Field | Value |
 |---|---|
-| **Status** | Open — **blocks T186 reaching Ready** once T263 merges; owner decision D32 (proposed) |
+| **Status** | Open — D32 approved 2026-10-10 and **applied 2026-10-13** (M1 PASS: parents confirmed; 2 roles + scope + 2 `-App` assignments created and read back). Remaining: live checks M2–M7 after RBAC propagation (30 min – 2 h), then close |
 | **Filed** | 2026-10-10 (T263; number provisional — the main session assigns ISS numbers) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1562 (the mail-model issue; T263 implements it) |
 

@@ -656,7 +656,7 @@ prereqs:
     scope: once_per_env
     frequency: once per tenant L2 provisions into (Spaarke's, for Model 1); the platform parameter exchangeAdminAppId names it
     owner: Spaarke platform admin (Entra Global Admin + Exchange Organization Management) — SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1
-    consequence_of_absence: H14a and H13 T4 fail on first use ("ExchangeAdminAppId is not configured", or the sign-in / Exchange call is refused); the stamp identity never receives its group-scoped mailbox roles, so its Mail.* calls 403 (trap T4). Without the T263 roles (guide section 4.2.1 step 5, pending owner decision D32) H14m fails Resumable h14m-mailbox-ensure-failed naming PRQ-E-16 and creates nothing - no run reaches Ready.
+    consequence_of_absence: H14a and H13 T4 fail on first use ("ExchangeAdminAppId is not configured", or the sign-in / Exchange call is refused); the stamp identity never receives its group-scoped mailbox roles, so its Mail.* calls 403 (trap T4). Without the T263 roles (guide section 4.2.1 step 5, owner decision D32, applied on the Spaarke tenant 2026-10-13) H14m fails Resumable h14m-mailbox-ensure-failed naming PRQ-E-16 and creates nothing - no run reaches Ready.
     check_recipe:
       cli: |
         set -o pipefail
@@ -668,7 +668,7 @@ prereqs:
         [ -z "$keys" ] || { echo "app $appid holds a secret or certificate - it must hold none (D24/D25)"; exit 1; }
         echo ok
       expect: '`ok` - the app `Spaarke Exchange Admin` exists, a federated credential names the L2 Worker UAMI principal id, and the app holds NO secret or certificate. NOT asserted here (needs an interactive Exchange Online session, which Step 0.5b must not open): `Exchange.ManageAsApp` consent and, in Exchange, `Get-ManagementRoleAssignment -RoleAssignee <its service-principal object id>` listing `Spaarke App RBAC Admin`, `View-Only Recipients` and the four DelegatingOrgWide `Application Mail.*` / `MailboxSettings.Read` assignments - H14a / H13 T4 fail loudly on first use if they are missing'
-    remediation: 'Follow SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1 (Enable-OrganizationCustomization once per tenant — irreversible, ~1 h to apply). Never give the app a secret, a certificate or an Entra directory role. Step 5 of §4.2.1 (T263 shared-mailbox roles, called PRQ-E-16 in H14m diagnostics) is applied ONLY after the owner approves decision D32.'
+    remediation: 'Follow SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1 (Enable-OrganizationCustomization once per tenant — irreversible, ~1 h to apply). Never give the app a secret, a certificate or an Entra directory role. Step 5 of §4.2.1 (T263 shared-mailbox roles, called PRQ-E-16 in H14m diagnostics) is the exact set the owner approved in decision D32 (applied on the Spaarke tenant 2026-10-13); apply nothing wider.'
     related_findings: [T251-G30, D24, D25, D26, T263-D32]
 
   - id: PRQ-E-14

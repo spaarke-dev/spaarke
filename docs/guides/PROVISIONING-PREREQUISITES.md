@@ -10,8 +10,8 @@
 > each customer's Spaarke-tenant shared mailbox `sprk-{customerId}-mail` at the intake `communicationDefaultMailbox`
 > address and adds it to the `PRQ-C-08` group. `PRQ-C-08`: the group's name **must** be `Spaarke-AppAccess-{customerId}`
 > (H14m refuses another customer's group), and L2 now adds exactly one member, its own mailbox. `PRQ-E-15`: H14m needs
-> two more Exchange roles on `Spaarke Exchange Admin` — **pending owner decision D32** (deployment guide §4.2.1 step 5;
-> H14m diagnostics call them `PRQ-E-16`). Until they are applied, H14m fails Resumable and creates nothing.
+> two more Exchange roles on `Spaarke Exchange Admin` — owner decision D32 (2026-10-10); applied on Spaarke's tenant 2026-10-13 (deployment guide §4.2.1 step 5;
+> H14m diagnostics call them `PRQ-E-16`). On a tenant without them, H14m fails Resumable and creates nothing.
 >
 > **v11 (2026-10-09, `customer-provisioning-orchestration-r1` T262 — G36, owner approval 2026-10-09)**: `PRQ-S-06`
 > **added** — the customer's subscription is a direct member of the `spaarke-customers` management group, where the
@@ -218,7 +218,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-E-10 | L2 UAMI KV Secrets User on platform + per-tenant KVs | Spaarke admin (Bicep) | F16 — `@Microsoft.KeyVault(...)` refs silently unresolvable |
 | PRQ-E-11 | L2 UAMI SB Data Sender + Data Receiver | Spaarke admin (Bicep) | Dispatcher DOA — cannot enqueue or dequeue |
 | PRQ-E-12 | Provisioning SB queue with sessions + dedup | Spaarke admin (Bicep + ceremony) | Session receiver throws on `StartProcessingAsync`; §4C retries lost |
-| PRQ-E-15 | Exchange admin app `Spaarke Exchange Admin` (federated credential trusting the L2 Worker UAMI, `Exchange.ManageAsApp`) + narrowed Exchange role `Spaarke App RBAC Admin` (T251) + the T263 shared-mailbox roles (§4.2.1 step 5 — **pending owner decision D32**) | Spaarke admin — deployment guide §4.2.1 | H14a / H13 T4 fail on first use; the stamp's Mail.* calls 403 (T4). Without step 5, H14m fails Resumable (`h14m-mailbox-ensure-failed`, names PRQ-E-16) and creates nothing |
+| PRQ-E-15 | Exchange admin app `Spaarke Exchange Admin` (federated credential trusting the L2 Worker UAMI, `Exchange.ManageAsApp`) + narrowed Exchange role `Spaarke App RBAC Admin` (T251) + the T263 shared-mailbox roles (§4.2.1 step 5 — owner decision D32 (2026-10-10); applied on Spaarke's tenant 2026-10-13) | Spaarke admin — deployment guide §4.2.1 | H14a / H13 T4 fail on first use; the stamp's Mail.* calls 403 (T4). Without step 5, H14m fails Resumable (`h14m-mailbox-ensure-failed`, names PRQ-E-16) and creates nothing |
 | PRQ-E-14 | Registry schema current on the admin env — v3.3 columns + `sprk_credentialmode` (T225b) + `sprk_bffappid` / `sprk_copilotauthconfigid` (T257) | Spaarke admin (`Extend-DataverseEnvironmentSchema-v3.3.ps1`, idempotent) | H4 fails `kvsecrets-secret-free-marker-apply-failed` after writing the vault; without `sprk_bffappid` H13's promoted-columns PATCH is rejected (registry stale) |
 
 ### Once-per-customer (10 active + 2 retired, besides the subscription entries above)

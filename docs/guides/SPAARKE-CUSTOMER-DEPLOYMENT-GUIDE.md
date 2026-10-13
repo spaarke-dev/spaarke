@@ -506,7 +506,8 @@ legacy and caps at a few hundred policies per tenant). L2 does that through its 
    Worker reads the tenant's initial domain (`contoso.onmicrosoft.com`) there and the sidecar connects with
    `-Organization <initial domain>` — the only value Microsoft documents for app-only sign-in. With the tenant id, Exchange
    connects and reads but refuses every write with "doesn't have write permission to target DC" (2026-10-04).
-5. **Shared-mailbox roles for H14m (task 263) — PENDING OWNER DECISION D32. Do not apply before the owner approves.**
+5. **Shared-mailbox roles for H14m (task 263) — owner decision D32 (2026-10-10); applied on Spaarke's tenant 2026-10-13** (M1 passed; live checks M2–M7 follow once the RBAC
+   change propagates, 30 min – 2 h). Apply exactly this set on any other tenant; nothing wider.
    H14m creates each customer's shared mailbox and adds it to the customer's scope group. `Spaarke App RBAC Admin` cannot
    (it holds no `New-Mailbox` or `Add-DistributionGroupMember`), and widening it is an owner decision. The narrowest set
    found is two custom roles plus one scope, assigned with `-App` (non-delegating). Run as an Organization Management

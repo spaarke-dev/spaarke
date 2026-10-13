@@ -125,7 +125,7 @@ names another customer's group is refused (Drift) **before** this customer's mai
 the other customer's stamp read and send as this mailbox. Group names are unique in an Exchange organization. The name is
 also the filter of the membership scope in §5, so the Exchange role and the code agree.
 
-## 5. Exchange permissions — **OWNER DECISION NEEDED (proposed D32)**
+## 5. Exchange permissions — owner decision D32 (approved 2026-10-10; applied on Spaarke's tenant 2026-10-13, M1 PASS)
 
 The current role, `Spaarke App RBAC Admin`, is a child of Role Management trimmed to 14 cmdlets. With
 `View-Only Recipients`, it covers every read H14m and H13 need: `Get-Recipient` (View-Only Recipients),
