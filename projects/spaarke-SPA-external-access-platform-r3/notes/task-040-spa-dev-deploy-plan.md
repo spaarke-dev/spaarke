@@ -67,3 +67,5 @@ This rebuilds exactly the live build: the workflow at `885d0c5f9` hard-codes the
   - The authorized client `bd57e54e` had no scope ticked; the owner updated it.
   - SPA app `bd57e54e` (Spaarke External Workspace SPA), API permissions: `User.Read`, `SDAP.Access` and `user_impersonation` are delegated and **granted with admin consent** for Spaarke External Access.
   - S1 stays held only for the A9 re-plan of 040.
+- 2026-10-13 **S1 deployed (owner: "deploy SPA").** Run `38420637859` of `deploy-external-spa.yml` (ref master `05356cbf7`, environment dev) succeeded. The A9 re-plan no longer holds it: licensed users stay on A8 and CIAM is unchanged; workforce contacts use the A8 path on dev until the A9 build.
+- 2026-10-13 **S2a PASS:** `/auth-callback.html` returns 200, the "Spaarke Authentication" MSAL bridge page, not the SPA index. S2b–S2d (browser sign-ins) are with the owner.
