@@ -1396,6 +1396,23 @@ The owner asked for research on the practical and technical limits of access tea
    - An ordinary-team-owned *intermediate* stops it. That is the resolver's own rule, bounded by the recent-changes pass, which writes by default.
    - An Undetermined, Failed or faulted walk counts as secure, or the hit is skipped. It is never ordinary.
 
+## Round 96 (2026-10-12): OWNER: personal To Do decision-record owner (Q23); creator-person column (Q27)
+
+- **Q23, decided** (recorded by ontology as D-134). "The owner should be the Assigned To contact's team." A decision record on a personal (no-core) To Do is owned by the business-unit default team of the To Do's Assigned To. The path is contact → its systemuser → that user's business unit → its default team, the resolver's existing user → BU → team path.
+  - Before this decision: the To Do's own owning team, that is, the creator's.
+  - Shipped in ontology #1665 or a follow-up. If it needs a change to `RecordOwnershipResolver`, that is UAC's file: ontology sends the shape first.
+  - **Edge cases, still open with the owner (my proposed defaults):**
+    1. no Assigned To, or one without a systemuser → the To Do's own team;
+    2. a later filing under a core follows the normal re-file rule, and an Assigned To change alone does not re-own;
+    3. the Signal on a personal To Do follows the same rule (ontology 143);
+    4. the To Do's own owner is unchanged.
+- **Q27, open.** The owner asked whether `sprk_createdbyperson` should be a user lookup, given that OOB `createdby` already exists.
+  - Answer given: it IS a systemuser lookup. `createdby` cannot serve, because the BFF creates these rows app-only, so `createdby` is the BFF application user and `createdonbehalfby` is empty (verified live 2026-10-01). That is why rounds 7 and 13 introduced the column.
+  - Options put to the owner:
+    - (A, recommended, matching ontology) add the column to `sprk_budgetrevision`, `sprk_decisionrecord` and `sprk_signal`; job-raised Signals leave it empty;
+    - (B) add it to budget revision only, with a decided exemption for DR (the decider is already in `sprk_assignedtointernal`) and Signal (mostly job-raised).
+  - Issues: #1777, #1783.
+
 ## C7 research
 
 - **The user:** a customer **employee without a Power Apps licence (Type 2)**, signing in with company SSO.
