@@ -1,6 +1,6 @@
 # Task 038: R3 BFF deploy to dev (spaarke-bff-dev): plan and record
 
-> Status: **Phase A done 2026-10-13; phase B HELD** (A5: dev runs another project's unmerged build). Phases A+B owner-approved 2026-10-13.
+> Status: **Phases A and B done 2026-10-13.** R3 is live on dev through the master deploy `99ec749cd` (see Record). Phase C needs a separate approval.
 > Owner said "ok" to dev dispatch on 2026-10-12, on condition that each command and its rollback are shown first.
 
 ## What gets deployed
@@ -83,3 +83,11 @@ Delta **+0.100 MB** (under the +5 MB trigger; total far under 55/60 MB). `dotnet
 | A5 | Kudu records no author (3 OneDeploy entries, latest 2026-10-13 00:59 UTC). The live DLL's version is `1.0.0+f9cc25f73`: **`work/spaarkeai-word-add-in-r1` task 129, NOT on master** (11 commits ahead of master; 11 files / +1620 lines in `src/server`; no open PR). **STOP condition met: deploying R3 overwrites that project's unmerged live build. Phase B held for owner decision** |
 | A6 | Rollback package `deploy/rollback/spaarke-bff-dev-wwwroot-20261013T034808Z.zip` (50.6 MB), expanded to `deploy/rollback/wwwroot-20261013T034808Z/` (222 files, 144.3 MB) |
 | A7 | `/healthz` 200, `/healthz/dataverse` 200 |
+
+### Phase B, 2026-10-13: R3 reached dev by the master deploy (no R3 deploy run)
+
+Owner direction: word-add-in-r1 merges to master (PR #1796, `99ec749cd`) and deploys the BFF from master, which already holds R3 (#1795). That session reported: 36.6 MB package, SHA-256 match on the critical files, `/healthz` pass.
+
+Independent check by R3: the live `Sprk.Bff.Api.dll` ProductVersion is `1.0.0+99ec749cd...`; that commit is on master and contains `ba1242b5a` (the R3 merge); `/healthz` 200, `/healthz/dataverse` 200. **R3 is live on dev.** Not in this build: PR #1799 (mapped `upn`, auto-merge) and the R3 branch's A8 clarification commit (docs only).
+
+The A6 package (`wwwroot-20261013T034808Z`) is the word-add-in `f9cc25f73` build. It is not a rollback target for this deploy; rolling back now means redeploying an earlier master commit, which the deploying session owns.
