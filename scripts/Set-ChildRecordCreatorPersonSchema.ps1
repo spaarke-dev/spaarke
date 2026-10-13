@@ -38,7 +38,10 @@
       (d) SOLUTION   The lookups, their relationships and both profiles are in -SolutionUniqueName (SpaarkeCore). A column
                      or relationship counts as included when its table is in the solution with rootcomponentbehavior = 0
                      ("include subcomponents") — the false negative the batch-4 live run found in task 133's verify
-                     (notes/batch4-live-gates-2026-10-03.md) is not repeated here.
+                     (notes/batch4-live-gates-2026-10-03.md) is not repeated here. A table listed in $SolutionHomes
+                     (sprk_budgetrevision: its column travels in SpaarkeMaster and OntologyPlatformSolution, which hold the
+                     whole table, not in SpaarkeCore) is checked against THOSE solutions instead, read-only: a gap there is
+                     reported, never written, so SpaarkeCore is not reported as a false gap.
       (e) PUBLISH    every child table.
 
     INFORMATIONAL (never written): how many existing rows of each table were created by an application user and carry no
@@ -115,12 +118,31 @@ $Column = 'sprk_createdbyperson'
 $ColumnSchemaName = 'sprk_CreatedByPerson'
 $NavigationProperty = 'sprk_CreatedByPerson'
 $TargetEntity = 'systemuser'
-$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent')
+$Tables = @('sprk_document', 'sprk_todo', 'sprk_event', 'sprk_eventlog', 'sprk_communication', 'sprk_communicationthread', 'sprk_communicationattachment', 'sprk_communicationparticipant', 'sprk_emailreviewlog', 'sprk_analysis', 'sprk_analysisoutput', 'sprk_emailartifact', 'sprk_attachmentartifact', 'sprk_fileversion', 'sprk_invoice', 'sprk_spendsignal', 'sprk_spendsnapshot', 'sprk_memo', 'sprk_reportcard', 'sprk_budget', 'sprk_kpiassessment', 'sprk_billingevent', 'sprk_budgetrevision')
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
 $Secured = $true
 $ExpectedCascade = [ordered]@{ Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Merge = 'NoCascade'; Delete = 'RemoveLink' }
 function RelationshipSchemaName([string]$Table) { "sprk_systemuser_$($Table)_createdbyperson" }
+# The relationship's name depends on how the lookup was made. This script creates `sprk_systemuser_{table}_createdbyperson`
+# (RelationshipSchemaName); a lookup an owner adds in the maker is named `{table}_CreatedByPerson_systemuser`
+# (D-135 Q27: sprk_budgetrevision, sprk_decisionrecord, sprk_signal). Both are the same relationship (same lookup, same
+# navigation property, same cascade checks below), so neither is "created another way". Canonical form first.
+function Get-CreatorPersonRelationshipNames([string]$Table) { @((RelationshipSchemaName $Table), "$($Table)_CreatedByPerson_systemuser") }
+# Reads each accepted name through $Read (a scriptblock taking the schema name, answering the relationship or $null) and
+# returns the first that exists; $null when none does (a name this script does not know: that stays a FAIL for a hand check).
+function Find-CreatorPersonRelationship([string]$Table, [scriptblock]$Read) {
+    foreach ($name in (Get-CreatorPersonRelationshipNames $Table)) {
+        $found = & $Read $name
+        if ($found) { return $found }
+    }
+    return $null
+}
+# Where a table's column travels when it is NOT SpaarkeCore. D-135 (c)(d), closed on dev 2026-10-12: the column on these
+# tables is in BOTH solutions below, each of which holds the whole table, and not in SpaarkeCore. For such a table section (d)
+# checks those solutions instead of SpaarkeCore, so it does not report a false gap -- and never writes to them (a product
+# solution's membership is the owner's call).
+$SolutionHomes = @{ sprk_budgetrevision = @('SpaarkeMaster', 'OntologyPlatformSolution') }
 
 # ── Auth + helpers ──────────────────────────────────────────────────────────────────────────────────────────
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
@@ -183,6 +205,7 @@ Write-Host "Tables      : $($Tables.Count) child tables"
 # ── (a) COLUMN ──────────────────────────────────────────────────────────────────────────────────────────────
 Write-Host "`n(a) $Column on each child table"
 $attrs = @{}
+$relByTable = @{}
 foreach ($t in $Tables) {
     $attrPath = "EntityDefinitions(LogicalName='$t')/Attributes(LogicalName='$Column')/Microsoft.Dynamics.CRM.LookupAttributeMetadata?`$select=LogicalName,Targets,IsSecured,MetadataId"
     $attr = Try-DvGet $attrPath
@@ -217,21 +240,24 @@ foreach ($t in $Tables) {
 
     # The relationship's cascade and navigation property: nothing about the USER may move, share or reparent the record,
     # and a Web API write binds the name the BFF uses.
-    $rel = Try-DvGet "RelationshipDefinitions(SchemaName='$(RelationshipSchemaName $t)')/Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata?`$select=SchemaName,ReferencedEntity,ReferencingEntity,ReferencingAttribute,ReferencingEntityNavigationPropertyName,CascadeConfiguration,MetadataId"
+    $readRel = { param($name) Try-DvGet "RelationshipDefinitions(SchemaName='$name')/Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata?`$select=SchemaName,ReferencedEntity,ReferencingEntity,ReferencingAttribute,ReferencingEntityNavigationPropertyName,CascadeConfiguration,MetadataId" }
+    $rel = Find-CreatorPersonRelationship $t $readRel
     # Relationship metadata is read through a cache: right after the create it can still answer 404 although the
     # relationship exists (seen on spaarkedev1, 2026-10-05). Poll for up to 2 minutes before reporting it missing.
     for ($try = 1; -not $rel -and $attrs[$t] -and $try -le 24; $try++) {
         Start-Sleep -Seconds 5
-        $rel = Try-DvGet "RelationshipDefinitions(SchemaName='$(RelationshipSchemaName $t)')/Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata?`$select=SchemaName,ReferencedEntity,ReferencingEntity,ReferencingAttribute,ReferencingEntityNavigationPropertyName,CascadeConfiguration,MetadataId"
+        $rel = Find-CreatorPersonRelationship $t $readRel
     }
+    $relByTable[$t] = $rel
     if ($rel) {
+        $relName = $rel.SchemaName
         $bad = @($ExpectedCascade.Keys | Where-Object { $rel.CascadeConfiguration.$_ -ne $ExpectedCascade[$_] } |
             ForEach-Object { "$_=$($rel.CascadeConfiguration.$_) (expected $($ExpectedCascade[$_]))" })
-        if ($rel.ReferencingAttribute -ne $Column) { Report 'FAIL' "$(RelationshipSchemaName $t) references $($rel.ReferencingAttribute), not $Column" }
-        elseif ($rel.ReferencingEntityNavigationPropertyName -ne $NavigationProperty) { Report 'FAIL' "$(RelationshipSchemaName $t) navigation property is $($rel.ReferencingEntityNavigationPropertyName), not $NavigationProperty — the BFF's Web API binds would be refused" }
-        elseif ($bad.Count -gt 0) { Report 'FAIL' "$(RelationshipSchemaName $t) cascade: $($bad -join '; ')" }
-        else { Report 'OK' "$(RelationshipSchemaName $t) (navigation $NavigationProperty; no Assign/Share cascade; Delete RemoveLink)" }
-    } elseif ($attrs[$t]) { Report 'FAIL' "$t.$Column exists but relationship $(RelationshipSchemaName $t) was not found — it was created another way; check its cascade and navigation property by hand" }
+        if ($rel.ReferencingAttribute -ne $Column) { Report 'FAIL' "$relName references $($rel.ReferencingAttribute), not $Column" }
+        elseif ($rel.ReferencingEntityNavigationPropertyName -ne $NavigationProperty) { Report 'FAIL' "$relName navigation property is $($rel.ReferencingEntityNavigationPropertyName), not $NavigationProperty — the BFF's Web API binds would be refused" }
+        elseif ($bad.Count -gt 0) { Report 'FAIL' "$relName cascade: $($bad -join '; ')" }
+        else { Report 'OK' "$relName (navigation $NavigationProperty; no Assign/Share cascade; Delete RemoveLink)" }
+    } elseif ($attrs[$t]) { Report 'FAIL' "$t.$Column exists but none of its relationships ($((Get-CreatorPersonRelationshipNames $t) -join ', ')) was found — it was created another way; check its cascade and navigation property by hand" }
     elseif ($Verify) { Report 'MISSING' "relationship $(RelationshipSchemaName $t)" }
 }
 
@@ -347,12 +373,31 @@ else {
     # and relationships implicitly (scripts/common/DataverseSolutionMembership.ps1).
     $membership = Get-DvSolutionMembership -Api $Api -Headers $headers -SolutionId $solution.solutionid
 
+    # Tables whose column does not travel in SpaarkeCore (see $SolutionHomes) are checked against the solutions that hold them.
+    $homeMemberships = @{}
     $components = [System.Collections.Generic.List[object]]::new()
+    $homeComponents = [System.Collections.Generic.List[object]]::new()
     foreach ($t in $Tables) {
         $tableId = (Invoke-DvGet "EntityDefinitions(LogicalName='$t')?`$select=MetadataId").MetadataId
-        if ($attrs[$t]) { $components.Add(@{ Id = $attrs[$t].MetadataId; Type = 2; Label = "$t.$Column"; TableId = $tableId }) }
-        $rel = Try-DvGet "RelationshipDefinitions(SchemaName='$(RelationshipSchemaName $t)')?`$select=MetadataId"
-        if ($rel) { $components.Add(@{ Id = $rel.MetadataId; Type = 10; Label = "relationship $(RelationshipSchemaName $t)"; TableId = $tableId }) }
+        # (not `$target = if ...`: an empty list assigned through the pipeline unrolls to $null)
+        $target = $components
+        if ($SolutionHomes.ContainsKey($t)) { $target = $homeComponents }
+        if ($attrs[$t]) { $target.Add(@{ Id = $attrs[$t].MetadataId; Type = 2; Label = "$t.$Column"; TableId = $tableId; Table = $t }) }
+        $rel = $relByTable[$t]
+        if ($rel) { $target.Add(@{ Id = $rel.MetadataId; Type = 10; Label = "relationship $($rel.SchemaName)"; TableId = $tableId; Table = $t }) }
+    }
+    foreach ($c in $homeComponents) {
+        foreach ($homeName in $SolutionHomes[$c.Table]) {
+            if (-not $homeMemberships.ContainsKey($homeName)) {
+                $homeSolution = @((Invoke-DvGet "solutions?`$select=solutionid,uniquename&`$filter=uniquename eq '$homeName'").value) | Select-Object -First 1
+                $homeMemberships[$homeName] = if ($homeSolution) { Get-DvSolutionMembership -Api $Api -Headers $headers -SolutionId $homeSolution.solutionid } else { $null }
+            }
+            if (-not $homeMemberships[$homeName]) { Report 'FAIL' "solution '$homeName' (which carries $($c.Table)) not found"; continue }
+            $how = Test-DvInSolution -Membership $homeMemberships[$homeName] -ComponentId $c.Id -TableMetadataId $c['TableId']
+            if ($how -eq 'Direct') { Report 'OK' "$($c.Label) in $homeName" }
+            elseif ($how -eq 'ViaTable') { Report 'OK' "$($c.Label) in $homeName (its table includes subcomponents)" }
+            else { Report 'MISSING' "$($c.Label) in $homeName (this table's column travels there, not in $SolutionUniqueName; add it by hand — the script does not write to it)" }
+        }
     }
     foreach ($profileId in $readerId, $writerId) { if ($profileId) { $components.Add(@{ Id = $profileId; Type = 70; Label = "field security profile $profileId" }) } }
 

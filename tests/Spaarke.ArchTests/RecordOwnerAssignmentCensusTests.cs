@@ -1985,6 +1985,7 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("InvoiceReviewService.cs", "CreateInvoiceRecordAsync", "the reviewer confirming the invoice"),
         new PersonBearingWriter("FinanceEndpoints.cs", "ConfirmInvoiceReview", "hands the HTTP caller to the invoice create"),
         new PersonBearingWriter("UpdateRecordActionCore.cs", "UpdateAsync", "the impersonated user, for F3 (owner round 13 item 8)"),
+        new PersonBearingWriter("DecisionActionExecutors.cs", "PlanAsync", "the caller whose decision commit revises the budget (ontology task 147, #1777)"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateDocumentAsync", "seam: writes CreatedByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisAsync", "seam: writes createdByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisOutputAsync", "seam: writes CreatedByPersonId"),
@@ -2020,51 +2021,31 @@ public class RecordOwnerAssignmentCensusTests
         RegexOptions.Compiled);
 
     /// <summary>
-    /// Task 182: the ONE table a census create writes that does not yet carry the creator-person column. A single table, not
-    /// a list, so it cannot grow to cover another: a second gap needs its own decision and its own change here.
+    /// The created tables without the creator-person column. No table is exempt: task 182 carried one reasoned exemption
+    /// (<c>sprk_budgetrevision</c>, #1777) until ontology task 147 made <c>ReviseBudgetExecutor</c> pass <c>RequestedBy</c>
+    /// and added the table to <c>RecordCreatorPerson.StampedChildTables</c>; a table that gains a gap needs the column, not a waiver.
     /// </summary>
-    private static readonly (string Table, string Reason) CreatorPersonColumnPending = (
-        "sprk_budgetrevision",
-        "Owner round 13 item 9 (children the BFF creates as the application record the person who asked) is not yet met by "
-        + "ontology task 044's budget revision: the table has no sprk_createdbyperson and ReviseBudgetExecutor passes no "
-        + "requester (it records the person in sprk_revisedby). Tracked by https://github.com/spaarke-dev/spaarke/issues/1777, "
-        + "accepted by the ontology main session (round 95). Until then a creator's F3 move of a revision out of isolation "
-        + "fails closed (the column is absent, so the creator cannot be told).");
-
-    /// <summary>The created tables without the creator-person column, apart from the one pending table; and that pending
-    /// table itself when its entry is stale (it now carries the column, or nothing creates it).</summary>
-    private static List<string> MissingCreatorPersonColumn(
-        IReadOnlySet<string> created, IReadOnlySet<string> stamped, (string Table, string Reason) pending)
-    {
-        var missing = created
-            .Where(t => !stamped.Contains(t) && !string.Equals(t, pending.Table, StringComparison.OrdinalIgnoreCase))
+    private static List<string> MissingCreatorPersonColumn(IReadOnlySet<string> created, IReadOnlySet<string> stamped) =>
+        created
+            .Where(t => !stamped.Contains(t))
             .OrderBy(t => t, StringComparer.Ordinal)
             .ToList();
-        if (stamped.Contains(pending.Table) || !created.Contains(pending.Table))
-            missing.Add($"{pending.Table} (stale pending entry: delete CreatorPersonColumnPending)");
-        if (!pending.Reason.Contains("issues/1777", StringComparison.Ordinal))
-            missing.Add($"{pending.Table} (the pending entry must cite its tracking issue)");
-        return missing;
-    }
 
-    [Fact(DisplayName = "Task 182: negative control — the creator-person exemption covers its one table and nothing else, and goes stale")]
-    public void CreatorPersonExemption_NegativeControl()
+    [Fact(DisplayName = "Task 147: negative control — a created table without the creator-person column is reported, with no exemption for any table")]
+    public void CreatorPersonColumn_NegativeControl()
     {
         var created = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_budgetrevision", "sprk_todo", "sprk_newchild" };
-        var stamped = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_todo" };
 
-        // Another table without the column is still reported; the exempted one is not.
-        Assert.Equal(new[] { "sprk_newchild" }, MissingCreatorPersonColumn(created, stamped, CreatorPersonColumnPending));
+        // A table the stamped set lacks is reported, including the former exemption's table: nothing is waived.
+        Assert.Equal(new[] { "sprk_budgetrevision", "sprk_newchild" },
+            MissingCreatorPersonColumn(created, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_todo" }));
 
-        // The exemption goes stale once the table carries the column, or once nothing creates it.
-        Assert.Contains(MissingCreatorPersonColumn(created, new HashSet<string>(stamped) { "sprk_budgetrevision", "sprk_newchild" }, CreatorPersonColumnPending),
-            p => p.StartsWith("sprk_budgetrevision (stale", StringComparison.Ordinal));
-        Assert.Contains(MissingCreatorPersonColumn(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_todo" }, stamped, CreatorPersonColumnPending),
-            p => p.StartsWith("sprk_budgetrevision (stale", StringComparison.Ordinal));
+        // A table that carries the column is not reported.
+        Assert.Empty(MissingCreatorPersonColumn(created,
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_budgetrevision", "sprk_todo", "sprk_newchild" }));
 
-        // Aimed at another table, it no longer covers the budget revision.
-        Assert.Contains("sprk_budgetrevision",
-            MissingCreatorPersonColumn(created, stamped, ("sprk_newchild", CreatorPersonColumnPending.Reason)));
+        // The real stamped set carries the budget revision (ontology task 147), so it is not reported.
+        Assert.Contains("sprk_budgetrevision", Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.StampedChildTables);
     }
 
     [Fact(DisplayName = "Task 146 c1-r1: every child table a census create writes carries the creator-person column, inside the codified set")]
@@ -2074,7 +2055,7 @@ public class RecordOwnerAssignmentCensusTests
         var created = Census.Where(e => e.Disposition is Disposition.Routed or Disposition.Seam).Select(e => e.Table)
             .Append("sprk_spendsnapshot") // an unscanned keyed UpsertRequest (SpendSnapshotService) — see UnscannedWriters
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var missing = MissingCreatorPersonColumn(created, stamped, CreatorPersonColumnPending);
+        var missing = MissingCreatorPersonColumn(created, stamped);
         Assert.True(missing.Count == 0,
             "Child tables the server creates app-only, without the creator-person column in RecordCreatorPerson."
             + "StampedChildTables (and scripts/Set-ChildRecordCreatorPersonSchema.ps1): " + string.Join(", ", missing));

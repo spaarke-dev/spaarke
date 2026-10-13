@@ -221,6 +221,81 @@ public class DecisionActionExecutorsTests
             new DecisionRecordRef("sprk_budget", BudgetId));
     }
 
+    /// <summary>An ownership resolver that records the context it was asked about and answers as the real one does for a
+    /// requester given by systemuserid: the owner team, with <c>CreatedByPerson</c> = that user (ontology task 147).</summary>
+    private static Mock<IRecordOwnershipResolver> OwnerThatRecordsTheRequester(Action<RecordOwnershipContext> capture)
+    {
+        var owner = new Mock<IRecordOwnershipResolver>();
+        owner.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RecordOwnershipContext context, CancellationToken _) =>
+            {
+                capture(context);
+                return new RecordOwnerResolution(RecordOwnerOutcome.Owned, MatterTeam, null, null)
+                {
+                    CreatedByPerson = context.RequestedBy?.SystemUserId,
+                };
+            });
+        return owner;
+    }
+
+    [Fact]
+    public async Task ReviseBudget_RecordsTheActingUserAsTheCreatorPerson_D135()
+    {
+        RecordOwnershipContext? asked = null;
+        var writer = new WriterHarness();
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, BudgetUser(MatterId), writer.Build(),
+            OwnerThatRecordsTheRequester(c => asked = c).Object, new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance);
+
+        var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        asked.Should().NotBeNull();
+        asked!.RequestedBy.Should().NotBeNull("the person whose decision commit caused the revision is the requester");
+        asked.RequestedBy!.SystemUserId.Should().Be(CallerUserId);
+
+        var revision = writer.Created.Should().ContainSingle().Which;
+        revision.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(MatterTeam, "the person decides nothing about the owner");
+        var person = revision.GetAttributeValue<EntityReference>("sprk_createdbyperson");
+        person.Should().NotBeNull("sprk_budgetrevision is a stamped child table, so ApplyTo writes the creator person");
+        person.LogicalName.Should().Be("systemuser");
+        person.Id.Should().Be(CallerUserId);
+    }
+
+    [Fact]
+    public async Task ReviseBudget_WhenTheOwnerDecisionNamesNoPerson_RecordsNoPerson_AndStillCreatesOwnedByTheTeam()
+    {
+        var writer = new WriterHarness();
+        var executor = new ReviseBudgetExecutor(Probe(CanWrite).Object, BudgetUser(MatterId), writer.Build(), Owner().Object,
+            new FakeTimeProvider(Now), NullLogger<ReviseBudgetExecutor>.Instance);
+
+        var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Done);
+        var revision = writer.Created.Should().ContainSingle().Which;
+        revision.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(MatterTeam);
+        revision.Contains("sprk_createdbyperson").Should().BeFalse("a requester the resolver could not name records nobody (no throw)");
+    }
+
+    [Fact]
+    public async Task ReviseBudget_WhenTheCallerHasNoDataverseUser_RefusesBeforeAnyWrite_AndAsksNoOwner()
+    {
+        var probe = Probe(CanWrite);
+        probe.Setup(p => p.GetCallerSystemUserIdAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid?)null);
+        var user = BudgetUser(MatterId);
+        var writer = new WriterHarness();
+        var owner = Owner();
+        var executor = new ReviseBudgetExecutor(probe.Object, user, writer.Build(), owner.Object, new FakeTimeProvider(Now),
+            NullLogger<ReviseBudgetExecutor>.Instance);
+
+        var outcome = await executor.ExecuteAsync(Request(ReviseParams()), CancellationToken.None);
+
+        outcome.Status.Should().Be(DecisionActionStatus.Refused);
+        outcome.ReasonCode.Should().Be(DecisionActionReasons.CallerUnresolved);
+        writer.Created.Should().BeEmpty();
+        user.Patches.Should().BeEmpty();
+        owner.Verify(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task ReviseBudget_CallerWithoutWriteOnTheBudget_WritesNothing_AndRefuses()
     {
