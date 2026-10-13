@@ -236,7 +236,7 @@ public static class InviteAndGrantExternalUserEndpoint
         try
         {
             // The resolution the checks above judged — onboarding does not look the email up again.
-            var outcome = await InviteExternalUserEndpoint.ProvisionAsync(
+            var outcome = await ExternalInviteService.ProvisionAsync(
                 request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl,
                 InviteExternalUserEndpoint.InviteLinkCustomerKey(customer), logger, invitee, ct);
 

@@ -19,9 +19,14 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <c>true</c> when the grant gave access to a contact that represents an internal user and that user could not be sent
 /// the in-app notification (task 181, owner round 89). The grant itself stands. Additive.
 /// </param>
+/// <param name="Invite">
+/// Task 185 slice E (§12 I-1): what the grant did about the contact's CIAM invite — an unbound contact with an email is
+/// invited automatically. <c>null</c> for an organization grant. Additive; no other field changes.
+/// </param>
 public record GrantAccessResponse(
     Guid AccessRecordId,
     bool SpeContainerMembershipGranted,
     ExternalAccessLevel? GrantedAccessLevel = null,
     bool Narrowed = false,
-    bool NotificationFailed = false);
+    bool NotificationFailed = false,
+    GrantInviteResult? Invite = null);

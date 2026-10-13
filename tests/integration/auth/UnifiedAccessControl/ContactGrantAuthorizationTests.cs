@@ -46,7 +46,7 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// kind, flag, issuer).</para>
 /// <para>KEEP path: <c>tests/integration/auth/**</c> (ADR-038 §2, security-auth).</para>
 /// </remarks>
-public class ContactGrantAuthorizationTests
+public partial class ContactGrantAuthorizationTests
 {
     internal static readonly Guid ProjectId = Guid.Parse("14014014-0140-0140-0140-014014014014");
     internal static readonly Guid MatterId = Guid.Parse("14014014-0140-0140-0140-0140140140aa");
@@ -65,6 +65,12 @@ public class ContactGrantAuthorizationTests
     private readonly GrantPolicyTestDoubles.FlagStubParticipationService _participations = new(RootRecordFlags.None);
     private readonly GrantPolicyTestDoubles.SeamNoAccessListReader _denyReader = new();
     private readonly InMemoryContactIdentityStore _identities = new();
+
+    /// <summary>Task 185 slice E: the invite service the grant handler gets; an inert one unless a test sets it.</summary>
+    private ExternalInviteService? Invites { get; set; }
+
+    /// <summary>Task 185 slice E: the grant notifier the grant handler gets; an inert one unless a test sets it.</summary>
+    private GrantAccessNotifier? Notifier { get; set; }
 
     public ContactGrantAuthorizationTests()
     {
@@ -1479,7 +1485,8 @@ public class ContactGrantAuthorizationTests
 
     private Task<IResult> HandlerGrant(ContactGrantRequest request, HttpContext httpContext)
         => ContactGrantEndpoints.GrantAsync(
-            request, _dataverse, _participations, DenyList(), _identities, httpContext,
+            request, _dataverse, _participations, DenyList(), _identities, Invites ?? AssignedAccessTestDoubles.InertInvites(),
+            Notifier ?? AssignedAccessTestDoubles.InertNotifier(), httpContext,
             NullLogger<ContactGrantorAuthorizationFilter>.Instance, new FixedClock(Today), CancellationToken.None);
 
     internal static HttpContext Context(CallerPrincipal principal)

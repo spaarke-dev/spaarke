@@ -870,6 +870,71 @@ internal static class AssignedAccessTestDoubles
         }
     }
 
+    /// <summary>
+    /// Task 185 slice E: the CIAM account seam, recording each create instead of reaching Graph (no Key Vault, no HTTP). A
+    /// <see cref="Failure"/> that is Graph's "already exists" error becomes the production "existing account" exception.
+    /// </summary>
+    internal sealed class RecordingCiamProvisioner : Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService
+    {
+        public RecordingCiamProvisioner()
+            : base(
+                new Sprk.Bff.Api.Infrastructure.Graph.CiamGraphClientFactory(
+                    new Azure.Security.KeyVault.Secrets.SecretClient(new Uri("https://vault.test.invalid/"), NoCredential.Instance),
+                    Moq.Mock.Of<IHttpClientFactory>(),
+                    Config(),
+                    NullLogger<Sprk.Bff.Api.Infrastructure.Graph.CiamGraphClientFactory>.Instance),
+                new Sprk.Bff.Api.Services.Registration.PasswordGenerator(),
+                Config(),
+                NullLogger<Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService>.Instance)
+        {
+        }
+
+        /// <summary>Every CIAM account created, in order.</summary>
+        public List<(string Email, Guid Oid)> Created { get; } = new();
+
+        /// <summary>Every create attempted (made or failed), in order.</summary>
+        public List<string> Attempts { get; } = new();
+
+        /// <summary>Thrown by every create, as the Graph SDK throws a Graph error.</summary>
+        public Exception? Failure { get; set; }
+
+        public override Task<string> CreateCiamUserAsync(
+            string email, string? firstName, string? lastName, CancellationToken ct = default)
+        {
+            lock (Attempts)
+                Attempts.Add(email);
+            if (Failure is { } failure)
+            {
+                if (failure is Microsoft.Graph.Models.ODataErrors.ODataError graph && IsExistingAccountConflict(graph))
+                    throw new Sprk.Bff.Api.Services.Registration.CiamAccountAlreadyExistsException(email, graph);
+                throw failure;
+            }
+
+            var oid = Guid.NewGuid();
+            lock (Attempts)
+                Created.Add((email, oid));
+            return Task.FromResult(oid.ToString("D"));
+        }
+
+        private static IConfiguration Config() => new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Ciam:Instance"] = "https://test.ciamlogin.com",
+                ["Ciam:TenantId"] = "00000000-0000-0000-0000-0000000000c1",
+                ["Ciam:Domain"] = "test.onmicrosoft.com",
+                ["Ciam:GraphProvisioner:ClientId"] = "provisioner",
+                ["Ciam:GraphProvisioner:CertificateName"] = "cert",
+            })
+            .Build();
+    }
+
+    /// <summary>Task 185 slice E: the one service the invite service resolves at invite time — the CIAM double.</summary>
+    internal sealed class CiamOnlyServices(Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService ciam) : IServiceProvider
+    {
+        public object? GetService(Type serviceType)
+            => serviceType == typeof(Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService) ? ciam : null;
+    }
+
     /// <summary>Everything one materializer needs, wired, with the production materializer between the doubles.</summary>
     internal sealed class Harness
     {
@@ -985,6 +1050,35 @@ internal static class AssignedAccessTestDoubles
         /// <summary>Task 036: every portal email the notifier sent (external-contact grants), recorded, never sent.</summary>
         public RecordingEmailService Emails { get; } = new();
 
+        /// <summary>Task 185 slice E: the CIAM accounts the invite core created, recorded, never made.</summary>
+        public RecordingCiamProvisioner Ciam { get; } = new();
+
+        /// <summary>
+        /// Task 185 slice E: the PRODUCTION shared invite service over this harness's grant table, CIAM double, recording
+        /// email service and identity store (the REAL binder), with the portal URL and the "acme" customer key.
+        /// </summary>
+        public Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService Invites => InvitesOver(Identities);
+
+        /// <summary>Task 185 slice E: <see cref="Invites"/> over ANOTHER identity store (a fixture with its own contacts).</summary>
+        /// <param name="services">What the service resolves the CIAM provisioner from; this harness's double when null.</param>
+        public Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService InvitesOver(
+            InMemoryContactIdentityStore identities, IServiceProvider? services = null)
+        {
+            var settings = new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })
+                .Build();
+            return new Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService(
+                Grants, services ?? new CiamOnlyServices(Ciam), Emails, IdentityBindingTestKit.Binder(identities), settings,
+                new Sprk.Bff.Api.Configuration.CustomerIdentity(
+                    Options.Create(new Sprk.Bff.Api.Configuration.CustomerOptions { Id = "acme" }), settings,
+                    NullLogger<Sprk.Bff.Api.Configuration.CustomerIdentity>.Instance),
+                Time, InviteLogger);
+        }
+
+        /// <summary>Task 185 slice E: the invite service's logger; set a capturing logger to assert what it writes.</summary>
+        public ILogger<Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService> InviteLogger { get; set; } =
+            NullLogger<Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService>.Instance;
+
         /// <summary>
         /// Task 114: the PRODUCTION Restricted remover over this harness's flags, share table, system users
         /// (<see cref="GrantTable.SystemUsers"/>), cache and child synchronizer.
@@ -1070,6 +1164,12 @@ internal static class AssignedAccessTestDoubles
     /// represents anyone, and a share's notification is written to an entity seam nobody reads. It never throws.
     /// </summary>
     internal static Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier InertNotifier() => new Harness().Notifier;
+
+    /// <summary>
+    /// Task 185 slice E: an invite service over an EMPTY world, for handler tests that are not about the invite: no contact
+    /// is found, so nothing is invited (it answers Failed, contact_not_active), and it never throws.
+    /// </summary>
+    internal static Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService InertInvites() => new Harness().Invites;
 
     /// <summary>
     /// Task 158 r1c-v2 (round 39 item 2): an <see cref="Spaarke.Dataverse.IGenericEntityService"/> that finds no row — the No

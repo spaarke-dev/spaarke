@@ -780,7 +780,7 @@ public class GrantorCeilingTests
         GrantExternalAccessEndpoint.GrantAccessAsync(
             request, _dataverse, _participations, DenyList(), new FixedRightsProbe(callerRights),
             AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(),
-            Context(), NullLogger<Program>.Instance, new FixedClock(Today),
+            AssignedAccessTestDoubles.InertInvites(), Context(), NullLogger<Program>.Instance, new FixedClock(Today),
             CancellationToken.None);
 
     /// <remarks>
