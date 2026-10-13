@@ -1430,6 +1430,24 @@ The owner asked for research on the practical and technical limits of access tea
   - Recommendation put to the owner: (A) home-tenant sign-in, with the BFF accepting the listed customer tenants on the external routes, and the task 141 member test as designed. The alternative is (B) guest invite plus a recorded oid set.
   - Open with the owner: A or B, approval of new registrations, and baseline access.
 
+## Round 97 (2026-10-13): OWNER: task 184 after provisioning's cross-customer review
+
+The decisions follow provisioning's review of #1801, findings F1 and F2.
+
+- **F1, account squatting: merge #1801 now, follow up in task 185.**
+  - The squatting route: someone with User.Create in spaarkeextid pre-creates `victim@acme`. Customer Y's invite then hits ExistingAccount and sets the marker, so the squatter binds to Y's contact.
+  - #1801 still narrows exposure: master binds ANY matching email, with no intent at all.
+  - Task 185 adds the invite-code proof: a single-use code, stored only as a hash, that E11 requires on both the marker leg and the grant-only leg.
+  - Provisioning approved #1801 on this basis and records 185 as a T240d PRODUCTION GATE.
+- **F2, marker age: a 30-day window, inside #1801.** E11 honours `sprk_externalinvitedon` only while it is 30 days old or less. A re-invite refreshes it, and a far-future date is refused.
+- **Deny codes: keep them distinct.** The owner accepted the small existence leak, because the distinct code helps support. `contact_not_invited` stays separate from `contact_not_found`.
+- **Organization-wide grants:** E11 counts only a grant on the contact itself as intent (as built). The owner asked how organization-grant contacts get access, and the answer was given in session.
+  - There is no self sign-up: every external person gets a CIAM identity through an invite.
+  - A new-account invite binds the oid in the same request. An existing-account invite binds on first sign-in through the marker.
+  - The organization grant supplies the access; the invite supplies the identity.
+  - Counting organization grants as intent would let any CIAM account with a matching email bind to any member contact of a granted organization, which is the squatting route made wider.
+- **Dev schema:** `Set-ExternalInviteMarkerSchema.ps1 -Apply` ran on spaarkedev1 and `-Verify` passes. The first `-Apply` hit MetadataCache lag (0x80041103) at the field-level-security step; a re-run completed it.
+
 ## C7 research
 
 - **The user:** a customer **employee without a Power Apps licence (Type 2)**, signing in with company SSO.
