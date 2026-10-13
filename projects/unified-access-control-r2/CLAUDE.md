@@ -98,6 +98,8 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
   - on a Restricted record a flagged user is refused a share, and existing shares are removed; a secure-only record may be shared with them, e.g. licensed outside counsel (round 78);
   - **Restricted wins over the last-reader rule:** the removal reports `no-internal-reader` for an admin (round 76);
   - B2B guests are flagged by `scripts/Set-ExternalFlagForB2BGuests.ps1`, run BEFORE the BFF deploy.
+    - ⛔ **Do NOT run it with `-Apply` in a Model 1 environment** (word-add-in-r1 T126, 2026-10-12). The customer's own staff sign in as B2B guests (`#EXT#`), so its "every `#EXT#` is external" rule would mark them external: Restricted shares are removed and internal-only messages are hidden. Example: Ralph Dewey on dev, correctly `sprk_isexternal = No`.
+    - The correct rule: a guest is external unless its `oid` is in the customer-workforce set recorded at provisioning. Until that rule exists, the script is Model 2 only.
 - **Accepted gap (round 77):** a flagged user can still read a NON-secure Restricted record in their own business unit through role depth.
 - **`sprk_issecure`** is field-locked and changed only through the endpoints (round 2):
   - securing needs Write;
