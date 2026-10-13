@@ -484,3 +484,11 @@ The implementation is split into slices A, B1, B2, C, D, E and F, committed in o
   - (3) Cost of doing nothing: without it, the grant flows cannot send the invite the owner required in round 98, short of copying 184's marker-first ordering into four places.
   - Its placement and DI registration go next to the existing external-access registrations.
 - **I-6. Removing the link from the stored body.** The caller (`RegistrationEmailService`) passes the body to store, with the link replaced by "[invitation link removed]", in a system-mail option. `CommunicationService` never parses bodies. The email-communication project is asked on the PR to agree this shape.
+- **I-7 (main session, after slice E). The I-4 notification on a team-owned record (every secure record).** No single owner can be notified, so the fallback order is:
+  1. the internal user who granted the partner contact its own access;
+  2. the record's `createdby`, if that is a person;
+  3. a Warning log.
+
+  The response stays `NeedsInternalInvite`.
+- **I-8 (main session). ADR-010, path C (comply).** Slice E resolved the CIAM provisioner through `IServiceProvider` because its constructor throws on hosts without `Ciam:*`. Slice F moves that validation to first use and injects the provisioner directly, so no service locator is needed. The behaviour on configured hosts is unchanged.
+- **Known limit.** When an invite fails after its marker was written, a re-grant within 30 days answers `AlreadyPending`. The first grant's response reported `Failed`, and an explicit Invite retries it.
