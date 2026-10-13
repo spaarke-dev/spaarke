@@ -251,7 +251,9 @@ ARM and Graph scopes; the browser consent works). Test ran in a throwaway ACI as
      (scopes + `preAuthorizedApplications`) with retry, or in one PATCH once the app is visible.
   3. Pre-authorizing the CIAM SPA client on each customer's CIAM API app means no consent prompt for contacts and no
      admin-consent step per customer.
-- **S1 is complete.** Cleanup: see the task notes. In `spaarkeextid` the owner deletes, in the Entra admin center, the test
+- **S1 is complete; cleanup 2026-10-12:** deleted the throwaway API app `9a5da09a-…` and test client `e2e75783-…` (in
+  `spaarkeextid`, by the spike app), the spike app `40ec7b2b-…` (Spaarke tenant) and UAMI `id-spaarke-ciam-spike-s1-dev`;
+  all spike ACIs deleted. Still owed, by the owner in the Entra admin center of `spaarkeextid`: delete, in the Entra admin center, the test
   local account `spike-s1-20261010154358@spaarke.com` (`ae9c6c5e-…`; `User.Create` cannot delete) and the spike app's
   service principal (Enterprise applications → "Spaarke CIAM Spike S1 - Dev").
 
@@ -261,7 +263,7 @@ ARM and Graph scopes; the browser consent works). Test ran in a throwaway ACI as
 |---|---|---|
 | 1 | ~~Accept option 3 (the BFF app doubles as the CIAM audience, subject to S1), with option 2 as the fallback~~ — settled by S1 (iii) 2026-10-12: option 3 is impossible (AADSTS500207), option 2 applies (the owner accepted it as the fallback) | owner |
 | 2 | Approve S1 and the §7 one-time live actions in `spaarkeextid` | owner |
-| 3 | Pending-invite marker, marker-gated E11, and the invite's "already has an account" branch (a contract and schema change to the 141 binding model) | unified-access-control-r2, then the owner |
+| 3 | Pending-invite marker, marker-gated E11, and the invite's "already has an account" branch (a contract and schema change to the 141 binding model) | unified-access-control-r2, then the owner. **UAC-r2 2026-10-12:** agrees with the principle; offers the owner a no-schema rule first (E11 binds only a contact with an active `sprk_externalrecordaccess` grant or a pending invite from Y), the marker if that is not enough; do not touch the 141 binding files until decided. "Already has an account" accepted as a UAC defect, built after the rule. `CiamUserProvisioningService` is not UAC's: T240d takes the S1 provisioner facts (login.microsoftonline.com authority, `Ciam:Domain`, `User.Create`) |
 | 4 | Invitation-link format, the SPA's customer picker and cold-landing UX, the production SPA client, and dropping `apiBaseUrl` from R3's deep-link draft | spaarke-SPA-external-access-platform-r3. R3 says its auth items are on hold for `spaarke-auth-system-of-record-r1` (R3 `design.md` §4.6) |
 | 5 | The T240c directory gains a CIAM-authenticated lookup by customer key | this project (T240c); the owner approved the service |
 | 6 | Production uses `spaarkeextid`, today recorded under `dev` in `config/environments.json`. When does the dev BFF's CIAM certificate and shared audience `4a4d5126` retire? | owner |
