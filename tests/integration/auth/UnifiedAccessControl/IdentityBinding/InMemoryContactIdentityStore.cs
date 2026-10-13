@@ -47,8 +47,19 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
         public CollisionFlag? Flag { get; set; }
+
+        /// <summary>Task 184: <c>sprk_externalinvitedon</c> — the pending-invite marker (field-secured; only the BFF writes it).</summary>
+        public DateTimeOffset? InvitedOn { get; set; }
+
         public int Version { get; set; }
     }
+
+    /// <summary>
+    /// Task 184: one contact-level <c>sprk_externalrecordaccess</c> row, as the intent read sees it. Active = statecode 0
+    /// AND an expiry on or after today — the platform side of <c>ExternalParticipationService.BuildContactGrantFilter</c>
+    /// (an undated row confers nothing).
+    /// </summary>
+    public sealed record Grant(Guid ContactId, int StateCode, DateOnly? ExpiresOn);
 
     public sealed class SystemUser
     {
@@ -67,6 +78,24 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     public Dictionary<Guid, Contact> Contacts { get; } = new();
     public Dictionary<Guid, SystemUser> SystemUsers { get; } = new();
+
+    /// <summary>Task 184: the contact-level grant rows the intent read filters.</summary>
+    public List<Grant> Grants { get; } = new();
+
+    /// <summary>Task 184: the grant leg of the intent read ends this way (a non-Read status carries no rows).</summary>
+    public LookupStatus GrantLookupStatus { get; set; } = LookupStatus.Read;
+
+    /// <summary>
+    /// Task 184: the marker leg of the intent read ends this way. <see cref="LookupStatus.ColumnMissing"/> also makes the
+    /// marker WRITE answer <see cref="StoreWriteStatus.ColumnMissing"/> — an environment before the schema script.
+    /// </summary>
+    public LookupStatus InviteMarkerStatus { get; set; } = LookupStatus.Read;
+
+    /// <summary>Task 184: the intent read throws (a transport fault the store did not convert into a status).</summary>
+    public bool ThrowOnIntentRead { get; set; }
+
+    /// <summary>Task 184: the marker write fails with this status (null = it behaves like the platform).</summary>
+    public StoreWriteStatus? MarkerWriteFailure { get; set; }
 
     /// <summary>(operation, rowId, detail) for every write that LANDED.</summary>
     public List<(string Op, Guid? RowId, string Detail)> Writes { get; } = new();
@@ -134,6 +163,10 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             EmailLookupStatus = LookupStatus.Read;
             FailReferences = FailGetContact = FailBind = FailCreate = FailFlagWrites = FailSystemUserScan = FailProbe = false;
             ScanFlaggedWithoutETags = false;
+            Grants.Clear();
+            GrantLookupStatus = InviteMarkerStatus = LookupStatus.Read;
+            ThrowOnIntentRead = false;
+            MarkerWriteFailure = null;
             FailOidLookupOnceFor.Clear();
             BeforeCreate = null;
             BeforeBind = null;
@@ -151,7 +184,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     /// seeds a binding with NO mirror (a binding an operator wrote by hand).
     /// </summary>
     public Contact AddContact(Guid id, string? email = null, string? oid = null, IdentityPlaneMarker? plane = null,
-        int stateCode = 0, CollisionFlag? flag = null, string? keyMirror = null, bool deriveKeyMirror = true)
+        int stateCode = 0, CollisionFlag? flag = null, string? keyMirror = null, bool deriveKeyMirror = true,
+        DateTimeOffset? invitedOn = null)
     {
         var mirror = keyMirror
             ?? (deriveKeyMirror && oid is not null && Guid.TryParse(oid.Trim(), out var g) && g != Guid.Empty
@@ -160,7 +194,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         var c = new Contact
         {
             Id = id, Email = email, Oid = oid, KeyMirror = mirror, Plane = plane is { } p ? (int)p : null,
-            StateCode = stateCode, Flag = flag, Version = NextVersion(),
+            StateCode = stateCode, Flag = flag, InvitedOn = invitedOn, Version = NextVersion(),
         };
         Contacts[id] = c;
         return c;
@@ -177,6 +211,14 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         };
         SystemUsers[id] = u;
         return u;
+    }
+
+    /// <summary>Task 184: seeds a contact-level grant row (active and unexpired by default).</summary>
+    public Grant AddGrant(Guid contactId, int stateCode = 0, DateOnly? expiresOn = null)
+    {
+        var g = new Grant(contactId, stateCode, expiresOn ?? DateOnly.MaxValue);
+        Grants.Add(g);
+        return g;
     }
 
     public IEnumerable<Contact> ContactsBoundTo(Guid oid)
@@ -280,7 +322,47 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         }
     }
 
+    public Task<BindIntentLookup> FindBindIntentAsync(Guid contactId, DateOnly today, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("intent");
+            AfterRead?.Invoke("intent");
+            if (ThrowOnIntentRead) throw new HttpRequestException("injected intent-read fault");
+            var hasGrant = GrantLookupStatus == LookupStatus.Read
+                && Grants.Any(g => g.ContactId == contactId && g.StateCode == 0 && g.ExpiresOn is { } e && e >= today);
+            var invitedOn = InviteMarkerStatus == LookupStatus.Read && Contacts.TryGetValue(contactId, out var c)
+                ? c.InvitedOn
+                : null;
+            return Task.FromResult(new BindIntentLookup(contactId, GrantLookupStatus, hasGrant, InviteMarkerStatus, invitedOn));
+        }
+    }
+
     // ── Writes ─────────────────────────────────────────────────────────────────────────────────────
+
+    public Task<StoreWriteResult> MarkInvitedAsync(Guid contactId, string? etag, DateTimeOffset invitedOn, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (MarkerWriteFailure is { } failure) return Task.FromResult(new StoreWriteResult(failure, Error: "injected"));
+            if (InviteMarkerStatus == LookupStatus.ColumnMissing)
+            {
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.ColumnMissing, Error: "The property 'sprk_externalinvitedon' does not exist on type 'Microsoft.Dynamics.CRM.contact'."));
+            }
+
+            // If-Match: the version when given, "*" otherwise — a missing row is 404, never created.
+            if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is not null && !VersionMatches(etag, c.Version))
+            {
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
+            }
+
+            c.InvitedOn = invitedOn;
+            c.Version = NextVersion();
+            Writes.Add(("invite-marker", contactId, invitedOn.UtcDateTime.ToString("O")));
+            return Task.FromResult(StoreWriteResult.Written);
+        }
+    }
 
     public Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct)
     {

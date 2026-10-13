@@ -282,8 +282,143 @@ public class ContactBindingDecisionTests
 
     [Fact]
     public void E11_ExactlyOneActiveUnboundUnlinkedMatch_BindsByEmail()
-        => ContactBindingDecision.Decide(Ciam(), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of())
+        // Task 184: on the CIAM plane this bind now also needs this environment's intent (here an active grant). The
+        // workforce form of this row is E11_TheWorkforceAndSystemUserPlanes_BindWithoutAnyIntent, unchanged.
+        => ContactBindingDecision.Decide(Ciam(), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of(),
+                Intent(grant: true))
             .Should().Be(new BindingDecision(BindingAction.BindByEmail, ContactA));
+
+    // ── E11 intent gate (task 184, owner round 96): the CIAM plane binds only on THIS environment's intent ─────
+
+    private static BindIntentLookup Intent(
+        bool grant = false, DateTimeOffset? invitedOn = null, LookupStatus grantStatus = LookupStatus.Read,
+        LookupStatus inviteStatus = LookupStatus.Read, Guid? contact = null, DateTimeOffset? asOf = null)
+        => new(contact ?? ContactA, grantStatus, grant, inviteStatus, invitedOn) { AsOf = asOf ?? Now };
+
+    private static BindingDecision CiamE11(BindIntentLookup? intent)
+        => ContactBindingDecision.Decide(Ciam(), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of(), intent);
+
+    // ── The marker's 30-day window and its clock-skew tolerance (owner round 97) ─────────────────────────────
+
+    /// <summary>
+    /// A marker counts while it is at most 30 days old (exactly 30 days binds) and at most 5 minutes in the future (exactly
+    /// 5 minutes binds). Older, or later than the skew, it is "no invite evidence": with no grant the deny is
+    /// <c>contact_not_invited</c>, never a fault, and nothing is flagged.
+    /// MUTATION PROOFS: dropping the window fails <c>30d+1s</c> and <c>expired-a-year</c>; <c>&lt;=</c> to <c>&lt;</c> at
+    /// the boundary fails <c>exactly-30d</c>; flipping the age comparison fails <c>fresh</c> and <c>exactly-30d</c>; ignoring
+    /// the future check fails <c>skew+1s</c> and <c>far-future</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("fresh", 0, true)]
+    [InlineData("an-hour-old", -3_600, true)]
+    [InlineData("exactly-30d", -30 * 86_400, true)]
+    [InlineData("30d+1s", -30 * 86_400 - 1, false)]
+    [InlineData("expired-a-year", -365 * 86_400, false)]
+    [InlineData("within-skew", 60, true)]
+    [InlineData("exactly-skew", 5 * 60, true)]
+    [InlineData("skew+1s", 5 * 60 + 1, false)]
+    [InlineData("far-future", 10 * 86_400, false)]
+    public void E11_Ciam_AMarker_CountsOnlyWithinItsWindow(string label, int offsetSeconds, bool binds)
+    {
+        var decision = CiamE11(Intent(invitedOn: Now.AddSeconds(offsetSeconds)));
+
+        if (binds)
+        {
+            decision.Should().Be(new BindingDecision(BindingAction.BindByEmail, ContactA), label);
+        }
+        else
+        {
+            decision.Action.Should().Be(BindingAction.Deny, label);
+            decision.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited,
+                "an expired or far-future marker is no invite evidence — not a fault ({0})", label);
+            decision.FlagContactIds.Should().BeNullOrEmpty();
+        }
+    }
+
+    [Fact]
+    public void E11_Ciam_AnExpiredMarker_WithAnActiveGrant_BindsThroughTheGrant()
+        => CiamE11(Intent(grant: true, invitedOn: Now.AddDays(-90))).Action.Should().Be(BindingAction.BindByEmail);
+
+    [Fact]
+    public void E11_Ciam_AFarFutureMarker_WithAnActiveGrant_StillBindsThroughTheGrant()
+        => CiamE11(Intent(grant: true, invitedOn: Now.AddYears(5))).Action.Should().Be(BindingAction.BindByEmail);
+
+    [Fact]
+    public void E11_Ciam_ALookupWithNoDecisionTime_CountsNoMarker()
+        // Fail closed: a caller that forgets to stamp AsOf sees every marker as far-future, never as current.
+        => CiamE11(new BindIntentLookup(ContactA, LookupStatus.Read, false, LookupStatus.Read, Now))
+            .DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+
+    [Fact]
+    public void TheWindowAndTheSkew_AreTheOwnersNumbers()
+    {
+        ContactBindingDecision.InviteMarkerWindow.Should().Be(TimeSpan.FromDays(30), "owner round 97");
+        ContactBindingDecision.InviteMarkerClockSkew.Should().Be(TimeSpan.FromMinutes(5));
+    }
+
+    [Fact]
+    public void E11_Ciam_AsksForTheIntent_BeforeItBinds()
+        => CiamE11(intent: null).Should().Be(new BindingDecision(BindingAction.NeedIntentLookup, ContactA));
+
+    [Fact]
+    public void E11_Ciam_AnActiveGrantHere_Binds()
+        => CiamE11(Intent(grant: true)).Action.Should().Be(BindingAction.BindByEmail);
+
+    [Fact]
+    public void E11_Ciam_APendingInviteHere_Binds()
+        => CiamE11(Intent(invitedOn: Now)).Action.Should().Be(BindingAction.BindByEmail);
+
+    [Fact]
+    public void E11_Ciam_NoGrantAndNoInvite_IsDeniedNotInvited_AndFlagsNothing()
+    {
+        // MUTATION (remove the intent gate): this test fails — the decision would answer BindByEmail.
+        var decision = CiamE11(Intent());
+
+        decision.Should().Be(new BindingDecision(BindingAction.Deny, DenyCode: ContactBindingDecision.DenyContactNotInvited));
+        decision.FlagContactIds.Should().BeNull("no other person is involved, so there is no collision to flag");
+    }
+
+    [Theory]
+    [InlineData(LookupStatus.Failed, LookupStatus.Read, true)]     // the grant read faulted (and the marker says invited)
+    [InlineData(LookupStatus.ColumnMissing, LookupStatus.Read, true)]
+    [InlineData(LookupStatus.Read, LookupStatus.Failed, false)]     // the marker read faulted (and a grant exists)
+    public void E11_Ciam_AFaultedIntentRead_NeverBinds_EvenWhenTheOtherLegShowsIntent(
+        LookupStatus grantStatus, LookupStatus inviteStatus, bool invited)
+    {
+        // MUTATION (treat a fault as intent): this test fails.
+        var decision = CiamE11(Intent(grant: !invited, invitedOn: invited ? Now : null, grantStatus: grantStatus,
+            inviteStatus: inviteStatus));
+
+        decision.Action.Should().Be(BindingAction.Deny);
+        decision.DenyCode.Should().Be(ContactBindingDecision.DenyContactLookupFailed);
+    }
+
+    [Fact]
+    public void E11_Ciam_AMarkerColumnNotProvisionedYet_IsNoInviteEvidence_AndTheGrantLegStillDecides()
+    {
+        // The marker is read in its own query so a BFF deployed before the schema keeps the grant evidence (task 184).
+        CiamE11(Intent(grant: true, inviteStatus: LookupStatus.ColumnMissing)).Action.Should().Be(BindingAction.BindByEmail);
+        CiamE11(Intent(inviteStatus: LookupStatus.ColumnMissing)).DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+    }
+
+    [Fact]
+    public void E11_Ciam_IntentReadForAnotherContact_IsNeverUsed()
+        => CiamE11(Intent(grant: true, contact: ContactB)).DenyCode.Should().Be(ContactBindingDecision.DenyContactLookupFailed);
+
+    [Theory]
+    [InlineData(BindingPlane.WorkforceToken)]
+    [InlineData(BindingPlane.SystemUser)]
+    public void E11_TheWorkforceAndSystemUserPlanes_BindWithoutAnyIntent(BindingPlane plane)
+    {
+        // Workforce-plane E11 is unchanged (Model 1 workforce sign-in is under separate owner discussion): it never asks
+        // for intent, and a "no intent" answer handed to it changes nothing. Pins the gate to the CIAM plane.
+        var request = new BindingRequest(plane, Caller, Email, BindingEligibility.EmailBindAndCreate);
+        var rows = ContactLookup.Of(Unbound(ContactA));
+
+        ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of()).Action.Should().Be(BindingAction.BindByEmail);
+        ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), Intent()).Action
+            .Should().Be(BindingAction.BindByEmail);
+    }
 
     [Fact]
     public void TheDecisionAsksForEachLookupOnlyWhenItNeedsIt()

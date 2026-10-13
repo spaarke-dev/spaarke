@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using FluentAssertions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -351,5 +352,176 @@ public class DataverseContactIdentityStoreTests
         DataverseContactIdentityStore.TryParseJson("<html>gateway timeout</html>").Should().BeNull();
         using var doc = DataverseContactIdentityStore.TryParseJson("{\"value\":[]}");
         doc.Should().NotBeNull();
+    }
+
+    // ── Task 184: the bind-intent reads and the pending-invite marker ─────────────────────────────────────────
+
+    [Fact]
+    public void TheIntentGrantLeg_IsTheReadPathsOwnActiveUnexpiredContactGrantFilter()
+    {
+        var contact = Guid.NewGuid();
+        var today = new DateOnly(2026, 10, 13);
+
+        var path = DataverseContactIdentityStore.BuildActiveContactGrantPath(contact, today);
+
+        path.Should().StartWith("sprk_externalrecordaccesses?");
+        path.Should().Contain(ExternalParticipationService.BuildContactGrantFilter(contact, today),
+            "\"active\" must mean what it means where access is decided");
+        path.Should().Contain($"_sprk_contact_value eq {contact}").And.Contain("statecode eq 0")
+            .And.Contain("sprk_expiresdate ge 2026-10-13", "an expired or deactivated grant is no intent");
+        path.Should().Contain("$top=1");
+        path.Should().Contain("$select=sprk_externalrecordaccessid,_sprk_contact_value",
+            "the leg checks each row is a grant row about THIS contact");
+    }
+
+    [Fact]
+    public void TheMarker_IsReadInItsOwnQuery_NeverInTheBindingSelect()
+    {
+        var contact = Guid.NewGuid();
+
+        DataverseContactIdentityStore.BuildInviteMarkerPath(contact)
+            .Should().Be($"contacts({contact:D})?$select=contactid,sprk_externalinvitedon");
+        DataverseContactIdentityStore.ContactSelect.Should().NotContain(ContactBindingDecision.ExternalInvitedOnColumn,
+            "a BFF deployed before the column would otherwise fail every binding read, on every plane");
+    }
+
+    // ── Task 184 (fix round 1, F4-1): how each intent leg's answer is read ─────────────────────────────────
+
+    private static readonly Guid IntentContact = Guid.Parse("CCCCCCCC-0000-4000-8000-000000000184");
+    private static readonly Guid OtherContact = Guid.Parse("DDDDDDDD-0000-4000-8000-000000000184");
+
+    private static string GrantRow(Guid? id, Guid? contact)
+        => "{" + string.Join(",", new[]
+        {
+            id is null ? null : $"\"sprk_externalrecordaccessid\":\"{id:D}\"",
+            contact is null ? null : $"\"_sprk_contact_value\":\"{contact:D}\"",
+        }.Where(s => s is not null)) + "}";
+
+    /// <summary>
+    /// The grant leg: ONLY a row with its id and this contact's id is a grant; an empty array is a read "no grant"; every
+    /// answer that is not what the query asked for is a fault (the decision denies <c>contact_lookup_failed</c>), never
+    /// "no grant" and never "a grant". MUTATION PROOF (M17): "any successful response is a grant" fails the
+    /// <c>{"value":[]}</c> row and every Failed row.
+    /// </summary>
+    [Theory]
+    [InlineData("good-row", LookupStatus.Read, true)]
+    [InlineData("empty-array", LookupStatus.Read, false)]
+    [InlineData("no-value-array", LookupStatus.Failed, false)]
+    [InlineData("value-not-an-array", LookupStatus.Failed, false)]
+    [InlineData("row-without-id", LookupStatus.Failed, false)]
+    [InlineData("row-without-contact", LookupStatus.Failed, false)]
+    [InlineData("row-for-another-contact", LookupStatus.Failed, false)]
+    [InlineData("not-json", LookupStatus.Failed, false)]
+    [InlineData("no-body", LookupStatus.Failed, false)]
+    [InlineData("json-not-an-object", LookupStatus.Failed, false)]
+    public void TheGrantLeg_IsAGrant_OnlyForAnIdentifiedRowAboutThisContact(
+        string scenario, LookupStatus expectedStatus, bool expectedGrant)
+    {
+        var body = scenario switch
+        {
+            "good-row" => "{\"value\":[" + GrantRow(Guid.NewGuid(), IntentContact) + "]}",
+            "empty-array" => "{\"value\":[]}",
+            "no-value-array" => "{\"@odata.context\":\"x\"}",
+            "value-not-an-array" => "{\"value\":{}}",
+            "row-without-id" => "{\"value\":[" + GrantRow(null, IntentContact) + "]}",
+            "row-without-contact" => "{\"value\":[" + GrantRow(Guid.NewGuid(), null) + "]}",
+            "row-for-another-contact" => "{\"value\":[" + GrantRow(Guid.NewGuid(), OtherContact) + "]}",
+            "not-json" => "<html>gateway timeout</html>",
+            "no-body" => null,
+            "json-not-an-object" => "[]",
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
+
+        DataverseContactIdentityStore.InterpretGrantLeg(LookupStatus.Read, body, IntentContact)
+            .Should().Be((expectedStatus, expectedGrant));
+    }
+
+    [Theory]
+    [InlineData(LookupStatus.Failed)]
+    [InlineData(LookupStatus.ColumnMissing)]
+    public void TheGrantLeg_KeepsAFaultedRead_AndIgnoresItsBody(LookupStatus fault)
+        => DataverseContactIdentityStore.InterpretGrantLeg(
+                fault, "{\"value\":[" + GrantRow(Guid.NewGuid(), IntentContact) + "]}", IntentContact)
+            .Should().Be((fault, false));
+
+    /// <summary>
+    /// The marker leg: a 404 is "this contact was never invited" (it does not exist); a column the environment lacks is
+    /// ColumnMissing (no evidence — the grant leg decides); a body that is absent, not JSON, or about another contact is
+    /// a fault — never "not invited" and never "invited". MUTATION PROOF (M22): reporting an unreadable body as Read fails
+    /// the not-json, no-body, not-an-object and another-contact rows.
+    /// </summary>
+    [Theory]
+    [InlineData("marked", LookupStatus.Read, true)]
+    [InlineData("unmarked", LookupStatus.Read, false)]
+    [InlineData("not-a-date", LookupStatus.Read, false)]
+    [InlineData("not-found", LookupStatus.Read, false)]
+    [InlineData("not-json", LookupStatus.Failed, false)]
+    [InlineData("no-body", LookupStatus.Failed, false)]
+    [InlineData("json-not-an-object", LookupStatus.Failed, false)]
+    [InlineData("another-contact", LookupStatus.Failed, false)]
+    [InlineData("no-contact-id", LookupStatus.Failed, false)]
+    public void TheMarkerLeg_IsEvidence_OnlyForThisContactsReadableRow(
+        string scenario, LookupStatus expectedStatus, bool expectedInvited)
+    {
+        var (code, body) = scenario switch
+        {
+            "marked" => (HttpStatusCode.OK, $"{{\"contactid\":\"{IntentContact:D}\",\"sprk_externalinvitedon\":\"2026-10-13T09:30:05Z\"}}"),
+            "unmarked" => (HttpStatusCode.OK, $"{{\"contactid\":\"{IntentContact:D}\",\"sprk_externalinvitedon\":null}}"),
+            "not-a-date" => (HttpStatusCode.OK, $"{{\"contactid\":\"{IntentContact:D}\",\"sprk_externalinvitedon\":\"soon\"}}"),
+            "not-found" => (HttpStatusCode.NotFound, (string?)null),
+            "not-json" => (HttpStatusCode.OK, "<html>gateway timeout</html>"),
+            "no-body" => (HttpStatusCode.OK, null),
+            "json-not-an-object" => (HttpStatusCode.OK, "[]"),
+            "another-contact" => (HttpStatusCode.OK, $"{{\"contactid\":\"{OtherContact:D}\",\"sprk_externalinvitedon\":\"2026-10-13T09:30:05Z\"}}"),
+            "no-contact-id" => (HttpStatusCode.OK, "{\"sprk_externalinvitedon\":\"2026-10-13T09:30:05Z\"}"),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario)),
+        };
+
+        var (status, invitedOn) = DataverseContactIdentityStore.InterpretMarkerLeg(LookupStatus.Read, code, body, IntentContact);
+
+        status.Should().Be(expectedStatus);
+        (invitedOn is not null).Should().Be(expectedInvited);
+        if (expectedInvited)
+        {
+            invitedOn.Should().Be(new DateTimeOffset(2026, 10, 13, 9, 30, 5, TimeSpan.Zero));
+        }
+    }
+
+    [Theory]
+    [InlineData(LookupStatus.ColumnMissing)]
+    [InlineData(LookupStatus.Failed)]
+    public void TheMarkerLeg_KeepsAFaultedRead_AndIgnoresItsBody(LookupStatus fault)
+        => DataverseContactIdentityStore.InterpretMarkerLeg(fault, HttpStatusCode.BadRequest,
+                $"{{\"contactid\":\"{IntentContact:D}\",\"sprk_externalinvitedon\":\"2026-10-13T09:30:05Z\"}}", IntentContact)
+            .Should().Be((fault, (DateTimeOffset?)null));
+
+    [Fact]
+    public void TheMarkerWrite_CarriesOnlyTheMarker_InUtc()
+    {
+        var payload = DataverseContactIdentityStore.InviteMarkerPayload(
+            new DateTimeOffset(2026, 10, 13, 11, 30, 5, TimeSpan.FromHours(2)));
+
+        payload.Should().ContainSingle().Which.Should().Be(
+            new KeyValuePair<string, object?>("sprk_externalinvitedon", "2026-10-13T09:30:05Z"));
+    }
+
+    [Theory]
+    [InlineData("{\"error\":{\"code\":\"0x80048d19\",\"message\":\"Error identified in Payload ... The property 'sprk_externalinvitedon' does not exist on type 'Microsoft.Dynamics.CRM.contact'.\"}}", true)]
+    [InlineData("Invalid property 'sprk_externalinvitedon' was found in entity 'Microsoft.Dynamics.CRM.contact'.", true)]
+    [InlineData("The property 'sprk_somethingelse' does not exist on type 'Microsoft.Dynamics.CRM.contact'.", false)]
+    [InlineData("Principal user is missing prvWriteContact privilege (sprk_externalinvitedon)", false)]
+    [InlineData(null, false)]
+    public void AMissingMarkerColumn_IsToldApartFromEveryOtherWriteFault(string? body, bool missing)
+        => DataverseContactIdentityStore.IsWriteColumnMissing(body, "sprk_externalinvitedon").Should().Be(missing);
+
+    [Theory]
+    [InlineData("{\"sprk_externalinvitedon\":\"2026-10-13T09:30:05Z\"}", true)]
+    [InlineData("{\"sprk_externalinvitedon\":null}", false)]
+    [InlineData("{\"sprk_externalinvitedon\":\"not a date\"}", false)]
+    [InlineData("{}", false)]
+    public void TheMarker_ReadsAsEvidence_OnlyWhenItIsADateTime(string json, bool evidence)
+    {
+        using var doc = JsonDocument.Parse(json);
+        (DataverseContactIdentityStore.ParseInvitedOn(doc.RootElement) is not null).Should().Be(evidence);
     }
 }
