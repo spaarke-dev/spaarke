@@ -158,6 +158,7 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
 
 ## 6. Gotchas — do not re-learn
 
+- 2026-10-12 — **Signal pair type is a Lookup on spaarkedev1 (task 140), and the branch code still writes text until task 141.** Do not deploy a BFF containing `Services/Signals/**` to ANY environment until 141 merges, and do not deploy a post-141 BFF to an environment that lacks the 140 schema. Any push to master that touches API code auto-deploys the BFF to dev (`deploy-bff-api.yml`), so #1111 must not merge before 141. Guards: 141 adds a schema-agreement test (code vs `src/dataverse/solutions/SpaarkeMaster` Entity.xml); 035 has a schema pre-flight step against the target environment. Master has no Signal code today, so the live dev BFF is unaffected.
 - 2026-10-09 — **Ontology code lives on the project branch, not master.** `Services/Signals/**` (writer, catalog, plan service, validators) exists only on `docs/ontology-platform-design` (draft #1111) and reaches master with #1111. Ontology task lanes branch from `origin/docs/ontology-platform-design` and open PRs with `--base docs/ontology-platform-design`; publish-size deltas are measured against that branch. Only non-ontology fixes (other areas' code) go to master. 044/051/070 were first launched off master by mistake (corrected same day).
 
 - 2026-10-02 — **MCP `create_table` can't set the publisher** (env default prefix `new`); logical names are immutable → delete-and-recreate. Use the Web API recipe.
