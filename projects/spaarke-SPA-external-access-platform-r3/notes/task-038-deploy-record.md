@@ -45,17 +45,44 @@ This redeploys the exact files captured in A6, with the same hash verification a
 
 ## Phase C: live probes (step 4 of the POML), separate approval
 
-Need test identities (a CIAM partner test account and a workforce test user). Read-only where possible; test rows created (intake submit, message, document upload) are deleted afterwards through the R3 delete-own routes. Exact commands will be shown before Phase C runs.
+Owner said "yes let's proceed" (2026-10-13) to preparing it. **Plan below; nothing has run.** Tokens stay in a PowerShell variable and are never printed; evidence records status codes and masked claims only (`tid`/`aud` first 8 characters, `scp`, `idtyp`).
 
-| Probe | Expected |
-|---|---|
-| CIAM token on a workforce-only route | 401 (FR-23) |
-| CIAM token, audience `{appId}` and `api://{appId}`, on `/api/v1/external/me` | 200 both (FR-22) |
-| `/me/entitlements` as a workforce user | `legal-front-door` + `policy-library`, `intakeRequestTypes` present (FR-19) |
-| Message read and send on an accessible record; 403 outside | FR-04 / FR-11 |
-| Intake submit as workforce | 201 (FR-05) |
-| Notification feed shows the new message | FR-08 |
-| Document upload + own delete on a matter | FR-24 / FR-26 |
+**Identities.** Workforce: the owner's member account `ralph.schroeder@spaarke.com` through Azure CLI (no CIAM-style restriction in the Spaarke tenant). CIAM: an interactive browser sign-in by the owner is the only way to get a CIAM user token (CLI and device-code sign-in to `spaarkeextid` are refused, T240d S1), so the CIAM probes run in the owner's browser after the SPA deploy (`notes/task-040-spa-dev-deploy-plan.md`).
+
+**Test record.** A dev matter the owner names, which the workforce account can open. Outside-access probes use a random GUID (an unknown record and a no-access record are denied identically, so it exercises the same 403 path).
+
+### C-W: workforce probes (session, PowerShell)
+
+```powershell
+$b   = 'https://spaarke-bff-dev.azurewebsites.net/api/v1/external'
+$tok = az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c --query accessToken -o tsv
+$h   = @{ Authorization = "Bearer $tok" }
+# C-W0: print masked claims only (tid, aud, scp, idtyp) by decoding the payload locally
+```
+
+| # | Request | Expected | Creates data |
+|---|---|---|---|
+| C-W1 | `GET $b/me` | 200, plane = workforce | no |
+| C-W2 | `GET $b/me/entitlements` | 200; modules include `legal-front-door` and `policy-library`; `intakeRequestTypes` = all four (FR-19) | no |
+| C-W3 | `GET $b/matters/{testMatter}/messages`, then the same for a random GUID | 200; 403 (FR-04 / FR-11) | no |
+| C-W4 | `POST $b/matters/{testMatter}/messages` body `{"sprk_body":"[R3 probe 038] safe to delete"}`; then `POST` with an extra `attachments` property | 201 (or 200) and no email (standing rule); the second is refused (FR-11, no attachments) | **1 message** |
+| C-W5 | `GET $b/notifications` | 200; record whether the new message appears (the poster's own message may be excluded by design) (FR-08) | no |
+| C-W6 | `POST $b/servicerequests` body `{"requestType":100000002,"title":"[R3 probe 038] safe to delete","answers":{"question":"probe"}}` | 201 with the new id (FR-05) | **1 service request** |
+| C-W7 | `POST $b/matters/{testMatter}/documents`, multipart field `file` = a 1 KB text file `r3-probe-038.txt` | 201 with the document id (FR-24) | **1 document + 1 SPE file** |
+| C-W8 | `DELETE $b/documents/{docId}`; `DELETE $b/servicerequests/{srId}` | 204 both (FR-26) | removes C-W6/C-W7 |
+
+**Cleanup.** C-W8 deletes the document and the service request through R3's own delete routes. R3 has **no** route to delete a message, so the C-W4 message is removed by a Dataverse delete of the id the POST returns (table confirmed from that response), with the owner's approval of that one delete at the time, or it is left on the test matter marked "safe to delete" if the owner prefers.
+
+### C-C: CIAM probes (owner's browser, after the SPA deploy)
+
+| # | Step | Expected |
+|---|---|---|
+| C-C1 | Sign in to the dev SPA as a CIAM test partner; DevTools Network: the `/api/v1/external/me` request | 200; token `aud` = `4a4d5126...` (bare GUID, v2), `iss` = the `ciamlogin.com` v2 issuer (FR-22) |
+| C-C2 | DevTools console: `fetch('https://spaarke-bff-dev.azurewebsites.net/api/me', {headers:{Authorization:'Bearer ' + <the same token>}})` and read the status in the Network tab | 401 (FR-23: a CIAM token on a workforce route) |
+
+The `api://{appId}` audience form cannot be produced live: the CIAM API app issues v2 tokens, whose `aud` is always the bare GUID. That form stays covered by task 010's unit tests (`BuildCiamValidAudiences`); recorded as not live-testable.
+
+**Rollback.** Probes change no configuration. If a probe shows a regression in existing (non-R3) behaviour, BFF rollback means redeploying an earlier master commit, which is owned by whoever deploys dev next (see Phase B).
 
 ## Measurements
 
