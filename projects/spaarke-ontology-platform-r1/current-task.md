@@ -34,7 +34,7 @@ Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-d
 
 ## D-134/D-135 work
 
-- **#1665 D-134 commit:** an opus implementer is running in `C:\wts-043`. It adds `ForUserTeam`, the shared assignee helper (one enabled user, else the To Do's own team; a fault fails closed) and the item-7 secure-wins rule, with tests and mutations. After it reports: uac-r2 reviews the factory and the item-7 path, then the base merge (with #1780) + C2 reason rewrite, then merge.
+- **#1665 D-134:** commit `ba9945149` + fix round `736109d24` (F1 service-request filing; F2 eligible persons only, `rootIsRestricted: null`; K2 pinned; ledger refs). Our re-check APPROVE; uac-r2 is re-checking the fix diff. Then merge the base (with #1780) + rewrite the C2 reason → merge.
 - **Task 148** (reconciler) is written. uac-r2 provides `SecureChildReconciler.ReownOrdinaryRowAsync` in its own PR (owner sign-off; we review it).
 - **Task 147** (budget revision creator-person) starts once #1780 merges.
 

@@ -66,7 +66,7 @@
     </files>
   </knowledge>
 
-  <notes>Created 2026-10-12 (D-131). Two adversarial passes (auth/security). Absorbs the "F3 SignalWriter no-core ownership" follow-up lane.</notes>
+  <notes>Created 2026-10-12 (D-131). Two adversarial passes (auth/security). Absorbs the "F3 SignalWriter no-core ownership" follow-up lane. D-135 (c)/(d) open: on dev, sprk_createdbyperson is not yet field-secured and not in SpaarkeCore. Do not rely on it being BFF-only (no read path may treat it as trustworthy proof of the creator until the owner closes (c)); the write and stamp are still required.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

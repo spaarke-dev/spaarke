@@ -73,7 +73,7 @@
     </files>
   </knowledge>
 
-  <notes>Created 2026-10-12 (D-131..D-133). Two adversarial passes (security) per root CLAUDE.md §8.5; uac-r2 reviews. UAC task 182 carries the one-line `LineageColumnByCoreEntity` typed-core filter in DecisionRecordWriter.cs (`Roots.Contains(l.Value) &amp;&amp; l.Key == l.Value`), so the map survives the sprk_regarding* lineage columns; approved by the ontology main session 2026-10-12 (option b). Start from the code after 182 merges; do not re-add the filter.</notes>
+  <notes>Created 2026-10-12 (D-131..D-133). Two adversarial passes (security) per root CLAUDE.md §8.5; uac-r2 reviews. UAC task 182 carries the one-line `LineageColumnByCoreEntity` typed-core filter in DecisionRecordWriter.cs (`Roots.Contains(l.Value) &amp;&amp; l.Key == l.Value`), so the map survives the sprk_regarding* lineage columns; approved by the ontology main session 2026-10-12 (option b). Start from the code after 182 merges; do not re-add the filter. D-135 (c)/(d) open: on dev, sprk_createdbyperson is not yet field-secured and not in SpaarkeCore. Do not rely on it being BFF-only (no read path may treat it as trustworthy proof of the creator until the owner closes (c)); the write and stamp are still required.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

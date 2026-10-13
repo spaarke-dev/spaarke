@@ -3,7 +3,7 @@
   <metadata>
     <title>Follow the assignee: TodoAssigneeOwnerReconciliationJob re-owns a personal To Do's Signals and Decision Records to its current Assigned To's team (D-135 item 2)</title>
     <phase>4c Standard child-record contract (D-131)</phase>
-    <gate>blocked: 142 and 143 merged; #1665 (D-134 helper + ForUserTeam) merged; UAC's ReownOrdinaryRowAsync PR merged and owner-approved</gate>
+    <gate>blocked: 142 and 143 merged; #1665 (D-134 helper + ForUserTeam) merged; UAC task 183 (ReownOrdinaryRowAsync, owner-approved round 96) merged</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>New scheduled job that changes record ownership (security-relevant).</rigor-reason>
@@ -42,7 +42,7 @@
   <constraints>
     <constraint source="uac-r2 F1 / D-34">"Personal" is decided from LIVE filing: the To Do's current core (CoreAncestorResolver) plus each row's live sprk_regarding{matter,project,workassignment,servicerequest} stamps. Never use sprk_corerecordid/type (immutable decision context) to select or skip. Rows are selected by sprk_regardingtodo = To Do id. A To Do that is filed now → its rows are left to the re-file rule (skip, count SkippedCored); a To Do un-filed since → its rows come in.</constraint>
     <constraint source="uac-r2 F2">Two passes: every 5 minutes, To Dos with modifiedon after a watermark; nightly, a full recompute of EVERY personal-To-Do Signal and DR against the helper's CURRENT answer (catches assignee BU moves, disable/enable, sprk_primarycontact relinks with no To Do edit). Per-run bounds: page cap and carry-over cursor as in the scaffold.</constraint>
-    <constraint source="uac-r2 F3">All re-owns (Signals AND DRs) go through UAC's `SecureChildReconciler.ReownOrdinaryRowAsync(table, id, teamId, ct)` — one place for the Secure refusals. Do not use SignalWriter.ReassignNoCoreOwnerAsync and do not grant any identity Write on sprk_decisionrecord. A refusal from that entry point is counted (SkippedSecure), never retried as an error.</constraint>
+    <constraint source="uac-r2 F3">All re-owns (Signals AND DRs) go through UAC's `SecureChildReconciler.ReownOrdinaryRowAsync(table, id, teamId, ct)` — one place for the Secure refusals. Do not use SignalWriter.ReassignNoCoreOwnerAsync and do not grant any identity Write on sprk_decisionrecord. It returns a typed outcome (UAC task 183): Reowned → Reowned; AlreadyOwned → AlreadyApplied; RefusedSecure → SkippedSecure; RefusedNotTeamOwned → SkippedUserOwned; Failed → RepairFailures (run partial). Refusals are counted, never retried as errors.</constraint>
     <constraint source="D-134/D-130">Expected owner per To Do: the shared helper → exactly one enabled user → ResolveOwnerAsync(RecordOwnershipContext.ForUserTeam(user)); otherwise the To Do's own team. Before writing a row, resolve its parents with ForParents (secure wins): SRO or Refused → skip and count; a row already owned by the Secure team → skip. Write only rows whose ownerid differs. Memoise the expected owner per To Do per run.</constraint>
     <constraint source="owner">Switch `Ontology:TodoAssigneeOwner:WritesEnabled`, report-only unless explicitly true. Turning writes on is an owner decision after a dev report-only run that uac-r2 reviews. No dev data writes in this task.</constraint>
     <constraint source="project">ADR-036 IScheduledJob; BFF hygiene §10 (publish-size delta); census entries for the new owner-write call sites; never use --no-verify or bare git stash; you cannot write .claude/.</constraint>
