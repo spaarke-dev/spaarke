@@ -9,14 +9,16 @@
 
 import { renderHook, act } from '@testing-library/react';
 import { useStreamingInsert } from '../useStreamingInsert';
-import type {
-  IDocumentStreamStartEvent,
-  IDocumentStreamTokenEvent,
-  IDocumentStreamEndEvent,
-  IDocumentReplaceEvent,
-  IProgressEvent,
-} from '../../../SprkChat/types';
+import type { IDocumentStreamEvent } from '../../../SprkChat/types';
 import type { StreamingInsertHandle } from '../StreamingInsertPlugin';
+
+// `SprkChat/types` exports the stream events only as the `IDocumentStreamEvent` union (the shape
+// `handleStreamEvent` accepts); narrow it per event type rather than importing per-event names.
+type IDocumentStreamStartEvent = Extract<IDocumentStreamEvent, { type: 'document_stream_start' }>;
+type IDocumentStreamTokenEvent = Extract<IDocumentStreamEvent, { type: 'document_stream_token' }>;
+type IDocumentStreamEndEvent = Extract<IDocumentStreamEvent, { type: 'document_stream_end' }>;
+type IDocumentReplaceEvent = Extract<IDocumentStreamEvent, { type: 'document_replace' }>;
+type IProgressEvent = Extract<IDocumentStreamEvent, { type: 'progress' }>;
 
 // ---------------------------------------------------------------------------
 // Mock the StreamingInsertPlugin handle
@@ -310,7 +312,6 @@ describe('useStreamingInsert', () => {
         type: 'document_stream_start',
         operationId: 'op-start-1',
         targetPosition: 'paragraph-5',
-        operationType: 'insert',
       };
 
       act(() => {
@@ -333,7 +334,6 @@ describe('useStreamingInsert', () => {
           type: 'document_stream_start',
           operationId: 'op-token-1',
           targetPosition: 'pos-1',
-          operationType: 'insert',
         });
       });
 
@@ -341,7 +341,6 @@ describe('useStreamingInsert', () => {
         type: 'document_stream_token',
         operationId: 'op-token-1',
         token: 'Hello',
-        index: 0,
       };
 
       act(() => {
@@ -363,7 +362,6 @@ describe('useStreamingInsert', () => {
           type: 'document_stream_start',
           operationId: 'op-end-1',
           targetPosition: 'pos-1',
-          operationType: 'insert',
         });
       });
 
@@ -371,7 +369,6 @@ describe('useStreamingInsert', () => {
         type: 'document_stream_end',
         operationId: 'op-end-1',
         cancelled: false,
-        totalTokens: 5,
       };
 
       act(() => {
@@ -393,7 +390,6 @@ describe('useStreamingInsert', () => {
           type: 'document_stream_start',
           operationId: 'op-cancel-1',
           targetPosition: 'pos-1',
-          operationType: 'insert',
         });
       });
 
@@ -402,7 +398,6 @@ describe('useStreamingInsert', () => {
           type: 'document_stream_end',
           operationId: 'op-cancel-1',
           cancelled: true,
-          totalTokens: 0,
         });
       });
 
@@ -420,7 +415,7 @@ describe('useStreamingInsert', () => {
       const replaceEvent: IDocumentReplaceEvent = {
         type: 'document_replace',
         operationId: 'op-replace-1',
-        html: '<p>Replaced content</p>',
+        content: '<p>Replaced content</p>',
       };
 
       expect(() => {
@@ -439,7 +434,6 @@ describe('useStreamingInsert', () => {
       const progressEvent: IProgressEvent = {
         type: 'progress',
         operationId: 'op-progress-1',
-        percent: 50,
         message: 'Processing...',
       };
 
@@ -464,7 +458,6 @@ describe('useStreamingInsert', () => {
           type: 'document_stream_start',
           operationId: 'full-op',
           targetPosition: 'doc-start',
-          operationType: 'insert',
         });
       });
 
@@ -477,7 +470,6 @@ describe('useStreamingInsert', () => {
           type: 'document_stream_token',
           operationId: 'full-op',
           token: 'Hello',
-          index: 0,
         });
       });
       act(() => {
@@ -485,7 +477,6 @@ describe('useStreamingInsert', () => {
           type: 'document_stream_token',
           operationId: 'full-op',
           token: ' ',
-          index: 1,
         });
       });
       act(() => {
@@ -493,7 +484,6 @@ describe('useStreamingInsert', () => {
           type: 'document_stream_token',
           operationId: 'full-op',
           token: 'World',
-          index: 2,
         });
       });
 
@@ -505,7 +495,6 @@ describe('useStreamingInsert', () => {
           type: 'document_stream_end',
           operationId: 'full-op',
           cancelled: false,
-          totalTokens: 3,
         });
       });
 

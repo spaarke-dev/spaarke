@@ -11,7 +11,7 @@ Whenever you add or modify a service registration in any `*Module.cs` file insid
 ## Read These Files
 1. `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs` (`AddPublicContractsFacade` + `AddNullObjectsForCompoundOff`) — canonical symmetric pair
 2. `src/server/api/Sprk.Bff.Api/Services/Ai/NullRagService.cs` — canonical P3 Fail-Fast Null peer (the double-gate gold standard)
-3. `src/server/api/Sprk.Bff.Api/Endpoints/EndpointMappingExtensions.cs` — endpoint mapping (look for `if (flag) app.MapXxx()`)
+3. `src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs` — endpoint mapping (look for `if (flag) app.MapXxx()`)
 
 ## Constraints
 - **`bff-extensions.md` §F.1**: asymmetric-registration anti-pattern is BANNED — if an endpoint maps unconditionally, its handler's injected services MUST also resolve unconditionally

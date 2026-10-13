@@ -1,6 +1,5 @@
-import type { Config } from 'jest';
-
-const config: Config = {
+/** @type {import('jest').Config} */
+module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'jest-environment-jsdom',
   roots: ['<rootDir>/src'],
@@ -25,5 +24,3 @@ const config: Config = {
   testRunner: 'jest-circus/runner',
   collectCoverage: false,
 };
-
-export default config;

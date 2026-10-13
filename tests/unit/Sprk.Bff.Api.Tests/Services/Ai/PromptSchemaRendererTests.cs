@@ -631,7 +631,7 @@ public class PromptSchemaRendererTests
         result.SchemaName.Should().Be("prompt_response");
     }
 
-    [Fact(Skip = "Render method signature changed - test calls outdated 6-parameter overload")]
+    [Fact]
     public void StructuredOutput_JsonSchemaHasCorrectProperties()
     {
         // Arrange
@@ -687,9 +687,9 @@ public class PromptSchemaRendererTests
         enumArray.Should().HaveCount(3);
         enumArray[0]!.GetValue<string>().Should().Be("contract");
 
-        // Verify numeric constraints
-        props["confidence"]!["minimum"]!.GetValue<double>().Should().Be(0);
-        props["confidence"]!["maximum"]!.GetValue<double>().Should().Be(1);
+        // minimum/maximum are stripped: Azure OpenAI strict structured output rejects them (HTTP 400)
+        props["confidence"]!.AsObject().ContainsKey("minimum").Should().BeFalse();
+        props["confidence"]!.AsObject().ContainsKey("maximum").Should().BeFalse();
 
         // Verify required array
         var required = jsonSchema["required"]!.AsArray();

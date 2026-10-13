@@ -559,7 +559,7 @@ One job runs `node scripts/check-html-css-reset.mjs --all`, verifying every Code
 |-----|---------|
 | `gated-jest` | Runs an explicit, ratchet-only list of jest suites (`ci-gated-suites.txt`) — 56 of the package's 56 suites as of 2026-09-28; fails if a listed suite is missing or if jest runs a different count than the manifest declares (no vacuous green) |
 | `typecheck` | Production-only TypeScript typecheck — fails on any production `error TS`; a pinned, equality-checked count of accepted test-file debt (68 lines as of the last re-baseline) must also match exactly |
-| `server-tests` | A namespace-prefix-filtered slice of `Sprk.Bff.Api.Tests` (office/AI/documents/domain/seam/filters/auth namespaces) with a floor assertion (`MIN_SELECTED_TESTS`) so a renamed namespace can't silently shrink coverage |
+| `server-tests` | A namespace-prefix-filtered slice of `Sprk.Bff.Api.Tests` (what the Office add-ins call: office, documents, record-search/visualization, rag send-to-index, communications send, file access, share-link auth; ~1,441 tests as of 2026-10-12, #1748/#1782) run as a 2-leg matrix (`api-office` / `rest`; checks `Server tests (office scope) (api-office)` and `(rest)`), each leg with its own floor assertion (`MIN_SELECTED_TESTS`) so a renamed namespace can't silently shrink coverage |
 | `lint` | ESLint over `shared/`, `word/`, `outlook/` with `--max-warnings 0` |
 
 **This workflow DOES fail its own run on a red job. It does NOT block a merge** — master's ruleset names only `Router` as required (see the note under [Pipeline Summary](#pipeline-summary)); each job's summary says so explicitly. The companion nightly baseline for the other 39 of 40 client packages is `client-tests.yml`.

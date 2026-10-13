@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Internal;
 using Microsoft.Extensions.Options;
 using Spaarke.Core.Cache;
 using Xunit;
@@ -20,8 +21,16 @@ namespace Spaarke.Core.Tests.Cache;
 /// </summary>
 public class DistributedCacheExtensionsTests
 {
-    private static IDistributedCache CreateMemoryCache()
-        => new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
+    private static IDistributedCache CreateMemoryCache(ISystemClock? clock = null)
+        => new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions { Clock = clock }));
+
+    /// <summary>Hand-advanced clock injected into MemoryCache so TTL expiry is driven, not slept for.</summary>
+    private sealed class ManualClock : ISystemClock
+    {
+        public DateTimeOffset UtcNow { get; private set; } = new(2026, 10, 12, 12, 0, 0, TimeSpan.Zero);
+
+        public void Advance(TimeSpan by) => UtcNow += by;
+    }
 
     public sealed record SamplePoco(string Name, int Value, IReadOnlyList<string> Tags);
 
@@ -91,7 +100,8 @@ public class DistributedCacheExtensionsTests
     public async Task GetOrCreateAsync_TtlExpires_FactoryInvokedAgain()
     {
         // Arrange
-        var cache = CreateMemoryCache();
+        var clock = new ManualClock();
+        var cache = CreateMemoryCache(clock);
         var factoryInvocations = 0;
         var ttl = TimeSpan.FromMilliseconds(50);
 
@@ -101,8 +111,8 @@ public class DistributedCacheExtensionsTests
             ct => { factoryInvocations++; return Task.FromResult(new SamplePoco("v1", 1, Array.Empty<string>())); },
             ttl);
 
-        // Wait past TTL
-        await Task.Delay(150);
+        // Move the cache's clock past the TTL (no real waiting)
+        clock.Advance(TimeSpan.FromMilliseconds(150));
 
         // Act 2: cache should be expired, factory invoked again
         var result = await cache.GetOrCreateAsync(

@@ -18,7 +18,7 @@ last-reviewed: 2026-05-16
 
 Deploy the BFF API (`Sprk.Bff.Api`) to Azure App Service.
 
-> 🟢 **.NET 10 runtime (2026-08-13, `dotnet-10-upgrade-r1` task 042)**: the BFF now targets **net10.0**; the App Service runtime string is **`DOTNETCORE|10.0`** (pipe form for `linuxFxVersion`/`az webapp config set`; colon form `DOTNETCORE:10.0` for `az webapp create --runtime`/`list-runtimes`). A runtime/binary mismatch = hard startup **503**. The framework-dependent linux-x64 publish is **~45 MB compressed** on net10 (was ~49.63 MB net8; measured baseline 44.96 MB incl. PDBs, task 031). For the **near-term dev direct-deploy** sequence and the **future prod/demo zero-downtime slot-swap** playbook (with exact `az` commands, pipe/colon forms, port-8080/no-`ASPNETCORE_URLS` rules, and Linux-no-auto-swap), see the runbook: [`projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md`](../../../projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md). Do NOT hardcode `ASPNETCORE_URLS`/`UseUrls()` or pin `RuntimeFrameworkVersion`.
+> 🟢 **.NET 10 runtime (2026-08-13, `dotnet-10-upgrade-r1` task 042)**: the BFF now targets **net10.0**; the App Service runtime string is **`DOTNETCORE|10.0`** (pipe form for `linuxFxVersion`/`az webapp config set`; colon form `DOTNETCORE:10.0` for `az webapp create --runtime`/`list-runtimes`). A runtime/binary mismatch = hard startup **503**. The framework-dependent linux-x64 deploy zip is **~37 MB** on net10 (36.5 MB measured 2026-10-12; 44.96 MB at task 031, ~49.63 MB on net8). Anything from 30 to 50 MB is normal; under 30 MB means an incomplete package. For the **near-term dev direct-deploy** sequence and the **future prod/demo zero-downtime slot-swap** playbook (with exact `az` commands, pipe/colon forms, port-8080/no-`ASPNETCORE_URLS` rules, and Linux-no-auto-swap), see the runbook: [`projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md`](../../../projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md). Do NOT hardcode `ASPNETCORE_URLS`/`UseUrls()` or pin `RuntimeFrameworkVersion`.
 
 > 🚨 **CRITICAL — Silent Deploy Failures (May 2026)**: `az webapp deploy --type zip` has been observed to return HTTP 200 + Kudu `status=4 success` while NOT actually replacing the DLLs on disk. The running .NET host holds file locks on the DLLs and Windows refuses overwrites — but the deploy mechanism reports success anyway. **Never trust the success message alone.** Always verify with SHA-256 hash comparison via Kudu VFS. The hardened `Deploy-BffApi.ps1` does this automatically; manual deploys MUST verify (see Manual Verification section below).
 
@@ -76,7 +76,7 @@ All paths are relative to the repository root. **Claude Code MUST use these exac
 - ❌ `$HOME/` or user home directory
 - ❌ Any path outside the project tree (`src/server/api/Sprk.Bff.Api/`)
 
-**Why**: Publishing to external directories produces incomplete packages (~22 MB) missing nested DLLs. The correct package from the project directory is ~45 MB.
+**Why**: Publishing to external directories produces incomplete packages (~22 MB) missing nested DLLs. The correct package from the project directory is ~37 MB (30–50 MB is normal).
 
 ---
 
@@ -97,7 +97,7 @@ All paths are relative to the repository root. **Claude Code MUST use these exac
 The deployment script handles critical packaging steps that are easy to get wrong manually:
 
 1. **Publishes from the project directory** — `dotnet publish -c Release -o ./publish` must run from `src/server/api/Sprk.Bff.Api/` so all dependencies resolve correctly
-2. **Creates a complete zip** — `Compress-Archive -Path "$PublishPath\*"` from the publish folder includes ALL nested directories and DLLs (~45 MB). A manual zip from `/tmp` or other locations may produce an incomplete package (~22 MB) that silently drops endpoints.
+2. **Creates a complete zip** — `Compress-Archive -Path "$PublishPath\*"` from the publish folder includes ALL nested directories and DLLs (~37 MB). A manual zip from `/tmp` or other locations may produce an incomplete package (~22 MB) that silently drops endpoints.
 3. **Waits for restart** — 10-second pause after deployment before health check
 4. **Verifies health** — Retries health check up to 6 times
 
@@ -134,7 +134,7 @@ Expected output:
 [1/4] Building API...
   Build successful
 [2/4] Creating deployment package...
-  Package created: ~45 MB          # <-- VERIFY: must be 40-50 MB (net10)
+  Package created: ~37 MB          # <-- VERIFY: 30-50 MB is normal (net10); < 30 MB = incomplete
 [3/4] Deploying to Azure...
   Deployment complete (or: auto-recovered via Kudu zipdeploy)
 [4/4] Verifying file replacement on server...
@@ -175,7 +175,7 @@ When the user wants to deploy manually for fastest iteration:
    ```powershell
    .\scripts\Deploy-BffApi.ps1
    ```
-2. **Verify**: Check output shows `~45 MB` package and `Health check passed!`
+2. **Verify**: Check output shows a 30–50 MB package (~37 MB) and `Health check passed!`
 3. **Test endpoint**:
    ```bash
    curl -s -o /dev/null -w "%{http_code}" https://spaarke-bff-dev.azurewebsites.net/api/{your-endpoint}
@@ -196,7 +196,7 @@ When the user wants to deploy manually for fastest iteration:
 |---------|-------|-----|
 | Package size < 30 MB | Incomplete zip (missing DLLs) | Delete `publish/` dir, re-run script |
 | MSB3030 error during publish | Nested `publish/publish/` | Delete `src/server/api/Sprk.Bff.Api/publish/` |
-| Health check passes but endpoints 404 | Incomplete package | Re-deploy with script, verify ~45 MB |
+| Health check passes but endpoints 404 | Incomplete package | Re-deploy with script, verify 30–50 MB |
 | Deploy reports success but old code runs (SILENT FILE LOCK FAILURE) | The running .NET host on Windows App Service held file locks on `Sprk.Bff.Api.dll`. `az webapp deploy --type zip` returned 200 and Kudu logged "Deployment successful" but the DLL on disk was never replaced. **First observed May 12, 2026.** | The hardened `Deploy-BffApi.ps1` now compares local + remote SHA-256 hashes for 6 critical files after every deploy and auto-recovers with stop → Kudu zipdeploy → start. If you must deploy manually, always verify: see "Manual verification" below. |
 | Persistent old code after restart | Deployment didn't register | Use Kudu Zip Push Deploy: `curl -X POST "https://{app}.scm.azurewebsites.net/api/zipdeploy?isAsync=true" -H "Authorization: Bearer $(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)" -H "Content-Type: application/zip" --data-binary @publish.zip` — stop the app first if files are locked. |
 
@@ -246,7 +246,7 @@ If any file shows MISMATCH, the deploy did NOT replace it. Recover with stop →
 |---|---|---|
 | `az webapp deploy --type zip` returns 200 + "Deployment successful" but DLLs not actually replaced | Running .NET host holds file locks on `Sprk.Bff.Api.dll`; Windows silently refuses overwrites; OneDeploy reports success regardless | **2026-05-14 G-2 incident.** Always verify with SHA-256 hash via Kudu VFS. The hardened `Deploy-BffApi.ps1` does this automatically + auto-recovers via stop → Kudu zipdeploy → start. NEVER trust deploy "success" alone. |
 | Health check fails at 60s but the deploy actually succeeded | Default window sized for Windows warm-restart; Linux App Service cold-start is 90-120s | Default is now 120s (24 retries × 5s). Hash-verify success + healthz timeout = deploy correct, still booting. Wait one more cycle before declaring failure. |
-| Package size < 30 MB after publish | Incomplete zip — missing nested DLLs because publish ran from `/tmp` or outside project tree | Always publish from `src/server/api/Sprk.Bff.Api/` (not external dirs). Verify package is 40-50 MB (net10). |
+| Package size < 30 MB after publish | Incomplete zip — missing nested DLLs because publish ran from `/tmp` or outside project tree | Always publish from `src/server/api/Sprk.Bff.Api/` (not external dirs). Verify package is 30–50 MB (net10; ~37 MB measured 2026-10-12). |
 | Health check passes but specific endpoints return 404 to a SIGNED-IN request | Incomplete package: route handler couldn't compile at startup due to missing DLL | Call the endpoint WITH a bearer token — anything but 404 means it registered. Do not use an anonymous 401 as proof: the authorization FallbackPolicy (UAC-r2 task 167) answers 401 for a missing route too. |
 | `/healthz` or `/ping` returns 429 | More than 120 requests a minute from one client IP: the probes' "health-probe" rate limit (UAC-r2 task 167, owner round 14). Deploy and rotation pollers make at most 12/min | Wait for the window to slide (Retry-After header). A 429 is not a failed deploy. |
 | MSB3030 error during publish | Nested `publish/publish/` directory from leftover prior publish | Delete `src/server/api/Sprk.Bff.Api/publish/` before re-publishing. The script does this automatically (Step 1). |

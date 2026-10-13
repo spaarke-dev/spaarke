@@ -25,22 +25,9 @@ public class EndpointGroupingTests : IClassFixture<CustomWebAppFactory>
         _client = factory.CreateClient();
     }
 
-    [Fact(Skip = "Requires fully mocked Graph/Dataverse services - endpoint returns 404 without proper registration")]
-    public async Task DocumentsEndpoints_ReturnsProblemDetailsOnError()
-    {
-        // Attempt to create container without proper auth/data
-        var response = await _client.PostAsync("/api/containers", null);
-
-        response.StatusCode.Should().BeOneOf(HttpStatusCode.BadRequest, HttpStatusCode.Unauthorized);
-
-        var content = await response.Content.ReadAsStringAsync();
-        var problemDetails = JsonSerializer.Deserialize<JsonElement>(content);
-
-        // Should have RFC 7807 Problem Details structure
-        problemDetails.TryGetProperty("type", out _).Should().BeTrue();
-        problemDetails.TryGetProperty("title", out _).Should().BeTrue();
-        problemDetails.TryGetProperty("status", out _).Should().BeTrue();
-    }
+    // DocumentsEndpoints_ReturnsProblemDetailsOnError REMOVED (C# test-diet): it exercised POST /api/containers,
+    // deleted with the other dead container endpoints by auth-v4 (commit c17e856f4; see the AuthorizationIntegrationTests
+    // remarks). It was Skip, so it proved nothing.
 
     // UploadEndpoints_ReturnsProblemDetailsOnError REMOVED 2026-08-26 (unified-access-control-r2
     // task 073): it exercised POST /api/containers/{containerId}/upload, one of the three app-only
@@ -71,20 +58,9 @@ public class EndpointGroupingTests : IClassFixture<CustomWebAppFactory>
     // same subject as above — POST /api/containers/{containerId}/upload, retired with
     // Api/UploadEndpoints.cs. Also already [Fact(Skip=...)].
 
-    [Fact(Skip = "Requires fully mocked Graph/Dataverse services - endpoint returns 404 without proper registration")]
-    public async Task UserEndpoints_CapabilitiesRequiresContainerId()
-    {
-        // Missing containerId parameter
-        var response = await _client.GetAsync("/api/me/capabilities");
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-
-        var content = await response.Content.ReadAsStringAsync();
-        var problemDetails = JsonSerializer.Deserialize<JsonElement>(content);
-
-        problemDetails.TryGetProperty("detail", out var detail).Should().BeTrue();
-        detail.GetString().Should().Contain("containerId");
-    }
+    // UserEndpoints_CapabilitiesRequiresContainerId REMOVED (C# test-diet): the live behaviour (missing containerId -> 400
+    // problem+json) is asserted with a bearer by UserEndpointsTests.GetCapabilities_WithoutContainerId_Returns400 and
+    // GetCapabilities_ResponseIsProperProblemJson; this anonymous variant could only ever see the 401 challenge.
 
     // DocumentEndpoints_ExistAndReturnConsistentErrorFormat REMOVED 2026-08-26
     // (unified-access-control-r2 task 073). Its assertion was `NotBe(404)` — "these routes exist" —

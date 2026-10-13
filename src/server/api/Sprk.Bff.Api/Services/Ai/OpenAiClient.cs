@@ -962,8 +962,7 @@ public class OpenAiClient : IOpenAiClient
     /// <summary>
     /// Stream a structured completion (json_schema strict mode + streaming).
     /// Yields raw content-token strings as Azure OpenAI emits them; the caller is responsible
-    /// for accumulating the tokens into JSON and feeding them to an incremental parser
-    /// (see <c>Sprk.Bff.Api.Services.Ai.Streaming.IncrementalJsonParser</c>).
+    /// for accumulating the tokens into JSON and parsing them.
     ///
     /// Per the R5 task 006 spike (<c>notes/task-006-spike-results.md</c>), Azure OpenAI streams
     /// JSON char-by-char / word-by-word via <c>delta.content</c> in declaration order. Token

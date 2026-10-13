@@ -109,7 +109,7 @@ public static IServiceCollection AddAnalysisServices(this IServiceCollection ser
 **Follow-on ArchTest** (Class-B row B01, filed against BFF-owning worktree):
 
 ```csharp
-// tests/Spaarke.ArchTests/ADR032/AsymmetricRegistrationTier15Tests.cs (planned)
+// tests/Spaarke.ArchTests/Adr032/AsymmetricRegistrationTier15Tests.cs (planned; sibling of Adr032/AsymmetricRegistrationTests.cs)
 [Fact]
 public void No_Unconditional_Consumer_Depends_On_Conditionally_Registered_Service()
 {

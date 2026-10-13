@@ -139,11 +139,14 @@ export interface LayoutJsonRow {
    * `contentSizing`.
    *
    * Spec: FR-02 (spaarke-dataset-grid-framework-r2). Applied by the framework as
-   * `maxHeight` + `overflow: hidden` on the row wrapper. When both `rowHeight`
-   * (row-level) AND `contentSizing: 'clamped'` (section-level) are set, the row's
-   * ceiling wins — the row wrapper's `maxHeight` provides the constraint and the
-   * section's own `defaultHeight` still applies to its inner card, but the row's
-   * `overflow: hidden` prevents any over-constraint on the outer wrapper.
+   * `maxHeight` + `overflow: hidden` on the row wrapper, AND literally onto each
+   * section card in the row (`height`/`maxHeight`/`minHeight` = `rowHeight`,
+   * `overflow: hidden`, flex column; commit 803c77ace, R2 UAT §5.6). The row's
+   * `rowHeight` WINS over a section's registration `defaultHeight` (whether the
+   * section is `contentSizing: 'grow'` or `'clamped'`): the section's
+   * `defaultHeight` applies only when the row has no `rowHeight`. The one
+   * exception is a section whose factory already set `style.height` or
+   * `style.maxHeight` — the factory's style is left untouched ("factory wins").
    *
    * Omitted `rowHeight` preserves current behavior (row grows to fit sections;
    * sections apply their own `contentSizing` per FR-01).
@@ -381,11 +384,10 @@ export function buildDynamicWorkspaceConfig(
     const templateSlotCount = countSlots(jsonRow.columns);
 
     // FR-02: propagate optional row-level `rowHeight` as `maxHeight` +
-    // `overflow: 'hidden'` on the row wrapper. When both `rowHeight` (row-level)
-    // AND `contentSizing: 'clamped'` (section-level) are set, the row's ceiling
-    // wins — the section's `defaultHeight` still applies to its inner card, but
-    // the row's `overflow: hidden` prevents any over-constraint on the outer
-    // wrapper.
+    // `overflow: 'hidden'` on the row wrapper. The same `rowHeight` is also applied
+    // literally to each section card above (803c77ace): the row's `rowHeight` wins
+    // over a section's `defaultHeight`, which applies only when the row has no
+    // `rowHeight` (a factory-set `style.height`/`maxHeight` still wins over both).
     const rowHeightStyle = jsonRow.rowHeight
       ? { maxHeight: jsonRow.rowHeight, overflow: 'hidden' as const }
       : undefined;

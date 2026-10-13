@@ -171,8 +171,8 @@ public interface IOpenAiClient
 
     /// <summary>
     /// Stream a structured completion (json_schema strict mode + streaming). Yields raw content-token
-    /// strings as Azure OpenAI emits them; the caller accumulates and feeds tokens to
-    /// <see cref="Streaming.IncrementalJsonParser"/> for FieldDelta extraction.
+    /// strings as Azure OpenAI emits them; the caller accumulates the tokens and
+    /// parses them.
     /// </summary>
     /// <remarks>
     /// <para>
