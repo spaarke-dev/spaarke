@@ -1,4 +1,4 @@
-// Workforce client switch (spaarke-SPA-external-access-platform-r3 task 040, FR-16; ADR-028 Amendment A7).
+// Workforce client switch (spaarke-SPA-external-access-platform-r3 task 040, FR-16; ADR-028 Amendment A8).
 //
 // The workforce plane (browser "My organization" and the Teams tab) signs in through ONE single-tenant Spaarke
 // client: authority https://login.microsoftonline.com/{Spaarke tenant id} (never /organizations or /common), scope
@@ -187,7 +187,7 @@ function expectOnlyUserImpersonationRequests(): void {
 // The workforce authority and scope (both hosts)
 // ---------------------------------------------------------------------------------------------------------------
 
-describe('Workforce authority is pinned to the Spaarke tenant (A7)', () => {
+describe('Workforce authority is pinned to the Spaarke tenant (A8)', () => {
   it('builds https://login.microsoftonline.com/{tenant id} with the configured client id', async () => {
     const { msalConfig } = await loadAuth();
     const descriptor = msalConfig.workforceAuthorityConfig(teamsCfg);
@@ -571,7 +571,7 @@ describe('Shipped files', () => {
 
 // ---------------------------------------------------------------------------------------------------------------
 // Completion fixes (2026-10-10): silent renewal bridge page + interactive fallback, Teams error diagnostics,
-// CI workflow / config alignment with A7
+// CI workflow / config alignment with A8
 // ---------------------------------------------------------------------------------------------------------------
 
 describe('Browser silent renewal: CIAM requests are unchanged on the wire; the workforce iframe retry uses the bridge page', () => {
@@ -1155,7 +1155,7 @@ describe('Teams error screen diagnostics read the { naaError, popupError } cause
   });
 });
 
-describe('CI workflows and static config agree with A7', () => {
+describe('CI workflows and static config agree with A8', () => {
   const REPO_ROOT = path.resolve(SPA_ROOT, '../../..');
   const read = (rel: string) => fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8').replace(/\r\n/g, '\n');
 

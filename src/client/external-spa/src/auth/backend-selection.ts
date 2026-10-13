@@ -1,5 +1,5 @@
 /**
- * Run-time backend selection — which customer BFF this tab talks to (task 041; spec FR-17, NFR-02; ADR-028 A7).
+ * Run-time backend selection — which customer BFF this tab talks to (task 041; spec FR-17, NFR-02; ADR-028 A8).
  *
  * Under owner decision D-13 every customer has its own backend (BFF URL + BFF app registration). One SPA build serves
  * all of them, so the BFF base URL and the scope cannot be baked at build time. This module resolves the ACTIVE
@@ -17,7 +17,7 @@
  * query parameter is read here. Every backend — from config or from the directory — is shape-checked (https origin,
  * app id) before it can become active, and an unresolvable selection fails closed (no default host is invented).
  *
- * Scope (ADR-028 A7): `api://{bffAppId}/user_impersonation` on BOTH planes. The former CIAM `SDAP.Access` default is
+ * Scope (ADR-028 A8): `api://{bffAppId}/user_impersonation` on BOTH planes. The former CIAM `SDAP.Access` default is
  * refused.
  *
  * Storage: `localStorage` holds only customer keys (the known-keys list behind the picker, spec "Picker storage");
@@ -94,14 +94,14 @@ const CUSTOMER_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 /** A BFF app id (normally a GUID): letters, digits, `.` and `-`; no `/`, `:` or whitespace. */
 const BFF_APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.-]{0,127}$/;
 
-/** `api://{app id}/user_impersonation` — the only BFF scope on either plane (A7). */
+/** `api://{app id}/user_impersonation` — the only BFF scope on either plane (A8). */
 const USER_IMPERSONATION_SCOPE = /^api:\/\/([^/\s]+)\/user_impersonation$/;
 
 export function isCustomerKey(value: unknown): value is string {
   return typeof value === 'string' && CUSTOMER_KEY_PATTERN.test(value);
 }
 
-/** The scope for a BFF app id: `api://{bffAppId}/user_impersonation` (ADR-028 A7, both planes). */
+/** The scope for a BFF app id: `api://{bffAppId}/user_impersonation` (ADR-028 A8, both planes). */
 export function bffScopeFor(bffAppId: string): string {
   if (!BFF_APP_ID_PATTERN.test(bffAppId)) {
     throw new BackendSelectionError(`[BackendSelection] '${bffAppId}' is not a valid BFF app id.`);
@@ -169,7 +169,7 @@ function appIdFromScope(scope: string, envKey: string): string {
   if (!match || !BFF_APP_ID_PATTERN.test(match[1])) {
     throw new BackendSelectionError(
       `[BackendSelection] ${envKey} must be api://{customer BFF app id}/user_impersonation, not '${scope}' ` +
-        '(ADR-028 A7: the only BFF scope on both planes).'
+        '(ADR-028 A8: the only BFF scope on both planes).'
     );
   }
   return match[1];

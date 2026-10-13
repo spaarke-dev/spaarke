@@ -12,7 +12,7 @@
  *   - 'workforce' → a standalone `PublicClientApplication` built from the pluggable
  *                   `workforceAuthorityConfig`: the single-tenant Spaarke client with the authority
  *                   pinned to `https://login.microsoftonline.com/{Spaarke tenant id}` and the scope
- *                   `api://{customer BFF app id}/user_impersonation` (ADR-028 A7, task 040 / FR-16).
+ *                   `api://{customer BFF app id}/user_impersonation` (ADR-028 A8, task 040 / FR-16).
  *                   It uses the SAME client, tenant and scope as the Teams tab — only the acquisition
  *                   TRANSPORT differs (browser redirect here vs NAA / MSAL popup there).
  *
@@ -70,7 +70,7 @@ export function resolveStandalonePlane(realm: Realm): StandalonePlane {
     return { realm, instance: msalInstance, bffScope: activeBffScope('ciam') };
   }
 
-  // 'workforce' — standalone browser redirect flow against the Spaarke-tenant workforce authority (A7).
+  // 'workforce' — standalone browser redirect flow against the Spaarke-tenant workforce authority (A8).
   const { clientId, tenantId } = getWorkforceClientConfig();
   const bffScope = activeBffScope('workforce');
   const instance = createStandaloneMsalInstance(workforceAuthorityConfig({ clientId, tenantId, bffScope }));

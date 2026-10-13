@@ -38,7 +38,7 @@ interface AuthGuardProps {
   /**
    * True when running inside the Teams host. In Teams, authentication is completed during bootstrap
    * (TeamsHostAdapter.selectAuthStrategy acquires a BFF-valid workforce token — via NAA, then the
-   * MSAL popup fallback (ADR-028 A7; no Teams SSO) — BEFORE <App> is rendered), so this guard must NOT
+   * MSAL popup fallback (ADR-028 A8; no Teams SSO) — BEFORE <App> is rendered), so this guard must NOT
    * run the MSAL account gate below. See the early return for the full rationale.
    */
   teamsHost?: boolean;
@@ -52,7 +52,7 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children, teamsHost = fals
 
   // Inside the Teams host, the caller is already authenticated by the time this guard mounts:
   // main.tsx only renders <App> after TeamsHostAdapter.initialize() resolves, which means a
-  // BFF-valid workforce token was acquired (NAA, else the MSAL popup fallback — ADR-028 A7) and the
+  // BFF-valid workforce token was acquired (NAA, else the MSAL popup fallback — ADR-028 A8) and the
   // active BFF token acquirer is wired. Both paths leave the signed-in account in the MSAL cache of
   // the instance handed to <MsalProvider>, but the MSAL account gate below must still never run in
   // Teams: if it ever fired instance.loginRedirect(), a full-page redirect inside the Teams iframe is

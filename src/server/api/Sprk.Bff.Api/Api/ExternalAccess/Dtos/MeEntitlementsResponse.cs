@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// outside counsel). NOTE: <c>"admin"</c> is not a distinct server plane — an admin is a workforce caller
 /// whose App-Roles map to the <c>admin</c> module.</param>
 /// <param name="Entitlements">The flat list of module codes the caller is entitled to (Tier-1): the default
-/// modules for the server-resolved principal kind (A7) plus <c>sprk_approlemodulemap</c> (App-Role → module)
+/// modules for the server-resolved principal kind (A8) plus <c>sprk_approlemodulemap</c> (App-Role → module)
 /// extras.</param>
 /// <param name="IntakeRequestTypes">The Legal Front Door intake types (<c>sprk_requesttype</c> option values: NDA
 /// Assessment 100000000, Invention Submission 100000001, Policy Question 100000002, Trademark Search 100000003) this caller

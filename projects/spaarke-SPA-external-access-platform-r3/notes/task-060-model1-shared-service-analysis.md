@@ -1,6 +1,6 @@
 # Task 060: does a shared registration service conflict with the Model 1 directive? (2026-10-12)
 
-Owner, 2026-10-12: "a shared service as long as does not create conflict with our Model 1 dedicated and segregated customer directive". Read-only analysis from code and docs. **Conclusion: no conflict, under the conditions in §5.** A per-customer inviter buys no segregation and is already forbidden by ADR-028 A7.
+Owner, 2026-10-12: "a shared service as long as does not create conflict with our Model 1 dedicated and segregated customer directive". Read-only analysis from code and docs. **Conclusion: no conflict, under the conditions in §5.** A per-customer inviter buys no segregation and is already forbidden by ADR-028 A8.
 
 ## 1. The directive
 
@@ -24,7 +24,7 @@ The T240c directory is already an approved shared, cross-customer service in `rg
 
 ## 4. The tenancy fact
 
-Every registered person becomes a guest in the one Spaarke tenant wherever the inviter runs (`auth.md:64`; ADR-028 `:456`). A per-stamp inviter would put N identities with tenant-wide power inside customer subscriptions, widening the blast radius. It is also forbidden: ADR-028 A7 `:492` ("one shared Spaarke-tenant registration path"), `:500` (no `User.Invite.All` for a stamp identity); task 261 removed it from stamps (`GraphAppRoles.cs:38-40`); `spec.md:299`.
+Every registered person becomes a guest in the one Spaarke tenant wherever the inviter runs (`auth.md:64`; ADR-028 `:456`). A per-stamp inviter would put N identities with tenant-wide power inside customer subscriptions, widening the blast radius. It is also forbidden: ADR-028 A8 `:492` ("one shared Spaarke-tenant registration path"), `:500` (no `User.Invite.All` for a stamp identity); task 261 removed it from stamps (`GraphAppRoles.cs:38-40`); `spec.md:299`.
 
 ## 5. Recommendation and conditions
 
@@ -36,14 +36,14 @@ One shared registration service co-hosted with the T240c directory, provided:
 5. Abuse controls: authenticated home-tenant sign-in first; rate limit per home oid/tenant and per customer key; no CAPTCHA needed; unknown key and non-listed tenant get the same refusal (no key enumeration); the `acct = 1` refusal stays distinct.
 6. Paperwork: `notes/fr-14-placement-decision.md` under ADR-052 (fleet-scoped host); a row in the inventory's shared-platform table; a one-line D-12 / packaging-strategy clarification that the closed list covers the customer stamp.
 
-**Separate conflict to resolve:** the multitenant "Spaarke Registration" client with an `/organizations` authority contradicts ADR-028 `:22`, A7 `:498` and `auth.md:66`. It needs an A7 carve-out (one registration-only client, ID token only, its token never reaches a BFF): §6.5 path B.
+**Separate conflict to resolve:** the multitenant "Spaarke Registration" client with an `/organizations` authority contradicts ADR-028 `:22`, A8 `:498` and `auth.md:66`. It needs an A8 carve-out (one registration-only client, ID token only, its token never reaches a BFF): §6.5 path B.
 
-**Alternative:** a per-stamp invite function. It breaks ADR-028 A7 or needs an amendment plus a dedicated identity per customer (ADR-052 `:77`), a deployable per stamp (against "provisioning builds no new components"), per-customer link routing, and hits the 20-federated-credentials-per-app limit (inventory `:194`).
+**Alternative:** a per-stamp invite function. It breaks ADR-028 A8 or needs an amendment plus a dedicated identity per customer (ADR-052 `:77`), a deployable per stamp (against "provisioning builds no new components"), per-customer link routing, and hits the 20-federated-credentials-per-app limit (inventory `:194`).
 
 ## 6. Open items for the owner
 
 1. Accept that the directive covers the customer stamp, not the platform plane; approve the D-12 clarification line.
-2. Approve the ADR-028 A7 carve-out for the `/organizations` registration client.
+2. Approve the ADR-028 A8 carve-out for the `/organizations` registration client.
 3. Set the log retention; confirm no email or UPN in logs.
 4. If group write cannot be scoped below tenant-wide `GroupMember.ReadWrite.All`, approve that grant.
 5. Doc fix: D-12 `:65` still says "three named exceptions"; the list has two.

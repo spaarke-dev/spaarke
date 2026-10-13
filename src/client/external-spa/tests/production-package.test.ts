@@ -1,5 +1,5 @@
 // Production SPA build + production Teams package in CI (spaarke-SPA-external-access-platform-r3 task 043; spec FR-20,
-// design actions A1/A2/A4; ADR-028 A7).
+// design actions A1/A2/A4; ADR-028 A8).
 //
 // Shipped-config tests (they read the committed workflows and appPackage files): the two workflows that build this SPA
 // take every environment-specific value from a GitHub environment (no identifier, URL or scope literal), deploy the

@@ -30,7 +30,7 @@ Authentication is handled by MSAL against an Entra External ID (CIAM) tenant —
 
 The variables, their meaning and which are optional are documented in [`.env.example`](./.env.example) - that file is the
 single source (backend selection: `VITE_BACKENDS` or `VITE_BFF_API_URL`; the CIAM and workforce authority / client /
-tenant values; the BFF scopes, which on both planes must be `api://{app id}/user_impersonation` - ADR-028 A7).
+tenant values; the BFF scopes, which on both planes must be `api://{app id}/user_impersonation` - ADR-028 A8).
 
 The BFF URL and scope are chosen at run time from Spaarke-owned configuration (task 041, FR-17); a missing or invalid
 backend fails closed - no request is sent and the sign-in screen says so.

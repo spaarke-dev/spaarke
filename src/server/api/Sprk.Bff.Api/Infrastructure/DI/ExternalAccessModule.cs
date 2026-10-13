@@ -106,7 +106,7 @@ public static class ExternalAccessModule
         });
 
         // Per-customer external-access switches (external-access-platform-r3 task 011, spec FR-06 / FR-19, ADR-028
-        // A7). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for
+        // A8). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for
         // their own requests and adds legal-front-door to their default modules. Read by the entitlement resolver
         // below and by the "service-requests" descriptor. ValidateOnStart so an invalid value fails startup rather
         // than the first external module read: ANY non-boolean value, INCLUDING EMPTY (""), fails startup - remove
@@ -115,7 +115,7 @@ public static class ExternalAccessModule
             .BindConfiguration(ExternalAccessOptions.SectionName)
             .ValidateOnStart();
 
-        // Module entitlement resolver (task 072; defaults by principal kind, r3 task 011 / A7) — resolves the
+        // Module entitlement resolver (task 072; defaults by principal kind, r3 task 011 / A8) — resolves the
         // Tier-1 module-code set the external-spa widget registry gates tabs on (/api/v1/external/me/entitlements):
         // workforce → legal-front-door + policy-library + sprk_approlemodulemap extras (App-Role → module); CIAM →
         // assigned-work (+ legal-front-door when ExternalAccess:PartnerServiceRequestsEnabled is on). Typed

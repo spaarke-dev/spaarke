@@ -155,7 +155,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
   },
   {
     // The concrete data-backed read of the caller's OWN submitted service requests (task 028;
-    // sprk_requestedby == caller contact). The BFF (A7, r3 task 011) returns own rows for workforce and
+    // sprk_requestedby == caller contact). The BFF (A8, r3 task 011) returns own rows for workforce and
     // for CIAM only when ExternalAccess:PartnerServiceRequestsEnabled is on - and only then does a CIAM
     // caller hold the legal-front-door entitlement. Task 052 (review 011 K3): the client gate is that
     // entitlement, not the plane, so a partner sees this tab (library + default) exactly when the switch

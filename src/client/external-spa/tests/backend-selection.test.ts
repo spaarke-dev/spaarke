@@ -1,5 +1,5 @@
 // Run-time backend selection on both planes (spaarke-SPA-external-access-platform-r3 task 041; spec FR-17, NFR-02;
-// ADR-028 A7).
+// ADR-028 A8).
 //
 // One build serves every customer backend. The BFF URL and the scope api://{bffAppId}/user_impersonation come from
 // Spaarke-owned data (the T240c directory, dev config until it ships); a link may carry only ?customer={key}, which

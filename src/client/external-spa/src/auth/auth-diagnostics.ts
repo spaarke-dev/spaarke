@@ -5,7 +5,7 @@
 
 /**
  * Extracts the underlying NAA + MSAL-popup failure detail (error name / MSAL errorCode / subError /
- * any AADSTS code / message) from a TeamsWorkforceAuthError's `cause` (`{ naaError, popupError }`, ADR-028 A7),
+ * any AADSTS code / message) from a TeamsWorkforceAuthError's `cause` (`{ naaError, popupError }`, ADR-028 A8),
  * so the on-screen error state can show the REAL diagnostic on hosts where dev tools aren't readily
  * available (e.g. the Teams desktop client). Diagnostic-only; contains no tokens or secrets.
  */

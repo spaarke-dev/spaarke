@@ -142,7 +142,7 @@ Every source file was restored and compared byte-for-byte afterwards.
 - **adr-check:** compliant on every ADR considered.
   - ADR-021: v9 only, tokens only, inside a `FluentProvider`, dark mode tested.
   - ADR-012: the shared `EmptyState` is reused and no new component was added to the shared library.
-  - ADR-028: no `PublicClientApplication`, no raw bearer fetch, no `/organizations` or `/common` authority in the SPA. A7: the hand-off uses the existing tenant-pinned workforce client.
+  - ADR-028: no `PublicClientApplication`, no raw bearer fetch, no `/organizations` or `/common` authority in the SPA. A8: the hand-off uses the existing tenant-pinned workforce client.
   - ADR-038: tests written; no KEEP-path deletion.
   - ADR-006, ADR-026: the SPA's existing Vite build; no new surface type.
   - Out of scope: ADR-001/002/007/008/010/013/052 (no BFF or Dataverse change) and ADR-050 (no modal).

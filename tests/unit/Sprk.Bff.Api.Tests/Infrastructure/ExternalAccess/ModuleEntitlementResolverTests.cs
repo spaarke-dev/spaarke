@@ -14,7 +14,7 @@
 // The Dataverse read (GetActiveMapAsync) is overridden in a test subclass so the map is a fixture — the
 // resolution BEHAVIOR is tested, not the HTTP plumbing (ADR-038: no Mock<HttpMessageHandler>).
 //
-// spaarke-SPA-external-access-platform-r3 task 011 (spec FR-19 / FR-06, ADR-028 Amendment A7) — default modules by
+// spaarke-SPA-external-access-platform-r3 task 011 (spec FR-19 / FR-06, ADR-028 Amendment A8) — default modules by
 // server-resolved principal kind, and the per-customer partner switch ExternalAccess:PartnerServiceRequestsEnabled
 // (default off). Every case runs with the switch OFF and ON:
 //   (5) a workforce systemuser and a workforce contact each get legal-front-door + policy-library with NO map row;
@@ -141,7 +141,7 @@ public class ModuleEntitlementResolverTests
         ModuleEntitlementResolver.OutsideCounselEntitlements.Should().BeEquivalentTo(new[] { "assigned-work" });
     }
 
-    // ── ResolveAsync: default modules by principal kind (r3 task 011, A7) ──────────────────────────
+    // ── ResolveAsync: default modules by principal kind (r3 task 011, A8) ──────────────────────────
     // (5) Workforce systemuser — legal-front-door + policy-library with NO sprk_approlemodulemap row, either setting.
     [Theory]
     [InlineData(false)]

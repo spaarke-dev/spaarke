@@ -78,7 +78,7 @@ public static class ExternalAccessEndpoints
 
         // GET /api/v1/external/me/entitlements — Tier-1 MODULE entitlement context (task 072, Option B).
         // Returns the module-code list the external-spa widget registry gates tab visibility on: default
-        // modules by server-resolved principal kind (A7: workforce → legal-front-door + policy-library; CIAM →
+        // modules by server-resolved principal kind (A8: workforce → legal-front-door + policy-library; CIAM →
         // assigned-work, + legal-front-door when the partner switch is on), plus sprk_approlemodulemap extras. Distinct from
         // /me above (Tier-2 record access). Same group → same dual-scheme policy + CallerPrincipal filter.
         externalGroup.MapGet("/me/entitlements", MeEntitlementsEndpoint.Handle)

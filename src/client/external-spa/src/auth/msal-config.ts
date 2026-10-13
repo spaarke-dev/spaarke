@@ -6,7 +6,7 @@
  * workforce plane (browser "My organization" and the Teams tab). The authority is selected by
  * config — NOT by forking the module.
  *
- * Workforce plane (ADR-028 Amendment A7, task 040 / FR-16): ONE single-tenant Spaarke public client
+ * Workforce plane (ADR-028 Amendment A8, task 040 / FR-16): ONE single-tenant Spaarke public client
  * in Spaarke's tenant, authority pinned to `https://login.microsoftonline.com/{Spaarke tenant id}`.
  * `/organizations`, `/common` and `/consumers` are refused here (fail-safe), as is any workforce BFF
  * scope other than `api://{customer BFF app id}/user_impersonation`.
@@ -25,7 +25,7 @@
  * authenticates against the CIAM authority (*.ciamlogin.com); the BFF validates the
  * resulting tokens via its "Ciam" scheme. Flow: authorization code + PKCE.
  *
- * See: .claude/adr/ADR-028-spaarke-auth-architecture.md (Amendments A1, A2 and A7)
+ * See: .claude/adr/ADR-028-spaarke-auth-architecture.md (Amendments A1, A2 and A8)
  * See: docs/architecture/external-access-spa-architecture.md
  */
 
@@ -36,7 +36,7 @@ import { MSAL_CLIENT_ID, MSAL_AUTHORITY, isTenantId, isUserImpersonationScope, r
  * Which Entra authority plane a standalone-MSAL instance targets.
  *   - 'ciam'      → Entra External ID (*.ciamlogin.com); the external SPA's partner plane (A1)
  *   - 'workforce' → workforce Entra (login.microsoftonline.com) pinned to Spaarke's tenant; the
- *                   browser "My organization" plane and the Teams tab (A7 — never multitenant)
+ *                   browser "My organization" plane and the Teams tab (A8 — never multitenant)
  */
 export type AuthorityKind = 'ciam' | 'workforce';
 
@@ -62,12 +62,12 @@ export function popupRedirectUri(): string {
   return `${window.location.origin}${POPUP_REDIRECT_PATH}`;
 }
 
-/** The tenant-pinned workforce authority for a tenant id (A7). Throws on anything but a tenant GUID. */
+/** The tenant-pinned workforce authority for a tenant id (A8). Throws on anything but a tenant GUID. */
 export function workforceAuthority(tenantId: string): string {
   if (!isTenantId(tenantId)) {
     throw new Error(
       `[CollabAuth] The workforce authority must be pinned to Spaarke's tenant id (a GUID), not '${tenantId}'. ` +
-        'organizations / common / consumers are refused (ADR-028 A7).'
+        'organizations / common / consumers are refused (ADR-028 A8).'
     );
   }
   return `https://${WORKFORCE_AUTHORITY_HOST}/${tenantId}`;
@@ -94,7 +94,7 @@ function assertTenantPinnedWorkforceAuthority(authority: string): void {
   if (!pinned) {
     throw new Error(
       `[CollabAuth] Workforce authority '${authority}' is not tenant-pinned. Expected ` +
-        `https://${WORKFORCE_AUTHORITY_HOST}/{Spaarke tenant id}; organizations / common are refused (ADR-028 A7).`
+        `https://${WORKFORCE_AUTHORITY_HOST}/{Spaarke tenant id}; organizations / common are refused (ADR-028 A8).`
     );
   }
 }
@@ -110,7 +110,7 @@ export interface StandaloneMsalConfig {
   clientId: string;
   /**
    * Full authority URL, e.g. `https://spaarkeextid.ciamlogin.com/{tid}` (CIAM) or
-   * `https://login.microsoftonline.com/{Spaarke tenant id}` (workforce, A7).
+   * `https://login.microsoftonline.com/{Spaarke tenant id}` (workforce, A8).
    */
   authority: string;
   /**
@@ -137,7 +137,7 @@ export interface MsalConfigurationOptions {
  *
  * Fails SAFE (throws) on an unknown/unconfigured authority kind or missing required field —
  * it never silently falls back to the wrong authority (acceptance criterion 5). A workforce
- * config must also carry a tenant-pinned authority and a `/user_impersonation` scope (A7).
+ * config must also carry a tenant-pinned authority and a `/user_impersonation` scope (A8).
  *
  * CIAM authorities (*.ciamlogin.com) are non-default (B2C-style) authorities, so their host
  * MUST be declared in `knownAuthorities` for MSAL to trust the OIDC metadata endpoint. The
@@ -168,7 +168,7 @@ export function buildMsalConfiguration(
     if (!isUserImpersonationScope(config.bffScope)) {
       throw new Error(
         `[CollabAuth] Workforce BFF scope '${config.bffScope}' is refused: only ` +
-          'api://{customer BFF app id}/user_impersonation is allowed (ADR-028 A7).'
+          'api://{customer BFF app id}/user_impersonation is allowed (ADR-028 A8).'
       );
     }
   }
@@ -228,7 +228,7 @@ export const ciamAuthorityConfig: StandaloneMsalConfig = {
 };
 
 /**
- * Build the workforce authority descriptor (ADR-028 Amendment A7, superseding A2's multitenant
+ * Build the workforce authority descriptor (ADR-028 Amendment A8, superseding A2's multitenant
  * default): the single-tenant Spaarke client with authority
  * `https://login.microsoftonline.com/{tenantId}`. Used by the browser "My organization" plane
  * (standalone-plane.ts) and the Teams tab (msal-auth.ts), which read the values from config.ts

@@ -89,8 +89,8 @@ jobs:
           match VITE_MSAL_TENANT_ID "$guid" "GUID"
           match VITE_TEAMS_MSAL_CLIENT_ID "$guid" "GUID"
           match VITE_TEAMS_MSAL_TENANT_ID "$guid" "GUID"
-          match VITE_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A7"
-          match VITE_TEAMS_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A7"
+          match VITE_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A8"
+          match VITE_TEAMS_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A8"
           match VITE_MSAL_AUTHORITY "$authority" "https://{host}/{tenant GUID}, no query or fragment"
           if [ -n "$VITE_BFF_API_URL" ]; then match VITE_BFF_API_URL '^https://' "https URL"; fi
           if [ -n "$VITE_BACKENDS" ] && ! printf '%s' "$VITE_BACKENDS" | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), list)'; then
@@ -106,7 +106,7 @@ jobs:
       # Vite gives real process env vars the highest priority, so these VITE_* values OVERRIDE the #{...}#
       # placeholders in .env.production at build time (no separate token-substitution step needed). All values are
       # NON-SECRET identifiers (NFR-06) held as GitHub environment variables (see the header). Both planes request
-      # api://{app id}/user_impersonation (ADR-028 A7); the workforce client is ONE single-tenant Spaarke public
+      # api://{app id}/user_impersonation (ADR-028 A8); the workforce client is ONE single-tenant Spaarke public
       # client whose authority is pinned to Spaarke's tenant. VITE_BACKENDS is optional (empty = unset): with it
       # unset, VITE_BFF_API_URL + the two *_BFF_SCOPE values form a one-entry backend list (task 041, FR-17) until
       # the T240c directory ships.

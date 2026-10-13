@@ -1,5 +1,5 @@
 // spaarke-SPA-external-access-platform-r3 task 011 — the per-customer external-access switches (spec FR-06, FR-19;
-// ADR-028 Amendment A7, owner-approved 2026-10-10).
+// ADR-028 Amendment A8, owner-approved 2026-10-10).
 //
 // Owner decision 2026-10-10: Legal Front Door intake is workforce-only by default; a per-customer setting lets CIAM
 // partners submit and read their OWN service requests. Default OFF — with it off, a CIAM caller's behaviour is exactly

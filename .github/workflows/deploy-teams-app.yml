@@ -42,7 +42,7 @@ name: Deploy Teams App Package
 #   environment=prod -> GitHub environment `external-spa-prod`, packages appPackage/manifest.prod.json
 # The prod manifest carries a ${{TEAMS_APP_ID}} placeholder; the job renders it from the environment variable
 # TEAMS_APP_ID (the owner-supplied production Teams app id) into build/stage/manifest.json. Both manifests must declare
-# NO webApplicationInfo (ADR-028 A7). The sanity build reads the same VITE_* environment variables as
+# NO webApplicationInfo (ADR-028 A8). The sanity build reads the same VITE_* environment variables as
 # deploy-external-spa.yml; no environment-specific identifier, URL or scope is written in this file. The variables the
 # owner must create are listed in projects/spaarke-SPA-external-access-platform-r3/notes/task-043-notes.md.
 on:
@@ -108,7 +108,7 @@ jobs:
         env:
           # GitHub environment variables (dev values in external-spa-dev, prod values in external-spa-prod) - same
           # names and meaning as in deploy-external-spa.yml; both planes request api://{app id}/user_impersonation
-          # (ADR-028 A7). Unset optional values (VITE_BACKENDS) arrive as empty strings, which the SPA treats as unset.
+          # (ADR-028 A8). Unset optional values (VITE_BACKENDS) arrive as empty strings, which the SPA treats as unset.
           VITE_BFF_API_URL: ${{ vars.VITE_BFF_API_URL }}
           VITE_BACKENDS: ${{ vars.VITE_BACKENDS }}
           VITE_MSAL_AUTHORITY: ${{ vars.VITE_MSAL_AUTHORITY }}
@@ -150,8 +150,8 @@ jobs:
           jq -e '.id != null and .id != ""' manifest.json > /dev/null || { echo "::error::manifest.json missing id"; exit 1; }
           jq -e '.staticTabs != null and (.staticTabs | length) > 0' manifest.json > /dev/null || { echo "::error::manifest.json missing staticTabs"; exit 1; }
           jq -e '.validDomains != null and (.validDomains | length) > 0' manifest.json > /dev/null || { echo "::error::manifest.json missing validDomains"; exit 1; }
-          # ADR-028 Amendment A7 (MUST NOT): the manifest declares NO webApplicationInfo (no Teams-SSO fallback).
-          jq -e 'has("webApplicationInfo") | not' manifest.json > /dev/null || { echo "::error::manifest.json must NOT declare webApplicationInfo (ADR-028 A7: NAA then MSAL popup, no Teams SSO)"; exit 1; }
+          # ADR-028 Amendment A8 (MUST NOT): the manifest declares NO webApplicationInfo (no Teams-SSO fallback).
+          jq -e 'has("webApplicationInfo") | not' manifest.json > /dev/null || { echo "::error::manifest.json must NOT declare webApplicationInfo (ADR-028 A8: NAA then MSAL popup, no Teams SSO)"; exit 1; }
           # No unrendered placeholder may reach a package.
           if grep -Eq '[$][{][{]' manifest.json; then echo "::error::manifest.json still contains an unrendered placeholder"; exit 1; fi
           echo "Manifest validation passed."

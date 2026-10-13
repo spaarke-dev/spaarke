@@ -90,7 +90,7 @@ export function readOptionalEnv(key: string): string | undefined {
 
 /*
  * Backend URL and scope (task 041, FR-17 / NFR-02). There is no build-time `BFF_API_URL` or CIAM `MSAL_BFF_SCOPE`
- * constant any more: the BFF base URL and the scope `api://{customer BFF app id}/user_impersonation` (ADR-028 A7, both
+ * constant any more: the BFF base URL and the scope `api://{customer BFF app id}/user_impersonation` (ADR-028 A8, both
  * planes) come from the run-time backend selection in `auth/backend-selection.ts`. Its dev fallback reads
  * `VITE_BACKENDS` (a JSON list) or, when that is unset, the one-entry list built from `VITE_BFF_API_URL`,
  * `VITE_TEAMS_MSAL_BFF_SCOPE` (workforce) and `VITE_MSAL_BFF_SCOPE` (CIAM). The CIAM scope must now be
@@ -101,19 +101,19 @@ export function readOptionalEnv(key: string): string | undefined {
 export const APP_VERSION = '1.0.0';
 
 // ---------------------------------------------------------------------------
-// Workforce plane — the single-tenant Spaarke client (ADR-028 A7; task 040, FR-16)
+// Workforce plane — the single-tenant Spaarke client (ADR-028 A8; task 040, FR-16)
 // ---------------------------------------------------------------------------
 
 /**
- * MSAL client id, Spaarke tenant id and BFF scope for the WORKFORCE plane (ADR-028 Amendment A7, which
+ * MSAL client id, Spaarke tenant id and BFF scope for the WORKFORCE plane (ADR-028 Amendment A8, which
  * supersedes A2's multitenant client for Model 1). ONE single-tenant public client registered in
  * Spaarke's tenant — not the BFF app registration — serves the workforce plane in BOTH hosts: the Teams
  * tab (NAA, then an MSAL popup) and the standalone browser "My organization" choice (redirect flow).
  *
  * - The authority is pinned to `https://login.microsoftonline.com/{tenantId}`. Only a Spaarke-tenant
  *   authority issues a guest's token with the guest `oid` its `systemuser` row is keyed by;
- *   `/organizations` or `/common` signs a guest into their home tenant (A7 MUST NOT).
- * - The scope is `api://{customer BFF app id}/user_impersonation`; A2's separate Teams scope is retired (A7). Since
+ *   `/organizations` or `/common` signs a guest into their home tenant (A8 MUST NOT).
+ * - The scope is `api://{customer BFF app id}/user_impersonation`; A2's separate Teams scope is retired (A8). Since
  *   task 041 it comes from the active backend (`auth/backend-selection.ts`: the T240c directory, or dev config until
  *   it ships), never from a link or query string (FR-17); `VITE_TEAMS_MSAL_BFF_SCOPE` only feeds the dev fallback.
  *
@@ -126,9 +126,9 @@ export const APP_VERSION = '1.0.0';
  * the browser workforce plane reads them too.
  */
 export interface WorkforceEnvConfig {
-  /** The single-tenant Spaarke workforce public client id (A7). */
+  /** The single-tenant Spaarke workforce public client id (A8). */
   clientId: string;
-  /** Spaarke's Entra tenant id (a GUID) — the only workforce authority (A7). */
+  /** Spaarke's Entra tenant id (a GUID) — the only workforce authority (A8). */
   tenantId: string;
   /** The BFF API scope: `api://{customer BFF app id}/user_impersonation`. */
   bffScope: string;
@@ -141,7 +141,7 @@ function isUnsetOrPlaceholder(value: string | undefined): boolean {
   return !value || /^#\{.+\}#$/.test(value);
 }
 
-/** A tenant id is a GUID. `common`, `organizations`, `consumers` and domain names are refused (A7). */
+/** A tenant id is a GUID. `common`, `organizations`, `consumers` and domain names are refused (A8). */
 const TENANT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** True when `value` is a tenant GUID — never a multi-tenant alias such as `organizations` or `common`. */
@@ -149,10 +149,10 @@ export function isTenantId(value: string | undefined | null): value is string {
   return !!value && TENANT_ID_PATTERN.test(value);
 }
 
-/** The only workforce BFF scope shape A7 allows: `api://{app id}/user_impersonation`. */
+/** The only workforce BFF scope shape A8 allows: `api://{app id}/user_impersonation`. */
 const USER_IMPERSONATION_SCOPE_PATTERN = /^api:\/\/[^/\s]+\/user_impersonation$/;
 
-/** True when `scope` is `api://{app id}/user_impersonation` (A7: the only workforce scope). */
+/** True when `scope` is `api://{app id}/user_impersonation` (A8: the only workforce scope). */
 export function isUserImpersonationScope(scope: string | undefined | null): scope is string {
   return !!scope && USER_IMPERSONATION_SCOPE_PATTERN.test(scope);
 }
@@ -184,7 +184,7 @@ export function getWorkforceClientConfig(): WorkforceClientConfig {
   if (!isTenantId(tenantId)) {
     throw new Error(
       `[ExternalSPA] VITE_TEAMS_MSAL_TENANT_ID must be Spaarke's tenant id (a GUID), not '${tenantId}'. ` +
-        'The workforce authority is tenant-pinned; organizations/common are refused (ADR-028 A7).'
+        'The workforce authority is tenant-pinned; organizations/common are refused (ADR-028 A8).'
     );
   }
 
@@ -216,14 +216,14 @@ export function getWorkforceEnvConfig(): WorkforceEnvConfig {
   if (!isTenantId(tenantId)) {
     throw new Error(
       `[ExternalSPA] VITE_TEAMS_MSAL_TENANT_ID must be Spaarke's tenant id (a GUID), not '${tenantId}'. ` +
-        'The workforce authority is tenant-pinned; organizations/common are refused (ADR-028 A7).'
+        'The workforce authority is tenant-pinned; organizations/common are refused (ADR-028 A8).'
     );
   }
 
   if (!isUserImpersonationScope(bffScope)) {
     throw new Error(
       `[ExternalSPA] VITE_TEAMS_MSAL_BFF_SCOPE must be api://{customer BFF app id}/user_impersonation, not '${bffScope}' ` +
-        '(ADR-028 A7).'
+        '(ADR-028 A8).'
     );
   }
 

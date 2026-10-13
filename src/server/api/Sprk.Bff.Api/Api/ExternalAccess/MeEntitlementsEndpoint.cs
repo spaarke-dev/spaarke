@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// The group-level <c>CallerPrincipalAuthorizationFilter</c> (task 025) has already authenticated the
 /// caller on EITHER plane (CIAM external contact or workforce user) and stored the resolved
 /// <see cref="CallerPrincipal"/> on <c>HttpContext.Items</c>. Principal-agnostic at the route level; the
-/// resolver applies the A7 default-by-principal-kind rule (server-resolved kind: workforce →
+/// resolver applies the A8 default-by-principal-kind rule (server-resolved kind: workforce →
 /// <c>legal-front-door</c> + <c>policy-library</c>; CIAM → <c>assigned-work</c>, plus <c>legal-front-door</c>
 /// when <c>ExternalAccess:PartnerServiceRequestsEnabled</c> is on); <c>sprk_approlemodulemap</c> rows are extras.
 ///

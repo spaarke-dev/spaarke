@@ -175,7 +175,7 @@ K-list: K3 stale comments — fixed; K4 diagnostics (startup warning when the st
 
 ### Known limits NOT fixed
 
-1. **Guest email-bind trust basis.** A registered guest is email-bound exactly like a member, but a guest's `email` claim comes from the guest object in Spaarke's tenant, not the customer's. The bind is only as safe as task 060 (FR-14 registration) deriving the invite address from the verified home-tenant token AND being the only guest-creation path. This aligns with ADR-028 A7 :493 by delegation; task 060 must state it.
+1. **Guest email-bind trust basis.** A registered guest is email-bound exactly like a member, but a guest's `email` claim comes from the guest object in Spaarke's tenant, not the customer's. The bind is only as safe as task 060 (FR-14 registration) deriving the invite address from the verified home-tenant token AND being the only guest-creation path. This aligns with ADR-028 A8 :493 by delegation; task 060 must state it.
 2. **Principal `TenantId` is the stamp tenant for guests** (the token's `tid`), not the home tenant. Audit consumers that want the home tenant must read the `homeTenant` / `idpHomeTenant` log fields.
 3. **HTTP-level test hosts use a non-GUID `AzureAd:TenantId`**, so FR-15 is only resolver-tested (unit level) until a contract fixture sets a GUID.
 4. **Sovereign-cloud issuers** (`login.microsoftonline.us`, `sts.chinacloudapi.cn`, ...) are refused by `TryParseHomeTenant`.

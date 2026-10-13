@@ -27,7 +27,7 @@ Option B; no delete after close; invoice upload = invoice rights only; team-acce
 1. **Grid views:** (a) "assigned resolver" = the shared membership resolver? (b) views per entity = External Active / My / Inactive? (c) log the internal "My" views (`ownerid eq-userid`) as an issue?
 2. **Bell items:** team access A (none) / B (snapshot diff in cache); renewals A (accept modifiedon noise) / B (`sprk_renewedon` column).
 3. **ISS-005:** option A, `ExternalAccess:CustomerBusinessUnitId` written by provisioning H4b from H10's BU id.
-4. **060:** approve (1) the D-12 clarification, (2) the ADR-028 A7 carve-out for the `/organizations` registration client, (3) 60-day log retention. Analysis: `notes/task-060-model1-shared-service-analysis.md`.
+4. **060:** approve (1) the D-12 clarification, (2) the ADR-028 A8 carve-out for the `/organizations` registration client, (3) 60-day log retention. Analysis: `notes/task-060-model1-shared-service-analysis.md`.
 5. **052:** Service Requests as a partner default tab (opens first) or library-only? Accept no intake idempotency key as a known limit?
 6. **053:** optional "classes, if you know them" field on Trademark (design §4 deliberately omits classes)?
 

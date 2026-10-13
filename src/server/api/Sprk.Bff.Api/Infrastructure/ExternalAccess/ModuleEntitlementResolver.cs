@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// <see cref="CallerPrincipal"/> (which records the caller may see): Tier-1 = "which module tabs",
 /// Tier-2 = "which records within a module" (<see cref="ExternalModuleRegistry"/>).
 ///
-/// <para><b>Default modules by principal kind</b> (ADR-028 Amendment A7; owner 2026-10-09 option (b) and the
+/// <para><b>Default modules by principal kind</b> (ADR-028 Amendment A8; owner 2026-10-09 option (b) and the
 /// 2026-10-10 partner switch; external-access-platform-r3 task 011, spec FR-19 / FR-06). The kind is the
 /// SERVER-resolved <see cref="CallerPrincipal.Plane"/> (validated <c>iss</c>/<c>tid</c> only), never client input.
 /// Resolved WITHOUT ever fabricating a Contact for an internal user:</para>
@@ -50,12 +50,12 @@ public class ModuleEntitlementResolver
 
     /// <summary>
     /// The CIAM set when the partner service-request switch is on (FR-06/FR-19): the outside-counsel set plus
-    /// <c>legal-front-door</c>. Never <c>policy-library</c> — A7 gives partners only the Front Door.
+    /// <c>legal-front-door</c>. Never <c>policy-library</c> — A8 gives partners only the Front Door.
     /// </summary>
     private static readonly IReadOnlyList<string> PartnerServiceRequestModules = new[] { "assigned-work", "legal-front-door" };
 
     /// <summary>
-    /// The workforce default set (A7): every workforce caller — <c>systemuser</c> or workforce contact — gets these
+    /// The workforce default set (A8): every workforce caller — <c>systemuser</c> or workforce contact — gets these
     /// with no <c>sprk_approlemodulemap</c> row. The map only adds extras on top.
     /// </summary>
     private static readonly IReadOnlyList<string> WorkforceDefaultModules = new[] { "legal-front-door", "policy-library" };
@@ -99,7 +99,7 @@ public class ModuleEntitlementResolver
     /// <summary>The outside-counsel blanket entitlement set surfaced for the endpoint + tests.</summary>
     public static IReadOnlyList<string> OutsideCounselEntitlements => OutsideCounselModules;
 
-    /// <summary>The workforce default entitlement set (A7) surfaced for tests.</summary>
+    /// <summary>The workforce default entitlement set (A8) surfaced for tests.</summary>
     public static IReadOnlyList<string> WorkforceDefaultEntitlements => WorkforceDefaultModules;
 
     /// <summary>The Legal Front Door module code: the four intake wizards and their submit route (r3 task 035, FR-05).</summary>
@@ -161,7 +161,7 @@ public class ModuleEntitlementResolver
             .ToList();
 
     /// <summary>
-    /// Resolves the caller's module entitlement codes by server-resolved principal kind (A7). CIAM → the
+    /// Resolves the caller's module entitlement codes by server-resolved principal kind (A8). CIAM → the
     /// outside-counsel set, plus <c>legal-front-door</c> when the partner switch is on; workforce → the
     /// default set ∪ the extras its App-Role claims map to through active <c>sprk_approlemodulemap</c> rows.
     /// </summary>
@@ -181,7 +181,7 @@ public class ModuleEntitlementResolver
             return _options.PartnerServiceRequestsEnabled ? PartnerServiceRequestModules : OutsideCounselModules;
         }
 
-        // Workforce plane (systemuser or workforce contact) → the default set; no map row is needed for it (A7).
+        // Workforce plane (systemuser or workforce contact) → the default set; no map row is needed for it (A8).
         var roles = ExtractAppRoles(user);
         if (roles.Count == 0)
         {

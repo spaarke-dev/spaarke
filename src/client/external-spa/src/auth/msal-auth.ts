@@ -484,7 +484,7 @@ function isInteractionNeeded(err: unknown): boolean {
  * shape (FR-15 — no CIAM regression: the silent request is unchanged; the one deliberate routing change is that a
  * `timed_out` silent renewal now falls back to the redirect). See `acquireStandaloneBffToken`.
  *
- * Scope (task 041, FR-17; ADR-028 A7): the active CIAM backend's `api://{customer BFF app id}/user_impersonation`
+ * Scope (task 041, FR-17; ADR-028 A8): the active CIAM backend's `api://{customer BFF app id}/user_impersonation`
  * (`activeBffScope('ciam')`, which throws — no token — when the active backend belongs to the workforce plane or none
  * can be resolved). Deliberately argument-free: pages hand this function to libraries as a token callback, so no
  * caller-supplied argument can become a scope.
@@ -558,7 +558,7 @@ export function setActiveBffTokenAcquirer(acquirer: BffTokenAcquirer): void {
  * token and the host always belong to one backend; without it each strategy uses its plane's active backend scope.
  *
  * The seam takes the backend record, never a bare scope string, and refuses (rejects, no token request) a record whose
- * scope is not `api://{app id}/user_impersonation` (ADR-028 A7) — so no caller can turn an arbitrary string into a
+ * scope is not `api://{app id}/user_impersonation` (ADR-028 A8) — so no caller can turn an arbitrary string into a
  * scope for `acquireTokenSilent` / NAA.
  */
 export function acquireActiveBffToken(
@@ -628,7 +628,7 @@ export function accountsForActivePlane<T extends { tenantId?: string }>(accounts
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────────────────
- * Teams collaboration host — workforce NAA, then MSAL popup (ADR-028 A7; task 040 / FR-16)
+ * Teams collaboration host — workforce NAA, then MSAL popup (ADR-028 A8; task 040 / FR-16)
  * ───────────────────────────────────────────────────────────────────────────────────────────
  *
  * A SECOND acquisition strategy inside this SAME shared module — the Teams host — added WITHOUT
@@ -646,17 +646,17 @@ export function accountsForActivePlane<T extends { tenantId?: string }>(accounts
  *      msal-browser v5 redirect-bridge page.
  *   3. If both fail: `TeamsWorkforceAuthError` carrying `{ naaError, popupError }`.
  *
- * Invariants (ADR-028 A2 as amended by A7 / NFR-02 / NFR-04):
+ * Invariants (ADR-028 A2 as amended by A8 / NFR-02 / NFR-04):
  *   - Broker-only (NFR-02): the token authenticates to the BFF ONLY — never exchanged downstream
  *     (no OBO on the collaboration path).
  *   - Non-redirect (NFR-04): NAA → popup — NEVER `acquireTokenRedirect`. A full-page redirect inside
  *     the Teams iframe breaks framing. This is why the Teams path does NOT reuse
  *     `acquireStandaloneBffToken` (whose interaction fallback is a redirect — correct for the
  *     standalone SPA, wrong inside Teams).
- *   - No Teams SSO (A7 MUST NOT): `authentication.getAuthToken` is never called, and the Teams
+ *   - No Teams SSO (A8 MUST NOT): `authentication.getAuthToken` is never called, and the Teams
  *     manifest declares no `webApplicationInfo`. A Teams-SSO token's audience would be the one
  *     resource the manifest names — wrong for a per-customer backend.
- *   - Tenant-pinned (A7 MUST NOT `/organizations`/`/common`): a guest signed in through Spaarke's
+ *   - Tenant-pinned (A8 MUST NOT `/organizations`/`/common`): a guest signed in through Spaarke's
  *     tenant gets the guest `oid` its `systemuser` is keyed by; `/organizations` would sign the guest
  *     into their home tenant (different `oid`, no `systemuser` match). `buildMsalConfiguration` refuses
  *     any other workforce authority and any scope other than `…/user_impersonation`.
@@ -666,7 +666,7 @@ export function accountsForActivePlane<T extends { tenantId?: string }>(accounts
 
 /** Config the Teams host supplies to select the workforce strategy (values from `getWorkforceEnvConfig()`). */
 export interface TeamsWorkforceAuthConfig {
-  /** The single-tenant Spaarke workforce public client id (A7). */
+  /** The single-tenant Spaarke workforce public client id (A8). */
   clientId: string;
   /** Spaarke's tenant id (a GUID) — the authority is `https://login.microsoftonline.com/{tenantId}`. */
   tenantId: string;
@@ -920,7 +920,7 @@ function teamsWorkforceFailure(naaError: unknown, popupError: unknown): TeamsWor
 /**
  * Acquire a BFF-valid workforce token inside the Teams host — the selectable strategy the host
  * adapter invokes. Primary: NAA (skipped when the host does not recommend the NAA channel). Fallback: the
- * MSAL popup on a standard instance for the same client (ADR-028 A7: NAA first, then the popup; never
+ * MSAL popup on a standard instance for the same client (ADR-028 A8: NAA first, then the popup; never
  * Teams SSO) — except after the user cancelled NAA's own sign-in, when no second popup is opened. Both are
  * broker-only (NFR-02) and non-redirect (NFR-04). If both fail, throws `TeamsWorkforceAuthError` — the
  * caller surfaces a sign-in/consent error rather than degrading silently.
@@ -1009,7 +1009,7 @@ async function signInViaPopupInstance(
 }
 
 /**
- * The MSAL popup path for the Teams error screen's "Sign in" button (ADR-028 A7 fallback), so the popup opens
+ * The MSAL popup path for the Teams error screen's "Sign in" button (ADR-028 A8 fallback), so the popup opens
  * from a USER GESTURE (bootstrap cannot guarantee one; Teams webviews and browsers may block a gesture-less
  * `window.open`). Goes straight to `acquireTokenPopup` with no silent attempt first, which could outlast the
  * click's transient user activation and get the popup blocked. Records the popup instance as the signed-in

@@ -1,4 +1,4 @@
-# ADR-028 Amendment A7 — draft for owner approval (task 001)
+# ADR-028 Amendment A8 — draft for owner approval (task 001)
 
 **Status:** DRAFT, 2026-10-10. Not yet in `.claude/adr/`. Written there only after the owner approves (CLAUDE.md §6.5 path B; project directive "editing `.claude/adr/` needs owner approval").
 **Sources:**
@@ -7,18 +7,18 @@
 - owner decisions 2026-10-09 and 2026-10-10.
 
 **Placement in the ADR:**
-- A new section `## Amendment A7 (2026-10-xx)`, after A6.
+- A new section `## Amendment A8 (2026-10-xx)`, after A6.
 - One-line pointer markers at the four superseded spots: line 36 (the MUST NOT parenthetical "workforce Entra (multitenant, Teams SSO/NAA)"), A1 :52/:56, A2 :71 and A3 :125.
 - No other rule text changes.
 
 ---
 
-## Amendment A7 (2026-10-xx): Workforce client, scope, default modules and workforce-contact self-registration for the module-host SPA
+## Amendment A8 (2026-10-xx): Workforce client, scope, default modules and workforce-contact self-registration for the module-host SPA
 
 > **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5). **Driver project**:
 > `spaarke-SPA-external-access-platform-r3` (spec §ADR Tensions rows A2, A3, A1). **Owner-approved** 2026-10-xx.
 > **Amends one clause each of A1, A2 and A3; adds one rule.** Rationale: `projects/spaarke-SPA-external-access-platform-r3/notes/r3-auth-path.md`.
-> The auth system-of-record findings (§12b) are **not** in A7; they are a separate amendment owned by `spaarke-auth-system-of-record-r1`.
+> The auth system-of-record findings (§12b) are **not** in A8; they are a separate amendment owned by `spaarke-auth-system-of-record-r1`.
 
 ### Why
 
@@ -95,5 +95,5 @@ The Office add-in already runs the working shape: one single-tenant Spaarke clie
 - **Invites from each stamp BFF.** It puts a tenant-wide invite permission on every customer identity. A single shared path keeps it in one place.
 - **Combining with the §12b amendment.** §12b is not finished, and R3's Wave 2 (tasks 011, 012, 040) needs these rules first. Two dated amendments do not conflict, because they touch different clauses.
 
-> **Note (A7)**: Applied concise-only, like A1–A6. This concise ADR now carries Amendments A1–A7.
-> A7 changes the workforce client, scope, Tier-1 defaults and guest-creation path. It adds no IdP or token exchange, and does not weaken the no-OBO invariant.
+> **Note (A8)**: Applied concise-only, like A1–A6. This concise ADR now carries Amendments A1–A8.
+> A8 changes the workforce client, scope, Tier-1 defaults and guest-creation path. It adds no IdP or token exchange, and does not weaken the no-OBO invariant.

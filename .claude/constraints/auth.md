@@ -63,7 +63,7 @@ Load when:
 
 - ✅ **MUST** treat a Model 1 customer employee as a **B2B guest in Spaarke's tenant** who authenticates in **their company's own Entra tenant (home tenant)**: the stamp token carries `tid` = Spaarke, `acct = 1`, `idp` = home-tenant issuer. Model 1 moves Spaarke's side into Spaarke's tenant, not the customer's people.
 - ✅ **MUST** key workforce membership on the customer's home tenant id(s) in `WorkforceIdentity:CustomerTenantIds` (and, for self-registration, the same list in the Spaarke registry) — **never** on `AzureAd:TenantId` (= Spaarke on Model 1), an email domain or a `#EXT#` UPN.
-- ❌ **MUST NOT** use a multitenant / `common` / `organizations` authority for Model 1 workforce sign-in — the guest lands in the home tenant with a different `oid` (ADR-028 A7).
+- ❌ **MUST NOT** use a multitenant / `common` / `organizations` authority for Model 1 workforce sign-in — the guest lands in the home tenant with a different `oid` (ADR-028 A8).
 - Full explanation and where each value lives: [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §6.5.2 "Model 1: why a customer has a home tenant at all"](../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md). Code: `WorkforceIdentityOptions.cs` `WorkforceMembershipTest`.
 
 ### SPE File Access — broker-only byte identity (binding — task 171, 2026-10-06; supersedes Pattern 4's writer-identity rule)

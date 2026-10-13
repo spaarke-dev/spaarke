@@ -3,7 +3,7 @@
  * `createGridWidgetBody(configId)` binding — see `GridWidgetBody.tsx` for the shared implementation.
  * Backed by the "Internal — Service Requests (external widget)" `sprk_gridconfiguration` record and
  * the "service-requests" BFF module (entity `sprk_servicerequest`, Tier-2 predicate =
- * `sprk_requestedby == caller contact`; BFF A7 / r3 task 011: workforce see their own rows, CIAM partners
+ * `sprk_requestedby == caller contact`; BFF A8 / r3 task 011: workforce see their own rows, CIAM partners
  * only when ExternalAccess:PartnerServiceRequestsEnabled is on, otherwise 0 rows).
  *
  * Registered for both real planes and gated by the `legal-front-door` entitlement from `/me` (task 052, review 011 K3):

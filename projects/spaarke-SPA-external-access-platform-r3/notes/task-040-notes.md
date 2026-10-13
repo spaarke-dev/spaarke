@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-10 · **Rigor:** FULL (auth) · **Status at hand-off:** code done; **blocked on the new client registration** (owner live steps below). Not committed (wave rule).
 
-Binding rule: ADR-028 Amendment A7 (owner-approved 2026-10-10) — one single-tenant Spaarke public client in Spaarke's tenant, authority `https://login.microsoftonline.com/{Spaarke tenant id}`, Teams = NAA then MSAL popup, no `webApplicationInfo`, no Teams-SSO fallback, scope `api://{customer BFF app id}/user_impersonation`.
+Binding rule: ADR-028 Amendment A8 (owner-approved 2026-10-10) — one single-tenant Spaarke public client in Spaarke's tenant, authority `https://login.microsoftonline.com/{Spaarke tenant id}`, Teams = NAA then MSAL popup, no `webApplicationInfo`, no Teams-SSO fallback, scope `api://{customer BFF app id}/user_impersonation`.
 
 ## 1. What changed (src/client/external-spa)
 
@@ -36,7 +36,7 @@ The SWA CSP sets only `frame-ancestors`, so the inline script is allowed. The Ar
 - **Tenant must be a GUID** (not a verified domain) — simplest unambiguous pin; refuses every multi-tenant alias.
 - **NAA instance redirect** changed from origin to `{origin}/auth-callback.html`. NAA requests do not carry a redirect URI (checked `NestedAppAuthAdapter`); it matters only when the host offers no NAA bridge and `createNestablePublicClientApplication` returns a standard instance — then its silent iframe and popup land on the bridge page instead of timing out.
 - **Browser plane keeps the redirect flow** (redirect = origin), unchanged apart from the tenant pin.
-- **CIAM unchanged**: `ciamAuthorityConfig`, the `msalInstance` singleton and `acquireBffToken` untouched; CIAM's scope stays `SDAP.Access` (A7's "user_impersonation on both planes" for CIAM is not this task — the POML says the CIAM plane is unchanged; task 041/T240d).
+- **CIAM unchanged**: `ciamAuthorityConfig`, the `msalInstance` singleton and `acquireBffToken` untouched; CIAM's scope stays `SDAP.Access` (A8's "user_impersonation on both planes" for CIAM is not this task — the POML says the CIAM plane is unchanged; task 041/T240d).
 
 ## 4. Tests and checks (run 2026-10-10, src/client/external-spa)
 
@@ -87,7 +87,7 @@ az rest --method PATCH --url https://graph.microsoft.com/v1.0/applications/<BFF_
 **Step 4 — deploy (owner-gated):** SWA via `deploy-external-spa.yml`, Teams package via `deploy-teams-app.yml`, then the FR-21 live check (task 071): member + test guest `ralph@deweycheatham…`, browser + Teams desktop + web; token `tid` = Spaarke, `aud` = dev BFF app, `scp` contains `user_impersonation`. Escalation from the POML: if NAA fails without `webApplicationInfo`, STOP and record it for 071 — do not restore `webApplicationInfo`.
 - **Rollback:** redeploy the previous SWA build / previous Teams package (`git revert` this change set, re-run both workflows). Step 2's pre-auths are additive, so the old build keeps working.
 
-**Step 5 — after a verified step 4, REMOVE the A2-era pre-authorizations** (drop `<AAU_SCOPE_ID>` from the Teams/broker entries). Retiring the A2-era scope itself on `1e40baad` is a separate owner/provisioning decision (A7: "MUST NOT request or expose" it for the SPA/Teams host). Optionally remove `1e40baad`'s own SPA redirects for the dev SWA (it is no longer a client).
+**Step 5 — after a verified step 4, REMOVE the A2-era pre-authorizations** (drop `<AAU_SCOPE_ID>` from the Teams/broker entries). Retiring the A2-era scope itself on `1e40baad` is a separate owner/provisioning decision (A8: "MUST NOT request or expose" it for the SPA/Teams host). Optionally remove `1e40baad`'s own SPA redirects for the dev SWA (it is no longer a client).
 - **Rollback:** PATCH back the list saved before this step.
 
 ## 6. Dev sign-in before the registration exists
@@ -100,7 +100,7 @@ Not verified live (no live access in this task). Expected:
 ## 7. Found but out of this task's edit scope (not changed)
 
 1. `.github/workflows/deploy-external-spa.yml:52` — still `VITE_TEAMS_MSAL_BFF_SCOPE: api://1e40baad-…/<A2-era scope>`, and no `VITE_TEAMS_MSAL_TENANT_ID`. **Acceptance criterion 5 (grep over the workflow) is NOT met** — the wave rule limits this task to `src/client/external-spa`. Needs step 3.
-2. `.github/workflows/deploy-teams-app.yml:91-92` — the "Validate Teams app manifest" step **requires** `webApplicationInfo.id/resource`; with A7 it now fails the Teams package job. Invert to assert absence (`jq -e 'has("webApplicationInfo") | not'`).
+2. `.github/workflows/deploy-teams-app.yml:91-92` — the "Validate Teams app manifest" step **requires** `webApplicationInfo.id/resource`; with A8 it now fails the Teams package job. Invert to assert absence (`jq -e 'has("webApplicationInfo") | not'`).
 3. `src/main.tsx:212,238-242` — `extractAuthDiagnostics` reads `cause.ssoError`; the Teams error screen now shows `SSO: (none)` and omits `popupError`. Two-line change to read `popupError` (label "Popup").
 4. `src/components/AuthGuard.tsx:25-29,40-49` — comments describe the removed `getAuthToken` fallback (behaviour still correct: Teams path renders children).
 5. `src/client/external-spa/README.md:38-39` — describes a "multitenant" client; add `VITE_TEAMS_MSAL_TENANT_ID`.
@@ -120,10 +120,10 @@ Items 1-7 of the completion round. Section 7 above is now resolved except where 
 
 | # | Item | What changed | Tests |
 |---|---|---|---|
-| 1 | `deploy-teams-app.yml` manifest validation | The two `webApplicationInfo.id/resource` "must exist" checks are replaced by `jq -e 'has("webApplicationInfo") \| not'` (A7 MUST NOT). Rest of the job untouched. | `CI workflows and static config agree with A7 > deploy-teams-app.yml asserts the manifest has NO webApplicationInfo` |
+| 1 | `deploy-teams-app.yml` manifest validation | The two `webApplicationInfo.id/resource` "must exist" checks are replaced by `jq -e 'has("webApplicationInfo") \| not'` (A8 MUST NOT). Rest of the job untouched. | `CI workflows and static config agree with A8 > deploy-teams-app.yml asserts the manifest has NO webApplicationInfo` |
 | 2 | `deploy-external-spa.yml` build env | `VITE_TEAMS_MSAL_BFF_SCOPE` is now `api://1e40baad-.../user_impersonation`; new `VITE_TEAMS_MSAL_TENANT_ID: a221a95e-6abc-4434-aecc-e48338a1b2f2`. The workflow hardcodes dev ids as non-secret literals (its established pattern), so the tenant id is hardcoded the same way. `VITE_TEAMS_MSAL_CLIENT_ID` stays `1e40baad-...` (INTERIM; a comment points at section 5 steps 1 and 3 of this file). | `... deploy-external-spa.yml injects the tenant id and the user_impersonation scope, not the retired scope` |
 | 3 | Teams error screen | `extractAuthDiagnostics` moved verbatim from `main.tsx` to the new `src/auth/auth-diagnostics.ts` (main.tsx runs the bootstrap on import, so it was untestable) and now reads `{ naaError, popupError }`; it prints `NAA:` and `Popup:` lines and no `SSO:` line. | `Teams error screen diagnostics read the { naaError, popupError } cause` (2 tests) |
-| 4 | Declarations and stale docs | `VITE_TEAMS_MSAL_TENANT_ID` declared in `vite-env.d.ts`; `.env.production` gets `VITE_TEAMS_MSAL_TENANT_ID=#{TEAMS_MSAL_TENANT_ID}#` (existing placeholder style, comment rewritten for A7); `AuthGuard.tsx` comments no longer describe `getAuthToken`; `README.md` env table describes the single-tenant client, the tenant id and `user_impersonation`. | `... VITE_TEAMS_MSAL_TENANT_ID is declared in vite-env.d.ts, .env.production and .env.example` |
+| 4 | Declarations and stale docs | `VITE_TEAMS_MSAL_TENANT_ID` declared in `vite-env.d.ts`; `.env.production` gets `VITE_TEAMS_MSAL_TENANT_ID=#{TEAMS_MSAL_TENANT_ID}#` (existing placeholder style, comment rewritten for A8); `AuthGuard.tsx` comments no longer describe `getAuthToken`; `README.md` env table describes the single-tenant client, the tenant id and `user_impersonation`. | `... VITE_TEAMS_MSAL_TENANT_ID is declared in vite-env.d.ts, .env.production and .env.example` |
 | 5 | `Referrer-Policy` | `no-referrer-or-same-origin` (invalid, ignored by browsers) is now `strict-origin-when-cross-origin`. | `... the SWA Referrer-Policy is a valid policy value` |
 | 6 | Silent renewal (CIAM + workforce browser instances) | CONFIRMED and fixed (below). | `Browser silent renewal (CIAM and workforce) ...` (4 tests) |
 | 7 | Popup without a user gesture in Teams | Not changed (below). | - |
@@ -198,13 +198,13 @@ New `src/components/auth/TeamsAuthError.tsx` (Fluent v9, `makeStyles` + semantic
 ### K5: stale text
 
 - `.github/workflows/deploy-external-spa.yml` comment ("There is no public/ dir") now says `public/` holds only `auth-callback.html`.
-- `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` (the acct-claim paragraph, "Teams SSO included (`webApplicationInfo.id` ...)"): now describes the A7 model (single-tenant Spaarke client, NAA then MSAL popup, `user_impersonation`, no `webApplicationInfo`, no Teams SSO).
+- `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` (the acct-claim paragraph, "Teams SSO included (`webApplicationInfo.id` ...)"): now describes the A8 model (single-tenant Spaarke client, NAA then MSAL popup, `user_impersonation`, no `webApplicationInfo`, no Teams SSO).
 - Teams error copy ("your organization may not have consented") -> "Sign in with your work account in Spaarke's directory. If it keeps failing, contact your administrator." (in `TeamsAuthError.tsx`).
 - Test: `no stale text: ...` (fails against the 040 `main.tsx`).
 
 ### K6: Copilot agent still uses the retired scope - constrain section 5 step 5
 
-`scripts/Deploy-CopilotAgent.ps1:69` (`$BffScopeName = "access_as_user"`, default BFF app `1e40baad-...`, line 66) and `tests/scripts/CopilotAgentPackage.Tests.ps1:136` (`api://1e40baad-.../access_as_user`) still request that scope: the Copilot agent is outside A7's SPA/Teams scope. So section 5 step 5 (removing the A2-era pre-authorizations on `1e40baad`) must remove ONLY the Teams/broker/SPA pre-authorizations, NOT the scope itself and NOT the Copilot agent's pre-authorization. Retiring the scope on `1e40baad` is blocked until the Copilot agent has its own decision (separate owner/provisioning item).
+`scripts/Deploy-CopilotAgent.ps1:69` (`$BffScopeName = "access_as_user"`, default BFF app `1e40baad-...`, line 66) and `tests/scripts/CopilotAgentPackage.Tests.ps1:136` (`api://1e40baad-.../access_as_user`) still request that scope: the Copilot agent is outside A8's SPA/Teams scope. So section 5 step 5 (removing the A2-era pre-authorizations on `1e40baad`) must remove ONLY the Teams/broker/SPA pre-authorizations, NOT the scope itself and NOT the Copilot agent's pre-authorization. Retiring the scope on `1e40baad` is blocked until the Copilot agent has its own decision (separate owner/provisioning item).
 
 ### Review K-items recorded, not fixed here
 

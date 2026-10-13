@@ -16,7 +16,7 @@
  * the client is never the enforcement boundary regardless).
  *
  * STATUS(task-073): `fetchMeEntitlements` now calls the REAL BFF endpoint
- * `GET /api/v1/external/me/entitlements` (task 072; A7 / r3 task 011: default modules by
+ * `GET /api/v1/external/me/entitlements` (task 072; A8 / r3 task 011: default modules by
  * server-resolved principal kind, plus sprk_approlemodulemap extras). The BFF derives the plane from the caller's token.
  *
  * Failure handling (task 042, FR-18 / #1566):

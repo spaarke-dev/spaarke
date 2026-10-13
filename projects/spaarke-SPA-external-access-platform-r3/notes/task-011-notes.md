@@ -1,6 +1,6 @@
 # Task 011 — Default modules by user type + partner service-request switch (FR-19, FR-06 module half, #1568)
 
-Date: 2026-10-10. Rigor FULL (auth, entitlement). Implemented by a parallel-wave implementer agent; the two adversarial review passes are run by the main session. Basis: ADR-028 Amendment A7 (owner-approved 2026-10-10).
+Date: 2026-10-10. Rigor FULL (auth, entitlement). Implemented by a parallel-wave implementer agent; the two adversarial review passes are run by the main session. Basis: ADR-028 Amendment A8 (owner-approved 2026-10-10).
 
 ## Changes
 
@@ -22,7 +22,7 @@ Date: 2026-10-10. Rigor FULL (auth, entitlement). Implemented by a parallel-wave
 2. **`IOptions<T>` (read once per process), not `IOptionsMonitor<T>`**, for both readers. The registry is a startup singleton, so a monitor in the resolver alone would let the two disagree after a reload. An App Service setting change restarts the app anyway.
 3. **`ValidateOnStart` with no custom validator.** A bound `bool` has no invalid value, but a non-boolean string fails the bind. Without `ValidateOnStart`, that failure would surface on the first external module read (when the registry singleton is built) as a 500 on every module. With it, startup fails instead. `IOptionsDriftTests` needs no Census entry (no custom validation, no demanded key) and passes.
 4. **Order of the workforce result** is ordinal-sorted (as `ResolveWorkforceEntitlements` already was); the no-roles path returns the static default list in its declared order. Consumers treat the list as a set.
-5. **CIAM switch-on never adds `policy-library`.** A7's table gives partners only the Front Door.
+5. **CIAM switch-on never adds `policy-library`.** A8's table gives partners only the Front Door.
 
 ## Escalation check (POML trigger: workforce systemuser with no ContactId)
 
@@ -85,7 +85,7 @@ In the BFF, in the existing external-access module. Tier-1 entitlement and the T
 
 ## Follow-ups noticed (not in this task's file list)
 
-- Stale doc comments still describe the pre-A7 "workforce = App-Role map only" rule: `Api/ExternalAccess/MeEntitlementsEndpoint.cs:15-18`, `Api/ExternalAccess/ExternalAccessEndpoints.cs:79-89` (route summary/description), `Api/ExternalAccess/Dtos/MeEntitlementsResponse.cs:17`. Text only; behaviour is in the resolver.
+- Stale doc comments still describe the pre-A8 "workforce = App-Role map only" rule: `Api/ExternalAccess/MeEntitlementsEndpoint.cs:15-18`, `Api/ExternalAccess/ExternalAccessEndpoints.cs:79-89` (route summary/description), `Api/ExternalAccess/Dtos/MeEntitlementsResponse.cs:17`. Text only; behaviour is in the resolver.
 - FR-06's other halves (the intake endpoint accepting the CIAM plane when the switch is on; 403 when off) are not in this task; they should read the same `IOptions<ExternalAccessOptions>`.
 - Deployment: no stamp channel writes `ExternalAccess__PartnerServiceRequestsEnabled`; absent means off, which is the intended default. A customer that wants it on needs the App Service setting (provisioning / deployment guide entry).
 
@@ -94,7 +94,7 @@ In the BFF, in the existing external-access module. Tier-1 entitlement and the T
 Two adversarial review passes; no F-class (fix-now) defects. Fixes applied in the review-fix commit (comments and tests only):
 
 - Startup on a blank or non-boolean switch value: `ExternalAccess:PartnerServiceRequestsEnabled` = `""` / `"yes"` / `"1"` throws at startup (fail-closed, verified). Added `PartnerSwitch_BlankOrNonBooleanValue_FailsStartup` (`""`, `"yes"`) to `ModuleEntitlementResolverTests`. `ExternalAccessModule.cs` and `appsettings.template.json` comments now say any non-boolean value, INCLUDING EMPTY, fails startup; remove the setting to turn it off.
-- Stale pre-A7 comments corrected to the A7 model (default Tier-1 modules by server-resolved principal kind: workforce -> legal-front-door + policy-library; CIAM -> assigned-work, + legal-front-door when the partner switch is on; `sprk_approlemodulemap` = extras; service requests = own `sprk_requestedby` rows for workforce, and for CIAM only when the switch is on): `MeEntitlementsEndpoint.cs`, `ExternalAccessEndpoints.cs` (route comment + description), `Dtos/MeEntitlementsResponse.cs`, `NoAccessListReader.cs` (dropped `ModuleEntitlementResolver` from the "no guards" precedent), `ExternalAccessModule.cs` (Service Requests label), and client comments in `widgetRegistry.ts`, `ServiceRequestsWidget.tsx`, `me-client.ts`. `planes: ['workforce']` is unchanged; widening the client plane is task 052.
+- Stale pre-A8 comments corrected to the A8 model (default Tier-1 modules by server-resolved principal kind: workforce -> legal-front-door + policy-library; CIAM -> assigned-work, + legal-front-door when the partner switch is on; `sprk_approlemodulemap` = extras; service requests = own `sprk_requestedby` rows for workforce, and for CIAM only when the switch is on): `MeEntitlementsEndpoint.cs`, `ExternalAccessEndpoints.cs` (route comment + description), `Dtos/MeEntitlementsResponse.cs`, `NoAccessListReader.cs` (dropped `ModuleEntitlementResolver` from the "no guards" precedent), `ExternalAccessModule.cs` (Service Requests label), and client comments in `widgetRegistry.ts`, `ServiceRequestsWidget.tsx`, `me-client.ts`. `planes: ['workforce']` is unchanged; widening the client plane is task 052.
 
 Known limits NOT fixed here:
 

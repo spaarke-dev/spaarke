@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-11 - **Rigor:** STANDARD - **Status at hand-off:** code + tests done, NOT committed (the main session commits by path). **STOPPED at the POML escalation trigger:** the owner has not created the GitHub environments/variables or the production Teams app id (section 3 lists exactly what to create). POML step 5 (a `workflow_dispatch` dev run) needs owner approval and was not run; POML step 6 (TASK-INDEX / POML status / drift script) is outside this agent's edit scope.
 
-Binding: spec FR-20; design A1 (prod appPackage, own manifest + prod Teams app id), A2 (origins `external.spaarke.com`, `brk-multihub://external.spaarke.com`), A4 (deploy to `swa-spaarke-external-spa-prod`); ADR-028 A7 (no `webApplicationInfo`, tenant-pinned workforce authority, `user_impersonation` only); owner rule 2026-10-08 "baked dev values CANNOT be part of the package".
+Binding: spec FR-20; design A1 (prod appPackage, own manifest + prod Teams app id), A2 (origins `external.spaarke.com`, `brk-multihub://external.spaarke.com`), A4 (deploy to `swa-spaarke-external-spa-prod`); ADR-028 A8 (no `webApplicationInfo`, tenant-pinned workforce authority, `user_impersonation` only); owner rule 2026-10-08 "baked dev values CANNOT be part of the package".
 
 ## 1. What changed
 
@@ -26,7 +26,7 @@ Not touched: `manifest.json`, `env.dev.json` (dev outputs unchanged), TASK-INDEX
 4. **Preflight in the SPA workflow, not in the Teams workflow.** The Teams sanity build produces nothing that is shipped (only `manifest` + icons are packaged), so it builds with whatever the environment holds. The SPA build is deployed, so it fails closed on a missing/malformed variable. Prod additionally fails if no backend is configured (`VITE_BACKENDS` or `VITE_BFF_API_URL`).
 5. **Prod manifest id is substituted, not committed.** `${{TEAMS_APP_ID}}` follows the Toolkit placeholder convention used by `env.*.json`. The Teams workflow refuses an unset, non-GUID or all-zero id and refuses to package a manifest that still contains a `${{`. (In a workflow `run:` block a literal `${{` is parsed as an expression - the guard uses `[$][{][{]`.)
 6. **Prod `validDomains` is minimal** (`external.spaarke.com`, `teams.microsoft.com`, `*.cloud.microsoft`). Dev also lists its BFF host; on prod the BFF is per customer and chosen at run time (FR-17), so no customer host is listed. **Open question for the owner / T240c:** if a Teams webview check requires each customer BFF host in `validDomains`, the list must be extended per customer (or the manifest rendered from a variable) - not verified here, it needs the first prod install.
-7. **`webApplicationInfo`:** neither manifest has it; the jq guard (A7) runs on the staged manifest of either environment, and tests assert the property is absent from both committed manifests.
+7. **`webApplicationInfo`:** neither manifest has it; the jq guard (A8) runs on the staged manifest of either environment, and tests assert the property is absent from both committed manifests.
 8. **Dependabot PR #909** (setup-node 4 -> 7, touches both workflows) is still OPEN: its change is kept out of this diff (`setup-node@v4` / `@v6` left as they were). Expect a trivial rebase conflict on those one-line `uses:` lines when #909 merges.
 9. **Prod Teams package version** starts at `1.0.0` (a new app id; dev is `1.2.0`).
 
@@ -60,7 +60,7 @@ The dev workflow dispatch **fails at the preflight step** (and a Teams dev packa
 | Variable | `VITE_MSAL_AUTHORITY` | owner supplies - `https://{subdomain}.ciamlogin.com/{ciam tenant id}` of the production CIAM tenant |
 | Variable | `VITE_MSAL_CLIENT_ID` | owner supplies - production CIAM SPA client (after spike S1 / T240d) |
 | Variable | `VITE_MSAL_TENANT_ID` | owner supplies - production CIAM tenant id (GUID) |
-| Variable | `VITE_MSAL_BFF_SCOPE` | owner supplies - `api://{customer BFF app id}/user_impersonation` (only that scope is accepted, ADR-028 A7) |
+| Variable | `VITE_MSAL_BFF_SCOPE` | owner supplies - `api://{customer BFF app id}/user_impersonation` (only that scope is accepted, ADR-028 A8) |
 | Variable | `VITE_TEAMS_MSAL_CLIENT_ID` | owner supplies - the production single-tenant Spaarke workforce client |
 | Variable | `VITE_TEAMS_MSAL_TENANT_ID` | owner supplies - Spaarke's Entra tenant id (GUID; `organizations`/`common` are refused) |
 | Variable | `VITE_TEAMS_MSAL_BFF_SCOPE` | owner supplies - `api://{customer BFF app id}/user_impersonation` |

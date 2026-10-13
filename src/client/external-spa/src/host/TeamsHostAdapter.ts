@@ -12,7 +12,7 @@
  *
  * SCOPE (task 012 constraints — see the task POML):
  *   - Bootstrap + host-detection wiring ONLY. This adapter SELECTS — it does NOT implement — the
- *     Teams workforce auth strategy (NAA, then an MSAL popup; ADR-028 A7) in `../auth/msal-auth.ts`
+ *     Teams workforce auth strategy (NAA, then an MSAL popup; ADR-028 A8) in `../auth/msal-auth.ts`
  *     (`acquireTeamsWorkforceBffToken` / `getTeamsWorkforceSignedInInstance`). No token-acquisition
  *     algorithm lives in this file (ADR-028 A2).
  *   - Theme MUST use Fluent v9 semantic tokens (ADR-021). This adapter feeds the Teams-provided theme
@@ -88,7 +88,7 @@ export interface ITeamsHostAdapter {
    */
   getMsalInstance(): IPublicClientApplication;
   /**
-   * Recovery after `initialize()` failed on auth: run the MSAL popup sign-in (ADR-028 A7 fallback) and
+   * Recovery after `initialize()` failed on auth: run the MSAL popup sign-in (ADR-028 A8 fallback) and
    * finish the auth wiring `initialize()` would have done. MUST be called from a user gesture (the error
    * screen's "Sign in" button click) so the popup is not blocked; after it resolves the caller renders the
    * app with `getMsalInstance()`.
@@ -320,7 +320,7 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
       acquireTeamsWorkforceBffToken({ ...cfg, bffScope: scope ?? activeBffScope('workforce') }, options)
     );
     // The instance that holds the signed-in account: the NAA instance, or the popup fallback's
-    // instance when NAA failed (ADR-028 A7) — so useMsal() reflects the user either way.
+    // instance when NAA failed (ADR-028 A8) — so useMsal() reflects the user either way.
     this.msalInstance = getTeamsWorkforceSignedInInstance() ?? (await getTeamsWorkforceMsalInstance(cfg));
   }
 }

@@ -71,10 +71,10 @@ External users are **local accounts in a dedicated Entra External ID (CIAM) tena
 | App | Purpose | App ID |
 |-----|---------|--------|
 | External SPA public client | SPA client (public, PKCE) | `bd57e54e-b339-4500-b55c-e451009fd907` |
-| BFF API | Protected web API (scope `user_impersonation`; `SDAP.Access` retired by ADR-028 A7 / task 041) | `4a4d5126-91b0-4865-8e3a-134b7209013e` |
+| BFF API | Protected web API (scope `user_impersonation`; `SDAP.Access` retired by ADR-028 A8 / task 041) | `4a4d5126-91b0-4865-8e3a-134b7209013e` |
 | CIAM Graph provisioner | App-only user provisioning (`User.ReadWrite.All`) | `e63e6eb1-be25-4214-80a8-a6d609034bb9` |
 
-The BFF API app exposes App ID URI `api://4a4d5126-91b0-4865-8e3a-134b7209013e` with scope `user_impersonation` (the former `SDAP.Access` is retired by ADR-028 A7 / task 041; the SPA requests `api://{app id}/user_impersonation` on both planes). It sets `requestedAccessTokenVersion: 2`, so the access-token `aud` is the **client-id GUID** (`4a4d5126-…`), which the BFF validates as `Ciam:Audience`.
+The BFF API app exposes App ID URI `api://4a4d5126-91b0-4865-8e3a-134b7209013e` with scope `user_impersonation` (the former `SDAP.Access` is retired by ADR-028 A8 / task 041; the SPA requests `api://{app id}/user_impersonation` on both planes). It sets `requestedAccessTokenVersion: 2`, so the access-token `aud` is the **client-id GUID** (`4a4d5126-…`), which the BFF validates as `Ciam:Audience`.
 
 **Contact resolution by stable `oid`**: the CIAM caller-principal strategy (`CiamContactPrincipalStrategy` in `Infrastructure/ExternalAccess/CallerPrincipalResolver.cs`, invoked by the group-level `CallerPrincipalAuthorizationFilter`) resolves the CIAM caller to a Dataverse Contact by the immutable `oid` claim, stored on `Contact.sprk_externalobjectid` (String/100). Email (`preferred_username` / `upn` / `email`) is a **first-login fallback only** — it then binds the `oid` onto the Contact. Once an `oid` is bound, a mismatched email neither redirects resolution nor grants access. A token carrying neither `oid` nor a usable email is rejected (401).
 

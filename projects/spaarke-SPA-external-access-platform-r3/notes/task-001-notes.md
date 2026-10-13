@@ -1,4 +1,4 @@
-# Task 001 — ADR-028 Amendment A7
+# Task 001 — ADR-028 Amendment A8
 
 **Status:** done, 2026-10-10. Main session (opus), FULL rigor.
 
@@ -15,10 +15,10 @@
 
 ## What was written
 - **`.claude/adr/ADR-028-spaarke-auth-architecture.md`:**
-  - a new section, `## Amendment A7 (2026-10-10)`, after A6, taken verbatim from `notes/drafts/adr-028-a7-draft.md` (title shortened, date filled in);
+  - a new section, `## Amendment A8 (2026-10-10)`, after A6, taken verbatim from `notes/drafts/adr-028-a7-draft.md` (title shortened, date filled in);
   - one-line `⚠️` pointer markers under the rules at :36, :52, :56, :71 and :125.
   - **The diff only adds lines. No existing rule text was edited** (acceptance criterion 3).
-- **`.claude/adr/INDEX.md`:** the ADR-028 row now says "amended A1–A7" and summarises A7.
+- **`.claude/adr/INDEX.md`:** the ADR-028 row now says "amended A1–A8" and summarises A8.
 - **`notes/coordination/2026-10-10-adr-028-amendment.md`:** names which amendment carries which items (acceptance criterion 4). The §12b items stay with `spaarke-auth-system-of-record-r1`.
 
 ## Acceptance criteria
@@ -29,4 +29,4 @@
 
 ## Notes
 - `.claude/patterns/auth/oauth-scopes.md:20` (`access_as_user`) is still correct for the internal surfaces. Its update for the SPA and Teams belongs to the auth project's pattern sweep, as recorded in the coordination note.
-- The full `docs/adr/ADR-028-*.md` still does not exist; A7 is concise-only, like A1–A6.
+- The full `docs/adr/ADR-028-*.md` still does not exist; A8 is concise-only, like A1–A6.
