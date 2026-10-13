@@ -433,6 +433,20 @@ one. **Fix:** add the column to H7b's lock verification (reuse `scripts/Set-Exte
 checks); H7b never secures a column itself. If a check ever writes field-security rows, allow for `0x80041103`
 (MetadataCache lag: UAC's first `-Apply` on dev failed there although the column was readable; a re-run passed).
 
+### ISS-026 — Publisher verification for Spaarke's multitenant apps (ADR-028 A9)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — owner/business action; **before the first production customer** |
+| **Filed** | 2026-10-13 (ADR-028 A9, owner decision relayed by SPA-r3) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1811 |
+
+Under A9, workforce contacts consent to, and sign in through, Spaarke's multitenant workforce SPA client and each
+stamp's multitenant BFF app. Unverified multitenant apps meet risk-based step-up consent and show "unverified" to
+customer admins. **Needs:** a Microsoft AI Cloud Partner Program account, and a verified publisher domain (not
+`*.onmicrosoft.com`) set on those apps. Provisioning's A9 work (H3 v2 tokens + `knownClientApplications`, intake
+`customerWorkforceTenantIds`, admin-consent link): `notes/coordination/2026-10-13-from-spa-r3-adr028-a9-workforce-signin.md`.
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
