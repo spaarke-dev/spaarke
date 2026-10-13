@@ -1330,6 +1330,33 @@ public class SignalSuppressionTests
     }
 
     [Fact]
+    public async Task R2FT2_AConditionalLowerThatThrows_IsACountedFailure_NotAChangedSinceCountedSkip()
+    {
+        // uac-r2 F-T2: only a row-version MISMATCH is the benign "changed since it was counted" case (K6). Any other fault of the
+        // conditional lower is a failure: counted, the stamp not written, the planner still handed the corrected (cleared) stamp.
+        var s = new Store();
+        var family = new[] { 5, 4, 3 }.Select(d => s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: d, secure: true)).ToList();
+        foreach (var (id, d) in family.Zip(new[] { 5, 4, 3 })) s.Signals.Single(x => x.Id == id)["sprk_resolvedon"] = Now.UtcDateTime.AddDays(-d);
+        var readable = new List<Guid>
+        {
+            s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 5, secure: false),
+            s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 4, secure: false),
+            s.Dismiss(MatterId, Guid.NewGuid(), daysAgo: 1, secure: false, reason: WrongMatter),
+            s.Open(MatterId, Guid.NewGuid(), secure: false),
+        };
+        var preFix = Now.UtcDateTime.AddDays(-3).AddDays(30); // the N1 cross-wall stamp
+        foreach (var id in s.Signals.Select(x => x.Id).ToList()) s.Stamp(id, preFix);
+        s.FailWrites = true; // every Dataverse update throws, the conditional (IfRowVersionMatches) lower included
+
+        var (signals, failures) = await s.Service.ReconcileAsync(PolicyId, Code, true, s.Existing(), default);
+
+        failures.Should().Be(1, "a thrown conditional lower is a failure, not a row that changed since it was counted");
+        signals.Where(x => readable.Contains(x.Id)).Should().OnlyContain(x => x.SuppressedUntil == null, "the planner still sees the withdrawal this pass");
+        s.StampedIds.Should().BeEmpty("the throwing write stored nothing");
+        s.Signals.Should().OnlyContain(x => x.GetAttributeValue<DateTime?>("sprk_suppresseduntil") == preFix, "no stored stamp changed");
+    }
+
+    [Fact]
     public async Task R2K6_ALower_IsConditionalOnTheRowVersion_ARowChangedSinceItWasCountedIsNotLowered()
     {
         var s = new Store();

@@ -828,7 +828,7 @@ public sealed class SignalSuppressionService
                 }
                 catch (Exception ex) when (SignalWriter.IsConcurrencyVersionMismatch(ex))
                 {
-                    _logger.LogInformation(SuppressionEvents.Withdrawn,
+                    _logger.LogWarning(SuppressionEvents.Withdrawn,
                         "Suppression: policy {PolicyCode}: Signal {SignalId} changed since it was counted; its stamp was NOT lowered. The next pass counts it again.",
                         policyCode, id);
                 }
