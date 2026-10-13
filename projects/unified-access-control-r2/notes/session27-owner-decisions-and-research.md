@@ -1419,6 +1419,17 @@ The owner asked for research on the practical and technical limits of access tea
     - the columns are not in SpaarkeCore.
   - Put to the owner whether UAC may apply the field security and solution membership on dev.
 
+- **E11 email bind on the CIAM plane, decided 2026-10-12/13** (source: provisioning T240d items 1–2, task 184).
+  - E11 binds only on this environment's intent: an active contact-level grant, OR a pending invite.
+  - Task 184 found that no existing record marks a pending invite. The owner then chose **a new column**, `contact.sprk_externalinvitedon`: set by the BFF invite flow, field-secured to the BFF (BFF-Managed Readers/Writers profiles), never cleared. "Pending" means it is set and the contact has no oid binding.
+  - An invite of someone who already has a CIAM account (Graph ObjectConflict) becomes ExistingAccount, with a sign-in email.
+- **Model 1 workforce sign-in: under discussion with the owner.**
+  - Owner requirements:
+    - the customer sees which of its workforce has signed in, on the contact table;
+    - there are no pre-created contacts, so the first sign-in shows a registration form.
+  - Recommendation put to the owner: (A) home-tenant sign-in, with the BFF accepting the listed customer tenants on the external routes, and the task 141 member test as designed. The alternative is (B) guest invite plus a recorded oid set.
+  - Open with the owner: A or B, approval of new registrations, and baseline access.
+
 ## C7 research
 
 - **The user:** a customer **employee without a Power Apps licence (Type 2)**, signing in with company SSO.
