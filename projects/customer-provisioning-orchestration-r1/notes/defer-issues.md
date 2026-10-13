@@ -417,7 +417,7 @@ The sidecar detects the missing cmdlets before any write, so every run fails Res
 
 Until then, merge T263 only together with the approval, or accept that T186 stops at H14m.
 
-### ISS-025 — H7b does not check the `contact.sprk_externalinvitedon` field lock on stamps
+### ISS-025 — H7b does not check the `contact.sprk_externalinvitedon` (and, with UAC 185, `sprk_externalinvitecodehash`) field locks on stamps
 
 | Field | Value |
 |---|---|
@@ -432,6 +432,9 @@ a tenant-isolation gap. H7b (`SecureRecordSetupProcedure`) already verifies the 
 one. **Fix:** add the column to H7b's lock verification (reuse `scripts/Set-ExternalInviteMarkerSchema.ps1 -Verify`'s
 checks); H7b never secures a column itself. If a check ever writes field-security rows, allow for `0x80041103`
 (MetadataCache lag: UAC's first `-Apply` on dev failed there although the column was readable; a re-run passed).
+**Widened 2026-10-13 (UAC task 185 design):** UAC task 185 adds `contact.sprk_externalinvitecodehash`, the invite-code
+hash, through `scripts/Set-ExternalInviteCodeHashSchema.ps1`. H7b must verify it too, with different grants: Readers
+read 0, create 0, update 0, and Writers 4/4/4. Any Readers read is a FAIL.
 
 ### ISS-026 — Publisher verification for Spaarke's multitenant apps (ADR-028 A9)
 

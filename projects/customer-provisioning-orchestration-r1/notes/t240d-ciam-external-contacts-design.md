@@ -188,7 +188,11 @@ Re-runs are idempotent: match by `appId`, and by principal plus role.
 2. Create the **production CIAM SPA client** in `spaarkeextid` (single-tenant). Its redirect URI is
    `https://external.spaarke.com/...`. R3 owns its config; provisioning needs only its client id.
 3. Register the **directory's CIAM API app** in `spaarkeextid` and pre-authorize the SPA client on it (T240c).
-4. Tenant settings stay as they are: sign-up off, SSPR email OTP on.
+4. Tenant settings stay as they are: sign-up off, SSPR email OTP on. **The sign-in method stays email + password; never
+   enable email-OTP sign-in** (UAC task 185 relies on it, 2026-10-13). A squatter who created `victim@` knows that
+   account's password. The invitee gets in only through an SSPR reset, which revokes the squatter's password-based
+   refresh tokens. With email-OTP sign-in, the invitee would get in without a reset, and the squatter would reach the
+   bound oid afterwards.
 
 ## 8. Spike S1: the gate before step 2 (owner-approved live actions, in dev)
 
@@ -292,6 +296,24 @@ registration (D-13) is its keyless CIAM Graph provisioner.**
 - **Refusal.** A stamp refuses another customer's contacts by audience (401) and by oid binding in its own Dataverse
   (403). E11 is narrowed to contacts this stamp invited.
 - **Gate.** Spike S1 must pass before step 2.
+- **Live acceptance: cross-customer ExistingAccount (taken on from UAC-r2 2026-10-13; their owner checklist §11
+  option b).** Single-environment dev cannot prove it, because every CIAM user there already has one bound contact. It
+  runs once a stamp has T240d wired (H3c + H4b `Ciam:*`), using dev and that stamp, both on `spaarkeextid`. On the stamp,
+  invite the email of a person who has a CIAM account and no contact there. PASS means all of:
+  - outcome `ExistingAccount`;
+  - `contact.sprk_externalinvitedon` is written;
+  - `sprk_externalobjectid` is still empty;
+  - the "sign in with your existing account" email is sent;
+  - no new CIAM user is created (Graph `ObjectConflict` on `proxyAddresses`).
+
+  This is a live action and needs the owner's OK at run time.
+- **Live acceptance: SSPR locks out a prior controller (185 review R2, 2026-10-13).** On a test account, sign in with the
+  password and keep the refresh token, then reset through SSPR email OTP. The earlier refresh token must fail.
+- **Ordering gate (185 review, 2026-10-13).** H4b writes `Ciam:*` only when the stamp runs a BFF from master at or after
+  UAC task 185's merge, and imports a SpaarkeMaster that carries both `sprk_externalinvitedon` and
+  `sprk_externalinvitecodehash`. The production gate also needs 185's secret-bearing send option (review R1): the invite
+  body is persisted redacted, enrichment is skipped, and nothing is saved to Sent Items. Until then, the code leaks into
+  Dataverse and AI outputs that Y's users can read.
 
 Alternatives rejected:
 - **One shared CIAM API audience**: a token for X authenticates at Y, the "one credential, every customer" pattern D-13
