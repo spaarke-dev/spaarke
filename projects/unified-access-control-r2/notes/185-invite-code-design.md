@@ -477,7 +477,7 @@ The implementation is split into slices A, B1, B2, C, D, E and F, committed in o
   - A failed invite is logged at Warning, without the code. The user can retry with Invite.
 - **I-2. A re-grant to an unbound contact whose marker is current** (under 30 days) sends NO new invite (`AlreadyPending`). A new code would break a link the person may be about to use. Only an explicit Invite replaces the code.
 - **I-3. For an unbound contact, the invite REPLACES `GrantAccessNotifier`'s "you were given access" email**, so no contact gets two emails. Bound contacts keep the existing notification.
-- **I-4. Task 140 contact grants: OPEN, an owner question.** Task 140 removed contacts' ability to invite.
+- **I-4. Task 140 contact grants (OWNER, round 98b, 2026-10-13): no automatic invite.** Task 140's rule that contacts cannot invite stands. The partner's grant is saved. The colleague is matched once an INTERNAL user sends the invite, and the record's internal owner is notified that the colleague needs one, through the existing `GrantAccessNotifier`/`appnotification` path. The response `invite.status` is `NeedsInternalInvite`.
 - **I-5. Shared invite service.** `InviteExternalUserEndpoint.ProvisionAsync` is extracted into one internal service, called by the invite endpoint and by the grant flows. §11:
   - (1) Existing: the provision logic in `InviteExternalUserEndpoint`.
   - (2) Extension: it is the same logic moved, not new behaviour; the endpoint becomes a thin caller.
