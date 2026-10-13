@@ -137,6 +137,10 @@ public static class DecisionRecordRefusalReason
     /// <summary>Task 142: the filing (subject lookup and pair, or the core-ancestor stamp, contract C1/C2) could not be derived, so the
     /// record's place and the parents its owner is asked about are unknown. Nothing was written; a retry may succeed.</summary>
     public const string FilingFailed = "decision_filing_failed";
+
+    /// <summary>Task 142 (adversarial pass 1 F1): the subject cannot be filed for a reason a retry does not change (its lineage names
+    /// two different records of one core table, or it no longer exists). A refusal, not an outage.</summary>
+    public const string SubjectUnfileable = "decision_subject_unfileable";
 }
 
 /// <summary>
@@ -145,17 +149,25 @@ public static class DecisionRecordRefusalReason
 /// uses the answer only when the record it files sits under exactly those parents; otherwise it asks again, so an owner is never applied
 /// to a record filed somewhere the answer was not given for.
 /// </summary>
-/// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="RecordOwnerResolution"/> is the answer. Extension: it
+/// <remarks>It also carries the FILING step 1f computed (<see cref="Filing"/>), so the write at step 5 applies it with no Dataverse
+/// read: a catalog or stamp read that faults after the route has sent an email would leave a decision sent but not recorded.
+/// Component justification (CLAUDE.md section 11). Existing: <see cref="RecordOwnerResolution"/> is the answer. Extension: it
 /// carries no record of the question, and adding one there would change uac-r2's shared type for one caller. Cost of doing nothing: a
-/// subject re-filed between the route's step 1f and its step 5 would get an owner resolved for parents it no longer has.</remarks>
+/// subject re-filed between the route's step 1f and its step 5 would get an owner resolved for parents it no longer has, and every
+/// filing read would run again after the sends.</remarks>
 public sealed class DecisionRecordOwner
 {
-    internal DecisionRecordOwner(RecordOwnerResolution resolution, IReadOnlyList<RecordOwnershipParent> parents, Guid? assignee)
+    internal DecisionRecordOwner(
+        RecordOwnerResolution resolution, IReadOnlyList<RecordOwnershipParent> parents, Guid? assignee, DecisionRecordFiling? filing = null)
     {
         Resolution = resolution ?? throw new ArgumentNullException(nameof(resolution));
         Parents = parents ?? throw new ArgumentNullException(nameof(parents));
         Assignee = assignee;
+        Filing = filing;
     }
+
+    /// <summary>The filing the answer was given for (null when none was computed with it).</summary>
+    internal DecisionRecordFiling? Filing { get; }
 
     /// <summary>The resolver's answer, as returned.</summary>
     public RecordOwnerResolution Resolution { get; }
@@ -170,6 +182,14 @@ public sealed class DecisionRecordOwner
     internal bool Answers(IReadOnlyList<RecordOwnershipParent> parents, Guid? assignee) =>
         Assignee == assignee && Parents.SequenceEqual(parents);
 }
+
+/// <summary>
+/// Task 142: a Decision Record's filing under <paramref name="Subject"/> as computed once: the columns the shared regarding builder and
+/// the core-ancestor stamp wrote (subject lookup, ADR-024 pair, <c>sprk_regarding{core}</c> stamps, inherited Access Permission), and
+/// the cores the stamp derived (owner parents).
+/// </summary>
+internal sealed record DecisionRecordFiling(
+    DecisionRecordRef Subject, IReadOnlyDictionary<string, object> Columns, IReadOnlyList<CoreAncestorStamp> DerivedCores);
 
 /// <summary>Stable EventIds for the Decision Record writer (the 5030x range is the Signal side's).</summary>
 public static class DecisionRecordEvents
@@ -337,55 +357,14 @@ public sealed class DecisionRecordWriter
         {
             var plan = Validate(request);
             var content = Content(request, plan);
-            var subject = SubjectOf(request);
-
-            var entity = new Entity(Table);
+            // Filed under its subject and owned (FiledAndOwnedAsync); the route's step-1f filing and owner are applied with no read.
+            var (entity, recordOwner) = await FiledAndOwnedAsync(request, resolvedOwner, ct).ConfigureAwait(false);
+            var owner = recordOwner.Resolution;
             foreach (var (column, value) in content)
             {
                 entity[column] = value;
             }
 
-            // Task 142 (contract C1/C2, 140-schema-delta section 9 K2): filed under its subject by the SHARED regarding builder
-            // FIRST (its ADR-024 guard refuses a row that already carries a regarding lookup), then stamped from the subject by
-            // CoreAncestorResolver into sprk_regarding{matter,project,workassignment,servicerequest}. The typed lineage column
-            // (Content) stays as today until task 145.
-            var derivedCores = await FileUnderSubjectAsync(entity, subject, ct).ConfigureAwait(false);
-
-            // D-33/D-34/D-39 as amended by D-129 (records are owned by TEAMS), uac-r2 F1 and contract C3: the owner is uac-r2's
-            // resolver asked with EVERY parent the record sits under (the core record, the record's subject, every core the filing
-            // derived, and the subject of every Signal it resolves), exactly as returned. The resolver is secure-if-any, so one
-            // secure parent makes the record the Secure Record Owners team's even when the core is an ordinary matter.
-            // owningbusinessunit is never set here (it derives from the owner); a refusal writes nothing; KeepCreator is not
-            // requested, so an Unchanged answer cannot occur and is refused if it ever does. The commit route resolves the owner
-            // BEFORE its first write and hands it in (task 043): it is used when it answered for the parents this filing has.
-            var context = OwnershipContextOf(request, derivedCores);
-            RecordOwnerResolution owner;
-            if (resolvedOwner is { } handed && handed.Answers(context.Parents, request.AssigneeSystemUserId))
-            {
-                owner = handed.Resolution;
-            }
-            else
-            {
-                if (resolvedOwner is not null)
-                {
-                    _logger.LogWarning(
-                        "Decision Record owner for review {ReviewId} was resolved for other parents than the record is filed under; asking again.",
-                        request.ReviewId);
-                }
-
-                owner = (await ResolveRequestOwnerAsync(request, context, ct).ConfigureAwait(false)).Resolution;
-            }
-
-            if (!owner.IsOwned)
-            {
-                throw new DecisionRecordRefusedException(
-                    DecisionRecordRefusalReason.OwnerRefused,
-                    "The resolved owner of the Decision Record is not a team; nothing was written.",
-                    owner.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource);
-            }
-
-            // ownerid = the team, and sprk_createdbyperson = the deciding user (RequestedBy, #1783 / D-135).
-            owner.ApplyTo(entity);
             Guid? secureTeamId = owner.IsSecureOwner ? owner.OwningTeamId : null;
 
             Guid recordId;
@@ -433,10 +412,11 @@ public sealed class DecisionRecordWriter
 
     /// <summary>
     /// Task 043 / 142: resolves the Decision Record's owner over every parent it will sit under, with every owner refusal the write
-    /// would give: the cores its subject derives are read here (<see cref="CoreAncestorResolver.ResolveStampsAsync"/>, the same
-    /// derivation the write stamps from), so a parent the filing adds can never be left out of the answer. The commit route calls it
-    /// before its first write and passes the answer to
-    /// <see cref="WriteAsync(DecisionRecordRequest, DecisionRecordOwner?, CancellationToken)"/>. Writes nothing.
+    /// would give, and the record's whole FILING (every read the write would make: the record-type catalog, the stamp derivation and
+    /// its column probe), so a parent the filing adds can never be left out of the answer and no filing read is left for after the
+    /// sends. The commit route calls it before its first write and passes the answer to
+    /// <see cref="WriteAsync(DecisionRecordRequest, DecisionRecordOwner?, CancellationToken)"/>, which applies it with no read. Writes
+    /// nothing.
     /// </summary>
     /// <exception cref="DecisionRecordRefusedException">The owner was refused, the subject cannot be filed, or the resolver or the
     /// filing derivation failed (<see cref="DecisionRecordRefusalReason.OwnerResolutionFailed"/> /
@@ -447,14 +427,7 @@ public sealed class DecisionRecordWriter
 
         try
         {
-            var subject = SubjectOf(request);
-            var derived = await _coreAncestors.ResolveStampsAsync(subject.Entity, subject.Id, ct).ConfigureAwait(false);
-            if (!derived.Succeeded)
-            {
-                throw FilingFailed(subject, derived.Error);
-            }
-
-            return await ResolveRequestOwnerAsync(request, OwnershipContextOf(request, derived.Stamps), ct).ConfigureAwait(false);
+            return (await FiledAndOwnedAsync(request, handed: null, ct).ConfigureAwait(false)).Owner;
         }
         catch (DecisionRecordRefusedException ex)
         {
@@ -472,7 +445,8 @@ public sealed class DecisionRecordWriter
     /// no core (a core filing always takes precedence) AND a personal To Do's Assigned To named one enabled user, the owner is that
     /// user's business-unit team (<see cref="RecordOwnershipContext.ForUserTeam"/>), with the same refusals. Otherwise the parents' answer.
     /// </summary>
-    private async Task<DecisionRecordOwner> ResolveRequestOwnerAsync(DecisionRecordRequest request, RecordOwnershipContext context, CancellationToken ct)
+    private async Task<DecisionRecordOwner> ResolveRequestOwnerAsync(
+        DecisionRecordRequest request, RecordOwnershipContext context, DecisionRecordFiling filing, CancellationToken ct)
     {
         var owner = await ResolveOwnerCoreAsync(context, requireTeam: true, ct).ConfigureAwait(false);
         if (!owner.IsSecureOwner && request.Core is null && request.AssigneeSystemUserId is { } assignee && assignee != Guid.Empty)
@@ -481,7 +455,7 @@ public sealed class DecisionRecordWriter
                 RecordOwnershipContext.ForUserTeam(assignee) with { RequestedBy = context.RequestedBy }, requireTeam: true, ct).ConfigureAwait(false);
         }
 
-        return new DecisionRecordOwner(owner, context.Parents, request.AssigneeSystemUserId);
+        return new DecisionRecordOwner(owner, context.Parents, request.AssigneeSystemUserId, filing);
     }
 
     /// <summary>
@@ -551,6 +525,69 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>
+    /// Task 142: the ONE place a Decision Record entity is built: filed under its subject (<see cref="FileUnderSubjectAsync"/>) and owned
+    /// by the resolver's answer over every parent (<see cref="OwnershipContextOf"/>), applied with <c>ApplyTo</c> (ownerid and, for the
+    /// deciding user, <c>sprk_createdbyperson</c>). With <paramref name="handed"/> (the route's step-1f answer) for the same subject, its
+    /// filing is applied as computed then, with NO Dataverse read: the route resolves at 1f so that a read fault refuses before any send
+    /// (task 043). Its owner is used only when it answered for exactly these parents and assignee; otherwise the owner is asked again.
+    /// </summary>
+    private async Task<(Entity Record, DecisionRecordOwner Owner)> FiledAndOwnedAsync(
+        DecisionRecordRequest request, DecisionRecordOwner? handed, CancellationToken ct)
+    {
+        var subject = SubjectOf(request);
+        var entity = new Entity(Table);
+
+        DecisionRecordFiling filing;
+        if (handed?.Filing is { } computed && computed.Subject == subject)
+        {
+            foreach (var (column, value) in computed.Columns)
+            {
+                entity[column] = value;
+            }
+
+            filing = computed;
+        }
+        else
+        {
+            var derivedCores = await FileUnderSubjectAsync(entity, subject, ct).ConfigureAwait(false);
+            filing = new DecisionRecordFiling(
+                subject, entity.Attributes.ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal), derivedCores);
+        }
+
+        // D-33/D-34/D-39 as amended by D-129 (records are owned by TEAMS), uac-r2 F1 and contract C3: the owner is uac-r2's resolver
+        // asked with EVERY parent the record sits under, exactly as returned (secure-if-any). owningbusinessunit is never set here (it
+        // derives from the owner); a refusal writes nothing; KeepCreator is not requested, so an Unchanged answer is refused.
+        var context = OwnershipContextOf(request, filing.DerivedCores);
+        DecisionRecordOwner owner;
+        if (handed is not null && handed.Answers(context.Parents, request.AssigneeSystemUserId))
+        {
+            owner = handed;
+        }
+        else
+        {
+            if (handed is not null)
+            {
+                _logger.LogWarning(
+                    "Decision Record owner for review {ReviewId} was resolved for other parents than the record is filed under; asking again.",
+                    request.ReviewId);
+            }
+
+            owner = await ResolveRequestOwnerAsync(request, context, filing, ct).ConfigureAwait(false);
+        }
+
+        if (!owner.Resolution.IsOwned)
+        {
+            throw new DecisionRecordRefusedException(
+                DecisionRecordRefusalReason.OwnerRefused,
+                "The resolved owner of the Decision Record is not a team; nothing was written.",
+                owner.Resolution.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource);
+        }
+
+        owner.Resolution.ApplyTo(entity);
+        return (entity, owner);
+    }
+
+    /// <summary>
     /// Task 142 (contract C1/C2; 140-schema-delta section 9 K2): the subject lookup and the regarding pair through the SHARED regarding
     /// builder, THEN the core-ancestor stamp from the same subject. Never the other way round: the builder's ADR-024 guard refuses a row
     /// that already carries any regarding lookup, and the stamp columns are regarding lookups. Returns every core the stamp derived (the
@@ -575,7 +612,13 @@ public sealed class DecisionRecordWriter
         var stamp = await _coreAncestors.StampAsync(entity, subject.Entity, subject.Id, ct).ConfigureAwait(false);
         if (!stamp.Succeeded)
         {
-            throw FilingFailed(subject, stamp.Error);
+            // A data condition (two different roots of one table, or a subject that no longer exists) is a refusal a retry does not
+            // change; anything else is a fault (503). Neither text names a record.
+            throw stamp.IsPermanent
+                ? new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.SubjectUnfileable,
+                    "The decision's subject cannot be filed: the records it sits under conflict, or it no longer exists; nothing was written.")
+                : FilingFailed(subject, stamp.Error);
         }
 
         return stamp.Stamps;

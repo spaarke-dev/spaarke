@@ -14,8 +14,9 @@ namespace Spaarke.ArchTests;
 /// or a Web API <c>"col@odata.bind"</c>) appears only in the two create builders: <c>DecisionRecordWriter.Content</c> (the Decision
 /// Record's create) and <c>SignalWriter.BuildEntity</c> (the Signal's create, whose columns the record copies). (2) The Decision
 /// Record writer calls its Dataverse client for <c>CreateAsync</c> and <c>RetrieveAsync</c> only: it has no update path. (3) No
-/// server code addresses a Decision Record row for an update by name (<c>sprk_decisionrecords(…)</c>, or an update/upsert of
-/// <c>"sprk_decisionrecord"</c>).</para>
+/// server code addresses a Decision Record row for an update through a STRING LITERAL (see <see cref="DecisionRecordUpdate"/>): a
+/// table name held in a constant or a variable and handed to a generic writer is not seen by (3); rules (1) and (2) cover the writer
+/// itself.</para>
 /// <para><b>Crude by design</b>, like every <see cref="SourceScan"/> rule: it reads comment-stripped text, not a compilation. Each
 /// rule has a must-fire control (a seeded violation is reported) and a must-not-fire control (the sanctioned shape and the reads
 /// that name the same columns are not).</para>
@@ -34,7 +35,8 @@ public class DecisionRecordContextImmutabilityTests
         + $@"|SetAttributeValue\s*\(\s*""(?:{Columns})""\s*,"
         + $@"|\{{\s*""(?:{Columns})(?:@odata\.bind)?""\s*,\s*[^""\s]"
         + @"|""(?:sprk_corerecordtype|sprk_policyversion)@odata\.bind""",
-        RegexOptions.Compiled);
+        // Case-insensitive: a Web API bind uses the navigation property's PascalCase name ("sprk_PolicyVersion@odata.bind").
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>(file name, member) pairs that may write the context columns: the creates, each with its reason.</summary>
     private static readonly IReadOnlyDictionary<(string File, string Member), string> SanctionedWriters =
@@ -54,11 +56,15 @@ public class DecisionRecordContextImmutabilityTests
 
     private static readonly HashSet<string> AllowedWriterClientCalls = new(StringComparer.Ordinal) { "CreateAsync", "RetrieveAsync" };
 
-    /// <summary>A Decision Record row addressed for an update by name.</summary>
+    /// <summary>A Decision Record row addressed for an update through a string literal: a Web API path to one row
+    /// (<c>"sprk_decisionrecords(…"</c>), an update/upsert/patch call naming the table or its entity set as its first argument,
+    /// or an SDK <c>Entity</c> built for an EXISTING row (<c>new Entity("sprk_decisionrecord", id)</c>, the shape an update
+    /// takes; the create is <c>new Entity(Table)</c> with no id).</summary>
     private static readonly Regex DecisionRecordUpdate = new(
         @"""sprk_decisionrecords\("
-        + @"|(?:UpdateAsync|UpsertAsync|UpdateRecordFieldsAsync|PatchAsync)\s*\(\s*""sprk_decisionrecord""",
-        RegexOptions.Compiled);
+        + @"|(?:UpdateAsync|UpsertAsync|UpdateRecordFieldsAsync|PatchAsync)\s*\(\s*""sprk_decisionrecords?"""
+        + @"|new\s+Entity\s*\(\s*""sprk_decisionrecord""\s*,",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     [Fact(DisplayName = "Task 142 / D-34: the four Decision Record context columns are written only by the create builders")]
     public void ContextColumnsAreWrittenOnlyByTheCreateBuilders()
@@ -95,7 +101,7 @@ public class DecisionRecordContextImmutabilityTests
             "D-34: DecisionRecordWriter is create-only (append-only); it calls its Dataverse client for: " + string.Join(", ", others));
     }
 
-    [Fact(DisplayName = "Task 142 / D-34: no server code addresses a Decision Record row for an update")]
+    [Fact(DisplayName = "Task 142 / D-34: no server code addresses a Decision Record row for an update through a string literal")]
     public void NoServerCodeUpdatesADecisionRecordByName()
     {
         var problems = ServerFiles()
@@ -126,10 +132,11 @@ public class DecisionRecordContextImmutabilityTests
             "        row[\"sprk_corerecordid\"] = id.ToString();",
             "        row.Attributes.Add(\"sprk_factsnapshot\", \"{}\");",
             "        row.SetAttributeValue(\"sprk_corerecordtype\", new EntityReference(\"sprk_recordtype_ref\", id));",
-            "        var body = new Dictionary<string, object?> { { \"sprk_policyversion@odata.bind\", $\"/sprk_policyversions({id})\" } };",
+            "        var body = new Dictionary<string, object?> { { \"sprk_PolicyVersion@odata.bind\", $\"/sprk_policyversions({id})\" } };",
             "        await _writerClient.UpdateAsync(row, CancellationToken.None);",
             "        await _api.PatchAsync(\"sprk_decisionrecord\", id, body);",
             "        await _http.SendAsync($\"sprk_decisionrecords({id})\");",
+            "        await _api.UpdateAsync(\"sprk_decisionrecords\", id, body);",
             "    }",
             "",
             "    private IReadOnlyList<string> Reads(Entity e) => new[]",
@@ -158,7 +165,8 @@ public class DecisionRecordContextImmutabilityTests
         // The writer-client and the update-by-name detectors.
         var calls = WriterClientCall.Matches(seeded).Select(m => m.Groups["method"].Value).ToList();
         Assert.Contains("UpdateAsync", calls);
-        Assert.Equal(2, DecisionRecordUpdate.Matches(seeded).Count);
+        Assert.Equal(4, DecisionRecordUpdate.Matches(seeded).Count); // new Entity(table, id), PatchAsync(table), sprk_decisionrecords(, UpdateAsync(set)
+        Assert.False(DecisionRecordUpdate.IsMatch("var entity = new Entity(Table); var other = new Entity(\"sprk_decisionrecord\");"), "a create has no id");
         Assert.False(DecisionRecordUpdate.IsMatch("var query = new QueryExpression(\"sprk_decisionrecord\");"), "a read query is not an update");
     }
 

@@ -86,10 +86,13 @@ public sealed class DecisionRecordWriterTests
                     : Task.FromResult(Rows.TryGetValue((table, id), out var row) ? row : new Entity(table, id)));
 
             var client = new OntologyWriterDataverseClient(() => Org.Object, NullLogger<OntologyWriterDataverseClient>.Instance);
+            // The probe says every stamp column and every intermediate's root column exists (a document subject's links included).
             var coreAncestors = new CoreAncestorResolver(
                 Entities.Object,
                 (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
-                    CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute), StringComparer.OrdinalIgnoreCase)),
+                    CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute)
+                        .Concat(CoreAncestorResolver.IntermediateRootColumns.Values.SelectMany(c => c.Select(x => x.Column))),
+                    StringComparer.OrdinalIgnoreCase)),
                 NullLogger<CoreAncestorResolver>.Instance);
             Writer = new DecisionRecordWriter(client, realResolver ?? Ownership.Object, coreAncestors, RecordTypes, new FakeTimeProvider(Now), Log);
         }
@@ -1148,6 +1151,28 @@ public sealed class DecisionRecordWriterTests
     }
 
     [Fact]
+    public async Task A142_AHandedOwner_CarriesItsFiling_AndTheWriteAppliesItWithNoRead()
+    {
+        var h = new Harness(Secure());
+        h.Rows[("sprk_communication", CommunicationId)] = new Entity("sprk_communication", CommunicationId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+        };
+        var request = Request(core: Core("sprk_matter", MatterId), subject: new DecisionRecordRef("sprk_communication", CommunicationId));
+        var owner = await h.Writer.ResolveOwnerAsync(request);
+        h.Entities.Invocations.Clear();
+        h.RowReadFault = new TimeoutException("a read after the sends");
+
+        await h.Writer.WriteAsync(request, owner, CancellationToken.None);
+
+        h.Entities.Invocations.Should().BeEmpty("the step-1f filing is applied, not re-read");
+        h.RecordTypes.Queried.Should().ContainSingle();
+        h.OwnerAsks.Should().ContainSingle();
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(CommunicationId);
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId);
+    }
+
+    [Fact]
     public async Task A142_AnOwnerResolvedForOtherParents_IsAskedAgain_NeverReused()
     {
         var h = new Harness(Secure());
@@ -1189,6 +1214,40 @@ public sealed class DecisionRecordWriterTests
             .Which.Reason.Should().Be(DecisionRecordRefusalReason.FilingFailed);
         h.Created.Should().BeEmpty();
         h.OwnerAsks.Should().BeEmpty("an owner is never asked about a parent list the filing could not complete");
+    }
+
+    [Theory]
+    [InlineData("two-roots")]
+    [InlineData("missing")]
+    public async Task A142_ASubjectThatCannotBeFiledForGood_IsARefusal_NotAnOutage_AndNothingIsWritten(string condition)
+    {
+        // Adversarial pass 1 F1: a document whose matter and related matter name different records (or a subject that no longer
+        // exists) is a data condition a retry never changes: decision_subject_unfileable, never decision_filing_failed (503).
+        var document = Guid.NewGuid();
+        var h = new Harness();
+        if (condition == "two-roots")
+        {
+            h.Rows[("sprk_document", document)] = new Entity("sprk_document", document)
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+                ["sprk_relatedmatter"] = new EntityReference("sprk_matter", Guid.NewGuid()),
+            };
+        }
+        else
+        {
+            h.RowReadFault = new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217) }, "sprk_document With Id = ... Does Not Exist");
+        }
+
+        var request = Request(core: Core("sprk_matter", MatterId), subject: new DecisionRecordRef("sprk_document", document));
+
+        (await h.Writer.Invoking(w => w.ResolveOwnerAsync(request)).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.SubjectUnfileable);
+        var ex = (await h.Writer.Invoking(w => w.WriteAsync(request)).Should().ThrowAsync<DecisionRecordRefusedException>()).Which;
+        ex.Reason.Should().Be(DecisionRecordRefusalReason.SubjectUnfileable);
+        ex.Message.Should().NotContain(document.ToString("D")).And.NotContain(MatterId.ToString("D"), "the refusal names no record");
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty();
     }
 
     [Fact]

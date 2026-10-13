@@ -265,8 +265,20 @@ public sealed class DecisionCommitServiceTests
 
         /// <summary>Task 142: the <c>sprk_recordtype_ref</c> catalog the shared regarding builder types the Decision Record's pair from
         /// (spaarkedev1's rows: a communication subject is untyped, as live).</summary>
-        public Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub RecordTypes { get; } =
-            new(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1);
+        public Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub RecordTypes => _recordTypes ??= new((name, _) =>
+            CatalogFault is { } fault && _catalogReads++ >= CatalogFaultFromRead
+                ? Task.FromException<Entity?>(fault)
+                : Task.FromResult(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1.TryGetValue(name, out var id)
+                    ? new Entity("sprk_recordtype_ref", id) { ["sprk_recorddisplayname"] = name }
+                    : null));
+
+        private Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub? _recordTypes;
+        private int _catalogReads;
+
+        /// <summary>Task 142: a fault of the record-type catalog read, from the <see cref="CatalogFaultFromRead"/>-th read (0: every read).</summary>
+        public Exception? CatalogFault { get; set; }
+
+        public int CatalogFaultFromRead { get; set; }
 
         /// <summary>Task 142: uac-r2's REAL core-ancestor resolver over <see cref="Entities"/>; the probe says every stamp column exists
         /// (they do on sprk_decisionrecord after task 140).</summary>
@@ -841,6 +853,25 @@ public sealed class DecisionCommitServiceTests
         AssertNothingWritten(rig, "a two-wall decision is refused before its first write");
     }
 
+    [Fact]
+    public async Task A142_TheWallCheckRunsAfterFR51_ACallerWhoMayNotDecide_GetsForbidden_NotTheWallRefusal()
+    {
+        // Adversarial pass 1 K4: the family answer (which tells "these items sit under different secure records") is given only to a
+        // caller FR-51 lets act on every item.
+        var rig = new Rig();
+        rig.AddSignal(Second, DecisionLane.Decide, Matter, PathB);
+        rig.Families[Primary] = SuppressionPartition.Secure([("sprk_matter", SecureMatterX)]);
+        rig.Families[Second] = SuppressionPartition.Secure([("sprk_project", SecureProjectY)]);
+        rig.Rights[("sprk_matters", Matter)] = AccessRights.Read | AccessRights.Write;
+
+        var result = await rig.CommitAsync(PathBReview(also: [Second]));
+
+        result.Status.Should().Be(DecisionCommitStatus.Forbidden);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.NotAuthorized);
+        rig.FamiliesAsked.Should().BeEmpty("the families are never read for a caller who may not decide");
+        rig.Writes.Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData("ordinary-beside-secure")]
     [InlineData("undetermined")]
@@ -907,6 +938,56 @@ public sealed class DecisionCommitServiceTests
         rig.OwnerAsks.Should().ContainSingle("the 1f answer is reused at the write: same parents");
         rig.OwnerAsks[0].Parents.Should().Equal(new RecordOwnershipParent("sprk_matter", Matter), new RecordOwnershipParent("sprk_todo", ItemTodo));
         rig.OwnerAsks[0].RequestedBy!.SystemUserId.Should().Be(Caller);
+    }
+
+    [Fact]
+    public async Task A142_ACatalogFault_RefusesAtStep1f_BeforeTheInquiryIsSent_NeverSentButNotRecorded()
+    {
+        // Adversarial pass 2 F1: every filing read happens before the first write. A catalog fault refuses the whole decision at 1f.
+        var rig = new Rig { CatalogFault = new TimeoutException("429") };
+
+        var result = await rig.CommitAsync(PathBReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, result.Detail);
+        rig.Writes.Should().BeEmpty("refused before the inquiry is sent");
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A142_TheWriteAtStep5_MakesNoFilingRead_AFaultThereCannotStrandASentDecision()
+    {
+        // The catalog answers once (step 1f) and faults on every later read: the write after the sends must not read it again.
+        var rig = new Rig { CatalogFault = new TimeoutException("429"), CatalogFaultFromRead = 1 };
+
+        var result = await rig.CommitAsync(PathBReview());
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.RecordTypes.Queried.Should().ContainSingle("the filing is computed once, at 1f, and applied at step 5 with no read");
+        rig.Record.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(Matter);
+        rig.Record.GetAttributeValue<EntityReference>("sprk_regardingrecordtype").Id
+            .Should().Be(Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1["sprk_matter"]);
+    }
+
+    [Fact]
+    public async Task A142_ASubjectThatNoLongerExists_IsRefused_NotUnavailable_AtStep1f_AndNothingIsWritten()
+    {
+        // Adversarial pass 1 F1: a permanent filing condition is a refusal (a retry never changes it), not a 503.
+        var rig = new Rig
+        {
+            TodoFilingReadFault = new FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040217) }, "sprk_todo With Id = ... Does Not Exist"),
+        };
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused, result.Detail);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.RecordRefused);
+        result.Detail.Should().Contain(DecisionRecordRefusalReason.SubjectUnfileable).And.NotContain(ItemTodo.ToString("D"));
+        rig.Writes.Should().BeEmpty();
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
     }
 
     [Fact]
