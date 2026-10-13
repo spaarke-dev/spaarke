@@ -1429,10 +1429,18 @@ The owner asked for research on the practical and technical limits of access tea
     - there are no pre-created contacts, so the first sign-in shows a registration form.
   - Recommendation put to the owner: (A) home-tenant sign-in, with the BFF accepting the listed customer tenants on the external routes, and the task 141 member test as designed. The alternative is (B) guest invite plus a recorded oid set.
   - Open with the owner: A or B, approval of new registrations, and baseline access.
-- **Model 1 workforce sign-in: DECIDED, round 97 (2026-10-13). This is task 186.**
-  1. **Option A.** The person signs in with their home tenant. The BFF accepts tokens from the tenants in `WorkforceIdentity:CustomerTenantIds` on the workforce routes, and task 141's member test runs as designed. No B2B guests, and `Set-ExternalFlagForB2BGuests.ps1 -Apply` stays forbidden in Model 1.
-  2. **No approval** of new registrations. The first sign-in form creates the workforce contact, and it is active at once.
-  3. **Baseline access** uses the Dataverse security role "Spaarke Internal Contact User (Workforce)". The owner created it on dev on 2026-10-13 (root BU role 9deaac9c-02c7-f111-a05c-0022482913fc, 655 privileges) and will change its privileges as needed. These callers are not systemusers, so how the BFF applies the role is an owner decision in 186's design note.
+- **Model 1 workforce sign-in: SUPERSEDED.** This record originally said "round 97: option A, no B2B guests, all in UAC task 186". That record was written against a branch that lacked ADR-028 A6–A8, and as written it contradicted A8. The settled decision is **ADR-028 A9** (owner-confirmed 2026-10-13, PR #1810, driven by SPA-r3):
+  1. **Licensed core users** stay B2B guests in the Spaarke tenant (A8, unchanged).
+  2. **Workforce contacts** sign in to the browser SPA with their company account, at the customer's home directory, through one multi-tenant Spaarke SPA client. They are not B2B guests.
+     - The BFF accepts their token only on: an exact `iss` for a tid in `CustomerTenantIds`, this stamp's audience, a user token, and `acct = 0`.
+     - They are keyed on (tid, oid), never on email.
+     - First sign-in returns `registration_required`, then a profile form; there is NO approval.
+     - Teams is deferred.
+  3. **A licensed user** reaching the SPA with their company account resolves through a stored link (tid, oid) → systemuserid, never by email.
+  4. **Partners** stay on CIAM.
+  5. **Ownership:** SPA-r3 owns workforce sign-in and registration end to end. UAC owns only baseline access: how the role "Spaarke Internal Contact User (Workforce)" applies (task 186, re-scoped).
+     - Round 97's other answers still stand under A9: no approval, and the Workforce role as baseline. The owner created that role on dev in the root BU (9deaac9c-02c7-f111-a05c-0022482913fc, 655 privileges, no `sprk_servicerequest` privilege).
+  6. **Process lesson:** before recording an auth decision, merge master and check it against ADR-028 (project CLAUDE.md §3).
 
 ## Round 97 (2026-10-13): OWNER: task 184 after provisioning's cross-customer review
 

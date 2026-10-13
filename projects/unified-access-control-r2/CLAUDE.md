@@ -80,6 +80,25 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 - 2026-10-06: terminology: say "save the email as documents" (the archive route), never "Save to SharePoint".
 - 2026-09-07: don't absorb other surfaces' work (Compose, CI gates) or hand work to a mid-execution project; the 27 unbuilt solutions are fixed per surface, never by a CI workflow.
 - 2026-09-10: no Dataverse test in CI (live assertions are manual gates); a failed revoke gives the user a message, never a bare 500.
+- **2026-10-13 (BINDING, all projects): ADR-028 is the single authority for auth.** Before recording an owner decision about auth, merge master and check the decision against ADR-028. If they conflict, raise the CLAUDE.md §6.5 "ADR Conflict" block BEFORE writing anything down. Round 97 was recorded against a branch that lacked A6–A8, and the result contradicted A8.
+- **2026-10-13: always say which directory you mean.** "Spaarke tenant" is Spaarke's Entra directory; in Model 1 it holds every customer's Dataverse, Azure resources, app registrations and SPE. "Customer's home directory" is the customer's own Entra directory. Never write a bare "tenant" when you mean the customer's directory.
+
+**Model 1 sign-in (ADR-028 A9, owner-confirmed 2026-10-13; supersedes the round 97 "option A" record):**
+- **Licensed core users** are B2B guests in the Spaarke tenant (systemusers), unchanged under A8. They use the model-driven apps, the Office add-ins (`/api/office/*` stays Spaarke-tenant-only) and Teams.
+- **Workforce contacts** (licence-free customer staff) sign in to the browser SPA with their company account at the customer's home directory, through one multi-tenant Spaarke SPA client. They are NOT B2B guests.
+  - The BFF accepts the token only when ALL of these hold: an exact `iss` for a tid in `WorkforceIdentity:CustomerTenantIds`, this stamp's BFF audience, a user token, and `acct = 0`.
+  - Identity is keyed on (tid, oid), never on email or UPN.
+  - The first sign-in returns `registration_required`; a profile form then creates one contact, with no approval.
+  - Teams for workforce contacts is deferred.
+- **A licensed user signing in to the SPA** with their company account resolves to their systemuser ONLY through a stored link from home (tid, oid) to systemuserid, never by email.
+- **Partners** use CIAM, unchanged.
+- **Ownership:** SPA-r3 owns workforce sign-in and registration end to end: the SPA client, BFF token acceptance, the registration endpoint and the stored link. UAC owns ONLY baseline access: how the role "Spaarke Internal Contact User (Workforce)" applies to contact callers (task 186).
+- **What UAC requires of SPA-r3's PRs, agreed 2026-10-13:** UAC reviews them as a gate.
+  - They build on top of #1801 (task 184).
+  - The (tid, oid) path is a NEW branch in the binder; it does not reshape E10/E11.
+  - The stored link lives in its own field or store, never in `sprk_externalobjectid` or the plane columns, so task 141's invariants stand.
+  - Word-add-in's findings (a), (b), (d) and (e) apply.
+  - The `MembershipEndpoints` oid → systemuser lookup is guarded off for home-directory tokens.
 
 **Access model:**
 - **D1/C9 (2026-09-30):**
@@ -98,7 +117,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
   - on a Restricted record a flagged user is refused a share, and existing shares are removed; a secure-only record may be shared with them, e.g. licensed outside counsel (round 78);
   - **Restricted wins over the last-reader rule:** the removal reports `no-internal-reader` for an admin (round 76);
   - B2B guests are flagged by `scripts/Set-ExternalFlagForB2BGuests.ps1`, run BEFORE the BFF deploy.
-    - ⛔ **Do NOT run it with `-Apply` in a Model 1 environment** (word-add-in-r1 T126, 2026-10-12). The customer's own staff sign in as B2B guests (`#EXT#`), so its "every `#EXT#` is external" rule would mark them external: Restricted shares are removed and internal-only messages are hidden. Example: Ralph Dewey on dev, correctly `sprk_isexternal = No`.
+    - ⛔ **Do NOT run it with `-Apply` in a Model 1 environment** (word-add-in-r1 T126, 2026-10-12). The customer's licensed core users sign in as B2B guests (`#EXT#`; ADR-028 A8/A9), so its "every `#EXT#` is external" rule would mark them external: Restricted shares are removed and internal-only messages are hidden. Example: Ralph Dewey on dev, correctly `sprk_isexternal = No`.
     - The correct rule: a guest is external unless its `oid` is in the customer-workforce set recorded at provisioning. Until that rule exists, the script is Model 2 only.
 - **Accepted gap (round 77):** a flagged user can still read a NON-secure Restricted record in their own business unit through role depth.
 - **`sprk_issecure`** is field-locked and changed only through the endpoints (round 2):
