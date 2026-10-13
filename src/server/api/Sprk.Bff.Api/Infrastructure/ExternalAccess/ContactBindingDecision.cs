@@ -2,7 +2,8 @@
 //
 // One pure decision shared by every path that binds a person to a Dataverse contact:
 //   • the workforce token plane (a customer employee with no Power Apps licence — "Type 2"),
-//   • the CIAM token plane (an invited external user; the email bind is kept only as the invite-repair path),
+//   • the CIAM token plane (an invited external user; the email bind is kept for the invite-repair path and the
+//     existing-CIAM-account invite, and since task 184 binds only on this environment's intent — E11),
 //   • the systemuser plane (a licensed user linked without a token: the reconciliation job, registration,
 //     and the inline link at first resolution),
 //   • the invite path (which never binds, but must refuse a contact another plane already owns).
@@ -291,6 +292,41 @@ public sealed record ReferenceLookup(LookupStatus Status, IReadOnlyList<SystemUs
     public static ReferenceLookup Of(params SystemUserReference[] references) => new(LookupStatus.Read, references);
 }
 
+/// <summary>
+/// Task 184 (owner round 96) — whether THIS environment intends an unbound contact to be email-bound on the CIAM plane.
+/// Two facts, each read in its own query (<c>IContactIdentityStore.FindBindIntentAsync</c>), raw, interpreted by the
+/// decision (<see cref="ContactBindingDecision.Decide"/>, E11).
+/// </summary>
+/// <remarks>
+/// Why it exists: any CIAM user can obtain a token for any customer's audience (the SPA client is pre-authorized for
+/// every customer — provisioning spike S1), so an email match alone would bind a person customer Y never invited onto Y's
+/// contact. Y's own grant or Y's own pending invite is the evidence that Y means this person.
+/// </remarks>
+/// <param name="ContactId">The contact the facts were read for; a lookup for any other contact is never used.</param>
+/// <param name="GrantStatus">How the grant read ended. Anything but <see cref="LookupStatus.Read"/> denies.</param>
+/// <param name="HasActiveGrant">
+/// At least one ACTIVE, UNEXPIRED contact-level <c>sprk_externalrecordaccess</c> row names the contact (the read path's
+/// own filter, <c>ExternalParticipationService.BuildContactGrantFilter</c>). Organization-wide grants do not count: they
+/// say nothing about which person is meant.
+/// </param>
+/// <param name="InviteStatus">
+/// How the marker read ended. <see cref="LookupStatus.ColumnMissing"/> is "no invite evidence", NOT a fault: the marker is
+/// read in its own query precisely so a BFF deployed before the column keeps the grant leg working. A
+/// <see cref="LookupStatus.Failed"/> read denies.
+/// </param>
+/// <param name="InvitedOn"><c>contact.sprk_externalinvitedon</c> — when the BFF's invite flow last invited the contact.</param>
+public sealed record BindIntentLookup(
+    Guid ContactId,
+    LookupStatus GrantStatus,
+    bool HasActiveGrant,
+    LookupStatus InviteStatus,
+    DateTimeOffset? InvitedOn)
+{
+    /// <summary>Both reads failed.</summary>
+    public static BindIntentLookup Failed(Guid contactId) =>
+        new(contactId, LookupStatus.Failed, false, LookupStatus.Failed, null);
+}
+
 /// <summary>The facts of one binding request, as the calling plane establishes them.</summary>
 /// <param name="Plane">Which plane is asking.</param>
 /// <param name="CallerOid">The caller's oid, already parsed. <see cref="Guid.Empty"/> = unusable.</param>
@@ -341,6 +377,12 @@ public enum BindingAction
 
     /// <summary>The decision needs the systemuser's linked contact row before it can finish.</summary>
     NeedLinkedContact,
+
+    /// <summary>
+    /// The CIAM plane's E11 needs this environment's intent for <see cref="BindingDecision.ContactId"/> (an active grant or a
+    /// pending invite) before it can bind (task 184).
+    /// </summary>
+    NeedIntentLookup,
 }
 
 /// <summary>One decision step's answer.</summary>
@@ -353,7 +395,7 @@ public sealed record BindingDecision(
 {
     /// <summary>True for an outcome that ends the decision.</summary>
     public bool IsTerminal => Action is not (BindingAction.NeedEmailLookup or BindingAction.NeedReferenceLookup
-        or BindingAction.NeedLinkedContact);
+        or BindingAction.NeedLinkedContact or BindingAction.NeedIntentLookup);
 }
 
 /// <summary>How the invite path must treat the contact its email resolves to.</summary>
@@ -465,6 +507,13 @@ public static class ContactBindingDecision
     /// </summary>
     public const string DenyContactKeyConflict = "sdap.access.deny.contact_key_conflict";
 
+    /// <summary>
+    /// CIAM plane, E11 (task 184, owner round 96): the email matches one unbound, active, unlinked contact, but THIS
+    /// environment shows no intent for it — no active contact-level grant and no pending invite
+    /// (<c>sprk_externalinvitedon</c>). Nothing is written and nothing is flagged: no other person is involved.
+    /// </summary>
+    public const string DenyContactNotInvited = "sdap.access.deny.contact_not_invited";
+
     // ── Invite reason codes ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>The invite email matches a contact bound on the workforce plane.</summary>
@@ -543,7 +592,8 @@ public static class ContactBindingDecision
         BindingRequest request,
         ContactLookup oidLookup,
         ContactLookup? emailLookup = null,
-        ReferenceLookup? references = null)
+        ReferenceLookup? references = null,
+        BindIntentLookup? intent = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(oidLookup);
@@ -656,8 +706,44 @@ public static class ContactBindingDecision
             return Collide(IdentityCollisionReason.LinkedToOtherUser, DenyContactLinkedToOtherUser, row.ContactId);
         }
 
-        // E11
+        // E11 — the CIAM plane binds only on THIS environment's intent (task 184, owner round 96). A CIAM token for this
+        // customer's audience is obtainable by any CIAM user, so an email match alone is no evidence this customer means
+        // this person. The workforce and systemuser planes are unchanged: their callers are admitted by the member test
+        // or are directory-synced licensed users (Model 1 workforce sign-in is under separate owner discussion).
+        if (request.Plane == BindingPlane.CiamToken)
+        {
+            if (intent is null)
+            {
+                return new BindingDecision(BindingAction.NeedIntentLookup, row.ContactId);
+            }
+
+            if (DecideIntent(intent, row.ContactId) is { } refused)
+            {
+                return refused;
+            }
+        }
+
         return new BindingDecision(BindingAction.BindByEmail, row.ContactId);
+    }
+
+    /// <summary>
+    /// E11's intent check on the CIAM plane: null when this environment shows intent for <paramref name="contactId"/>,
+    /// else the deny. FAIL CLOSED: a lookup for another contact, a grant read that did not complete, or a marker read that
+    /// FAILED denies <see cref="DenyContactLookupFailed"/> — even when the other leg shows intent, because a fault is never
+    /// half-trusted. Only a marker column that is not provisioned yet reads as "no invite evidence" (the grant leg still
+    /// decides). No intent at all denies <see cref="DenyContactNotInvited"/>.
+    /// </summary>
+    private static BindingDecision? DecideIntent(BindIntentLookup intent, Guid contactId)
+    {
+        if (intent.ContactId != contactId
+            || intent.GrantStatus != LookupStatus.Read
+            || intent.InviteStatus is not (LookupStatus.Read or LookupStatus.ColumnMissing))
+        {
+            return Deny(DenyContactLookupFailed);
+        }
+
+        var invitePending = intent.InviteStatus == LookupStatus.Read && intent.InvitedOn is not null;
+        return intent.HasActiveGrant || invitePending ? null : Deny(DenyContactNotInvited);
     }
 
     /// <summary>
@@ -1108,6 +1194,16 @@ public static class ContactBindingDecision
 
     /// <summary><c>contact.sprk_identityplane</c> — which plane wrote the binding.</summary>
     public const string IdentityPlaneColumn = "sprk_identityplane";
+
+    /// <summary>
+    /// <c>contact.sprk_externalinvitedon</c> — the pending-invite marker (task 184, owner round 96: the one column the
+    /// no-schema rule was lifted for). A UTC date-and-time the BFF's invite flow writes BEFORE it creates the CIAM account,
+    /// overwritten by a re-invite, never cleared. "Pending" = set AND no oid binding. FIELD-SECURED so only the BFF can
+    /// write it (<c>scripts/Set-ExternalInviteMarkerSchema.ps1</c>): a user who could set it could open E11's email bind.
+    /// Read in its OWN query, never in <c>ContactSelect</c>, so a BFF deployed before the column keeps every binding read.
+    /// It is NOT a binding and never touches <see cref="IdentityPlaneColumn"/>: "plane marker with no oid" stays Unreadable.
+    /// </summary>
+    public const string ExternalInvitedOnColumn = "sprk_externalinvitedon";
 
     private static BindingDecision? DecideOnOid(ContactLookup oidLookup)
     {

@@ -16,8 +16,12 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   2. Refuse — HTTP 409, a reason code, and a durable collision flag — a contact bound on the WORKFORCE
 ///      plane or one a systemuser links to (task 141): one contact carries one sign-in.
 ///   3. Idempotency gate: a contact already bound on the CIAM plane skips account creation.
-///   4. Otherwise create a CIAM local email account (task 022 cross-tenant Graph client),
-///      persist the returned oid (plane External) and send the onboarding email.
+///   4. Otherwise stamp the pending-invite marker (contact.sprk_externalinvitedon, task 184), create a CIAM local
+///      email account (task 022 cross-tenant Graph client), persist the returned oid (plane External) and send the
+///      onboarding email.
+///   5. If the person ALREADY has a CIAM account (Graph 400 ObjectConflict on proxyAddresses — task 184), the invite
+///      succeeds as "ExistingAccount": the contact stays pending (marker, no oid), the "sign in with your existing
+///      account" email is sent instead, and the first CIAM sign-in binds the contact (E11's intent gate).
 ///
 /// The caller then calls POST /grant to create the sprk_externalrecordaccess record.
 ///
@@ -44,7 +48,8 @@ public static class InviteExternalUserEndpoint
             .WithDescription(
                 "Resolves an ACTIVE Dataverse Contact by email (or creates one), then — if not already provisioned — " +
                 "creates a CIAM local account, persists the oid to sprk_externalobjectid, and sends the " +
-                "onboarding email. Idempotent: re-invoking a Contact already bound on the CIAM plane creates no " +
+                "onboarding email. A person who already has a CIAM account is answered \"ExistingAccount\": the contact " +
+                "stays pending and is bound at their first sign-in. Idempotent: re-invoking a Contact already bound on the CIAM plane creates no " +
                 "second account. Refuses (409) an email whose contact belongs to an employee's work identity or " +
                 "an internal user, and an email carried by more than one active contact. Call POST /grant " +
                 "separately to create the access record.")
@@ -161,6 +166,13 @@ public static class InviteExternalUserEndpoint
     /// <summary>The <see cref="ProvisionOutcome.Status"/> of a contact whose CIAM account already existed (no onboarding email sent).</summary>
     internal const string AlreadyProvisionedStatus = "AlreadyProvisioned";
 
+    /// <summary>
+    /// Task 184 — the <see cref="ProvisionOutcome.Status"/> of an invite whose person ALREADY had a CIAM account (Graph
+    /// <c>ObjectConflict</c>): no account was created, the contact stays pending (marker set, no oid) and the "sign in with
+    /// your existing account" email was sent instead of the onboarding email. The first sign-in binds the contact.
+    /// </summary>
+    internal const string ExistingAccountStatus = "ExistingAccount";
+
     /// <summary>The provisioning outcome: a contact and a status, or a refusal, or a lookup failure.</summary>
     internal sealed record ProvisionOutcome(
         Guid ContactId, string Status, InviteRefusal? Refusal = null, InviteLookupFailure? Failure = null);
@@ -172,7 +184,9 @@ public static class InviteExternalUserEndpoint
     /// second account ("AlreadyProvisioned"). <b>Refuses</b> (task 141) a contact bound on the WORKFORCE plane,
     /// one an internal user links to, an ambiguous email, or an unreadable binding — BEFORE any CIAM account is
     /// created. Returns a <see cref="InviteLookupFailure"/> (HTTP 503, its own reason code) when the contact
-    /// lookup could not be read. Throws on any other hard failure (Contact create, CIAM create, oid bind). Shared
+    /// lookup could not be read. Stamps the pending-invite marker before the CIAM account is created (task 184), and
+    /// answers "ExistingAccount" — no account, the contact kept pending, the sign-in email sent — when the person already
+    /// has a CIAM account. Throws on any other hard failure (Contact create, marker write, CIAM create, oid bind). Shared
     /// by <c>/invite</c> and <c>/invite-and-grant</c> (task 029).
     /// </summary>
     /// <param name="resolution">
@@ -227,8 +241,54 @@ public static class InviteExternalUserEndpoint
                     $"The invite decision for '{request.Email}' ended in an unexpected state ({resolution.Action}).");
         }
 
+        // Task 184 — the pending-invite marker, BEFORE the CIAM account exists: a first CIAM sign-in that has to email-bind
+        // this contact (the oid write below fails, or the person already had a CIAM account) finds THIS environment's intent.
+        // Not written: the invite stops here and no CIAM account is created — except where the column is not provisioned
+        // yet (a BFF deployed before scripts/Set-ExternalInviteMarkerSchema.ps1), where the invite proceeds as it did before
+        // task 184 and the grant is the only evidence.
+        var mark = await binder.MarkInviteSentAsync(contactId, etag, ct);
+        switch (mark.Status)
+        {
+            case StoreWriteStatus.Written:
+                // The marker moved the row version. The bind below re-reads the contact and binds it only while it is
+                // still active and unbound, under its fresh version (the path a just-created contact already takes).
+                etag = null;
+                break;
+            case StoreWriteStatus.ColumnMissing:
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"Contact {contactId:D} for '{request.Email}' could not be marked invited ({mark.Status}); no CIAM account " +
+                    "was created. Try again.");
+        }
+
         // Create the CIAM local account (broker-only; no B2B guest).
-        var rawOid = await ciamProvisioner.CreateCiamUserAsync(request.Email, request.FirstName, request.LastName, ct);
+        string rawOid;
+        try
+        {
+            rawOid = await ciamProvisioner.CreateCiamUserAsync(request.Email, request.FirstName, request.LastName, ct);
+        }
+        catch (CiamAccountAlreadyExistsException)
+        {
+            // Task 184 — the person already has a CIAM account (Graph 400 ObjectConflict on proxyAddresses). The invite
+            // succeeds: the contact stays PENDING (marker set, no oid), and the first sign-in email-binds it under E11's
+            // intent gate. The existing account's oid is deliberately NOT looked up here (no User.Read.All on any stamp).
+            logger.LogInformation(
+                "[EXT-INVITE] {Email} already has a CIAM account — contact {ContactId} kept pending; the first sign-in binds it.",
+                request.Email, contactId);
+            try
+            {
+                await emailService.SendCiamExistingAccountEmailAsync(request.Email, request.FirstName ?? string.Empty, portalUrl, ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "[EXT-INVITE] Contact {ContactId} kept pending for {Email}, but the sign-in email failed to send.",
+                    contactId, request.Email);
+            }
+
+            return new ProvisionOutcome(contactId, ExistingAccountStatus);
+        }
+
         if (!Guid.TryParse(rawOid, out var ciamOid) || ciamOid == Guid.Empty)
         {
             throw new InvalidOperationException($"CIAM returned an object id that is not a GUID for '{request.Email}'.");

@@ -234,6 +234,45 @@ public class RegistrationEmailService
     }
 
     /// <summary>
+    /// Sends the "sign in with your existing account" email (unified-access-control-r2 task 184): the invite found that the
+    /// person already has a CIAM account (Graph <c>POST /users</c> answered <c>ObjectConflict</c>), so no account was created and
+    /// there is no password to set. Sent INSTEAD of <see cref="SendCiamOnboardingEmailAsync"/>, through the same template
+    /// mechanism, sender, send mode and pipeline. Not sealed only as a test seam, like the onboarding email.
+    /// </summary>
+    public virtual async Task SendCiamExistingAccountEmailAsync(
+        string recipientEmail,
+        string firstName,
+        string portalUrl,
+        CancellationToken cancellationToken = default)
+    {
+        var templateHtml = await LoadTemplateAsync("CiamExistingAccountTemplate.html");
+
+        var body = templateHtml
+            .Replace("{{FirstName}}", Encode(firstName))
+            .Replace("{{Email}}", Encode(recipientEmail))
+            .Replace("{{PortalUrl}}", portalUrl)
+            .Replace("{{SupportEmail}}", SupportEmail)
+            .Replace("{{Year}}", DateTime.UtcNow.Year.ToString());
+
+        var request = new SendCommunicationRequest
+        {
+            To = [recipientEmail],
+            Subject = "You've Been Invited to the Spaarke Portal — Sign In With Your Existing Account",
+            Body = body,
+            BodyFormat = BodyFormat.HTML,
+            FromMailbox = FromMailbox,
+            SendMode = SendMode.SharedMailbox,
+            CorrelationId = $"reg-ciam-existing-account-{recipientEmail}"
+        };
+
+        _logger.LogInformation(
+            "Sending CIAM existing-account invite email | Recipient: {Recipient}",
+            recipientEmail);
+
+        await _communicationService.SendAsync(request, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
     /// Sends a portal notification email (spaarke-SPA-external-access-platform-r3 task 036, FR-07): "you were given access
     /// to a record", with one link into the external portal. Same sender, send
     /// mode and pipeline as <see cref="SendCiamOnboardingEmailAsync"/> (the shared mailbox, app-only — never the user's

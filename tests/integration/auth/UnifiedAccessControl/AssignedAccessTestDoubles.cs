@@ -834,6 +834,17 @@ internal static class AssignedAccessTestDoubles
             return Task.CompletedTask;
         }
 
+        /// <summary>Task 184: the "sign in with your existing account" emails sent (an invite whose person already had a CIAM account).</summary>
+        public List<string> ExistingAccount { get; } = new();
+
+        public override Task SendCiamExistingAccountEmailAsync(
+            string recipientEmail, string firstName, string portalUrl, CancellationToken cancellationToken = default)
+        {
+            lock (ExistingAccount)
+                ExistingAccount.Add(recipientEmail);
+            return Task.CompletedTask;
+        }
+
         public override async Task SendPortalNotificationEmailAsync(
             string recipientEmail, string subject, string headline, string message, string linkUrl, string linkText,
             string correlationId, CancellationToken cancellationToken = default)

@@ -68,13 +68,59 @@ public class CiamUserProvisioningService
         var user = BuildCiamUser(email, firstName, lastName, temporaryPassword, _issuerDomain);
 
         var graphClient = await _ciamGraphClientFactory.CreateClientForAppAsync(ct);
-        var created = await graphClient.Users.PostAsync(user, cancellationToken: ct);
+        User? created;
+        try
+        {
+            created = await graphClient.Users.PostAsync(user, cancellationToken: ct);
+        }
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError error) when (IsExistingAccountConflict(error))
+        {
+            // Task 184: the email already has a CIAM account. Translated here so no caller outside this Graph-owning
+            // service references a Graph SDK type (ADR-007); every other Graph error propagates unchanged.
+            throw new CiamAccountAlreadyExistsException(email, error);
+        }
 
         var oid = created?.Id
             ?? throw new InvalidOperationException("CIAM Graph POST /users returned a null user id.");
 
         _logger.LogInformation("[CIAM-PROVISION] Created CIAM user {Oid} for {Email}", oid, email);
         return oid;
+    }
+
+    /// <summary>
+    /// Task 184 — true when <paramref name="error"/> is Graph's answer to a second <c>POST /users</c> for an email that already
+    /// has a CIAM account: HTTP 400 <c>Request_BadRequest</c> with an <c>ObjectConflict</c> on <c>proxyAddresses</c> (the
+    /// request sets <c>mail</c>), as provisioning's spike S1 (ii) measured on 2026-10-12. ONLY that: any other 400, a conflict
+    /// on another property, or any other status keeps the invite's failure path. Pure.
+    /// </summary>
+    /// <remarks>
+    /// The conflict is read from <c>error.details[]</c> (<c>code = ObjectConflict</c>, <c>target = proxyAddresses</c>). When
+    /// Graph sends no details, the message must name <c>proxyAddresses</c> as already existing ("Another object with the
+    /// same value for property proxyAddresses already exists.").
+    /// </remarks>
+    internal static bool IsExistingAccountConflict(Microsoft.Graph.Models.ODataErrors.ODataError? error)
+    {
+        if (error is null || error.ResponseStatusCode != StatusCodes.Status400BadRequest)
+        {
+            return false;
+        }
+
+        var main = error.Error;
+        if (main is null || !string.Equals(main.Code, "Request_BadRequest", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (main.Details is { Count: > 0 } details)
+        {
+            return details.Any(d =>
+                string.Equals(d.Code, "ObjectConflict", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(d.Target, "proxyAddresses", StringComparison.OrdinalIgnoreCase));
+        }
+
+        var message = main.Message ?? string.Empty;
+        return message.Contains("proxyAddresses", StringComparison.OrdinalIgnoreCase)
+               && message.Contains("already exists", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -122,4 +168,24 @@ public class CiamUserProvisioningService
             PasswordPolicies = "DisablePasswordExpiration"
         };
     }
+}
+
+/// <summary>
+/// Task 184 — thrown by <see cref="CiamUserProvisioningService.CreateCiamUserAsync"/> when the email already has a CIAM
+/// account (Graph 400 <c>ObjectConflict</c> on <c>proxyAddresses</c>; see
+/// <see cref="CiamUserProvisioningService.IsExistingAccountConflict"/>). The invite treats it as the "ExistingAccount"
+/// outcome. It carries no account id: the oid is deliberately NOT looked up at invite time (the account may belong to
+/// another customer's invite), and the contact binds at its first sign-in through the E11 intent gate. Graph-free surface
+/// (ADR-007); the Graph error is kept only as <see cref="Exception.InnerException"/>.
+/// </summary>
+public sealed class CiamAccountAlreadyExistsException : InvalidOperationException
+{
+    public CiamAccountAlreadyExistsException(string email, Exception innerException)
+        : base("A CIAM account already exists for this email address.", innerException)
+    {
+        Email = email;
+    }
+
+    /// <summary>The invitee email the CIAM create was refused for.</summary>
+    public string Email { get; }
 }

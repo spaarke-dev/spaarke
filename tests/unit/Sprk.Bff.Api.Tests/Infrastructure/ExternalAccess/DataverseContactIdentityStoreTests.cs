@@ -352,4 +352,63 @@ public class DataverseContactIdentityStoreTests
         using var doc = DataverseContactIdentityStore.TryParseJson("{\"value\":[]}");
         doc.Should().NotBeNull();
     }
+
+    // ── Task 184: the bind-intent reads and the pending-invite marker ─────────────────────────────────────────
+
+    [Fact]
+    public void TheIntentGrantLeg_IsTheReadPathsOwnActiveUnexpiredContactGrantFilter()
+    {
+        var contact = Guid.NewGuid();
+        var today = new DateOnly(2026, 10, 13);
+
+        var path = DataverseContactIdentityStore.BuildActiveContactGrantPath(contact, today);
+
+        path.Should().StartWith("sprk_externalrecordaccesses?");
+        path.Should().Contain(ExternalParticipationService.BuildContactGrantFilter(contact, today),
+            "\"active\" must mean what it means where access is decided");
+        path.Should().Contain($"_sprk_contact_value eq {contact}").And.Contain("statecode eq 0")
+            .And.Contain("sprk_expiresdate ge 2026-10-13", "an expired or deactivated grant is no intent");
+        path.Should().Contain("$top=1");
+    }
+
+    [Fact]
+    public void TheMarker_IsReadInItsOwnQuery_NeverInTheBindingSelect()
+    {
+        var contact = Guid.NewGuid();
+
+        DataverseContactIdentityStore.BuildInviteMarkerPath(contact)
+            .Should().Be($"contacts({contact:D})?$select=sprk_externalinvitedon");
+        DataverseContactIdentityStore.ContactSelect.Should().NotContain(ContactBindingDecision.ExternalInvitedOnColumn,
+            "a BFF deployed before the column would otherwise fail every binding read, on every plane");
+    }
+
+    [Fact]
+    public void TheMarkerWrite_CarriesOnlyTheMarker_InUtc()
+    {
+        var payload = DataverseContactIdentityStore.InviteMarkerPayload(
+            new DateTimeOffset(2026, 10, 13, 11, 30, 5, TimeSpan.FromHours(2)));
+
+        payload.Should().ContainSingle().Which.Should().Be(
+            new KeyValuePair<string, object?>("sprk_externalinvitedon", "2026-10-13T09:30:05Z"));
+    }
+
+    [Theory]
+    [InlineData("{\"error\":{\"code\":\"0x80048d19\",\"message\":\"Error identified in Payload ... The property 'sprk_externalinvitedon' does not exist on type 'Microsoft.Dynamics.CRM.contact'.\"}}", true)]
+    [InlineData("Invalid property 'sprk_externalinvitedon' was found in entity 'Microsoft.Dynamics.CRM.contact'.", true)]
+    [InlineData("The property 'sprk_somethingelse' does not exist on type 'Microsoft.Dynamics.CRM.contact'.", false)]
+    [InlineData("Principal user is missing prvWriteContact privilege (sprk_externalinvitedon)", false)]
+    [InlineData(null, false)]
+    public void AMissingMarkerColumn_IsToldApartFromEveryOtherWriteFault(string? body, bool missing)
+        => DataverseContactIdentityStore.IsWriteColumnMissing(body, "sprk_externalinvitedon").Should().Be(missing);
+
+    [Theory]
+    [InlineData("{\"sprk_externalinvitedon\":\"2026-10-13T09:30:05Z\"}", true)]
+    [InlineData("{\"sprk_externalinvitedon\":null}", false)]
+    [InlineData("{\"sprk_externalinvitedon\":\"not a date\"}", false)]
+    [InlineData("{}", false)]
+    public void TheMarker_ReadsAsEvidence_OnlyWhenItIsADateTime(string json, bool evidence)
+    {
+        using var doc = JsonDocument.Parse(json);
+        (DataverseContactIdentityStore.ParseInvitedOn(doc.RootElement) is not null).Should().Be(evidence);
+    }
 }

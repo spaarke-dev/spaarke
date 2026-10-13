@@ -282,8 +282,85 @@ public class ContactBindingDecisionTests
 
     [Fact]
     public void E11_ExactlyOneActiveUnboundUnlinkedMatch_BindsByEmail()
-        => ContactBindingDecision.Decide(Ciam(), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of())
+        // Task 184: on the CIAM plane this bind now also needs this environment's intent (here an active grant). The
+        // workforce form of this row is E11_TheWorkforceAndSystemUserPlanes_BindWithoutAnyIntent, unchanged.
+        => ContactBindingDecision.Decide(Ciam(), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of(),
+                Intent(grant: true))
             .Should().Be(new BindingDecision(BindingAction.BindByEmail, ContactA));
+
+    // ── E11 intent gate (task 184, owner round 96): the CIAM plane binds only on THIS environment's intent ─────
+
+    private static BindIntentLookup Intent(
+        bool grant = false, DateTimeOffset? invitedOn = null, LookupStatus grantStatus = LookupStatus.Read,
+        LookupStatus inviteStatus = LookupStatus.Read, Guid? contact = null)
+        => new(contact ?? ContactA, grantStatus, grant, inviteStatus, invitedOn);
+
+    private static BindingDecision CiamE11(BindIntentLookup? intent)
+        => ContactBindingDecision.Decide(Ciam(), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of(), intent);
+
+    [Fact]
+    public void E11_Ciam_AsksForTheIntent_BeforeItBinds()
+        => CiamE11(intent: null).Should().Be(new BindingDecision(BindingAction.NeedIntentLookup, ContactA));
+
+    [Fact]
+    public void E11_Ciam_AnActiveGrantHere_Binds()
+        => CiamE11(Intent(grant: true)).Action.Should().Be(BindingAction.BindByEmail);
+
+    [Fact]
+    public void E11_Ciam_APendingInviteHere_Binds()
+        => CiamE11(Intent(invitedOn: Now)).Action.Should().Be(BindingAction.BindByEmail);
+
+    [Fact]
+    public void E11_Ciam_NoGrantAndNoInvite_IsDeniedNotInvited_AndFlagsNothing()
+    {
+        // MUTATION (remove the intent gate): this test fails — the decision would answer BindByEmail.
+        var decision = CiamE11(Intent());
+
+        decision.Should().Be(new BindingDecision(BindingAction.Deny, DenyCode: ContactBindingDecision.DenyContactNotInvited));
+        decision.FlagContactIds.Should().BeNull("no other person is involved, so there is no collision to flag");
+    }
+
+    [Theory]
+    [InlineData(LookupStatus.Failed, LookupStatus.Read, true)]     // the grant read faulted (and the marker says invited)
+    [InlineData(LookupStatus.ColumnMissing, LookupStatus.Read, true)]
+    [InlineData(LookupStatus.Read, LookupStatus.Failed, false)]     // the marker read faulted (and a grant exists)
+    public void E11_Ciam_AFaultedIntentRead_NeverBinds_EvenWhenTheOtherLegShowsIntent(
+        LookupStatus grantStatus, LookupStatus inviteStatus, bool invited)
+    {
+        // MUTATION (treat a fault as intent): this test fails.
+        var decision = CiamE11(Intent(grant: !invited, invitedOn: invited ? Now : null, grantStatus: grantStatus,
+            inviteStatus: inviteStatus));
+
+        decision.Action.Should().Be(BindingAction.Deny);
+        decision.DenyCode.Should().Be(ContactBindingDecision.DenyContactLookupFailed);
+    }
+
+    [Fact]
+    public void E11_Ciam_AMarkerColumnNotProvisionedYet_IsNoInviteEvidence_AndTheGrantLegStillDecides()
+    {
+        // The marker is read in its own query so a BFF deployed before the schema keeps the grant evidence (task 184).
+        CiamE11(Intent(grant: true, inviteStatus: LookupStatus.ColumnMissing)).Action.Should().Be(BindingAction.BindByEmail);
+        CiamE11(Intent(inviteStatus: LookupStatus.ColumnMissing)).DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+    }
+
+    [Fact]
+    public void E11_Ciam_IntentReadForAnotherContact_IsNeverUsed()
+        => CiamE11(Intent(grant: true, contact: ContactB)).DenyCode.Should().Be(ContactBindingDecision.DenyContactLookupFailed);
+
+    [Theory]
+    [InlineData(BindingPlane.WorkforceToken)]
+    [InlineData(BindingPlane.SystemUser)]
+    public void E11_TheWorkforceAndSystemUserPlanes_BindWithoutAnyIntent(BindingPlane plane)
+    {
+        // Workforce-plane E11 is unchanged (Model 1 workforce sign-in is under separate owner discussion): it never asks
+        // for intent, and a "no intent" answer handed to it changes nothing. Pins the gate to the CIAM plane.
+        var request = new BindingRequest(plane, Caller, Email, BindingEligibility.EmailBindAndCreate);
+        var rows = ContactLookup.Of(Unbound(ContactA));
+
+        ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of()).Action.Should().Be(BindingAction.BindByEmail);
+        ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), Intent()).Action
+            .Should().Be(BindingAction.BindByEmail);
+    }
 
     [Fact]
     public void TheDecisionAsksForEachLookupOnlyWhenItNeedsIt()

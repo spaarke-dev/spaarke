@@ -200,9 +200,10 @@ public sealed class ContactIdentityBinder
     // ── CIAM token plane ──────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Resolves a CIAM (external) caller. By oid; the email bind survives ONLY as the repair path for an
-    /// invite whose oid write failed after the CIAM account was created. The CIAM plane never creates a
-    /// contact — external users arrive by invitation.
+    /// Resolves a CIAM (external) caller. By oid; the email bind survives for an invited contact that carries no oid yet —
+    /// an invite whose oid write failed after the CIAM account was created, or an invite of a person who already had a
+    /// CIAM account (task 184, "ExistingAccount") — and binds only on THIS environment's intent: an active contact-level
+    /// grant or a pending-invite marker (E11). The CIAM plane never creates a contact — external users arrive by invitation.
     /// </summary>
     public async Task<ContactBindingResult> ResolveCiamCallerAsync(string? oidClaim, string? email, CancellationToken ct)
     {
@@ -395,6 +396,31 @@ public sealed class ContactIdentityBinder
         return await _store.BindOidAsync(contactId, etag, ciamOid, IdentityPlaneMarker.External, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Task 184 — stamps the pending-invite marker (<c>contact.sprk_externalinvitedon</c> = now, UTC) on the invited contact,
+    /// BEFORE the invite creates the CIAM account, so a first CIAM sign-in that has to email-bind (a failed oid write, or a
+    /// person who already had a CIAM account) finds this environment's intent. A re-invite overwrites it; nothing clears it.
+    /// Conditional on <paramref name="etag"/> (the version the invite decided on) when there is one. Writes only that column.
+    /// </summary>
+    public async Task<StoreWriteResult> MarkInviteSentAsync(Guid contactId, string? etag, CancellationToken ct)
+    {
+        var write = await _store.MarkInvitedAsync(contactId, etag, _time.GetUtcNow(), ct).ConfigureAwait(false);
+        if (write.Status == StoreWriteStatus.ColumnMissing)
+        {
+            _logger.LogError(
+                "[ID-BIND] {Column} is not provisioned in this environment, so contact {ContactId} carries no pending-invite "
+                + "marker. Its first CIAM sign-in email-binds only on an active grant. Apply "
+                + "scripts/Set-ExternalInviteMarkerSchema.ps1.", ContactBindingDecision.ExternalInvitedOnColumn, contactId);
+        }
+        else if (write.Status != StoreWriteStatus.Written)
+        {
+            _logger.LogWarning("[ID-BIND] Pending-invite marker on contact {ContactId} not written ({Status}): {Error}",
+                contactId, write.Status, write.Error);
+        }
+
+        return write;
+    }
+
     /// <summary>The human message carried in a refusal's ProblemDetails.</summary>
     public static string? InviteMessage(string? reasonCode) => reasonCode switch
     {
@@ -541,10 +567,30 @@ public sealed class ContactIdentityBinder
             decision = ContactBindingDecision.Decide(request, oidLookup, emailLookup);
         }
 
+        ReferenceLookup? refs = null;
         if (decision.Action == BindingAction.NeedReferenceLookup && decision.ContactId is { } candidate)
         {
-            var refs = await _store.FindSystemUsersLinkingAsync(new[] { candidate }, ct).ConfigureAwait(false);
+            refs = await _store.FindSystemUsersLinkingAsync(new[] { candidate }, ct).ConfigureAwait(false);
             decision = ContactBindingDecision.Decide(request, oidLookup, emailLookup, refs);
+        }
+
+        // Task 184 — the CIAM plane's E11 binds only on this environment's intent (an active grant, a pending invite).
+        // A read that throws is a fault, never "no intent" and never intent: the decision denies on it.
+        if (decision.Action == BindingAction.NeedIntentLookup && decision.ContactId is { } invitee)
+        {
+            BindIntentLookup intent;
+            try
+            {
+                intent = await _store.FindBindIntentAsync(invitee, ExternalGrantLifecycle.TodayUtc(_time), ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "[ID-BIND] The bind-intent read for contact {ContactId} threw — denied", invitee);
+                intent = BindIntentLookup.Failed(invitee);
+            }
+
+            decision = ContactBindingDecision.Decide(request, oidLookup, emailLookup, refs, intent);
         }
 
         return (decision, emailLookup);
