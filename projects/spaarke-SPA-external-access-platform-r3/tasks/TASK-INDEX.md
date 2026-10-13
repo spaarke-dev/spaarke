@@ -48,7 +48,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 060 | Registration service: owner host decision, then build or R4 hand-off (FR-14) | P6 | 🚫 [cancelled] superseded by ADR-028 A9 (047 + 058) | 003 + owner decision | O/h | FULL | — |
 | 061 | Shared DataGrid shows option-set labels from @formattedValues (check-2 #1) | P5b | 🔲 [open] | none | S/h | FULL | CHK2 |
 | 062 | Message sender name falls back to createdby (check-2 #4) | P5b | 🔲 [open] | none | S/h | FULL | CHK2 |
-| 063 | External upload queued for indexing + profile (check-2 #5) | P5b | 🔲 [open] | owner decision (enqueue rule) | O/h | FULL | — (blocked on owner) |
+| 063 | External upload queued for indexing + profile (check-2 #5) | P5b | 🔲 [open] | none (owner: index + profile, 2026-10-13) | O/h | FULL | — (serial: ExternalProjectDataEndpoints.cs) |
 | 070 | Deploy SPA + dev Teams package to dev | P7 | 🔲 [open] | 038, 042, 043, 053, 055, 056, 057 | S/h | STANDARD | — (live, owner-gated) |
 | 071 | Teams live check: contact, licensed user, unlisted directory × desktop/web/mobile (FR-21, A9) | P7 | 🔲 [open] | 070, 075, 076 | S/h | STANDARD | — (owner-driven) |
 | 072 | Both-plane E2E on dev, success criteria 1–12 + FR-10 | P7 | 🔲 [open] | 002, 070, 071 | S/h | STANDARD | — (live) |

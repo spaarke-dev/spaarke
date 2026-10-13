@@ -3,7 +3,7 @@
   <metadata>
     <title>External document upload is queued for AI Search indexing and document profile (check-2 issue 5)</title>
     <phase>5b Owner check-2 fixes</phase>
-    <gate>blocked: owner decision on the app-only enqueue rule (auth.md:78 vs IPostUploadIndexingEnqueuer.cs:85-90)</gate>
+    <gate>startable: owner decided 2026-10-13 "yes files should be indexed and document profile"</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags bff-api, ai; adds a call on an external write path</rigor-reason>
@@ -12,8 +12,8 @@
     <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Blocked on owner decision; touches ExternalProjectDataEndpoints.cs</parallel-reason>
-    <deps>none (owner decision)</deps>
+    <parallel-reason>Touches ExternalProjectDataEndpoints.cs (shared with other external document work)</parallel-reason>
+    <deps>none</deps>
     <tags>bff-api, ai, auth, testing</tags>
     <estimated-effort>3-5 hours</estimated-effort>
   </metadata>
@@ -50,7 +50,7 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="0" name="Context + rigor declaration">Confirm the owner decision is recorded in notes/task-063-notes.md; load knowledge; declare rigor/tier.</step>
+    <step order="0" name="Context + rigor declaration">Record the owner decision (2026-10-13: index AND profile external uploads) in notes/task-063-notes.md; load knowledge; declare rigor/tier.</step>
     <step order="1">Trace how the profile job is queued server-side; record it.</step>
     <step order="2">Tests first; implement; build + test; publish-size delta; adversarial pass; status + drift check.</step>
   </steps>
@@ -67,11 +67,12 @@
     <criterion testable="true">A successful external upload calls EnqueueAppOnlyIfApplicableAsync once with the new document id and its drive/item pointers.</criterion>
     <criterion testable="true">An enqueue exception is logged and the response is still 201 with the document.</criterion>
     <criterion testable="true">A failed upload (SPE or document create failure) enqueues nothing.</criterion>
-    <criterion testable="true">If the owner approved profiling: the profile job is queued app-only once per upload; otherwise not.</criterion>
+    <criterion testable="true">The document profile job is queued app-only once per successful upload (owner decision 2026-10-13); a profile-enqueue failure is logged and does not change the 201.</criterion>
+    <criterion testable="true">IPostUploadIndexingEnqueuer.cs:85-90 comment is updated to match auth.md:78 (MI-written files, including external uploads written app-only by the BFF).</criterion>
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Owner check 2 issue 5. The interface-comment vs auth.md disagreement is fixed in whichever direction the owner decides (comment edit in this task; an auth.md edit needs owner approval and the main session).</notes>
+  <notes>Owner check 2 issue 5. Owner decision 2026-10-13: external uploads are indexed AND profiled. auth.md:78 already allows the app-only enqueuer for MI-written files; the interface comment is brought in line (no .claude/ edit needed).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

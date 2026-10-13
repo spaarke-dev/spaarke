@@ -12,7 +12,7 @@
 | **Task** | ADR-028 **A9** build (owner-approved design `notes/a9-bff-design.md`, Teams included; ADR amended `63b7c575b`). R3 owns it end to end. Owner check-2 fixes 061–063 |
 | **Step** | 2026-10-13: A9 tasks created (044–048, 058, 059, 074–076); 060 cancelled; 012/056 superseded-in-part notes; 071 widened (9 Teams runs); check-2 fixes 061/062 (startable), 063 (blocked: owner decision on app-only enqueue rule); 002 gained grid-config labels (issue 2). Drift check + POML validator green. SPA deployed to dev (run `38420637859`), S2a pass; owner checks 1–2 done |
 | **Status** | Commits after #1810 (`5bfedfe3d`, notes, `63b7c575b`, task creation) are on the branch, not on master: next PR needs `/conflict-check` (word-add-in PR #1815 may edit `.claude/constraints/auth.md` line 69, adjacent to ours) |
-| **Next Action** | Answer owner check 3 (partner access via "Manage Access"); get owner decisions on check-2 issue 3 (numbering source, live read) and issue 5 (063 enqueue rule); then run A9 Wave 1 (044 + 045) and CHK2 (061 + 062) |
+| **Next Action** | Answer owner check 3 (partner access via "Manage Access"); run the approved issue-3 read-only check (scratchpad issue3-numbering-read.ps1, after showing it); 063 unblocked (owner: index + profile); then run A9 Wave 1 (044 + 045) and CHK2 (061 + 062) |
 
 ### Critical Context
 - **Parallel pattern:** BFF tasks run in isolated worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-*` (`git reset --hard <R3 sha>` first), commit there, main session merges `--no-ff`; after a merge re-verify ledger line cites (the guard only checks format). SPA tasks run in this worktree, uncommitted; the main session commits by explicit path. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
@@ -25,7 +25,7 @@ Option B; no delete after close; invoice upload = invoice rights only; team-acce
 
 ## Open owner questions
 1. Check-2 issue 3 ("Number —" on SPA-created service requests): the repo has no numbering (no autonumber, plugin, flow or script); MDA rows get RQST-0001 from something live-only. Needs a read-only look at the dev column (AutoNumberFormat) and flows on `sprk_servicerequest`.
-2. Check-2 issue 5 (063): may external uploads (MI-written) use the app-only indexing enqueuer, and should they also be profiled? `auth.md:78` vs `IPostUploadIndexingEnqueuer.cs:85-90` disagree.
+2. Owner check 3 (CIAM partner, 2026-10-13): documents fail on a newly granted matter; no document preview; grid row not selectable / no download; no +New; partner does not see MDA-sent messages. Code investigation running; App Insights read-only query offered (awaiting OK).
 3. Owner deletes probe message `b38f0ab7-03c7-f111-a05c-0022482913fc` by hand.
 
 ## Option B known limits (notes/task-039-notes.md §12.11) (notes/task-039-notes.md §12.11)
