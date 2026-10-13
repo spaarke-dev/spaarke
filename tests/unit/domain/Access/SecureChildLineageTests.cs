@@ -48,6 +48,33 @@ public class SecureChildLineageTests
     }
 
     /// <summary>
+    /// Task 182 (contract C4): the Decision Record is filed under its subject like a Signal. Its row carries the same eight
+    /// subject lookups as the Signal row (never the service request's) and keeps the three typed core lookups until
+    /// ontology task 145's backfill is verified.
+    /// </summary>
+    [Fact]
+    public void TheDecisionRecordRow_HoldsTheSubjectLookups_AndTheTypedCores_ButNoServiceRequest()
+    {
+        var decisionRecord = SecureChildLineage.Children["sprk_decisionrecord"].Lookups;
+        var signalSubjects = SecureChildLineage.Children["sprk_signal"].Lookups
+            .Where(l => l.Key.StartsWith("sprk_regarding", StringComparison.Ordinal))
+            .ToDictionary(l => l.Key, l => l.Value);
+
+        signalSubjects.Should().HaveCount(8);
+        decisionRecord.Where(l => l.Key.StartsWith("sprk_regarding", StringComparison.Ordinal))
+            .ToDictionary(l => l.Key, l => l.Value)
+            .Should().BeEquivalentTo(signalSubjects);
+        decisionRecord.Should().Contain(new Dictionary<string, string>
+        {
+            ["sprk_matter"] = "sprk_matter",
+            ["sprk_project"] = "sprk_project",
+            ["sprk_workassignment"] = "sprk_workassignment",
+        });
+        decisionRecord.Should().HaveCount(11);
+        decisionRecord.Keys.Should().NotContain("sprk_regardingservicerequest");
+    }
+
+    /// <summary>
     /// The mirror follows the ownership resolver: every table it treats as a reparentable child is mirrored, except
     /// <c>sprk_servicerequest</c>, which the resolver treats as a root of its own.
     /// </summary>
