@@ -60,6 +60,9 @@ registration has an application user there. **Step 1 can go ahead.**
 
 ## 3. (a) CIAM audience: per customer, using the customer's own BFF app
 
+> **Superseded by S1 (iii), 2026-10-12:** `spaarkeextid` will not issue a contact's token for an app homed in the Spaarke
+> tenant (AADSTS500207, §8 "S1 results"). **Option 2 is the design**; option 3 below is kept as the record of why.
+
 **Option 1: one shared CIAM API app (today's dev shape, `4a4d5126`).** Every stamp would accept the same `aud` and `iss`,
 so a token issued for customer X also passes authentication at customer Y. Isolation would then depend only on Y's
 Dataverse binding, including the E11 gap. This is the "one credential, every customer" pattern D-13 §2 rejects. It also
@@ -146,7 +149,7 @@ customer invites them, so the **invitation link** carries the customer:
 | `Ciam__Instance` | literal `https://spaarkeextid.ciamlogin.com/` (platform value, one for all stamps) |
 | `Ciam__TenantId` | literal `7052feba-bfc4-43e0-b09e-65014b429131` (platform) |
 | `Ciam__Domain` | literal `spaarkeextid.onmicrosoft.com` (the issuer for local-account identities) |
-| `Ciam__Audience` | `from-h3-output:bff_app_client_id` (the customer's own BFF app) |
+| `Ciam__Audience` | ~~`from-h3-output:bff_app_client_id`~~ → the H3c output `ciam_api_app_id` (option 2, S1 2026-10-12) |
 | `Ciam__GraphProvisioner__ClientId` | `from-h3-output:bff_app_client_id` |
 | `ExternalAccess__PortalUrl` | `https://external.spaarke.com/?customer=` + `from-intake-parameter:customer_id` (needs a composed source, or the value is built in H4b) |
 
@@ -159,7 +162,9 @@ If the platform values move later, they belong in L2 options, not intake.
 **New H-step, H3c "CIAM service principal"** (after H3, before H4b). L2 acts in `spaarkeextid` through its own
 cross-tenant app (see §7):
 - create or get the BFF app's service principal there;
-- create or get its Graph `User.Create` app-role assignment.
+- create or get its Graph `User.Create` app-role assignment;
+- (option 2, S1 2026-10-12) create or get the customer's CIAM API app `sprk-{customerId}-ciam-api` and its service
+  principal (shape in §10), read back until visible before PATCHing; output `ciam_api_app_id`.
 
 Re-runs are idempotent: match by `appId`, and by principal plus role.
 
@@ -200,13 +205,65 @@ Use the dev BFF app (multitenant, FIC'd), or a throwaway multitenant app plus a 
   stamp certificate (against D13 and A6) or a Spaarke-side broker.
 - Only (iii) fails: use option 2 for the audience; (c) is unchanged.
 
+### S1 results — 2026-10-10 (owner-approved; dev only)
+
+Setup: throwaway multitenant app "Spaarke CIAM Spike S1 - Dev" (`40ec7b2b-…`, Spaarke tenant, `requestedAccessTokenVersion=2`,
+FIC trusting throwaway UAMI `id-spaarke-ciam-spike-s1-dev`); its service principal + Graph `User.Create` in `spaarkeextid` by the
+owner's **admin-consent URL** (the CLI device-code sign-in into `spaarkeextid` is refused — "You don't have access to this" — for both
+ARM and Graph scopes; the browser consent works). Test ran in a throwaway ACI as the UAMI.
+
+- **(i) PASS — keyless works.** MI assertion → client-credentials token for `spaarkeextid` from authority
+  `https://login.microsoftonline.com/{ciamTenantId}`: `aud=https://graph.microsoft.com`, `tid=7052feba…`, `roles=["User.Create"]`,
+  `idtyp=app`. The **`*.ciamlogin.com` authority REFUSES app-only** (`AADSTS500206: The account type can't be used for the
+  application`) → the stamp provisioner must use `login.microsoftonline.com`. `POST /users` with an `emailAddress` identity
+  (issuer `spaarkeextid.onmicrosoft.com`) → **201**. `User.Create` cannot read `/organization` (initial domain): carry the
+  issuer domain as configuration (`Ciam:Domain`), do not read it.
+- **(ii)** Same email again → **400 `Request_BadRequest` / `ObjectConflict` on `proxyAddresses`** (because the request sets `mail`).
+  This is the "already has an account" signal the invite path must handle (ISS-009 / design §5).
+- **(iii) FAIL → option 2 (2026-10-12).** Test public client `e2e75783-…` created IN `spaarkeextid` by the spike app
+  (`Application.ReadWrite.OwnedBy`; its owner is the spike app — live proof that an OwnedBy-created app lists its creator as
+  owner), admin-consented by the owner. The S1 local account (`ae9c6c5e-…`, password reset by the owner) signs in at
+  `https://spaarkeextid.ciamlogin.com/{tid}` and gets a Graph token (`idtyp=user`, `tid=7052feba…`). The same account asking
+  for `api://40ec7b2b-…/user_impersonation` (the Spaarke-tenant multitenant app) gets **`AADSTS500207: The account type can't
+  be used for the resource you're trying to access`**, both at `/authorize` and as a refresh-token redemption. A workforce
+  admin account gets the same error. Microsoft states that an external-tenant (CIAM) user cannot get an access token for an
+  API whose app is homed in a workforce tenant
+  (<https://learn.microsoft.com/en-us/answers/questions/5641439/aadsts500207-the-account-type-cant-be-used-for-the>). So the
+  customer BFF app cannot be the CIAM audience: **option 3 is out, and option 2 (one CIAM API app per customer, registered in
+  `spaarkeextid`) applies**, as §8 Outcomes set. (c) is unchanged: the keyless provisioner stays a Spaarke-tenant app with
+  its service principal in `spaarkeextid` (proven in (i)). The same mechanism creates the per-customer CIAM API app:
+  `Application.ReadWrite.OwnedBy` in `spaarkeextid` creates apps there keylessly (proven by `e2e75783`).
+- **(iii) under option 2 — PASS (2026-10-12).** The spike app created a throwaway API app IN `spaarkeextid`
+  (`9a5da09a-…`: `requestedAccessTokenVersion=2`, scope `user_impersonation`, `identifierUris=api://{appId}`, the test
+  client in `preAuthorizedApplications` → no consent prompt) plus its service principal, all keylessly via
+  `Application.ReadWrite.OwnedBy`. The local account then gets, from `ciamlogin.com`:
+  `aud=9a5da09a-…` (**bare GUID**), `iss=https://7052feba-….ciamlogin.com/7052feba-…/v2.0`, `ver=2.0`,
+  `scp=user_impersonation`, `azp={client}`, `tid=7052feba-…`.
+- **R5 — PASS.** The same session silently gets a second resource (Graph `User.Read`) from the refresh token.
+- **(iv) — PASS.** That token at the dev BFF (CIAM audience configured = `4a4d5126`, i.e. "customer Y"):
+  `/api/v1/external/me` → **401** `invalid_token`, "The audience … is invalid"; workforce `/api/me` → **401** `invalid_token`,
+  "The issuer … is invalid". A token for X is refused by Y's CIAM scheme and by the workforce scheme before any handler runs.
+- **Build findings for H3c (the per-customer CIAM API app):**
+  1. `PATCH /applications/{id}` and `POST /servicePrincipals` right after `POST /applications` fail with 404
+     `Request_ResourceNotFound` and 403 "the backing application … must be in the local tenant" (replication lag). Read the
+     app back until 200 before the follow-up writes.
+  2. Two back-to-back PATCHes on one app fail 400 "identifier Uris changed concurrently". Set `identifierUris` and `api`
+     (scopes + `preAuthorizedApplications`) with retry, or in one PATCH once the app is visible.
+  3. Pre-authorizing the CIAM SPA client on each customer's CIAM API app means no consent prompt for contacts and no
+     admin-consent step per customer.
+- **S1 is complete; cleanup 2026-10-12:** deleted the throwaway API app `9a5da09a-…` and test client `e2e75783-…` (in
+  `spaarkeextid`, by the spike app), the spike app `40ec7b2b-…` (Spaarke tenant) and UAMI `id-spaarke-ciam-spike-s1-dev`;
+  all spike ACIs deleted. Still owed, by the owner in the Entra admin center of `spaarkeextid`: delete, in the Entra admin center, the test
+  local account `spike-s1-20261010154358@spaarke.com` (`ae9c6c5e-…`; `User.Create` cannot delete) and the spike app's
+  service principal (Enterprise applications → "Spaarke CIAM Spike S1 - Dev").
+
 ## 9. Open decisions
 
 | # | Decision | Owner |
 |---|---|---|
-| 1 | Accept option 3 (the BFF app doubles as the CIAM audience, subject to S1), with option 2 as the fallback | owner |
+| 1 | ~~Accept option 3 (the BFF app doubles as the CIAM audience, subject to S1), with option 2 as the fallback~~ — settled by S1 (iii) 2026-10-12: option 3 is impossible (AADSTS500207), option 2 applies (the owner accepted it as the fallback) | owner |
 | 2 | Approve S1 and the §7 one-time live actions in `spaarkeextid` | owner |
-| 3 | Pending-invite marker, marker-gated E11, and the invite's "already has an account" branch (a contract and schema change to the 141 binding model) | unified-access-control-r2, then the owner |
+| 3 | Pending-invite marker, marker-gated E11, and the invite's "already has an account" branch (a contract and schema change to the 141 binding model) | unified-access-control-r2, then the owner. **UAC-r2 2026-10-12:** agrees with the principle; offers the owner a no-schema rule first (E11 binds only a contact with an active `sprk_externalrecordaccess` grant or a pending invite from Y), the marker if that is not enough; do not touch the 141 binding files until decided. **Owner decided 2026-10-12 (via UAC-r2): the no-schema rule** — E11 email-binds only when this environment already has an active external grant for the contact or a pending invite of it; otherwise no bind. UAC builds it with the "already has an account" branch as one task; we review the PR. **Revised 2026-10-13 (UAC task 184, owner):** a marker column after all — `contact.sprk_externalinvitedon` (DateTime, field-secured, BFF-only writer, never cleared), set by `/invite` and `/invite-and-grant` before the CIAM account is created (ExistingAccount branch included); CIAM-plane E11 binds only with an active contact-level grant OR the column set, else `contact_not_invited`. Our asks to UAC: secure it in an EXISTING profile H7b already populates (no new H7b step), and ship it in SpaarkeMaster (stamps import only the CI-built SpaarkeMaster; T186 needs the version that carries it). Both adopted (PR #1801: existing BFF-Managed profiles; `scripts/Set-ExternalInviteMarkerSchema.ps1` adds it to SpaarkeMaster). **Our review of #1801 (2026-10-13): F1 account squatting** — accounts in `spaarkeextid` carry no email-ownership proof and every stamp holds `User.Create`, so a compromised stamp can pre-create `victim@…`; when another customer invites that email (ExistingAccount) or grants a typed-in contact, E11 binds the squatter. **F2** the marker never expires. Master today is worse (E11 binds any email with no intent), so #1801 merges as the interim narrowing; **production gate for T240d:** UAC's invite-code follow-up (single-use code in the invite email, hashed on the contact, required by the marker and grant legs; marker expiry) lands before any production customer onboards external contacts. **Owner decided 2026-10-13 (UAC round 97):** merge #1801 as the interim; F2 fixed inside #1801 (E11 honours the marker only within 30 days, a re-invite refreshes it, a future-dated marker is refused); `contact_not_invited` stays distinct; organization-wide grants are not evidence. **T240d production gate = UAC task 185** (`projects/unified-access-control-r2/tasks/185-invite-code-proof-for-e11-email-bind.poml`): single-use ≥128-bit invite code, hash stored field-secured, required by the marker leg (and the grant-only leg, or that leg stops binding). We review its PR. Note for #1803: on dev the first `-Apply` hit `0x80041103` (MetadataCache lag) at the field-security step; a re-run passed. `CiamUserProvisioningService` is not UAC's: T240d takes the S1 provisioner facts (login.microsoftonline.com authority, `Ciam:Domain`, `User.Create`) |
 | 4 | Invitation-link format, the SPA's customer picker and cold-landing UX, the production SPA client, and dropping `apiBaseUrl` from R3's deep-link draft | spaarke-SPA-external-access-platform-r3. R3 says its auth items are on hold for `spaarke-auth-system-of-record-r1` (R3 `design.md` §4.6) |
 | 5 | The T240c directory gains a CIAM-authenticated lookup by customer key | this project (T240c); the owner approved the service |
 | 6 | Production uses `spaarkeextid`, today recorded under `dev` in `config/environments.json`. When does the dev BFF's CIAM certificate and shared audience `4a4d5126` retire? | owner |
@@ -214,10 +271,20 @@ Use the dev BFF app (multitenant, FIC'd), or a throwaway multitenant app plus a 
 
 ## 10. Recommendation
 
-**Each customer's own BFF app registration (D-13) also serves as that customer's CIAM audience and its CIAM Graph
-provisioner.**
-- **Audience.** Its service principal is provisioned into `spaarkeextid`, and the stamp sets
-  `Ciam:Audience = Ciam:GraphProvisioner:ClientId = {bffAppId}`.
+> **Revised after S1 (2026-10-12): option 2.** The audience is a per-customer CIAM API app in `spaarkeextid`; the BFF app
+> stays the keyless CIAM Graph provisioner. The bullets below are updated; "Alternatives rejected" is kept as written then.
+
+**Each customer gets a CIAM API app registered in `spaarkeextid` as its CIAM audience; the customer's own BFF app
+registration (D-13) is its keyless CIAM Graph provisioner.**
+- **Audience.** H3c creates (get-before-set, keyless via MI-FIC as L2's own CIAM app, §7 step 1, which already needs
+  `Application.ReadWrite.All` in `spaarkeextid` for the BFF app's service principal) the app `sprk-{customerId}-ciam-api`:
+  `requestedAccessTokenVersion=2`, scope `user_impersonation`, `identifierUris=api://{appId}`, the CIAM SPA client in
+  `preAuthorizedApplications`, plus its service principal; with read-back-until-visible and retry (S1 build findings).
+  The stamp sets `Ciam:Audience = {ciamApiAppId}` and `Ciam:GraphProvisioner:ClientId = {bffAppId}`; H4b writes both and
+  the registry records `ciamApiAppId`.
+- **Directory contract (agreed with R3 2026-10-12).** The T240c directory entry per customer carries `bffAppId`
+  (workforce scope) and `ciamBffAppId` = the CIAM API app id (the field name R3's SPA already reads,
+  `external-spa/src/auth/backend-selection.ts`).
 - **Credential.** The stamp signs in to the CIAM tenant with the MI-FIC it already has, as Graph `User.Create`. It holds
   no certificate or secret.
 - **Routing.** Contacts reach the right stamp through an invitation link that carries only the customer key. The SPA
