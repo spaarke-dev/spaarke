@@ -24,16 +24,9 @@
 Option B; no delete after close; invoice upload = invoice rights only; team-access and renewal bell items wanted; contact owned by the customer's primary BU; intake (department from contact, Invention partners behind a flag, incidents simple, fixed lists, NDA review + issue); grid views from Dataverse views; 060 shared service OK if Model 1 allows; dev dispatch "ok"; 060 tenant-wide group permission approved if it cannot be scoped. Deferred: DEF-001 #1736 NDA generation, DEF-002 #1737 incident alerting.
 
 ## Open owner questions
-1. **Intake 403 (038 C-W6):** BU1 owning team lacks `prvReadsprk_ServiceRequest`. Fix by role (Workforce role / UAC baseline), Basic User, or code-side ownership?
-2. **S0a:** has the CIAM API app `4a4d5126` got the `user_impersonation` scope? (instructions given)
-3. **Licensing approach** (6 questions in `notes/2026-10-13-option-a-identity-and-licensing-research.md` §2): not decided.
-4. **Mechanical guard** (coordination note §4.5): an ArchTest for `organizations`/`common` outside the A9 client: yes/no?
-5. **Grid views:** (a) "assigned resolver" = the shared membership resolver? (b) views per entity = External Active / My / Inactive? (c) log the internal "My" views as an issue?
-6. **Bell items:** team access A/B; renewals A/B.
-7. **ISS-005:** option A, `ExternalAccess:CustomerBusinessUnitId` from provisioning H4b.
-8. **052:** Service Requests as a partner default tab or library-only? Accept no intake idempotency key as a known limit?
-9. **053:** optional "classes" field on Trademark?
-(060's questions lapsed: 060 withdrawn under A9.)
+1. **Intake 403 (038 C-W6):** the fix for the BU default team's missing `prvReadsprk_ServiceRequest`. Asked 2026-10-13 with a recommendation.
+2. **S0a:** the CIAM API app `4a4d5126` `user_impersonation` scope. The owner checks it in the portal (CLI sign-in to `spaarkeextid` is refused).
+Answered 2026-10-13 (project CLAUDE.md §3): grid views, bell items, ISS-005, 052, 053, licensing (outside the project), mechanical guard (not added). UAC confirmed A9 by the owner directly.
 
 ## Option B known limits (notes/task-039-notes.md §12.11) (notes/task-039-notes.md §12.11)
 Messages and feed give no "incomplete" signal; `Truncated` may over-report; a project pair naming a deleted matter stays secure permanently; `IGenericEntityService` filing seam is DI-supplied (drop = over-hide, not leak).

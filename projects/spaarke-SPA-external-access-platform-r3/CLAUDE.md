@@ -113,6 +113,24 @@ Full table: `spec.md` §Owner Clarifications. These still constrain work:
 - Grid columns: the owner wants grids driven by the entity's Dataverse views (savedqueries) with the shared view selector, as in the workspace grids, rather than hard-coded column sets. Approach under discussion (task 002).
 - Registration service (060): a shared service is acceptable if it does not conflict with the Model 1 dedicated and segregated customer directive.
 
+**Owner answers 2026-10-13 ("follow your recommendations so we are not blocked")**
+- Grid views (task 002 → "use Dataverse views"):
+  - "My" views use the assignment/membership resolver;
+  - each entity has External Active, My and Inactive views;
+  - the internal `ownerid eq-userid` "My" views are logged as an issue (`/project-defer-issue-tracking`) at the start of the grid task.
+- Bell items:
+  - team access: option A, no bell item; people still get message items on records reached through a team;
+  - renewals: option A, accept `modifiedon` noise; no `sprk_renewedon` column.
+- ISS-005: option A. Provisioning H4b writes `ExternalAccess:CustomerBusinessUnitId` from H10's BU id. While it is missing, no contact is created (fail safe). Dev sets it by hand.
+- 052:
+  - Service Requests stays a partner default tab, but only while the partner switch is on (as built);
+  - no intake idempotency key is a known limit (Finish is locked while a submit is in flight).
+- 053: no Trademark "classes" field (design §4: Legal assigns the classes).
+- Licensing: a commercial item, handled outside this project. It does not block R3.
+- Mechanical guard against `organizations`/`common`: **not added**.
+  - The security control is the BFF's A9 token acceptance; a client-side authority grants nothing.
+  - The A9 BFF task carries must-reject tests: an unlisted `tid`, `acct` = 1, an app token, a non-exact `iss` and a wrong `aud`.
+
 **Delivery**
 - 2026-10-09 — R3 delivers the production build and package; go-live is gated on T240c/T240d and DNS.
 - 2026-10-09 — provisioning builds no new components. The registration service is R3's, or R4's with a written path (task 060).
