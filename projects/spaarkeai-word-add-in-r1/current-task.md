@@ -2,19 +2,18 @@
 
 > **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas" (incl. "Multi-customer add-in (Model 1)" and "Guest sign-in, PCFs and telemetry" blocks). History: git log + `notes/handoff-history/` (do not load on recovery).
 
-> **Last Updated**: 2026-10-13 (128/129 merged to master via #1796 at `99ec749cd`; dev BFF redeployed from master; T126 option 1 dropped for ADR-028 A8).
+> **Last Updated**: 2026-10-13 (ADR-028 A9 recorded; task 126 re-scoped and unblocked; 128/129 on master; dev BFF on master `99ec749cd`).
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | 126 (Model 1 guests count as internal) — blocked. 128/129 done and on master (#1796, `99ec749cd`). 129 history: `IThreadResolver.ReconcileThreadForFilingAsync` (commits `48a2f8687`, `09397337f`, `cb9e10aac`), empty-thread retirement + backfill job `communication-thread-filing-sweep` (`fb9e0cdb3`), sweep review fixes (`46687a851`). Reviews: security, behaviour, re-check, sweep adversarial — no open F-class. BFF publish +25,916 B (36.46 → 36.49 MB), no vulnerable packages. |
-| **Status** | 128 ✅ (owner retest passed 2026-10-12). 129 ✅ (owner confirmed 2026-10-12). Dev BFF redeployed 2026-10-13 from master `99ec749cd` (the 10-12 deploy from `f9cc25f73` was based on 10-11 master and had rolled back other projects' work — restored). 129 first deployed 2026-10-12 from `f9cc25f73` (adds party anchoring: an email re-filed to a contact / account / organization takes its thread there, owner kept). Sweep run: dry run 143 candidates + 26 owner fixes → apply 143 reconciled / 26 assigned / 0 unresolved, refused, failed → verify dry run 0 candidates / 0 wouldAssign. `CommunicationThreadFilingSweep__Apply` removed again; job stays registered disabled. Reports: session scratchpad `sweep-{dryrun,apply,verify}-20261012-*`. PAT-444023 email `b22bb67e` now in active thread `b62bb67e` anchored to matter `5b297187`, owner team "Spaarke Business Unit 1". |
-| **Next Action** | Open finding from the owner's screenshot: the add-in "Link another record" picker lists sprk_communication / sprk_analysis / sprk_document / sprk_reportcard by logical name, and sprk_communication / sprk_document / sprk_reportcard have no thread lookup, so an email related only to them shows on no Messages panel — owner to decide. T126: the home-tenant scheme ("option 1") is DROPPED (conflicts with ADR-028 A8; parked unpushed on local branch `wip/t126-workforce-customer`, never deployed) — see `notes/126-message-to-uac-r2.md` "Update 2026-10-13". Dewey retest waits on R3 deploying its task 040 SPA build (owner-gated). #1799 (mapped `upn` claim, closes #1798) open with auto-merge. 126 still blocked on UAC-r2's external-flag answer. |
+| **Task** | **126**, re-scoped 2026-10-13 under ADR-028 A9: only the external-flag script part remains. 🔲 open, no longer blocked. Step 1 is owner-gated: pick the rule for "this guest is the stamp's customer staff", option (a) domain lookup, (b) recorded set, or (c) every guest in a Model 1 stamp is internal plus an exception list. See the POML. |
+| **Status** | **Sign-in decided (ADR-028 A9, owner 2026-10-13, PR #1810):**<br>- Licensed core users are B2B guests (A8).<br>- Workforce contacts use their company account in the browser SPA only, not guests.<br>- Partners use CIAM.<br>- SPA-r3 owns workforce sign-in end to end, UAC-r2 the baseline role, provisioning the registrations and consent.<br>**For this project:**<br>- The add-in changes nothing (licensed users only, on A8). See the project `CLAUDE.md` "Multi-customer add-in (Model 1)".<br>- The 2026-10-12 home-directory scheme is shelved on the local branch `wip/t126-workforce-customer` (unpushed, never deployed); keep it for reference only.<br>**Done:**<br>- 128 and 129 ✅, on master via #1796 (`99ec749cd`). Dev BFF live at `1.0.0+99ec749cd`.<br>- #1799 (mapped `upn` claim) merged; it reaches dev with the next BFF deploy from master. |
+| **Next Action** | 1. Owner picks the task 126 Step 1 rule, then run task-execute on 126. Never `-Apply` the external-flag script on a Model 1 stamp before it lands.<br>2. Owner decision: the add-in's "Link another record" list shows sprk_communication / sprk_analysis / sprk_document / sprk_reportcard by internal name. communication / document / report card have no thread lookup, so an email linked only to them shows on no Messages panel. Recommendation: remove those three.<br>3. Owner decision: licensing (multiplexing) for workforce contacts and partners. Recommendation: a Microsoft licensing specialist before the first production customer. Research: `.claude/agent-memory/researcher/pp-licensing-multiplexing-isv-workforce-partners-2026-10-13.md`. |
 
 ### Unpushed / uncommitted
-- Open PR #1799 (branch `fix/workforce-email-upn-claim`, worktree `C:\wt1798`). Dev BFF verified live at `1.0.0+99ec749cd` (hash-verified, healthz OK) 2026-10-13. Deploy worktree `C:\wt1796d` can be removed.
-
+- Local only: branch `wip/t126-workforce-customer` (shelved). Worktree `C:\wt1798` (branch `fix/workforce-email-upn-claim`, merged) can be removed.
 ## Live in dev (2026-10-08/11)
 - 2026-10-12 03:12 UTC (evening of 10-11 local): `sprk_communicationreconciliation` (fix: page loads again — `4fb7c8da6`) and `sprk_documentuploadwizard` (task 128 — `db37e6a31`) built from `a70019e3e`, published, read back byte-equal.
 - Guest sign-in fix (#1453, tasks 122-125): @spaarke/auth + 10 PCFs + 8 code pages + 3 web resources.
@@ -33,6 +32,7 @@
   - The Communication form shows the timeline, conversation panel and actions, and they work as before.
   - The document relationship viewer opens.
 - **Guest + member UAT** for the sign-in fix (list given 2026-10-09).
+- **A9 live-test item:** a licensed B2B guest signs in to the add-in from their OWN company's desktop Office and Word, with the authority pinned to the Spaarke tenant. Outlook on the web was verified on 2026-10-08. If it fails, raise it with the owner before any workaround.
 - **Task 121 live checks**:
   - Message-ID header, and the link to an existing communication.
   - An unfiled communication gets filed.
@@ -43,7 +43,7 @@
 - **078**: one Word-on-the-web run + desktop Word build number. **080**: Test User 1 opens a matter-filed document they saved + Run Index / document To Do.
 
 ## Blocked / waiting on others
-- **126** (Model 1 guests count as internal): blocked on UAC-r2's answers to `notes/coordination/2026-10-08-to-uac-r2-model1-guests.md`. Fold in provisioning's **T255** (customer workforce tenant list + acct claim).
+- **SPA-r3 (A9):** workforce-contact sign-in, registration, the stored link and the task 040 re-scope. Provisioning: multitenant BFF app plus customer admin consent. The Dewey Cheatham retest waits on SPA-r3's A9 build. Nothing for this project to do.
 - **customer-provisioning-orchestration-r1**: directory endpoint (240c) → runtime customer selection + first production deploy. Diagnostics view stays on dev until their guest tests finish.
 - **UAC-r2**: To Do access-permission column; full UAT (rounds 5-12) after their secure project.
 - **#1591** (`Import-SolutionScoped.ps1` false success when pac exits 0 on a failed import): filed for the script's owners.
