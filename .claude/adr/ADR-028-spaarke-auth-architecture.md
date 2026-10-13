@@ -517,9 +517,12 @@ The Office add-in already runs the working shape: one single-tenant Spaarke clie
   - It is not the BFF app registration.
   - Its authority is pinned to `https://login.microsoftonline.com/{Spaarke tenant id}`.
 - **MUST**, in Teams, acquire tokens with **Nested App Authentication first, then the MSAL popup**.
-- **MUST** request `api://{customer BFF app id}/user_impersonation` on **both** planes: the workforce client and the CIAM client.
-  - The customer BFF app id and server URL come from Spaarke-owned data: the T240c directory, or dev configuration until it ships.
+- **MUST** request `api://{app id}/user_impersonation` on **both** planes:
+  - **Workforce client:** `{app id}` is the customer BFF app id.
+  - **CIAM client:** `{app id}` is the customer's own **CIAM API app**, registered in the CIAM tenant (`spaarkeextid`) by provisioning, keyless, with the CIAM SPA client pre-authorized. A CIAM local account cannot get a token for an API registered in the workforce tenant (AADSTS500207; T240d spike S1, 2026-10-12). The stamp's `Ciam:Audience` is that app id.
+  - The app ids and server URL come from Spaarke-owned data: the T240c directory (`bffAppId`, `ciamBffAppId`), or dev configuration until it ships.
   - They never come from a link, query string or other client-supplied input.
+  - *Clarified 2026-10-12 (owner-approved): the CIAM-plane audience is the per-customer CIAM API app, not the BFF app.*
 
 **Default Tier-1 modules (amends A3 :125)**
 
