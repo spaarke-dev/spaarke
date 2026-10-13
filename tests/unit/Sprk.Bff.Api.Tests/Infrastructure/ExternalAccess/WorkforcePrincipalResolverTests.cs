@@ -707,6 +707,27 @@ public class WorkforcePrincipalResolverTests
             .Should().Be(Upn, "only acct = 1 tokens skip the #EXT# UPN");
     }
 
+    [Fact]
+    public void TokenEmail_ReadsTheMappedUpnClaim_WhenNoOtherEmailClaimIsPresent()
+    {
+        // A v1 token validated with MapInboundClaims = true carries "upn" as ClaimTypes.Upn (#1798).
+        const string Upn = "member@customer.example";
+        var user = BuildUser(TestOid, CustomerTenant, acct: "0");
+        ((ClaimsIdentity)user.Identity!).AddClaim(new Claim(System.Security.Claims.ClaimTypes.Upn, Upn));
+
+        WorkforceCallerClaims.TokenEmail(user).Should().Be(Upn);
+    }
+
+    [Fact]
+    public void TokenEmail_ForAGuest_SkipsAMappedExtUpn()
+    {
+        var user = BuildUser(GuestOid, SpaarkeTenant, acct: "1", idp: V1Issuer(CustomerTenant));
+        ((ClaimsIdentity)user.Identity!).AddClaim(
+            new Claim(System.Security.Claims.ClaimTypes.Upn, "new.hire_customer.example#EXT#@spaarke.onmicrosoft.com"));
+
+        WorkforceCallerClaims.TokenEmail(user).Should().BeNull();
+    }
+
     private Task<WorkforcePrincipalResolution> ResolveGuestAsync(
         Guid tid, string? idp, string? acct = "1", string? stampTenant = "22222222-bbbb-4bbb-8bbb-222222222222",
         Guid[]? listedTenants = null)

@@ -203,7 +203,8 @@ public sealed record WorkforceCallerClaims(
     private const string ExternalUpnMarker = "#EXT#";
 
     /// <summary>
-    /// The token's email: <c>email</c>, then <c>preferred_username</c>, then <c>upn</c>. NOT verified by
+    /// The token's email: <c>email</c>, then <c>preferred_username</c>, then <c>upn</c> (raw or, with inbound
+    /// claim mapping on, as <see cref="ClaimTypes.Email"/> / <see cref="ClaimTypes.Upn"/>). NOT verified by
     /// anything here — Microsoft documents these as mutable and unsuitable for authorization. It is trusted
     /// only behind the member test: for a MEMBER of a configured customer tenant, that tenant's admin controls
     /// the attribute. A non-member's email is never used to bind or create.
@@ -220,7 +221,7 @@ public sealed record WorkforceCallerClaims(
         return First(
             user,
             v => !isGuest || !v.Contains(ExternalUpnMarker, StringComparison.OrdinalIgnoreCase),
-            "email", "preferred_username", "upn", ClaimTypes.Email);
+            "email", "preferred_username", "upn", ClaimTypes.Email, ClaimTypes.Upn);
     }
 
     private static string? First(ClaimsPrincipal user, params string[] types)
