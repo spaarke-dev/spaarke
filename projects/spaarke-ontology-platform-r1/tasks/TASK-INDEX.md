@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **123 tasks** across 15 phases (76 ✅ · 1 🔄 · 33 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-12: +140–146, Phase 4c child-record contract)
+> (spec §9) · **124 tasks** across 15 phases (76 ✅ · 1 🔄 · 34 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-12: +140–147, Phase 4c child-record contract)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
