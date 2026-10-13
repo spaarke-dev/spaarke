@@ -36,11 +36,23 @@ Researcher finding, 2026-10-12; memory `.claude/agent-memory/researcher/b2b-gues
    - Beta `signIn.homeTenantId` may be used only as a cross-check.
 4. **At sign-in:** customer workforce = `tid` is Spaarke's tenant **and** `oid` is in the recorded set. `idp` and `acct` are sanity checks only. Never use `email`, `upn` or `preferred_username`.
 
-## Question for you
+## The member test and sign-in authority (revised 2026-10-12 after a code check)
 
-`WorkforceIdentityOptions` (task 141) says a Model 1 employee "signs in with the CUSTOMER's `tid`", and the member test reads `tid`. That holds only when the employee signs in against their **home** tenant authority, through a multi-tenant app. A guest signing in against Spaarke's tenant carries Spaarke's `tid`.
+`WorkforceIdentityOptions` (task 141) assumes a Model 1 employee "signs in with the CUSTOMER's `tid`". The code bears that out for every path that runs the member test:
 
-Which authority does each Type-2 path use? If any path uses Spaarke's authority, the member test refuses every Model 1 employee. A live token probe on the Dewey Cheatham account would settle it.
+| Sign-in path | Authority | `tid` for a customer employee | Runs the member test |
+|---|---|---|---|
+| Dataverse-hosted (PCFs, code pages, Console — `@spaarke/auth`) | Spaarke's tenant (forced since #1453) | Spaarke's, `acct = 1` | No — licensed systemusers |
+| External SPA, workforce realm (Type-2) | `/organizations` → the user's home tenant | the customer's, `acct = 0` | Yes (`ContactIdentityBinder`) |
+| External SPA in Teams | Teams SSO, home tenant | the customer's | Yes |
+
+So the member test itself is consistent. What remains open:
+
+1. **Consent in the customer's tenant.** The workforce plane's app (`1e40baad…`, SDAP-BFF-SPE-API) is `AzureADMultipleOrgs`, but a home-tenant sign-in fails with AADSTS700016 until the customer's tenant has a service principal for it (admin consent). Is that a Model 1 provisioning step today?
+2. **The customer tenant list.** `WorkforceIdentity__CustomerTenantIds` must hold the customer's home tenant id (provisioning's H4b writes it from `customerWorkforceTenantIds`). Empty = everyone refused.
+3. **The external-flag script** works on systemusers, not tokens, so the member test does not protect against it — the rule above still applies.
+
+A live sign-in as the Dewey Cheatham account on the external SPA's workforce realm will confirm 1 and 2: a consent / AADSTS700016 error points to 1, a `workforce_tenant_not_customer` deny to 2, `workforce_guest` to a Spaarke-authority sign-in.
 
 ## Q4 (owner)
 
