@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="186" project="unified-access-control-r2">
+  <metadata>
+    <title>Model 1 workforce sign-in: the BFF accepts home-tenant tokens from the listed customer tenants, a first sign-in registers a workforce contact (no approval), and baseline access follows the "Spaarke Internal Contact User (Workforce)" role</title>
+    <phase>Session 28 — UAC (owner round 97, 2026-10-13)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Token validation (which issuers the BFF trusts), cross-tenant identity, contact creation, and the access model for callers who are not Dataverse users.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth and tenant isolation: a wrong issuer rule lets any Entra tenant into a customer's environment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the JWT configuration, CallerPrincipalResolver and the binder that tasks 184 and 185 also touch. Run after 184 merges.</parallel-reason>
+    <deps>184 (#1801) merged</deps>
+    <tags>bff-api, auth, security, tenant-isolation, external-spa, testing</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+    <origin>
+      Word-add-in-r1 T126 found that the External SPA workforce realm and Teams sign in via `/organizations`. The token then carries the person's HOME tid, for example the Dewey Cheatham tenant bc3aa7f4…. The BFF accepts only the Spaarke tenant a221a95e, so it returns 401 IDX40001. This was seen live on dev on 2026-10-13 at 02:26Z. Task 141's member test (WorkforceIdentityOptions.cs:199-230) has therefore never run.
+      Owner requirements (round 96):
+      - the customer can see which of its workforce has signed in, on the contact table;
+      - contacts are NOT pre-created, so a first sign-in needs a form to fill in.
+      Owner round 97 (2026-10-13):
+      - (1) option A: home-tenant sign-in. The B2B guest-invite route is rejected, and `Set-ExternalFlagForB2BGuests.ps1 -Apply` stays forbidden in Model 1.
+      - (2) registrations need NO approval.
+      - (3) baseline access uses the Dataverse security role "Spaarke Internal Contact User (Workforce)". The owner created it on dev on 2026-10-13 in root BU 06fbf21c, as role 9deaac9c-02c7-f111-a05c-0022482913fc. It has 655 privileges, is held by no one yet, and its description is "Internal contact user for Service Request Portal (SPA)". The owner will modify its privileges as required.
+      Consumers: provisioning H11 (customer tenant consent and the CustomerTenantIds intake, see INCOMING-141-workforce-tenant-list.md) and word-add-in-r1 T126 (Teams / add-in sign-in).
+    </origin>
+  </metadata>
+
+  <prompt>Design first. Write notes/186-model1-workforce-design.md and put it through owner review before any code. Its open point (3) is an owner decision. Then implement on a branch from master and open a PR into master. Read first:
+- task 141's model: ContactBindingDecision, ContactIdentityBinder, CallerPrincipalResolver and WorkforceIdentityOptions;
+- notes/handoffs/INCOMING-141-workforce-tenant-list.md;
+- ModuleEntitlementResolver, for workforce entitlements from App-Role claims and sprk_approlemodulemap;
+- ADR-028.</prompt>
+
+  <goal>(1) TOKEN ACCEPTANCE.
+- On the routes the External SPA workforce realm, Teams and the add-in call, the BFF accepts user tokens whose issuer is `https://login.microsoftonline.com/{tid}/v2.0` for a tid in `WorkforceIdentity:CustomerTenantIds`, with the BFF's own audience. It accepts no other foreign tenant.
+- An empty list accepts no foreign tenant.
+- Routes that call Dataverse on behalf of the user (OBO) keep accepting the BFF's own tenant only. A foreign-tenant token cannot do OBO into Spaarke's tenant, so the design note lists which routes fall into each group.
+- This fixes T126's 401. The issuer rule is one validator, guarded by a test and an ArchTest so a route cannot opt in by accident.
+
+(2) MEMBER TEST. Task 141's `WorkforceMembershipTest` (tid in the list, `acct` = 0, user token) runs on these tokens as designed. Guest (`acct` = 1), app and unlisted-tenant tokens are denied.
+
+(3) REGISTRATION.
+- A member whose oid binds to no contact, and whose email matches no contact under E11's workforce plane, gets `registration_required`. Task 141's workforce-plane binding rules are unchanged.
+- The SPA then shows a registration form: name, and the minimal fields the design note lists.
+- The BFF creates the workforce contact app-only, bound to the caller's oid at creation (workforce identity plane), with no approval step.
+- Collisions follow task 141's E10 rules. A systemuser link or several matches deny, and registration NEVER creates a second contact for an email that already has one.
+
+(4) VISIBILITY. The customer sees on the contact table which of its workforce has signed in.
+- Prefer existing columns: the identity plane, the bind columns and createdon.
+- If a first or last sign-in date is needed, the design note justifies it under §11 and the owner approves the schema.
+- Last-sign-in writes must be throttled, at most one write per contact per day.
+
+(5) BASELINE ACCESS (OWNER DECISION IN THE DESIGN NOTE).
+- These callers are not Dataverse systemusers, so a Dataverse role cannot be assigned to them directly.
+- The design note proposes how the role "Spaarke Internal Contact User (Workforce)" defines their access. Candidates, with a recommendation:
+  - (a) the BFF reads the role's table privileges (and their depth) as the permission ceiling for workforce-contact callers, while record scope comes from UAC grants and participation as for other contacts;
+  - (b) the role is assigned to a dedicated team, and the BFF evaluates through that team;
+  - (c) the role maps onto module entitlements.
+- State how depth (User/BU/Org) maps for a contact caller, and how the owner's later privilege changes take effect (cache TTL).
+
+(6) CLIENTS. External SPA build:prod. Name the T126 (Teams / add-in) client change for word-add-in-r1, and do NOT make it here.</goal>
+
+  <constraints>
+    <constraint source="owner round 97">Option A only. No B2B guests. Do NOT run `Set-ExternalFlagForB2BGuests.ps1 -Apply` in Model 1.</constraint>
+    <constraint source="ADR-028 / §9 / §6">No new credential. The app registration's multi-tenant setting and customer consent are provisioning and owner actions, not agent writes. This is auth code, so the owner signs off.</constraint>
+    <constraint source="task 141">E10, oid-first resolution and "never clear or re-point a link" are unchanged. The member test is used as designed.</constraint>
+    <constraint source="§11">Any new column or endpoint carries the three answers. Schema needs owner approval.</constraint>
+    <constraint source="git">Stage explicit paths only. Never force-push, never use a bare stash, never use --no-verify. Do not merge.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>A member token from a listed customer tenant reaches the workforce routes. A token from an unlisted tenant, a guest token, an app token, and any token while the list is empty get 401 or 403, and a test pins each case.</criterion>
+    <criterion>OBO routes still accept only the BFF's own tenant.</criterion>
+    <criterion>First sign-in with no contact gives registration_required. Submitting the form creates one workforce contact bound to the oid, with no approval. A second submission, or a submission for an email that already has a contact, creates nothing new.</criterion>
+    <criterion>The customer can identify signed-in workforce contacts on the contact table, as the design note specifies.</criterion>
+    <criterion>Baseline access follows the owner's decision on (5). Changing a privilege on the role changes what a workforce caller can do within the stated TTL.</criterion>
+    <criterion>Task 141 tests are unchanged and green. Full ArchTests are green, including RouteAuthorizationGuard. The BFF builds with 0 errors. The External SPA build:prod is green.</criterion>
+    <criterion>Live gate on dev: a Dewey Cheatham tenant member signs in through the External SPA workforce realm, registers, and reaches baseline access. An unlisted-tenant account gets 401.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1429,6 +1429,10 @@ The owner asked for research on the practical and technical limits of access tea
     - there are no pre-created contacts, so the first sign-in shows a registration form.
   - Recommendation put to the owner: (A) home-tenant sign-in, with the BFF accepting the listed customer tenants on the external routes, and the task 141 member test as designed. The alternative is (B) guest invite plus a recorded oid set.
   - Open with the owner: A or B, approval of new registrations, and baseline access.
+- **Model 1 workforce sign-in: DECIDED, round 97 (2026-10-13). This is task 186.**
+  1. **Option A.** The person signs in with their home tenant. The BFF accepts tokens from the tenants in `WorkforceIdentity:CustomerTenantIds` on the workforce routes, and task 141's member test runs as designed. No B2B guests, and `Set-ExternalFlagForB2BGuests.ps1 -Apply` stays forbidden in Model 1.
+  2. **No approval** of new registrations. The first sign-in form creates the workforce contact, and it is active at once.
+  3. **Baseline access** uses the Dataverse security role "Spaarke Internal Contact User (Workforce)". The owner created it on dev on 2026-10-13 (root BU role 9deaac9c-02c7-f111-a05c-0022482913fc, 655 privileges) and will change its privileges as needed. These callers are not systemusers, so how the BFF applies the role is an owner decision in 186's design note.
 
 ## Round 97 (2026-10-13): OWNER: task 184 after provisioning's cross-customer review
 
