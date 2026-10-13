@@ -438,13 +438,21 @@ internal sealed class GrantAccessNotifier
 
     /// <summary>
     /// A contact-side grant (task 140) gave <paramref name="contactId"/> — an unbound colleague with an email — access to a
-    /// record. Contacts never invite, so the colleague cannot sign in until an internal user sends the invite: the record's
-    /// internal owner (its OWNING user) is told so, in-app, with a link to the record. A team-owned record has no owning user
-    /// and nobody is told (logged). Never a user the record's No Access list walls off. Best effort, like everything here:
-    /// nothing throws.
+    /// record. Contacts never invite, so the colleague cannot sign in until an internal user sends the invite: one internal
+    /// user is told so, in-app, with a link to the record. Who (§12 I-4):
+    /// <list type="number">
+    /// <item>a user-owned record: its OWNING user, as before;</item>
+    /// <item>a team-owned record (task 185 slice F; secure records are team-owned): the first of
+    /// <paramref name="granters"/> — the internal users who granted the granting partner contact its own access to the
+    /// record (<c>sprk_grantedby</c> on its grant rows) — that is an enabled person not walled off the record;</item>
+    /// <item>else the record's <c>createdby</c>, when that is an enabled person (not an application user) not walled off;</item>
+    /// <item>else nobody: logged at Warning.</item>
+    /// </list>
+    /// Never a user the record's No Access list walls off. Best effort, like everything here: nothing throws.
     /// </summary>
     public async Task<GrantNotificationOutcome> NotifyInviteNeededAsync(
-        ExternalGrantRootType rootType, Guid rootId, Guid contactId, ClaimsPrincipal caller)
+        ExternalGrantRootType rootType, Guid rootId, Guid contactId, ClaimsPrincipal caller,
+        IReadOnlyList<Guid>? granters = null)
     {
         try
         {
@@ -452,45 +460,60 @@ internal sealed class GrantAccessNotifier
             var rows = await _dataverse.QueryAsync<OwnerRow>(
                 ExternalGrantRoot.BindFor(rootType).EntitySet,
                 filter: $"{logical}id eq {rootId}",
-                select: "_owninguser_value",
+                select: "_owninguser_value,_createdby_value",
                 top: 1,
                 cancellationToken: CancellationToken.None);
-            if (rows.FirstOrDefault()?.OwningUser is not { } owner || owner == Guid.Empty)
-            {
-                _logger.LogInformation(
-                    "[GRANT-NOTIFY] {RootType} {RootId} has no owning user (team-owned); nobody is told that contact {ContactId} " +
-                    "needs an invite.", rootType, rootId, contactId);
-                return GrantNotificationOutcome.NotApplicable;
-            }
+            var record = rows.FirstOrDefault();
 
-            SecureShareWallOutcome wall;
-            try
+            Guid owner;
+            string role;
+            if (record?.OwningUser is { } owningUser && owningUser != Guid.Empty)
             {
-                wall = (await _noAccessGuard.CheckRecordAndSecureParentsAsync(
-                    logical, rootId, owner, SecureWallRecordScope.AsFlagged, CancellationToken.None)).Outcome;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "[GRANT-NOTIFY] The No Access check for owner {UserId} on {RootType} {RootId} threw; they were not told.",
-                    owner, rootType, rootId);
-                return GrantNotificationOutcome.Failed;
-            }
+                // A user-owned record: its owner, as before.
+                switch (await CheckWallAsync(logical, rootType, rootId, owningUser, "owner"))
+                {
+                    case WallCheck.Clear:
+                        break;
+                    case WallCheck.Walled:
+                        return GrantNotificationOutcome.NotApplicable;
+                    default:
+                        return GrantNotificationOutcome.Failed;
+                }
 
-            switch (wall)
+                owner = owningUser;
+                role = "owner";
+            }
+            else
             {
-                case SecureShareWallOutcome.NotSecure:
-                case SecureShareWallOutcome.NotWalled:
+                // A team-owned record (task 185 slice F): the partner contact's own granter, else the record's creator.
+                var candidates = (granters ?? Array.Empty<Guid>())
+                    .Where(id => id != Guid.Empty)
+                    .Select(id => (Id: id, Role: "granter"))
+                    .ToList();
+                if (record?.CreatedBy is { } creator && creator != Guid.Empty)
+                    candidates.Add((creator, "creator"));
+
+                (Guid Id, string Role)? chosen = null;
+                foreach (var candidate in candidates.DistinctBy(c => c.Id))
+                {
+                    if (!await IsPersonAsync(candidate.Id, candidate.Role, rootType, rootId))
+                        continue;
+                    if (await CheckWallAsync(logical, rootType, rootId, candidate.Id, candidate.Role) != WallCheck.Clear)
+                        continue;
+                    chosen = candidate;
                     break;
-                case SecureShareWallOutcome.Walled:
-                    _logger.LogInformation(
-                        "[GRANT-NOTIFY] Owner {UserId} is on the No Access list of {RootType} {RootId}; not told.", owner, rootType, rootId);
-                    return GrantNotificationOutcome.NotApplicable;
-                default:
+                }
+
+                if (chosen is not { } found)
+                {
                     _logger.LogWarning(
-                        "[GRANT-NOTIFY] Whether owner {UserId} is on the No Access list of {RootType} {RootId} could not be checked; " +
-                        "not told.", owner, rootType, rootId);
-                    return GrantNotificationOutcome.Failed;
+                        "[GRANT-NOTIFY] {RootType} {RootId} is team-owned and neither the partner contact's granter nor the " +
+                        "record's creator is an internal person who can be told; nobody is told that contact {ContactId} needs " +
+                        "an invite. The grant stands.", rootType, rootId, contactId);
+                    return GrantNotificationOutcome.NotApplicable;
+                }
+
+                (owner, role) = found;
             }
 
             var label = ExternalGrantRoot.LabelFor(rootType);
@@ -513,16 +536,91 @@ internal sealed class GrantAccessNotifier
                 actionTitle: $"Open {label}");
 
             _logger.LogInformation(
-                "[GRANT-NOTIFY] Told owner {UserId} of {RootType} {RootId} that contact {ContactId} needs an invite.",
-                owner, rootType, rootId, contactId);
+                "[GRANT-NOTIFY] Told the {Role} {UserId} of {RootType} {RootId} that contact {ContactId} needs an invite.",
+                role, owner, rootType, rootId, contactId);
             return GrantNotificationOutcome.Sent;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "[GRANT-NOTIFY] Could not tell the owner of {RootType} {RootId} that contact {ContactId} needs an invite. The " +
+                "[GRANT-NOTIFY] Could not tell anyone at {RootType} {RootId} that contact {ContactId} needs an invite. The " +
                 "grant stands.", rootType, rootId, contactId);
             return GrantNotificationOutcome.Failed;
+        }
+    }
+
+    private enum WallCheck
+    {
+        Clear,
+        Walled,
+        Unreadable,
+    }
+
+    /// <summary>Whether <paramref name="userId"/> may be named the record: not walled off it. Never throws.</summary>
+    private async Task<WallCheck> CheckWallAsync(
+        string logical, ExternalGrantRootType rootType, Guid rootId, Guid userId, string role)
+    {
+        SecureShareWallOutcome wall;
+        try
+        {
+            wall = (await _noAccessGuard.CheckRecordAndSecureParentsAsync(
+                logical, rootId, userId, SecureWallRecordScope.AsFlagged, CancellationToken.None)).Outcome;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[GRANT-NOTIFY] The No Access check for {Role} {UserId} on {RootType} {RootId} threw; they were not told.",
+                role, userId, rootType, rootId);
+            return WallCheck.Unreadable;
+        }
+
+        switch (wall)
+        {
+            case SecureShareWallOutcome.NotSecure:
+            case SecureShareWallOutcome.NotWalled:
+                return WallCheck.Clear;
+            case SecureShareWallOutcome.Walled:
+                _logger.LogInformation(
+                    "[GRANT-NOTIFY] {Role} {UserId} is on the No Access list of {RootType} {RootId}; not told.",
+                    role, userId, rootType, rootId);
+                return WallCheck.Walled;
+            default:
+                _logger.LogWarning(
+                    "[GRANT-NOTIFY] Whether {Role} {UserId} is on the No Access list of {RootType} {RootId} could not be checked; " +
+                    "not told.", role, userId, rootType, rootId);
+                return WallCheck.Unreadable;
+        }
+    }
+
+    /// <summary>
+    /// Task 185 slice F: whether <paramref name="userId"/> is an enabled, interactive person — not an application user — by
+    /// the one share-eligibility rule (<see cref="InternalShareEndpoints.ClassifyEligibility"/>; a contact grant reaches only
+    /// a record that is not Restricted). A user that cannot be read is not one. Never throws.
+    /// </summary>
+    private async Task<bool> IsPersonAsync(Guid userId, string role, ExternalGrantRootType rootType, Guid rootId)
+    {
+        try
+        {
+            var user = await InternalShareEndpoints.ReadSystemUserAsync(_dataverse, userId, CancellationToken.None);
+            if (user is not null
+                && InternalShareEndpoints.ClassifyEligibility(
+                       user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal, rootIsRestricted: false)
+                   == InternalShareEndpoints.ShareEligibility.Eligible)
+            {
+                return true;
+            }
+
+            _logger.LogInformation(
+                "[GRANT-NOTIFY] The {Role} {UserId} of {RootType} {RootId} is not an enabled internal person; not told.",
+                role, userId, rootType, rootId);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[GRANT-NOTIFY] The {Role} {UserId} of {RootType} {RootId} could not be read; not told.",
+                role, userId, rootType, rootId);
+            return false;
         }
     }
 
@@ -553,6 +651,10 @@ internal sealed class GrantAccessNotifier
     {
         [System.Text.Json.Serialization.JsonPropertyName("_owninguser_value")]
         public Guid? OwningUser { get; set; }
+
+        /// <summary>Task 185 slice F: the record's creator, the last fallback for a team-owned record.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("_createdby_value")]
+        public Guid? CreatedBy { get; set; }
     }
 
     /// <summary>

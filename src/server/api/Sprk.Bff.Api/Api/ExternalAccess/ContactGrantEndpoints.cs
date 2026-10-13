@@ -233,7 +233,8 @@ public static class ContactGrantEndpoints
 
         if (invite.Status == GrantInviteStatus.NeedsInternalInvite)
         {
-            await accessNotifier.NotifyInviteNeededAsync(g.RootType, g.RootId, grantee, httpContext.User);
+            await accessNotifier.NotifyInviteNeededAsync(
+                g.RootType, g.RootId, grantee, httpContext.User, cap.Granters ?? Array.Empty<Guid>());
         }
 
         return TypedResults.Ok(new ContactGrantResponse(
@@ -403,7 +404,11 @@ public static class ContactGrantEndpoints
         Fault,
     }
 
-    internal readonly record struct GrantorExpiryCap(GrantorExpiryCapKind Kind, DateOnly? Cap);
+    /// <param name="Granters">
+    /// Task 185 slice F (§12 I-4): the internal users (<c>sprk_grantedby</c>) who issued the grantor's OWN qualifying rows —
+    /// its direct rows first, then its organizations', each latest-expiring first; distinct. Empty when no row records one.
+    /// </param>
+    internal readonly record struct GrantorExpiryCap(GrantorExpiryCapKind Kind, DateOnly? Cap, IReadOnlyList<Guid>? Granters = null);
 
     /// <summary>
     /// The latest date until which the grantor holds at least <paramref name="grantedLevel"/> through a DATED grant on
@@ -451,7 +456,8 @@ public static class ContactGrantEndpoints
         }
 
         if (held.Rows.Count > 0)
-            return new GrantorExpiryCap(GrantorExpiryCapKind.Cap, held.Rows.Max(r => r.ExpiresDate!.Value));
+            return new GrantorExpiryCap(
+                GrantorExpiryCapKind.Cap, held.Rows.Max(r => r.ExpiresDate!.Value), GrantersOf(held.Rows, grantor.ContactId));
 
         if (!held.DirectOnly && grantor.Principal.UndatedAccessTermEntityTypes.Contains(logicalName))
             return new GrantorExpiryCap(GrantorExpiryCapKind.NoCap, null);
@@ -462,6 +468,19 @@ public static class ContactGrantEndpoints
             grantor.ContactId, grantor.Level, grantor.RootType, grantor.RootId, grantedLevel);
         return new GrantorExpiryCap(GrantorExpiryCapKind.Refuse, null);
     }
+
+    /// <summary>
+    /// Task 185 slice F (§12 I-4): who issued the grantor's own rows (<c>sprk_grantedby</c>) — the contact's direct rows
+    /// before its organizations', each latest-expiring first; distinct, empties dropped. Pure.
+    /// </summary>
+    internal static IReadOnlyList<Guid> GrantersOf(IEnumerable<ExternalGrantRow> rows, Guid grantorContactId)
+        => rows
+            .Where(r => r.GrantedBySystemUserId is { } id && id != Guid.Empty)
+            .OrderBy(r => r.ContactId == grantorContactId ? 0 : 1)
+            .ThenByDescending(r => r.ExpiresDate)
+            .Select(r => r.GrantedBySystemUserId!.Value)
+            .Distinct()
+            .ToList();
 
     // =========================================================================================
     // GET /contact-grants

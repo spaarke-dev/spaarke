@@ -512,6 +512,12 @@ internal static class AssignedAccessTestDoubles
         /// </summary>
         public ConcurrentDictionary<Guid, Guid> RootOwners { get; } = new();
 
+        /// <summary>
+        /// Task 185 slice F: the CREATOR of a project / matter / work assignment (<c>_createdby_value</c>), answered with its
+        /// owner to the same root read. A root in neither dictionary answers no row.
+        /// </summary>
+        public ConcurrentDictionary<Guid, Guid> RootCreators { get; } = new();
+
         /// <summary>Task 114 verifier V3: a root-owner read fails (every other query still answers).</summary>
         public bool FailRootOwnerQueries { get; set; }
 
@@ -619,9 +625,13 @@ internal static class AssignedAccessTestDoubles
                 "systemusers" => SystemUsers.Values
                     .Where(u => filter is not null && filter.Contains($"systemuserid eq {u.Id}", StringComparison.OrdinalIgnoreCase))
                     .ToList(),
-                "sprk_projects" or "sprk_matters" or "sprk_workassignments" => RootOwners
-                    .Where(kv => filter is not null && filter.Contains(kv.Key.ToString(), StringComparison.OrdinalIgnoreCase))
-                    .Select(kv => new Dictionary<string, object?> { ["_owninguser_value"] = kv.Value })
+                "sprk_projects" or "sprk_matters" or "sprk_workassignments" => RootOwners.Keys.Union(RootCreators.Keys)
+                    .Where(id => filter is not null && filter.Contains(id.ToString(), StringComparison.OrdinalIgnoreCase))
+                    .Select(id => new Dictionary<string, object?>
+                    {
+                        ["_owninguser_value"] = RootOwners.TryGetValue(id, out var owner) ? owner : null,
+                        ["_createdby_value"] = RootCreators.TryGetValue(id, out var creator) ? creator : null,
+                    })
                     .ToList<object>(),
                 _ => throw new InvalidOperationException($"Unexpected query of {entitySetName} through the grant table."),
             };
@@ -1036,9 +1046,13 @@ internal static class AssignedAccessTestDoubles
                         Options.Create(new Sprk.Bff.Api.Configuration.CustomerOptions { Id = "acme" }), settings,
                         NullLogger<Sprk.Bff.Api.Configuration.CustomerIdentity>.Instance),
                     settings,
-                    NullLogger<Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier>.Instance);
+                    NotifierLogger);
             }
         }
+
+        /// <summary>Task 185 slice F: the grant notifier's logger; set a capturing logger to assert what it writes.</summary>
+        public ILogger<Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier> NotifierLogger { get; set; } =
+            NullLogger<Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier>.Instance;
 
         /// <summary>Task 036: every portal email the notifier sent (external-contact grants), recorded, never sent.</summary>
         public RecordingEmailService Emails { get; } = new();

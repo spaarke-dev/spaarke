@@ -1,7 +1,10 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Xunit;
 using static Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles;
 
@@ -100,7 +103,105 @@ public partial class ContactGrantAuthorizationTests
 
         body.Invite!.Status.Should().Be(GrantInviteStatus.NeedsInternalInvite);
         _dataverse.RowsFor(Colleague).Should().ContainSingle();
-        h.SentNotifications.Should().BeEmpty("a team-owned record has no owning user to tell");
+        h.SentNotifications.Should().BeEmpty(
+            "a team-owned record with no owning user, no granter on the partner's own grant and no creator has nobody to tell");
         h.Ciam.Attempts.Should().BeEmpty();
+    }
+
+    // ── Task 185 slice F (§12 I-4): a team-owned record (secure records are) tells a fallback internal user ──────────────
+
+    private static readonly Guid PartnerGranter = Guid.Parse("5a140000-0000-0000-0000-0000000000f2");
+    private static readonly Guid RecordCreator = Guid.Parse("5a140000-0000-0000-0000-0000000000f3");
+
+    /// <summary>The invite seams over a TEAM-owned project (no owning user), with a capturing notifier log.</summary>
+    private (Harness H, BindingLogCapture<GrantAccessNotifier> Log) WireTeamOwnedInviteSeams()
+    {
+        var h = WireInviteSeams();
+        h.Grants.RootOwners.TryRemove(ProjectId, out _);
+        var log = new BindingLogCapture<GrantAccessNotifier>();
+        h.NotifierLogger = log;
+        Notifier = h.Notifier;
+        return (h, log);
+    }
+
+    /// <summary>The internal user who granted the granting partner contact its OWN access to the project (sprk_grantedby).</summary>
+    private void PartnersOwnGrantIssuedBy(Guid systemUserId)
+        => _dataverse.RowsFor(Grantor).Single().GrantedBySystemUserId = systemUserId;
+
+    private static Guid ToldUser(Harness h)
+        => h.SentNotifications.Should().ContainSingle("one internal user is told").Subject
+            .GetAttributeValue<EntityReference>("ownerid").Id;
+
+    [Fact]
+    public async Task ContactGrant_OnATeamOwnedRecord_TellsTheInternalUserWhoGrantedThePartnerItsOwnAccess()
+    {
+        var (h, _) = WireTeamOwnedInviteSeams();
+        h.Grants.Person(PartnerGranter);
+        h.Grants.Person(RecordCreator);
+        h.Grants.RootCreators[ProjectId] = RecordCreator;
+        PartnersOwnGrantIssuedBy(PartnerGranter);
+
+        var body = Ok<ContactGrantResponse>(await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate)));
+
+        body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.NeedsInternalInvite));
+        ToldUser(h).Should().Be(PartnerGranter, "the partner's own granter comes before the record's creator");
+        h.SentNotifications.Single().GetAttributeValue<string>("title").Should().Contain("needs an invite").And.Contain("Apollo");
+        h.Ciam.Attempts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ContactGrant_OnATeamOwnedRecord_WithNoGranterRecorded_TellsTheRecordsCreator()
+    {
+        var (h, _) = WireTeamOwnedInviteSeams();
+        h.Grants.Person(RecordCreator);
+        h.Grants.RootCreators[ProjectId] = RecordCreator;
+
+        var body = Ok<ContactGrantResponse>(await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate)));
+
+        body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.NeedsInternalInvite));
+        ToldUser(h).Should().Be(RecordCreator);
+    }
+
+    [Fact]
+    public async Task ContactGrant_OnATeamOwnedRecord_WhoseGranterIsDisabled_TellsTheRecordsCreator()
+    {
+        var (h, _) = WireTeamOwnedInviteSeams();
+        h.Grants.Person(PartnerGranter);
+        h.Grants.SystemUsers[PartnerGranter].IsDisabled = true;
+        h.Grants.Person(RecordCreator);
+        h.Grants.RootCreators[ProjectId] = RecordCreator;
+        PartnersOwnGrantIssuedBy(PartnerGranter);
+
+        await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate));
+
+        ToldUser(h).Should().Be(RecordCreator, "a disabled granter is not a person who can be told");
+    }
+
+    [Fact]
+    public async Task ContactGrant_OnATeamOwnedRecord_CreatedByTheApplicationUser_WithNoGranter_TellsNobody_AndLogsAWarning()
+    {
+        var (h, log) = WireTeamOwnedInviteSeams();
+        h.Grants.Person(RecordCreator);
+        h.Grants.SystemUsers[RecordCreator].ApplicationId = Guid.NewGuid();
+        h.Grants.RootCreators[ProjectId] = RecordCreator;
+
+        var body = Ok<ContactGrantResponse>(await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate)));
+
+        body.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.NeedsInternalInvite), "the response is unchanged");
+        _dataverse.RowsFor(Colleague).Should().ContainSingle("the grant stands");
+        h.SentNotifications.Should().BeEmpty("the application user is not a person");
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Warning, "nobody could be told: a Warning, not a throw");
+    }
+
+    [Fact]
+    public async Task ContactGrant_OnAUserOwnedRecord_StillTellsTheOwner_NotThePartnersGranter()
+    {
+        var h = WireInviteSeams();
+        h.Grants.Person(PartnerGranter);
+        PartnersOwnGrantIssuedBy(PartnerGranter);
+
+        await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate));
+
+        ToldUser(h).Should().Be(RecordOwner, "a user-owned record keeps telling its owner, as before");
     }
 }
