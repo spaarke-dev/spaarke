@@ -54,8 +54,8 @@ public sealed record SignalAccessDecision(
 /// Signal's own business unit / secure-child sharing. (2) The caller then reads the Signal's CORE record, whatever its
 /// type: the type comes from the <c>sprk_recordtype_ref</c> catalog row the Signal's <c>sprk_corerecordtype</c> names,
 /// the id from <c>sprk_corerecordid</c>. No code here names a core type (D-36 extensibility). (3) A Signal with NO core
-/// record is visible only in the Do lane (D-35) and only to a caller who can read its SUBJECT row (<c>sprk_regardingrecordtype</c> /
-/// <c>sprk_regardingrecordid</c>, an ownership-parent table) as themselves, in addition to the Signal row (D-129: records are
+/// record is visible only in the Do lane (D-35) and only to a caller who can read its SUBJECT row (the subject lookup that carries
+/// the pair id <c>sprk_regardingrecordid</c>, an ownership-parent table; task 141) as themselves, in addition to the Signal row (D-129: records are
 /// owned by teams, so the old "caller is the Signal's owner" test matched nobody for a team-owned item). A subject in a secure
 /// record family is unreadable to a non-member, so the Signal is too (D-123).</para>
 /// <para><b>Fail closed, one denial.</b> A row the caller cannot read, a malformed core-record pair, a catalog row that
@@ -112,7 +112,7 @@ public sealed class SignalCoreRecordAccess
         try
         {
             var signal = await _userClient.GetAsync(
-                $"sprk_signals({signalId})?$select=sprk_lane,_sprk_policyversion_value,_sprk_corerecordtype_value,sprk_corerecordid,sprk_regardingrecordtype,sprk_regardingrecordid",
+                $"sprk_signals({signalId})?$select=sprk_lane,_sprk_policyversion_value,_sprk_corerecordtype_value,sprk_corerecordid,sprk_regardingrecordid,{SubjectLookupSelect}",
                 ct).ConfigureAwait(false);
 
             if (!signal.IsSuccess)
@@ -191,12 +191,17 @@ public sealed class SignalCoreRecordAccess
             return SignalAccessDecision.NotFound;
         }
 
-        var subjectType = ReadString(signalRow, "sprk_regardingrecordtype")?.Trim().ToLowerInvariant();
-        if (!Guid.TryParse(ReadString(signalRow, "sprk_regardingrecordid"), out var subjectId) || subjectId == Guid.Empty
-            || !RecordOwnershipResolver.IsOwnershipParent(subjectType))
+        // Task 141: the subject table comes from the subject lookup that carries the pair id (SignalWriter.SubjectEntityOf),
+        // never from sprk_regardingrecordtype, which is a lookup to sprk_recordtype_ref since task 140 (and absent on an
+        // untyped pair).
+        var subjectId = Guid.TryParse(ReadString(signalRow, "sprk_regardingrecordid"), out var pairId) ? pairId : Guid.Empty;
+        var subjectType = SignalWriter.SubjectEntityOf(
+            subjectId, lookup => TryReadGuid(signalRow, $"_{lookup}_value", out var id) ? id : null);
+        if (subjectId == Guid.Empty || !RecordOwnershipResolver.IsOwnershipParent(subjectType))
         {
             // No subject pair, or a table that is not one of uac-r2's ownership parents: a forged or stale pointer (the K2 rule,
-            // applied to the subject).
+            // applied to the subject). Defence in depth for the second half: every table sprk_signal has a subject lookup for is
+            // an ownership parent today (pinned by DecisionActionCatalogTests), so only an added non-parent lookup reaches it.
             _logger.LogWarning("Signal access: the no-core Signal's subject pair is missing or not an ownership-parent table; denying.");
             return SignalAccessDecision.NotFound;
         }
@@ -301,6 +306,10 @@ public sealed class SignalCoreRecordAccess
 
         return false;
     }
+
+    /// <summary>The Signal's subject lookups as Web API <c>$select</c> names (<c>_sprk_regardingmatter_value</c>, ...), task 141.</summary>
+    private static readonly string SubjectLookupSelect =
+        string.Join(",", SignalWriter.RegardingLookupByEntity.Values.Select(lookup => $"_{lookup}_value"));
 
     private static bool TryReadGuid(JsonElement row, string name, out Guid id)
     {

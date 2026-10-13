@@ -184,3 +184,42 @@ did not evict anything.
   decision.
 - Both tables are in `Default` as well; no action.
 - The forms on `sprk_decisionrecord` / `sprk_signal` were not touched (no regarding picker was requested).
+
+## 8. Task 141: the code side is closed (2026-10-13)
+
+The pair-type hazard in section 1a is closed by task 141 (branch `task/ontology-141-regarding-builder`, draft PR into
+`docs/ontology-platform-design`). It is closed on the docs branch only once that PR merges.
+
+- **Writer.** `SignalWriter` no longer writes the pair itself. The subject lookup and the pair go through the shared
+  `TodoRegardingBuilder.ApplySubjectLookupAndPairAsync` (task 141 commit 1 generalised the builder by host table). On a subject
+  table with a `sprk_recordtype_ref` row the pair type is an `EntityReference` to that row; on `sprk_communication` (no row on
+  spaarkedev1) the pair is untyped (id, name, url). The private lookup map and `BuildRecordUrl` copy are gone
+  (`SignalWriter.RegardingLookupByEntity` now points at the builder's `sprk_signal` map).
+- **Dedupe key.** Unchanged value format `{policy}|{subject logical name}|{subject id}|{episode}`, composed from the request's
+  logical name, never read back. spaarkedev1 holds 0 `sprk_signal` rows (read-only query, 2026-10-13), so no live key exists to
+  compare; `SignalWriterTests.WriteAsync_DedupeKey_IsThePreLookupKey_AndAnExistingRowWithItIsReconciled_D132` pins the
+  pre-141 keys for the dev seed matter and communication and reconciles to a row that already carries them.
+- **Readers (section 1a rows).** `SignalCoreRecordAccess.cs:115` (`$select`) and `:194-200` (no-core subject), and
+  `DecisionCommitService.cs:283-291` (`SignalColumns`) and `:1377` (`ToRow`) no longer read `sprk_regardingrecordtype`. They read
+  the subject from the typed subject lookup that carries the pair id (`SignalWriter.SubjectEntityOf`), which works for typed and
+  untyped pairs and needs no catalog read. XML docs at `DecisionCommitService.cs` (`SubjectOf`), `DecisionRecordWriter.cs:52`
+  and `SignalCoreRecordAccess.cs:57` updated. `git grep -i regardingrecordtype -- src/server/api/Sprk.Bff.Api/Services/Signals`
+  now finds only comments and the To Do / Communication writers listed as "not readers" above.
+
+**Enforced by:** `SignalPairTypeSchemaAgreementTests` (`tests/integration/data-mutation/Signals/SignalPairTypeSchemaAgreementTests.cs`):
+`SignalWriter_WritesThePairTypeInTheShapeTheSolutionDeclares` (the real `SignalWriter.WriteAsync` build path vs
+`Entities/sprk_Signal/Entity.xml` + the relationship that names the column) and
+`SharedRegardingBuilder_WritesTheDecisionRecordPairTypeInTheShapeTheSolutionDeclares` (`sprk_DecisionRecord`). Must-fire: a
+writer mutated to emit the logical name as a string fails the Signal test ("declared lookup to sprk_recordtype_ref, written
+String 'sprk_matter'"), plus seeded controls in the same class. Must-not-fire: the correct writer passes. The guard checks the
+repo solution source; the target environment is checked by 035's schema pre-flight.
+
+## 9. Constraint for task 144 (and any later Decision Record writer): builder first, then stamp
+
+From uac-r2's review of #1805 (K2). On `sprk_signal` and `sprk_decisionrecord`, the shared builder's ADR-024 mutual-exclusion guard
+refuses a row on which ANY of the host's `sprk_regarding*` lookups is already set. Four of those lookups,
+`sprk_regardingproject`, `sprk_regardingmatter`, `sprk_regardingworkassignment` and `sprk_regardingservicerequest`
+(`CoreAncestorResolver.CoreAncestorLookups`), are also the C2 core-ancestor stamp columns. So a writer that writes the stamp
+BEFORE calling `TodoRegardingBuilder` is refused with `InvalidOperationException` ("already has a regarding lookup set").
+Call the builder first (subject lookup and pair), then stamp, which is the order `ApplyResolverFieldsAsync` already uses. Task 144's
+Signal restamper registration and any future DR writer must follow it.

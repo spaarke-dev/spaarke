@@ -538,16 +538,49 @@ public class DecisionActionCatalogTests
         Mock.Get(users).Verify(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_todos(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // Task 141 (review F2): since the subject comes from the lookup that carries the pair id, all three cases take the SAME path:
+    // a pair id with no subject lookup carrying it. sprk_signal and systemuser have no sprk_signal subject lookup, so the row
+    // cannot express them; they no longer reach the ownership-parent (K2) check.
     [Theory]
-    [InlineData(null)]               // no subject type
-    [InlineData("sprk_signal")]      // a table that is not an ownership parent: a forged pointer, never read (the K2 rule)
-    [InlineData("systemuser")]
-    public async Task ANoCoreDoItem_WithNoUsableSubject_IsTheUniformNotFound_AndNothingIsRead(string? subjectType)
+    [InlineData(null)]               // no subject type written
+    [InlineData("sprk_signal")]      // a table with no sprk_signal subject lookup: not expressible on the row
+    [InlineData("systemuser")]       // likewise
+    public async Task ANoCoreDoItem_WhosePairIdNoSubjectLookupCarries_IsTheUniformNotFound_AndNothingIsRead(string? subjectType)
     {
         var users = Users(signal: NoCoreDoRow(subjectType), core: Ok(new { createdon = "x" }), who: Ok(new { UserId = OwnerId }));
 
         (await Access(users, coreSet: "sprk_todos").AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
         Mock.Get(users).Verify(u => u.GetAsync(It.Is<string>(p => !p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    public static IEnumerable<object[]> EverySignalSubjectTable() =>
+        SignalWriter.RegardingLookupByEntity.Keys.Select(k => new object[] { k });
+
+    // Task 141 fix round 2 (K4b-a). The three theory cases above converged on "no subject lookup carries the pair id", so none of
+    // them reaches the ownership-parent test in AuthorizeNoCoreRecordAsync with a REAL, derivable subject any more. This one does:
+    // every table a Signal can name as its subject is derivable, passes that test, and goes on to the caller's own read.
+    [Theory]
+    [MemberData(nameof(EverySignalSubjectTable))]
+    public async Task ANoCoreDoItem_WithAnyDerivableSubject_ReachesTheCallersOwnRead(string subjectTable)
+    {
+        var users = Users(signal: NoCoreDoRow(subjectTable), core: Ok(new { createdon = "x" }), who: Ok(new { UserId = OwnerId }));
+
+        var decision = await Access(users, coreSet: "subject_set").AuthorizeAsync(SignalId, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SignalAccessOutcome.Allowed);
+        Mock.Get(users).Verify(u => u.GetAsync($"subject_set({SubjectId})?$select=createdon", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public void EveryTableASignalCanNameAsItsSubject_IsAnOwnershipParent_SoTheK2SubjectTestHasNoLiveFalseBranchYet()
+    {
+        // SignalCoreRecordAccess' `!IsOwnershipParent(subjectType)` refusal is defence in depth: the 9 subject lookups on
+        // sprk_signal are all ownership parents today, so no derivable subject can reach it. If a lookup is added for a table that
+        // is not a parent, this fails: add the case that reaches that refusal (a derivable non-parent subject is the uniform
+        // NotFound and nothing is read) and keep this test honest.
+        SignalWriter.RegardingLookupByEntity.Keys
+            .Where(k => !RecordOwnershipResolver.IsOwnershipParent(k))
+            .Should().BeEmpty();
     }
 
     [Fact]
@@ -748,9 +781,12 @@ public class DecisionActionCatalogTests
             ["sprk_lane"] = (int)lane,
             ["_sprk_policyversion_value"] = VersionId,
         };
-        if (subjectType is not null)
+        // Task 141: the subject is the typed subject lookup that carries the pair id. A table a Signal has no lookup for (a forged
+        // or unknown pointer) cannot be expressed on the row at all, so it is simply absent.
+        if (subjectType is not null && subjectId is { } subjectRow
+            && SignalWriter.RegardingLookupByEntity.TryGetValue(subjectType, out var subjectLookup))
         {
-            row["sprk_regardingrecordtype"] = subjectType;
+            row[$"_{subjectLookup}_value"] = subjectRow.ToString();
         }
 
         if (subjectId is { } subject)

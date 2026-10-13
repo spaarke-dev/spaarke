@@ -116,6 +116,13 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
 
         result.GroupingMatterId.Should().Be(PositiveMatter,
             "sprk_communication.sprk_regardingmatter on the seeded row points at the positive matter");
+
+        // Task 141 (D-133): spaarkedev1 has no sprk_recordtype_ref row for sprk_communication, so the pair is untyped (id only).
+        var row = await _dv.OperatorClient.RetrieveAsync("sprk_signal", result.SignalId,
+            new ColumnSet("sprk_regardingcommunication", "sprk_regardingrecordtype", "sprk_regardingrecordid"));
+        row.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(PositiveCommunication);
+        row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(PositiveCommunication.ToString("D"));
+        row.GetAttributeValue<EntityReference>("sprk_regardingrecordtype").Should().BeNull();
     }
 
     /// <summary>
@@ -215,6 +222,9 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
         row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(PositiveMatter);
         row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(await BusinessUnitOfAsync("sprk_matter", PositiveMatter));
         row.GetAttributeValue<DateTime?>("sprk_duedate")!.Value.Date.Should().Be(new DateTime(2026, 11, 2));
+        // Task 141 (D-132): the pair type is the Lookup to the subject table's catalog row, written by the shared builder.
+        (await CatalogNameAsync(row.GetAttributeValue<EntityReference>("sprk_regardingrecordtype").Id)).Should().Be(subjectEntity);
+        row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(subjectId.ToString("D"));
 
         // The subject's date changes while the Signal is open: reconcile refreshes it.
         await _dv.OperatorClient.UpdateAsync(new Entity(subjectEntity, subjectId) { ["sprk_duedate"] = new DateTime(2026, 11, 9) });
@@ -333,7 +343,21 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
             (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
                 CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute), StringComparer.OrdinalIgnoreCase)),
             NullLogger<CoreAncestorResolver>.Instance);
-        return new SignalWriter(writerClient, sysadmin, coreAncestors, ownership, TimeProvider.System, NullLogger<SignalWriter>.Instance);
+        // Task 141: the shared regarding builder types the pair from the LIVE sprk_recordtype_ref catalog (the production query's
+        // filter: active row by logical name).
+        var recordTypes = new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(async (name, ct) =>
+        {
+            var query = new QueryExpression("sprk_recordtype_ref")
+            {
+                ColumnSet = new ColumnSet("sprk_recordtype_refid", "sprk_recorddisplayname"),
+                TopCount = 1,
+            };
+            query.Criteria.AddCondition("sprk_recordlogicalname", ConditionOperator.Equal, name);
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+            return (await _dv.OperatorClient.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault();
+        });
+        return new SignalWriter(
+            writerClient, sysadmin, coreAncestors, recordTypes, ownership, TimeProvider.System, NullLogger<SignalWriter>.Instance);
     }
 
     private static SignalWriteRequest Request(Guid subjectId, string subjectEntity, string displayName) => new(

@@ -273,7 +273,11 @@ public sealed class DecisionCommitServiceTests
 
             if (resolution is { } r) e["sprk_resolutiontype"] = new OptionSetValue(r);
             if (resolvedOn is { } on) e["sprk_resolvedon"] = on;
-            if (subjectEntity is not null) e["sprk_regardingrecordtype"] = subjectEntity;
+            // Task 141: the subject is the typed subject lookup that carries the pair id (the pair type is a lookup to
+            // sprk_recordtype_ref since task 140 and is not read).
+            if (subjectEntity is not null && subjectId is { } subject
+                && SignalWriter.RegardingLookupByEntity.TryGetValue(subjectEntity, out var subjectLookup))
+                e[subjectLookup] = new EntityReference(subjectEntity, subject);
             if (subjectId is { } s) e["sprk_regardingrecordid"] = s.ToString("D");
             e["ownerid"] = new EntityReference("systemuser", ItemOwner);
             Signals[id] = e;
@@ -311,7 +315,8 @@ public sealed class DecisionCommitServiceTests
                     body["sprk_corerecordid"] = CallerSeesCore.TryGetValue(id, out var seen) ? seen.ToString("D") : row.GetAttributeValue<string>("sprk_corerecordid");
                 }
 
-                if (row.Contains("sprk_regardingrecordtype")) body["sprk_regardingrecordtype"] = row.GetAttributeValue<string>("sprk_regardingrecordtype");
+                foreach (var lookup in SignalWriter.RegardingLookupByEntity.Values)
+                    if (row.GetAttributeValue<EntityReference>(lookup) is { } subjectRef) body[$"_{lookup}_value"] = subjectRef.Id.ToString("D");
                 if (row.Contains("sprk_regardingrecordid")) body["sprk_regardingrecordid"] = row.GetAttributeValue<string>("sprk_regardingrecordid");
 
                 return Ok(body);
@@ -1909,11 +1914,77 @@ public sealed class DecisionCommitServiceTests
     }
 
     [Fact]
+    public async Task ASignalWhoseSubjectTableCannotBeDerived_IsForbidden_LikeAnUnreadableSubject_BeforeAnyWrite()
+    {
+        // Task 141 review F3: the pair id is set but no subject lookup carries it (the sprk_signal_reg* relationships cascade a
+        // subject delete as RemoveLink, which clears the lookup and leaves the pair id). An unknown subject is never "no subject".
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: null, subjectId: ItemTodo);
+        var review = new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] };
+
+        var result = await rig.CommitAsync(review, DoSignal);
+
+        // Task 141 fix round 2 (K2): the same refusal (Forbidden, fail closed), with its own code and message.
+        result.Status.Should().Be(DecisionCommitStatus.Forbidden);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.SignalSubjectMissing);
+        result.ReasonCode.Should().Be("ontology.decision.signal_subject_missing");
+        result.Detail.Should().Be("This Signal's subject no longer exists.");
+        rig.Writes.Should().BeEmpty();
+        rig.Status(DoSignal).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task K2_ARecordedReplay_WhoseSignalSubjectNoLongerExists_SaysSo_AndStillClosesNothing()
+    {
+        // The replay-repair asks FR-51 again; a Signal whose subject was deleted since the first run (its lookup cleared, the pair
+        // id left) is refused as before, now with the subject-missing code instead of signal_close_not_authorized.
+        var rig = new Rig();
+        FirstCloseFails(rig);
+        var review = PathBReview(inquiry: false, todo: false);
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.Signals[Primary]["sprk_regardingrecordid"] = ItemTodo.ToString("D"); // the subject lookup is not set: it was cleared
+
+        var replay = await rig.CommitAsync(review);
+
+        replay.Status.Should().Be(DecisionCommitStatus.Recorded);
+        replay.Replayed.Should().BeTrue();
+        replay.Signals.Single().Should().Be(new DecisionCommitSignal(Primary, "Unchanged", "signal_subject_missing"));
+        replay.Warnings.Should().Contain("signal_subject_missing").And.NotContain("signal_close_not_authorized");
+        rig.Status(Primary).Should().Be(Open);
+    }
+
+    [Fact]
+    public void TheDecisionRecordOwnerParents_RefuseASignalWhoseSubjectTableCannotBeDerived_NeverDropIt()
+    {
+        // Task 141 review F3 (uac-r2 F1): the record's owner is secure-if-any over every resolved Signal's subject. An unknown
+        // subject dropped from that set could hide a secure parent, so it refuses, as an unreadable parent does.
+        var known = DecisionCommitService.ToRow(Guid.NewGuid(), new Entity("sprk_signal")
+        {
+            ["sprk_regardingrecordid"] = ItemTodo.ToString("D"),
+            ["sprk_regardingtodo"] = new EntityReference("sprk_todo", ItemTodo),
+        });
+        var noSubject = DecisionCommitService.ToRow(Guid.NewGuid(), new Entity("sprk_signal"));
+        var unknown = DecisionCommitService.ToRow(Guid.NewGuid(), new Entity("sprk_signal")
+        {
+            ["sprk_regardingrecordid"] = Guid.NewGuid().ToString("D"), // its lookup was cleared
+        });
+
+        DecisionCommitService.SignalSubjectsOf([known, noSubject, known]).Should().Equal(new DecisionRecordRef("sprk_todo", ItemTodo));
+
+        var act = () => DecisionCommitService.SignalSubjectsOf([known, unknown]);
+
+        var refused = act.Should().Throw<DecisionRecordRefusedException>().Which;
+        refused.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused, "the commit route maps it to Refused");
+        refused.OwnerRefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+    }
+
+    [Fact]
     public async Task ASubjectWhoseTableCannotBeLookedUp_IsUnavailable_BeforeAnyWrite()
     {
         var rig = new Rig();
-        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_unknown", subjectId: ItemTodo);
-        rig.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_unknown", It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("no metadata"));
+        // Task 141: the subject table now comes from the Signal's subject lookup, so the table is one a Signal can carry.
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_event", subjectId: ItemTodo);
+        rig.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_event", It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException("no metadata"));
         var review = new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] };
 
         var result = await rig.CommitAsync(review, DoSignal);

@@ -49,7 +49,7 @@ public sealed record DecisionRecordFollowOn(string ActionCode, string Entity, Gu
 /// <param name="ReviewId">The client's review id; stored in <c>sprk_steps</c> so a retry can find it.</param>
 /// <param name="PolicyVersionId">The immutable policy version the Signal came from.</param>
 /// <param name="Core">The Signal's core record; <c>null</c> for a no-core item (D-35, D-39).</param>
-/// <param name="ItemSubject">The no-core item's subject record (the Signal's <c>sprk_regardingrecordtype</c> / <c>sprk_regardingrecordid</c>);
+/// <param name="ItemSubject">The no-core item's subject record (the Signal's subject lookup that carries its pair id <c>sprk_regardingrecordid</c>, task 141);
 /// required when <paramref name="Core"/> is null. It is the parent uac-r2's <see cref="IRecordOwnershipResolver"/> is asked about, so the
 /// record is owned by the team that answer names (D-39 as amended by D-129: owned by teams, never by a person).</param>
 /// <param name="ConfirmedByUserId">The confirming human (<c>systemuserid</c>).</param>

@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Services.Signals;
 using Ownership = Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Telemetry;
 using Sprk.Bff.Api.Tests.Services.Communication; // reuse CapturingLogger<T>/LogEntry (internal, same assembly)
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Domain.Signals;
@@ -37,9 +38,9 @@ public class SignalWriterTests
 {
     private static readonly Guid PolicyId = Guid.Parse("4d204810-61bf-f111-aaaf-0022482913fc");
     private static readonly Guid PolicyVersionId = Guid.Parse("42b3e716-61bf-f111-aaaf-0022482913fc");
-    private static readonly Guid MatterId = Guid.Parse("2444af6d-e1f2-f011-8406-7ced8d1dc988");
-    private static readonly Guid CommunicationId = Guid.Parse("f00b6389-8fbf-f111-aaaf-0022482913fc");
-    private static readonly Guid BusinessUnitId = Guid.Parse("06fbf21c-1872-f011-b4cb-7c1e52671ad0");
+    internal static readonly Guid MatterId = Guid.Parse("2444af6d-e1f2-f011-8406-7ced8d1dc988");
+    internal static readonly Guid CommunicationId = Guid.Parse("f00b6389-8fbf-f111-aaaf-0022482913fc");
+    internal static readonly Guid BusinessUnitId = Guid.Parse("06fbf21c-1872-f011-b4cb-7c1e52671ad0");
 
     private static readonly DateTimeOffset FirstRun = new(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset SecondRun = new(2026, 10, 4, 12, 0, 0, TimeSpan.Zero);
@@ -152,7 +153,10 @@ public class SignalWriterTests
 
         row.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId);
         row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId, "the subject IS the matter");
-        row.GetAttributeValue<string>("sprk_regardingrecordtype").Should().Be("sprk_matter");
+        // Task 141 (D-132): the pair type is the Lookup to the subject table's sprk_recordtype_ref row, written by the shared builder.
+        var pairType = row["sprk_regardingrecordtype"].Should().BeOfType<EntityReference>().Subject;
+        pairType.LogicalName.Should().Be("sprk_recordtype_ref");
+        pairType.Id.Should().Be(RecordTypeCatalogStub.SpaarkeDev1["sprk_matter"]);
         row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(MatterId.ToString("D").ToLowerInvariant());
     }
 
@@ -173,7 +177,12 @@ public class SignalWriterTests
         result.GroupingMatterId.Should().Be(MatterId, "a Signal about a communication on matter X groups under X");
         row.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(CommunicationId);
         row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId);
-        row.Attributes.Keys.Should().NotContain("sprk_regardingmatter", "ADR-024: at most one specific regarding lookup");
+        row.Attributes.Keys.Where(k => SignalWriter.RegardingLookupByEntity.Values.Contains(k)).Should().Equal(
+            new[] { "sprk_regardingcommunication" }, "ADR-024: at most one specific regarding lookup");
+        // Task 141 (D-133): sprk_communication has no sprk_recordtype_ref row, so the pair is untyped (id only), never an error.
+        row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(CommunicationId.ToString("D").ToLowerInvariant());
+        row.Attributes.Should().NotContainKey("sprk_regardingrecordtype");
+        result.Created.Should().BeTrue();
     }
 
     // =====================================================================================
@@ -793,6 +802,75 @@ public class SignalWriterTests
     }
 
     // =====================================================================================
+    // Task 141 review F1: a subject catalog read that FAULTS is not "no catalog row"
+    // =====================================================================================
+
+    [Fact]
+    public async Task WriteAsync_SubjectCatalogReadFaults_Escalates_LoggedAndMetered_AndWritesNothing_NeverUntyped()
+    {
+        var scope = Guid.NewGuid();
+        FailureMetricScope.Value = scope;
+        var (listener, reasons) = ListenFailureReasonsScoped(scope);
+        using var _ = listener;
+
+        var logger = new CapturingLogger<SignalWriter>();
+        var writerOrg = new FakeOrganizationService();
+        var catalog = new RecordTypeCatalogStub((_, _) => Task.FromException<Entity?>(new TimeoutException("429: too many requests")));
+        var writer = Build(writerOrg, new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId),
+            new FakeTimeProvider(FirstRun), logger, recordTypes: catalog);
+
+        var act = async () => await writer.WriteAsync(MatterSubjectRequest());
+
+        var thrown = await act.Should().ThrowAsync<SignalWriterEscalationException>("the evaluator counts an escalation as refused");
+        thrown.Which.Reason.Should().Be(OntologyWriterFailureReason.SubjectPairUnresolved);
+        thrown.Which.InnerException.Should().BeOfType<TimeoutException>();
+        writerOrg.CreateCallCount.Should().Be(0, "a Signal is never written with an untyped pair because of a fault");
+        reasons().Should().Equal(OntologyWriterFailureReason.SubjectPairUnresolved);
+        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error)
+            .Which.EventId.Id.Should().Be(OntologyWriterEvents.WriteRefused.Id);
+        SignalWriter.IsMeteredByWriter(thrown.Which).Should().BeTrue("the job must not meter it a second time");
+    }
+
+    [Fact]
+    public async Task WriteAsync_CancelledDuringTheSubjectCatalogRead_PropagatesTheCancellation_NotAnEscalation()
+    {
+        using var cts = new CancellationTokenSource();
+        var writerOrg = new FakeOrganizationService();
+        var catalog = new RecordTypeCatalogStub((_, _) =>
+        {
+            cts.Cancel();
+            return Task.FromException<Entity?>(new OperationCanceledException(cts.Token));
+        });
+        var writer = Build(writerOrg, new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId),
+            new FakeTimeProvider(FirstRun), recordTypes: catalog);
+
+        var act = async () => await writer.WriteAsync(MatterSubjectRequest(), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        writerOrg.CreateCallCount.Should().Be(0);
+    }
+
+    // =====================================================================================
+    // Task 141 review F2: SubjectEntityOf fails closed on a missing or ambiguous subject
+    // =====================================================================================
+
+    [Theory]
+    [InlineData(0, null)]
+    [InlineData(1, "sprk_todo")]
+    [InlineData(2, null)]
+    public void SubjectEntityOf_ExactlyOneLookupCarryingThePairId_NamesTheSubject_NoneOrTwoAreNull(int lookupsCarryingPairId, string? expected)
+    {
+        var pairId = Guid.NewGuid();
+        // Another lookup carrying a DIFFERENT id (a later core-ancestor stamp, task 144) never counts.
+        var columns = new Dictionary<string, Guid?>(StringComparer.Ordinal) { ["sprk_regardingmatter"] = Guid.NewGuid() };
+        if (lookupsCarryingPairId >= 1) columns["sprk_regardingtodo"] = pairId;
+        if (lookupsCarryingPairId >= 2) columns["sprk_regardingevent"] = pairId;
+
+        SignalWriter.SubjectEntityOf(pairId, lookup => columns.TryGetValue(lookup, out var id) ? id : null)
+            .Should().Be(expected);
+    }
+
+    // =====================================================================================
     // Task 037: Do-lane subjects (event, To Do, work assignment) and the core record (D-34..D-38)
     // =====================================================================================
 
@@ -840,7 +918,7 @@ public class SignalWriterTests
         row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(MatterId));
         row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId);
         row.GetAttributeValue<EntityReference>(typedLookup).Id.Should().Be(subjectId);
-        row.GetAttributeValue<string>("sprk_regardingrecordtype").Should().Be(subjectEntity);
+        row.GetAttributeValue<EntityReference>("sprk_regardingrecordtype").Id.Should().Be(RecordTypeCatalogStub.SpaarkeDev1[subjectEntity]);
         row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(Lower(subjectId));
         row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(BusinessUnitId);
         result.GroupingMatterId.Should().Be(MatterId);
@@ -1410,6 +1488,44 @@ public class SignalWriterTests
         key.Should().Be("POL-COMMIT-BUDGET|sprk_matter|2444af6d-e1f2-f011-8406-7ced8d1dc988|1", "D-13: the key ends with the episode");
     }
 
+    /// <summary>
+    /// Task 141 (D-132): the pair type became a Lookup, and the dedupe key must not change with it. The literal keys below are
+    /// exactly what the pre-141 writer composed for the dev seed subjects (matter REAL-2026-123456.01 and its communication;
+    /// spaarkedev1 holds no sprk_signal row today, read 2026-10-13, so these literals are the existing format, not a live
+    /// read). The new writer must compose the same key, and must reconcile to a row that already carries it.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_matter", "POL-COMMIT-BUDGET|sprk_matter|2444af6d-e1f2-f011-8406-7ced8d1dc988|1")]
+    [InlineData("sprk_communication", "POL-COMMENT-FLAG|sprk_communication|f00b6389-8fbf-f111-aaaf-0022482913fc|1")]
+    public async Task WriteAsync_DedupeKey_IsThePreLookupKey_AndAnExistingRowWithItIsReconciled_D132(string subjectEntity, string existingKey)
+    {
+        var request = subjectEntity == "sprk_matter" ? MatterSubjectRequest() : CommunicationSubjectRequest();
+        FakeSysadminClient Sysadmin() => new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId)
+            .Stub(new Entity("sprk_communication", CommunicationId) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) });
+
+        var freshOrg = new FakeOrganizationService();
+        var created = await Build(freshOrg, Sysadmin(), new FakeTimeProvider(FirstRun)).WriteAsync(request);
+        var createdRow = freshOrg.Rows[created.SignalId];
+        createdRow.GetAttributeValue<string>("sprk_dedupekey").Should().Be(existingKey,
+            "the key is composed from the subject logical name the writer holds, never from the (now lookup) pair type");
+        createdRow.Attributes.ContainsKey("sprk_regardingrecordtype").Should().Be(subjectEntity == "sprk_matter",
+            "the matter's pair is typed, the communication's is untyped; the key is the same shape either way");
+
+        var existingOrg = new FakeOrganizationService();
+        var existingId = existingOrg.SeedExisting(existingKey, new Entity("sprk_signal")
+        {
+            ["sprk_corerecordid"] = MatterId.ToString("D"),
+            ["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusOpen),
+            ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId),
+        });
+        existingOrg.ThrowDuplicateOnNextCreate = true;
+
+        var reconciled = await Build(existingOrg, Sysadmin(), new FakeTimeProvider(SecondRun)).WriteAsync(request);
+
+        reconciled.Created.Should().BeFalse("the existing row's key is the key the new writer composes");
+        reconciled.SignalId.Should().Be(existingId);
+    }
+
     // =====================================================================================
     // OntologyWriterDataverseClient — credential guard (F7)
     // =====================================================================================
@@ -1451,12 +1567,13 @@ public class SignalWriterTests
     // Fixtures
     // =====================================================================================
 
-    private static SignalWriter Build(
+    internal static SignalWriter Build(
         FakeOrganizationService writerOrg, FakeSysadminClient sysadmin, FakeTimeProvider clock, ILogger<SignalWriter>? logger = null,
-        FakeOwnershipResolver? ownership = null) =>
+        FakeOwnershipResolver? ownership = null, RecordTypeCatalogStub? recordTypes = null) =>
         new(new OntologyWriterDataverseClient(() => writerOrg, NullLogger<OntologyWriterDataverseClient>.Instance),
             sysadmin,
             new Ownership.CoreAncestorResolver(sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
+            recordTypes ?? new RecordTypeCatalogStub(RecordTypeCatalogStub.SpaarkeDev1),
             ownership ?? new FakeOwnershipResolver(), clock, logger ?? NullLogger<SignalWriter>.Instance);
 
     private static Task<IReadOnlySet<string>> StampColumnProbe(string entityLogicalName, CancellationToken ct) =>
@@ -1470,7 +1587,7 @@ public class SignalWriterTests
     private static Ownership.RecordOwnerResolution SecureAnswer() =>
         Ownership.RecordOwnerResolution.Owned(SecureTeamId) with { IsSecureOwner = true };
 
-    private static SignalWriteRequest MatterSubjectRequest() => new(
+    internal static SignalWriteRequest MatterSubjectRequest() => new(
         PolicyId: PolicyId,
         PolicyCode: "POL-COMMIT-BUDGET",
         PolicyVersionId: PolicyVersionId,
@@ -1483,7 +1600,7 @@ public class SignalWriterTests
         MessageTemplate: "A {{category}} communication was raised with no revision.",
         FactValues: new Dictionary<string, object?> { ["category"] = "Fee / rate change" });
 
-    private static SignalWriteRequest CommunicationSubjectRequest() => new(
+    internal static SignalWriteRequest CommunicationSubjectRequest() => new(
         PolicyId: PolicyId,
         PolicyCode: "POL-COMMENT-FLAG",
         PolicyVersionId: PolicyVersionId,
@@ -1502,7 +1619,7 @@ public class SignalWriterTests
 
     /// <summary>uac-r2's resolver seam (<see cref="Ownership.IRecordOwnershipResolver"/>): answers what the test set and
     /// records every context, so a test can check the writer named the matter and the subject as parents.</summary>
-    private sealed class FakeOwnershipResolver : Ownership.IRecordOwnershipResolver
+    internal sealed class FakeOwnershipResolver : Ownership.IRecordOwnershipResolver
     {
         public Ownership.RecordOwnerResolution Answer { get; set; } = Ownership.RecordOwnerResolution.Owned(DefaultTeamId);
         public List<Ownership.RecordOwnershipContext> Contexts { get; } = new();
@@ -1518,7 +1635,7 @@ public class SignalWriterTests
             Ownership.RecordReparent request, Func<CancellationToken, Task> applyChange, CancellationToken ct) => throw new NotImplementedException();
     }
 
-    private sealed class FakeSysadminClient : IGenericEntityService
+    internal sealed class FakeSysadminClient : IGenericEntityService
     {
         private readonly Dictionary<(string Entity, Guid Id), Entity> _rows = new();
         private readonly Dictionary<string, Guid> _catalog = new(StringComparer.Ordinal)
@@ -1609,7 +1726,7 @@ public class SignalWriterTests
     /// this project's (ADR-010 F10). Implements CreateAsync/RetrieveAsync/ExecuteAsync(RetrieveRequest)/UpdateAsync
     /// meaningfully; everything else throws (unused by <see cref="SignalWriter"/>).
     /// </summary>
-    private sealed class FakeOrganizationService : IOrganizationServiceAsync2
+    internal sealed class FakeOrganizationService : IOrganizationServiceAsync2
     {
         public readonly Dictionary<Guid, Entity> Rows = new();
         private readonly Dictionary<string, Guid> _byDedupeKey = new(StringComparer.Ordinal);

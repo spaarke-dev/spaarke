@@ -221,6 +221,15 @@ public static class DecisionCommitReasons
     public const string NotResumable = "ontology.decision.not_resumable";
     public const string NotAuthorized = "ontology.decision.not_authorized";
     public const string CoreChanged = "ontology.decision.core_changed";
+
+    /// <summary>Task 141 fix round 2 (K2): a Signal names a subject (its pair id is set) but the subject's table cannot be
+    /// derived, for example the subject was deleted and its RemoveLink cascade cleared the lookup. Refused exactly as before
+    /// (Forbidden, fail closed, no new allow path); only the code and message say what is wrong. A Replay's warning for the
+    /// same case is the bare <see cref="ReplaySubjectMissingWarning"/>, as the replay's other warnings are bare.</summary>
+    public const string SignalSubjectMissing = "ontology.decision.signal_subject_missing";
+
+    /// <summary>The replay-repair warning for <see cref="SignalSubjectMissing"/> (the sibling of <c>signal_close_not_authorized</c>).</summary>
+    public const string ReplaySubjectMissingWarning = "signal_subject_missing";
 }
 
 /// <summary>Stable EventIds for the commit route (50360-50369, assigned by the coordinator 2026-10-11).</summary>
@@ -280,11 +289,14 @@ public sealed class DecisionCommitService
     /// <summary>The state of a Signal the commit did not close or link.</summary>
     private const string Unchanged = "Unchanged";
 
+    // Task 141: the subject is read from the subject lookup that carries the pair id (SignalWriter.SubjectEntityOf), never from
+    // sprk_regardingrecordtype (a lookup to sprk_recordtype_ref since task 140), so the subject lookups are read instead of it.
     private static readonly string[] SignalColumns =
     [
         "sprk_lane", "sprk_policy", "sprk_policyversion", "sprk_corerecordtype", "sprk_corerecordid", "sprk_signalstatus",
-        "sprk_resolutiontype", "sprk_resolvedon", "sprk_regardingrecordtype", "sprk_regardingrecordid", "sprk_matter",
+        "sprk_resolutiontype", "sprk_resolvedon", "sprk_regardingrecordid", "sprk_matter",
         "sprk_factsnapshot", "sprk_privilegeflagged", "sprk_dedupekey", "sprk_decisionrecord", "versionnumber",
+        .. SignalWriter.RegardingLookupByEntity.Values,
     ];
 
     private static readonly JsonSerializerOptions HashJson = new() { WriteIndented = false };
@@ -695,7 +707,8 @@ public sealed class DecisionCommitService
             }
 
             if (blocked is null && await CallerMayDecideAsync(http, core, rows, CancellationToken.None).ConfigureAwait(false) is { } denied)
-                blocked = denied.Status == DecisionCommitStatus.Forbidden ? "signal_close_not_authorized" : "signal_close_not_checked";
+                blocked = denied.ReasonCode == DecisionCommitReasons.SignalSubjectMissing ? DecisionCommitReasons.ReplaySubjectMissingWarning
+                    : denied.Status == DecisionCommitStatus.Forbidden ? "signal_close_not_authorized" : "signal_close_not_checked";
         }
 
         if (blocked is { } why)
@@ -1291,8 +1304,18 @@ public sealed class DecisionCommitService
         var checkedSubjects = new HashSet<(string, Guid)>();
         foreach (var row in resolved)
         {
-            if (row.SubjectEntity is not { Length: > 0 } subject || row.SubjectId is not { } subjectId || subjectId == Guid.Empty)
+            if (row.SubjectId is not { } subjectId || subjectId == Guid.Empty)
                 continue; // nothing beyond the core record to act on
+            // Task 141 review F3: a pair id whose subject table cannot be derived (no subject lookup, or two, carry it; for
+            // example the subject was deleted and its RemoveLink cascade cleared the lookup) is an unknown subject, never "no
+            // subject": the caller's Write on it cannot be shown, so the decision is refused like an unreadable subject.
+            if (row.SubjectEntity is not { Length: > 0 } subject)
+                return new DecisionCommitResult
+                {
+                    Status = DecisionCommitStatus.Forbidden, // K2: the refusal is unchanged; only its code and message are specific
+                    ReasonCode = DecisionCommitReasons.SignalSubjectMissing,
+                    Detail = "This Signal's subject no longer exists.",
+                };
             if (!checkedSubjects.Add((subject, subjectId)))
                 continue;
             if (await CallerHoldsOnAsync(http, sets, subject, subjectId, WriteOperation, ct).ConfigureAwait(false) is not { } mayWrite)
@@ -1371,7 +1394,7 @@ public sealed class DecisionCommitService
             e.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value,
             e.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value,
             resolvedOn,
-            e.GetAttributeValue<string>("sprk_regardingrecordtype")?.Trim().ToLowerInvariant(),
+            subjectId is { } pairId ? SignalWriter.SubjectEntityOf(pairId, lookup => e.GetAttributeValue<EntityReference>(lookup)?.Id) : null,
             subjectId,
             e.GetAttributeValue<EntityReference>("sprk_matter")?.Id,
             e.GetAttributeValue<string>("sprk_factsnapshot"),
@@ -1408,11 +1431,38 @@ public sealed class DecisionCommitService
     /// reason is echoed: F4-b).</summary>
     private const string ItemOwnerUnsupportedDetail = "The item's decision cannot be filed under an owning team, so it cannot be recorded; nothing was done.";
 
-    /// <summary>A no-core Signal's subject record (<c>sprk_regardingrecordtype</c> / <c>sprk_regardingrecordid</c>), server-written;
+    /// <summary>A no-core Signal's subject record (the subject lookup that carries the pair id <c>sprk_regardingrecordid</c>, task 141), server-written;
     /// null when it names none. D-39 / D-129: the Decision Record's owner is uac-r2's answer for THIS record as the parent, resolved
     /// by <see cref="DecisionRecordWriter.ResolveOwnerAsync"/> only after FR-51 (F4-a).</summary>
     private static DecisionRecordRef? SubjectOf(SignalRow signal) =>
         signal.SubjectEntity is { Length: > 0 } entity && signal.SubjectId is { } subjectId ? new DecisionRecordRef(entity, subjectId) : null;
+
+    /// <summary>uac-r2 F1: the subject of every Signal the record resolves, as parents of the Decision Record's owner question
+    /// (secure-if-any). A Signal with no pair id names no subject and adds none. A Signal whose pair id is set but whose subject
+    /// table cannot be derived (no subject lookup, or two, carry the pair id: task 141 review F3) is an UNKNOWN parent, never
+    /// dropped: dropping it could leave a secure parent out of the answer. It refuses the record, as an unreadable parent does.</summary>
+    /// <exception cref="DecisionRecordRefusedException">A Signal's subject is unknown (<see cref="DecisionRecordRefusalReason.OwnerRefused"/>).</exception>
+    internal static IReadOnlyList<DecisionRecordRef> SignalSubjectsOf(IEnumerable<SignalRow> rows)
+    {
+        var subjects = new List<DecisionRecordRef>();
+        foreach (var row in rows)
+        {
+            if (row.SubjectId is not { } subjectId || subjectId == Guid.Empty)
+                continue;
+            if (SubjectOf(row) is not { } subject)
+            {
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.OwnerRefused,
+                    "A Signal the decision resolves names a subject whose table cannot be derived, so the Decision Record owner is unknown; nothing was written.",
+                    RecordOwnerRefusal.ParentUndetermined);
+            }
+
+            if (!subjects.Contains(subject))
+                subjects.Add(subject);
+        }
+
+        return subjects;
+    }
 
     /// <summary>D-129: the deciding caller's linked internal contact, through the identity service task 141 feeds (the user's
     /// <c>sprk_primarycontact</c> link, else the contact bound to their Entra oid). Null, with a warning, when the user genuinely has
@@ -1636,7 +1686,9 @@ public sealed class DecisionCommitService
             DeciderContactId: deciderContact,
             // uac-r2 F1: the record's owner is asked about EVERY Signal it resolves (primary and also-resolve), not just the core, so a
             // Signal whose subject sits under a secure record makes the record secure-owned even under an ordinary matter.
-            SignalSubjects: p.Resolved.Select(SubjectOf).OfType<DecisionRecordRef>().Distinct().ToList(),
+            // Defence in depth: FR-51 (CallerMayDecideAsync, always before this) already refuses the same rows for the same predicate
+            // (pair id set, subject table underivable), so a commit never reaches the throw here; SignalSubjectsOf is tested directly.
+            SignalSubjects: SignalSubjectsOf(p.Resolved),
             // D-134: a personal To Do's Assigned To user (no-core only; the writer applies it only when every parent is ordinary).
             AssigneeSystemUserId: assignee);
 

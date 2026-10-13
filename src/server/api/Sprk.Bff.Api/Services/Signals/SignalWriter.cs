@@ -8,6 +8,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Workspace;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Signals;
@@ -48,8 +49,8 @@ public sealed record SignalEvidenceRef(string Kind, string Ref, string Tier, dou
 /// dedupe key — survives policy deletion and renders without a join. Max 50 chars (schema limit).</param>
 /// <param name="PolicyVersionId">The immutable version that fired (<c>sprk_signal.sprk_policyversion</c>).</param>
 /// <param name="SubjectEntityLogicalName">The subject's Dataverse logical name, e.g. <c>sprk_matter</c> or
-/// <c>sprk_communication</c>. MUST be one of <see cref="SignalWriter.RegardingLookupByEntity"/>'s 9 verified
-/// keys.</param>
+/// <c>sprk_communication</c>. MUST be one of <see cref="SignalWriter.VerifiedSubjects"/> (a subset of
+/// <see cref="SignalWriter.RegardingLookupByEntity"/>'s 9 keys). It is also the subject segment of the dedupe key.</param>
 /// <param name="SubjectId">The subject record's id.</param>
 /// <param name="SubjectDisplayName">For the denormalized <c>sprk_regardingrecordname</c> — display only.</param>
 /// <param name="ShortHeadline">The Signal's <c>sprk_name</c> (required, NOT NULL). Max 200 chars (schema
@@ -233,16 +234,17 @@ public sealed class SignalSentenceTemplateException : Exception
 /// Re-fire-after-resolution semantics and <c>Superseded</c>-on-version-change belong to the EVALUATOR (task
 /// 031), not this writer: this class's only job on a duplicate is "touch lastevaluated", never "decide whether
 /// to reopen".</para>
-/// <para><b>Mirrors, does not copy, <c>TodoRegardingBuilder</c>.</b> Same ADR-024 semantics (one specific
-/// lookup + denormalized resolver fields, written atomically) but adapted to <c>sprk_signal</c>'s LIVE schema,
-/// which differs from <c>sprk_todo</c> in one load-bearing way: <c>sprk_signal.sprk_regardingrecordtype</c> is
-/// <c>NVARCHAR(100)</c> (plain text), NOT a lookup to <c>sprk_recordtype_ref</c> (verified via
-/// <c>describe('tables/sprk_signal')</c>, 2026-10-04). This writer stores the subject's own logical name there
-/// directly — simpler, and it is exactly the value spec FR-03 composes the dedupe key from
-/// (<c>{policycode}|{regardingrecordtype}|{regardingrecordid}</c>), so there is no second representation to
-/// keep in sync. The lookup's nav-property casing (<c>sprk_Matter</c> capitalized) is a Web-API-only concern —
-/// irrelevant here because this writer goes through the SDK's typed <see cref="EntityReference"/>, which the
-/// SDK resolves correctly regardless of case (F2, verified live and REFUTED as a risk to this code path).</para>
+/// <para><b>Subject lookup + ADR-024 pair: the shared builder (task 141, D-132, D-133).</b> The subject's typed
+/// <c>sprk_regarding{entity}</c> lookup and the pair (<c>sprk_regardingrecordid</c>, <c>name</c>, <c>url</c> and
+/// <c>sprk_regardingrecordtype</c>) are written by <c>TodoRegardingBuilder.ApplySubjectLookupAndPairAsync</c>, the same
+/// code that files To Dos, never by a copy here. Since task 140, <c>sprk_signal.sprk_regardingrecordtype</c> is a Lookup to
+/// <c>sprk_recordtype_ref</c> (D-132), as on <c>sprk_todo</c>: the builder writes the subject table's catalog row there, and
+/// a subject table with no catalog row (<c>sprk_communication</c> on spaarkedev1) gets the untyped pair (id, name, url),
+/// which is valid, never an error. The builder writes no core-ancestor stamp for this host: the grouping core below is this
+/// writer's own (D-36), and the Signal's live stamp belongs to the restamper registration (task 144). The dedupe key is
+/// composed from the subject logical name this writer holds (<see cref="BuildDedupeKey"/>), never read back from the pair
+/// type. The schema-agreement guard <c>SignalPairTypeSchemaAgreementTests</c> fails the build if the pair type the writer
+/// emits stops matching the type the SpaarkeMaster solution declares.</para>
 /// <para><b>Core record (task 037; D-34, D-36, D-37, D-35).</b> <see cref="VerifiedSubjects"/> is the closed set of
 /// subjects the writer accepts (matter, communication, and the Do-lane event, To Do and work assignment); it is a
 /// subset of <see cref="RegardingLookupByEntity"/>'s 9 schema keys. The grouping CORE record (any type
@@ -323,22 +325,56 @@ public sealed partial class SignalWriter
         new[] { SeverityInfo, SeverityWarning, SeverityCritical }.ToFrozenSet();
 
     /// <summary>
-    /// The 9 entity-specific regarding lookups on <c>sprk_signal</c> (verified live schema). ADR-024: AT MOST
+    /// The 9 entity-specific regarding lookups on <c>sprk_signal</c>: the shared regarding builder's own map for this host
+    /// table (<c>TodoRegardingBuilder.RegardingLookupsByHostTable["sprk_signal"]</c>, task 141), not a copy. ADR-024: AT MOST
     /// ONE is populated per row.
     /// </summary>
-    public static readonly FrozenDictionary<string, string> RegardingLookupByEntity =
-        new Dictionary<string, string>(StringComparer.Ordinal)
+    public static IReadOnlyDictionary<string, string> RegardingLookupByEntity { get; } =
+        TodoRegardingBuilder.RegardingLookupsByHostTable[SignalEntity];
+
+    private const string SignalEntity = "sprk_signal";
+
+    /// <summary>
+    /// A Signal row's SUBJECT table, read from its filing, never from the pair's type (task 141): the one subject lookup in
+    /// <see cref="RegardingLookupByEntity"/> whose id equals the pair id <paramref name="pairId"/>
+    /// (<c>sprk_regardingrecordid</c>). <paramref name="lookupIdOf"/> returns the id a lookup column carries on the row, or
+    /// null. Returns null when no lookup, or more than one, carries the pair id: a missing or ambiguous subject, which every
+    /// caller treats as "no subject" (fail closed).
+    /// </summary>
+    /// <remarks>
+    /// Why not <c>sprk_regardingrecordtype</c>: since task 140 it is a lookup to <c>sprk_recordtype_ref</c> (D-132), so its
+    /// value is a catalog row id, not a table name, and it is absent on an untyped pair (a <c>sprk_communication</c> subject on
+    /// spaarkedev1). The writer always writes the subject lookup and the pair id together (the shared regarding builder), so
+    /// the lookup that repeats the pair id names the subject for typed and untyped pairs alike, with no catalog read. It is the
+    /// same agreement rule uac-r2 applies to an untyped pair (a lookup carrying the pair id). A later core-ancestor stamp in
+    /// another <c>sprk_regarding*</c> column (task 144) carries a different id and so never matches.
+    /// </remarks>
+    internal static string? SubjectEntityOf(Guid pairId, Func<string, Guid?> lookupIdOf)
+    {
+        ArgumentNullException.ThrowIfNull(lookupIdOf);
+        if (pairId == Guid.Empty)
         {
-            ["sprk_matter"] = "sprk_regardingmatter",
-            ["sprk_communication"] = "sprk_regardingcommunication",
-            ["sprk_project"] = "sprk_regardingproject",
-            ["sprk_servicerequest"] = "sprk_regardingservicerequest",
-            ["sprk_workassignment"] = "sprk_regardingworkassignment",
-            ["sprk_todo"] = "sprk_regardingtodo",
-            ["sprk_event"] = "sprk_regardingevent",
-            ["sprk_invoice"] = "sprk_regardinginvoice",
-            ["sprk_document"] = "sprk_regardingdocument",
-        }.ToFrozenDictionary();
+            return null;
+        }
+
+        string? subject = null;
+        foreach (var (entity, lookup) in RegardingLookupByEntity)
+        {
+            if (lookupIdOf(lookup) != pairId)
+            {
+                continue;
+            }
+
+            if (subject is not null)
+            {
+                return null;
+            }
+
+            subject = entity;
+        }
+
+        return subject;
+    }
 
     /// <summary>
     /// The subject types the writer accepts: a CLOSED, VERIFIED set and deliberately a SUBSET of
@@ -373,14 +409,18 @@ public sealed partial class SignalWriter
     private readonly OntologyWriterDataverseClient _writerClient;
     private readonly IGenericEntityService _sysadminClient;
     private readonly CoreAncestorResolver _coreAncestors;
+    private readonly ICommunicationDataverseService _recordTypes;
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SignalWriter> _logger;
 
+    /// <param name="recordTypes">The <c>sprk_recordtype_ref</c> lookup the shared regarding builder types the pair from
+    /// (<c>QueryRecordTypeRefAsync</c>; the same source <c>TaskActionCore</c> and the To Do writers hand it). Task 141.</param>
     public SignalWriter(
         OntologyWriterDataverseClient writerClient,
         IGenericEntityService sysadminClient,
         CoreAncestorResolver coreAncestors,
+        ICommunicationDataverseService recordTypes,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         TimeProvider timeProvider,
         ILogger<SignalWriter> logger)
@@ -388,6 +428,7 @@ public sealed partial class SignalWriter
         _writerClient = writerClient ?? throw new ArgumentNullException(nameof(writerClient));
         _sysadminClient = sysadminClient ?? throw new ArgumentNullException(nameof(sysadminClient));
         _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
+        _recordTypes = recordTypes ?? throw new ArgumentNullException(nameof(recordTypes));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -499,7 +540,24 @@ public sealed partial class SignalWriter
 
             var nowUtc = _timeProvider.GetUtcNow();
             var dedupeKey = BuildDedupeKey(request.PolicyCode, subjectEntity, cleanSubjectId, request.Episode);
-            var entity = BuildEntity(request, subjectEntity, cleanSubjectId, core, coreTypeRefId, owningBusinessUnitId, secureOwner, dueDate, sentence, nowUtc);
+            var entity = BuildEntity(request, core, coreTypeRefId, owningBusinessUnitId, secureOwner, dueDate, sentence, nowUtc);
+
+            // ADR-024 subject lookup + pair through the SHARED regarding builder (task 141, D-133). No core-ancestor stamp (see
+            // class remarks). A catalog read that FAULTS is not "no catalog row" (review F1): the builder throws, and the Signal
+            // is refused as an escalation (logged, metered, counted by the evaluator) rather than written untyped.
+            try
+            {
+                await new TodoRegardingBuilder(_recordTypes, _coreAncestors, _logger)
+                    .ApplySubjectLookupAndPairAsync(entity, subjectEntity, request.SubjectId, request.SubjectDisplayName, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when ((ex is not OperationCanceledException || !ct.IsCancellationRequested) && !IsDataverseAccessDenied(ex))
+            {
+                throw new SignalWriterEscalationException(
+                    $"The subject lookup and regarding pair for {subjectEntity} {cleanSubjectId} could not be built " +
+                    $"({ex.GetType().Name}); the Signal is not written untyped.",
+                    OntologyWriterFailureReason.SubjectPairUnresolved, ex);
+            }
             entity["sprk_dedupekey"] = dedupeKey;
 
             Guid signalId;
@@ -667,7 +725,7 @@ public sealed partial class SignalWriter
     /// could reproduce for a different privilege). Mirrors <see cref="DataverseServiceClientImpl.IsAlternateKeyDuplicate"/>'s
     /// typed-first, message-fallback classification style.
     /// </summary>
-    private static bool IsDataverseAccessDenied(Exception ex)
+    internal static bool IsDataverseAccessDenied(Exception ex)
     {
         for (Exception? e = ex; e is not null; e = e.InnerException)
         {
@@ -692,8 +750,10 @@ public sealed partial class SignalWriter
         return false;
     }
 
-    /// <summary>spec FR-03 as amended by D-13 (task 031): <c>{policycode}|{regardingrecordtype}|{regardingrecordid}|{episode}</c>.
-    /// Task 007 re-keyed the existing dev rows as episode 1.</summary>
+    /// <summary>spec FR-03 as amended by D-13 (task 031): <c>{policycode}|{subject logical name}|{subject id}|{episode}</c>.
+    /// Task 007 re-keyed the existing dev rows as episode 1. D-132 (task 141): <paramref name="subjectEntity"/> is the subject
+    /// logical name the writer already holds (the request's), never read back from <c>sprk_regardingrecordtype</c>, which is a
+    /// lookup to <c>sprk_recordtype_ref</c> since task 140; the key's value format is unchanged.</summary>
     internal static string BuildDedupeKey(string policyCode, string subjectEntity, string cleanSubjectId, int episode) =>
         $"{policyCode}|{subjectEntity}|{cleanSubjectId}|{episode.ToString(CultureInfo.InvariantCulture)}";
 
@@ -1178,8 +1238,6 @@ public sealed partial class SignalWriter
 
     private static Entity BuildEntity(
         SignalWriteRequest request,
-        string subjectEntity,
-        string cleanSubjectId,
         CorePlan core,
         Guid? coreTypeRefId,
         Guid owningBusinessUnitId,
@@ -1188,26 +1246,10 @@ public sealed partial class SignalWriter
         string sentence,
         DateTimeOffset nowUtc)
     {
-        if (!RegardingLookupByEntity.TryGetValue(subjectEntity, out var specificLookup))
-        {
-            // Unreachable given VerifiedSubjects is a subset of RegardingLookupByEntity's keys
-            // (asserted by SignalWriterTests) — guarded anyway so a future edit that breaks that invariant
-            // fails loudly here instead of writing an un-trimmed row.
-            throw new InvalidOperationException(
-                $"'{subjectEntity}' is a verified subject but has no entry in RegardingLookupByEntity. " +
-                "This is a code-configuration defect, not a data problem.");
-        }
+        // The subject lookup and the ADR-024 pair are NOT written here: the shared regarding builder writes them on this
+        // entity in WriteAsync (task 141, D-133).
+        var entity = new Entity(SignalEntity);
 
-        var entity = new Entity("sprk_signal");
-
-        entity[specificLookup] = new EntityReference(subjectEntity, request.SubjectId);
-        entity["sprk_regardingrecordid"] = cleanSubjectId;
-        // TEXT column on sprk_signal (verified live schema) — NOT a lookup to sprk_recordtype_ref, unlike
-        // sprk_todo/sprk_communication. The subject's own logical name is exactly the value FR-03's dedupe
-        // key needs, so there is nothing else to resolve here.
-        entity["sprk_regardingrecordtype"] = subjectEntity;
-        entity["sprk_regardingrecordname"] = request.SubjectDisplayName ?? string.Empty;
-        entity["sprk_regardingrecordurl"] = BuildRecordUrl(subjectEntity, cleanSubjectId);
         if (!string.IsNullOrWhiteSpace(request.SubjectRecordNumber))
         {
             // Task 031 (R13): ADR-024's fifth resolver field, from the field the subject's catalog row names.
@@ -1394,11 +1436,6 @@ public sealed partial class SignalWriter
 
     /// <summary>Dividing by 1.000...0 (28 places) drops a decimal's trailing zeros without changing its value.</summary>
     private static decimal Normalize(decimal value) => value / 1.0000000000000000000000000000m;
-
-    /// <summary>Mirrors <c>TodoRegardingBuilder.BuildRecordUrl</c> — a relative URL; the model-driven app
-    /// resolves the host origin at click time. No org URL or tenant id hard-coded.</summary>
-    internal static string BuildRecordUrl(string entityLogicalName, string recordId) =>
-        $"/main.aspx?pagetype=entityrecord&etn={entityLogicalName}&id={recordId}";
 
     private static string RequireSubjectEntity(string? subjectEntityLogicalName)
     {
