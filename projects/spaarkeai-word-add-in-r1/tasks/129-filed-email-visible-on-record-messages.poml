@@ -3,7 +3,7 @@
   <metadata>
     <title>An email filed to a record shows on that record's Messages panel (thread anchoring and ownership)</title>
     <phase>8 — UAT findings, owner 2026-10-11</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code on the communication filing and read paths; record visibility (access); a Dataverse backfill.</rigor-reason>
     <model-tier>opus</model-tier>
