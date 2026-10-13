@@ -802,6 +802,75 @@ public class SignalWriterTests
     }
 
     // =====================================================================================
+    // Task 141 review F1: a subject catalog read that FAULTS is not "no catalog row"
+    // =====================================================================================
+
+    [Fact]
+    public async Task WriteAsync_SubjectCatalogReadFaults_Escalates_LoggedAndMetered_AndWritesNothing_NeverUntyped()
+    {
+        var scope = Guid.NewGuid();
+        FailureMetricScope.Value = scope;
+        var (listener, reasons) = ListenFailureReasonsScoped(scope);
+        using var _ = listener;
+
+        var logger = new CapturingLogger<SignalWriter>();
+        var writerOrg = new FakeOrganizationService();
+        var catalog = new RecordTypeCatalogStub((_, _) => Task.FromException<Entity?>(new TimeoutException("429: too many requests")));
+        var writer = Build(writerOrg, new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId),
+            new FakeTimeProvider(FirstRun), logger, recordTypes: catalog);
+
+        var act = async () => await writer.WriteAsync(MatterSubjectRequest());
+
+        var thrown = await act.Should().ThrowAsync<SignalWriterEscalationException>("the evaluator counts an escalation as refused");
+        thrown.Which.Reason.Should().Be(OntologyWriterFailureReason.SubjectPairUnresolved);
+        thrown.Which.InnerException.Should().BeOfType<TimeoutException>();
+        writerOrg.CreateCallCount.Should().Be(0, "a Signal is never written with an untyped pair because of a fault");
+        reasons().Should().Equal(OntologyWriterFailureReason.SubjectPairUnresolved);
+        logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error)
+            .Which.EventId.Id.Should().Be(OntologyWriterEvents.WriteRefused.Id);
+        SignalWriter.IsMeteredByWriter(thrown.Which).Should().BeTrue("the job must not meter it a second time");
+    }
+
+    [Fact]
+    public async Task WriteAsync_CancelledDuringTheSubjectCatalogRead_PropagatesTheCancellation_NotAnEscalation()
+    {
+        using var cts = new CancellationTokenSource();
+        var writerOrg = new FakeOrganizationService();
+        var catalog = new RecordTypeCatalogStub((_, _) =>
+        {
+            cts.Cancel();
+            return Task.FromException<Entity?>(new OperationCanceledException(cts.Token));
+        });
+        var writer = Build(writerOrg, new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId),
+            new FakeTimeProvider(FirstRun), recordTypes: catalog);
+
+        var act = async () => await writer.WriteAsync(MatterSubjectRequest(), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        writerOrg.CreateCallCount.Should().Be(0);
+    }
+
+    // =====================================================================================
+    // Task 141 review F2: SubjectEntityOf fails closed on a missing or ambiguous subject
+    // =====================================================================================
+
+    [Theory]
+    [InlineData(0, null)]
+    [InlineData(1, "sprk_todo")]
+    [InlineData(2, null)]
+    public void SubjectEntityOf_ExactlyOneLookupCarryingThePairId_NamesTheSubject_NoneOrTwoAreNull(int lookupsCarryingPairId, string? expected)
+    {
+        var pairId = Guid.NewGuid();
+        // Another lookup carrying a DIFFERENT id (a later core-ancestor stamp, task 144) never counts.
+        var columns = new Dictionary<string, Guid?>(StringComparer.Ordinal) { ["sprk_regardingmatter"] = Guid.NewGuid() };
+        if (lookupsCarryingPairId >= 1) columns["sprk_regardingtodo"] = pairId;
+        if (lookupsCarryingPairId >= 2) columns["sprk_regardingevent"] = pairId;
+
+        SignalWriter.SubjectEntityOf(pairId, lookup => columns.TryGetValue(lookup, out var id) ? id : null)
+            .Should().Be(expected);
+    }
+
+    // =====================================================================================
     // Task 037: Do-lane subjects (event, To Do, work assignment) and the core record (D-34..D-38)
     // =====================================================================================
 

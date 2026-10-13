@@ -1914,6 +1914,48 @@ public sealed class DecisionCommitServiceTests
     }
 
     [Fact]
+    public async Task ASignalWhoseSubjectTableCannotBeDerived_IsForbidden_LikeAnUnreadableSubject_BeforeAnyWrite()
+    {
+        // Task 141 review F3: the pair id is set but no subject lookup carries it (the sprk_signal_reg* relationships cascade a
+        // subject delete as RemoveLink, which clears the lookup and leaves the pair id). An unknown subject is never "no subject".
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: null, subjectId: ItemTodo);
+        var review = new DecisionReview { ReviewId = Guid.NewGuid(), Confirmed = true, Actions = [Take("mark-complete"), Skip("reschedule")] };
+
+        var result = await rig.CommitAsync(review, DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Forbidden);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.NotAuthorized);
+        rig.Writes.Should().BeEmpty();
+        rig.Status(DoSignal).Should().Be(Open);
+    }
+
+    [Fact]
+    public void TheDecisionRecordOwnerParents_RefuseASignalWhoseSubjectTableCannotBeDerived_NeverDropIt()
+    {
+        // Task 141 review F3 (uac-r2 F1): the record's owner is secure-if-any over every resolved Signal's subject. An unknown
+        // subject dropped from that set could hide a secure parent, so it refuses, as an unreadable parent does.
+        var known = DecisionCommitService.ToRow(Guid.NewGuid(), new Entity("sprk_signal")
+        {
+            ["sprk_regardingrecordid"] = ItemTodo.ToString("D"),
+            ["sprk_regardingtodo"] = new EntityReference("sprk_todo", ItemTodo),
+        });
+        var noSubject = DecisionCommitService.ToRow(Guid.NewGuid(), new Entity("sprk_signal"));
+        var unknown = DecisionCommitService.ToRow(Guid.NewGuid(), new Entity("sprk_signal")
+        {
+            ["sprk_regardingrecordid"] = Guid.NewGuid().ToString("D"), // its lookup was cleared
+        });
+
+        DecisionCommitService.SignalSubjectsOf([known, noSubject, known]).Should().Equal(new DecisionRecordRef("sprk_todo", ItemTodo));
+
+        var act = () => DecisionCommitService.SignalSubjectsOf([known, unknown]);
+
+        var refused = act.Should().Throw<DecisionRecordRefusedException>().Which;
+        refused.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused, "the commit route maps it to Refused");
+        refused.OwnerRefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
+    }
+
+    [Fact]
     public async Task ASubjectWhoseTableCannotBeLookedUp_IsUnavailable_BeforeAnyWrite()
     {
         var rig = new Rig();

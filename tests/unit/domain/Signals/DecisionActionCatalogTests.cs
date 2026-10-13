@@ -538,11 +538,14 @@ public class DecisionActionCatalogTests
         Mock.Get(users).Verify(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_todos(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // Task 141 (review F2): since the subject comes from the lookup that carries the pair id, all three cases take the SAME path:
+    // a pair id with no subject lookup carrying it. sprk_signal and systemuser have no sprk_signal subject lookup, so the row
+    // cannot express them; they no longer reach the ownership-parent (K2) check.
     [Theory]
-    [InlineData(null)]               // no subject type
-    [InlineData("sprk_signal")]      // a table that is not an ownership parent: a forged pointer, never read (the K2 rule)
-    [InlineData("systemuser")]
-    public async Task ANoCoreDoItem_WithNoUsableSubject_IsTheUniformNotFound_AndNothingIsRead(string? subjectType)
+    [InlineData(null)]               // no subject type written
+    [InlineData("sprk_signal")]      // a table with no sprk_signal subject lookup: not expressible on the row
+    [InlineData("systemuser")]       // likewise
+    public async Task ANoCoreDoItem_WhosePairIdNoSubjectLookupCarries_IsTheUniformNotFound_AndNothingIsRead(string? subjectType)
     {
         var users = Users(signal: NoCoreDoRow(subjectType), core: Ok(new { createdon = "x" }), who: Ok(new { UserId = OwnerId }));
 

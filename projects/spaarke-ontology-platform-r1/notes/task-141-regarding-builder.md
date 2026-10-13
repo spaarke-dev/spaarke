@@ -20,9 +20,10 @@ Branch `task/ontology-141-regarding-builder` (worktree `C:\wts-141`), based on `
 - **No stamp from the builder on a Signal.** `SignalWriter` calls `ApplySubjectLookupAndPairAsync`, not `ApplyResolverFieldsAsync`.
   Contract C2: the Signal's create-time stamp belongs to the restamper registration (task 144) and its ownership to 143. Neither
   is changed here.
-- **A fresh builder per write.** `SignalWriter` is a singleton; the builder caches catalog lookups (including a failed read, as
-  a negative) for its lifetime. One builder per write keeps a transient catalog failure from leaving every later Signal
-  untyped until a restart. Cost: one `sprk_recordtype_ref` read per write (K-class, see open items).
+- **A builder per write (kept; its original reason is gone).** `SignalWriter` still constructs the builder per write. It was
+  justified by the builder caching a FAILED catalog read as "no row"; since the fix round (F1 below) a fault is never cached, so
+  that reason no longer applies. Removing the per-write construction is not trivial (one builder shared by concurrent writes
+  needs a thread-safe cache), so it stays; its cost (one `sprk_recordtype_ref` read per write) is #1806.
 - **Readers derive the subject table from the subject lookup, not from the pair type.** `SignalWriter.SubjectEntityOf(pairId,
   lookupIdOf)` returns the one table whose `sprk_regarding*` lookup carries the pair id (`sprk_regardingrecordid`); null when
   none or more than one does (callers fail closed). It works for typed and untyped pairs and for rows written before 141 (they
@@ -128,6 +129,111 @@ package added.
 - **Signal create-time stamp**: not written by 141 (contract C2: 144 registers it; 143 owns ownership).
 - **No `sprk_communication` catalog row** on spaarkedev1, so communication Signals carry the untyped pair. Valid (D-133); add the
   row if typed communication pairs are wanted.
-- **One catalog read per Signal write** (K-class): `QueryRecordTypeRefAsync` is uncached in `DataverseServiceClientImpl`, and the
-  writer builds a fresh builder per write (see design). A shared, TTL-bounded catalog cache would remove it; out of scope here.
+- **One catalog read per Signal write** (K-class, filed as #1806): `QueryRecordTypeRefAsync` is uncached in
+  `DataverseServiceClientImpl`, and the writer builds a builder per write (see design). A shared, TTL-bounded catalog cache would
+  remove it; not fixed here.
 - Live seam run pending Q7 (above). Adversarial review and uac-r2's review of commit 1 are run by the main session.
+
+## Fix round: PR #1805 review (adversarial review + uac-r2), 2026-10-13
+
+Merged `origin/docs/ontology-platform-design` (`a30d60e89`: docs, POML and TASK-INDEX only, no conflicts; no #1797 code on it) as `af6ac0ae6`, then
+one fix commit.
+
+### F1. A catalog fault is never "absent" (all hosts)
+
+`TodoRegardingBuilder.ResolveRecordTypeRefAsync` (:375-393) no longer catches. A read that succeeds and finds no row is untyped
+(D-133) and cached; a fault (429, timeout) propagates and is never cached; caller cancellation propagates as itself. The real
+defect: `TodoGenerationService` holds ONE builder in its singleton `IScheduledJob`, so one 429 made every later generated To Do of
+that parent type untyped until restart.
+
+Per-caller throw analysis (does the throw become "do not create", with no other user-visible change?):
+
+| Caller | Before (fault) | After (fault) | Handling |
+|---|---|---|---|
+| `TodoGenerationService.CreateTodoAsync` (rules 1-5) | untyped To Do created; negative cached for the job's lifetime | throws; each rule's per-row `catch` logs it, `failed++`, the pass continues; the next pass retries | existing, unchanged |
+| `InquiryReplyTodoCreator` | untyped To Do created | throws inside `CreateIfNeededAsync`; the `OnReplyArrivedAsync` catch returns `Failed` with a warning | existing, unchanged |
+| `TaskActionCore` (`sprk_event`) | untyped task created | builder fault caught in `TaskActionCore` (:201-218) and returned as the degraded `Guid.Empty`, the contract its stamp failure already uses; cancellation propagates | new catch (see below) |
+| `SignalWriter` | untyped Signal created | `SignalWriterEscalationException(SubjectPairUnresolved)` (:545-560), logged `WriteRefused` and metered once; the job's `GuardAsync` counts it refused and does not meter it again | new reason constant |
+
+Why `TaskActionCore` catches rather than propagating: its callers are `CreateTaskNodeExecutor` (catch-all, node error),
+`ActionSeam.CreateTaskAsync` (no catch) and, through the seam, `CommunicationCreateTaskApplyService` (two apply paths with NO catch
+around the seam call, so a propagated throw would be a 500 instead of the handled 422 `CREATE_TASK_FAILED`),
+`CommunicationEnrichmentService` (two paths, catch then degrade, row left for retry) and `CommunicationRiActionService` (a
+propagated throw would abort the outbox write and ping that a degraded `Guid.Empty` lets continue). Mapping the fault to
+`Guid.Empty`, the way the class already handles its stamp failure, makes every one of them "not created" through its existing
+branch: no caller changes, no new user-visible behaviour.
+
+`SubjectPairUnresolved` (`OntologyWriterTelemetry.cs:273-276`), section 11. Existing: the bounded reason set; none names the
+subject pair (`CoreRecordTypeNotCataloged` is the CORE table's catalog). Extension: it is one more constant in that set. Cost of
+doing nothing: the escalation would carry a wrong reason, so log and metric queries would misattribute catalog faults.
+
+### F2. `SubjectEntityOf` and the catalog test names
+
+New `SignalWriterTests.SubjectEntityOf_ExactlyOneLookupCarryingThePairId_NamesTheSubject_NoneOrTwoAreNull` (0, 1 and 2 lookups
+carrying the pair id, plus one lookup carrying another id). The `DecisionActionCatalogTests` theory is renamed to
+`ANoCoreDoItem_WhosePairIdNoSubjectLookupCarries_IsTheUniformNotFound_AndNothingIsRead`: `sprk_signal` and `systemuser` have no
+`sprk_signal` subject lookup, so all three cases take the "no lookup carries the pair id" path, not the K2 ownership-parent check.
+
+### F3. Fail closed on an underivable subject
+
+- FR-51 (`DecisionCommitService.CallerMayDecideAsync`, :1297-1303): a Signal whose `SubjectId` is set but whose `SubjectEntity`
+  cannot be derived answers **Forbidden** (`NotAuthorized`), as an unreadable subject does. A Signal with no pair id still adds
+  nothing.
+- DR owner parents: new `internal static SignalSubjectsOf` (:1425-1451) replaces `.OfType<DecisionRecordRef>()` (:1674). An
+  unknown subject throws `DecisionRecordRefusedException(OwnerRefused, ParentUndetermined)`, which the route maps to **Refused**
+  (the step 1e / 1f catches). In the full route FR-51 refuses first, so this is the second line; it is tested at the helper.
+- Real route: the `sprk_signal_reg*` relationships cascade delete as RemoveLink, so deleting the subject clears the lookup and
+  leaves the pair id.
+
+### K1. `ApplySubjectLookupAndPairAsync` host guard
+
+Accepts `SubjectLookupHostTables` (`sprk_signal`, `sprk_decisionrecord`) only (:238-265); any other host, `sprk_todo` included,
+throws `ArgumentException` (param `host`). A To Do written through it would skip the FR-26 stamp and the task-173 inherited
+Access Permission, which fails open.
+
+### Notes only
+
+- **K2 (uac-r2): a constraint for task 144 and any later Decision Record writer.** On `sprk_signal` and `sprk_decisionrecord` the
+  ADR-024 mutual-exclusion guard covers every `sprk_regarding*` lookup of the host, and four of them (`sprk_regardingproject`,
+  `sprk_regardingmatter`, `sprk_regardingworkassignment`, `sprk_regardingservicerequest`, `CoreAncestorResolver.CoreAncestorLookups`)
+  are also the C2 stamp columns. A writer that stamps BEFORE calling the builder is refused (`InvalidOperationException`, "already
+  has a regarding lookup set"). Call the builder first, then stamp: the order `ApplyResolverFieldsAsync` already uses. Also in
+  `140-schema-delta.md` section 9.
+- **Review K2 (log noise, communication):** every communication-subject write logs the untyped-pair warning, because spaarkedev1
+  has no `sprk_communication` catalog row. Expected (D-133); a catalog row or a lower log level would quiet it. Not changed.
+- **Review K1 (TopCount = 1 vs exactly one):** `QueryRecordTypeRefAsync` takes the first active row, while
+  `SignalWriter.ResolveRecordTypeRefIdAsync` (the core type) demands exactly one. A duplicated catalog row would type the pair from
+  either row silently. Not changed.
+- **Review K4:** the `SignalPairTypeSchemaAgreementTests` seam check re-implements the catalog query instead of calling the
+  production one. Not changed.
+
+### Existing test edits
+
+No existing `TodoRegardingBuilderTests` case asserted that a fault yields untyped, so none was changed. The only existing-test
+edit is the F2 rename in `DecisionActionCatalogTests` (method name and case comments; cases and assertions unchanged).
+
+### Verification
+
+| Run | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | succeeded, 0 warnings |
+| filter `TodoRegardingBuilder`, `TaskActionCore`, `RegardingBuilderHostTable`, `SignalPairTypeSchemaAgreement`, `SignalWriter`, `DecisionCommit`, `DecisionActionCatalog`, `TodoGeneration`, `ServerWriterAncestorStamping`, `SignalSuppression`, `SignalReevaluation` | 723 passed |
+| filter `Signal`, `Decision`, `Workspace`, `SecureChild`, `RecordOwnership` | 2678 passed |
+| filter `InquiryReply`, `CreateTaskNodeExecutor`, `ActionSeam`, `CommunicationCreateTaskApply`, `CommunicationRiAction`, `CommunicationEnrichment` | 53 passed |
+| `Spaarke.ArchTests` | 968 passed |
+
+Mutations (each applied alone, rebuilt, the 14 new tests run, the code restored byte for byte):
+
+| Mutation | New tests failing |
+|---|---|
+| A: the builder catches the fault again (old `catch (Exception)`, negative cached) | 7: the builder fault and cancel tests, the `TodoGeneration` fault test, both `TaskActionCore` tests, both `SignalWriter` tests |
+| B: K1 guard disabled | `TodoHost_SubjectLookupAndPair_IsRefused...` |
+| C: FR-51 `continue` restored | `ASignalWhoseSubjectTableCannotBeDerived_IsForbidden...` |
+| D: unknown subject dropped (the old `OfType`) | `TheDecisionRecordOwnerParents_Refuse...` |
+| E: `TaskActionCore` catch disabled | `CreateTask_WhenTheRecordTypeCatalogReadFaults...` |
+| F: `SignalWriter` escalation wrap disabled | `WriteAsync_SubjectCatalogReadFaults_Escalates...` |
+| G: `SubjectEntityOf` keeps the first of two matches | `SubjectEntityOf_...(2, null)` |
+
+Publish size (`dotnet publish -c Release`, `Compress-Archive`, 192 files both): base `origin/docs/ontology-platform-design`
+`fd161c1ea` (docs-only ahead of the merged `a30d60e89`) 38,586,487 B; head 38,587,782 B; delta **+1,295 B** compressed
+(+5,936 B uncompressed, `Sprk.Bff.Api.dll` +5,120 B). Total 36.80 MB. No package change.

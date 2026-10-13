@@ -198,10 +198,24 @@ internal sealed class TaskActionCore
                 {
                     var regardingName = await ReadRegardingNameAsync(
                         input.RegardingObjectType, input.RegardingObjectId.Value, cancellationToken).ConfigureAwait(false);
-                    await new TodoRegardingBuilder(_recordTypes, _coreAncestors, _logger)
-                        .ApplyResolverPairAsync(
-                            entity, input.RegardingObjectType, input.RegardingObjectId.Value, regardingName, cancellationToken)
-                        .ConfigureAwait(false);
+                    try
+                    {
+                        await new TodoRegardingBuilder(_recordTypes, _coreAncestors, _logger)
+                            .ApplyResolverPairAsync(
+                                entity, input.RegardingObjectType, input.RegardingObjectId.Value, regardingName, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                    {
+                        // Task 141 review F1: a sprk_recordtype_ref read that FAULTS is not "no catalog row" — the builder
+                        // throws instead of writing an untyped pair. Same error contract as the stamp failure below (the
+                        // degraded-success Guid.Empty): the task is NOT created, and every caller already handles that.
+                        _logger.LogWarning(ex,
+                            "CreateTask: the regarding pair for {RegardingType} {RegardingId} could not be built; " +
+                            "refusing to create the sprk_event.",
+                            input.RegardingObjectType, input.RegardingObjectId.Value);
+                        return Guid.Empty;
+                    }
                 }
 
                 // FR-26 core-ancestor stamp (task 052) - applied after the typed lookup. Four of the

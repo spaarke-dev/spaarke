@@ -270,6 +270,10 @@ public static class OntologyWriterFailureReason
     /// Signal's <c>sprk_corerecordtype</c> cannot be written.</summary>
     public const string CoreRecordTypeNotCataloged = "core_record_type_not_cataloged";
 
+    /// <summary>Task 141 (review F1): the subject lookup and ADR-024 pair could not be built, for example because the subject
+    /// table's <c>sprk_recordtype_ref</c> read faulted. A fault is not "no catalog row", so the Signal is not written untyped.</summary>
+    public const string SubjectPairUnresolved = "subject_pair_unresolved";
+
     /// <summary>Task 037 (D-35): a subject with no core record is owned by the subject's owner, and that owner is neither a
     /// system user nor a team (or is empty). The write is refused rather than owned by the writer.</summary>
     public const string NoCoreOwnerUnresolved = "no_core_owner_unresolved";

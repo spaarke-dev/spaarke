@@ -57,6 +57,20 @@ public class RegardingBuilderHostTableTests
         AssertSubjectAndPair(record, subject, subjectId, subjectLookup, typed);
     }
 
+    [Fact]
+    public async Task TodoHost_SubjectLookupAndPair_IsRefused_ItWouldSkipTheStampAndTheInheritedAccessPermission()
+    {
+        // Task 141 review K1 (uac-r2): the no-stamp entry point serves only the writers that own their stamp. A To Do written
+        // through it would carry no FR-26 stamp and no task-173 inherited Access Permission, which fails open.
+        var builder = Builder(CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)));
+        var todo = new Entity("sprk_todo");
+
+        var act = async () => await builder.ApplySubjectLookupAndPairAsync(todo, "sprk_matter", MatterId, "Subject name");
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.ParamName.Should().Be("host");
+        todo.Attributes.Should().BeEmpty("nothing is written on a refused host");
+    }
+
     private static void AssertSubjectAndPair(Entity host, string subject, Guid subjectId, string subjectLookup, bool typed)
     {
         var lookups = TodoRegardingBuilder.RegardingLookupsByHostTable[host.LogicalName].Values;

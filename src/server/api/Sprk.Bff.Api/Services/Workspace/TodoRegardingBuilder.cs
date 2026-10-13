@@ -24,7 +24,8 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// <para>
 /// <strong>Untyped pair.</strong> A parent whose table has no active <c>sprk_recordtype_ref</c> row (on
 /// spaarkedev1, <c>sprk_communication</c>) gets the pair without a type: id, name and url only. That is a
-/// valid pair, never an error (D-133), on every host.
+/// valid pair, never an error (D-133), on every host. A catalog read that FAULTS is not "no row": it throws, is never
+/// cached, and the caller does not create the row (task 141 review F1).
 /// </para>
 ///
 /// <para>
@@ -233,14 +234,33 @@ internal sealed class TodoRegardingBuilder
     /// <c>sprk_corerecordtype</c>/<c>sprk_corerecordid</c> context (D-34, D-36); the Signal's live stamp belongs to the
     /// restamper registration (task 144). Same exceptions as <see cref="ApplyResolverFieldsAsync"/>, except that there is
     /// no stamp to fail.
+    /// <para>Only <see cref="SubjectLookupHostTables"/> (<c>sprk_signal</c>, <c>sprk_decisionrecord</c>): any other host
+    /// throws <see cref="ArgumentException"/>. A <c>sprk_todo</c> writer that used this would silently skip the FR-26 stamp
+    /// and the task-173 inherited Access Permission, which fails open; To Dos go through
+    /// <see cref="ApplyResolverFieldsAsync"/> (task 141 review K1, uac-r2).</para>
     /// </remarks>
-    internal Task ApplySubjectLookupAndPairAsync(
+    internal async Task ApplySubjectLookupAndPairAsync(
         Entity host,
         string regardingEntityName,
         Guid regardingId,
         string? regardingDisplayName,
-        CancellationToken ct = default) =>
-        ApplyLookupAndPairAsync(host, nameof(host), regardingEntityName, regardingId, regardingDisplayName, ct);
+        CancellationToken ct = default)
+    {
+        if (host is not null && !SubjectLookupHostTables.Contains(host.LogicalName ?? string.Empty))
+        {
+            throw new ArgumentException(
+                $"ApplySubjectLookupAndPairAsync writes no core-ancestor stamp, so it only serves " +
+                $"{string.Join(", ", SubjectLookupHostTables)}. Got: '{host.LogicalName}'; use ApplyResolverFieldsAsync.",
+                nameof(host));
+        }
+
+        await ApplyLookupAndPairAsync(host!, nameof(host), regardingEntityName, regardingId, regardingDisplayName, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>The host tables <see cref="ApplySubjectLookupAndPairAsync"/> serves: the ones whose writer owns its own stamp.</summary>
+    internal static readonly IReadOnlySet<string> SubjectLookupHostTables =
+        new HashSet<string>(["sprk_signal", "sprk_decisionrecord"], StringComparer.OrdinalIgnoreCase);
 
     private async Task ApplyLookupAndPairAsync(
         Entity host,
@@ -352,35 +372,25 @@ internal sealed class TodoRegardingBuilder
     /// Resolve the <c>sprk_recordtype_ref</c> GUID + display name for an entity
     /// logical name. Cached for the lifetime of the builder instance.
     /// </summary>
+    /// <remarks>
+    /// Only an ANSWER is cached: a row (typed) or a read that succeeded and found no row (untyped, D-133). A read that
+    /// FAULTS (a 429, a timeout) is not an answer: it propagates and is never cached, so one transient fault cannot type
+    /// every later pair of that parent table as untyped for the builder's lifetime (task 141 review F1; the
+    /// <c>TodoGenerationService</c> builder lives as long as its singleton job). Caller cancellation propagates as itself.
+    /// Every caller treats a throw from the builder as "do not create".
+    /// </remarks>
     private async Task<(Guid Id, string DisplayName)?> ResolveRecordTypeRefAsync(
         string entityLogicalName, CancellationToken ct)
     {
         if (_recordTypeRefCache.TryGetValue(entityLogicalName, out var cached))
             return cached;
 
-        try
-        {
-            var record = await _communicationService.QueryRecordTypeRefAsync(entityLogicalName, ct);
-            if (record is not null)
-            {
-                var entry = (
-                    Id: record.Id,
-                    DisplayName: record.GetAttributeValue<string>("sprk_recorddisplayname") ?? entityLogicalName
-                );
-                _recordTypeRefCache[entityLogicalName] = entry;
-                return entry;
-            }
-        }
-        catch (Exception ex)
-        {
-            // Non-fatal — log and cache the negative result so we don't retry every call
-            _logger.LogWarning(ex,
-                "Failed to query sprk_recordtype_ref for '{Entity}'. Caching negative result.",
-                entityLogicalName);
-        }
-
-        _recordTypeRefCache[entityLogicalName] = null;
-        return null;
+        var record = await _communicationService.QueryRecordTypeRefAsync(entityLogicalName, ct);
+        (Guid Id, string DisplayName)? entry = record is null
+            ? null
+            : (record.Id, record.GetAttributeValue<string>("sprk_recorddisplayname") ?? entityLogicalName);
+        _recordTypeRefCache[entityLogicalName] = entry;
+        return entry;
     }
 
     /// <summary>

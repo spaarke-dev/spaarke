@@ -1294,8 +1294,13 @@ public sealed class DecisionCommitService
         var checkedSubjects = new HashSet<(string, Guid)>();
         foreach (var row in resolved)
         {
-            if (row.SubjectEntity is not { Length: > 0 } subject || row.SubjectId is not { } subjectId || subjectId == Guid.Empty)
+            if (row.SubjectId is not { } subjectId || subjectId == Guid.Empty)
                 continue; // nothing beyond the core record to act on
+            // Task 141 review F3: a pair id whose subject table cannot be derived (no subject lookup, or two, carry it; for
+            // example the subject was deleted and its RemoveLink cascade cleared the lookup) is an unknown subject, never "no
+            // subject": the caller's Write on it cannot be shown, so the decision is refused like an unreadable subject.
+            if (row.SubjectEntity is not { Length: > 0 } subject)
+                return Forbidden("You do not have permission to change an item in this decision.");
             if (!checkedSubjects.Add((subject, subjectId)))
                 continue;
             if (await CallerHoldsOnAsync(http, sets, subject, subjectId, WriteOperation, ct).ConfigureAwait(false) is not { } mayWrite)
@@ -1416,6 +1421,33 @@ public sealed class DecisionCommitService
     /// by <see cref="DecisionRecordWriter.ResolveOwnerAsync"/> only after FR-51 (F4-a).</summary>
     private static DecisionRecordRef? SubjectOf(SignalRow signal) =>
         signal.SubjectEntity is { Length: > 0 } entity && signal.SubjectId is { } subjectId ? new DecisionRecordRef(entity, subjectId) : null;
+
+    /// <summary>uac-r2 F1: the subject of every Signal the record resolves, as parents of the Decision Record's owner question
+    /// (secure-if-any). A Signal with no pair id names no subject and adds none. A Signal whose pair id is set but whose subject
+    /// table cannot be derived (no subject lookup, or two, carry the pair id: task 141 review F3) is an UNKNOWN parent, never
+    /// dropped: dropping it could leave a secure parent out of the answer. It refuses the record, as an unreadable parent does.</summary>
+    /// <exception cref="DecisionRecordRefusedException">A Signal's subject is unknown (<see cref="DecisionRecordRefusalReason.OwnerRefused"/>).</exception>
+    internal static IReadOnlyList<DecisionRecordRef> SignalSubjectsOf(IEnumerable<SignalRow> rows)
+    {
+        var subjects = new List<DecisionRecordRef>();
+        foreach (var row in rows)
+        {
+            if (row.SubjectId is not { } subjectId || subjectId == Guid.Empty)
+                continue;
+            if (SubjectOf(row) is not { } subject)
+            {
+                throw new DecisionRecordRefusedException(
+                    DecisionRecordRefusalReason.OwnerRefused,
+                    "A Signal the decision resolves names a subject whose table cannot be derived, so the Decision Record owner is unknown; nothing was written.",
+                    RecordOwnerRefusal.ParentUndetermined);
+            }
+
+            if (!subjects.Contains(subject))
+                subjects.Add(subject);
+        }
+
+        return subjects;
+    }
 
     /// <summary>D-129: the deciding caller's linked internal contact, through the identity service task 141 feeds (the user's
     /// <c>sprk_primarycontact</c> link, else the contact bound to their Entra oid). Null, with a warning, when the user genuinely has
@@ -1639,7 +1671,7 @@ public sealed class DecisionCommitService
             DeciderContactId: deciderContact,
             // uac-r2 F1: the record's owner is asked about EVERY Signal it resolves (primary and also-resolve), not just the core, so a
             // Signal whose subject sits under a secure record makes the record secure-owned even under an ordinary matter.
-            SignalSubjects: p.Resolved.Select(SubjectOf).OfType<DecisionRecordRef>().Distinct().ToList(),
+            SignalSubjects: SignalSubjectsOf(p.Resolved),
             // D-134: a personal To Do's Assigned To user (no-core only; the writer applies it only when every parent is ordinary).
             AssigneeSystemUserId: assignee);
 

@@ -542,11 +542,22 @@ public sealed partial class SignalWriter
             var dedupeKey = BuildDedupeKey(request.PolicyCode, subjectEntity, cleanSubjectId, request.Episode);
             var entity = BuildEntity(request, core, coreTypeRefId, owningBusinessUnitId, secureOwner, dueDate, sentence, nowUtc);
 
-            // ADR-024 subject lookup + pair through the SHARED regarding builder (task 141, D-133): a fresh instance per write,
-            // so a failed catalog read is never cached across writes. No core-ancestor stamp (see class remarks).
-            await new TodoRegardingBuilder(_recordTypes, _coreAncestors, _logger)
-                .ApplySubjectLookupAndPairAsync(entity, subjectEntity, request.SubjectId, request.SubjectDisplayName, ct)
-                .ConfigureAwait(false);
+            // ADR-024 subject lookup + pair through the SHARED regarding builder (task 141, D-133). No core-ancestor stamp (see
+            // class remarks). A catalog read that FAULTS is not "no catalog row" (review F1): the builder throws, and the Signal
+            // is refused as an escalation (logged, metered, counted by the evaluator) rather than written untyped.
+            try
+            {
+                await new TodoRegardingBuilder(_recordTypes, _coreAncestors, _logger)
+                    .ApplySubjectLookupAndPairAsync(entity, subjectEntity, request.SubjectId, request.SubjectDisplayName, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when ((ex is not OperationCanceledException || !ct.IsCancellationRequested) && !IsDataverseAccessDenied(ex))
+            {
+                throw new SignalWriterEscalationException(
+                    $"The subject lookup and regarding pair for {subjectEntity} {cleanSubjectId} could not be built " +
+                    $"({ex.GetType().Name}); the Signal is not written untyped.",
+                    OntologyWriterFailureReason.SubjectPairUnresolved, ex);
+            }
             entity["sprk_dedupekey"] = dedupeKey;
 
             Guid signalId;

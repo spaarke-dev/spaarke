@@ -213,3 +213,13 @@ The pair-type hazard in section 1a is closed by task 141 (branch `task/ontology-
 writer mutated to emit the logical name as a string fails the Signal test ("declared lookup to sprk_recordtype_ref, written
 String 'sprk_matter'"), plus seeded controls in the same class. Must-not-fire: the correct writer passes. The guard checks the
 repo solution source; the target environment is checked by 035's schema pre-flight.
+
+## 9. Constraint for task 144 (and any later Decision Record writer): builder first, then stamp
+
+From uac-r2's review of #1805 (K2). On `sprk_signal` and `sprk_decisionrecord`, the shared builder's ADR-024 mutual-exclusion guard
+refuses a row on which ANY of the host's `sprk_regarding*` lookups is already set. Four of those lookups,
+`sprk_regardingproject`, `sprk_regardingmatter`, `sprk_regardingworkassignment` and `sprk_regardingservicerequest`
+(`CoreAncestorResolver.CoreAncestorLookups`), are also the C2 core-ancestor stamp columns. So a writer that writes the stamp
+BEFORE calling `TodoRegardingBuilder` is refused with `InvalidOperationException` ("already has a regarding lookup set").
+Call the builder first (subject lookup and pair), then stamp, which is the order `ApplyResolverFieldsAsync` already uses. Task 144's
+Signal restamper registration and any future DR writer must follow it.
