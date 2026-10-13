@@ -1406,6 +1406,8 @@ The owner asked for research on the practical and technical limits of access tea
     - item 2: **follow the assignee**. When Assigned To changes, the existing DRs and Signals are re-owned to the new assignee's team. A later core filing still follows the re-file rule. This needs a reconciler, because Assigned To can change from the client; ontology maps the shape first.
     - item 3: the Signal follows the same rule;
     - item 4: the To Do's own owner is unchanged.
+  - **"Personal" means filed under nothing** (owner, 2026-10-12, review K2). A no-core To Do filed under a non-core parent, such as an unfiled document, keeps the To Do's own team.
+  - Application and non-interactive users are not people (the round-67 `ClassifyEligibility` rule), so they count as "no single user" and the fallback applies (#1665 review F2).
   - **Item 7 is binding, not a choice:** any secure parent wins (SRO or Refused), per F1/C9.
   - Resolver surface: `RecordOwnershipContext.ForUserTeam(Guid)`, added by ontology and reviewed by UAC. The assignee lookup goes through `systemuser.sprk_primarycontact`, filtered to `isdisabled = false`, and must return exactly one user.
 - **Q27, decided:** the owner created `sprk_createdbyperson` on `sprk_budgetrevision`, `sprk_decisionrecord` and `sprk_signal` on spaarkedev1 (#1777, #1783).
