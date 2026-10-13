@@ -467,3 +467,20 @@ All tests follow ADR-038: the in-memory store (`InMemoryContactIdentityStore`, w
   - Q9: the SPA shows the server's deny detail.
 - **The live gate** needs a real CIAM sign-in, so it goes on the owner checklist.
 - **Q10: 185's BFF PR lands first.** SPA-r3 agreed on 2026-10-13 and rebases onto it. Keep E11's bypass for non-CIAM planes as it is (`ContactIdentityBinder` :725-728), at R3's request.
+
+## 12. Implementation decisions (main session, 2026-10-13; technical defaults, consistent with §11)
+
+The implementation is split into slices A, B1, B2, C, D, E and F, committed in order on `uac/185-invite-code` and delivered as ONE PR.
+- **I-1. A grant whose automatic invite fails still succeeds.**
+  - The grant is the internal user's decision, and with no code there is no bind, so it fails closed.
+  - The grant response gains an ADDITIVE field, `invite`, with `status` set to one of `Sent`, `ExistingAccount`, `AlreadyPending`, `NotNeeded` (already bound), `NoEmail` or `Failed`, plus the failure's error code. Existing fields are unchanged.
+  - A failed invite is logged at Warning, without the code. The user can retry with Invite.
+- **I-2. A re-grant to an unbound contact whose marker is current** (under 30 days) sends NO new invite (`AlreadyPending`). A new code would break a link the person may be about to use. Only an explicit Invite replaces the code.
+- **I-3. For an unbound contact, the invite REPLACES `GrantAccessNotifier`'s "you were given access" email**, so no contact gets two emails. Bound contacts keep the existing notification.
+- **I-4. Task 140 contact grants: OPEN, an owner question.** Task 140 removed contacts' ability to invite.
+- **I-5. Shared invite service.** `InviteExternalUserEndpoint.ProvisionAsync` is extracted into one internal service, called by the invite endpoint and by the grant flows. §11:
+  - (1) Existing: the provision logic in `InviteExternalUserEndpoint`.
+  - (2) Extension: it is the same logic moved, not new behaviour; the endpoint becomes a thin caller.
+  - (3) Cost of doing nothing: without it, the grant flows cannot send the invite the owner required in round 98, short of copying 184's marker-first ordering into four places.
+  - Its placement and DI registration go next to the existing external-access registrations.
+- **I-6. Removing the link from the stored body.** The caller (`RegistrationEmailService`) passes the body to store, with the link replaced by "[invitation link removed]", in a system-mail option. `CommunicationService` never parses bodies. The email-communication project is asked on the PR to agree this shape.
