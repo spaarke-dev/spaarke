@@ -5,7 +5,7 @@
 
 ## What gets deployed
 
-- Branch `work/spaarke-SPA-external-access-platform-r3` at the commit pushed after the owner answers the ADR-028 A8 question (currently local `260e10fc3`: R3 + master `e5059672d` merged).
+- Branch `work/spaarke-SPA-external-access-platform-r3` at `ae2ecb5f5` (2026-10-13): R3 after PR #1795 merged to master, current with master `ba1242b5a`. It differs from master only by the A8 clarification commit (docs and a comment); BFF code is the same as master's.
 - Pre-deploy local gates (done 2026-10-12 on the merged tree): Release build 0 errors; ArchTests 969 passed; external/communication filter 4670 passed, 0 failed (8 pre-existing skips).
 - Publish-size delta against a fresh master build and the CVE check: measured separately (§ Measurements).
 
@@ -67,6 +67,8 @@ Measured 2026-10-12 per `.claude/constraints/azure-deployment.md` (fresh short-p
 | Files | 192 | 192 (path-by-path identical set) |
 
 Delta **+0.100 MB** (under the +5 MB trigger; total far under 55/60 MB). `dotnet list package --vulnerable --include-transitive`: none on either side. SDK 10.0.101 present. Note: origin/master moved past the branch's last merge (`e5059672d`), so the delta also includes those later master commits.
+
+2026-10-13: R3 is now on master, so the deploy payload is master's BFF (`src/server` changed in 18 files between `260e10fc3` and `ae2ecb5f5`, mostly master's work). Before phase B, the local publish is re-run once to record the zip size (must stay under 55 MB). This is a local build only and touches no Azure resource.
 
 ## Record
 
