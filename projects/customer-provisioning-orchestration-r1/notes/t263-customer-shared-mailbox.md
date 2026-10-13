@@ -125,7 +125,7 @@ names another customer's group is refused (Drift) **before** this customer's mai
 the other customer's stamp read and send as this mailbox. Group names are unique in an Exchange organization. The name is
 also the filter of the membership scope in §5, so the Exchange role and the code agree.
 
-## 5. Exchange permissions — owner decision D32 (approved 2026-10-10; applied on Spaarke's tenant 2026-10-13, M1 PASS)
+## 5. Exchange permissions — owner decision D32 (approved 2026-10-10; applied on Spaarke's tenant 2026-10-13; M1–M5, M7 PASS)
 
 The current role, `Spaarke App RBAC Admin`, is a child of Role Management trimmed to 14 cmdlets. With
 `View-Only Recipients`, it covers every read H14m and H13 need: `Get-Recipient` (View-Only Recipients),
@@ -204,6 +204,21 @@ mail roles.
 | M5 | `Get-Recipient -Filter "Members -eq '<mailbox DN>'"` (the "no other group" rule; the in-scope-group rule uses the documented `MemberOfGroup` filter) | returns the scope group. If it returns nothing, the "no other group" rule is inert (the in-scope rule still holds) — replace it with a per-group check over `Get-Recipient -RecipientTypeDetails MailUniversalSecurityGroup -Filter "Name -like 'Spaarke-AppAccess-*'"` + `MemberOfGroup` before relying on it |
 | M6 | (optional) creation scope `Alias -like 'sprk-*-mail'` on the create assignment | a create outside the pattern is refused. If it is, add `-CustomResourceScope` to the create assignment |
 | M7 | `Get-User <mailbox>` → `AccountDisabled` | record it. Learn conflicts on whether sign-in is blocked by default. Owner decides whether to require a disabled account (that needs `Set-User` — not requested) |
+
+**Results, 2026-10-13** (as the app: an ACI from the Worker's sidecar image, running as the Worker UAMI → MI-FIC →
+`Spaarke Exchange Admin` → `Connect-ExchangeOnline -AccessToken -Organization spaarke.onmicrosoft.com`; test group
+`Spaarke-AppAccess-m4test` and mailbox `sprk-m4test-mail`, both removed afterwards; `sprk-t251-spike-scope` membership
+unchanged):
+
+| # | Result |
+|---|---|
+| Cmdlets | The app sees `New-Mailbox` with exactly `Alias, DisplayName, Name, PrimarySmtpAddress, Shared` and `Add-DistributionGroupMember` with exactly `BypassSecurityGroupManagerCheck, Identity, Member` |
+| M2 | PASS. Without `-Shared`, `New-Mailbox` fails parameter-set resolution: every other set needs a parameter the role does not grant (for example `Password`, `MicrosoftOnlineServicesID`) |
+| M3 | PASS. Adding to `sprk-t251-spike-scope` is refused: "out of the current user's write scope" |
+| M4 | PASS at the cmdlet level: the shared mailbox is created (`SharedMailbox`, visible at once) and added to the scope group; a second add reports "already a member". The route-level check runs in T186 at H14m |
+| M5 | PASS. `Members -eq '<DN>'` returns the scope group, so the "no other group" rule is live; `MemberOfGroup` returns the mailbox |
+| M6 | Not run (optional). The create assignment stays organization-scoped, constrained by the 5 parameters |
+| M7 | `AccountDisabled = True` by default, so sign-in is blocked without `Set-User` |
 
 ## 6. Identities
 

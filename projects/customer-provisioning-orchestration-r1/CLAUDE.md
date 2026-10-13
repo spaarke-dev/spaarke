@@ -43,6 +43,7 @@ Full list: `spec.md` "MUST Rules". These come up on most tasks.
 - Stamps are keyless (D13). Stamp Redis is Azure Managed Redis, Microsoft Entra only (D12). See `provisioning.md` "Stamp resources are keyless" and "Stamp Redis".
 - SPE: one container type per model and one root container per customer. Never propose a container type per customer (D28). SPE Admin on a stamp reaches only that stamp's containers (D29). Container-type creation is delegated-only, an operator one-time step (topology doc §R5).
 - Model 1 users are B2B guests in the environment security group `sprk-{customerId}-users`. Spaarke pays pay-as-you-go on the customer's stamp subscription; guest access must be on (D2, owner 2026-10-07; `provisioning.md` "Model 1 users").
+- ADR-028 A9 (owner 2026-10-13): Model 1 LICENSED users are B2B guests (H11 invites them). Workforce contacts sign in at their home directory through the shared multitenant workforce SPA client and are never invited. Partners use CIAM (T240d, option 2). "Spaarke tenant" means Spaarke's directory and "customer's home directory" means the customer's own; never write a bare "tenant" for the latter. Provisioning work: `notes/coordination/2026-10-13-from-spa-r3-adr028-a9-workforce-signin.md`; publisher verification ISS-026.
 - The customer's subscription and Dataverse environment are operator prerequisites; H5 adopts, never creates (D4, T228). Cost: one envelope per dedicated stamp (T229).
 
 **Credentials and Key Vault**

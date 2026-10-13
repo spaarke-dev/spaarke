@@ -68,5 +68,10 @@
       assignments sprk-exoadmin-sharedmbx-create (Regular, org) and sprk-exoadmin-scopegroup-member (Regular, CustomResourceScope)
       to Spaarke Exchange Admin (SP b5d396bb-...). Read back matches. Leftover from T261: delegating assignment
       sprk-exoadmin-deleg-MailboxSettingsRead (harmless; remove at next maintenance). M2-M7 owed after propagation.</note>
+    <note date="2026-10-13">LIVE checks as the app (Worker UAMI in an ACI from the sidecar image -> Spaarke Exchange Admin): M2 PASS
+      (no -Shared: parameter set unresolvable with the 5 granted parameters), M3 PASS (sprk-t251-spike-scope out of write scope),
+      M4 cmdlet-level PASS (shared mailbox created, added to Spaarke-AppAccess-m4test, second add "already a member"), M5 PASS
+      (Members filter returns the scope group; MemberOfGroup returns the mailbox), M7 AccountDisabled=True. M6 not run (optional).
+      Test mailbox + group removed; t251 group unchanged. ISS-024 closed. Route-level M4 is proven by T186 at H14m.</note>
   </notes>
 </task>

@@ -392,11 +392,11 @@ caller on a stamp; none is a boot failure.
 with "unresolved placeholder" on PRQ-C-10. Fix when Model 2 returns: resolve to `notApplicable` for non-B2BGuest runs and let
 PRQ-C-10's recipe SKIP (the PRQ-C-14 pattern).
 
-### ISS-024 — H14m (customer shared mailbox) needs two Exchange roles the owner has not approved yet
+### ISS-024 — H14m (customer shared mailbox) needs two Exchange roles the owner has not approved yet — CLOSED 2026-10-13
 
 | Field | Value |
 |---|---|
-| **Status** | Open — D32 approved 2026-10-10 and **applied 2026-10-13** (M1 PASS: parents confirmed; 2 roles + scope + 2 `-App` assignments created and read back). Remaining: live checks M2–M7 after RBAC propagation (30 min – 2 h), then close |
+| **Status** | **Closed 2026-10-13.** D32 approved 2026-10-10 and applied 2026-10-13 (M1 PASS). Live checks as the app (Worker UAMI → MI-FIC → Spaarke Exchange Admin) the same day: M2, M3, M4a/b, M5, M7 PASS; M6 not run (optional). Results: `notes/t263-customer-shared-mailbox.md` §5. The full ensure route (M4 `Success` → `AlreadyCompliant`, `Test-ServicePrincipalAuthorization` for the 3 roles) is proven by T186 at H14m |
 | **Filed** | 2026-10-10 (T263; number provisional — the main session assigns ISS numbers) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1562 (the mail-model issue; T263 implements it) |
 
