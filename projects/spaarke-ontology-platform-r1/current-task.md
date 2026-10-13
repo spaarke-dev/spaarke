@@ -1,36 +1,62 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-11 (main session). State only — history is in git log, task `<completion>` blocks and
-> `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (**D-106: critical path only**;
-> merges D-107 branch + **D-115 master**) and §6 gotchas. Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-120).
-> Issues for after the project: [`notes/defer-issues.md`](notes/defer-issues.md) (F-1..F-66 on the branch; 034's branch adds a second "F-65" (#1661) to renumber when it merges; 025's adds F-67/F-68). Sub-agents never edit this file.
+> **Last Updated**: 2026-10-12 late (main session). State only — history is in git log, task `<completion>` blocks and
+> `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
+> D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership via RecordOwnershipResolver) and §6 gotchas.
+> Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-133). Deferred work: one self-contained GitHub issue per item,
+> label `ontology-deferred`. Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Orchestrating ontology lanes. 116 tasks: **73 ✅**, 1 🔄 (130: live proof in D-112 deploy), 29 🔲, 9 ⏸️, 4 🚫. |
-| **Branch** | `docs/ontology-platform-design` (draft #1111): 031 (#1626), 046 (#1609), 033 (#1653), 032 (#1660 → `86c09c11d`) merged 2026-10-11. |
-| **Owner prefs** | Finish fast but not at a cost premium. Keep 101/102/103/025; **073 lowest priority, last**. Subagent cap 4. Every Agent call passes `model`. Don't merge #1111 to master yet (owner to choose: wait for 035/055, or add an on/off setting). |
-| **Critical path** | 031 ✅ → 032 ✅ / 033 ✅ / **034** / **025** → 035 deploy BFF → 050/038 → 059 → 055 deploy Console → 064. Decision path: 046 ✅ → **043** → 058 → 045/049. |
-| **Next Action** | Wait for the three lane reports below; then for each: scoped re-check (sonnet) of the fix diff → CI green → `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-design` → mark done (POML + TASK-INDEX + drift check). |
+| **Task** | Orchestrating ontology lanes. Child-record contract tasks 140–146 (D-131..D-133) are planned; 140 is live on dev. |
+| **Blocker** | Owner answers Q23, Q24, Q25, Q26, Q27 (below). |
+| **Next Action** | #1756 MERGED `b6d997b74`; #1763 MERGED `d0775ff1d`. Running: #1780 merge script (`bs7wb48lp`, pinned `e4f147828`); #1746 fix round 3 (sonnet). When round 3 reports → merge the base into #1746 → send uac-r2 the 3 diffs → merge. Then task 141 once #1665 + #1747 merge (Q23, Q25). |
 
-## Running now (background agents, worktrees `C:\wts-NNN`)
+## Lanes (worktrees `C:\wts-NNN`; all branch from `origin/docs/ontology-platform-design`)
 
-| Lane | PR | Doing | Then |
+| Lane | PR | State | Next |
 |---|---|---|---|
-| **lane-034** (suppression) | #1654 | Merge project branch (032/033 in); uac-r2 F2: add status/window clause to the CALLER read in the count route + assert in the filter test; NIT-a comment at DecisionPlanEndpoints.cs:77-78; full ArchTests | Send uac-r2 the new head (they re-check `d6c0025a9..head`, #1355 + SendMessage); merge on their approval; renumber its defer row "F-65" (#1661) to the next free number |
-| **lane-025** (threshold) | #1664 | Merge project branch; implement **D-120** (re-raise after a re-crossing: one-time marker when condition observed false after Acted; tests); inspect (do NOT re-run) the failed live seam test `SignalWriterSeamTests…RefreshDueDate(sprk_todo)` | Scoped re-check; owner told about the accidental live run; close #1662 on merge. If it needs a NEW column → owner decision |
-| **lane-043** (commit route) | (PR # to come) | Merge project branch; fix its reviewer's 10 fix-now findings + K2 (core pair compare) + K4 (server-side plan-read time); EventIds 50360–69 | Scoped re-check; uac-r2 reviews its ledger entry |
+| **043** D-129/D-130 ownership, D-35 read | #1665, head `85f430366` | Our pass + fix round done. **UAC verdict APPROVE, held only for Q23.** N1 (two-wall refusal) scoped to task 142: PR-body note + #1778. K-a identity cache ~2 min; K-b no-core pair not cross-checked (FR-51); K-c writer AppendTo on contact → task 146 live gate. **Before merge:** merge the base (with #1780), rewrite the DR Pending reason in `RecordOwnerAssignmentCensusTests.cs` ~:246 (uac-r2 C2; PR comment posted), and fix the `DecisionCommitFollowUpsTests.cs:54` / `DecisionCommitServiceTests.cs:216` constructor args if #1746 merged first. | Merge when Q23 is answered (and Q26 for dev use). |
+| **#1661** secure suppression | #1746, head `c21e82e73` (round 2 fixes `14297d25a`, plus a base merge with #1763) | Round 2 re-checks (ours + uac-r2): every claim holds. One finding, F-T1: the job test never reaches the hit-placement fault. K8 is accepted. Fix round 3 (sonnet) is running: F-T1; the K9 cross-wall lost-lower analysis (fix it if anything reads the stale stamp that night); PR-body notes K-a, K8, K9, K10. | Merge the base (now with #1756 `b6d997b74`, plus #1780 once merged) → send uac-r2 all 3 diffs in one pass (F-T1 fix, `c21e82e73`, the 2nd base merge) → merge. |
+| **#1659** filing trigger | #1747, head `cc6b10cf5` | UAC APPROVED. | Merge when Q25 is answered. |
+
+Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-design` (`gh pr ready` first). The Office-scope CI job hits its 20-min cap (F-49, #1718); merge on log evidence with a PR comment.
+**Merge order:** whichever of #1665/#1746 merges second fixes `DecisionCommitFollowUpsTests.cs:54` and `DecisionCommitServiceTests.cs:216` (the constructor takes `IConfiguration` + `IServiceScopeFactory`).
+**Don't deploy** a BFF with SignalWriter/043 readers to dev until 141 merges: the code reads the pair type as text, but it is now a Lookup.
+
+## Child-record contract (tasks 140–146)
+
+- **UAC 182** (lineage + census) carries the one-line `DecisionRecordWriter.cs` `LineageColumnByCoreEntity` typed-core filter (option b: conditions are the exact filter, the existing test unchanged, a new regression test, and a note in the PR body). It runs `merge-tree` against `85f430366` and sends the PR URL and sha. Its census exempts `sprk_budgetrevision` creator-person per **#1777**.
+- The DR lineage row is inert until 142 writes the subject lookups. **142 must ship the two-wall refusal in the same PR** that first writes them (#1778; this is a constraint in the 142 POML).
+- Sequence: 141 → 142/143 → 144 → 145 → 146. 146 waits for the 6 h metadata cache key.
+
+## D-134/D-135 work
+
+- **#1665 D-134:** commit `ba9945149` + fix round `736109d24` (F1 service-request filing; F2 eligible persons only, `rootIsRestricted: null`; K2 pinned; ledger refs). Our re-check APPROVE; uac-r2 is re-checking the fix diff. Then merge the base (with #1780) + rewrite the C2 reason → merge.
+- **Task 148** (reconciler) is written. uac-r2 provides `SecureChildReconciler.ReownOrdinaryRowAsync` in its own PR (owner sign-off; we review it).
+- **Task 147** (budget revision creator-person) starts once #1780 merges.
 
 ## Waiting / owner
 
-- **Owner questions open:** deferred-list walkthrough timing · rename defer rows F-nn → I-nn · D-119 date (received vs classification) · where to send the #1501/dev-deploy answer · #1111 merge strategy · #1659 association-confirmed call site (ask email project or defer) · #1658 hand-made budget revisions · #1661 (034 stamp vs secure wall) · 025's evaluator change vs spec FR-46 "no evaluator change" (amend FR-46 or record a decision) · threshold column list (matter only) · pre-existing invalid POMLs (092, 068, 131, 132, 134–138).
-- **Reported to owner 2026-10-11:** lane 025 ran the live write-seam tests against spaarkedev1 by accident (cleanup verified by query); one failed (`…RefreshDueDate(subjectEntity: "sprk_todo")`), not re-run — lane inspecting by reading.
-- **130 / 111 / 114**: run in the D-112 full E2E dev deploy.
-- **Housekeeping (owner, by hand):** stale `C:\wt*` / `C:\wts-*` worktrees (list: `notes/handoff-history/2026-10.md`).
-- **Checklist page** https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV.
+- **Q23 → D-134 (relayed by uac-r2, 2026-10-12; confirm here):** a DR on a personal To Do is owned by the Assigned To contact's user's BU default team. Edge cases 1–4 (D-134) await the owner. A code-mapper is mapping the change (contact → systemuser → resolver user path); then a #1665 follow-up commit, plus task 143 parity.
+- **Q26 (blocks #1665 on dev):** assign Spaarke Basic User (or a minimal role) to the **Dev 1 and Test 1** BU default teams only; the Secure Record team stays roleless. #1776. Facts: `C:\wts-043\...\notes\043-bu-team-read-check.md`.
+- **Q27 (blocks tasks 142 and 143 flipping to Routed):** `sprk_createdbyperson` (lookup → systemuser) is missing on three tables:
+  - `sprk_budgetrevision` (#1777);
+  - `sprk_decisionrecord` and `sprk_signal` (#1783).
+  - A (recommended): add the column to all three in one scoped import (D-83). Writers pass `RequestedBy`; job-raised Signals leave it null, with the reason recorded in the guard. Drop 182's exemption.
+  - B: Signal is exempt; DR and budget revision get the column.
+  - It is a schema change, so it needs owner approval. If approved, it goes in a new task 147, before 142 and 143.
+- **Q24:** invoice statuses counted as spend (only ToReview/Reviewed exist; Reviewed only for now).
+- **Q25:** word-add-in sign-off on `ReconciledEmailFiling.cs` for #1747 (the owner may approve on their behalf).
+- **Q22:** event column for the individual: `sprk_assignedto1` or `sprk_assignedto` (all are contact lookups).
+- **Q20 (parked):** no-core DRs on a later secure flip; superseded by tasks 142/144 once they land.
+- **Q7 live re-run:** retry once the machine is quiet. Env `SIGNALS_LIVE_DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com`, `SIGNALS_LIVE_CALLER_ID=3121bf1b-9fbf-f111-aaaf-0022482913fc`. Filter `FullyQualifiedName~SignalWriterSeamTests.WriteAsync_EventAndTodoUnderAMatter_GroupUnderTheMatter_CreateAndReconcile_RefreshDueDate&DisplayName~sprk_todo`. Afterwards, zz-037 rows must be 0.
+- **Q11:** F-nn → I-nn rename in one commit, after #1746, #1747 and #1756 merge.
+- **Q15:** EventId 50361 alert + runbook in task 035. **Q8:** #1111 to master after 035 + 055.
+- Owner decisions page https://claude.ai/artifact/ADCv42eKukX2BQx7d62Mop (Q1–Q19 answered).
 
 ## Coordination
 
-uac-r2: post on #1355 **and** SendMessage `spaarke-wt-unified-access-control-r2-1d`. F-49: the office-scope CI job can hang to its 20-min cap — rerun failed jobs.
+uac-r2: post on #1355 **and** SendMessage `spaarke-wt-unified-access-control-r2-1d`. Their K2 is #1730 (keep 403 `caller_unresolved`). Issues today: #1757, #1761, #1766–#1778.

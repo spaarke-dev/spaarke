@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **116 tasks** across 14 phases (74 ✅ · 1 🔄 · 28 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-12)
+> (spec §9) · **125 tasks** across 15 phases (76 ✅ · 1 🔄 · 35 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-12: +140–148, Phase 4c child-record contract)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -173,7 +173,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
 | ✅ [done] 024 | [Grammar extension: subject-only rules, now+Nd, Do subjects, quiet-window knob](024-grammar-extension-do-lane.poml) | FULL | **opus**/high | 021, 022 | K | **D-16**, **D-13** (FR-17a knob). Still one filter per body; everything else still refused. **Before 031** (feeds 037) · **[uac]** |
-| 🔲 [open] 025 | [Threshold rule type: schema + compiler (spend threshold)](025-threshold-rule-type-schema-and-compiler.poml) | FULL | sonnet/high | 024, 031 | C | **D-16**. Proves the 031 job runs it with **no evaluator change**. Switch stays refused. **After 031** |
+| ✅ [done] 025 | [Threshold rule type: schema + compiler (spend threshold)](025-threshold-rule-type-schema-and-compiler.poml) | FULL | sonnet/high | 024, 031 | C | **D-16**. Proves the 031 job runs it with **no evaluator change**. Switch stays refused. **After 031** |
 | ✅ [done] 026 | [Rule-body describer (plain-language condition, read-side)](026-rule-body-describer.poml) | FULL | sonnet/high | 024 | — | #11. Feeds the wizard's *How this was determined* (058) and the admin rule page (100) |
 
 ### Phase 3 — Evaluator, Signal lifecycle and read
@@ -185,7 +185,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | ✅ [done] 032 | [Three event triggers (D-48)](032-event-triggers-classification-and-budgetrevision.poml) | FULL | sonnet/high | 031 | — | Budget-revision hook is correctness, not polish. **Amended**: shared core (D-13, D-33); never re-closes a decision-Acted Signal (X-6). **Association-confirmed trigger added (D-48)** · **[uac]** |
 | ✅ [done] 033 | [Closure semantics](033-closure-semantics.poml) | FULL | sonnet/high | 031 | C | Aged-out maps to `ConditionCleared`. **Amended**: Superseded → new episode (D-13), reads `sprk_inforceto` (D-14); Off (next pass, reversible: **D-32**) vs Retire (immediate) |
 | ✅ [done] 034 | [Suppression per (policy, matter), 30d](034-suppression-policy-matter-30-days.poml) | FULL | sonnet/high | 031, 036 | C | D-11 grain; auto-close never counts. **Amended**: lapse → new episode (D-13); *misresolved* never counts (R-10); count read for wizard/admin · **[uac]** |
-| 🔲 [open] 035 | [**Deploy** BFF](035-deploy-bff-evaluator.poml) | FULL | sonnet/high | 034 | — | Merge master first; hash-verify |
+| 🔲 [open] 035 | [**Deploy** BFF](035-deploy-bff-evaluator.poml) | FULL | sonnet/high | 034, **141** | — | Merge master first; **schema pre-flight on the target**; hash-verify |
 | ✅ [done] 079 | [uac-r2 coordination: two recorded live refusals + review of the secure-child entries](079-issue-secure-record-mirror-for-signals.poml) | STANDARD | sonnet/medium | — | — | **D-33** (was the D-15 "later mirror" issue). Refusals must be recorded **before** 008's Secure Record Owner edit; the review gates 039. **Start now** · **[uac]** |
 | ✅ [done] 039 | [**Secure children: register Signal + Decision Record; writer owner from the resolver**](039-secure-signals-and-decision-records.poml) | FULL | **opus**/high | 007, 008, 079 | — | 🔴 **D-33** (replaces D-15's skip): two entries each in `SecureChildLineage.cs` and `config/secure-record-owner-role.json` (uac-r2 review via 079); task-146-shaped writer change; 2-minute secure-sync load measured; live gate on a provisioned Secure matter. ~3 dev-days. **Before 031** · **[uac]** |
 | ✅ [done] 037 | [Signal writer accepts Do-lane subjects (event, To Do, WA)](037-signal-writer-do-lane-subjects.poml) | FULL | sonnet/high | 007, 008, 024, 039 | — | **D-16** matter via `sprk_regardingmatter`; `sprk_duedate` (D-27) refreshed while open. Decides + flags project-filed tasks (D-16); **D-31** matterless To Do owned by the To Do owner's BU; **D-33** resolver parents + narrow skip. **Before 031** · **[uac]** |
@@ -210,6 +210,22 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | ✅ [done] 047 | [Schema: response columns on `sprk_workassignment` (D-54)](047-schema-work-assignment-response-columns.poml) | FULL | sonnet/high | — | — | **D-54**: responded-on + outcome (exact set agreed with the WA owner); 007 recipe; WA is a secure root · **[uac]**. Feeds 044, 061. **Start now** |
 | 🔲 [open] 048 | [D-66: move shared Dataverse write core (`OwnedChildWrite` + helpers) out of `Services/Ai` → `Services/Dataverse`, own PR (uac-r2 review)](048-move-dataverse-write-core-out-of-ai-namespace.poml) | FULL | sonnet/high | — | C | **D-66**; uac-r2 agreed (D-113): after #1391, before 046; sequence after #1391 (same file) **[uac]** |
 | 🔲 [open] 049 | [Remove Console User Write on `sprk_signal`](049-revoke-console-user-signal-write.poml) | STANDARD | sonnet/medium | 043, 055 | — | **D-17**, after the deployed Console closes Signals only via the BFF. Union re-verify · **[uac]** |
+
+### Phase 4c — Standard child-record contract (D-131..D-133; added 2026-10-12, critical path, before 035)
+
+Contract: `git show origin/work/unified-access-control-r2:projects/unified-access-control-r2/notes/ontology-standard-child-contract-2026-10-12.md`. Sequence: 140 → uac-r2 lineage + census PR → 141 → 142/143 → 144 → 145 → 146. All **[uac]** (uac-r2 reviews every PR).
+
+| # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
+|---|---|---|---|---|---|---|
+| ✅ [done] 140 | [Schema: 14 DR regarding columns; Signal pair type text → Lookup](140-child-contract-schema-delta.poml) | FULL | sonnet/high | — | CC1 | **D-132** owner-approved. Done on spaarkedev1 2026-10-12 (scoped publish; no dependency; upgrade runbook in the deployment guide §10.5; DR metadata cache key lives up to 6 h, so 146 waits) · see [notes/140-schema-delta.md](../notes/140-schema-delta.md) · **[uac]** |
+| 🔲 [open] 141 | [Generalise `TodoRegardingBuilder`; SignalWriter on the shared builder](141-shared-regarding-builder-signalwriter.poml) | FULL | **opus**/high | 140 (+ #1665/#1746 merged) | CC2 | **PRIORITY** (closes the pair-type deploy hazard; adds a schema-agreement guard). **D-133**. Builder commit reviewed alone by uac-r2; To Do/Event tests unchanged; dedupe key unchanged · **[uac]** |
+| 🔲 [open] 142 | [DecisionRecordWriter: subject filing, all-parent owner, two-wall refusal](142-decision-record-writer-contract.poml) | FULL | **opus**/high | 141, 043 | CC3 | Contract C1–C3, C9; acceptance 1–3, 6, 7 · **[uac]** |
+| 🔲 [open] 143 | [D-130 owner on SignalWriter/Suppression/Commit; replace ownerid read rule](143-d130-owner-signal-writers.poml) | FULL | **opus**/high | 141, #1746 | CC3 | Audit F3 + F2 code side (F2 Read grant = owner decision). Absorbs the "F3 SignalWriter no-core ownership" lane · **[uac]** |
+| 🔲 [open] 144 | [Register Signal + DR with the core-ancestor restamper; re-file re-stamps/re-owns](144-restamper-registration-refile.poml) | FULL | **opus**/high | 142, 143, uac-r2 C4/C7 PR, #1747 | CC4 | uac-r2 conditions: separate commit; not an intermediate; root classification; report-only reconciliation first · **[uac]** |
+| 🔲 [open] 145 | [`sprk_matter` readers (context vs filing), backfill, evidence leak](145-matter-readers-backfill-evidence-leak.poml) | FULL | **opus**/high | 141, 142, 144 | CC5 | D-34 split; uac-r2 #1747 finding (e) (D-123 leak); backfill write needs owner approval · **[uac]** |
+| 🔲 [open] 146 | [Live gate: contract §5, 11 items](146-child-contract-live-gate.poml) | FULL | sonnet/high | 140–145 | CC6 | After the BFF with 141–145 is on dev and the DR metadata cache key has expired · **[uac]** |
+| 🔲 [open] 147 | [Budget revision records its requester (`sprk_createdbyperson`); drop 182's exemption](147-budgetrevision-creator-person.poml) | FULL | sonnet/high | #1780 merged | CC2 | **D-135** (Q27; #1777). Column created on dev by the owner · **[uac]** |
+| 🔲 [open] 148 | [Follow the assignee: `TodoAssigneeOwnerReconciliationJob`](148-todo-assignee-owner-reconciler.poml) | FULL | **opus**/high | 142, 143, #1665, UAC `ReownOrdinaryRowAsync` | CC5 | **D-135** item 2. Shape approved by uac-r2 (F1 live filing, F2 nightly recompute, F3 re-owns via UAC's entry point). Report-only by default · **[uac]** |
 
 ### Phase 5 — The worklist surface
 

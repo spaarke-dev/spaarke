@@ -217,7 +217,7 @@ public sealed class DecisionRecordWriter
     /// </summary>
     internal static readonly FrozenDictionary<string, string> LineageColumnByCoreEntity =
         SecureChildLineage.Children[Table].Lookups
-            .Where(l => SecureChildLineage.Roots.Contains(l.Value))
+            .Where(l => SecureChildLineage.Roots.Contains(l.Value) && l.Key == l.Value)
             .ToFrozenDictionary(l => l.Value, l => l.Key, StringComparer.OrdinalIgnoreCase);
 
     private readonly OntologyWriterDataverseClient _writerClient;

@@ -56,6 +56,9 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// query left out: the evaluator (task 031) must therefore widen the query for these fields (for example anchor
 /// at a day boundary and widen each Date Only bound by one day) before judging per item. Recorded as a 031 input
 /// in <c>notes/024-progress.md</c>.</param>
+/// <param name="Threshold">For a <see cref="RuleType.Threshold"/> body, the one comparison it makes (task 025b); null for Existence.
+/// When <see cref="ThresholdComparison.BaseDerived"/> the compared column is NOT trusted from the stored row: the evaluator
+/// removes this comparison's condition from <see cref="FetchXml"/> and judges the comparison itself from the base rows.</param>
 public sealed record CompiledPredicate(
     string SubjectEntity,
     string SubjectIdAttribute,
@@ -65,7 +68,16 @@ public sealed record CompiledPredicate(
     IReadOnlySet<string> AmbiguousTemplateFields,
     IReadOnlySet<string> UnpinnedTemplateFields,
     int QuietWindowDays,
-    IReadOnlySet<string> DateOnlyWhenFields);
+    IReadOnlySet<string> DateOnlyWhenFields,
+    ThresholdComparison? Threshold = null);
+
+/// <summary>
+/// The comparison of a Threshold body (task 025b). <see cref="FetchOperator"/> is <c>ge/gt/le/lt</c>; <see cref="Operand"/> is the
+/// text the compiled condition carries (so the evaluator can find that exact condition); <see cref="Value"/> is the same number.
+/// </summary>
+/// <param name="BaseDerived">True when the column is one of <see cref="Sprk.Bff.Api.Services.Finance.FinanceBaseValues"/>'s derived
+/// columns (a plain stored column that only a form edit refreshes): the evaluator computes it from the invoice and budget rows.</param>
+public sealed record ThresholdComparison(string Field, string FetchOperator, string Operand, decimal Value, bool BaseDerived);
 
 /// <summary>
 /// Thrown when a rule body cannot be compiled into a single FetchXML filter. The message names the offending
@@ -79,11 +91,17 @@ public sealed class PredicateCompilationException : Exception
 }
 
 /// <summary>
-/// Compiles an <c>Existence</c> rule body (<c>sprk_policyversion.sprk_rulebody</c>, rule type
-/// <see cref="RuleType.Existence"/>) into ONE Dataverse FetchXML query (spec FR-06, FR-07, NFR-07; design.md
-/// §8.0.1; mvp-technical-spec.md §3.4a / §11.4).
+/// Compiles an <c>Existence</c> or <c>Threshold</c> rule body (<c>sprk_policyversion.sprk_rulebody</c>, rule type
+/// <see cref="RuleType.Existence"/> / <see cref="RuleType.Threshold"/>) into ONE Dataverse FetchXML query (spec FR-06,
+/// FR-07, NFR-07; design.md §8.0.1; mvp-technical-spec.md §3.4a / §11.4). Switch has no compiler (D-16).
 /// </summary>
 /// <remarks>
+/// <para><b>Threshold (task 025, D-16).</b> One numeric comparison between ONE verified column of the subject
+/// (<see cref="ThresholdColumns"/>) and a declared number, as ONE condition in the subject's own filter beside the optional
+/// <c>when</c> conditions: no link-entity, no clause, no arithmetic. It produces the same <see cref="CompiledPredicate"/>
+/// the evaluator already consumes; the compared column is recorded like a <c>when</c> field, so a template may name it and
+/// its value is the subject's own (the declared number is not a token). A subject whose column is null never matches, for
+/// any operator (Dataverse compares nothing with null). The rest of these remarks describe the Existence shape.</para>
 /// <para><b>Shape — one query, both conjuncts (CM-3).</b> Rooted at the body's <c>subject</c>, projecting only the
 /// subject id, <c>distinct="true"</c> (an inner join to N qualifying related rows would otherwise repeat the
 /// subject N times). Each clause becomes one <c>link-entity</c> joined <c>from</c> the clause's <c>path</c> (the
@@ -223,7 +241,43 @@ public sealed partial class PredicateCompiler
         ("sprk_event", "sprk_tododuedate"),
         ("sprk_todo", "sprk_duedate"),
         ("sprk_workassignment", "sprk_responseduedate"),
+        ("sprk_workassignment", "sprk_respondedon"),
     }.ToFrozenSet();
+
+    /// <summary>
+    /// The value range Dataverse accepts for each <see cref="ThresholdColumns"/> entry (live column metadata,
+    /// <c>SignalPredicateTests.ThresholdColumns_RangesFitTheLiveColumnMetadata</c>). A threshold outside it is refused at
+    /// save: Dataverse would reject the comparison at run time (or, for a bound beyond the column, the rule could never
+    /// fire), and a policy that cannot work must not save.
+    /// </summary>
+    public static readonly FrozenDictionary<(string Entity, string Column), (decimal Min, decimal Max)> ThresholdColumnRanges =
+        new Dictionary<(string, string), (decimal, decimal)>
+        {
+            [("sprk_matter", "sprk_budgetutilizationpercent")] = (-100000000000m, 100000000000m),
+            [("sprk_matter", "sprk_totalbudget")] = (-922337203685477m, 922337203685477m),
+            [("sprk_matter", "sprk_totalspendtodate")] = (-922337203685477m, 922337203685477m),
+            // Task 025b (D-122): the same three columns on the project, same live metadata (Decimal/Money, same bounds, 2026-10-12).
+            [("sprk_project", "sprk_budgetutilizationpercent")] = (-100000000000m, 100000000000m),
+            [("sprk_project", "sprk_totalbudget")] = (-922337203685477m, 922337203685477m),
+            [("sprk_project", "sprk_totalspendtodate")] = (-922337203685477m, 922337203685477m),
+        }.ToFrozenDictionary();
+
+    /// <summary>
+    /// The columns a <see cref="RuleType.Threshold"/> body may compare: the numeric spend roll-ups on the matter and the project
+    /// (<c>sprk_totalbudget</c> and <c>sprk_totalspendtodate</c> Currency, <c>sprk_budgetutilizationpercent</c> Decimal, a PERCENT
+    /// where 100 means fully spent; v4 finding #8, task 025; project added by task 025b, D-122). They are plain stored columns that
+    /// only a form edit refreshes, so a Threshold on them is judged by the evaluator from the invoice and budget rows
+    /// (<see cref="Sprk.Bff.Api.Services.Finance.FinanceBaseValues"/>), never from the stored copy. A closed list for the same reason as <see cref="VerifiedJoins"/>: the body cannot say a column
+    /// is numeric, and a threshold on a text, lookup or date column would not fail at save time. The seam test
+    /// <c>SignalPredicateTests.ThresholdColumns_AreNumericOnTheLiveSchema</c> fails if a listed column is missing or not
+    /// numeric. Adding a column is a schema check plus a code change with review; its table must also be in
+    /// <see cref="EvaluatorGlobalReadableEntities"/>.
+    /// </summary>
+    public static readonly FrozenSet<(string Entity, string Column)> ThresholdColumns = ThresholdColumnRanges.Keys.ToFrozenSet();
+
+
+    /// <summary>An empty <c>all</c> array, for a body type that has none.</summary>
+    private static readonly JsonElement NoClauses = JsonDocument.Parse("[]").RootElement.Clone();
 
     /// <summary>The quiet window when a body omits <c>quietWindowDays</c> (D-13: 14 days).</summary>
     public const int DefaultQuietWindowDays = 14;
@@ -293,19 +347,34 @@ public sealed partial class PredicateCompiler
     /// (<c>PredicateCompilerTests</c>). See <see cref="PolicyVersionValidator"/>'s remarks for exactly what the
     /// architecture test <c>PredicateCompilerCallerGuardTests</c> enforces, and what it does not.
     /// </remarks>
-    public CompiledPredicate Compile(string ruleBodyJson, Guid? subjectId = null)
+    public CompiledPredicate Compile(string ruleBodyJson, Guid? subjectId = null) =>
+        Compile(ruleBodyJson, subjectId, RuleType.Existence);
+
+    /// <summary><see cref="Compile(string, Guid?)"/> for a named rule type (task 025): Existence or Threshold; Switch is refused.</summary>
+    public CompiledPredicate Compile(string ruleBodyJson, Guid? subjectId, RuleType ruleType)
     {
+        RequireCompilable(ruleType);
         using var doc = ParseBounded(ruleBodyJson);
 
         // Schema first (shape), then the compiler's own stricter checks.
-        var validation = _validator.Validate(RuleType.Existence, ruleBodyJson);
+        var validation = _validator.Validate(ruleType, ruleBodyJson);
         if (!validation.IsValid)
         {
             throw new PredicateCompilationException(
-                "Rule body failed Existence schema validation: " + string.Join("; ", validation.Errors));
+                $"Rule body failed {ruleType} schema validation: " + string.Join("; ", validation.Errors));
         }
 
-        return CompileParsed(doc.RootElement, subjectId);
+        return CompileParsed(doc.RootElement, subjectId, ruleType);
+    }
+
+    /// <summary>Only Existence and Threshold compile (Switch is deferred, D-16). Refused with the compiler's own
+    /// exception type so a caller never sees the schema validator's <see cref="NotSupportedException"/>.</summary>
+    private static void RequireCompilable(RuleType ruleType)
+    {
+        if (ruleType is not (RuleType.Existence or RuleType.Threshold))
+        {
+            throw new PredicateCompilationException($"Rule type '{ruleType}' has no compiler (Switch is deferred, D-16).");
+        }
     }
 
     /// <summary>
@@ -317,10 +386,15 @@ public sealed partial class PredicateCompiler
     /// <c>PredicateCompilerCallerGuardTests</c>). The length cap, strict parse, and every compiler-level
     /// refusal (including the <c>$</c>-reference and numeric-range defences) still run.
     /// </summary>
-    internal CompiledPredicate CompileSchemaValidated(string ruleBodyJson, Guid? subjectId)
+    internal CompiledPredicate CompileSchemaValidated(string ruleBodyJson, Guid? subjectId) =>
+        CompileSchemaValidated(ruleBodyJson, subjectId, RuleType.Existence);
+
+    /// <summary><see cref="CompileSchemaValidated(string, Guid?)"/> for a named rule type (task 025).</summary>
+    internal CompiledPredicate CompileSchemaValidated(string ruleBodyJson, Guid? subjectId, RuleType ruleType)
     {
+        RequireCompilable(ruleType);
         using var doc = ParseBounded(ruleBodyJson);
-        return CompileParsed(doc.RootElement, subjectId);
+        return CompileParsed(doc.RootElement, subjectId, ruleType);
     }
 
     internal static JsonDocument ParseBounded(string? ruleBodyJson)
@@ -353,11 +427,11 @@ public sealed partial class PredicateCompiler
         "Rule body is not valid JSON: it contains text that cannot be read as a string (for example an unpaired " +
         "UTF-16 surrogate escape such as \\ud800).";
 
-    private CompiledPredicate CompileParsed(JsonElement root, Guid? subjectId)
+    private CompiledPredicate CompileParsed(JsonElement root, Guid? subjectId, RuleType ruleType)
     {
         try
         {
-            return CompileParsedCore(root, subjectId);
+            return CompileParsedCore(root, subjectId, ruleType);
         }
         catch (InvalidOperationException)
         {
@@ -370,7 +444,7 @@ public sealed partial class PredicateCompiler
         }
     }
 
-    private CompiledPredicate CompileParsedCore(JsonElement root, Guid? subjectId)
+    private CompiledPredicate CompileParsedCore(JsonElement root, Guid? subjectId, RuleType ruleType)
     {
         // Resolved once, so every clause in the query shares one anchor (to whole seconds, for a stable text).
         var nowUtc = TruncateToSeconds(_timeProvider.GetUtcNow().ToUniversalTime());
@@ -378,7 +452,14 @@ public sealed partial class PredicateCompiler
         var subject = RequireGlobalReadable(RequireIdentifier(root.GetProperty("subject").GetString(), "subject"), "subject");
         var subjectIdAttribute = subject + "id";
 
-        var clauses = root.GetProperty("all");
+        // A Threshold body has no 'all' (the schema refuses it, and this re-checks because CompileSchemaValidated
+        // skips the schema): the comparison below is its only condition and it reads no other entity.
+        if (ruleType == RuleType.Threshold && root.TryGetProperty("all", out _))
+        {
+            throw new PredicateCompilationException("all: a Threshold body reads only its subject; it takes no exists/notExists clauses.");
+        }
+
+        var clauses = ruleType == RuleType.Threshold ? NoClauses : root.GetProperty("all");
         if (clauses.GetArrayLength() > MaxClauses)
         {
             throw new PredicateCompilationException(
@@ -407,6 +488,16 @@ public sealed partial class PredicateCompiler
             rootConditions.Add(Condition(subjectIdAttribute, "eq", id.ToString("D")));
         }
 
+        var thresholdConditionCount = 0;
+        ThresholdComparison? thresholdComparison = null;
+        if (ruleType == RuleType.Threshold)
+        {
+            var (condition, comparison) = CompileThreshold(subject, root, nowUtc, positiveUses);
+            rootConditions.Add(condition);
+            thresholdComparison = comparison;
+            thresholdConditionCount = 1;
+        }
+
         var dateOnlyWhenFields = new List<string>();
         var whenConditionCount = 0;
         if (root.TryGetProperty("when", out var when) && when.ValueKind == JsonValueKind.Object)
@@ -414,6 +505,16 @@ public sealed partial class PredicateCompiler
             var whenConditions = CompileFilterConditions(subject, when, nowUtc, "when",
                 (field, _) =>
                 {
+                    if (Sprk.Bff.Api.Services.Finance.FinanceBaseValues.IsDerived(subject, field))
+                    {
+                        // Task 025b: spend, budget and utilization are judged from the base rows, but a 'when' on the stored columns
+                        // reads the STORED copy (stale until a form edit). That is wrong for ANY rule type (Existence too), so the
+                        // refusal does not depend on the rule type.
+                        throw new PredicateCompilationException(
+                            $"when.{field}: spend, budget and utilization on '{subject}' are derived from the invoice and " +
+                            "budget rows; a 'when' on the stored column would read a value that is not kept current. Scope the rule with another column.");
+                    }
+
                     UseOf(positiveUses, field).RecordWhen(subject);
                     if (DateOnlyColumns.Contains((subject, field)))
                     {
@@ -424,7 +525,7 @@ public sealed partial class PredicateCompiler
             rootConditions.AddRange(whenConditions);
         }
 
-        if (clauses.GetArrayLength() == 0 && whenConditionCount == 0)
+        if (clauses.GetArrayLength() == 0 && whenConditionCount == 0 && thresholdConditionCount == 0)
         {
             // Task 024 (D-16): a subject-only rule is a 'when' filter with zero clauses. With neither, the query
             // would return every row of the subject -- a Signal per row. Defence in depth over the schema's if/then.
@@ -515,8 +616,73 @@ public sealed partial class PredicateCompiler
             AmbiguousTemplateFields: ambiguous.ToFrozenSet(StringComparer.Ordinal),
             UnpinnedTemplateFields: unpinned.ToFrozenSet(StringComparer.Ordinal),
             QuietWindowDays: quietWindowDays,
-            DateOnlyWhenFields: dateOnlyWhenFields.ToFrozenSet(StringComparer.Ordinal));
+            DateOnlyWhenFields: dateOnlyWhenFields.ToFrozenSet(StringComparer.Ordinal),
+            Threshold: thresholdComparison);
     }
+
+    /// <summary>
+    /// Task 025 (D-16): the one comparison of a <see cref="RuleType.Threshold"/> body as ONE condition in the subject's own
+    /// filter. The compared column is read from the firing subject itself, so it is recorded like a <c>when</c> field: a
+    /// template may name it and the evaluator supplies the subject's own value (section 0.3). The declared number itself is
+    /// not a token. Re-checked here because <see cref="CompileSchemaValidated"/> skips the schema.
+    /// </summary>
+    private static (XElement Condition, ThresholdComparison Comparison) CompileThreshold(
+        string subject, JsonElement root, DateTimeOffset nowUtc, Dictionary<string, PositiveFieldUse> positiveUses)
+    {
+        const string at = "threshold";
+        if (!root.TryGetProperty("threshold", out var threshold) || threshold.ValueKind != JsonValueKind.Object
+            || !threshold.TryGetProperty("field", out var fieldEl) || !threshold.TryGetProperty("operator", out var opEl)
+            || !threshold.TryGetProperty("value", out var valueEl))
+        {
+            throw new PredicateCompilationException($"{at}: a Threshold body needs a threshold object with field, operator and value.");
+        }
+
+        var field = RequireIdentifier(fieldEl.ValueKind == JsonValueKind.String ? fieldEl.GetString() : null, at + ".field");
+        if (!ThresholdColumns.Contains((subject, field)))
+        {
+            throw new PredicateCompilationException(
+                $"{at}.field: '{subject}.{field}' is not a verified numeric column. A threshold may compare only: " +
+                string.Join(", ", ThresholdColumns.Select(c => $"{c.Entity}.{c.Column}")) +
+                ". Adding one is a schema check plus a code change with review.");
+        }
+
+        var op = (opEl.ValueKind == JsonValueKind.String ? opEl.GetString() : null) switch
+        {
+            ">=" => "ge",
+            ">" => "gt",
+            "<=" => "le",
+            "<" => "lt",
+            var other => throw new PredicateCompilationException(
+                $"{at}.operator: '{other}' is not a threshold comparison; use one of >, >=, <, <=."),
+        };
+
+        if (valueEl.ValueKind != JsonValueKind.Number)
+        {
+            throw new PredicateCompilationException(
+                $"{at}.value: a threshold compares with a declared number, not {valueEl.GetRawText()} (no column, expression or reference).");
+        }
+
+        var operand = FormatScalar(valueEl, nowUtc, at + ".value");
+        var (min, max) = ThresholdColumnRanges[(subject, field)];
+        var declared = valueEl.GetDecimal();
+        if (declared < min || declared > max)
+        {
+            throw new PredicateCompilationException(
+                $"{at}.value: {operand} is outside the range Dataverse holds for '{subject}.{field}' ({min.ToString(CultureInfo.InvariantCulture)} to {max.ToString(CultureInfo.InvariantCulture)})." +
+                UnitHint(field));
+        }
+
+        UseOf(positiveUses, field).RecordWhen(subject);
+        return (Condition(field, op, operand),
+            new ThresholdComparison(field, op, operand, declared, Sprk.Bff.Api.Services.Finance.FinanceBaseValues.IsDerived(subject, field)));
+    }
+
+    /// <summary>The unit of a Threshold column, appended to a validation message so an author does not write a fraction (0.85) for a
+    /// percent (85). Empty for the money columns.</summary>
+    private static string UnitHint(string field) =>
+        field == Sprk.Bff.Api.Services.Finance.FinanceBaseValues.UtilizationColumn
+            ? " Budget utilization is a PERCENT: 85 means 85 percent of the budget spent and 100 means fully spent."
+            : string.Empty;
 
     /// <summary>The optional <c>quietWindowDays</c> knob (D-13, FR-17a): absent → <see cref="DefaultQuietWindowDays"/>;
     /// otherwise an integer in 0..<see cref="MaxQuietWindowDays"/>. Re-checked here because

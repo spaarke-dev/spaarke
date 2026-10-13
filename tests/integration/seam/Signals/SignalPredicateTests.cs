@@ -213,6 +213,65 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
         PredicateCompiler.DateOnlyColumns.Should().BeEquivalentTo(live);
     }
 
+    // ── Task 025 (D-16): the Threshold rule type against the live schema ───────────────────────────────────
+
+    // Task 025b (D-122): the evaluator no longer sends the compiled stored-column comparison (it judges from the invoice and budget rows
+    // in C#), so the old live tests that ran that FetchXML against dev rows were removed; the aggregate it does send is paired with
+    // live Dataverse in FinanceBaseValuesSeamTests, which creates its own zz-025b- rows.
+
+    [Fact]
+    public async Task ThresholdColumns_AreNumericOnTheLiveSchema()
+    {
+        if (!_dv.IsLive) return;
+
+        // A threshold on a text, lookup or date column would not fail at save time, so each listed column must exist on
+        // its table and be a Decimal, Money, Double or Integer there.
+        foreach (var (entity, column) in PredicateCompiler.ThresholdColumns)
+        {
+            var attribute = await _dv.GetAttributeAsync(entity, column);
+            attribute.Should().Match<AttributeMetadata>(a =>
+                a is DecimalAttributeMetadata || a is MoneyAttributeMetadata || a is DoubleAttributeMetadata || a is IntegerAttributeMetadata,
+                $"{entity}.{column} must be a numeric column");
+
+            // Task 025b (D-122): the evaluator derives these from the invoice and budget rows BECAUSE they are plain stored columns
+            // (SourceType 0) that only FinanceRollupService writes. If one becomes a rollup or calculated column, Dataverse keeps it
+            // current and the derivation (FinanceBaseValues) must be revisited, so this fails to make that a decision, not an accident.
+            (attribute.SourceType ?? 0).Should().Be(0, $"{entity}.{column} is a plain stored column (not calculated, not rollup)");
+        }
+    }
+
+    [Fact]
+    public async Task ThresholdColumns_RangesFitTheLiveColumnMetadata_AndTheSdkReturnsTheirValuesAtTheColumnScale()
+    {
+        if (!_dv.IsLive) return;
+
+        foreach (var ((entity, column), (min, max)) in PredicateCompiler.ThresholdColumnRanges)
+        {
+            var attribute = await _dv.GetAttributeAsync(entity, column);
+            var (liveMin, liveMax, precision) = attribute switch
+            {
+                DecimalAttributeMetadata d => ((decimal?)d.MinValue, (decimal?)d.MaxValue, (int?)d.Precision),
+                MoneyAttributeMetadata m => ((decimal?)m.MinValue, (decimal?)m.MaxValue, m.Precision),
+                _ => throw new InvalidOperationException($"{entity}.{column} is {attribute.GetType().Name}, not a numeric column"),
+            };
+            _out.WriteLine($"{entity}.{column}: {attribute.GetType().Name} live min {liveMin} max {liveMax} precision {precision}; compiler range {min} to {max}");
+
+            // The compiler may be narrower than the column, never wider (a wider range would let a value through that Dataverse rejects).
+            min.Should().BeGreaterThanOrEqualTo(liveMin!.Value, $"{entity}.{column} lower bound");
+            max.Should().BeLessThanOrEqualTo(liveMax!.Value, $"{entity}.{column} upper bound");
+
+            // How the SDK hands the value back (scale), for SignalWriter.FormatFactValue.
+            var rows = await _dv.RunFetchRowsAsync(
+                $"<fetch top=\"5\"><entity name=\"{entity}\"><attribute name=\"{column}\" /><filter><condition attribute=\"{column}\" operator=\"not-null\" /></filter></entity></fetch>");
+            foreach (var value in rows.Select(r => r[column]))
+            {
+                var number = value is Money money ? money.Value : (decimal)value;
+                var scale = (decimal.GetBits(number)[3] >> 16) & 0xFF;
+                _out.WriteLine($"  {column} returned as {value.GetType().Name} {number.ToString(System.Globalization.CultureInfo.InvariantCulture)} (scale {scale})");
+            }
+        }
+    }
+
     private static string FixturePath(string name)
     {
         var dir = new DirectoryInfo(System.AppContext.BaseDirectory);
@@ -343,6 +402,10 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
                 """<fetch aggregate="true"><entity name="sprk_matter"><attribute name="sprk_matterid" alias="n" aggregate="count" /></entity></fetch>"""));
             return (int)((AliasedValue)result.Entities[0]["n"]).Value;
         }
+
+        /// <summary>The raw rows of a hand-written query, for reading column values as the SDK returns them.</summary>
+        public async Task<IReadOnlyList<Entity>> RunFetchRowsAsync(string fetchXml) =>
+            (await _client!.RetrieveMultipleAsync(new FetchExpression(fetchXml))).Entities.ToList();
 
         public async Task<Guid> WhoAmIAsync() =>
             ((WhoAmIResponse)await _client!.ExecuteAsync(new WhoAmIRequest())).UserId;

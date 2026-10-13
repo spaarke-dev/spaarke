@@ -232,14 +232,14 @@ public sealed class PolicyVersionValidator
                     "(design.md CM-7); adding a type is a code change with review, not a data value."), null);
             }
 
-            if (ruleType != RuleType.Existence)
+            if (ruleType == RuleType.Switch)
             {
-                // Threshold/Switch: closed-set members but no schema authored yet (task 020 scope). Fail
-                // closed rather than call RuleBodySchemaValidator.Validate and let its NotSupportedException
-                // (by design, for this known-but-unimplemented case) propagate.
+                // Switch is a closed-set member that D-16 defers: no schema, no compiler. Fail closed rather than
+                // call RuleBodySchemaValidator.Validate and let its NotSupportedException (by design, for this
+                // known-but-unimplemented case) propagate. Existence and Threshold (task 025) are the shipped types.
                 return (PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.RuleTypeUnsupported,
-                    $"sprk_ruletype '{ruleType}' has no schema authored yet, so its sprk_rulebody cannot be " +
-                    "validated (task 020 scope: Existence only)."), null);
+                    $"sprk_ruletype '{ruleType}' is not supported: Switch is deferred (D-16), so its sprk_rulebody " +
+                    "cannot be validated. The supported types are Existence and Threshold."), null);
             }
 
             // Finding F2: the length cap BEFORE any parse or schema evaluation, so an oversized row never holds
@@ -251,7 +251,7 @@ public sealed class PolicyVersionValidator
                     RuleBodySchemaValidator.RuleBodyTooLongMessage(ruleBodyJson.Length)), null);
             }
 
-            // ruleType is Existence here, so RuleBodySchemaValidator.Validate never throws NotSupportedException
+            // ruleType is Existence or Threshold here, so RuleBodySchemaValidator.Validate never throws NotSupportedException
             // for it -- the try/catch is defensive only, in case that contract ever changes.
             RuleBodyValidationResult schemaResult;
             try
@@ -275,7 +275,7 @@ public sealed class PolicyVersionValidator
                 // Finding F2: the schema was evaluated just above -- do not evaluate it a second time inside
                 // the compiler. This is the ONLY production caller of a PredicateCompiler.Compile* method
                 // (PredicateCompilerCallerGuardTests).
-                compiled = _compiler.CompileSchemaValidated(ruleBodyJson!, subjectId);
+                compiled = _compiler.CompileSchemaValidated(ruleBodyJson!, subjectId, ruleType);
             }
             catch (PredicateCompilationException ex)
             {

@@ -33,6 +33,10 @@ Check every other environment the repo deploys to (the environment list in the d
     <constraint source="project">Read-only inventory first: for each environment, the PlaybookBuilder web resource's modifiedon, size and whether its bundle contains canvas-save code; whether PlaybookBuilderHost is on any form. Record in notes/deploy-log.md. Removing PlaybookBuilderHost: only if no form, view or app references it (dependency check), and from source too if nothing uses it. Never use --no-verify or bare git stash. You cannot write .claude/. No parking.</constraint>
   </constraints>
 
+  <steps mode="directional">
+    <step order="1">Not executed: this task was cancelled; see the completion note for the owner decision. Steps are written when the task is picked up.</step>
+  </steps>
+
   <acceptance-criteria>
     <criterion testable="true">Every environment's PlaybookBuilder bundle contains no canvas-save or node-delete code (before and after recorded).</criterion>
     <criterion testable="true">PlaybookBuilderHost removed (dependency check recorded) or every remaining copy proven unreachable.</criterion>

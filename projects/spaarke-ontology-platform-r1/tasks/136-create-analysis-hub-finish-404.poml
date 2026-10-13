@@ -31,6 +31,10 @@ Tasks 056/111/112/113 moved wizards into the standard modal and the in-app host 
     <constraint source="project">Investigate first: reproduce from the code path (and read-only App Insights / Dataverse reads for 2026-10-08 around 14:00-14:15Z) before changing anything. Record the root cause with evidence in notes/task-136-create-analysis-404.md. Fix the cause, not the message. Check every entry point that opens the same wizard (hub, matter, project, document, ribbon) for the same fault and fix or prove each. If an analysis created without a filing parent is a legitimate case, the server must accept it; if it is not, the wizard must require a parent before Finish. Choose based on the existing contract and say which. A test fails on the old code. Own worktree off origin/master, own PR, do not merge. No dev data writes beyond creating one test analysis through the fixed UI path after deploy approval. BFF hygiene per root CLAUDE.md section 10. Never use --no-verify or bare git stash. You cannot write .claude/. No parking.</constraint>
   </constraints>
 
+  <steps mode="directional">
+    <step order="1">Not executed: this task was deferred under D-106 (ontology critical path only); the self-contained pickup context is the ontology-deferred GitHub issue for this task. Steps are written when the task is picked up.</step>
+  </steps>
+
   <acceptance-criteria>
     <criterion testable="true">Root cause recorded with evidence (code path plus telemetry or a reproduction).</criterion>
     <criterion testable="true">Create Analysis from the hub completes (unit or integration test fails on the old code and passes on the new).</criterion>
