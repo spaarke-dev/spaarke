@@ -25,8 +25,14 @@ public class ContactBindingDecisionTests
     private static BindingRequest Workforce(BindingEligibility e = BindingEligibility.EmailBindAndCreate, Guid? oid = null)
         => new(BindingPlane.WorkforceToken, oid ?? Caller, Email, e, "sdap.access.deny.workforce_guest");
 
-    private static BindingRequest Ciam(string? email = Email)
-        => new(BindingPlane.CiamToken, Caller, email, BindingEligibility.EmailBindOnly);
+    private static BindingRequest Ciam(string? email = Email, string? code = null)
+        => new(BindingPlane.CiamToken, Caller, email, BindingEligibility.EmailBindOnly) { InviteCode = code };
+
+    // Task 185: ContactA's current invite (its code goes in the email; only the stored value is on the contact).
+    private static readonly (string Code, string StoredValue) InviteA = InviteCode.Create(ContactA);
+
+    private static readonly BindingDecision BindsAndConsumes =
+        new(BindingAction.BindByEmail, ContactA) { ConsumeInviteCode = true };
 
     private static BindingRequest SystemUser(bool guest = false)
         => new(BindingPlane.SystemUser, Caller, Email,
@@ -282,28 +288,34 @@ public class ContactBindingDecisionTests
 
     [Fact]
     public void E11_ExactlyOneActiveUnboundUnlinkedMatch_BindsByEmail()
-        // Task 184: on the CIAM plane this bind now also needs this environment's intent (here an active grant). The
-        // workforce form of this row is E11_TheWorkforceAndSystemUserPlanes_BindWithoutAnyIntent, unchanged.
-        => ContactBindingDecision.Decide(Ciam(), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of(),
-                Intent(grant: true))
-            .Should().Be(new BindingDecision(BindingAction.BindByEmail, ContactA));
+        // Task 184: on the CIAM plane this bind also needs this environment's intent; task 185: a pending invite AND its
+        // code. The workforce form of this row is E11_TheWorkforceAndSystemUserPlanes_BindWithoutAnyIntent, unchanged.
+        => ContactBindingDecision.Decide(Ciam(code: InviteA.Code), NoRows, ContactLookup.Of(Unbound(ContactA)),
+                ReferenceLookup.Of(), Intent(invitedOn: Now, hash: InviteA.StoredValue))
+            .Should().Be(BindsAndConsumes);
 
     // ── E11 intent gate (task 184, owner round 96): the CIAM plane binds only on THIS environment's intent ─────
 
     private static BindIntentLookup Intent(
         bool grant = false, DateTimeOffset? invitedOn = null, LookupStatus grantStatus = LookupStatus.Read,
-        LookupStatus inviteStatus = LookupStatus.Read, Guid? contact = null, DateTimeOffset? asOf = null)
-        => new(contact ?? ContactA, grantStatus, grant, inviteStatus, invitedOn) { AsOf = asOf ?? Now };
+        LookupStatus inviteStatus = LookupStatus.Read, Guid? contact = null, DateTimeOffset? asOf = null,
+        string? hash = null)
+        => new(contact ?? ContactA, grantStatus, grant, inviteStatus, invitedOn) { AsOf = asOf ?? Now, InviteCodeHash = hash };
 
-    private static BindingDecision CiamE11(BindIntentLookup? intent)
-        => ContactBindingDecision.Decide(Ciam(), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of(), intent);
+    /// <summary>ContactA's current invite: a marker at <paramref name="invitedOn"/> (default now) and its stored hash.</summary>
+    private static BindIntentLookup Invited(DateTimeOffset? invitedOn = null, bool grant = false)
+        => Intent(grant: grant, invitedOn: invitedOn ?? Now, hash: InviteA.StoredValue);
+
+    private static BindingDecision CiamE11(BindIntentLookup? intent, string? code = null)
+        => ContactBindingDecision.Decide(Ciam(code: code), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of(),
+            intent);
 
     // ── The marker's 30-day window and its clock-skew tolerance (owner round 97) ─────────────────────────────
 
     /// <summary>
     /// A marker counts while it is at most 30 days old (exactly 30 days binds) and at most 5 minutes in the future (exactly
-    /// 5 minutes binds). Older, or later than the skew, it is "no invite evidence": with no grant the deny is
-    /// <c>contact_not_invited</c>, never a fault, and nothing is flagged.
+    /// 5 minutes binds). Older, or later than the skew, it is "no invite evidence": even with the right code (task 185) the
+    /// deny is <c>contact_not_invited</c>, never a fault, and nothing is flagged.
     /// MUTATION PROOFS: dropping the window fails <c>30d+1s</c> and <c>expired-a-year</c>; <c>&lt;=</c> to <c>&lt;</c> at
     /// the boundary fails <c>exactly-30d</c>; flipping the age comparison fails <c>fresh</c> and <c>exactly-30d</c>; ignoring
     /// the future check fails <c>skew+1s</c> and <c>far-future</c>.
@@ -320,11 +332,11 @@ public class ContactBindingDecisionTests
     [InlineData("far-future", 10 * 86_400, false)]
     public void E11_Ciam_AMarker_CountsOnlyWithinItsWindow(string label, int offsetSeconds, bool binds)
     {
-        var decision = CiamE11(Intent(invitedOn: Now.AddSeconds(offsetSeconds)));
+        var decision = CiamE11(Invited(Now.AddSeconds(offsetSeconds)), InviteA.Code);
 
         if (binds)
         {
-            decision.Should().Be(new BindingDecision(BindingAction.BindByEmail, ContactA), label);
+            decision.Should().Be(BindsAndConsumes, label);
         }
         else
         {
@@ -335,18 +347,27 @@ public class ContactBindingDecisionTests
         }
     }
 
+    /// <summary>
+    /// Task 185 (owner round 98, option (c); design §6): a grant no longer binds, so it does not extend a code past its
+    /// marker's 30 days. Before 185 this test was <c>..._WithAnActiveGrant_BindsThroughTheGrant</c>.
+    /// </summary>
     [Fact]
-    public void E11_Ciam_AnExpiredMarker_WithAnActiveGrant_BindsThroughTheGrant()
-        => CiamE11(Intent(grant: true, invitedOn: Now.AddDays(-90))).Action.Should().Be(BindingAction.BindByEmail);
+    public void E11_Ciam_AnExpiredMarker_WithAnActiveGrant_AndTheRightCode_IsDenied_AGrantDoesNotExtendACode()
+        => CiamE11(Invited(Now.AddDays(-90), grant: true), InviteA.Code)
+            .DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
 
+    /// <summary>Task 185 (design §6): before 185 this was <c>..._WithAnActiveGrant_StillBindsThroughTheGrant</c>.</summary>
     [Fact]
-    public void E11_Ciam_AFarFutureMarker_WithAnActiveGrant_StillBindsThroughTheGrant()
-        => CiamE11(Intent(grant: true, invitedOn: Now.AddYears(5))).Action.Should().Be(BindingAction.BindByEmail);
+    public void E11_Ciam_AFarFutureMarker_WithAnActiveGrant_AndTheRightCode_IsDenied()
+        => CiamE11(Invited(Now.AddYears(5), grant: true), InviteA.Code)
+            .DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
 
     [Fact]
     public void E11_Ciam_ALookupWithNoDecisionTime_CountsNoMarker()
-        // Fail closed: a caller that forgets to stamp AsOf sees every marker as far-future, never as current.
-        => CiamE11(new BindIntentLookup(ContactA, LookupStatus.Read, false, LookupStatus.Read, Now))
+        // Fail closed: a caller that forgets to stamp AsOf sees every marker as far-future, never as current, even with the
+        // right code.
+        => CiamE11(new BindIntentLookup(ContactA, LookupStatus.Read, false, LookupStatus.Read, Now)
+                { InviteCodeHash = InviteA.StoredValue }, InviteA.Code)
             .DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
 
     [Fact]
@@ -360,13 +381,110 @@ public class ContactBindingDecisionTests
     public void E11_Ciam_AsksForTheIntent_BeforeItBinds()
         => CiamE11(intent: null).Should().Be(new BindingDecision(BindingAction.NeedIntentLookup, ContactA));
 
+    /// <summary>
+    /// Task 185 (owner round 98, option (c); design §6): a grant with no invite is no bind evidence, with or without a code.
+    /// Before 185 this test was <c>E11_Ciam_AnActiveGrantHere_Binds</c>.
+    /// </summary>
     [Fact]
-    public void E11_Ciam_AnActiveGrantHere_Binds()
-        => CiamE11(Intent(grant: true)).Action.Should().Be(BindingAction.BindByEmail);
+    public void E11_Ciam_AnActiveGrantHere_WithNoMarker_IsDeniedNotInvited()
+    {
+        CiamE11(Intent(grant: true)).Should()
+            .Be(new BindingDecision(BindingAction.Deny, DenyCode: ContactBindingDecision.DenyContactNotInvited));
+        CiamE11(Intent(grant: true, hash: InviteA.StoredValue), InviteA.Code).DenyCode
+            .Should().Be(ContactBindingDecision.DenyContactNotInvited, "a code without a current marker never binds");
+    }
 
     [Fact]
     public void E11_Ciam_APendingInviteHere_Binds()
-        => CiamE11(Intent(invitedOn: Now)).Action.Should().Be(BindingAction.BindByEmail);
+        => CiamE11(Invited(), InviteA.Code).Should().Be(BindsAndConsumes);
+
+    // ── Task 185 (owner round 98): the marker leg requires the invite code ──────────────────────────────────────
+    // MUTATION PROOF (i): InviteCode.Matches dropped from DecideIntent fails every "denied" test in this block.
+
+    [Fact]
+    public void E11_Ciam_APendingInvite_WithNoCode_IsDeniedNotInvited_AndFlagsNothing()
+    {
+        // AC1: a squatted CIAM account carrying the invitee's email presents no code.
+        var decision = CiamE11(Invited(), code: null);
+
+        decision.Should().Be(new BindingDecision(BindingAction.Deny, DenyCode: ContactBindingDecision.DenyContactNotInvited));
+        decision.FlagContactIds.Should().BeNull();
+    }
+
+    [Fact]
+    public void E11_Ciam_APendingInvite_WithAWrongCode_IsDeniedNotInvited()
+        => CiamE11(Invited(), InviteCode.Create(ContactA).Code).DenyCode
+            .Should().Be(ContactBindingDecision.DenyContactNotInvited);
+
+    [Fact]
+    public void E11_Ciam_ACodeHashedForAnotherContact_IsDeniedNotInvited()
+    {
+        // ContactB's invite stored on ContactA: the contact id is in the hash input, so one code opens one contact.
+        var invitedB = InviteCode.Create(ContactB);
+
+        CiamE11(Intent(invitedOn: Now, hash: invitedB.StoredValue), invitedB.Code).DenyCode
+            .Should().Be(ContactBindingDecision.DenyContactNotInvited);
+    }
+
+    [Fact]
+    public void E11_Ciam_ASupersededCode_IsDenied_TheReInvitesCodeBinds()
+    {
+        // A re-invite overwrote the marker and the hash; the earlier email's code is presented.
+        var superseded = InviteCode.Create(ContactA);
+        var reInvite = InviteCode.Create(ContactA);
+        var intent = Intent(invitedOn: Now, hash: reInvite.StoredValue);
+
+        CiamE11(intent, superseded.Code).DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        CiamE11(intent, reInvite.Code).Should().Be(BindsAndConsumes);
+    }
+
+    [Fact]
+    public void E11_Ciam_AnExpiredMarker_WithTheRightCode_IsDeniedNotInvited()
+        // MUTATION PROOF (iii): IsInviteMarkerCurrent dropped from DecideIntent fails this test (and the window theory).
+        => CiamE11(Invited(Now - ContactBindingDecision.InviteMarkerWindow - TimeSpan.FromSeconds(1)), InviteA.Code)
+            .DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+
+    [Fact]
+    public void E11_Ciam_TheRightCode_UnderAMarkerFromTheFutureBeyondTheSkew_IsDeniedNotInvited()
+        => CiamE11(Invited(Now + ContactBindingDecision.InviteMarkerClockSkew + TimeSpan.FromSeconds(1)), InviteA.Code)
+            .DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+
+    [Fact]
+    public void E11_Ciam_AMarkerWithNoStoredHash_APre185Invite_IsDeniedNotInvited()
+        => CiamE11(Intent(invitedOn: Now, hash: null), InviteA.Code).DenyCode
+            .Should().Be(ContactBindingDecision.DenyContactNotInvited);
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-code")]
+    [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")]
+    public void E11_Ciam_AMalformedPresentedCode_IsDeniedNotInvited(string presented)
+        => CiamE11(Invited(), presented).DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("v2.not-a-hash")]
+    [InlineData("v1.")]
+    public void E11_Ciam_AMalformedStoredHash_IsDeniedNotInvited(string storedValue)
+        => CiamE11(Intent(invitedOn: Now, hash: storedValue), InviteA.Code).DenyCode
+            .Should().Be(ContactBindingDecision.DenyContactNotInvited);
+
+    [Fact]
+    public void E11_Ciam_ATruncatedOrVersionChangedStoredHash_IsDeniedNotInvited()
+    {
+        CiamE11(Intent(invitedOn: Now, hash: InviteA.StoredValue[..^1]), InviteA.Code).DenyCode
+            .Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        CiamE11(Intent(invitedOn: Now, hash: "v2" + InviteA.StoredValue[2..]), InviteA.Code).DenyCode
+            .Should().Be(ContactBindingDecision.DenyContactNotInvited);
+    }
+
+    [Fact]
+    public void TheCodeAndTheHash_AreNeverPrintedByTheRecords()
+    {
+        // Never log a code or a hash (CLAUDE.md §9): the compiler-generated ToString of either record leaves them out.
+        Ciam(code: InviteA.Code).ToString().Should().NotContain(InviteA.Code);
+        Invited().ToString().Should().NotContain(InviteA.StoredValue);
+    }
 
     [Fact]
     public void E11_Ciam_NoGrantAndNoInvite_IsDeniedNotInvited_AndFlagsNothing()
@@ -378,32 +496,37 @@ public class ContactBindingDecisionTests
         decision.FlagContactIds.Should().BeNull("no other person is involved, so there is no collision to flag");
     }
 
-    [Theory]
-    [InlineData(LookupStatus.Failed, LookupStatus.Read, true)]     // the grant read faulted (and the marker says invited)
-    [InlineData(LookupStatus.ColumnMissing, LookupStatus.Read, true)]
-    [InlineData(LookupStatus.Read, LookupStatus.Failed, false)]     // the marker read faulted (and a grant exists)
-    public void E11_Ciam_AFaultedIntentRead_NeverBinds_EvenWhenTheOtherLegShowsIntent(
-        LookupStatus grantStatus, LookupStatus inviteStatus, bool invited)
+    /// <summary>
+    /// A marker read that faulted never binds, even with the right code and a grant. Task 185 (design §6): the grant-fault
+    /// rows were removed with the grant leg (no grant is consulted); the marker-fault case stays.
+    /// </summary>
+    [Fact]
+    public void E11_Ciam_AFaultedIntentRead_NeverBinds_EvenWhenTheOtherLegShowsIntent()
     {
         // MUTATION (treat a fault as intent): this test fails.
-        var decision = CiamE11(Intent(grant: !invited, invitedOn: invited ? Now : null, grantStatus: grantStatus,
-            inviteStatus: inviteStatus));
+        var decision = CiamE11(Intent(grant: true, invitedOn: Now, inviteStatus: LookupStatus.Failed,
+            hash: InviteA.StoredValue), InviteA.Code);
 
         decision.Action.Should().Be(BindingAction.Deny);
         decision.DenyCode.Should().Be(ContactBindingDecision.DenyContactLookupFailed);
     }
 
+    /// <summary>
+    /// A marker column not provisioned yet is no invite evidence, and (task 185, design §6) no grant decides instead.
+    /// Before 185 this test was <c>..._AndTheGrantLegStillDecides</c>.
+    /// </summary>
     [Fact]
-    public void E11_Ciam_AMarkerColumnNotProvisionedYet_IsNoInviteEvidence_AndTheGrantLegStillDecides()
+    public void E11_Ciam_AMarkerColumnNotProvisionedYet_IsNoInviteEvidence_EvenWithAGrant()
     {
-        // The marker is read in its own query so a BFF deployed before the schema keeps the grant evidence (task 184).
-        CiamE11(Intent(grant: true, inviteStatus: LookupStatus.ColumnMissing)).Action.Should().Be(BindingAction.BindByEmail);
+        CiamE11(Intent(grant: true, inviteStatus: LookupStatus.ColumnMissing), InviteA.Code).DenyCode
+            .Should().Be(ContactBindingDecision.DenyContactNotInvited);
         CiamE11(Intent(inviteStatus: LookupStatus.ColumnMissing)).DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
     }
 
     [Fact]
     public void E11_Ciam_IntentReadForAnotherContact_IsNeverUsed()
-        => CiamE11(Intent(grant: true, contact: ContactB)).DenyCode.Should().Be(ContactBindingDecision.DenyContactLookupFailed);
+        => CiamE11(Intent(invitedOn: Now, contact: ContactB, hash: InviteA.StoredValue), InviteA.Code).DenyCode
+            .Should().Be(ContactBindingDecision.DenyContactLookupFailed);
 
     [Theory]
     [InlineData(BindingPlane.WorkforceToken)]
@@ -418,6 +541,24 @@ public class ContactBindingDecisionTests
         ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of()).Action.Should().Be(BindingAction.BindByEmail);
         ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), Intent()).Action
             .Should().Be(BindingAction.BindByEmail);
+    }
+
+    [Theory]
+    [InlineData(BindingPlane.WorkforceToken)]
+    [InlineData(BindingPlane.SystemUser)]
+    public void E11_TheNonCiamPlanes_BypassTheCodeCheck_AndNeverConsumeACode(BindingPlane plane)
+    {
+        // Task 185 changes nothing outside the CIAM block (owner round 98, R3's request): a presented code, a wrong code or
+        // none changes nothing on these planes, and their bind never asks the binder to consume a code.
+        var rows = ContactLookup.Of(Unbound(ContactA));
+        var plain = new BindingDecision(BindingAction.BindByEmail, ContactA);
+
+        foreach (var code in new[] { null, InviteA.Code, InviteCode.Create(ContactA).Code })
+        {
+            var request = new BindingRequest(plane, Caller, Email, BindingEligibility.EmailBindAndCreate) { InviteCode = code };
+            ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of()).Should().Be(plain);
+            ContactBindingDecision.Decide(request, NoRows, rows, ReferenceLookup.Of(), Invited()).Should().Be(plain);
+        }
     }
 
     [Fact]

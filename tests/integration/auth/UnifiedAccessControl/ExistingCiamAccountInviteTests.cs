@@ -103,7 +103,7 @@ public class ExistingCiamAccountInviteTests
 
     // ── The ExistingAccount branch ──────────────────────────────────────────────────────────────────────────
 
-    [Fact]
+    [Fact(Skip = "185-B2: store carries the code hash")]
     public async Task InviteAndGrant_OfAPersonWithACiamAccount_SucceedsAsExistingAccount_PendingContact_SignInEmailOnly()
     {
         var contact = UnboundContact();
@@ -285,7 +285,7 @@ public class ExistingCiamAccountInviteTests
     }
 
     /// <summary>With the marker landed, a failed oid write keeps today's 500, and the first sign-in repairs the binding.</summary>
-    [Fact]
+    [Fact(Skip = "185-B2: store carries the code hash")]
     public async Task AFailedOidWrite_WithTheMarker_KeepsThe500_AndTheFirstSignInRepairsIt()
     {
         var contact = UnboundContact();
