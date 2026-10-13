@@ -85,7 +85,15 @@ public static class SignalsModule
         services.AddScoped<IDecisionActionExecutor, AddTodoExecutor>();
         services.AddScoped<IDecisionActionExecutor, CreateEventExecutor>();
         services.AddScoped<IDecisionActionExecutor, SendEmailExecutor>();
+        // Task 043: the last two catalog actions (Assign Work through the 046 create; the inquiry adapting 070).
+        services.AddScoped<IDecisionActionExecutor, AssignWorkExecutor>();
+        services.AddScoped<IDecisionActionExecutor, BudgetInquiryActionExecutor>();
         services.AddScoped<DecisionActionExecutors>();
+        // Task 043: the decision commit route's service and its after-record step (032 trigger, 034 suppression).
+        services.AddScoped<DecisionCommitFollowUps>();
+        services.AddScoped<DecisionCommitService>();
+        // Task 043 (K4): the server-side plan-read time the commit route uses as the review start (ITenantCache, a singleton).
+        services.AddSingleton<DecisionPlanReadStamp>();
 
         // RuleBodyDescriber (task 026, FR-48): the read-side plain-language description of a rule body. Stateless over the
         // compiler and the shared sysadmin entity service, both singletons.

@@ -19,8 +19,8 @@ namespace Sprk.Bff.Api.Services.Signals.Actions;
 // =====================================================================================================================
 // The decision action executors (ontology platform R1 task 044; spec FR-52, FR-61; D-18, D-19, D-27, D-29, D-54, D-55).
 //
-// One executor per catalog action that the commit route (task 043) calls, except send-budget-inquiry (task 070) and
-// assign-work (task 046). They are INTERNAL SERVICES, not routes. Each one:
+// One executor per catalog action that the commit route (task 043) calls; send-budget-inquiry adapts task 070's executor and
+// assign-work goes through task 046's create (both registered by task 043). They are INTERNAL SERVICES, not routes. Each one:
 //   * refuses BEFORE it writes when the signed-in caller lacks the right (the outcome is Refused and nothing was written);
 //   * performs exactly its write, through the shipped core for that table, as the caller;
 //   * returns the written record ids so the commit route can list them in the Decision Record's steps and follow-ons.
@@ -150,10 +150,6 @@ public interface IDecisionActionExecutor
 /// </summary>
 public sealed class DecisionActionExecutors
 {
-    /// <summary>The catalog actions whose executor is another task's: the inquiry (070) and Assign Work (046, D-21).</summary>
-    public static readonly IReadOnlySet<string> OwnedElsewhere =
-        new HashSet<string>(StringComparer.Ordinal) { "send-budget-inquiry", "assign-work" };
-
     private readonly Dictionary<string, IDecisionActionExecutor> _byCode = new(StringComparer.Ordinal);
 
     public DecisionActionExecutors(IEnumerable<IDecisionActionExecutor> executors)
@@ -184,9 +180,10 @@ public sealed class DecisionActionExecutors
         return false;
     }
 
-    /// <summary>Catalog codes this task owns that have no executor registered: empty when the set is complete.</summary>
+    /// <summary>Catalog codes with no executor registered: empty when the set is complete. Task 043 registered the last two (the
+    /// inquiry adapter and Assign Work), so every catalog action has one.</summary>
     public IReadOnlyList<string> MissingCodes() =>
-        DecisionActionCatalog.All.Select(a => a.Code).Where(c => !OwnedElsewhere.Contains(c) && !_byCode.ContainsKey(c)).ToList();
+        DecisionActionCatalog.All.Select(a => a.Code).Where(c => !_byCode.ContainsKey(c)).ToList();
 }
 
 /// <summary>Shared parsing and rights helpers; no executor re-implements either.</summary>
@@ -1154,5 +1151,157 @@ public sealed class CreateEventExecutor : ChildCreateExecutorBase
         if (request.Param("attendees") is { } attendees)
             payload["sprk_description"] = $"Attendees: {attendees}";
         return null;
+    }
+}
+
+/// <summary>
+/// <c>assign-work</c> (task 043; D-21, D-51, D-113): a <c>sprk_workassignment</c> through the ONE work-assignment create, the
+/// child-records create core task 046 proved for the wizard. uac-r2's pair rule (#1616/#1628, <c>OwnedChildWrite.PairTargetAsync</c>):
+/// on a work assignment a typed pair naming a matter or project counts only when the typed regarding lookup repeats it, so the
+/// shared base binds both (<c>sprk_regardingmatter</c> / <c>sprk_regardingproject</c> and the typed pair). A work assignment has
+/// no typed lookup to a work assignment or a service request, so under any other core record it is refused before anything is
+/// written rather than sent to a 400.
+/// </summary>
+/// <remarks>Not the wizard's whole payload: the wizard's business-unit search-index cascade is client-side (046 note, defer
+/// F-60), so a decision-created work assignment carries the columns below and the regarding filing only.</remarks>
+public sealed class AssignWorkExecutor : ChildCreateExecutorBase
+{
+    /// <summary>Create on <c>sprk_workassignment</c> (live privilege name, spaarkedev1 2026-10-11).</summary>
+    internal const string CreateWorkAssignmentPrivilege = "prvCreatesprk_WorkAssignment";
+
+    private const int NameMaxLength = 200;
+
+    public AssignWorkExecutor(CallerRecordAccessProbe probe, DecisionRouteCores cores, IGenericEntityService entities)
+        : base(probe, cores, entities)
+    {
+    }
+
+    public override string Code => "assign-work";
+
+    protected override string Table => "sprk_workassignment";
+
+    protected override string CreatePrivilege => CreateWorkAssignmentPrivilege;
+
+    protected override Guid? AssigneeContact(DecisionActionRequest request) =>
+        DecisionExec.TryGuid(request.Param("assignee"), out var id) ? id : null;
+
+    protected override DecisionActionOutcome? BuildColumns(DecisionActionRequest request, IDictionary<string, object?> payload)
+    {
+        if (request.Core is not { Entity: "sprk_matter" or "sprk_project" })
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.SubjectUnsupported,
+                "Work can only be assigned under a matter or a project.");
+        if (!DecisionExec.TryGuid(request.Param("assignee"), out var assignee))
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Pick who the work is for.");
+        if (request.Param("description") is not { } description)
+            return DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "Say what is to be done.");
+
+        var firstLine = description.Split('\n', 2)[0].Trim();
+        payload["sprk_name"] = firstLine.Length > NameMaxLength ? firstLine[..(NameMaxLength - 3)] + "..." : firstLine;
+        payload["sprk_description"] = description;
+        payload["sprk_assignedtointernal@odata.bind"] = $"/contacts({assignee:D})";
+        return null;
+    }
+}
+
+/// <summary>
+/// <c>send-budget-inquiry</c> as a decision action (task 043): 070's <see cref="BudgetInquiryExecutor"/> ADAPTED, not re-shaped
+/// (#1512/#1515 reviews). Its preflight is the inquiry's own (<see cref="BudgetInquiryExecutor.PreflightAsync"/>: WhoAmI, Create
+/// and AppendTo as the caller, the secure-matter decision; no write). Outcomes: Sent is Done (the service request and the
+/// communication); NotConfirmed, Invalid and Refused are Refused; CreateFailed is Failed with nothing written; SendFailed is
+/// Failed with the service request written.
+/// </summary>
+public sealed class BudgetInquiryActionExecutor : IDecisionActionExecutor
+{
+    private static readonly char[] RecipientSeparators = [';', ',', ' ', '\n', '\r', '\t'];
+
+    private readonly BudgetInquiryExecutor _inquiry;
+    private readonly ILogger? _logger;
+
+    public BudgetInquiryActionExecutor(BudgetInquiryExecutor inquiry, ILogger<BudgetInquiryActionExecutor>? logger = null)
+    {
+        _inquiry = inquiry ?? throw new ArgumentNullException(nameof(inquiry));
+        _logger = logger;
+    }
+
+    public string Code => BudgetInquiryExecutor.ActionCode;
+
+    public async Task<DecisionActionOutcome?> PreflightAsync(DecisionActionRequest request, CancellationToken ct)
+    {
+        var (inquiry, refusal) = Map(request);
+        if (refusal is not null || inquiry is null)
+            return refusal;
+        return await _inquiry.PreflightAsync(inquiry, ct).ConfigureAwait(false) is { } refused ? ToOutcome(refused, _logger) : null;
+    }
+
+    public async Task<DecisionActionOutcome> ExecuteAsync(DecisionActionRequest request, CancellationToken ct)
+    {
+        var (inquiry, refusal) = Map(request);
+        if (refusal is not null || inquiry is null)
+            return refusal ?? DecisionActionOutcome.Refused(Code, DecisionActionReasons.InvalidParameter, "The inquiry could not be prepared.");
+        return ToOutcome(await _inquiry.ExecuteAsync(inquiry, ct).ConfigureAwait(false), _logger);
+    }
+
+    /// <summary>The inquiry request for a decision action. <c>Confirmed</c> is true because the commit route runs an executor only
+    /// for a review the wizard's Confirm step confirmed (D-52); the route refuses an unconfirmed review before any executor runs.</summary>
+    internal static (BudgetInquiryRequest? Request, DecisionActionOutcome? Refusal) Map(DecisionActionRequest request)
+    {
+        const string code = BudgetInquiryExecutor.ActionCode;
+        if (request.MatterId is not { } matterId || matterId == Guid.Empty)
+            return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.SubjectUnsupported, "This item has no matter to send a budget inquiry about."));
+
+        var to = (request.Param("to") ?? string.Empty)
+            .Split(RecipientSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (to.Count == 0)
+            return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.RecipientUnresolved, "There is no recipient to send the inquiry to."));
+        if (request.Param("subject") is not { } subject)
+            return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidParameter, "Give the inquiry a subject."));
+        if (request.Param("body") is not { } body)
+            return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidParameter, "Write the inquiry."));
+
+        Guid? firm = null;
+        if (request.Param("outsideFirm") is { } firmText)
+        {
+            if (!DecisionExec.TryGuid(firmText, out var firmId))
+                return (null, DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidParameter, "Pick the outside firm the inquiry is to."));
+            firm = firmId;
+        }
+
+        return (new BudgetInquiryRequest(matterId, to, subject, body, Confirmed: true, firm), null);
+    }
+
+    /// <summary>070's outcome as a decision-action outcome (the mapping the #1512/#1515 reviews fixed).</summary>
+    /// <remarks>uac-r2 K4 on #1665: 070's <see cref="BudgetInquiryResult.Error"/> can carry Dataverse's own error text (a client
+    /// failure, an ownership or plan refusal). It is logged here, server-side only; the caller gets a fixed message per outcome
+    /// with the refusal code.</remarks>
+    internal static DecisionActionOutcome ToOutcome(BudgetInquiryResult result, ILogger? logger = null)
+    {
+        const string code = BudgetInquiryExecutor.ActionCode;
+        if (result.Outcome != BudgetInquiryOutcome.Sent && !string.IsNullOrEmpty(result.Error))
+            logger?.LogWarning("Decision commit: the budget inquiry ended {Outcome}: {InquiryError}", result.Outcome, result.Error);
+        switch (result.Outcome)
+        {
+            case BudgetInquiryOutcome.Sent:
+                var written = new List<DecisionRecordRef>();
+                if (result.ServiceRequestId is { } request) written.Add(new DecisionRecordRef(BudgetInquiryExecutor.Table, request));
+                if (result.CommunicationId is { } communication) written.Add(new DecisionRecordRef("sprk_communication", communication));
+                return DecisionActionOutcome.Done(code, [.. written]);
+            case BudgetInquiryOutcome.NotConfirmed or BudgetInquiryOutcome.Invalid:
+                return DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidParameter,
+                    Fixed("The inquiry is not complete; nothing was created or sent.", DecisionActionReasons.InvalidParameter));
+            case BudgetInquiryOutcome.Refused:
+                return DecisionActionOutcome.Refused(code, DecisionActionReasons.InvalidState,
+                    Fixed("The inquiry cannot be sent from here; nothing was created or sent.", DecisionActionReasons.InvalidState));
+            case BudgetInquiryOutcome.SendFailed:
+                return DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed,
+                    Fixed("The service request was created but the email was not sent.", DecisionActionReasons.WriteFailed),
+                    written: result.ServiceRequestId is { } created ? [new DecisionRecordRef(BudgetInquiryExecutor.Table, created)] : null);
+            default:
+                return DecisionActionOutcome.Failed(code, DecisionActionReasons.WriteFailed,
+                    Fixed("The inquiry could not be created; nothing was sent.", DecisionActionReasons.WriteFailed));
+        }
+
+        static string Fixed(string message, string reasonCode) => $"{message} ({reasonCode})";
     }
 }

@@ -4,7 +4,7 @@
     <title>The decision commit route: one review, record last, idempotent</title>
     <phase>4b Commit and actions</phase>
     <gate>040, 036, 044, 046, 070 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>The one route that turns a human decision into effects in the world and an append-only record; partial failure and authorization are the hard parts.</rigor-reason>
     <model-tier>opus</model-tier>

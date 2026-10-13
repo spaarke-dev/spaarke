@@ -18,7 +18,6 @@
 
 | Lane | PR | State | Next |
 |---|---|---|---|
-| **043** D-129/D-130 ownership, D-35 read | #1665, head `85f430366` | Our pass + fix round done. **UAC verdict APPROVE, held only for Q23.** N1 (two-wall refusal) scoped to task 142: PR-body note + #1778. K-a identity cache ~2 min; K-b no-core pair not cross-checked (FR-51); K-c writer AppendTo on contact → task 146 live gate. **Before merge:** merge the base (with #1780), rewrite the DR Pending reason in `RecordOwnerAssignmentCensusTests.cs` ~:246 (uac-r2 C2; PR comment posted), and fix the `DecisionCommitFollowUpsTests.cs:54` / `DecisionCommitServiceTests.cs:216` constructor args if #1746 merged first. | Merge when Q23 is answered (and Q26 for dev use). |
 | **#1661** secure suppression | #1746, head `c21e82e73` (round 2 fixes `14297d25a`, plus a base merge with #1763) | Round 2 re-checks (ours + uac-r2): every claim holds. One finding, F-T1: the job test never reaches the hit-placement fault. K8 is accepted. Fix round 3 (sonnet) is running: F-T1; the K9 cross-wall lost-lower analysis (fix it if anything reads the stale stamp that night); PR-body notes K-a, K8, K9, K10. | Merge the base (now with #1756 `b6d997b74`, plus #1780 once merged) → send uac-r2 all 3 diffs in one pass (F-T1 fix, `c21e82e73`, the 2nd base merge) → merge. |
 | **#1659** filing trigger | #1747, head `cc6b10cf5` | UAC APPROVED. | Merge when Q25 is answered. |
 
@@ -34,7 +33,7 @@ Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-d
 
 ## D-134/D-135 work
 
-- **#1665 D-134:** commit `ba9945149` + fix round `736109d24` (F1 service-request filing; F2 eligible persons only, `rootIsRestricted: null`; K2 pinned; ledger refs). Our re-check APPROVE; uac-r2 is re-checking the fix diff. Then merge the base (with #1780) + rewrite the C2 reason → merge.
+- **#1665 MERGED** `aeb9e0973` (task 043 ✅; D-134 included).
 - **Task 148** (reconciler) is written. uac-r2 provides `SecureChildReconciler.ReownOrdinaryRowAsync` in its own PR (owner sign-off; we review it).
 - **Task 147** (budget revision creator-person) starts once #1780 merges.
 
@@ -42,7 +41,7 @@ Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-d
 
 - **Q23 → D-134 (relayed by uac-r2, 2026-10-12; confirm here):** a DR on a personal To Do is owned by the Assigned To contact's user's BU default team. Edge cases 1–4 (D-134) await the owner. A code-mapper is mapping the change (contact → systemuser → resolver user path); then a #1665 follow-up commit, plus task 143 parity.
 - **Q26 (blocks #1665 on dev):** assign Spaarke Basic User (or a minimal role) to the **Dev 1 and Test 1** BU default teams only; the Secure Record team stays roleless. #1776. Facts: `C:\wts-043\...\notes\043-bu-team-read-check.md`.
-- **Q27 (blocks tasks 142 and 143 flipping to Routed):** `sprk_createdbyperson` (lookup → systemuser) is missing on three tables:
+- **Q27: CLOSED (D-135).** The owner created `sprk_createdbyperson` on budgetrevision, decisionrecord and signal, field-secured with Readers and Writers rows, in SpaarkeMaster and OntologyPlatformSolution. 142, 143 and 147 add the tables to `StampedChildTables` and the script `$Tables`, and teach the script the membership and the relationship name.
   - `sprk_budgetrevision` (#1777);
   - `sprk_decisionrecord` and `sprk_signal` (#1783).
   - A (recommended): add the column to all three in one scoped import (D-83). Writers pass `RequestedBy`; job-raised Signals leave it null, with the reason recorded in the guard. Drop 182's exemption.
