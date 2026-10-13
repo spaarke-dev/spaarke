@@ -131,7 +131,9 @@ public sealed class DecisionCommitFollowUpsTests
     public async Task SuppressionOverSignalsTheCallerCannotRead_ReachesTheCallerAsNothing_NoStatusNoCount()
     {
         // uac-r2 on 034: ApplyAsync counts every Signal of the (policy, core) grain app-only, Secure-team rows included. Here the
-        // grain holds three dismissed Signals owned by a Secure team (enough to suppress) that this caller cannot read.
+        // grain holds three dismissed team-owned Signals (enough to suppress) that this caller cannot read. This test is about
+        // non-disclosure to the caller, not the wall: it deliberately runs with no Secure team (the wall and the undetermined 503
+        // are covered in SignalSuppressionTests).
         var now = DateTime.UtcNow;
         _entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             // #1661: the Secure-team lookup (businessunit / team) is not a Signal read - it answers none, so this environment has no
