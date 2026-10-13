@@ -3,7 +3,7 @@
   <metadata>
     <title>Child-record contract T3: D-130 owner on SignalWriter, SignalSuppressionService and DecisionCommitService; no writer-MI ownership; replace the ownerid == caller read rule (audit F3, F2 code side)</title>
     <phase>4c Standard child-record contract (D-131)</phase>
-    <gate>blocked: 141 done; #1746 merged</gate>
+    <gate>blocked: 141 done; #1746 merged; D-136 narrow writer profile live on the target (147 creates it)</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Ownership and read authorization for Signals.</rigor-reason>
