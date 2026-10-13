@@ -1,6 +1,9 @@
 using System.Collections.Concurrent;
+using Azure.Core;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk.Query;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
@@ -15,7 +18,9 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 /// UAC task 183 (owner round 96, D-135) — <see cref="SecureChildReconciler.ReownOrdinaryRowAsync"/>, the one entry point
 /// ontology task 148 re-owns an ordinary Decision Record or Signal through. Driven over the REAL reconciler and one in-memory
 /// Dataverse that evaluates every query (<see cref="SecureChildShareWorld"/>), so a guard that read the wrong column or
-/// dropped a predicate re-owns a row here. Every refusal asserts NO owner write and NO eviction.
+/// dropped a predicate re-owns a row here. Every refusal asserts NO owner write and NO eviction. The owner write is the Web
+/// API's conditional PATCH (<see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>), answered by <see cref="ConditionalOwnerWebApi"/>
+/// over the same rows and their <c>versionnumber</c>.
 /// </summary>
 public class SecureChildReownOrdinaryRowTests
 {
@@ -35,11 +40,14 @@ public class SecureChildReownOrdinaryRowTests
         .Team(SecureFamilyTeam, SecureBu, "Secure Matter Owners", isDefault: false, teamType: 0);
 
     private readonly EvictionRecorder _evictions = new();
+    private readonly ConditionalOwnerWebApi _webApi;
+
+    public SecureChildReownOrdinaryRowTests() => _webApi = new ConditionalOwnerWebApi(() => _world);
 
     private SecureChildReconciler Reconciler(Mock<IGenericEntityService>? entities = null)
     {
         if (entities is null)
-            return SecureChildShareWorld.ReconcilerOver(() => _world, new FakeRecordShareTable(), webApi: null!,
+            return SecureChildShareWorld.ReconcilerOver(() => _world, new FakeRecordShareTable(), _webApi,
                 accessCacheInvalidator: _evictions);
 
         var configuration = SecureChildShareWorld.Configuration();
@@ -47,14 +55,14 @@ public class SecureChildReownOrdinaryRowTests
             entities.Object, configuration, NullLogger<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver>.Instance);
         var synchronizer = new SecureChildShareSynchronizer(entities.Object, new FakeRecordShareTable(),
             SecureChildShareWorld.NobodyWalled(), configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
-        return new SecureChildReconciler(entities.Object, resolver, synchronizer, webApi: null!, configuration,
+        return new SecureChildReconciler(entities.Object, resolver, synchronizer, _webApi, configuration,
             NullLogger<SecureChildReconciler>.Instance, _evictions);
     }
 
     private Guid TeamOwnedRow(string table, Guid team, Guid? storedBusinessUnit = null)
     {
         var id = Guid.NewGuid();
-        _world.Add(table, id, ("owningteam", new EntityReference("team", team)));
+        _world.Add(table, id, ("owningteam", new EntityReference("team", team)), ("versionnumber", 1L));
         if (storedBusinessUnit is { } bu)
             _world.Set(table, id, "owningbusinessunit", new EntityReference("businessunit", bu));
         return id;
@@ -80,6 +88,7 @@ public class SecureChildReownOrdinaryRowTests
         result.Should().Be(new OrdinaryRowReownResult(OrdinaryRowReownOutcome.Reowned, null));
         _world.OwnerOf(table, id).Should().Be(DataversePrincipalRef.Team(OtherBuTeam));
         _world.OwnerWrites.Should().ContainSingle().Which.Owner.Should().Be(DataversePrincipalRef.Team(OtherBuTeam));
+        _webApi.ConditionalWrites.Should().Equal((SecureChildLineage.Children[table].EntitySet, id, "W/\"1\""));
         _evictions.OwnerChanges.Should().Equal(
             (table, SecureChildLineage.Children[table].EntitySet, id, $"reown-ordinary-row:{table}:{id:D}"));
     }
@@ -110,6 +119,28 @@ public class SecureChildReownOrdinaryRowTests
 
         result.Outcome.Should().Be(OrdinaryRowReownOutcome.RefusedSecure);
         _world.OwnerOf("sprk_signal", id).Should().Be(DataversePrincipalRef.Team(owner));
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "183 fix F3.1a: already owned by the target team, and that team is in the Secure Record BU — RefusedSecure, not AlreadyOwned")]
+    public async Task AlreadyOwnedByASecureTeam_IsRefusedSecure_NotAlreadyOwned()
+    {
+        var id = TeamOwnedRow("sprk_decisionrecord", SecureFamilyTeam);
+
+        var result = await Reconciler().ReownOrdinaryRowAsync("sprk_decisionrecord", id, SecureFamilyTeam, CancellationToken.None);
+
+        result.Outcome.Should().Be(OrdinaryRowReownOutcome.RefusedSecure, "the Secure guard runs before the AlreadyOwned short-circuit");
+        NothingWritten();
+    }
+
+    [Fact(DisplayName = "183 fix F3.1b: already owned by the target team, with the row's own business unit the Secure Record BU — RefusedSecure")]
+    public async Task AlreadyOwnedWithTheRowInTheSecureBusinessUnit_IsRefusedSecure_NotAlreadyOwned()
+    {
+        var id = TeamOwnedRow("sprk_signal", GeneralTeam, storedBusinessUnit: SecureBu);
+
+        var result = await Reconciler().ReownOrdinaryRowAsync("sprk_signal", id, GeneralTeam, CancellationToken.None);
+
+        result.Outcome.Should().Be(OrdinaryRowReownOutcome.RefusedSecure, "the Secure guard runs before the AlreadyOwned short-circuit");
         NothingWritten();
     }
 
@@ -158,8 +189,8 @@ public class SecureChildReownOrdinaryRowTests
     [InlineData("bu-fault")]
     [InlineData("team-fault")]
     [InlineData("row-fault")]
-    [InlineData("team-missing")]
-    [InlineData("row-missing")]
+    [InlineData("team-missing")]   // a missing TARGET team stays Failed (refused), not NotFound
+    [InlineData("no-version")]     // fix round: no version, no conditional write
     public async Task UnreadableOrAmbiguous_IsFailed_AndNothingIsWritten(string fault)
     {
         var id = TeamOwnedRow("sprk_signal", GeneralTeam);
@@ -171,7 +202,7 @@ public class SecureChildReownOrdinaryRowTests
             case "team-fault": _world.FailingQueriesOf("team"); break;
             case "row-fault": _world.FailingRowReadsOf("sprk_signal", id); break;
             case "team-missing": target = Guid.NewGuid(); break;
-            case "row-missing": _world.Remove("sprk_signal", id); break;
+            case "no-version": _world.Set("sprk_signal", id, "versionnumber", null); break;
         }
 
         var result = await Reconciler().ReownOrdinaryRowAsync("sprk_signal", id, target, CancellationToken.None);
@@ -179,6 +210,80 @@ public class SecureChildReownOrdinaryRowTests
         result.Outcome.Should().Be(OrdinaryRowReownOutcome.Failed);
         result.Detail.Should().StartWith("refused:");
         NothingWritten();
+        _webApi.ConditionalWrites.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "183 fix F2: a row missing on the guard read is NotFound — no write")]
+    public async Task RowMissingOnTheGuardRead_IsNotFound()
+    {
+        var id = TeamOwnedRow("sprk_signal", GeneralTeam);
+        _world.Remove("sprk_signal", id);
+
+        var result = await Reconciler().ReownOrdinaryRowAsync("sprk_signal", id, OtherBuTeam, CancellationToken.None);
+
+        result.Outcome.Should().Be(OrdinaryRowReownOutcome.NotFound);
+        NothingWritten();
+        _webApi.ConditionalWrites.Should().BeEmpty();
+    }
+
+    // Beyond the POML's list (one-line justification): the other half of NotFound — the row deleted between the guard read
+    // and the conditional write (404) — is decided by the write, not by a read-back of a row that is gone.
+    [Fact(DisplayName = "183 fix F2: a row deleted between the guard and the write is NotFound — nothing written, nothing evicted")]
+    public async Task RowDeletedBeforeTheWrite_IsNotFound()
+    {
+        var id = TeamOwnedRow("sprk_decisionrecord", GeneralTeam);
+        _world.AfterQueriesOf("team", 2, w => w.Remove("sprk_decisionrecord", id));
+
+        var result = await Reconciler().ReownOrdinaryRowAsync("sprk_decisionrecord", id, OtherBuTeam, CancellationToken.None);
+
+        result.Outcome.Should().Be(OrdinaryRowReownOutcome.NotFound);
+        _webApi.ConditionalWrites.Should().ContainSingle("the write was attempted, and refused");
+        NothingWritten();
+    }
+
+    // ── F1: the guard and the write cannot race ──────────────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "183 fix F1: the secure pass moves the row into isolation after the guard — Conflict, nothing written, it stays isolated")]
+    public async Task ARowMovedIntoIsolationAfterTheGuard_IsAConflict_AndStaysOnTheSecureTeam()
+    {
+        var id = TeamOwnedRow("sprk_signal", GeneralTeam);
+        // After the guard's last read (the owner team's business unit), before the write: the secure pass re-owns the row
+        // to the Secure team, which changes its version.
+        _world.AfterQueriesOf("team", 2, w =>
+        {
+            w.MoveOwner("sprk_signal", id, DataversePrincipalRef.Team(SecureTeam));
+            w.Set("sprk_signal", id, "versionnumber", 2L);
+        });
+
+        var result = await Reconciler().ReownOrdinaryRowAsync("sprk_signal", id, OtherBuTeam, CancellationToken.None);
+
+        result.Outcome.Should().Be(OrdinaryRowReownOutcome.Conflict);
+        _webApi.ConditionalWrites.Should().Equal(("sprk_signals", id, "W/\"1\""));
+        _world.OwnerOf("sprk_signal", id).Should().Be(DataversePrincipalRef.Team(SecureTeam), "never moved back out of isolation");
+        NothingWritten();
+    }
+
+    // ── F3.2: cancellation ───────────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact(DisplayName = "183 fix F3.2: a cancelled token throws OperationCanceledException and writes nothing")]
+    public async Task ACancelledToken_Throws_AndWritesNothing()
+    {
+        var id = TeamOwnedRow("sprk_signal", GeneralTeam);
+        var entities = SecureChildShareWorld.EntitiesOver(() => _world);
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Returns((QueryExpression query, CancellationToken token) =>
+                token.IsCancellationRequested
+                    ? Task.FromCanceled<EntityCollection>(token)
+                    : Task.FromResult(_world.Answer(query)));
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        var act = () => Reconciler(entities).ReownOrdinaryRowAsync("sprk_signal", id, OtherBuTeam, cancelled.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        NothingWritten();
+        _webApi.ConditionalWrites.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "183: a user-owned row is RefusedNotTeamOwned — no write")]
@@ -202,9 +307,9 @@ public class SecureChildReownOrdinaryRowTests
             .Add("businessunit", OtherBu, ("name", "Litigation"))
             .Team(OtherBuTeam, OtherBu, "Litigation", isDefault: true, teamType: 0);
         var id = Guid.NewGuid();
-        world.Add("sprk_signal", id, ("owningteam", new EntityReference("team", GeneralTeam)));
-        var reconciler = SecureChildShareWorld.ReconcilerOver(() => world, new FakeRecordShareTable(), webApi: null!,
-            accessCacheInvalidator: _evictions);
+        world.Add("sprk_signal", id, ("owningteam", new EntityReference("team", GeneralTeam)), ("versionnumber", 1L));
+        var reconciler = SecureChildShareWorld.ReconcilerOver(
+            () => world, new FakeRecordShareTable(), new ConditionalOwnerWebApi(() => world), accessCacheInvalidator: _evictions);
 
         var result = await reconciler.ReownOrdinaryRowAsync("sprk_signal", id, OtherBuTeam, CancellationToken.None);
 
@@ -237,16 +342,9 @@ public class SecureChildReownOrdinaryRowTests
     public async Task WriteThatFaultsButLanded_IsReowned()
     {
         var id = TeamOwnedRow("sprk_signal", GeneralTeam);
-        var entities = SecureChildShareWorld.EntitiesOver(() => _world);
-        entities
-            .Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
-            .Returns((string t, Guid i, Dictionary<string, object> f, CancellationToken _) =>
-            {
-                _world.Update(t, i, f);
-                return Task.FromException(new TimeoutException("Test: the call timed out after the write committed."));
-            });
+        _webApi.FaultAfterApply = true;
 
-        var result = await Reconciler(entities).ReownOrdinaryRowAsync("sprk_signal", id, OtherBuTeam, CancellationToken.None);
+        var result = await Reconciler().ReownOrdinaryRowAsync("sprk_signal", id, OtherBuTeam, CancellationToken.None);
 
         result.Outcome.Should().Be(OrdinaryRowReownOutcome.Reowned);
         _evictions.OwnerChanges.Should().ContainSingle();
@@ -264,6 +362,111 @@ public class SecureChildReownOrdinaryRowTests
         result.Detail.Should().StartWith("Dataverse refused the re-own");
         _world.OwnerOf("sprk_decisionrecord", id).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
         _evictions.OwnerChanges.Should().ContainSingle();
+    }
+
+    // ── K4 (fix round): the existing pass's put-back onto a USER start owner ─────────────────────────────────────────────
+
+    /// <summary>
+    /// The secure pass's <c>RestoreStartOwnerAsync</c> through the shared write helper: a user-owned memo the unsecure pass
+    /// pulled INTO isolation behind an isolated event, whose support then left, goes back on its USER and READS BACK as that
+    /// user — so the pass does not report it failed. (The shape of
+    /// <c>SecureChildTransitionTests.Unsecure_PutsARowItPulledIntoIsolationBackOnItsOwner_WhenItsSupportLeaves</c>, driven on
+    /// the reconciler directly so its report can be read.) A helper that expected a TEAM for every put-back fails here.
+    /// </summary>
+    [Fact(DisplayName = "183 fix K4: the secure pass puts a pulled-in row back on its USER start owner, and it reads back")]
+    public async Task TheSecurePass_PutsARowBackOnItsUserStartOwner_AndItReadsBack()
+    {
+        var root = Guid.NewGuid();
+        var (otherSecure, halfProvisioned) = (Guid.NewGuid(), Guid.NewGuid());
+        var (document, analysis, @event, memo) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        _world
+            .FlaggedNotIsolatedRoot("sprk_workassignment", root) // mid-unsecure: moved off the Secure team, flag cleared last
+            .SecureRoot("sprk_matter", otherSecure)
+            .FlaggedNotIsolatedRoot("sprk_project", halfProvisioned)
+            .UserOwnedChild("sprk_document", document,
+                ("sprk_workassignment", "sprk_workassignment", root), ("sprk_matter", "sprk_matter", otherSecure))
+            .OrdinaryChild("sprk_analysis", analysis,
+                ("sprk_documentid", "sprk_document", document), ("sprk_regardingproject", "sprk_project", halfProvisioned))
+            .SecureChild("sprk_event", @event, ("sprk_regardinganalysis", "sprk_analysis", analysis))
+            .UserOwnedChild("sprk_memo", memo, ("sprk_regardingevent", "sprk_event", @event));
+
+        var report = await Reconciler().ReconcileAsync(
+            "sprk_workassignment", root, SecureChildReconcileMode.Apply, SecureChildPassTrigger.Unsecure, CancellationToken.None);
+
+        _world.OwnerWrites.Where(w => w.Id == memo).Select(w => w.Owner).Should().Equal(
+            DataversePrincipalRef.Team(SecureTeam), DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
+        _world.OwnerOf("sprk_memo", memo).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
+        report.Changes.Should().NotContain(c => c.Id == memo,
+            "put back on its own user and read back as that user: no net change, not a failure");
+    }
+
+    /// <summary>
+    /// The Web API's conditional PATCH over the world's rows (<see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>'s
+    /// production contract): a missing row is 404 (<see cref="KeyNotFoundException"/>), an ETag other than the row's
+    /// <c>W/"versionnumber"</c> is 412 (<see cref="System.Data.DBConcurrencyException"/>) — nothing written on either.
+    /// Otherwise the owner bind is applied through the world (recorded in <see cref="SecureChildShareWorld.OwnerWrites"/>,
+    /// its write faults honoured) and the version moves on. The unconditional <see cref="UpdateAsync"/> applies without
+    /// the check (the mutation proof's target).
+    /// </summary>
+    private sealed class ConditionalOwnerWebApi : DataverseWebApiClient
+    {
+        private readonly Func<SecureChildShareWorld> _world;
+
+        public ConditionalOwnerWebApi(Func<SecureChildShareWorld> world)
+            : base(new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com" })
+                    .Build(),
+                NullLogger<DataverseWebApiClient>.Instance,
+                NoCredential.Instance)
+            => _world = world;
+
+        public List<(string EntitySet, Guid Id, string ETag)> ConditionalWrites { get; } = new();
+
+        /// <summary>The write lands, then the call faults (a timeout after the commit).</summary>
+        public bool FaultAfterApply { get; set; }
+
+        public override Task UpdateIfMatchAsync(
+            string entitySetName, Guid id, object entity, string etag, CancellationToken cancellationToken = default)
+        {
+            ConditionalWrites.Add((entitySetName, id, etag));
+            var table = TableOf(entitySetName);
+            if (!_world().Has(table, id))
+                throw new KeyNotFoundException($"{entitySetName}({id}) was not found; nothing was created.");
+            if (etag != $"W/\"{_world().ValueOf<long>(table, id, "versionnumber")}\"")
+                throw new System.Data.DBConcurrencyException($"{entitySetName}({id}) changed since it was read; the update was not applied.");
+            return Apply(table, id, entity);
+        }
+
+        public override Task UpdateAsync(string entitySetName, Guid id, object entity, CancellationToken cancellationToken = default)
+            => Apply(TableOf(entitySetName), id, entity);
+
+        private Task Apply(string table, Guid id, object entity)
+        {
+            var fields = (IDictionary<string, object>)entity;
+            fields.Keys.Should().Equal(new[] { "ownerid@odata.bind" }, "the re-own writes the owner and nothing else");
+            var bind = (string)fields["ownerid@odata.bind"];
+            bind.Should().StartWith("/teams(");
+            var team = Guid.Parse(bind["/teams(".Length..^1]);
+            _world().Update(table, id, new Dictionary<string, object> { ["ownerid"] = new EntityReference("team", team) });
+            _world().Set(table, id, "versionnumber", _world().ValueOf<long>(table, id, "versionnumber") + 1);
+            return FaultAfterApply
+                ? Task.FromException(new HttpRequestException("Test: the call timed out after the write committed."))
+                : Task.CompletedTask;
+        }
+
+        private static string TableOf(string entitySetName) =>
+            SecureChildLineage.Children.Values.Single(t => t.EntitySet == entitySetName).LogicalName;
+    }
+
+    private sealed class NoCredential : TokenCredential
+    {
+        public static readonly NoCredential Instance = new();
+
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw new NotSupportedException("This double issues no HTTP.");
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw new NotSupportedException("This double issues no HTTP.");
     }
 
     /// <summary>Records every owner-change eviction, with its reason.</summary>
