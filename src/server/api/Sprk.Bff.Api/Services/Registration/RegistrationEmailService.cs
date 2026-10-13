@@ -195,36 +195,36 @@ public class RegistrationEmailService
     }
 
     /// <summary>
+    /// The text that replaces the invite link in the STORED copy of an invite email (task 185, design note §12 I-6): the
+    /// <c>sprk_communication</c> row keeps the email, never the link's one-time code.
+    /// </summary>
+    internal const string RemovedInviteLinkText = "[invitation link removed]";
+
+    /// <summary>
     /// Sends a CIAM onboarding email to an admin-provisioned external user.
     /// R1 has no admin-delivered permanent password: the email directs the user to set their own
     /// password via SSPR ("Forgot password") the first time they sign in.
-    /// Sent via the existing CommunicationService → shared-mailbox app-only pipeline (unchanged).
+    /// Sent via the existing CommunicationService → shared-mailbox app-only pipeline, as SYSTEM MAIL (task 185): the
+    /// stored copy has the invite link removed, and the send is neither enriched nor saved to Sent Items.
     /// </summary>
+    /// <param name="portalUrl">The portal URL (trusted config), shown as the link's visible text.</param>
+    /// <param name="inviteUrl">
+    /// Task 185: the invite link every button and link opens: the portal URL with <c>?customer=</c> and <c>&amp;invite=</c>
+    /// (the one-time code). Built by the caller from trusted config and the code; HTML-attribute-encoded here. Never logged.
+    /// </param>
     public virtual async Task SendCiamOnboardingEmailAsync(
         string recipientEmail,
         string firstName,
         string portalUrl,
+        string inviteUrl,
         CancellationToken cancellationToken = default)
     {
         var templateHtml = await LoadTemplateAsync("CiamOnboardingTemplate.html");
 
-        var body = templateHtml
-            .Replace("{{FirstName}}", Encode(firstName))
-            .Replace("{{Email}}", Encode(recipientEmail))
-            .Replace("{{PortalUrl}}", portalUrl)
-            .Replace("{{SupportEmail}}", SupportEmail)
-            .Replace("{{Year}}", DateTime.UtcNow.Year.ToString());
-
-        var request = new SendCommunicationRequest
-        {
-            To = [recipientEmail],
-            Subject = "Welcome to the Spaarke Portal — Set Your Password",
-            Body = body,
-            BodyFormat = BodyFormat.HTML,
-            FromMailbox = FromMailbox,
-            SendMode = SendMode.SharedMailbox,
-            CorrelationId = $"reg-ciam-onboarding-{recipientEmail}"
-        };
+        var request = BuildCiamInviteRequest(
+            templateHtml, recipientEmail, firstName, portalUrl, inviteUrl, DateTime.UtcNow.Year, FromMailbox,
+            subject: "Welcome to the Spaarke Portal — Set Your Password",
+            correlationId: $"reg-ciam-onboarding-{recipientEmail}");
 
         _logger.LogInformation(
             "Sending CIAM onboarding email | Recipient: {Recipient}",
@@ -237,39 +237,72 @@ public class RegistrationEmailService
     /// Sends the "sign in with your existing account" email (unified-access-control-r2 task 184): the invite found that the
     /// person already has a CIAM account (Graph <c>POST /users</c> answered <c>ObjectConflict</c>), so no account was created and
     /// there is no password to set. Sent INSTEAD of <see cref="SendCiamOnboardingEmailAsync"/>, through the same template
-    /// mechanism, sender, send mode and pipeline. Not sealed only as a test seam, like the onboarding email.
+    /// mechanism, sender, send mode and pipeline, and as system mail (task 185). Not sealed only as a test seam, like the
+    /// onboarding email.
     /// </summary>
+    /// <param name="portalUrl">The portal URL (trusted config), shown as the link's visible text.</param>
+    /// <param name="inviteUrl">Task 185: the invite link with its one-time code. See <see cref="SendCiamOnboardingEmailAsync"/>.</param>
     public virtual async Task SendCiamExistingAccountEmailAsync(
         string recipientEmail,
         string firstName,
         string portalUrl,
+        string inviteUrl,
         CancellationToken cancellationToken = default)
     {
         var templateHtml = await LoadTemplateAsync("CiamExistingAccountTemplate.html");
 
-        var body = templateHtml
-            .Replace("{{FirstName}}", Encode(firstName))
-            .Replace("{{Email}}", Encode(recipientEmail))
-            .Replace("{{PortalUrl}}", portalUrl)
-            .Replace("{{SupportEmail}}", SupportEmail)
-            .Replace("{{Year}}", DateTime.UtcNow.Year.ToString());
-
-        var request = new SendCommunicationRequest
-        {
-            To = [recipientEmail],
-            Subject = "You've Been Invited to the Spaarke Portal — Sign In With Your Existing Account",
-            Body = body,
-            BodyFormat = BodyFormat.HTML,
-            FromMailbox = FromMailbox,
-            SendMode = SendMode.SharedMailbox,
-            CorrelationId = $"reg-ciam-existing-account-{recipientEmail}"
-        };
+        var request = BuildCiamInviteRequest(
+            templateHtml, recipientEmail, firstName, portalUrl, inviteUrl, DateTime.UtcNow.Year, FromMailbox,
+            subject: "You've Been Invited to the Spaarke Portal — Sign In With Your Existing Account",
+            correlationId: $"reg-ciam-existing-account-{recipientEmail}");
 
         _logger.LogInformation(
             "Sending CIAM existing-account invite email | Recipient: {Recipient}",
             recipientEmail);
 
         await _communicationService.SendAsync(request, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// The shared-mailbox SYSTEM-MAIL request for a CIAM invite email (task 185). The sent body carries
+    /// <paramref name="inviteUrl"/> in every <c>{{InviteUrl}}</c>. The stored body (<see cref="SystemMailOptions.StoredBody"/>)
+    /// is the same template with <see cref="RemovedInviteLinkText"/> there instead, so <c>CommunicationService</c> never
+    /// parses a body. The visible link text stays <c>{{PortalUrl}}</c>, so the code is never printed as text. Every value
+    /// is HTML-encoded and the template is filled in ONE pass (<see cref="FillTemplate"/>). Pure, so it is testable
+    /// without a mailbox.
+    /// </summary>
+    internal static SendCommunicationRequest BuildCiamInviteRequest(
+        string templateHtml,
+        string recipientEmail,
+        string firstName,
+        string portalUrl,
+        string inviteUrl,
+        int year,
+        string fromMailbox,
+        string subject,
+        string correlationId)
+    {
+        string Fill(string inviteLinkValue) => FillTemplate(templateHtml, new Dictionary<string, string>
+        {
+            ["FirstName"] = Encode(firstName),
+            ["Email"] = Encode(recipientEmail),
+            ["PortalUrl"] = Encode(portalUrl),
+            ["InviteUrl"] = Encode(inviteLinkValue),
+            ["SupportEmail"] = SupportEmail,
+            ["Year"] = year.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        });
+
+        return new SendCommunicationRequest
+        {
+            To = [recipientEmail],
+            Subject = subject,
+            Body = Fill(inviteUrl),
+            BodyFormat = BodyFormat.HTML,
+            FromMailbox = fromMailbox,
+            SendMode = SendMode.SharedMailbox,
+            CorrelationId = correlationId,
+            SystemMail = new SystemMailOptions { StoredBody = Fill(RemovedInviteLinkText) },
+        };
     }
 
     /// <summary>
