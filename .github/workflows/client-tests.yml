@@ -1,11 +1,12 @@
 # ============================================================================
-# Client Tests (Jest) — Phase 1: BASELINE ONLY
+# Client Tests — Phase 1: BASELINE ONLY
 # ============================================================================
 # ci-cd-unit-test-remediation-r1 · task CICD-095 · issue #851
 #
 # WHY THIS EXISTS
 # ---------------
-# 730 tracked client test files across 40 packages, and BEFORE this workflow
+# 730 tracked client test files across ~40 packages (the count is discovered at
+# runtime, never hard-coded; 43 on 2026-10-12), and BEFORE this workflow
 # not one of them ran in CI — while 923 server .cs files did. One package has
 # been red since 2026-06-11 under a board that showed all green. A test nobody
 # runs is not a test; it is a file.
@@ -24,7 +25,7 @@
 #
 # WHY IT DOES NOT RUN ON pull_request (deliberate, revisit at promotion)
 # ----------------------------------------------------------------------
-# 40 packages with no npm workspace root means 40 independent `npm install`s.
+# ~40 packages with no npm workspace root means ~40 independent `npm install`s.
 # Hanging that off every PR would contend for runners with the very PRs the
 # CI shadow window is trying to accumulate (20 agreeing PRs), which works
 # directly against the owner north star "CI must not hold up high-frequency
@@ -42,7 +43,7 @@
 # filter. Do not add it to ci-tier1-blocking.yml or ci-tier2-advisory.yml.
 # ============================================================================
 
-name: Client Tests (Jest)
+name: Client Tests
 
 on:
   # Nightly baseline. 07:00 UTC — deliberately one hour after nightly-health.yml
@@ -86,9 +87,11 @@ jobs:
       - name: Find packages with a jest test script
         id: find
         shell: bash
+        env:
+          PACKAGE_FILTER: ${{ inputs.package_filter }}
         run: |
           set -euo pipefail
-          filter='${{ inputs.package_filter }}'
+          filter="$PACKAGE_FILTER"
           pkgs=()
 
           while IFS= read -r pkgjson; do
@@ -195,7 +198,11 @@ jobs:
           PKG: ${{ matrix.package }}
         run: |
           set -uo pipefail
-          node - "$PKG" > "$RUNNER_TEMP/deps-order.tsv" <<'NODE'
+          # Explicit failure handler instead of `-e`: the rest of this step
+          # accumulates failures in $failed and must keep going. A Node crash
+          # here would otherwise leave an empty TSV and the leg would run with
+          # no libs built, silently.
+          if ! node - "$PKG" > "$RUNNER_TEMP/deps-order.tsv" <<'NODE'
           const fs = require('fs');
           const path = require('path');
           const root = process.cwd();
@@ -225,6 +232,12 @@ jobs:
           // e.g. `from '../../../solutions/LegalWorkspace/src/...'`. Jest then
           // loads that source from where it lives, and its own imports resolve
           // from ITS node_modules — so that package has to be installed too.
+          // CAVEAT: installing node_modules into a sibling of a different React
+          // major (e.g. pcf/VisualHost on React 16/17) is safe only while the
+          // imported files are plain utilities. A test importing a hook-using
+          // component across such a path fails with "useContext of null" (two
+          // React copies). That symptom means a duplicate-React problem, not a
+          // test bug.
           const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'out', 'coverage', 'generated', '.git', '__snapshots__']);
           const SPEC = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bjest\.(?:mock|doMock|requireActual)\s*\(\s*)['"]((?:\.\.\/)+[^'"]*)['"]/g;
           const sourceNeighbours = (dir) => {
@@ -299,6 +312,10 @@ jobs:
             process.stdout.write(rel + '\t' + (build.get(d) ? 1 : 0) + '\n');
           }
           NODE
+          then
+            echo "::error::deriving shared-library dependencies of $PKG failed (node crashed)"
+            exit 1
+          fi
           echo "Shared-library dependencies of $PKG (dependencies first):"
           sed 's/^/  /' "$RUNNER_TEMP/deps-order.tsv"
 
@@ -342,6 +359,8 @@ jobs:
       - name: Record result
         if: always()
         shell: bash
+        env:
+          PKG: ${{ matrix.package }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/results"
@@ -358,9 +377,9 @@ jobs:
           else
             status="fail"
           fi
-          slug="$(printf '%s' '${{ matrix.package }}' | tr '/' '_')"
-          printf '%s\t%s\n' '${{ matrix.package }}' "$status" > "$RUNNER_TEMP/results/$slug.tsv"
-          echo "$status  ${{ matrix.package }}"
+          slug="$(printf '%s' "$PKG" | tr '/' '_')"
+          printf '%s\t%s\n' "$PKG" "$status" > "$RUNNER_TEMP/results/$slug.tsv"
+          echo "$status  $PKG"
 
       - name: Upload result
         if: always()
