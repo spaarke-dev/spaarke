@@ -213,13 +213,11 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
         PredicateCompiler.DateOnlyColumns.Should().BeEquivalentTo(live);
     }
 
-    // ── Task 025 (D-16): the Threshold rule type, compiled and run against real matters ────────────────────
+    // ── Task 025 (D-16): the Threshold rule type against the live schema ───────────────────────────────────
 
-    // spaarkedev1 matters with finance roll-ups (read 2026-10-11): REAL-2026-123456.01 spend 25000, REAL-2026-123456.02 spend 250000
-    // and utilization 1.25, CMRCL-441482 spend 10000; every other matter has none (null).
-    private static readonly Guid SpendMatter25k = Guid.Parse("2444af6d-e1f2-f011-8406-7ced8d1dc988");
-    private static readonly Guid SpendMatter250k = Guid.Parse("b68299c6-bafb-f011-8407-7c1e520aa4df");
-    private static readonly Guid SpendMatter10k = Guid.Parse("491b1efe-e562-f111-ab0c-000d3a4d8152");
+    // Task 025b (D-122): the evaluator no longer sends the compiled stored-column comparison (it judges from the invoice and budget rows
+    // in C#), so the old live tests that ran that FetchXML against dev rows were removed; the aggregate it does send is paired with
+    // live Dataverse in FinanceBaseValuesSeamTests, which creates its own zz-025b- rows.
 
     [Fact]
     public async Task ThresholdColumns_AreNumericOnTheLiveSchema()
@@ -234,6 +232,11 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
             attribute.Should().Match<AttributeMetadata>(a =>
                 a is DecimalAttributeMetadata || a is MoneyAttributeMetadata || a is DoubleAttributeMetadata || a is IntegerAttributeMetadata,
                 $"{entity}.{column} must be a numeric column");
+
+            // Task 025b (D-122): the evaluator derives these from the invoice and budget rows BECAUSE they are plain stored columns
+            // (SourceType 0) that only FinanceRollupService writes. If one becomes a rollup or calculated column, Dataverse keeps it
+            // current and the derivation (FinanceBaseValues) must be revisited, so this fails to make that a decision, not an accident.
+            (attribute.SourceType ?? 0).Should().Be(0, $"{entity}.{column} is a plain stored column (not calculated, not rollup)");
         }
     }
 
@@ -267,43 +270,6 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
                 _out.WriteLine($"  {column} returned as {value.GetType().Name} {number.ToString(System.Globalization.CultureInfo.InvariantCulture)} (scale {scale})");
             }
         }
-    }
-
-    [Fact]
-    public async Task ThresholdFixture_ReturnsExactlyTheRowsOfTheHandWrittenFetchXml_IncludingTheBoundaryAndExcludingNulls()
-    {
-        if (!_dv.IsLive) return;
-
-        var compiled = _compiler.Compile(File.ReadAllText(FixturePath("threshold-matter-spend.rulebody.json")), null, RuleType.Threshold);
-        var reference = File.ReadAllText(FixturePath("threshold-matter-spend.reference.fetchxml"));
-
-        var fromCompiler = await RunAsync(compiled);
-        var fromReference = await _dv.RunFetchAsync(reference, "sprk_matterid");
-
-        fromCompiler.Should().BeEquivalentTo(fromReference);
-        fromCompiler.Should().Contain(new[] { SpendMatter25k, SpendMatter250k }, "spend 25000 and 250000 are at least 20000");
-        fromCompiler.Should().NotContain(SpendMatter10k, "spend 10000 is under 20000");
-        fromCompiler.Should().NotContain(Guid.Parse("ced2c3d9-47bf-f111-aaaf-0022482913fc"), "MAT-000011 has no spend roll-up, and a null never satisfies a comparison");
-        fromCompiler.Count.Should().BeLessThan(await _dv.CountMattersAsync(), "a rule that returns every row is not a filter");
-    }
-
-    [Theory]
-    // field, operator, value, rows that must come back, rows that must not
-    [InlineData("sprk_totalspendtodate", ">", "25000", "b68299c6-bafb-f011-8407-7c1e520aa4df", "2444af6d-e1f2-f011-8406-7ced8d1dc988")]            // strictly more: the 25000 row is out
-    [InlineData("sprk_totalspendtodate", "<=", "25000", "2444af6d-e1f2-f011-8406-7ced8d1dc988", "b68299c6-bafb-f011-8407-7c1e520aa4df")]           // at most: the 25000 row is in
-    [InlineData("sprk_totalbudget", "<", "100000", "491b1efe-e562-f111-ab0c-000d3a4d8152", "b68299c6-bafb-f011-8407-7c1e520aa4df")]               // budget 25000/55000 under 100000, 150000 not
-    [InlineData("sprk_budgetutilizationpercent", ">=", "1", "b68299c6-bafb-f011-8407-7c1e520aa4df", "2444af6d-e1f2-f011-8406-7ced8d1dc988")]      // the Decimal column; the null rows are out
-    public async Task EveryOperator_OnEveryKindOfColumn_ReturnsTheRightRows(string field, string op, string value, string inRow, string outRow)
-    {
-        if (!_dv.IsLive) return;
-
-        var body = "{\"type\":\"Threshold\",\"subject\":\"sprk_matter\",\"threshold\":{\"field\":\"" + field + "\",\"operator\":\"" + op +
-                   "\",\"value\":" + value + "}}";
-
-        var matters = await RunAsync(_compiler.Compile(body, null, RuleType.Threshold));
-
-        matters.Should().Contain(Guid.Parse(inRow)).And.NotContain(Guid.Parse(outRow));
-        matters.Count.Should().BeLessThan(await _dv.CountMattersAsync());
     }
 
     private static string FixturePath(string name)

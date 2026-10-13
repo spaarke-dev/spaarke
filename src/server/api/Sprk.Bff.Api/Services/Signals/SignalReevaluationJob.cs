@@ -219,6 +219,14 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }
 
             counts.Hits += evaluation.Hits.Count;
+            // D-120 (task 025b): a subject the rule could not judge (an input absent) is neither a hit nor observed false.
+            var unjudged = new HashSet<(string, Guid)>();
+            foreach (var m in evaluation.MissingInputs ?? Array.Empty<SignalMissingInput>())
+            {
+                unjudged.Add((m.SubjectEntity, m.SubjectId));
+            }
+
+            counts.MissingInputs += unjudged.Count;
             var read = await ReadPolicySignalsAsync(policy.Code, counts, ct, scope).ConfigureAwait(false);
             // Task 033 (FR-16, D-13): Signals citing an older version close Superseded first, so the planner below re-raises
             // the subjects the current version still holds as new episodes in this same pass.
@@ -254,7 +262,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }
 
             var plan = SignalEpisodePlanner.Plan(lane, evaluation.QuietWindowDays, now, evaluation.Hits, existing, hitPartitions,
-                isThreshold: RuleBodySchemaValidator.TryParseRuleType(spec.RuleType, out var ruleType) && ruleType == RuleType.Threshold);
+                isThreshold: RuleBodySchemaValidator.TryParseRuleType(spec.RuleType, out var ruleType) && ruleType == RuleType.Threshold,
+                unjudged: unjudged);
             if (superseded.NotClosed.Count > 0)
             {
                 // A supersede close that did not land (changed since read / failed) is already counted; the planner must not
@@ -458,12 +467,12 @@ public sealed class SignalReevaluationJob : IScheduledJob
         _logger.Log(success ? LogLevel.Information : LogLevel.Warning, OntologyWriterEvents.EvaluatorHeartbeat,
             "[SIGNAL-EVALUATOR] heartbeat outcome={Outcome} lastEvaluated={LastEvaluated:o} policies={Policies} hits={Hits} " +
             "written={Written} reraised={Reraised} updated={Updated} closed={Closed} supersededClosed={SupersededClosed} policyRetiredClosed={PolicyRetiredClosed} reassigned={Reassigned} refused={Refused} " +
-            "unchanged={Unchanged} suppressed={Suppressed} quietWindow={QuietWindow} dateUnchanged={DateUnchanged} awaitingEvidence={AwaitingEvidence} noDatedEvidence={NoDatedEvidence} clearedMarked={ClearedMarked} " +
+            "unchanged={Unchanged} suppressed={Suppressed} quietWindow={QuietWindow} dateUnchanged={DateUnchanged} awaitingEvidence={AwaitingEvidence} noDatedEvidence={NoDatedEvidence} clearedMarked={ClearedMarked} missingInputs={MissingInputs} " +
             "invalidPolicies={InvalidPolicies} policyFailures={PolicyFailures} attempt={Attempt} durationMs={DurationMs} " +
             "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             success ? "succeeded" : "failed", now, counts.PoliciesEvaluated, counts.Hits, counts.Written, counts.Reraised,
             counts.Updated, counts.Closed, counts.SupersededClosed, counts.RetiredClosed, counts.Reassigned, counts.Refused, counts.Unchanged, counts.Suppressed,
-            counts.QuietWindow, counts.DateUnchanged, counts.AwaitingEvidence, counts.NoDatedEvidence, counts.ClearedMarked, counts.InvalidPolicies, counts.PolicyFailures, context.Attempt,
+            counts.QuietWindow, counts.DateUnchanged, counts.AwaitingEvidence, counts.NoDatedEvidence, counts.ClearedMarked, counts.MissingInputs, counts.InvalidPolicies, counts.PolicyFailures, context.Attempt,
             (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
         return duration;
     }
@@ -696,7 +705,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
         public int PoliciesEvaluated, DecideLanePolicies, DoLanePolicies, InvalidPolicies, PolicyFailures, ScopedNotEvaluated;
         public int Hits, Written, Reraised, Updated, Closed, Reassigned, Refused, ChangedSinceRead;
         public int SupersededClosed, RetiredClosed;
-        public int ClearedMarked, Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred, NotApplicable;
+        public int ClearedMarked, Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred, NotApplicable, MissingInputs;
 
         /// <summary>#1661 round 2 F3: policies planned NOTHING this pass because their secure-family partitions could not be read (each is
         /// also a policy failure).</summary>
@@ -771,6 +780,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             awaitingEvidence = AwaitingEvidence,
             noDatedEvidence = NoDatedEvidence,
             clearedMarked = ClearedMarked,
+            missingInputs = MissingInputs,
             unparseableKeys = UnparseableKeys,
             anomalies = Anomalies,
             createsDeferred = CreatesDeferred,
@@ -877,7 +887,9 @@ internal sealed class EpisodePlan
 /// <c>sprk_duedate</c>; Decide lane unless it was Dismissed less than the quiet window ago (FR-17a). <b>D-119:</b> a Decide-lane
 /// <b>Acted</b> Signal re-raises only when at least one witness line is dated after its <c>sprk_resolvedon</c>; a predicate that
 /// merely still holds does not re-raise it, and a hit with no dated evidence stays un-raised.</item>
-/// <item><b>Not a hit</b>: every open Signal is closed as ConditionCleared. A hit whose core record the writer refused is
+/// <item><b>Unjudged (D-120, task 025b)</b>: a subject the rule could not judge for want of an input is neither a hit nor
+/// observed false: its open Signal is NOT closed and its Acted Signal is NOT stamped cleared.</item>
+/// <item><b>Not a hit</b>: every other open Signal is closed as ConditionCleared. A hit whose core record the writer refused is
 /// still a hit: its Signal is neither written nor closed.</item>
 /// </list>
 /// </remarks>
@@ -891,7 +903,7 @@ internal static class SignalEpisodePlanner
     public static EpisodePlan Plan(
         int lane, int quietWindowDays, DateTimeOffset nowUtc, IReadOnlyList<SignalHit> hits, IReadOnlyList<ExistingSignal> existing,
         IReadOnlyDictionary<(string SubjectEntity, Guid SubjectId), SuppressionPartition>? hitPartitions = null,
-        bool isThreshold = false)
+        bool isThreshold = false, IReadOnlySet<(string, Guid)>? unjudged = null)
     {
         var plan = new EpisodePlan();
         var now = nowUtc.UtcDateTime;
@@ -1023,7 +1035,8 @@ internal static class SignalEpisodePlanner
 
         foreach (var signal in existing)
         {
-            if (signal.IsOpen && !hitSubjects.Contains((signal.SubjectEntity, signal.SubjectId)))
+            if (signal.IsOpen && !hitSubjects.Contains((signal.SubjectEntity, signal.SubjectId))
+                && unjudged?.Contains((signal.SubjectEntity, signal.SubjectId)) != true)
             {
                 plan.Closes.Add(signal);
             }
@@ -1036,7 +1049,7 @@ internal static class SignalEpisodePlanner
             foreach (var (subject, episodes) in bySubject)
             {
                 var latest = episodes[0];
-                if (!hitSubjects.Contains(subject) && latest.IsResolved && latest.Resolution == SignalWriter.ResolutionActed
+                if (!hitSubjects.Contains(subject) && unjudged?.Contains(subject) != true && latest.IsResolved && latest.Resolution == SignalWriter.ResolutionActed
                     && !latest.ClearedObserved)
                 {
                     // Stamp only when the stamp WILL register as a marker (later than resolvedon + tolerance): an unknown resolution

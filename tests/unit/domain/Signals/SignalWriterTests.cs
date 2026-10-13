@@ -292,12 +292,32 @@ public class SignalWriterTests
         var sysadmin = new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId);
         var writerOrg = new FakeOrganizationService();
         var writer = Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun));
-        var request = MatterSubjectRequest() with { SubjectEntityLogicalName = "sprk_project", SubjectId = Guid.NewGuid() };
+        var request = MatterSubjectRequest() with { SubjectEntityLogicalName = "sprk_servicerequest", SubjectId = Guid.NewGuid() };
 
         var act = async () => await writer.WriteAsync(request);
 
-        (await act.Should().ThrowAsync<SignalWriterEscalationException>()).WithMessage("*sprk_project*");
+        (await act.Should().ThrowAsync<SignalWriterEscalationException>()).WithMessage("*sprk_servicerequest*");
         writerOrg.Rows.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task WriteAsync_ProjectSubject_IsItsOwnCoreRecord_RegardingTheProject_NoMatter()
+    {
+        // Task 025b (D-122): a Threshold rule on a project's spend or budget raises a Signal about the project.
+        var sysadmin = new FakeSysadminClient().WithBusinessUnit("sprk_project", ProjectId, ProjectBusinessUnitId);
+        var writerOrg = new FakeOrganizationService();
+        var ownership = new FakeOwnershipResolver();
+        var request = MatterSubjectRequest() with { SubjectEntityLogicalName = "sprk_project", SubjectId = ProjectId };
+
+        var result = await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun), ownership: ownership).WriteAsync(request);
+        var row = writerOrg.Rows[result.SignalId];
+
+        row.GetAttributeValue<EntityReference>("sprk_regardingproject").Id.Should().Be(ProjectId);
+        row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id.Should().Be(sysadmin.CatalogId("sprk_project"));
+        row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(ProjectId));
+        row.Attributes.Keys.Should().NotContain("sprk_matter");
+        row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(ProjectBusinessUnitId);
+        ownership.Contexts.Should().ContainSingle().Which.TargetEntityLogicalName.Should().Be("sprk_project");
     }
 
     [Fact]

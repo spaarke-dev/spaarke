@@ -423,6 +423,28 @@ public sealed class DecisionRecordWriterTests
         });
     }
 
+    /// <summary>
+    /// uac-r2 task 182 (contract C4): the lineage row also holds the subject's regarding lookups, three of which target the
+    /// same roots as the typed core columns. The map keeps only the typed column per root (the column named like its
+    /// root); without that filter its static initializer meets a duplicate key and the writer cannot load.
+    /// </summary>
+    [Fact]
+    public void TheLineageColumns_StayTheTypedCoreColumns_WhenTheRowAlsoHoldsRegardingLookupsToTheRoots()
+    {
+        var lookups = Sprk.Bff.Api.Services.Access.SecureChildLineage.Children["sprk_decisionrecord"].Lookups;
+        lookups.Should().Contain(new Dictionary<string, string>
+        {
+            ["sprk_regardingmatter"] = "sprk_matter",
+            ["sprk_regardingproject"] = "sprk_project",
+            ["sprk_regardingworkassignment"] = "sprk_workassignment",
+        });
+
+        var map = () => DecisionRecordWriter.LineageColumnByCoreEntity;
+        map.Should().NotThrow();
+        foreach (var root in new[] { "sprk_matter", "sprk_project", "sprk_workassignment" })
+            DecisionRecordWriter.LineageColumnByCoreEntity[root].Should().Be(root, $"{root} maps to its typed core column, never a regarding lookup");
+    }
+
     [Fact]
     public async Task ACoreOutsideTheAccessControlTaxonomy_IsRefused()
     {

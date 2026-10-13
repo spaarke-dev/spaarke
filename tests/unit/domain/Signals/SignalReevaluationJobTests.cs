@@ -19,6 +19,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.DI;
+using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Telemetry;
 using Xunit;
@@ -1016,12 +1017,173 @@ public partial class SignalReevaluationJobTests
         created.GetAttributeValue<string>("sprk_sentence").Should().Be("Budget utilization has reached 94.5 percent.",
             "the sentence states the subject own value of the column the rule compared (section 0.3)");
 
-        // The compiled query is the same contract Existence uses: one subject query, one condition for the comparison.
+        // Task 025b (D-122): the subject query selects the rule's SCOPE only. The comparison is not sent to Dataverse as a condition
+        // on the stored column (a copy only a form edit refreshes); it is judged from the base rows.
         var fetch = XElement.Parse(h.Sysadmin.Fetches.Should().ContainSingle().Subject);
-        var condition = fetch.Descendants("condition").Should().ContainSingle().Subject;
-        (condition.Attribute("attribute")!.Value, condition.Attribute("operator")!.Value, condition.Attribute("value")!.Value)
-            .Should().Be(("sprk_budgetutilizationpercent", "ge", "90"));
+        fetch.Descendants("condition").Should().BeEmpty("the stored column is not filtered on");
+        fetch.Descendants("attribute").Select(a => a.Attribute("name")!.Value).Should().NotContain("sprk_budgetutilizationpercent");
         fetch.Descendants("link-entity").Should().BeEmpty("a threshold reads only its subject");
+    }
+
+    [Fact]
+    public async Task Run_ThresholdPolicy_JudgesFromTheBaseRows_NotTheStaleStoredColumn_InBothDirections()
+    {
+        // MatterId: stored 1 (stale) but base rows say 95 -> fires. OtherMatterId: stored 99 (stale) but base rows say 62 -> does not.
+        var h = new Harness().WithThresholdPolicy()
+            .WithMatterUtilization(MatterId, 95m, "MAT-REAL-OVER")
+            .WithMatterUtilization(OtherMatterId, 62m, "MAT-REAL-UNDER");
+        h.Sysadmin.SubjectRows["sprk_matter"].Select(r => r.GetAttributeValue<decimal>("sprk_budgetutilizationpercent"))
+            .Should().Equal(new[] { 1m, 99m }, "the stored copies are the opposite of the truth");
+
+        await h.RunAsync();
+
+        var created = h.Org.CreatedPayloads.Should().ContainSingle().Subject;
+        created.GetAttributeValue<string>("sprk_dedupekey").Should().Be($"{PolicyCode}|sprk_matter|{Lower(MatterId)}|1");
+        created.GetAttributeValue<string>("sprk_sentence").Should().Be("Budget utilization has reached 95 percent.",
+            "the sentence states the computed value (D-121, section 0.3), never the stored 1");
+        created.GetAttributeValue<string>("sprk_factsnapshot").Should().Contain("95").And.NotContain("\"sprk_budgetutilizationpercent\":1,");
+    }
+
+    [Fact]
+    public async Task Run_ThresholdPolicy_ReadsTheBaseRowsWithGroupedQueries_NotOneQueryPerSubject()
+    {
+        var h = new Harness().WithThresholdPolicy();
+        foreach (var n in Enumerable.Range(1, 5))
+        {
+            h.WithMatterUtilization(Guid.Parse($"2444af6d-e1f2-f011-8406-7ced8d1dc9{n:00}"), 50m + n, "MAT-" + n);
+        }
+
+        await h.RunAsync();
+
+        h.Sysadmin.AggregateFetches.Should().HaveCount(2, "one grouped query for invoices and one for budgets, for all five matters");
+        h.Sysadmin.AggregateFetches.Select(f => XElement.Parse(f).Element("entity")!.Attribute("name")!.Value)
+            .Should().BeEquivalentTo("sprk_invoice", "sprk_budget");
+        h.Sysadmin.AggregateFetches.Should().OnlyContain(f => f.Contains("aggregate=\"true\"") && f.Contains("groupby=\"true\""));
+    }
+
+    [Fact]
+    public async Task Run_SpendThreshold_NeedsOnlyTheInvoiceQuery_AndOnlyCountsTheCountedStatuses()
+    {
+        const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_totalspendtodate","operator":">=","value":50000}}""";
+        var h = new Harness().WithThresholdPolicy(body, "Spend to date is {{sprk_totalspendtodate}}.");
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId) { ["sprk_matterid"] = MatterId });
+        h.WithInvoice("sprk_matter", MatterId, 30000m, FinanceBaseValues.InvoiceStatusReviewed)
+            .WithInvoice("sprk_matter", MatterId, 15000m, FinanceBaseValues.InvoiceStatusReviewed)
+            .WithInvoice("sprk_matter", MatterId, 4000m, FinanceBaseValues.InvoiceStatusReviewed)
+            .WithInvoice("sprk_matter", MatterId, 900000m, 100000000); // ToReview: the other real status, not counted, ignored
+
+        await h.RunAsync();
+
+        h.Sysadmin.AggregateFetches.Should().ContainSingle().Which.Should().Contain("sprk_invoice");
+        h.Org.CreatedPayloads.Should().BeEmpty("30000 + 15000 + 4000 = 49000 is under 50000, and the uncounted 900000 must not be added");
+
+        h.WithInvoice("sprk_matter", MatterId, 1000m); // now exactly 50000: at-least is inclusive
+        h.Org.ResetCounts();
+        await h.RunAsync();
+        h.Org.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_sentence").Should().Be("Spend to date is 50000.");
+    }
+
+    [Theory]
+    [InlineData(false, 0)]   // no budget row at all
+    [InlineData(true, 0)]    // a budget row of zero
+    public async Task Run_UtilizationThreshold_WithNoBudgetAboveZero_DoesNotFire_AndIsReportedAsAMissingInput(bool zeroRow, decimal budget)
+    {
+        var h = new Harness().WithThresholdPolicy();
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId) { ["sprk_matterid"] = MatterId, ["sprk_budgetutilizationpercent"] = 500m });
+        h.WithInvoice("sprk_matter", MatterId, 75000m);
+        if (zeroRow) h.WithBudget("sprk_matter", MatterId, budget);
+        var spec = new SignalEvaluationPolicy(PolicyId, PolicyCode, SignalWriter.LaneDecide, VersionId, "Threshold", UtilizationBody, UtilizationTemplate);
+
+        var evaluation = await h.Evaluator.EvaluateAsync(spec, null);
+
+        evaluation.PolicyValid.Should().BeTrue();
+        evaluation.Hits.Should().BeEmpty("a utilization of 75000 over no budget is undefined, not infinite, and the stored 500 is not trusted");
+        var missing = evaluation.MissingInputs.Should().ContainSingle().Subject;
+        (missing.SubjectEntity, missing.SubjectId, missing.Field).Should().Be(("sprk_matter", MatterId, "sprk_budgetutilizationpercent"));
+        missing.Reason.Should().Contain("no budget above zero");
+        h.Log.Should().Contain(e => e.Level == LogLevel.Information && e.Message.Contains("could not be judged") && e.Message.Contains("missing input"));
+    }
+
+    // ---- D-120 (finding 1): a subject whose input is missing is neither a hit nor observed false ------------------------------
+
+    [Theory]
+    [InlineData(false, 0)]   // the budget row was removed
+    [InlineData(true, 0)]    // the budget was set to zero
+    public async Task Run_UtilizationThreshold_OpenSignal_WhoseBudgetIsGone_StaysOpen_AndIsCountedAsAMissingInput(bool zeroRow, decimal budget)
+    {
+        var h = new Harness().WithThresholdPolicy();
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId)
+        {
+            ["sprk_matterid"] = MatterId, ["sprk_mattername"] = "Matter MAT-GONE", ["sprk_matternumber"] = "MAT-GONE",
+        });
+        h.WithInvoice("sprk_matter", MatterId, 75000m);
+        if (zeroRow) h.WithBudget("sprk_matter", MatterId, budget);
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        h.Org.ConditionalUpdates.Should().BeEmpty("the condition was not observed false: with no budget the utilization is undefined, so the Signal is not closed as cleared");
+        h.Org.CreateCalls.Should().Be(0);
+        result.ResultJson.Should().Contain("\"missingInputs\":1").And.Contain("\"closed\":0");
+    }
+
+    [Fact]
+    public async Task Run_UtilizationThreshold_ActedSignal_WhoseBudgetIsGone_GetsNoClearedMarker()
+    {
+        var h = new Harness().WithThresholdPolicy();
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId)
+        {
+            ["sprk_matterid"] = MatterId, ["sprk_mattername"] = "Matter MAT-GONE", ["sprk_matternumber"] = "MAT-GONE",
+        });
+        h.WithInvoice("sprk_matter", MatterId, 75000m); // no budget row at all
+        h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusResolved,
+            resolution: SignalWriter.ResolutionActed, resolvedOn: ActedOn, coreId: MatterId, lastEvaluated: ActedOn);
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        h.Org.ConditionalUpdates.Should().BeEmpty("an undefined utilization is not the condition observed false, so no cleared marker is stamped");
+        result.ResultJson.Should().Contain("\"clearedMarked\":0").And.Contain("\"missingInputs\":1");
+    }
+
+    [Fact]
+    public void Plan_UnjudgedSubject_IsNeitherClosedNorStamped_ButAJudgedOneIs()
+    {
+        var hit = CommHit(MatterId);
+        var other = CommHit(OtherMatterId);
+        var open = Existing(hit, 1, SignalWriter.SignalStatusOpen);
+        var acted = Existing(other, 1, SignalWriter.SignalStatusResolved, SignalWriter.ResolutionActed, resolvedOn: ActedOn);
+        var unjudged = new HashSet<(string, Guid)> { ("sprk_matter", MatterId), ("sprk_matter", OtherMatterId) };
+
+        var held = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { open, acted },
+            isThreshold: true, unjudged: unjudged);
+        held.Closes.Should().BeEmpty();
+        held.ClearedMarks.Should().BeEmpty();
+
+        var judged = SignalEpisodePlanner.Plan(SignalWriter.LaneDecide, 14, RunAt, Array.Empty<SignalHit>(), new[] { open, acted }, isThreshold: true);
+        judged.Closes.Should().ContainSingle();
+        judged.ClearedMarks.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Run_ThresholdPolicy_OnAProject_WritesASignalAboutTheProject_FromTheProjectsOwnBaseRows()
+    {
+        // The matter and the project share ids nowhere; a matter with big spend must not leak into the project's sum.
+        var body = UtilizationBody.Replace("sprk_matter", "sprk_project", StringComparison.Ordinal);
+        var h = new Harness().WithThresholdPolicy(body).WithProject(ProjectId, "PRJ-1")
+            .WithBudget("sprk_project", ProjectId, 200000m).WithInvoice("sprk_project", ProjectId, 190000m)
+            .WithBudget("sprk_matter", MatterId, 1m).WithInvoice("sprk_matter", MatterId, 1m);
+        h.Sysadmin.SubjectRows["sprk_project"].Single()["sprk_budgetutilizationpercent"] = 3m; // stale stored copy
+
+        var result = await h.RunAsync();
+
+        result.Success.Should().BeTrue();
+        var created = h.Org.CreatedPayloads.Should().ContainSingle().Subject;
+        created.GetAttributeValue<string>("sprk_dedupekey").Should().Be($"{PolicyCode}|sprk_project|{Lower(ProjectId)}|1");
+        created.GetAttributeValue<EntityReference>("sprk_regardingproject").Id.Should().Be(ProjectId);
+        created.GetAttributeValue<string>("sprk_sentence").Should().Be("Budget utilization has reached 95 percent.");
+        h.Sysadmin.AggregateFetches.Should().OnlyContain(f => f.Contains("attribute=\"sprk_project\""), "the project lookup, not the matter's");
     }
 
     // ---- D-120: a Threshold Signal resolved Acted re-raises only after a RE-CROSSING ---------------------------------------
@@ -1054,7 +1216,7 @@ public partial class SignalReevaluationJobTests
         h.Org.CreateCalls.Should().Be(0);
 
         // The matter crosses the threshold again: a new episode (D-13 key, episode 2).
-        h.Sysadmin.SubjectRows["sprk_matter"].Single()["sprk_budgetutilizationpercent"] = 95m;
+        h.Sysadmin.InvoiceRows.Single()["sprk_totalamount"] = new Money(95000m); // utilization is now 95 on the base rows
         (await h.RunAsync()).Success.Should().BeTrue();
         h.Org.CreatedPayloads.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_dedupekey")
             .Should().Be($"{PolicyCode}|sprk_matter|{Lower(MatterId)}|2");
@@ -1194,14 +1356,10 @@ public partial class SignalReevaluationJobTests
     {
         const string body = """{"type":"Threshold","subject":"sprk_matter","threshold":{"field":"sprk_totalspendtodate","operator":">=","value":50000}}""";
         var h = new Harness().WithThresholdPolicy(body, "Spend to date is {{sprk_totalspendtodate}}.");
-        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId)
-        {
-            ["sprk_matterid"] = MatterId, ["sprk_totalspendtodate"] = new Money(50000.0000000000m), // scale 10, as the SDK returns it
-        });
-        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", OtherMatterId)
-        {
-            ["sprk_matterid"] = OtherMatterId, ["sprk_totalspendtodate"] = new Money(49999.99m),
-        });
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", MatterId) { ["sprk_matterid"] = MatterId });
+        h.Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", OtherMatterId) { ["sprk_matterid"] = OtherMatterId });
+        h.WithInvoice("sprk_matter", MatterId, 50000.0000000000m); // scale 10, as the SDK returns an aggregate
+        h.WithInvoice("sprk_matter", OtherMatterId, 49999.99m);
 
         var result = await h.RunAsync();
 
@@ -1778,6 +1936,9 @@ public partial class SignalReevaluationJobTests
             return this;
         }
 
+        /// <summary>A matter whose BASE rows (a 100000 budget and an invoice of <c>percent</c> x 1000) give <paramref name="percent"/>
+        /// utilization, with a deliberately WRONG stored copy (the other side of the 90 threshold): a rule that read the stored column
+        /// would reach the opposite verdict, which is the point (task 025b, D-122).</summary>
         public Harness WithMatterUtilization(Guid matterId, decimal percent, string number)
         {
             Sysadmin.SubjectRows["sprk_matter"].Add(new Entity("sprk_matter", matterId)
@@ -1785,7 +1946,40 @@ public partial class SignalReevaluationJobTests
                 ["sprk_matterid"] = matterId,
                 ["sprk_mattername"] = "Matter " + number,
                 ["sprk_matternumber"] = number,
-                ["sprk_budgetutilizationpercent"] = percent,
+                ["sprk_budgetutilizationpercent"] = percent >= 90m ? 1m : 99m,
+            });
+            WithBudget("sprk_matter", matterId, 100000m);
+            return WithInvoice("sprk_matter", matterId, percent * 1000m);
+        }
+
+        public Harness WithProject(Guid projectId, string number)
+        {
+            Sysadmin.SubjectRows["sprk_project"].Add(new Entity("sprk_project", projectId)
+            {
+                ["sprk_projectid"] = projectId,
+                ["sprk_projectname"] = "Project " + number,
+                ["sprk_projectnumber"] = number,
+            });
+            return this;
+        }
+
+        public Harness WithInvoice(string parent, Guid parentId, decimal amount, int status = FinanceBaseValues.InvoiceStatusReviewed)
+        {
+            Sysadmin.InvoiceRows.Add(new Entity("sprk_invoice", Guid.NewGuid())
+            {
+                [parent] = new EntityReference(parent, parentId),
+                ["sprk_totalamount"] = new Money(amount),
+                ["sprk_invoicestatus"] = new OptionSetValue(status),
+            });
+            return this;
+        }
+
+        public Harness WithBudget(string parent, Guid parentId, decimal total)
+        {
+            Sysadmin.BudgetRows.Add(new Entity("sprk_budget", Guid.NewGuid())
+            {
+                [parent] = new EntityReference(parent, parentId),
+                ["sprk_totalbudget"] = new Money(total),
             });
             return this;
         }
@@ -1925,8 +2119,16 @@ public partial class SignalReevaluationJobTests
         public Dictionary<string, List<Entity>> SubjectRows { get; } = new(StringComparer.Ordinal)
         {
             ["sprk_matter"] = new(),
+            ["sprk_project"] = new(),
             ["sprk_todo"] = new(),
         };
+
+        /// <summary>The base rows of the finance rollup (task 025b): <c>sprk_invoice</c> and <c>sprk_budget</c>, each with its
+        /// <c>sprk_matter</c> / <c>sprk_project</c> parent lookup. Answered ONLY as the grouped aggregate the evaluator sends.</summary>
+        public List<Entity> InvoiceRows { get; } = new();
+        public List<Entity> BudgetRows { get; } = new();
+        public List<string> AggregateFetches { get; } = new();
+
         public Dictionary<string, List<Entity>> WitnessRows { get; } = new(StringComparer.Ordinal)
         {
             ["sprk_communication"] = new(),
@@ -2167,11 +2369,45 @@ public partial class SignalReevaluationJobTests
             _ => Equals(actual, expected),
         };
 
+        /// <summary>Answers the evaluator's grouped aggregate over invoices or budgets the way Dataverse does: rows of the given
+        /// parents (and, for invoices, of the listed statuses) summed per parent, the parent and the sum as aliased values. Anything
+        /// that is not a grouped sum over an <c>in</c> list of parents is refused, so a per-parent query fails the test.</summary>
+        private EntityCollection Aggregate(string name, XElement entity, string query)
+        {
+            AggregateFetches.Add(query);
+            if ((string?)XElement.Parse(query).Attribute("aggregate") != "true") throw new InvalidOperationException("Expected an aggregate query.");
+            var group = entity.Elements("attribute").Single(a => (string?)a.Attribute("groupby") == "true");
+            var sum = entity.Elements("attribute").Single(a => (string?)a.Attribute("aggregate") == "sum");
+            var lookup = (string)group.Attribute("name")!;
+            var sumColumn = (string)sum.Attribute("name")!;
+            var conditions = entity.Element("filter")!.Elements("condition").ToList();
+            var parents = conditions.Single(c => (string)c.Attribute("attribute")! == lookup && (string)c.Attribute("operator")! == "in")
+                .Elements("value").Select(v => Guid.Parse(v.Value)).ToHashSet();
+            var statuses = conditions.SingleOrDefault(c => (string)c.Attribute("attribute")! == "sprk_invoicestatus")
+                ?.Elements("value").Select(v => int.Parse(v.Value)).ToHashSet();
+
+            var result = new EntityCollection();
+            var rows = (name == "sprk_invoice" ? InvoiceRows : BudgetRows).Where(r =>
+                r.GetAttributeValue<EntityReference>(lookup) is { } p && parents.Contains(p.Id)
+                && (statuses is null || r.GetAttributeValue<OptionSetValue>("sprk_invoicestatus") is { } s && statuses.Contains(s.Value)));
+            foreach (var byParent in rows.GroupBy(r => r.GetAttributeValue<EntityReference>(lookup)!.Id))
+            {
+                result.Entities.Add(new Entity(name)
+                {
+                    ["parent"] = new AliasedValue(name, lookup, new EntityReference(lookup, byParent.Key)),
+                    ["total"] = new AliasedValue(name, sumColumn, new Money(byParent.Sum(r => r.GetAttributeValue<Money>(sumColumn)?.Value ?? 0m))),
+                });
+            }
+
+            return result;
+        }
+
         public Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct = default)
         {
-            Fetches.Add(fetch.Query);
             var entity = XElement.Parse(fetch.Query).Element("entity")!;
             var name = entity.Attribute("name")!.Value;
+            if (name is "sprk_invoice" or "sprk_budget") return Task.FromResult(Aggregate(name, entity, fetch.Query));
+            Fetches.Add(fetch.Query);
             var result = new EntityCollection();
             if (SubjectRows.TryGetValue(name, out var subjects))
             {

@@ -343,12 +343,14 @@ public sealed partial class SignalWriter
     /// <summary>
     /// The subject types the writer accepts: a CLOSED, VERIFIED set and deliberately a SUBSET of
     /// <see cref="RegardingLookupByEntity"/>'s keys. Task 037 (D-16/D-36) adds the three Do-lane subjects to matter and
-    /// communication. <c>sprk_servicerequest</c> (and project, invoice, document) stay refused as a SUBJECT: no rule reads
-    /// them in R1. Each subject's core record comes from <see cref="CoreAncestorResolver"/>, never from a lookup walk here.
+    /// communication. Task 025b (owner decision D-122) adds <c>sprk_project</c>: a Threshold rule on a project's spend, budget or
+    /// utilization raises a Signal about the project, which is a core record and groups under itself like a matter.
+    /// <c>sprk_servicerequest</c> (and invoice, document) stay refused as a SUBJECT: no rule reads them in R1. Each subject's core
+    /// record comes from <see cref="CoreAncestorResolver"/>, never from a lookup walk here.
     /// </summary>
     public static readonly FrozenSet<string> VerifiedSubjects = new[]
     {
-        "sprk_matter", "sprk_communication", "sprk_event", "sprk_todo", "sprk_workassignment",
+        "sprk_matter", "sprk_project", "sprk_communication", "sprk_event", "sprk_todo", "sprk_workassignment",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>The subject column the Signal's <c>sprk_duedate</c> copies (task 037, D-27): an event's
