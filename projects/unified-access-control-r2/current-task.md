@@ -1,71 +1,47 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives, §5 Environment, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` (rounds 1–89) and `notes/decisions.md`. Live records: `notes/batch5-live-gates-2026-10-08.md`. Owner checks: `notes/owner-hands-on-checklist-2026-10-08.md`. Narrative: checkpoint commit messages.
+> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives, §5 Environment, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` (rounds 1–96) and `notes/decisions.md`. Live records: `notes/batch5-live-gates-2026-10-08.md`. Narrative: checkpoint commit messages.
 
-> **Last Updated**: 2026-10-09 ~15:45 local (checkpoint #26, before /compact).
+> **Last Updated**: 2026-10-13 (checkpoint #27, after compaction).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Session 28, merge and deploy of 3 verified PRs. **177** #1517 is MERGED (`f3d0a498e`) and its BFF is DEPLOYED to dev (healthz 200). The leftover job from the previous session did it. Still to merge: **180** #1519 (master conflict resolved `eb71d996f`, CI re-running), **175** #1503 (master conflict resolved `2f07a22b4`, CI running), **176** #1520 (clean vs master, CI running). **No merge job is running now.** All leftover/old jobs were killed by PID. |
-| **Next Action** | (1) Launch the ONE sequential job, in the BACKGROUND: `bash "C:/Users/RALPHS~1/AppData/Local/Temp/claude/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/scratchpad/orchestrate.sh"`. It polls every 90 s, then: merge #1519 → 180 ribbon `-Apply` (`Set-CreatePrivilegeRibbon.ps1`, which also hides the "New Document" appaction) → merge #1503 → merge #1520 → ONE deploy from C:\wtR2: schema `-Verify` (pre-BFF), BFF, 175 web resources (`sprk_/scripts/access_ribbon.js`, `sprk_accesspermission_inherited`) + readback, 175 form lock (-SelfTest/dry/-Apply/-Verify), access ribbon `-Verify`, TrackingFieldTrio 1.0.45 import. It verifies each merge really happened and tolerates only a timeout-cancelled "Server tests (office scope)" (#1474). (2) If a merge is refused, it is usually a new master conflict: `git merge-tree --write-tree --name-only origin/master HEAD` in that worktree, resolve, push, then re-run the job. Remove already-merged PRs from the script first. (3) After the deploy: watch 2 `secure-root-inheritance` runs (`followParents`: notCompleted 0, no access_record_hidden/not_secured); re-run the schema `-Verify` (read probe); then the 175 live gate. If the access ribbon `-Verify` fails, run `Set-AccessRibbon.ps1 -Apply`. (4) The 180 live gate G180-2: a read-only role sees no custom Create buttons; Basic User still does. (5) 177 post-deploy: one-off Send-to-Index for the 141 relocated dev docs (query in the PR #1517 body). (6) Close 177 now (merged + deployed; its live check is the Send-to-Index repair), then close 175/176/180 after their gates: POML status + TASK-INDEX row + `scripts/check-task-status-drift.ps1` (9 known false positives) + board sync. (7) Start 179 and 181 (both after 175), then 178 (design note → owner first), then 136 → 099 → 036 → 090. |
+| **Mode** | Round 90 wrap-up: fix only findings that affect uac-r2 or break a real path; file everything else as an issue. A task closes on merge + deploy + server-side live gate. |
+| **Running** | (a) Task 184 executor, agent `a2bd29e032484065c`, worktree `C:/wt184`, branch `uac/184-e11-intent-and-existing-ciam`. It must not run the schema `-Apply`. (b) Task 183 verifier pass 1, agent `a6bd48068a1ce5b9b`, on PR #1797. |
+| **Next Action** | When the 183 verifier reports: resume the 183 executor for ONE fix round covering (1) F3.1, two RefusedSecure cases plus the AlreadyOwned-order mutation; (2) F3.2, a cancellation test plus the filter-inversion mutation; (3) a NotFound outcome; (4) K2→F, a row-version-conditional owner write with a `Conflict` outcome, a test and a mutation; and (5) the pass-1 findings. Then verifier pass 2 (required: security and tenant-isolation tags), then send the fix diff to the ontology session, which merges into `docs/ontology-platform-design`. |
 
-## Rules learned this session (also in project CLAUDE.md §6 where durable)
-- **ONE background polling job at a time.** Four parallel merge jobs exhausted the page file (Win32 1455) and died. A job started in a previous session can SURVIVE the restart and still act: check `ps -ef | grep merge` before launching.
-- **Never launch a merge job with `&`** (no log). Always use `run_in_background`.
-- **Subagents do not survive a session restart.** Spawn new ones with full briefs. The worktrees keep the work: C:\wt175, C:\wt176, C:\wt180.
-- Master moves fast (other projects). Re-check each PR for conflicts with `git merge-tree` right before merging; a conflicting PR gets no CI.
-- A newly created Dataverse column needs a table publish before `fieldpermissions` can reference it (175's script now waits).
+## Active lanes
+- **#1746 (ontology Signal suppression):** UAC review is CLEAN at `8e24a42d9`, sent to the ontology session and posted as comment 6139088001. The ontology session merges once CI is green on that head (Router, full unit tests, ArchTests). If the 5 uncaptured ArchTests failures come back, they send the names.
+- **#1797 / task 183 (ReownOrdinaryRowAsync, base `docs/ontology-platform-design`):** see Next Action. Outcome mapping 148 uses: Reowned, AlreadyOwned→AlreadyApplied, RefusedSecure→SkippedSecure, RefusedNotTeamOwned→SkippedUserOwned, Failed→RepairFailures, NotFound→SkippedGone, Conflict→SkippedConflict.
+- **Task 184 (E11 intent gate + ExistingAccount invite):** the owner chose a pending-invite column, `contact.sprk_externalinvitedon` (DateTime). The BFF writes it and never clears it. It is field-secured with the existing BFF-Managed profiles and added to SpaarkeMaster and SpaarkeCore. After the PR: two verifier passes (auth, security, tenant-isolation); send the PR to provisioning for the cross-customer review; the main session applies the schema script on dev; then merge, deploy and live gate. NOTE: the POML's "no new column" constraint is superseded by the owner's round 96 column decision.
+- **Model 1 workforce sign-in (word-add-in T126):** discussion open with the owner.
+  - The BFF accepts only tenant `a221a95e`. The workforce realm signs in via `/organizations`, which gives the home tid, so the BFF returns 401 IDX40001. This was live on dev on 2026-10-13.
+  - Recommendation A: home-tenant sign-in, the BFF accepts the listed customer tenants on external routes, 141's member test, a registration form at first sign-in, and the customer sees a workforce contact.
+  - Option B: guest invite plus a recorded oid set.
+  - Open questions: A or B? Do registrations need approval? What is the baseline access?
+  - Provisioning is holding H11 until this is decided. The 401 must be fixed or filed.
 
-## Dev state
-- **BFF:** master `f3d0a498e` (includes 174 and 177).
-- **175 schema:** `sprk_accessinheritance` on work assignments and projects, field-secured, writer profile only; `-Verify` PASS.
-- **Owner-facing UI already on dev:**
-  - TrackingFieldTrio 1.0.43 (174);
-  - banner 1.0.1 (#1490);
-  - 173 form lock;
-  - 153 banner.
-- **Banner still shows "Access status unavailable"** for the owner. The server side is verified fine. Waiting on the owner's browser details: Network tab filtered `no-access|config/client` after Ctrl+Shift+R, plus `[Access Status]` / `[BffAuth]` console lines.
+## Done this period
+- #1665 merged (`aeb9e0973`).
+- #1780 / task 182 merged (`a3c9aaa24`).
+- The #1732 live gate passed (2026-10-12).
+- The Q27 `sprk_createdbyperson` field permissions are complete on dev.
+- Issues filed: #1777 and #1779.
 
-## Owner decisions this session (recorded in notes)
-- **R87:** the parent sets a FLOOR; a child may be stricter; only inherited values follow down; a re-file never loosens; the lock covers Secure and Access Permission only.
-- **R88:** one SPE container per secure family; un-secure moves files to the business unit → task 178.
-- **R89:** Manage Access needs the Share privilege → 179; Create buttons follow the Create privilege → 180; internal grant notification → 181.
-- **180:** hide the modern "New Document" appaction (owner OK).
-- **Main-session calls:**
-  - 176: option B batch read as the caller; SearchDocuments unbound and trimmed; Precedents need every supporting matter readable; `/api/ai/search` per-document trim.
-  - 177: the index parent is the governing record (one secure → it; none → most specific; two secure roots or unreadable → none).
-- **Open policy question:** curated Precedents as firm-wide knowledge (option c), for later.
-
-## Task status
-- **Done:** 125 (174 closed).
-- **Merged + deployed, closable:** 177.
-- **Verified, merging:** 175, 176, 180.
-- **Waiting on owner checks:** 067 (§6), 153 (§7, blocked by the banner), 173 (§8), 154, 114, 171, batch 4 (137, 140, 142, 143, 147, 150, 157, 162–166, 168, 169).
-- **Not started:** 179, 181 (after 175); 178 (after 175, design first); 136; 099; 036; 090. Bookkeeping: 013/037/039 (with 136), 058 (090), 066 (067).
+## Owner decisions (round 96, in the notes)
+- D-134/D-135: the personal To Do decision-record owner is the assignee's BU team, follow on reassign, fall back to the To Do's team. "Personal" means filed under nothing.
+- Q27 is decided.
+- E11 uses the pending-invite column.
+- Do NOT run `Set-ExternalFlagForB2BGuests.ps1 -Apply` in Model 1 (this rule is in the project CLAUDE.md).
 
 ## Open owner items
-- The banner browser details (above).
-- No Access Entries in the app navigation?
-- Checklist §1–§8.
-- Run `Remove-TestContainers.ps1`.
-- CIAM identities for 140; users for 171; 165 role grant.
-- Set the Share privilege on roles after 179.
-- Authorize the claude.ai and legal-plugin connectors if wanted.
+- The Model 1 questions above.
+- #1747 (word-add-in sign-off).
+- #1776 (Dev 1 and Test 1 BU team roles).
+- F7, F9, CIAM emails G8, banner re-check 153, Remove-TestContainers, the checklist, 165(d), 171.
+- Optional: file an issue for the legacy `spaarke_core` solution; update `scripts/README.md` (it says Set-ChildRecordCreatorPersonSchema was never run).
 
-## Issues filed this session
-- #1489 KPI/rollup `/api/api`
-- #1492 SpaarkeMaster source missing web resources
-- #1514 per-document check cost
-- #1516 bulk indexing sweep broken + "Unknown Matter" labels
-- #1521 ribbon source drift
-- #1522 index-name resolver short names
-- #1533 search counts include unreadable docs
-- #1534 flaky ContentSafety test
-- Plus earlier: #1474, #1478, #1482, #1449, #1435–#1445.
-
-## Worktrees
-- **Active:** C:\wt175, C:\wt176, C:\wt180 (C:\wt177 can be removed).
-- **Deploy:** C:\wtR2 (clean, at `f3d0a498e`).
-- **Removable:** C:\wt174, C:\wt177, C:\wt1488, C:\wt064, C:\wt067, C:\wt113, C:\wt153, C:\wt173, C:\wt1410, C:\wt154, C:\wt105, C:\wt101, C:\wt114u. Run `cmd /c rmdir` on node_modules junctions first.
+## Not started
+178, 136, 036, 037, 039, 099, 090 wrap-up, and 013/058 bookkeeping.
