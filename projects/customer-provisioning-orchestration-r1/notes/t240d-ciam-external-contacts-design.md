@@ -292,6 +292,17 @@ registration (D-13) is its keyless CIAM Graph provisioner.**
 - **Refusal.** A stamp refuses another customer's contacts by audience (401) and by oid binding in its own Dataverse
   (403). E11 is narrowed to contacts this stamp invited.
 - **Gate.** Spike S1 must pass before step 2.
+- **Live acceptance: cross-customer ExistingAccount (taken on from UAC-r2 2026-10-13; their owner checklist §11
+  option b).** Single-environment dev cannot prove it, because every CIAM user there already has one bound contact. It
+  runs once a stamp has T240d wired (H3c + H4b `Ciam:*`), using dev and that stamp, both on `spaarkeextid`. On the stamp,
+  invite the email of a person who has a CIAM account and no contact there. PASS means all of:
+  - outcome `ExistingAccount`;
+  - `contact.sprk_externalinvitedon` is written;
+  - `sprk_externalobjectid` is still empty;
+  - the "sign in with your existing account" email is sent;
+  - no new CIAM user is created (Graph `ObjectConflict` on `proxyAddresses`).
+
+  This is a live action and needs the owner's OK at run time.
 
 Alternatives rejected:
 - **One shared CIAM API audience**: a token for X authenticates at Y, the "one credential, every customer" pattern D-13
