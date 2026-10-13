@@ -68,7 +68,14 @@ The cost is one admin consent per customer and Microsoft publisher verification 
 - `WorkforceIdentityOptions.cs`, `WorkforcePrincipalResolver.cs` and a new registration endpoint and service: no conflict with in-flight UAC work.
 - **Status:** UAC is waiting for its owner to confirm A9 to it directly before it applies its items 1–4. Its design draft `projects/unified-access-control-r2/notes/186-model1-workforce-design.md` is uncommitted and is shared after that confirmation.
 
-**Confirmations received:** word-add-in-r1, 2026-10-13 (commit `3235e5452`; no code change; live check: Outlook on the web verified 2026-10-08, desktop Word not yet).
+**Confirmations received:**
+- **word-add-in-r1**, 2026-10-13 (commit `3235e5452`). No code change. Live check: Outlook on the web verified 2026-10-08, desktop Word not yet.
+- **customer-provisioning-orchestration-r1**, 2026-10-13 (commit `d14362fcd`). Items 1–4 confirmed, no conflict. Its project CLAUDE.md directive waits for its owner's OK.
+  - H3 already creates `AzureADMultipleOrgs` BFF apps; it adds `requestedAccessTokenVersion` = 2, `knownClientApplications` and pre-authorization.
+  - The workforce SPA client is a one-time operator app; its id is a platform parameter.
+  - The intake gains `customerWorkforceTenantIds`, which H4b writes to both slots. The run hand-off prints the admin-consent URL; consent is a manual gate.
+  - Publisher verification is tracked as ISS-026 / #1811. Provisioning accepts task 041's directory field shape.
+- **unified-access-control-r2**: conditions above; waiting for its owner's direct confirmation.
 
 ### spaarkeai-word-add-in-r1
 
