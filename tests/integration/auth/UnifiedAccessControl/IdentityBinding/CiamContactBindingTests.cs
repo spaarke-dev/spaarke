@@ -47,13 +47,133 @@ public class CiamContactBindingTests
     [Fact]
     public async Task TheInviteRepairPath_BindsTheOidOntoTheOneUnboundActiveContact_PlaneExternal()
     {
-        _store.AddContact(ContactA, email: Email);
+        // Task 184: the invite that this path repairs left its pending-invite marker (written before the CIAM account).
+        _store.AddContact(ContactA, email: Email, invitedOn: Now);
 
         var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email.ToUpperInvariant(), CancellationToken.None);
 
         result.ContactId.Should().Be(ContactA);
         _store.Contacts[ContactA].Oid.Should().Be(CiamOid.ToString("D"));
         _store.Contacts[ContactA].Plane.Should().Be((int)IdentityPlaneMarker.External);
+    }
+
+    // ── Task 184 (owner round 96): E11 binds only on THIS environment's intent ──────────────────────────────────
+    // Any CIAM user can obtain a token for this customer's audience (provisioning spike S1), so an email match alone
+    // is no evidence that this customer invited this person.
+
+    [Fact]
+    public async Task AnUnboundContactWithAnActiveGrantHere_IsEmailBound()
+    {
+        _store.AddContact(ContactA, email: Email);
+        _store.AddGrant(ContactA, expiresOn: DateOnly.FromDateTime(Now.UtcDateTime).AddDays(30));
+
+        var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, CancellationToken.None);
+
+        result.Action.Should().Be(BindingAction.BindByEmail);
+        _store.Contacts[ContactA].Oid.Should().Be(CiamOid.ToString("D"));
+    }
+
+    [Fact]
+    public async Task AnUnboundContactWithAPendingInviteHere_IsEmailBound()
+    {
+        _store.AddContact(ContactA, email: Email, invitedOn: Now.AddDays(-2));
+
+        var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, CancellationToken.None);
+
+        result.Action.Should().Be(BindingAction.BindByEmail);
+        _store.Contacts[ContactA].Plane.Should().Be((int)IdentityPlaneMarker.External);
+    }
+
+    /// <summary>
+    /// Owner round 97, through the binder: the marker's age is measured at the binder's clock (the decision is pure). A
+    /// marker exactly 30 days old binds; one a second older is denied <c>contact_not_invited</c>, with nothing written.
+    /// </summary>
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(-1, false)]
+    public async Task AMarkerAtTheEdgeOfItsThirtyDays_IsMeasuredAtTheBindersClock(int extraSeconds, bool binds)
+    {
+        _store.AddContact(ContactA, email: Email,
+            invitedOn: Now - ContactBindingDecision.InviteMarkerWindow + TimeSpan.FromSeconds(extraSeconds));
+
+        var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, CancellationToken.None);
+
+        if (binds)
+        {
+            result.Action.Should().Be(BindingAction.BindByEmail);
+        }
+        else
+        {
+            result.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+            _store.Writes.Should().BeEmpty();
+            _store.Contacts[ContactA].Oid.Should().BeNull();
+        }
+    }
+
+    [Fact]
+    public async Task AnUnboundContactThisEnvironmentNeverInvited_IsDeniedNotInvited_AndNothingIsWritten()
+    {
+        _store.AddContact(ContactA, email: Email);
+
+        var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        _store.Writes.Should().BeEmpty("no bind, and no flag: no other person is involved");
+        _store.Contacts[ContactA].Oid.Should().BeNull();
+        _store.Contacts[ContactA].Flag.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(1, 30)]   // deactivated
+    [InlineData(0, -1)]   // expired yesterday
+    public async Task OnlyAnExpiredOrDeactivatedGrant_AndNoInvite_IsDenied(int stateCode, int expiresInDays)
+    {
+        _store.AddContact(ContactA, email: Email);
+        _store.AddGrant(ContactA, stateCode, DateOnly.FromDateTime(Now.UtcDateTime).AddDays(expiresInDays));
+
+        var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+        _store.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AnIntentReadThatThrows_NeverBinds()
+    {
+        _store.AddContact(ContactA, email: Email, invitedOn: Now);
+        _store.ThrowOnIntentRead = true;
+
+        var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactLookupFailed);
+        _store.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AFailedGrantRead_NeverBinds_EvenWithAnInviteMarker()
+    {
+        _store.AddContact(ContactA, email: Email, invitedOn: Now);
+        _store.GrantLookupStatus = LookupStatus.Failed;
+
+        var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactLookupFailed);
+        _store.Contacts[ContactA].Oid.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TheWorkforcePlane_EmailBindsAMember_WithoutReadingAnyIntent()
+    {
+        // Workforce-plane E11 is unchanged by task 184.
+        var oid = Guid.NewGuid();
+        _store.AddContact(ContactA, email: "person@customer.example");
+
+        var result = await Binder(_store).ResolveWorkforceCallerAsync(
+            WorkforceUser(oid, tid: CustomerTenant), oid, stampTenantId: null, CancellationToken.None);
+
+        result.Action.Should().Be(BindingAction.BindByEmail);
+        _store.Reads.Should().NotContain("intent");
     }
 
     [Fact]
@@ -151,7 +271,7 @@ public class CiamContactBindingTests
     [Fact]
     public async Task AFailedBindWrite_IsNotResolvedAnyway()
     {
-        _store.AddContact(ContactA, email: Email);
+        _store.AddContact(ContactA, email: Email, invitedOn: Now); // task 184: invited here, so the bind is attempted
         _store.FailBind = true;
 
         var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, CancellationToken.None);
@@ -165,7 +285,7 @@ public class CiamContactBindingTests
     {
         // Another identity binds ContactA between our read and our conditional (If-Match) write.
         var winner = Guid.NewGuid();
-        _store.AddContact(ContactA, email: Email);
+        _store.AddContact(ContactA, email: Email, invitedOn: Now); // task 184: invited here, so the bind is attempted
         _store.BeforeBind = c =>
         {
             c.Oid = winner.ToString("D");
@@ -184,7 +304,7 @@ public class CiamContactBindingTests
     public async Task TheRepairBind_AgainstASquattedMirror_Denies_AndFlagsTheHolder_NeverBinds()
     {
         // B2 (owner round 4 item 4): another contact holds this CIAM oid in the unsecured uniqueness mirror.
-        _store.AddContact(ContactA, email: Email);
+        _store.AddContact(ContactA, email: Email, invitedOn: Now); // task 184: invited here, so the bind is attempted
         _store.AddContact(ContactB, email: "elsewhere@firm.example", keyMirror: CiamOid.ToString("D"));
 
         var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, CancellationToken.None);

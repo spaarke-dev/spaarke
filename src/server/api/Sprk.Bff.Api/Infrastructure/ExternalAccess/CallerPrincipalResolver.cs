@@ -561,6 +561,9 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
         ContactBindingDecision.DenyContactKeyConflict =>
             "Another contact holds the identity key for this sign-in, so it cannot be bound. An administrator has been "
             + "alerted through an identity-collision flag.",
+        ContactBindingDecision.DenyContactNotInvited =>
+            "This sign-in has not been invited to this workspace. External users are added by invitation; ask the person "
+            + "who works with you here to invite you.",
         _ => "Access could not be resolved for this sign-in. Please try again.",
     };
 }

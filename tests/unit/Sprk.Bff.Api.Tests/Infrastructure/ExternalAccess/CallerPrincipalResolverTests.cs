@@ -415,6 +415,7 @@ public class CallerPrincipalResolverTests
     [InlineData("unreadable", "sdap.access.deny.contact_lookup_failed")]
     [InlineData("inactive", "sdap.access.deny.contact_inactive")]
     [InlineData("key-conflict", "sdap.access.deny.contact_key_conflict")]
+    [InlineData("not-invited", "sdap.access.deny.contact_not_invited")] // task 184
     public async Task CiamStrategy_EachDeny_CarriesItsOwnReasonCode(string scenario, string expectedCode)
     {
         var oid = Guid.NewGuid();
@@ -436,8 +437,13 @@ public class CallerPrincipalResolverTests
                 break;
             case "key-conflict":
                 // B2: the repair bind's target is free, but another contact holds the oid in the uniqueness mirror.
-                store.AddContact(Guid.NewGuid(), email: "x@firm.example");
+                // Task 184: invited here, so the repair bind is attempted (E11's intent gate).
+                store.AddContact(Guid.NewGuid(), email: "x@firm.example", invitedOn: IdentityBindingTestKit.Now);
                 store.AddContact(Guid.NewGuid(), email: "y@firm.example", keyMirror: oid.ToString("D"));
+                break;
+            case "not-invited":
+                // Task 184: an unbound contact with the email, but no grant and no pending invite in this environment.
+                store.AddContact(Guid.NewGuid(), email: "x@firm.example");
                 break;
         }
 
