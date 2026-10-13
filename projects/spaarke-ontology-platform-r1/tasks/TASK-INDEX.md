@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
-> (spec §9) · **124 tasks** across 15 phases (76 ✅ · 1 🔄 · 34 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-12: +140–147, Phase 4c child-record contract)
+> (spec §9) · **125 tasks** across 15 phases (76 ✅ · 1 🔄 · 35 🔲 · 4 cancelled · 9 deferred by D-106; updated 2026-10-12: +140–148, Phase 4c child-record contract)
 > **2026-10-08 no-parking sweep (D-81)**: new tasks **121-129** (phase 8) turn every open issue and loose end into a task;
 > **113** amended (#1420, #1421), **114** amended (deps 121; no tenant-wide publish; 127 auto-deploy), **120** amended (node
 > descriptions match their queries). Still deferred by explicit owner decision only: ISS-004 (#1095) and ISS-007 (#1381, D-50).
@@ -225,6 +225,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | 🔲 [open] 145 | [`sprk_matter` readers (context vs filing), backfill, evidence leak](145-matter-readers-backfill-evidence-leak.poml) | FULL | **opus**/high | 141, 142, 144 | CC5 | D-34 split; uac-r2 #1747 finding (e) (D-123 leak); backfill write needs owner approval · **[uac]** |
 | 🔲 [open] 146 | [Live gate: contract §5, 11 items](146-child-contract-live-gate.poml) | FULL | sonnet/high | 140–145 | CC6 | After the BFF with 141–145 is on dev and the DR metadata cache key has expired · **[uac]** |
 | 🔲 [open] 147 | [Budget revision records its requester (`sprk_createdbyperson`); drop 182's exemption](147-budgetrevision-creator-person.poml) | FULL | sonnet/high | #1780 merged | CC2 | **D-135** (Q27; #1777). Column created on dev by the owner · **[uac]** |
+| 🔲 [open] 148 | [Follow the assignee: `TodoAssigneeOwnerReconciliationJob`](148-todo-assignee-owner-reconciler.poml) | FULL | **opus**/high | 142, 143, #1665, UAC `ReownOrdinaryRowAsync` | CC5 | **D-135** item 2. Shape approved by uac-r2 (F1 live filing, F2 nightly recompute, F3 re-owns via UAC's entry point). Report-only by default · **[uac]** |
 
 ### Phase 5 — The worklist surface
 

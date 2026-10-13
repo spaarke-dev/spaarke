@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="148" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Follow the assignee: TodoAssigneeOwnerReconciliationJob re-owns a personal To Do's Signals and Decision Records to its current Assigned To's team (D-135 item 2)</title>
+    <phase>4c Standard child-record contract (D-131)</phase>
+    <gate>blocked: 142 and 143 merged; #1665 (D-134 helper + ForUserTeam) merged; UAC's ReownOrdinaryRowAsync PR merged and owner-approved</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New scheduled job that changes record ownership (security-relevant).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Ownership writes across two walls with live-filing semantics; FULL rigor with 3+ dependencies.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>CC5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New job class plus one registration line; touches no other task's files except census entries.</parallel-reason>
+    <deps>142,143</deps>
+    <tags>bff-api,security,job,dataverse,testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>When a personal To Do's Assigned To changes (from the client form, with no BFF hook) or the assignee's own business unit/state/contact link changes, re-own that To Do's Signals and Decision Records to the D-134 answer, without ever crossing a secure wall or overriding a core filing.</prompt>
+  <role>SPAARKE BFF engineer.</role>
+  <goal>The job keeps every personal-To-Do Signal and DR owned by the D-134 answer for the To Do's CURRENT state; report-only by default; uac-r2 has reviewed; a dev report-only run report is in notes/.</goal>
+
+  <context>
+    <background>D-134, D-135 (notes/decisions.md). Shape approved by uac-r2 2026-10-12 with fixes F1-F3 (below). Scaffold to copy: `Services/Dataverse/CoreAncestorStampReconciliationJob.cs` (IScheduledJob, WritesEnabled switch :135-147, ScanAsync paging/cursor :562-595 and :675-731, idempotency claim/marker :448-520, run result :233-259).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/ (new TodoAssigneeOwnerReconciliationJob.cs)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Signals/SignalsModule.cs (one AddScheduledJob line)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorStampReconciliationJob.cs (scaffold reference)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciler.cs (UAC's ReownOrdinaryRowAsync — call only)</file>
+      <file>the D-134 shared assignee helper and RecordOwnershipContext.ForUserTeam (from #1665)</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>SignalReevaluationJob reassigns only open hit Signals nightly, no DR; CoreAncestorStampReconciliationJob (stamps) and SecureChildReconciliationJob (secure-wall re-owns) are UAC-owned; none re-owns to a To Do's assignee.</existing>
+    <extension>A pass in a UAC job puts ontology ownership logic in UAC files; a pass in the nightly Signal job misses the DR half and the 5-minute cadence. The new class reuses the scaffold, host and admin plumbing.</extension>
+    <cost-of-doing-nothing>After a client-form Assigned To change, or an assignee's BU move, a personal To Do's Signals and DRs stay with the old team indefinitely (D-135 item 2).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="uac-r2 F1 / D-34">"Personal" is decided from LIVE filing: the To Do's current core (CoreAncestorResolver) plus each row's live sprk_regarding{matter,project,workassignment,servicerequest} stamps. Never use sprk_corerecordid/type (immutable decision context) to select or skip. Rows are selected by sprk_regardingtodo = To Do id. A To Do that is filed now → its rows are left to the re-file rule (skip, count SkippedCored); a To Do un-filed since → its rows come in.</constraint>
+    <constraint source="uac-r2 F2">Two passes: every 5 minutes, To Dos with modifiedon after a watermark; nightly, a full recompute of EVERY personal-To-Do Signal and DR against the helper's CURRENT answer (catches assignee BU moves, disable/enable, sprk_primarycontact relinks with no To Do edit). Per-run bounds: page cap and carry-over cursor as in the scaffold.</constraint>
+    <constraint source="uac-r2 F3">All re-owns (Signals AND DRs) go through UAC's `SecureChildReconciler.ReownOrdinaryRowAsync(table, id, teamId, ct)` — one place for the Secure refusals. Do not use SignalWriter.ReassignNoCoreOwnerAsync and do not grant any identity Write on sprk_decisionrecord. A refusal from that entry point is counted (SkippedSecure), never retried as an error.</constraint>
+    <constraint source="D-134/D-130">Expected owner per To Do: the shared helper → exactly one enabled user → ResolveOwnerAsync(RecordOwnershipContext.ForUserTeam(user)); otherwise the To Do's own team. Before writing a row, resolve its parents with ForParents (secure wins): SRO or Refused → skip and count; a row already owned by the Secure team → skip. Write only rows whose ownerid differs. Memoise the expected owner per To Do per run.</constraint>
+    <constraint source="owner">Switch `Ontology:TodoAssigneeOwner:WritesEnabled`, report-only unless explicitly true. Turning writes on is an owner decision after a dev report-only run that uac-r2 reviews. No dev data writes in this task.</constraint>
+    <constraint source="project">ADR-036 IScheduledJob; BFF hygiene §10 (publish-size delta); census entries for the new owner-write call sites; never use --no-verify or bare git stash; you cannot write .claude/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Copy the scaffold; implement the watermark pass and the nightly recompute; per-To-Do resolution with memoisation; guards; calls to ReownOrdinaryRowAsync.</step>
+    <step order="2">Tests (below), mutation proofs on the secure guard and the live-filing guard.</step>
+    <step order="3">Build, suites, ArchTests; draft PR; send to uac-r2. Then a report-only run on dev (needs the BFF deployed there per D-126; if not deployed, record that the run is pending) and save the report under notes/148-report-only-run.md.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Assigned To changed to a user in another BU → the To Do's Signals and DRs are re-owned to that BU's default team (watermark pass).</criterion>
+    <criterion testable="true">The assignee's BU changes with no To Do edit → the nightly recompute re-owns (uac-r2 F2 test).</criterion>
+    <criterion testable="true">No single enabled user (none, several, disabled) → the To Do's own team; counted separately as FallbackNoAssignee / FallbackAmbiguous / FallbackDisabled.</criterion>
+    <criterion testable="true">A Signal raised while the To Do was personal, To Do since filed under matter M (sprk_corerecordid null) → NOT re-owned by this job (SkippedCored) (uac-r2 F1 test).</criterion>
+    <criterion testable="true">A To Do un-filed since its rows were cored → its rows are re-owned to the D-134 answer (F1 reverse test).</criterion>
+    <criterion testable="true">A row with a secure parent, or owned by the Secure team, or refused by ReownOrdinaryRowAsync → never written; counted SkippedSecure / SkippedRefused. Mutation: remove the secure guard → this test fails.</criterion>
+    <criterion testable="true">A row already owned by the expected team → no write (AlreadyApplied).</criterion>
+    <criterion testable="true">Report-only (default) → no write, the would-be re-owns listed in sampleStale.</criterion>
+    <criterion testable="true">A scan or resolve fault → run status error/partial, never "0 stale"; no write for that To Do.</criterion>
+    <criterion testable="true">Census entries for the new call sites; census + consistency ArchTests pass.</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the cases above; anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/scheduled-jobs.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <escalation>
+    <trigger>If ReownOrdinaryRowAsync's contract differs from the one stated here, or the To Do's current core cannot be determined without a new Dataverse read pattern, STOP and escalate rather than adapting.</trigger>
+  </escalation>
+
+  <notes>Created 2026-10-12 (D-135). Shape and F1-F3 from uac-r2's review; UAC provides ReownOrdinaryRowAsync in its own PR (owner sign-off required). Two adversarial passes (security).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -32,6 +32,12 @@ Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-d
 - The DR lineage row is inert until 142 writes the subject lookups. **142 must ship the two-wall refusal in the same PR** that first writes them (#1778; this is a constraint in the 142 POML).
 - Sequence: 141 → 142/143 → 144 → 145 → 146. 146 waits for the 6 h metadata cache key.
 
+## D-134/D-135 work
+
+- **#1665 D-134 commit:** an opus implementer is running in `C:\wts-043`. It adds `ForUserTeam`, the shared assignee helper (one enabled user, else the To Do's own team; a fault fails closed) and the item-7 secure-wins rule, with tests and mutations. After it reports: uac-r2 reviews the factory and the item-7 path, then the base merge (with #1780) + C2 reason rewrite, then merge.
+- **Task 148** (reconciler) is written. uac-r2 provides `SecureChildReconciler.ReownOrdinaryRowAsync` in its own PR (owner sign-off; we review it).
+- **Task 147** (budget revision creator-person) starts once #1780 merges.
+
 ## Waiting / owner
 
 - **Q23 → D-134 (relayed by uac-r2, 2026-10-12; confirm here):** a DR on a personal To Do is owned by the Assigned To contact's user's BU default team. Edge cases 1–4 (D-134) await the owner. A code-mapper is mapping the change (contact → systemuser → resolver user path); then a #1665 follow-up commit, plus task 143 parity.
