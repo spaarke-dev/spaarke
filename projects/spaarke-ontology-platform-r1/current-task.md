@@ -42,7 +42,7 @@ Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-d
 
 - **Q23 → D-134 (relayed by uac-r2, 2026-10-12; confirm here):** a DR on a personal To Do is owned by the Assigned To contact's user's BU default team. Edge cases 1–4 (D-134) await the owner. A code-mapper is mapping the change (contact → systemuser → resolver user path); then a #1665 follow-up commit, plus task 143 parity.
 - **Q26 (blocks #1665 on dev):** assign Spaarke Basic User (or a minimal role) to the **Dev 1 and Test 1** BU default teams only; the Secure Record team stays roleless. #1776. Facts: `C:\wts-043\...\notes\043-bu-team-read-check.md`.
-- **Q27 (blocks tasks 142 and 143 flipping to Routed):** `sprk_createdbyperson` (lookup → systemuser) is missing on three tables:
+- **Q27: CLOSED (D-135).** The owner created `sprk_createdbyperson` on budgetrevision, decisionrecord and signal, field-secured with Readers and Writers rows, in SpaarkeMaster and OntologyPlatformSolution. 142, 143 and 147 add the tables to `StampedChildTables` and the script `$Tables`, and teach the script the membership and the relationship name.
   - `sprk_budgetrevision` (#1777);
   - `sprk_decisionrecord` and `sprk_signal` (#1783).
   - A (recommended): add the column to all three in one scoped import (D-83). Writers pass `RequestedBy`; job-raised Signals leave it null, with the reason recorded in the guard. Drop 182's exemption.

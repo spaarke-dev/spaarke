@@ -59,7 +59,7 @@
     </files>
   </knowledge>
 
-  <notes>Created 2026-10-12 (D-135, #1777). No new surface (§11 n/a: modifies existing writer and lists). D-135 (c)/(d) open: on dev, sprk_createdbyperson is not yet field-secured and not in SpaarkeCore. Do not rely on it being BFF-only (no read path may treat it as trustworthy proof of the creator until the owner closes (c)); the write and stamp are still required.</notes>
+  <notes>Created 2026-10-12 (D-135, #1777). No new surface (§11 n/a: modifies existing writer and lists). D-135 (c)/(d) CLOSED on dev 2026-10-12 (uac-r2 verified): sprk_createdbyperson is field-secured on budgetrevision/decisionrecord/signal with Readers (Read) and Writers (Read/Create/Update), and travels in SpaarkeMaster and OntologyPlatformSolution, both of which hold the whole table. When adding the table to `scripts/Set-ChildRecordCreatorPersonSchema.ps1` `$Tables`, teach the script two things: the SpaarkeMaster/OntologyPlatformSolution membership, so its SpaarkeCore check is not a false gap; and the `sprk_{table}_CreatedByPerson_systemuser` relationship name.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

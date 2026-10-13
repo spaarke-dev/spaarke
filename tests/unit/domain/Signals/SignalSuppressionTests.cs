@@ -612,6 +612,34 @@ public class SignalSuppressionTests
     }
 
     [Fact]
+    public async Task TheRoute_Returns503_WhenANoCoreDoSignalsSubjectReadFaults_NotTheUniform404_D35()
+    {
+        // D-35 as amended by D-129: a no-core Do Signal needs the caller's read of its subject; a fault reading it is not "not yours".
+        var s = new Store();
+        var signal = s.Open(MatterId, Guid.NewGuid());
+        var before = s.Queries;
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.GetEntitySetNameAsync("sprk_todo", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_todos");
+        var users = new Mock<IDataverseUserClient>();
+        users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Ok(new Dictionary<string, object?>
+            {
+                ["sprk_lane"] = (int)DecisionLane.Do,
+                ["_sprk_policyversion_value"] = Guid.NewGuid(),
+                ["sprk_regardingrecordtype"] = "sprk_todo",
+                ["sprk_regardingrecordid"] = Guid.NewGuid().ToString(),
+            }));
+        users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_todos(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fail(500, DataverseUserClientErrorCodes.ServiceError));
+        var access = new SignalCoreRecordAccess(users.Object, entities.Object, NullLogger<SignalCoreRecordAccess>.Instance);
+
+        var result = await Route(signal, s, (access, users.Object));
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(503);
+        s.Queries.Should().Be(before, "nothing is counted for a caller whose access could not be decided");
+    }
+
+    [Fact]
     public async Task TheRoute_LetsARealCancellationPropagate()
     {
         var s = new Store();
