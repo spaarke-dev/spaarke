@@ -753,10 +753,36 @@ public class DocumentCheckoutService
     // made UpdateTodoAsync virtual: the C2 gate is only meaningfully verifiable if a test can assert
     // the destroy DID NOT HAPPEN. A 403 assertion alone would pass even if the delete were issued
     // first, and this method destroys the SPE file as well as the row.
-    public virtual async Task<DeleteResult> DeleteAsync(
+    public virtual Task<DeleteResult> DeleteAsync(
         Guid documentId,
         string correlationId,
         CancellationToken ct = default)
+        => DeleteCoreAsync(documentId, correlationId, DocumentFileDeletePolicy.BestEffort, ct);
+
+    /// <summary>
+    /// Delete a document (both SPE file and Dataverse record) under an explicit <see cref="DocumentFileDeletePolicy"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>The SAME delete as <see cref="DeleteAsync(Guid, string, CancellationToken)"/> (one implementation,
+    /// <see cref="DeleteCoreAsync"/>): checkout lock, then the SPE file through <see cref="SpeFileStore"/> (app-only,
+    /// <c>SpeContainerOwnershipGuard</c>), then the row. The policy changes only what happens when the FILE cannot be
+    /// deleted. The external delete-own route (spaarke-SPA-external-access-platform-r3 task 032, FR-26) passes
+    /// <see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>.</para>
+    /// <para>Like the three-argument overload this performs NO authorization: its caller decides who may delete.</para>
+    /// </remarks>
+    // `virtual` for the same ADR-038 §4 substitution reason as the three-argument overload.
+    public virtual Task<DeleteResult> DeleteAsync(
+        Guid documentId,
+        string correlationId,
+        DocumentFileDeletePolicy filePolicy,
+        CancellationToken ct = default)
+        => DeleteCoreAsync(documentId, correlationId, filePolicy, ct);
+
+    private async Task<DeleteResult> DeleteCoreAsync(
+        Guid documentId,
+        string correlationId,
+        DocumentFileDeletePolicy filePolicy,
+        CancellationToken ct)
     {
         await EnsureAuthenticatedAsync(ct);
 
@@ -792,31 +818,45 @@ public class DocumentCheckoutService
         }
 
         // 2. Delete file from SPE first
-        try
+        if (filePolicy == DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure)
         {
-            if (!string.IsNullOrEmpty(document.DriveId) && !string.IsNullOrEmpty(document.ItemId))
+            // Task 032 (FR-26): the file must be gone before the row goes. Any failure here KEEPS the row, so a later
+            // step can never leave a row whose file was not deleted, and the caller is told.
+            var fileRefusal = await DeleteFileOrRefuseAsync(documentId, document, correlationId, ct);
+            if (fileRefusal is not null)
             {
-                var deleted = await _speFileStore.DeleteFileAsync(document.DriveId, document.ItemId, ct);
-                if (!deleted)
-                {
-                    _logger.LogWarning(
-                        "SPE file not found for document {DocumentId} (may already be deleted)",
-                        documentId);
-                }
-                else
-                {
-                    _logger.LogInformation(
-                        "SPE file deleted for document {DocumentId}",
-                        documentId);
-                }
+                return fileRefusal;
             }
         }
-        catch (Exception ex)
+        else
         {
-            // Log but continue - file might already be deleted
-            _logger.LogWarning(ex,
-                "Failed to delete SPE file for document {DocumentId} - continuing with Dataverse deletion",
-                documentId);
+            // The internal route's behaviour, unchanged: a file that cannot be deleted is logged, and the row goes.
+            try
+            {
+                if (!string.IsNullOrEmpty(document.DriveId) && !string.IsNullOrEmpty(document.ItemId))
+                {
+                    var deleted = await _speFileStore.DeleteFileAsync(document.DriveId, document.ItemId, ct);
+                    if (!deleted)
+                    {
+                        _logger.LogWarning(
+                            "SPE file not found for document {DocumentId} (may already be deleted)",
+                            documentId);
+                    }
+                    else
+                    {
+                        _logger.LogInformation(
+                            "SPE file deleted for document {DocumentId}",
+                            documentId);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log but continue - file might already be deleted
+                _logger.LogWarning(ex,
+                    "Failed to delete SPE file for document {DocumentId} - continuing with Dataverse deletion",
+                    documentId);
+            }
         }
 
         // 3. Delete Dataverse record (cascade should handle FileVersions)
@@ -853,6 +893,76 @@ public class DocumentCheckoutService
     }
 
     #region Private Methods
+
+    /// <summary>
+    /// The <see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/> file step (task 032, FR-26): verify
+    /// the row's pointer, then delete the file app-only. <see langword="null"/> means the row may now be deleted; any
+    /// other value is the result to return with the row KEPT.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The pointer is verified first</b> (<see cref="RecordContainerResolver.EnsureDocumentPointerContainerAsync"/>,
+    /// the check every app-only download runs). A destroy that follows the row's pointer as the application is at least
+    /// as consequential as a download: an item id re-pointed outside the BFF must not make this delete another file.</para>
+    /// <para><b>A row with no pointer has no file</b> to delete; the row may go.</para>
+    /// <para><b>An item already gone</b> (<see cref="SpeFileStore.DeleteFileAsync"/> returns <see langword="false"/>) is
+    /// not a failure: the file is not there, so the row may go.</para>
+    /// <para><b>Anything else keeps the row</b>: a pointer the check refuses or a refused container (409 with the check's
+    /// code), and a Graph or Dataverse fault (503 <see cref="FileNotDeletedCode"/>). Cancellation by the caller is
+    /// rethrown.</para>
+    /// </remarks>
+    private async Task<DeleteResult?> DeleteFileOrRefuseAsync(
+        Guid documentId, DocumentRecord document, string correlationId, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(document.DriveId) || string.IsNullOrEmpty(document.ItemId))
+        {
+            _logger.LogInformation(
+                "Document {DocumentId} has no file pointer; there is no SPE file to delete [{CorrelationId}]",
+                documentId, correlationId);
+            return null;
+        }
+
+        try
+        {
+            await _containerResolver.EnsureDocumentPointerContainerAsync(
+                documentId, document.DriveId, document.ItemId, ct);
+
+            var deleted = await _speFileStore.DeleteFileAsync(document.DriveId, document.ItemId, ct);
+            if (!deleted)
+            {
+                _logger.LogWarning(
+                    "SPE file not found for document {DocumentId} (already deleted); deleting the row [{CorrelationId}]",
+                    documentId, correlationId);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "SPE file deleted for document {DocumentId} [{CorrelationId}]", documentId, correlationId);
+            }
+
+            return null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException ex)
+        {
+            _logger.LogWarning(
+                "SPE file of document {DocumentId} not deleted ({Code}); the row is kept [{CorrelationId}]",
+                documentId, ex.Code, correlationId);
+            return new FileNotDeletedDeleteResult(ex.Code, StatusCodes.Status409Conflict, correlationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "SPE file of document {DocumentId} could not be deleted; the row is kept [{CorrelationId}]",
+                documentId, correlationId);
+            return new FileNotDeletedDeleteResult(FileNotDeletedCode, StatusCodes.Status503ServiceUnavailable, correlationId);
+        }
+    }
+
+    /// <summary>The code of a <see cref="FileNotDeletedDeleteResult"/> whose file delete failed (task 032).</summary>
+    public const string FileNotDeletedCode = "document_file_not_deleted";
 
     /// <summary>
     /// Looks up the Dataverse systemuserid for a given Azure AD Object ID.
@@ -1474,6 +1584,34 @@ public record FailedDeleteResult(string Message, string CorrelationId)
     : DeleteResult(false, CorrelationId)
 {
     public new int StatusCode => 500;
+}
+
+/// <summary>
+/// The document's SPE file was NOT deleted, so its row was kept (<see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>
+/// only; task 032). <paramref name="Code"/> is the pointer check's code (409) or
+/// <see cref="DocumentCheckoutService.FileNotDeletedCode"/> (503).
+/// </summary>
+public record FileNotDeletedDeleteResult(string Code, int FailureStatusCode, string CorrelationId)
+    : DeleteResult(false, CorrelationId)
+{
+    public new int StatusCode => FailureStatusCode;
+}
+
+/// <summary>What a document delete does when the SharePoint Embedded file cannot be deleted.</summary>
+public enum DocumentFileDeletePolicy
+{
+    /// <summary>
+    /// The internal <c>DELETE /api/documents/{documentId}</c> behaviour (unchanged): a file delete that fails is logged
+    /// and the row is deleted anyway.
+    /// </summary>
+    BestEffort = 0,
+
+    /// <summary>
+    /// The external delete-own route (spaarke-SPA-external-access-platform-r3 task 032, FR-26; ADR-007): the row's pointer
+    /// is verified, the file is deleted FIRST, and if it cannot be the row is KEPT and the result is
+    /// <see cref="FileNotDeletedDeleteResult"/>. A file already gone counts as deleted.
+    /// </summary>
+    VerifiedFileFirstKeepRowOnFailure = 1,
 }
 
 #endregion

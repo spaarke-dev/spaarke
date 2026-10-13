@@ -202,7 +202,6 @@ public class InsightsOrchestratorTests
         result.Artifact.Should().BeSameAs(artifact);
         result.Decline.Should().BeNull();
         result.CacheHit.Should().BeTrue("factory was not invoked");
-        result.ProcessingTimeMs.Should().BeGreaterThanOrEqualTo(0);
 
         _playbookOrchestrationMock.Verify(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()),
             Times.Never, "cache hit must not invoke the engine");

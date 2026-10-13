@@ -78,8 +78,8 @@ public class CommunicationAccountServiceTests
         entity["sprk_accounttype"] = new OptionSetValue(accountType);
         entity["sprk_autocreaterecords"] = autoCreateRecords;
         if (monitorFolder != null) entity["sprk_monitorfolder"] = monitorFolder;
-        if (subscriptionId != null) entity["sprk_subscriptionid"] = subscriptionId;
-        if (subscriptionExpiry.HasValue) entity["sprk_subscriptionexpiry"] = subscriptionExpiry.Value;
+        if (subscriptionId != null) entity["sprk_graphsubscriptionid"] = subscriptionId;
+        if (subscriptionExpiry.HasValue) entity["sprk_graphsubscriptionexpiry"] = subscriptionExpiry.Value;
         if (securityGroupId != null) entity["sprk_securitygroupid"] = securityGroupId;
         if (securityGroupName != null) entity["sprk_securitygroupname"] = securityGroupName;
         if (verificationStatus.HasValue) entity["sprk_verificationstatus"] = new OptionSetValue(verificationStatus.Value);
@@ -234,7 +234,7 @@ public class CommunicationAccountServiceTests
 
     #region QuerySendEnabledAccountsAsync — Entity Mapping
 
-    [Fact(Skip = "CommunicationAccount entity mapping changed - field mapping assertions outdated")]
+    [Fact]
     public async Task QuerySendEnabledAccountsAsync_MapsEntityCorrectly()
     {
         // Arrange

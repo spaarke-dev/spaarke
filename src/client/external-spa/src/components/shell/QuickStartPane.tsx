@@ -1,14 +1,17 @@
 /**
  * QuickStartPane — the body of the pinned "Quick Start" home tab (task 012 §4).
  *
- * Role-relevant "do something" action cards (wizards/actions), entitlement-gated per `/me` — an
- * action the caller is not entitled to never renders as a card, mirroring the widget registry's
- * Tier-1 gating. Cards that map to a registered widget (NDA Assessment → `nda`, Submit Policy
- * Question → `policy-library` per the "Submit Policy Question available inside the Policy
- * Library" UX refinement, Invention Submission → the existing `inventions` default widget) open
- * that widget's tab via `onOpenWidget`. Actions with no built wizard yet (Trademark Search
- * Request — P3 scope) fall through to the "More Services" modal, listing every entitled action
- * with a "Coming soon" badge for the ones not yet wired — real wizard launches are P3 (FR-23–27).
+ * Role-relevant "do something" action cards (wizards/actions), gated per `/me` — an action the
+ * caller may not start never renders as a card. Every card here starts a Legal Front Door intake
+ * (a `sprk_requesttype`), so its visibility is `isIntakeTypeAvailable` (`intake/intakeRegistry.ts`):
+ * the `legal-front-door` entitlement plus the server's `intakeRequestTypes`, NOT the plane (review
+ * 011 K3 - a CIAM partner sees the cards when the partner switch gives it `legal-front-door`).
+ *
+ * Launch (r3 tasks 052/053): every card's request type has a registered intake wizard
+ * (`INTAKE_WIZARDS`: NDA Assessment, Policy Question, Invention Submission, Trademark Search), so
+ * a card opens that wizard in `WizardShell`; the More Services entry for it does the same. A card
+ * whose request type has no wizard (none today) is a "Coming soon" entry in the "More Services"
+ * modal and opens nothing.
  *
  * Rendered with the SHARED library primitives — `SectionPanel` + `ActionCardRow`/`ActionCard`
  * from `@spaarke/ui-components` (CLAUDE.md §11) — and the SHARED `FormModal` (SprkModal preset,
@@ -34,8 +37,9 @@ import type { ActionCardConfig } from '@spaarke/ui-components/components/Workspa
 // SHARED library — the canonical modal system (ADR-050); FormModal preset for "More Services"
 // (a potentially >4-item catalog — outside ChoiceModal's 2-4-choice scope per ADR-050).
 import { FormModal } from '@spaarke/ui-components/components/SprkModal';
-import type { MeEntitlementsResponse, Plane } from '../../api/me-client';
-import { isEntitled } from '../../registry/widgetRegistry';
+import type { MeEntitlementsResponse } from '../../api/me-client';
+import { INTAKE_REQUEST_TYPE } from '../../api/intake-client';
+import { getIntakeWizard, isIntakeTypeAvailable } from '../../intake/intakeRegistry';
 
 const useStyles = makeStyles({
   root: {
@@ -61,31 +65,24 @@ interface QuickStartActionDef {
   icon: FluentIcon;
   ariaLabel: string;
   description: string;
-  /** Planes entitled to this action (hard gate, mirrors widgetRegistry's `planes`). */
-  planes: Plane[];
-  /** Module-level entitlement id required from `/me.entitlements`. Omit = entitled to all `planes`. */
-  requiredEntitlement?: string;
-  /** The registered widget this action opens. Omit = not yet wired (More-Services-only, "coming soon"). */
-  opensWidgetId?: string;
+  /**
+   * The `sprk_requesttype` this action starts. Visibility is `isIntakeTypeAvailable(me, requestType)`; the wizard (if
+   * any) is `getIntakeWizard(requestType)`.
+   */
+  requestType: number;
 }
 
 const MORE_SERVICES_ID = 'more-services';
 
-/**
- * Quick Start action catalog. NDA/Policy-Question/Invention map to registered widgets (see
- * widgetRegistry.ts); Trademark Search has no widget yet (P3) and renders as a "coming soon"
- * entry in the More Services modal only.
- */
+/** Quick Start action catalog. All four request types have an intake wizard (`INTAKE_WIZARDS`). */
 const QUICK_START_ACTIONS: QuickStartActionDef[] = [
   {
     id: 'nda-assessment',
     label: 'NDA Assessment',
     icon: ShieldTaskRegular,
     ariaLabel: 'Start an NDA assessment',
-    description: 'Upload an NDA and get an AI compliance assessment.',
-    planes: ['workforce'],
-    requiredEntitlement: 'legal-front-door',
-    opensWidgetId: 'nda',
+    description: 'Ask Legal to review an NDA or issue our standard one.',
+    requestType: INTAKE_REQUEST_TYPE.ndaAssessment,
   },
   {
     id: 'policy-question',
@@ -93,9 +90,7 @@ const QUICK_START_ACTIONS: QuickStartActionDef[] = [
     icon: QuestionCircleRegular,
     ariaLabel: 'Submit a policy question to the law department',
     description: 'Get an official human answer from the legal team.',
-    planes: ['workforce'],
-    requiredEntitlement: 'policy-library',
-    opensWidgetId: 'policy-library',
+    requestType: INTAKE_REQUEST_TYPE.policyQuestion,
   },
   {
     id: 'invention-submission',
@@ -103,9 +98,7 @@ const QUICK_START_ACTIONS: QuickStartActionDef[] = [
     icon: LightbulbRegular,
     ariaLabel: 'Submit an invention disclosure',
     description: 'File an invention disclosure for patent review.',
-    planes: ['workforce'],
-    requiredEntitlement: 'legal-front-door',
-    opensWidgetId: 'inventions',
+    requestType: INTAKE_REQUEST_TYPE.inventionSubmission,
   },
   {
     id: 'trademark-search',
@@ -113,11 +106,12 @@ const QUICK_START_ACTIONS: QuickStartActionDef[] = [
     icon: TagRegular,
     ariaLabel: 'Request a trademark clearance search',
     description: 'Ask the legal team to clear a proposed mark.',
-    planes: ['workforce'],
-    requiredEntitlement: 'legal-front-door',
-    // No opensWidgetId — not yet built (P3); "coming soon" in More Services only.
+    requestType: INTAKE_REQUEST_TYPE.trademarkSearch,
   },
 ];
+
+/** The widget the wizards' success screens link to. */
+const SERVICE_REQUESTS_WIDGET_ID = 'service-requests';
 
 export interface QuickStartPaneProps {
   me: MeEntitlementsResponse;
@@ -128,19 +122,28 @@ export interface QuickStartPaneProps {
 export const QuickStartPane: React.FC<QuickStartPaneProps> = ({ me, onOpenWidget }) => {
   const s = useStyles();
   const [moreOpen, setMoreOpen] = React.useState(false);
+  // The request type of the intake wizard that is open (mounted only while open, so each launch starts fresh).
+  const [wizardType, setWizardType] = React.useState<number | null>(null);
 
-  const entitledActions = React.useMemo(() => QUICK_START_ACTIONS.filter(a => isEntitled(me, a)), [me]);
-
-  const launch = React.useCallback(
-    (action: QuickStartActionDef) => {
-      if (action.opensWidgetId) {
-        onOpenWidget(action.opensWidgetId);
-      } else {
-        setMoreOpen(true);
-      }
-    },
-    [onOpenWidget]
+  // Entitled = the caller may start this intake (legal-front-door + the server's intakeRequestTypes; not the plane).
+  const entitledActions = React.useMemo(
+    () => QUICK_START_ACTIONS.filter(a => isIntakeTypeAvailable(me, a.requestType)),
+    [me]
   );
+
+  /** An action is launchable when its request type has a wizard; otherwise it is "coming soon". */
+  const isLaunchable = (action: QuickStartActionDef): boolean => getIntakeWizard(action.requestType) !== undefined;
+
+  const launch = React.useCallback((action: QuickStartActionDef) => {
+    if (getIntakeWizard(action.requestType)) {
+      setWizardType(action.requestType);
+    } else {
+      setMoreOpen(true);
+    }
+  }, []);
+
+  const ActiveWizard = wizardType === null ? undefined : getIntakeWizard(wizardType)?.Wizard;
+  const openServiceRequests = React.useCallback(() => onOpenWidget(SERVICE_REQUESTS_WIDGET_ID), [onOpenWidget]);
 
   const rowCards: ActionCardConfig[] = React.useMemo(() => {
     const live: ActionCardConfig[] = entitledActions.map(a => ({
@@ -191,9 +194,9 @@ export const QuickStartPane: React.FC<QuickStartPaneProps> = ({ me, onOpenWidget
                 icon={a.icon}
                 label={a.label}
                 ariaLabel={a.ariaLabel}
-                disabled={!a.opensWidgetId}
+                disabled={!isLaunchable(a)}
                 onClick={
-                  a.opensWidgetId
+                  isLaunchable(a)
                     ? () => {
                         setMoreOpen(false);
                         launch(a);
@@ -201,7 +204,7 @@ export const QuickStartPane: React.FC<QuickStartPaneProps> = ({ me, onOpenWidget
                     : undefined
                 }
               />
-              {a.opensWidgetId ? (
+              {isLaunchable(a) ? (
                 <Text size={100} className={s.caption}>
                   {a.description}
                 </Text>
@@ -219,6 +222,10 @@ export const QuickStartPane: React.FC<QuickStartPaneProps> = ({ me, onOpenWidget
           )}
         </div>
       </FormModal>
+
+      {ActiveWizard && (
+        <ActiveWizard open onClose={() => setWizardType(null)} onOpenServiceRequests={openServiceRequests} />
+      )}
     </div>
   );
 };

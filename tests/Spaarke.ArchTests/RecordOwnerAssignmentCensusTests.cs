@@ -144,9 +144,10 @@ public class RecordOwnerAssignmentCensusTests
             "The mapper builds the mirrored analysis row; DataverseObservationMirror resolves its owner from the row's "
             + "parent lookups (ForChild) and skips the mirror on a refusal.",
             OwnerFile: "DataverseObservationMirror.cs"),
-        new CensusEntry("CommunicationService.cs", "sprk_communication", 3, Disposition.Routed,
-            "Outbound email, message and shared sends: ForChild over every parent lookup on the row (secure-if-any); an "
-            + "unfiled send keeps its creator (E1); a refusal throws before the create."),
+        new CensusEntry("CommunicationService.cs", "sprk_communication", 4, Disposition.Routed,
+            "Outbound email, message and shared sends, and the external thread post (spaarke-SPA-external-access-platform-r3 "
+            + "task 034, PostToRecordThreadAsync): ForChild over every parent lookup on the row (secure-if-any); an unfiled "
+            + "send keeps its creator (E1); a refusal throws before the create."),
         new CensusEntry("CommunicationService.cs", "sprk_document", 3, Disposition.Routed,
             "Archived .eml and attachment documents — content of the communication (ContentOf), resolved before the SPE "
             + "upload so a refusal leaves neither bytes nor a row."),
@@ -240,6 +241,10 @@ public class RecordOwnerAssignmentCensusTests
             "Owned by the parent matter/project's team; a refusal skips the snapshot."),
         new UnscannedWriter("ExternalProjectDataEndpoints.cs", "Web API POST to a computed URL (document, event, to-do)",
             "The external routes resolve the root's owner before the create; ExternalDataService refuses an empty team."),
+        new UnscannedWriter("ExternalIntakeEndpoints.cs", "Web API POST of a sprk_servicerequest (the Legal Front Door intake)",
+            "A service request is a root with no parent, so the owner is the default team of the business unit that owns the "
+            + "requester's contact (target = the contact; owner decision 2026-10-11, I-6), resolved before the create; "
+            + "unresolved refuses with 500 EXT_INTAKE_OWNER_UNRESOLVED and ExternalDataService refuses an empty team."),
         new UnscannedWriter("EventEndpoints.cs", "seam caller (CreateEventAsync, CreateEventLogAsync)",
             "Owner resolved from the regarding record. The re-file route (PUT /{id}) was deleted by task 159 (owner round 10 item 1)."),
         new UnscannedWriter("AnalysisEndpoints.cs", "seam caller (CreateAnalysisAsync)",
@@ -309,6 +314,7 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerSeam("ExternalDataService.cs", "BuildDocumentCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "BuildEventCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "BuildTodoCreatePayload", RefusesAndBindsTheOwner),
+        new OwnerSeam("ExternalDataService.cs", "BuildServiceRequestCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "RequireOwner", Refusal),
     };
 
@@ -386,6 +392,8 @@ public class RecordOwnerAssignmentCensusTests
             "The team the external route resolved from the project — RequireOwner refuses an empty one."),
         new OwnerWriteEntry("ExternalDataService.cs", "BuildTodoCreatePayload", 1, OwnerWriteKind.Seam,
             "The team the external route resolved from the root — RequireOwner refuses an empty one."),
+        new OwnerWriteEntry("ExternalDataService.cs", "BuildServiceRequestCreatePayload", 1, OwnerWriteKind.Seam,
+            "The team the intake route resolved from the requester's contact (its business unit's default team) — RequireOwner refuses an empty one."),
 
         new OwnerWriteEntry("DocumentCheckoutService.cs", "CreateFileVersionAsync", 1, OwnerWriteKind.Routed,
             "A file version is content of its document (ContentOf)."),
@@ -1835,6 +1843,10 @@ public class RecordOwnerAssignmentCensusTests
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisAsync", "seam: writes createdByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAnalysisOutputAsync", "seam: writes CreatedByPersonId"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateEmailArtifactAsync", "seam: maps CreatedByPersonId"),
+        // R3 task 030 (FR-25): the external portal stamps its resolved principal (systemuser -> sprk_createdbyperson, contact -> sprk_createdbycontact).
+        new PersonBearingWriter("ExternalDataService.cs", "StampCreator", "the resolved external principal"),
+        // R3 task 034 (FR-11): the external thread post stamps its resolved author (StampCreator) on the sprk_communication it creates.
+        new PersonBearingWriter("CommunicationService.cs", "PostToRecordThreadAsync", "the external-plane author (StampCreator)"),
         new PersonBearingWriter("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", "seam: maps CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "BuildCreateEventPayload", "seam: binds CreatedByPersonId"),
         new PersonBearingWriter("DataverseWebApiService.cs", "CreateEventLogAsync", "seam: binds createdByPersonId"),
@@ -1856,13 +1868,12 @@ public class RecordOwnerAssignmentCensusTests
         ["SpendSnapshotService.cs"] = "scheduled spend snapshots: system work",
         ["DataverseObservationMirror.cs"] = "insight observation mirror: system work",
         ["AppOnlyAnalysisService.cs"] = "background document profile: system work",
-        ["ExternalDataService.cs"] = "external portal: the person is a CONTACT, and sprk_createdbyperson names a systemuser",
         ["DirectThreadAccessService.cs"] = "Direct thread (E2): owned by the caller themselves, never filed under a record",
         ["DataverseUpdateHandler.cs"] = "playbook output mapping re-files (no create); acts for no person, so F3 refuses a move out",
     };
 
     private static readonly Regex PersonToken = new(
-        @"\b(?:RequestedBy|requestedBy|RequestedBySystemUserId|RecordRequester|CreatedByPerson|CreatedByPersonId|createdByPersonId|createdByPerson|StampCreatorOn|RecordCreatorPerson|RecordCreatorPersonColumn|SecureExitCaller)\b",
+        @"\b(?:RequestedBy|requestedBy|RequestedBySystemUserId|RecordRequester|CreatedByPerson|CreatedByPersonId|createdByPersonId|createdByPerson|StampCreatorOn|RecordCreatorPerson|RecordCreatorPersonColumn|SecureExitCaller|StampCreator|EnsureCanStampCreator)\b",
         RegexOptions.Compiled);
 
     [Fact(DisplayName = "Task 146 c1-r1: every child table a census create writes carries the creator-person column, inside the codified set")]

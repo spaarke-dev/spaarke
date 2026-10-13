@@ -87,7 +87,7 @@ for NDA (deferred). 5A first-assignment CIAM invite email works (R2). 5B Partner
   `sprk_servicerequest`; registry entries; wire each quick-start action's target. **NOT code pages** —
   these are shared React `WizardModal` components mounted in the SPA (same as the Create* wizards).
 - **Submitters — RESOLVED 2026-10-08: workforce only.** Matches the code (the Service Requests module is
-  internal-only and fail-closed for the CIAM plane, `ExternalAccessModule.cs:444`) and R2 FR-17 (Front Door
+  internal-only and fail-closed for the CIAM plane, `ExternalAccessModule.cs:453`) and R2 FR-17 (Front Door
   user = workforce sign-in). C2 therefore has **no 240d dependency**.
 
 ### C3 — Subsequent-assignment notification (G3 / 6A) — R3 (owner confirmed 2026-08-12, not an R2 hotfix)
@@ -256,9 +256,8 @@ execution does not inadvertently regress dev. (Client work may proceed on the cu
    - **Invite: a shared Spaarke service** (recommended: the T240c directory). It invites the B2B guest into
      Spaarke's tenant (no licence) and adds it to `sprk-{customerId}-users`. Stamps cannot invite: since
      T261 a stamp identity holds only `FileStorageContainer.Selected`, and `User.Invite.All` sits with L2.
-   - **Contact.** The stamp creates the contact bound to the guest `oid`. A pre-bound guest already resolves
-     today ("everyone else resolves only through an existing oid binding", `ContactIdentityBinder`), so the
-     member-test change in #1563 becomes optional.
+   - **Contact.** The stamp creates the contact bound to the guest `oid`. *(Superseded 2026-10-09 by spec
+     FR-15: the contact is created on first sign-in through the member-test branch (#1563), which is required.)*
    - **Spike first.** Use Entra's built-in B2B self-service sign-up user flow if it covers this more simply.
    - **Customer prerequisite.** The customer's cross-tenant access settings must allow B2B collaboration with
      Spaarke's tenant. This is a new required customer approval (PRQ-C-14, requested from provisioning).
@@ -384,7 +383,7 @@ prereq**: net10 (§4.5). **Multi-backend**: for external contacts these endpoint
 <hot-path-declaration>
   <bff>Y</bff>                 <!-- C3 notify + in-portal read; C1 message read; C6 message send -->
   <spaarke-ai>N</spaarke-ai>   <!-- external-spa, not src/solutions/SpaarkeAi -->
-  <ci-workflows>N</ci-workflows>
+  <ci-workflows>Y</ci-workflows> <!-- FR-20 production build + Teams package (updated 2026-10-10 to match spec.md) -->
   <skill-directives>N</skill-directives>
   <root-claude-md>N</root-claude-md>
 </hot-path-declaration>

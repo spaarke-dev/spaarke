@@ -15,7 +15,8 @@
  *   4 = Expired
  *   5 = Revoked
  *
- * @version 1.0.0
+ * @version 2.1.0 - client id / tenant / redirect / BFF URL come from Dataverse environment
+ *                 variables (no hardcoded dev values); scope is user_impersonation (#1453)
  * @namespace Sprk.RegistrationRibbon
  */
 
@@ -23,25 +24,23 @@
 // CONFIGURATION
 // ============================================================================
 
-// TODO: Read from Dataverse environment variable for production
-var SPRK_REG_BFF_API_URL = "https://spe-api-dev-67e2xz.azurewebsites.net";
-
 var SPRK_REG_CONFIG = {
-    // BFF API URL - determined at runtime from environment
+    // BFF API URL - resolved at runtime from the sprk_BffApiBaseUrl environment variable
     bffApiUrl: null,
 
-    // MSAL Configuration (shared across Spaarke webresources)
+    // MSAL Configuration - resolved at runtime from Dataverse environment variables
+    // (sprk_MsalClientId, sprk_BffApiAppId, sprk_TenantId) and the Dataverse org URL
     msal: {
-        clientId: "b36e9b91-ee7d-46e6-9f6a-376871cc9d54",
-        bffAppId: "1e40baad-e065-4aea-a8d4-4b7ab273458c",
-        tenantId: "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+        clientId: null,
+        bffAppId: null,
+        tenantId: null,
         get authority() {
             return "https://login.microsoftonline.com/" + this.tenantId;
         },
         get scope() {
-            return "api://" + this.bffAppId + "/SDAP.Access";
+            return "api://" + this.bffAppId + "/user_impersonation";
         },
-        redirectUri: "https://spaarkedev1.crm.dynamics.com"
+        redirectUri: null
     },
 
     // Status values for sprk_status choice field
@@ -54,7 +53,7 @@ var SPRK_REG_CONFIG = {
         REVOKED: 5
     },
 
-    version: "1.0.0"
+    version: "2.1.0"
 };
 
 var SPRK_REG_LOG = "[Sprk.RegistrationRibbon]";
@@ -64,35 +63,91 @@ var SPRK_REG_LOG = "[Sprk.RegistrationRibbon]";
 // ============================================================================
 
 /**
- * Determine BFF API URL based on the current Dataverse environment.
- * Falls back to dev if environment is not recognized.
+ * Query one Dataverse Environment Variable by schema name (override value first, then default).
+ * Same resolution as sprk_DocumentOperations.js / sprk_emailactions.js.
+ * @param {string} schemaName
+ * @returns {Promise<string|null>}
  */
-function _sprkReg_initBffUrl() {
-    if (SPRK_REG_CONFIG.bffApiUrl) {
-        return; // Already initialized
+function _sprkReg_getEnvVar(schemaName) {
+    return Xrm.WebApi.retrieveMultipleRecords(
+        "environmentvariabledefinition",
+        "?$filter=schemaname eq '" + schemaName + "'" +
+        "&$select=environmentvariabledefinitionid,defaultvalue" +
+        "&$expand=environmentvariabledefinition_environmentvariablevalue($select=value)"
+    ).then(function (result) {
+        if (result.entities && result.entities.length > 0) {
+            var definition = result.entities[0];
+            var values = definition.environmentvariabledefinition_environmentvariablevalue;
+            if (values && values.length > 0 && values[0].value) {
+                return values[0].value;
+            }
+            if (definition.defaultvalue) {
+                return definition.defaultvalue;
+            }
+        }
+        return null;
+    });
+}
+
+/**
+ * A usable single-tenant identifier: a GUID or a dotted domain. Rejects "organizations",
+ * "common", "undefined", "null" and "" (the values that sign a B2B guest in against their
+ * HOME tenant or build a malformed authority - #1453).
+ * @param {*} value
+ * @returns {boolean}
+ */
+function _sprkReg_isValidTenant(value) {
+    if (typeof value !== "string") return false;
+    var v = value.trim();
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ||
+        /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(v);
+}
+
+var _sprkReg_configPromise = null;
+
+/**
+ * Resolve the BFF URL, MSAL client id, BFF app id and tenant from Dataverse Environment
+ * Variables (sprk_BffApiBaseUrl, sprk_MsalClientId, sprk_BffApiAppId, sprk_TenantId) and the
+ * redirect URI from the Dataverse org URL. No environment is hardcoded. Cached; a failure is
+ * not cached so the next click retries.
+ * @returns {Promise<void>}
+ */
+function _sprkReg_resolveConfig() {
+    if (_sprkReg_configPromise) {
+        return _sprkReg_configPromise;
     }
 
-    try {
-        var globalContext = Xrm.Utility.getGlobalContext();
-        var clientUrl = globalContext.getClientUrl();
-
-        if (clientUrl.indexOf("spaarkedev1.crm.dynamics.com") !== -1) {
-            SPRK_REG_CONFIG.bffApiUrl = "https://spe-api-dev-67e2xz.azurewebsites.net";
-        } else if (clientUrl.indexOf("spaarke-demo.crm.dynamics.com") !== -1) {
-            SPRK_REG_CONFIG.bffApiUrl = "https://spe-api-dev-67e2xz.azurewebsites.net";
-        } else if (clientUrl.indexOf("spaarkeuat.crm.dynamics.com") !== -1) {
-            SPRK_REG_CONFIG.bffApiUrl = "https://spe-api-uat.azurewebsites.net";
-        } else if (clientUrl.indexOf("spaarkeprod.crm.dynamics.com") !== -1) {
-            SPRK_REG_CONFIG.bffApiUrl = "https://spe-api-prod.azurewebsites.net";
-        } else {
-            SPRK_REG_CONFIG.bffApiUrl = SPRK_REG_BFF_API_URL;
+    var cfg = SPRK_REG_CONFIG;
+    _sprkReg_configPromise = Promise.all([
+        _sprkReg_getEnvVar("sprk_BffApiBaseUrl"),
+        _sprkReg_getEnvVar("sprk_MsalClientId"),
+        _sprkReg_getEnvVar("sprk_BffApiAppId"),
+        _sprkReg_getEnvVar("sprk_TenantId")
+    ]).then(function (v) {
+        var missing = [];
+        if (!v[0]) missing.push("sprk_BffApiBaseUrl");
+        if (!v[1]) missing.push("sprk_MsalClientId");
+        if (!v[2]) missing.push("sprk_BffApiAppId");
+        if (!_sprkReg_isValidTenant(v[3])) missing.push("sprk_TenantId (a tenant GUID or domain)");
+        if (missing.length > 0) {
+            throw new Error("Missing Dataverse environment variable(s): " + missing.join(", "));
         }
 
-        console.log(SPRK_REG_LOG, "BFF API URL:", SPRK_REG_CONFIG.bffApiUrl);
-    } catch (error) {
-        console.error(SPRK_REG_LOG, "Init failed:", error);
-        SPRK_REG_CONFIG.bffApiUrl = SPRK_REG_BFF_API_URL;
-    }
+        // HOST ONLY: strip trailing slashes and a trailing /api (paths add /api themselves).
+        cfg.bffApiUrl = v[0].replace(/\/+$/, "").replace(/\/api$/i, "");
+        cfg.msal.clientId = v[1];
+        cfg.msal.bffAppId = v[2];
+        cfg.msal.tenantId = v[3].trim();
+        cfg.msal.redirectUri = Xrm.Utility.getGlobalContext().getClientUrl().replace(/\/+$/, "");
+
+        console.log(SPRK_REG_LOG, "BFF API URL:", cfg.bffApiUrl);
+    }).catch(function (error) {
+        _sprkReg_configPromise = null;
+        console.error(SPRK_REG_LOG, "Config resolution failed:", error);
+        throw error;
+    });
+
+    return _sprkReg_configPromise;
 }
 
 // ============================================================================
@@ -174,6 +229,7 @@ function _sprkReg_initMsal() {
  * @returns {Promise<string>} Access token
  */
 async function _sprkReg_getAccessToken() {
+    await _sprkReg_resolveConfig();
     var msalInstance = await _sprkReg_initMsal();
     var scope = SPRK_REG_CONFIG.msal.scope;
 
@@ -221,7 +277,7 @@ async function _sprkReg_getAccessToken() {
  * @returns {Promise<{ok: boolean, status: number, data: object|null, errorText: string|null}>}
  */
 async function _sprkReg_callBffApi(method, path, body) {
-    _sprkReg_initBffUrl();
+    await _sprkReg_resolveConfig();
     var token = await _sprkReg_getAccessToken();
     var url = SPRK_REG_CONFIG.bffApiUrl + path;
 
@@ -342,16 +398,60 @@ async function approveRequest(gridControl) {
             return;
         }
 
+        // FR-07: Check each record for environment lookup before proceeding
+        // Records without environment will be skipped with per-record error
+        Xrm.Utility.showProgressIndicator("Validating environment selection...");
+
+        var validItems = [];
+        var skippedErrors = [];
+
+        for (var v = 0; v < selectedItems.length; v++) {
+            var checkItem = selectedItems[v];
+            var checkId = _sprkReg_cleanGuid(checkItem.Id || checkItem.id);
+            var checkName = checkItem.Name || checkItem.name || checkId;
+
+            try {
+                var record = await Xrm.WebApi.retrieveRecord(
+                    "sprk_registrationrequest", checkId,
+                    "?$select=sprk_name&$expand=sprk_dataverseenvironmentid($select=sprk_name)"
+                );
+                if (!record.sprk_dataverseenvironmentid) {
+                    skippedErrors.push(checkName + ": No target environment selected");
+                    console.log(SPRK_REG_LOG, "Skipping (no environment):", checkId, checkName);
+                } else {
+                    validItems.push(checkItem);
+                }
+            } catch (lookupErr) {
+                // If lookup check fails, still attempt approval (API will validate)
+                console.log(SPRK_REG_LOG, "Lookup check failed, including anyway:", checkId, lookupErr);
+                validItems.push(checkItem);
+            }
+        }
+
+        Xrm.Utility.closeProgressIndicator();
+
+        if (validItems.length === 0) {
+            _sprkReg_showError(
+                "No Valid Requests",
+                "None of the selected requests have a target environment set:\n\n" + skippedErrors.join("\n")
+            );
+            return;
+        }
+
         // Build names list for confirmation
         var names = [];
-        for (var i = 0; i < selectedItems.length; i++) {
-            var item = selectedItems[i];
+        for (var i = 0; i < validItems.length; i++) {
+            var item = validItems[i];
             names.push(item.Name || item.name || ("Request " + (i + 1)));
         }
 
-        var confirmText = selectedItems.length === 1
-            ? "Approve demo access for " + names[0] + "?\n\nThis will provision their demo account."
-            : "Approve demo access for " + selectedItems.length + " requests?\n\n" + names.join("\n") + "\n\nThis will provision demo accounts for all selected requests.";
+        var confirmText = validItems.length === 1
+            ? "Approve demo access for " + names[0] + "?\n\nThis will provision their demo account using the selected target environment."
+            : "Approve demo access for " + validItems.length + " requests?\n\n" + names.join("\n") + "\n\nThis will provision demo accounts using each request's target environment.";
+
+        if (skippedErrors.length > 0) {
+            confirmText += "\n\nSkipped (" + skippedErrors.length + " without environment):\n" + skippedErrors.join("\n");
+        }
 
         // Show confirmation dialog
         var confirmResult = await Xrm.Navigation.openConfirmDialog({
@@ -366,22 +466,22 @@ async function approveRequest(gridControl) {
             return;
         }
 
-        // Process each request sequentially
+        // Process each valid request sequentially
         var succeeded = 0;
         var failed = 0;
-        var errors = [];
+        var errors = skippedErrors.slice(); // Start with skipped records as errors
 
         Xrm.Utility.showProgressIndicator(
-            "Approving request 1 of " + selectedItems.length + "..."
+            "Approving request 1 of " + validItems.length + "..."
         );
 
-        for (var j = 0; j < selectedItems.length; j++) {
-            var requestItem = selectedItems[j];
+        for (var j = 0; j < validItems.length; j++) {
+            var requestItem = validItems[j];
             var requestId = _sprkReg_cleanGuid(requestItem.Id || requestItem.id);
             var requestName = requestItem.Name || requestItem.name || requestId;
 
             Xrm.Utility.showProgressIndicator(
-                "Approving request " + (j + 1) + " of " + selectedItems.length + ": " + requestName + "..."
+                "Approving request " + (j + 1) + " of " + validItems.length + ": " + requestName + "..."
             );
 
             console.log(SPRK_REG_LOG, "Approving:", requestId, requestName);
@@ -400,6 +500,9 @@ async function approveRequest(gridControl) {
                 console.error(SPRK_REG_LOG, "Approve failed:", requestId, result.errorText);
             }
         }
+
+        // Add skipped count to failed total
+        failed += skippedErrors.length;
 
         Xrm.Utility.closeProgressIndicator();
 
@@ -475,10 +578,23 @@ async function approveRequestFromForm(formContext) {
         console.log(SPRK_REG_LOG, "Record ID:", recordId);
         console.log(SPRK_REG_LOG, "Record Name:", recordName);
 
+        // FR-06: Validate that Target Environment lookup is set
+        var envLookup = formContext.getAttribute("sprk_dataverseenvironmentid");
+        var envValue = envLookup ? envLookup.getValue() : null;
+        if (!envValue || envValue.length === 0) {
+            await Xrm.Navigation.openAlertDialog({
+                title: "Target Environment Required",
+                text: "Please select a Target Environment before approving."
+            });
+            return;
+        }
+
+        var envName = envValue[0].name || "selected environment";
+
         // Confirm
         var confirmResult = await Xrm.Navigation.openConfirmDialog({
             title: "Approve Demo Access",
-            text: "Approve demo access for " + recordName + "?\n\nThis will provision their demo account.",
+            text: "Approve demo access for " + recordName + " in " + envName + "?\n\nThis will provision their demo account.",
             confirmButtonLabel: "Approve",
             cancelButtonLabel: "Cancel"
         });
@@ -488,7 +604,7 @@ async function approveRequestFromForm(formContext) {
             return;
         }
 
-        Xrm.Utility.showProgressIndicator("Provisioning demo account...");
+        Xrm.Utility.showProgressIndicator("Provisioning demo account in " + envName + "...");
 
         var result = await _sprkReg_callBffApi(
             "POST",

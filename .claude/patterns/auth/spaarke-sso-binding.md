@@ -66,6 +66,8 @@ Skip the bootstrap when the component only uses `Xrm.WebApi` and never calls the
 
 See [`xrm-webapi-vs-bff-auth.md`](xrm-webapi-vs-bff-auth.md) for the decision matrix.
 
+**Classic form scripts and ribbon commands** cannot import the package: they consume the library through `sprk_/scripts/bff_auth.js` (`Spaarke.BffAuth.getToken` / `authenticatedFetch`), a bundle built by `npm run build:webresource` in `Spaarke.Auth`. It counts as an INV-8 consumer, and `check:webresource` fails CI when it is stale. Never inline MSAL in a web resource (ADR-028 A7, #1655).
+
 ## Verification After Changes
 
 In Edge dev tools console:

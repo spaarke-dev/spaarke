@@ -11,9 +11,10 @@
  * bootstrap, context, framing/theme, and navigation/deep-linking.
  *
  * SCOPE (task 012 constraints — see the task POML):
- *   - Bootstrap + host-detection wiring ONLY. This adapter SELECTS — it does NOT implement — task
- *     011's Teams SSO/NAA auth strategy (`acquireTeamsWorkforceBffToken` / `getTeamsWorkforceMsalInstance`
- *     in `../auth/msal-auth.ts`). No token-acquisition algorithm lives in this file (ADR-028 A2).
+ *   - Bootstrap + host-detection wiring ONLY. This adapter SELECTS — it does NOT implement — the
+ *     Teams workforce auth strategy (NAA, then an MSAL popup; ADR-028 A8) in `../auth/msal-auth.ts`
+ *     (`acquireTeamsWorkforceBffToken` / `getTeamsWorkforceSignedInInstance`). No token-acquisition
+ *     algorithm lives in this file (ADR-028 A2).
  *   - Theme MUST use Fluent v9 semantic tokens (ADR-021). This adapter feeds the Teams-provided theme
  *     INTO the EXISTING `@spaarke/ui-components` theme cascade (`setUserThemePreference` /
  *     `resolveCodePageTheme` / `setupCodePageThemeListener`) rather than forking a second theme
@@ -37,11 +38,14 @@ import {
   acquireTeamsWorkforceBffToken,
   captureTeamsDeepLink,
   getTeamsWorkforceMsalInstance,
+  getTeamsWorkforceSignedInInstance,
   setActiveBffTokenAcquirer,
+  signInTeamsWorkforceViaPopup,
   TeamsWorkforceAuthError,
   type TeamsWorkforceAuthConfig,
 } from '../auth/msal-auth';
-import { getTeamsWorkforceEnvConfig } from '../config';
+import { getWorkforceClientConfig } from '../config';
+import { activeBffScope } from '../auth/backend-selection';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,7 +72,7 @@ export interface ITeamsHostAdapter {
   /**
    * Initialize the adapter: Teams JS `app.initialize()` + context retrieval, theme wiring
    * (initial value + live change listener), deep-link capture, and Teams workforce auth-strategy
-   * selection (delegates to task 011's `acquireTeamsWorkforceBffToken` — implements NO auth logic
+   * selection (delegates to `acquireTeamsWorkforceBffToken` — NAA, then an MSAL popup — implements NO auth logic
    * itself). Must be called before `getMsalInstance()`.
    *
    * @throws {TeamsWorkforceAuthError} When Teams workforce token acquisition fails — the caller
@@ -83,6 +87,15 @@ export interface ITeamsHostAdapter {
    * `initialize()` has resolved.
    */
   getMsalInstance(): IPublicClientApplication;
+  /**
+   * Recovery after `initialize()` failed on auth: run the MSAL popup sign-in (ADR-028 A8 fallback) and
+   * finish the auth wiring `initialize()` would have done. MUST be called from a user gesture (the error
+   * screen's "Sign in" button click) so the popup is not blocked; after it resolves the caller renders the
+   * app with `getMsalInstance()`.
+   *
+   * @throws {TeamsWorkforceAuthError} When the popup fails (cancelled, blocked, consent missing).
+   */
+  signInWithPopup(): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +124,51 @@ export async function detectTeamsHost(timeoutMs: number = TEAMS_INIT_DETECTION_T
     return true;
   } catch {
     return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pre-auth host signals (task 041 — customer picker / "no organization" screens)
+// ---------------------------------------------------------------------------
+
+/**
+ * Tell Teams the tab has content to show, so the host's loading spinner stops while the pre-auth customer picker is
+ * on screen. `app.initialize()` already ran in `detectTeamsHost()`, so this does NOT initialize again; the adapter's
+ * own `initialize()` calls `notifyAppLoaded()` again after the choice (idempotent). Best-effort: a host error here
+ * must never stop the screen from rendering.
+ */
+export function notifyTeamsAppLoaded(): void {
+  try {
+    teamsApp.notifyAppLoaded();
+  } catch (err) {
+    console.warn('[TeamsHostAdapter] notifyAppLoaded failed:', err);
+  }
+}
+
+/**
+ * Tell Teams the tab started successfully, for a screen that is final and needs no sign-in (the `/join` page: its
+ * message is the whole tab). The adapter's own `initialize()` does the same after a sign-in; this is the pre-auth
+ * counterpart, so the host's loading UI is dismissed definitively rather than timing out behind the message. Best-effort.
+ */
+export function notifyTeamsSuccess(): void {
+  try {
+    void Promise.resolve(teamsApp.notifySuccess()).catch(err =>
+      console.warn('[TeamsHostAdapter] notifySuccess failed:', err)
+    );
+  } catch (err) {
+    console.warn('[TeamsHostAdapter] notifySuccess failed:', err);
+  }
+}
+
+/**
+ * Tell Teams the tab failed to start for a non-auth reason (no customer backend could be resolved — fail closed),
+ * so the host does not keep spinning behind the explicit "No organization available" screen. Best-effort.
+ */
+export function notifyTeamsFailureOther(message: string): void {
+  try {
+    teamsApp.notifyFailure({ reason: teamsApp.FailedReason.Other, message });
+  } catch (err) {
+    console.warn('[TeamsHostAdapter] notifyFailure failed:', err);
   }
 }
 
@@ -153,6 +211,22 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
       throw new Error('[TeamsHostAdapter] getMsalInstance() called before initialize() resolved.');
     }
     return this.msalInstance;
+  }
+
+  async signInWithPopup(): Promise<void> {
+    const cfg: TeamsWorkforceAuthConfig = teamsWorkforceAuthConfig();
+    try {
+      await signInTeamsWorkforceViaPopup(cfg);
+    } catch (popupError) {
+      throw popupError instanceof TeamsWorkforceAuthError
+        ? popupError
+        : new TeamsWorkforceAuthError('Teams workforce sign-in (MSAL popup) failed.', { naaError: null, popupError });
+    }
+    await this.completeAuthSetup(cfg);
+    if (!this.initialized) {
+      this.initialized = true;
+      void teamsApp.notifySuccess();
+    }
   }
 
   async initialize(): Promise<TeamsHostContext> {
@@ -219,7 +293,7 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
    * msal-auth.ts is never touched by the Teams path.
    */
   private async selectAuthStrategy(): Promise<void> {
-    const cfg: TeamsWorkforceAuthConfig = getTeamsWorkforceEnvConfig();
+    const cfg: TeamsWorkforceAuthConfig = teamsWorkforceAuthConfig();
 
     try {
       await acquireTeamsWorkforceBffToken(cfg);
@@ -235,9 +309,29 @@ class TeamsHostAdapter implements ITeamsHostAdapter {
       throw failure; // Fail loud (acceptance criterion 4) — main.tsx renders an explicit error state.
     }
 
-    setActiveBffTokenAcquirer(() => acquireTeamsWorkforceBffToken(cfg));
-    this.msalInstance = await getTeamsWorkforceMsalInstance(cfg);
+    await this.completeAuthSetup(cfg);
   }
+
+  /** Re-point bff-client.ts at the Teams strategy and pick the instance that holds the signed-in account. */
+  private async completeAuthSetup(cfg: TeamsWorkforceAuthConfig): Promise<void> {
+    // `scope` is the active backend's scope passed by bff-client.ts (the same record as the request URL, task 041);
+    // without one, the active workforce backend's scope at call time.
+    setActiveBffTokenAcquirer((scope, options) =>
+      acquireTeamsWorkforceBffToken({ ...cfg, bffScope: scope ?? activeBffScope('workforce') }, options)
+    );
+    // The instance that holds the signed-in account: the NAA instance, or the popup fallback's
+    // instance when NAA failed (ADR-028 A8) — so useMsal() reflects the user either way.
+    this.msalInstance = getTeamsWorkforceSignedInInstance() ?? (await getTeamsWorkforceMsalInstance(cfg));
+  }
+}
+
+/**
+ * The Teams workforce auth config: the single-tenant client and Spaarke's tenant from config, and the BFF scope of
+ * the active workforce backend (task 041, `backend-selection.ts`; main.tsx selects it before `initialize()`). Throws
+ * (fail loud) when the client config is missing or no workforce backend can be resolved.
+ */
+function teamsWorkforceAuthConfig(): TeamsWorkforceAuthConfig {
+  return { ...getWorkforceClientConfig(), bffScope: activeBffScope('workforce') };
 }
 
 /** Factory mirroring the Office add-ins' `HostAdapterFactory.create()` convention. */

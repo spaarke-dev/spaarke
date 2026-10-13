@@ -15,6 +15,7 @@
 
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -150,36 +151,47 @@ public class MembershipCacheInvalidatorTests
 
     // ─── Argument guards (silent no-ops) ───────────────────────────────────
 
+    private static void AssertNothingPublished(Mock<ISubscriber> subscriber) =>
+        subscriber.Verify(
+            s => s.PublishAsync(It.IsAny<RedisChannel>(), It.IsAny<RedisValue>(), It.IsAny<CommandFlags>()),
+            Times.Never);
+
     [Fact]
     public async Task PublishInvalidationAsync_EmptyPersonId_NoOp()
     {
-        var subscriber = new Mock<ISubscriber>(MockBehavior.Strict);
+        var subscriber = new Mock<ISubscriber>();
         var sut = CreateSut(subscriber, out _);
 
-        // No setup on PublishAsync — strict mock fails the test if it's called.
         await sut.PublishInvalidationAsync(Guid.Empty, EntityLogicalName, CorrelationId, CancellationToken.None);
+
+        // Verify, don't rely on a Strict mock: PublishInvalidationAsync swallows every exception (FR-2P2.8),
+        // so a Strict-mock violation would be caught and logged, and this test could never fail.
+        AssertNothingPublished(subscriber);
     }
 
     [Fact]
     public async Task PublishInvalidationAsync_EmptyEntityLogicalName_NoOp()
     {
-        var subscriber = new Mock<ISubscriber>(MockBehavior.Strict);
+        var subscriber = new Mock<ISubscriber>();
         var sut = CreateSut(subscriber, out _);
 
         await sut.PublishInvalidationAsync(PersonId, "", CorrelationId, CancellationToken.None);
+
+        AssertNothingPublished(subscriber);
     }
 
     [Fact]
     public async Task PublishInvalidationAsync_CancelledBeforePublish_NoOp()
     {
-        var subscriber = new Mock<ISubscriber>(MockBehavior.Strict);
+        var subscriber = new Mock<ISubscriber>();
         var sut = CreateSut(subscriber, out _);
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        // No publish call — strict mock would fail if invoked.
         await sut.PublishInvalidationAsync(PersonId, EntityLogicalName, CorrelationId, cts.Token);
+
+        AssertNothingPublished(subscriber);
     }
 
     // ─── Null peer ─────────────────────────────────────────────────────────
@@ -187,13 +199,32 @@ public class MembershipCacheInvalidatorTests
     [Fact]
     public async Task NullMembershipCacheInvalidator_LogsAndReturns()
     {
-        var sut = new NullMembershipCacheInvalidator(
-            NullLogger<NullMembershipCacheInvalidator>.Instance);
+        var logger = new Mock<ILogger<NullMembershipCacheInvalidator>>();
+        var sut = new NullMembershipCacheInvalidator(logger.Object);
+
+        // The constructor announces — once, at Warning — that every invalidation is a no-op.
+        VerifyLogged(logger, LogLevel.Warning, "EVERY membership / access cache invalidation is a no-op", Times.Once());
 
         // Should complete without exception + without any Redis interaction
         // (no IConnectionMultiplexer in the constructor).
-        await sut.PublishInvalidationAsync(PersonId, EntityLogicalName, CorrelationId, CancellationToken.None);
+        var task = sut.PublishInvalidationAsync(PersonId, EntityLogicalName, CorrelationId, CancellationToken.None);
+        task.IsCompletedSuccessfully.Should().BeTrue("the no-op returns a completed task");
+        await task;
+
+        // ...and it logs the skipped publish at Debug, carrying the correlation id.
+        VerifyLogged(logger, LogLevel.Debug, "PublishInvalidationAsync no-op", Times.Once());
+        VerifyLogged(logger, LogLevel.Debug, CorrelationId!, Times.Once());
     }
+
+    private static void VerifyLogged<T>(Mock<ILogger<T>> logger, LogLevel level, string contains, Times times) =>
+        logger.Verify(
+            l => l.Log(
+                level,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains(contains)),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            times);
 
     /// <summary>
     /// Deterministic TimeProvider used by the invalidator for the

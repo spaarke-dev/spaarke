@@ -404,7 +404,7 @@ public class VisualizationServiceTests
 
     #region Metadata Tests
 
-    [Fact(Skip = "Visualization metadata structure changed - NodesPerLevel assertion outdated")]
+    [Fact]
     public async Task GetRelatedDocumentsAsync_Metadata_ContainsNodesPerLevel()
     {
         // Arrange
@@ -418,9 +418,8 @@ public class VisualizationServiceTests
         var result = await service.GetRelatedDocumentsAsync(_sourceDocumentId, options);
 
         // Assert
-        result.Metadata.NodesPerLevel.Should().HaveCount(2); // Level 0 and Level 1
-        result.Metadata.NodesPerLevel[0].Should().Be(1); // Source node at level 0
-        result.Metadata.NodesPerLevel[1].Should().Be(3); // 3 related at level 1
+        // Semantic relations get three levels: source, parent hubs (none for semantic matches), related docs
+        result.Metadata.NodesPerLevel.Should().Equal(1, 0, 3);
     }
 
     [Fact]

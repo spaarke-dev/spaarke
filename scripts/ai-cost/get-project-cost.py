@@ -19,21 +19,37 @@ def price_for(model):
         if k in m: return PRICE[k]
     return (0, 0, 0)
 
-def find_folder(slug):
-    """Match the Claude Code project folder for a given repo project slug."""
-    cands = []
-    want = slug.lower()
-    for d in os.listdir(CLAUDE_PROJECTS):
-        dl = d.lower()
-        if dl == f"c--code-files-spaarke-wt-{want}" or dl.endswith(f"-wt-{want}"):
-            cands.append(d)
-    if cands:
-        return cands[0]
-    # fallback: fuzzy contains
-    for d in os.listdir(CLAUDE_PROJECTS):
-        if want in d.lower():
-            cands.append(d)
-    return cands[0] if cands else None
+def slug_candidates(slug):
+    """Names a board slug may go by, most specific first: the slug itself, then the slug with a leading
+    `spaarke-` stripped (board titles carry the repo prefix, worktree folders often do not)."""
+    out = [slug.lower()]
+    if out[0].startswith("spaarke-") and len(out[0]) > len("spaarke-"):
+        out.append(out[0][len("spaarke-"):])
+    return out
+
+def find_folder(slug, known_slugs=None):
+    """Match the Claude Code project folder for a given repo project slug.
+
+    1. exact `-wt-<slug>` (case-insensitive); 2. exact `-wt-<slug minus leading spaarke->`;
+    3. last resort: a folder that ENDS in `-<candidate>` (extra prefix only). A folder that merely
+    contains the slug, e.g. `...-daily-update-service-r2` for `daily-update-service`, is a different
+    release and is never taken, and neither is a folder that is itself the exact folder of another
+    board slug in `known_slugs`."""
+    dirs = os.listdir(CLAUDE_PROJECTS)
+    cands = slug_candidates(slug)
+    for want in cands:
+        for d in dirs:
+            dl = d.lower()
+            if dl == f"c--code-files-spaarke-wt-{want}" or dl.endswith(f"-wt-{want}"):
+                return d
+    other = [k.lower() for k in (known_slugs or ()) if k.lower() not in cands]
+    other += [o[len("spaarke-"):] for o in other if o.startswith("spaarke-")]
+    for want in cands:
+        for d in dirs:
+            dl = d.lower()
+            if dl.endswith(f"-{want}") and not any(dl.endswith(f"-wt-{o}") for o in other):
+                return d
+    return None
 
 def cost_for_folder(folder):
     seen = set()

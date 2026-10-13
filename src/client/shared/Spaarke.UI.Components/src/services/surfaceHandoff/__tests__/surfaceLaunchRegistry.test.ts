@@ -12,7 +12,7 @@
  *  - every entry is structurally sound.
  */
 
-import { SURFACE_LAUNCH_REGISTRY, resolveSurfaceLaunch } from '../surfaceLaunchRegistry';
+import { SURFACE_LAUNCH_REGISTRY, EVENT_SUBTYPE_TASK_GUID, resolveSurfaceLaunch } from '../surfaceLaunchRegistry';
 
 describe('surfaceLaunchRegistry', () => {
   it('resolves list-tasks to a workspace-tab grid surface (event-bus kind)', () => {
@@ -26,6 +26,17 @@ describe('surfaceLaunchRegistry', () => {
   it('resolves wizard consumerTypes to the wizard kind + web-resource surface', () => {
     expect(resolveSurfaceLaunch('create-matter')).toMatchObject({ kind: 'wizard', surface: 'sprk_creatematterwizard' });
     expect(resolveSurfaceLaunch('create-task')).toMatchObject({ kind: 'wizard', surface: 'sprk_createeventwizard' });
+  });
+
+  it('create-matter carries no preset; create-task carries the Task-subtype preset', () => {
+    expect(resolveSurfaceLaunch('create-matter')!.preset).toBeUndefined();
+    // sprk_eventtype_ref_name = denormalized display name alongside the GUID ref.
+    expect(resolveSurfaceLaunch('create-task')!.preset).toEqual({
+      sprk_eventtype_ref: EVENT_SUBTYPE_TASK_GUID,
+      sprk_eventtype_ref_name: 'Task',
+    });
+    // The exact GUID is a contract with the Dataverse Event subtype row.
+    expect(EVENT_SUBTYPE_TASK_GUID).toBe('124f5fc9-98ff-f011-8406-7c1e525abd8b');
   });
 
   it('resolves create-todo to an oob-form entity surface', () => {
@@ -63,6 +74,22 @@ describe('surfaceLaunchRegistry', () => {
     expect(resolveSurfaceLaunch('')).toBeUndefined();
     expect(resolveSurfaceLaunch(null)).toBeUndefined();
     expect(resolveSurfaceLaunch(undefined)).toBeUndefined();
+  });
+
+  it('registry covers exactly the cataloged intents (adding or removing one is a deliberate change)', () => {
+    expect(Object.keys(SURFACE_LAUNCH_REGISTRY).sort()).toEqual([
+      'create-matter',
+      'create-project',
+      'create-task',
+      'create-todo',
+      'create-work-assignment',
+      'daily-briefing',
+      'find-similar',
+      'list-tasks',
+      'nda-review',
+      'smart-todo',
+      'summarize-files',
+    ]);
   });
 
   it('separates event-bus kinds from sessionStorage hand-off kinds', () => {

@@ -1,70 +1,164 @@
 name: Deploy External SPA (Static Web App)
 
-# Phase 0 scaffold — task 003 (spaarke-SPA-external-access-platform-r1).
-# Provisions the deploy pipeline for the external Secure Project Workspace SPA onto
-# Azure Static Web Apps (swa-spaarke-external-spa-dev), replacing the Power Pages
-# web-resource path (scripts/Deploy-ExternalWorkspaceSpa.ps1, retired in Phase 3).
+# Phase 0 scaffold - task 003 (spaarke-SPA-external-access-platform-r1); environment split - task 043
+# (spaarke-SPA-external-access-platform-r3, FR-20, design actions A1/A4).
 #
-# MANUAL-ONLY for now (workflow_dispatch): Phase 1 (tasks 010/011/014) flips the SPA to
-# BrowserRouter, adds staticwebapp.config.json (navigationFallback + security headers),
-# and only then adds the push/path trigger so pushes to master auto-deploy.
+# Builds the external Secure Project Workspace SPA and uploads it to an Azure Static Web App:
+#   environment=dev  -> swa-spaarke-external-spa-dev  (GitHub environment `external-spa-dev`)
+#   environment=prod -> swa-spaarke-external-spa-prod (GitHub environment `external-spa-prod`, external.spaarke.com)
+#
+# NO environment-specific identifier, URL or scope is written in this file (owner rule 2026-10-08: baked dev values
+# cannot be part of the package). Every VITE_* value is a GitHub environment VARIABLE (`vars.*`, resolved against the
+# job's environment, so the same name carries the dev value in `external-spa-dev` and the prod value in
+# `external-spa-prod`). The SWA deployment token is a secret. The variables/secrets the owner must create are listed
+# in projects/spaarke-SPA-external-access-platform-r3/notes/task-043-notes.md.
+#
+# MANUAL-ONLY (workflow_dispatch). The prod run is a deliberate human act: put required reviewers on the
+# `external-spa-prod` environment. Production go-live itself (task 073) is gated on T240c/T240d and DNS.
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (dev -> external-spa-dev, prod -> external-spa-prod)"
+        required: true
+        type: choice
+        default: dev
+        options:
+          - dev
+          - prod
 
 permissions:
   contents: read
 
+# One run per target environment at a time; a queued run waits rather than cancelling a deploy in flight.
+concurrency:
+  group: deploy-external-spa-${{ inputs.environment }}
+  cancel-in-progress: false
+
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
-    name: Build and deploy external-spa
+    name: Build and deploy external-spa (${{ inputs.environment }})
+    environment: ${{ inputs.environment == 'prod' && 'external-spa-prod' || 'external-spa-dev' }}
     steps:
+      # A REST/gh dispatch can pass a value the UI choice list would refuse. Anything but dev|prod would otherwise
+      # resolve to the dev GitHub environment (and, with no matching deploy step, end as a green no-op).
+      - name: Validate environment input
+        env:
+          TARGET: ${{ inputs.environment }}
+        run: |
+          case "$TARGET" in dev|prod) ;; *) echo "::error::environment must be dev or prod (got '$TARGET')"; exit 1;; esac
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      # Vite solution: use npm install --legacy-peer-deps (NOT npm ci) per root CLAUDE.md §12.
+      # Fail closed BEFORE building: a missing environment variable would otherwise ship a build with an unset
+      # identity configuration. Values are read from the environment, never interpolated into the script. Formats
+      # are checked generically; no identifier is named here.
+      - name: Check required environment variables
+        env:
+          TARGET: ${{ inputs.environment }}
+          VITE_BFF_API_URL: ${{ vars.VITE_BFF_API_URL }}
+          VITE_BACKENDS: ${{ vars.VITE_BACKENDS }}
+          VITE_MSAL_AUTHORITY: ${{ vars.VITE_MSAL_AUTHORITY }}
+          VITE_MSAL_CLIENT_ID: ${{ vars.VITE_MSAL_CLIENT_ID }}
+          VITE_MSAL_TENANT_ID: ${{ vars.VITE_MSAL_TENANT_ID }}
+          VITE_MSAL_BFF_SCOPE: ${{ vars.VITE_MSAL_BFF_SCOPE }}
+          VITE_TEAMS_MSAL_CLIENT_ID: ${{ vars.VITE_TEAMS_MSAL_CLIENT_ID }}
+          VITE_TEAMS_MSAL_TENANT_ID: ${{ vars.VITE_TEAMS_MSAL_TENANT_ID }}
+          VITE_TEAMS_MSAL_BFF_SCOPE: ${{ vars.VITE_TEAMS_MSAL_BFF_SCOPE }}
+        run: |
+          fail=0
+          guid='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          scope='^api://[0-9a-fA-F-]{36}/user_impersonation$'
+          # https URL whose path is one tenant GUID segment (optional trailing slash); no query or fragment. The host is
+          # not constrained: the SPA accepts any https authority host (src/auth/msal-config.ts).
+          authority='^https://[^/?#[:space:]]+/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/?$'
+          need() { if [ -z "${!1}" ]; then echo "::error::GitHub environment variable $1 is not set for the '$TARGET' environment"; fail=1; fi; }
+          match() { if [ -n "${!1}" ] && ! printf '%s' "${!1}" | grep -Eq "$2"; then echo "::error::$1 has the wrong format ($3)"; fail=1; fi; }
+          for k in VITE_MSAL_AUTHORITY VITE_MSAL_CLIENT_ID VITE_MSAL_TENANT_ID VITE_MSAL_BFF_SCOPE \
+                   VITE_TEAMS_MSAL_CLIENT_ID VITE_TEAMS_MSAL_TENANT_ID VITE_TEAMS_MSAL_BFF_SCOPE; do need "$k"; done
+          # Backend: VITE_BACKENDS (a JSON list) or the one-entry VITE_BFF_API_URL fallback - at least one.
+          if [ -z "$VITE_BACKENDS" ] && [ -z "$VITE_BFF_API_URL" ]; then
+            echo "::error::Set VITE_BACKENDS or VITE_BFF_API_URL for the '$TARGET' environment"; fail=1
+          fi
+          match VITE_MSAL_CLIENT_ID "$guid" "GUID"
+          match VITE_MSAL_TENANT_ID "$guid" "GUID"
+          match VITE_TEAMS_MSAL_CLIENT_ID "$guid" "GUID"
+          match VITE_TEAMS_MSAL_TENANT_ID "$guid" "GUID"
+          match VITE_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A8"
+          match VITE_TEAMS_MSAL_BFF_SCOPE "$scope" "api://{app id}/user_impersonation, ADR-028 A8"
+          match VITE_MSAL_AUTHORITY "$authority" "https://{host}/{tenant GUID}, no query or fragment"
+          if [ -n "$VITE_BFF_API_URL" ]; then match VITE_BFF_API_URL '^https://' "https URL"; fi
+          if [ -n "$VITE_BACKENDS" ] && ! printf '%s' "$VITE_BACKENDS" | python3 -c 'import json,sys; assert isinstance(json.load(sys.stdin), list)'; then
+            echo "::error::VITE_BACKENDS must be a JSON list"; fail=1
+          fi
+          exit "$fail"
+
+      # Vite solution: use npm install --legacy-peer-deps (NOT npm ci) per root CLAUDE.md section 12.
       - name: Install dependencies
         working-directory: src/client/external-spa
         run: npm install --legacy-peer-deps --no-audit --no-fund
 
-      # Vite gives real process env vars the highest priority, so these VITE_* values
-      # OVERRIDE the #{...}# placeholders in .env.production at build time (no separate
-      # token-substitution step needed). All values are NON-SECRET identifiers (NFR-06)
-      # sourced from config/environments.json dev.ciam + the CIAM app registrations
-      # (DI-028-01). CIAM repoint per task 028; matches the BFF Ciam:* settings on
-      # spaarke-bff-dev (Ciam:Audience = the BFF-API client-id GUID, v2 tokens).
-      # Promote to GitHub repository variables (vars.*) if/when a second environment is added.
+      # Vite gives real process env vars the highest priority, so these VITE_* values OVERRIDE the #{...}#
+      # placeholders in .env.production at build time (no separate token-substitution step needed). All values are
+      # NON-SECRET identifiers (NFR-06) held as GitHub environment variables (see the header). Both planes request
+      # api://{app id}/user_impersonation (ADR-028 A8); the workforce client is ONE single-tenant Spaarke public
+      # client whose authority is pinned to Spaarke's tenant. VITE_BACKENDS is optional (empty = unset): with it
+      # unset, VITE_BFF_API_URL + the two *_BFF_SCOPE values form a one-entry backend list (task 041, FR-17) until
+      # the T240c directory ships.
       - name: Build (Vite production)
         working-directory: src/client/external-spa
         env:
-          VITE_BFF_API_URL: https://spaarke-bff-dev.azurewebsites.net
-          VITE_MSAL_AUTHORITY: https://spaarkeextid.ciamlogin.com/7052feba-bfc4-43e0-b09e-65014b429131
-          VITE_MSAL_CLIENT_ID: bd57e54e-b339-4500-b55c-e451009fd907
-          VITE_MSAL_TENANT_ID: 7052feba-bfc4-43e0-b09e-65014b429131
-          VITE_MSAL_BFF_SCOPE: api://4a4d5126-91b0-4865-8e3a-134b7209013e/SDAP.Access
-          # Teams collaboration host (teams-app-r1, ADR-028 A2) — workforce multitenant app (task 061).
-          # Non-secret identifiers; override the #{...}# placeholders in .env.production at build time so
-          # the Teams host's getTeamsWorkforceEnvConfig() resolves instead of throwing when run in Teams.
-          VITE_TEAMS_MSAL_CLIENT_ID: 1e40baad-e065-4aea-a8d4-4b7ab273458c
-          VITE_TEAMS_MSAL_BFF_SCOPE: api://1e40baad-e065-4aea-a8d4-4b7ab273458c/access_as_user
+          VITE_BFF_API_URL: ${{ vars.VITE_BFF_API_URL }}
+          VITE_BACKENDS: ${{ vars.VITE_BACKENDS }}
+          VITE_MSAL_AUTHORITY: ${{ vars.VITE_MSAL_AUTHORITY }}
+          VITE_MSAL_CLIENT_ID: ${{ vars.VITE_MSAL_CLIENT_ID }}
+          VITE_MSAL_TENANT_ID: ${{ vars.VITE_MSAL_TENANT_ID }}
+          VITE_MSAL_BFF_SCOPE: ${{ vars.VITE_MSAL_BFF_SCOPE }}
+          VITE_TEAMS_MSAL_CLIENT_ID: ${{ vars.VITE_TEAMS_MSAL_CLIENT_ID }}
+          VITE_TEAMS_MSAL_TENANT_ID: ${{ vars.VITE_TEAMS_MSAL_TENANT_ID }}
+          VITE_TEAMS_MSAL_BFF_SCOPE: ${{ vars.VITE_TEAMS_MSAL_BFF_SCOPE }}
         run: npm run build
 
+      # Scan the BUILT bundle before it is staged for upload (task 042 review, FR-18): no dev-mock identity or canned
+      # data, and no "/api/" route outside /api/v1/external beyond the ratchet baseline in scripts/check-dist.mjs.
+      # No workflow value is used here - the script reads only dist/.
+      - name: Check build output (no mock mode, no out-of-plane routes)
+        working-directory: src/client/external-spa
+        run: npm run check:dist
+
       # staticwebapp.config.json lives at the project root (source of truth) but the SWA
-      # runtime only reads it from the deployed content root. There is no public/ dir, so
-      # Vite does not copy it into dist — stage it here before upload (skip_app_build: true).
+      # runtime only reads it from the deployed content root. public/ holds only the static
+      # MSAL popup page (auth-callback.html), which Vite copies into dist; the SWA config is not
+      # in public/, so stage it here before upload (skip_app_build: true).
       - name: Stage SWA runtime config into build output
         working-directory: src/client/external-spa
         run: cp staticwebapp.config.json dist/staticwebapp.config.json
 
-      - name: Deploy to Azure Static Web Apps
+      # The deployment token selects the target SWA. dev keeps its existing secret name (a repository or an
+      # `external-spa-dev` environment secret); prod uses an `external-spa-prod` ENVIRONMENT secret and has no
+      # fall-back to the dev token (an empty prod token makes the deploy action fail).
+      - name: Deploy to Azure Static Web Apps (dev)
+        if: ${{ inputs.environment == 'dev' }}
         uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV }}
           action: upload
           # Pre-built by the step above; upload the dist output as-is.
+          app_location: src/client/external-spa/dist
+          skip_app_build: true
+          output_location: ""
+
+      - name: Deploy to Azure Static Web Apps (prod)
+        if: ${{ inputs.environment == 'prod' }}
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_SWA_TOKEN_EXTERNAL_SPA_PROD }}
+          action: upload
           app_location: src/client/external-spa/dist
           skip_app_build: true
           output_location: ""
