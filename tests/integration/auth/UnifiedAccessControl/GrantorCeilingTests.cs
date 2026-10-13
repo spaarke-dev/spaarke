@@ -792,7 +792,8 @@ public class GrantorCeilingTests
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             request, _dataverse, _participations, DenyList(), new FixedRightsProbe(callerRights),
             ciamProvisioner: null!, emailService: null!, IdentityBindingTestKit.Binder(_identities),
-            PortalConfig(), AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(), Context(),
+            PortalConfig(), Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer("acme"),
+            AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(), Context(),
             NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None);
 
     /// <param name="noAccessCheck">The write-time No Access check; the real one over the seam reader when null.</param>

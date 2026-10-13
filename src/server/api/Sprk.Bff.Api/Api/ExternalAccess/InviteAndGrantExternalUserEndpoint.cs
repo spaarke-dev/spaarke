@@ -72,6 +72,7 @@ public static class InviteAndGrantExternalUserEndpoint
         RegistrationEmailService emailService,
         ContactIdentityBinder binder,
         IConfiguration configuration,
+        Sprk.Bff.Api.Configuration.CustomerIdentity customer,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         GrantAccessNotifier accessNotifier,
         HttpContext httpContext,
@@ -236,7 +237,8 @@ public static class InviteAndGrantExternalUserEndpoint
         {
             // The resolution the checks above judged — onboarding does not look the email up again.
             var outcome = await InviteExternalUserEndpoint.ProvisionAsync(
-                request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl, logger, invitee, ct);
+                request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl,
+                InviteExternalUserEndpoint.InviteLinkCustomerKey(customer), logger, invitee, ct);
 
             // Task 141: a refused onboarding writes NO grant. Granting a contact an employee's work identity
             // owns would hand the employee's contact a CIAM grant it can never use — or worse, one it can.

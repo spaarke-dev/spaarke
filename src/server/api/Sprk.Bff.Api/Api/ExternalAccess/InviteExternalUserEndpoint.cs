@@ -84,6 +84,7 @@ public static class InviteExternalUserEndpoint
         RegistrationEmailService emailService,
         ContactIdentityBinder binder,
         IConfiguration configuration,
+        Sprk.Bff.Api.Configuration.CustomerIdentity customer,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -125,8 +126,8 @@ public static class InviteExternalUserEndpoint
         try
         {
             var outcome = await ProvisionAsync(
-                request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl, logger,
-                resolution: null, ct);
+                request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl, InviteLinkCustomerKey(customer),
+                logger, resolution: null, ct);
             if (outcome.Failure is { } failure)
             {
                 return LookupFailureResult(failure, httpContext);
@@ -137,6 +138,7 @@ public static class InviteExternalUserEndpoint
                 return RefusalResult(refusal, httpContext);
             }
 
+            // Task 185: the response carries the BASE portal URL. The invite link and its code go only into the email.
             return TypedResults.Ok(new InviteExternalUserResponse(outcome.ContactId, portalUrl, outcome.Status));
         }
         catch (Exception ex)
@@ -206,10 +208,19 @@ public static class InviteExternalUserEndpoint
         RegistrationEmailService emailService,
         ContactIdentityBinder binder,
         string portalUrl,
+        string? customerKey,
         ILogger logger,
         InviteContactResolution? resolution,
         CancellationToken ct)
     {
+        // Task 185: the invite link is built from trusted config only. A portal URL it cannot use (not https, credentials in
+        // it) stops the invite here, before anything is resolved, written or created.
+        if (BuildInviteLink(portalUrl, customerKey, inviteCode: null) is null)
+        {
+            throw new InvalidOperationException(
+                "ExternalAccess:PortalUrl must be an absolute https URL with no credentials to build the invite link.");
+        }
+
         resolution ??= await binder.ResolveInviteContactAsync(request.Email, ct);
 
         if (NotProvisionable(resolution, request.Email, logger) is { } stopped)
@@ -257,6 +268,10 @@ public static class InviteExternalUserEndpoint
         // A marker write that FAILED (anything but Written / ColumnMissing) stops the invite here: 503, nothing created.
         var mark = await binder.MarkInviteSentAsync(contactId, etag, ct);
         var markerLanded = mark.Status == StoreWriteStatus.Written;
+
+        // Task 185: the link both invite emails open. It carries the one-time code only when the marker and its hash landed
+        // (a new-account invite on a stamp without the columns binds in this request and needs none). Never logged.
+        var inviteUrl = BuildInviteLink(portalUrl, customerKey, mark.InviteCode)!;
         switch (mark.Status)
         {
             case StoreWriteStatus.Written:
@@ -299,7 +314,8 @@ public static class InviteExternalUserEndpoint
                 request.Email, contactId);
             try
             {
-                await emailService.SendCiamExistingAccountEmailAsync(request.Email, request.FirstName ?? string.Empty, portalUrl, ct);
+                await emailService.SendCiamExistingAccountEmailAsync(
+                    request.Email, request.FirstName ?? string.Empty, portalUrl, inviteUrl, ct);
             }
             catch (Exception ex)
             {
@@ -316,7 +332,7 @@ public static class InviteExternalUserEndpoint
         }
 
         // Persist the oid (D format) + plane External, conditional on the row version read with it. If the bind
-        // does not land, the CIAM first-login email bind repairs it (the one case that path is kept for).
+        // does not land, no email is sent, so nobody holds a code: a retried invite (ExistingAccount, a new code) repairs it.
         // Task 185 (owner Q5): when the marker and its code hash landed, the same bind PATCH clears the now-inert hash.
         var bind = await binder.BindInvitedContactAsync(contactId, etag, ciamOid, consumeInviteCode: markerLanded, ct);
         if (bind.Status != StoreWriteStatus.Written && !markerLanded)
@@ -335,14 +351,16 @@ public static class InviteExternalUserEndpoint
         {
             throw new InvalidOperationException(
                 $"CIAM account {ciamOid:D} was created for '{request.Email}' but its oid could not be bound to contact " +
-                $"{contactId:D} ({bind.Status}). The first CIAM sign-in repairs the binding.");
+                $"{contactId:D} ({bind.Status}). No email was sent: retry the invite, which sends a new invite code that binds " +
+                "the contact at its first sign-in.");
         }
 
-        // Send the onboarding email (task 024). portalUrl is inserted un-encoded — trusted server config.
+        // Send the onboarding email (task 024; task 185: its links open the invite link).
         // Non-fatal: the account + oid are persisted; admin can re-send out-of-band on failure.
         try
         {
-            await emailService.SendCiamOnboardingEmailAsync(request.Email, request.FirstName ?? string.Empty, portalUrl, ct);
+            await emailService.SendCiamOnboardingEmailAsync(
+                request.Email, request.FirstName ?? string.Empty, portalUrl, inviteUrl, ct);
         }
         catch (Exception ex)
         {
@@ -355,6 +373,42 @@ public static class InviteExternalUserEndpoint
 
         return new ProvisionOutcome(contactId, "Provisioned");
     }
+
+    /// <summary>
+    /// Task 185 (design note §1.1) — the invite link: <c>{PortalUrl}/?customer={key}&amp;invite={code}</c>. Copies
+    /// <see cref="GrantAccessNotifier.BuildPortalLink"/>: built ONLY from the trusted portal URL (an absolute https URL, http
+    /// only on loopback, no credentials; its own query and fragment are dropped), this stamp's customer key and the code,
+    /// each URL-encoded. Unlike a record link it is still built when the customer key is not resolved (dev before
+    /// <c>Customer:Id</c>): <c>{PortalUrl}/?invite={code}</c>. With no code, it is the portal link without <c>invite</c>.
+    /// <c>null</c> when the portal URL is unusable. The result carries a secret: never log it, never return it in a response.
+    /// </summary>
+    internal static string? BuildInviteLink(string? portalUrl, string? customerKey, string? inviteCode)
+    {
+        if (!Uri.TryCreate(portalUrl?.Trim(), UriKind.Absolute, out var portal)
+            || !string.IsNullOrEmpty(portal.UserInfo)
+            || !(portal.Scheme == Uri.UriSchemeHttps || (portal.Scheme == Uri.UriSchemeHttp && portal.IsLoopback)))
+        {
+            return null;
+        }
+
+        var query = new List<string>(2);
+        if (!string.IsNullOrWhiteSpace(customerKey))
+        {
+            query.Add($"customer={Uri.EscapeDataString(customerKey.Trim())}");
+        }
+
+        if (!string.IsNullOrEmpty(inviteCode))
+        {
+            query.Add($"invite={Uri.EscapeDataString(inviteCode)}");
+        }
+
+        var baseUrl = portal.GetLeftPart(UriPartial.Path).TrimEnd('/');
+        return query.Count == 0 ? $"{baseUrl}/" : $"{baseUrl}/?{string.Join('&', query)}";
+    }
+
+    /// <summary>This stamp's customer key for the invite link, or <c>null</c> when it is not resolved (dev).</summary>
+    internal static string? InviteLinkCustomerKey(Sprk.Bff.Api.Configuration.CustomerIdentity customer)
+        => customer.IsResolved ? customer.Id : null;
 
     /// <summary>
     /// Task 184 — the retryable 503 of an invite whose contact needed the pending-invite marker as its only evidence and

@@ -826,11 +826,17 @@ internal static class AssignedAccessTestDoubles
         /// <summary>When set, every send throws this (the shared mailbox refusing or failing).</summary>
         public Exception? Failure { get; set; }
 
+        /// <summary>Task 185: the invite link each email in <see cref="Onboarding"/> or <see cref="ExistingAccount"/> carried, in send order.</summary>
+        public List<string> InviteUrls { get; } = new();
+
         public override Task SendCiamOnboardingEmailAsync(
-            string recipientEmail, string firstName, string portalUrl, CancellationToken cancellationToken = default)
+            string recipientEmail, string firstName, string portalUrl, string inviteUrl, CancellationToken cancellationToken = default)
         {
-            lock (Onboarding)
+            lock (InviteUrls)
+            {
                 Onboarding.Add(recipientEmail);
+                InviteUrls.Add(inviteUrl);
+            }
             return Task.CompletedTask;
         }
 
@@ -838,10 +844,13 @@ internal static class AssignedAccessTestDoubles
         public List<string> ExistingAccount { get; } = new();
 
         public override Task SendCiamExistingAccountEmailAsync(
-            string recipientEmail, string firstName, string portalUrl, CancellationToken cancellationToken = default)
+            string recipientEmail, string firstName, string portalUrl, string inviteUrl, CancellationToken cancellationToken = default)
         {
-            lock (ExistingAccount)
+            lock (InviteUrls)
+            {
                 ExistingAccount.Add(recipientEmail);
+                InviteUrls.Add(inviteUrl);
+            }
             return Task.CompletedTask;
         }
 
