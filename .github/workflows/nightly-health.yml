@@ -9,10 +9,11 @@ name: nightly-health
 #                    vs the recorded baseline in .github/baseline-bundle-sizes.json
 #   - vuln-scan:     dotnet list package --vulnerable + npm audit per client pkg
 #
-# Reports as a single rolling issue titled "Nightly Health — YYYY-MM-DD".
-# Failures stay open; clean nights close it. No Slack/Teams bridge by design.
+# The legacy per-night comment on the rolling issue "Nightly Health — YYYY-MM-DD" is
+# OFF by default (dispatch input post_tracking_comment); the quality alerts below and
+# the Issues & Quality dashboard replace it. No Slack/Teams bridge by design.
 #
-# ALSO raises one quality alert per check (the `alerts` job at the bottom, see
+# Raises one quality alert per check (the `alerts` job at the bottom, see
 # .github/actions/quality-alert and docs/procedures/ci-cd-workflow.md "Quality
 # alerts"). A cancelled or timed-out job is a failure to observe, never a pass: that
 # is how this workflow was cancelled in 13 of its last 30 runs without anyone being
@@ -40,6 +41,11 @@ on:
         required: false
         type: boolean
         default: false
+      post_tracking_comment:
+        description: 'Also append the legacy per-night comment to the rolling "Nightly Health" issue (off by default; alerts + dashboard replace it)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # for optional baseline update commit
@@ -61,8 +67,8 @@ jobs:
   #
   # PARALLEL, not sequential (2026-10-13). The three runs used to execute one after
   # another on a single runner under a 60-minute cap, and ONE run of
-  # Sprk.Bff.Api.Tests takes ~42 minutes there (19.5k tests, most of them booting a
-  # full BFF host). So the job was cancelled at its cap every night (13 of the last
+  # Sprk.Bff.Api.Tests took ~42 minutes there (19.5k tests, 1,084 of them failing on
+  # LFS pointer fixtures; see below). So the job was cancelled at its cap every night (13 of the last
   # 30 nightly runs) and the analysis step never ran: a flake hunt that never
   # reports. Now each of the 3 runs is its own matrix leg, and each leg is further
   # split into the same 4 namespace shards `ci-tier2-advisory.yml` uses for the PR
@@ -82,8 +88,9 @@ jobs:
   flake-hunt-run:
     name: Flake hunt run ${{ matrix.run }} / ${{ matrix.shard }}
     runs-on: ubuntu-latest
-    # ~2x the measured leg time; see the PR that introduced the sharding.
-    timeout-minutes: 45
+    # Measured 2026-10-13 (run 38432551839): 6.7-12.9 min per leg including a ~3 min
+    # build. Cap = ~2x the slowest leg.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -569,8 +576,9 @@ jobs:
   coverage-shard:
     name: Coverage shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
-    # ~2x the measured shard time; see the PR that introduced the sharding.
-    timeout-minutes: 60
+    # Measured 2026-10-13 (run 38432551839): 4.5-20.4 min per shard (api-seam is the
+    # slowest). Cap = ~2x the slowest shard.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -955,7 +963,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # Off by default since the quality alerts + the Issues & Quality dashboard replaced
+      # this log (the rolling issue had collected ~100 unread comments). The code is kept
+      # so the log can be restored: dispatch with post_tracking_comment=true.
       - name: Compose + post report
+        if: ${{ inputs.post_tracking_comment == true }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FLAKE_SUMMARY: ${{ needs.flake-hunt.outputs.flake_summary }}
