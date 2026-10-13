@@ -675,7 +675,7 @@ Five workflows run on a `schedule:` trigger. There is no longer a single "nightl
 | Workflow | Schedule | What it reports | Blocking |
 |---|---|---|---|
 | `nightly-health.yml` | Daily, 06:00 UTC | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy fs scan, dependency audit, Graph app-role parity | No — rolling tracking issue |
-| `client-tests.yml` | Nightly, 07:00 UTC | jest baseline across 40 client packages (pass/fail/install-failed table) | No — job summary + `client-test-baseline` artifact |
+| `client-tests.yml` | Nightly, 07:00 UTC | jest baseline across the client packages (pass/fail/install-failed/deps-build-failed table) | No — job summary + `client-test-baseline` artifact |
 | `adr-audit.yml` | Weekly, Monday 09:00 UTC | Full ADR NetArchTest compliance | No — tracking issue (see [above](#weekly-adr-audit)) |
 | `report-workflow-health.yml` | Weekly, Monday 09:00 UTC | Rolling 7-day per-workflow success rate across every `.github/workflows/*.yml` | No — tracking issue |
 | `pcf-build-prod-nightly.yml` | Daily, 08:00 UTC | `npm run build:prod` for every PCF control, judged by the build output (pcf-scripts exits 0 on a failed build) | No — advisory; job summary + artifact |
@@ -700,7 +700,7 @@ Five workflows run on a `schedule:` trigger. There is no longer a single "nightl
 
 ### `client-tests.yml`
 
-Discovers every `package.json` with a real `test` script (filters out the npm-init default), matrix-runs `npm test -- --ci` per package (`max-parallel: 8`, `continue-on-error: true` per leg), and writes a combined pass/fail/install-failed table to the job summary plus a `client-test-baseline` artifact. Deliberately **not** wired into `ci-tier1-blocking.yml`/`ci-tier2-advisory.yml` — see the file's own header for the promotion criteria. `office-addins-tests.yml`'s `gated-jest` job is the one promoted subset that *does* gate PRs today.
+Discovers every `package.json` with a real `test` script (filters out the npm-init default), matrix-runs `npm test -- --ci` per package (`max-parallel: 8`, `continue-on-error: true` per leg; vitest packages get no `--ci`/`--reporters`, which vitest rejects), and writes a combined pass/fail/install-failed/deps-build-failed table to the job summary plus a `client-test-baseline` artifact. Each leg is `npm install` → **install + build the shared libraries the package depends on** → tests. The library set is derived from the package, never listed: `file:` dependencies (transitively; built when `main`/`types` point at `dist/`), siblings a `tsconfig` `paths` entry points into the `dist/` of, and siblings whose source the package imports by relative path without declaring them; PCF controls also run `npm run refreshTypes` for the gitignored `generated/ManifestTypes`. A library that will not install/build is reported as `deps-build-failed`, not `fail` — the package's tests never ran. Jest `moduleNameMapper` is deliberately not used to derive the set (installing a source-mapped library gives it a second copy of react). Deliberately **not** wired into `ci-tier1-blocking.yml`/`ci-tier2-advisory.yml` — see the file's own header for the promotion criteria. `office-addins-tests.yml`'s `gated-jest` job is the one promoted subset that *does* gate PRs today.
 
 **Manual dispatch**: `gh workflow run client-tests.yml -f package_filter=<substring>` to scope to matching package paths.
 
