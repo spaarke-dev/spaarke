@@ -11,6 +11,7 @@
     <RolePrivilege name="prvAppendAccount" level="Basic" />
     <RolePrivilege name="prvAppendActionCard" level="Basic" />
     <RolePrivilege name="prvAppendActivity" level="Basic" />
+    <RolePrivilege name="prvAppendAppUserSetting" level="Global" />
     <RolePrivilege name="prvAppendArticle" level="Global" />
     <RolePrivilege name="prvAppendCalendar" level="Local" />
     <RolePrivilege name="prvAppendCategory" level="Global" />
@@ -100,6 +101,7 @@
     <RolePrivilege name="prvAppendToQueue" level="Basic" />
     <RolePrivilege name="prvAppendToReport" level="Basic" />
     <RolePrivilege name="prvAppendToRoutingRule" level="Global" />
+    <RolePrivilege name="prvAppendToSettingDefinition" level="Global" />
     <RolePrivilege name="prvAppendToSharePointData" level="Global" />
     <RolePrivilege name="prvAppendToSharePointDocument" level="Basic" />
     <RolePrivilege name="prvAppendToSharePointDocumentLocation" level="Basic" />
@@ -199,6 +201,7 @@
     <RolePrivilege name="prvCreateActionCard" level="Basic" />
     <RolePrivilege name="prvCreateActionCardUserSettings" level="Basic" />
     <RolePrivilege name="prvCreateActivity" level="Basic" />
+    <RolePrivilege name="prvCreateAppUserSetting" level="Global" />
     <RolePrivilege name="prvCreateCallbackRegistration" level="Basic" />
     <RolePrivilege name="prvCreateConnection" level="Basic" />
     <RolePrivilege name="prvCreateContact" level="Basic" />
@@ -316,6 +319,8 @@
     <RolePrivilege name="prvReadAppConfigMaster" level="Global" />
     <RolePrivilege name="prvReadApplicationFile" level="Global" />
     <RolePrivilege name="prvReadAppModule" level="Global" />
+    <RolePrivilege name="prvReadappnotification" level="Basic" />
+    <RolePrivilege name="prvReadAppUserSetting" level="Global" />
     <RolePrivilege name="prvReadArticle" level="Global" />
     <RolePrivilege name="prvReadArticleTemplate" level="Global" />
     <RolePrivilege name="prvReadAsyncOperation" level="Basic" />
@@ -454,6 +459,7 @@
     <RolePrivilege name="prvReadsprk_BillingEvent" level="Deep" />
     <RolePrivilege name="prvReadsprk_Budget" level="Deep" />
     <RolePrivilege name="prvReadsprk_BudgetBucket" level="Deep" />
+    <RolePrivilege name="prvReadsprk_BudgetRevision" level="Deep" />
     <RolePrivilege name="prvReadsprk_chartdefinition" level="Global" />
     <RolePrivilege name="prvReadsprk_ChartType" level="Global" />
     <RolePrivilege name="prvReadsprk_Communication" level="Basic" />
@@ -507,6 +513,7 @@
     <RolePrivilege name="prvReadsprk_ReportCard" level="Deep" />
     <RolePrivilege name="prvReadsprk_ReportingEntity" level="Global" />
     <RolePrivilege name="prvReadsprk_ReportingView" level="Global" />
+    <RolePrivilege name="prvReadsprk_ServiceRequest" level="Basic" />
     <RolePrivilege name="prvReadsprk_Signal" level="Basic" />
     <RolePrivilege name="prvReadsprk_SPEAuditLog" level="Deep" />
     <RolePrivilege name="prvReadsprk_SPEContainerTypeConfig" level="Deep" />
@@ -600,6 +607,7 @@
     <RolePrivilege name="prvWriteActionCard" level="Basic" />
     <RolePrivilege name="prvWriteActionCardUserSettings" level="Basic" />
     <RolePrivilege name="prvWriteActivity" level="Basic" />
+    <RolePrivilege name="prvWriteAppUserSetting" level="Global" />
     <RolePrivilege name="prvWriteArticle" level="Global" />
     <RolePrivilege name="prvWriteAsyncOperation" level="Basic" />
     <RolePrivilege name="prvWriteCallbackRegistration" level="Basic" />
@@ -654,11 +662,5 @@
     <RolePrivilege name="prvWriteUserSettings" level="Local" />
     <RolePrivilege name="prvWriteWorkflow" level="Basic" />
     <RolePrivilege name="prvWriteWorkflowSession" level="Basic" />
-    <RolePrivilege name="prvReadappnotification" level="Basic" />
-    <RolePrivilege name="prvCreateAppUserSetting" level="Global" />
-    <RolePrivilege name="prvReadAppUserSetting" level="Global" />
-    <RolePrivilege name="prvWriteAppUserSetting" level="Global" />
-    <RolePrivilege name="prvAppendAppUserSetting" level="Global" />
-    <RolePrivilege name="prvAppendToSettingDefinition" level="Global" />
   </RolePrivileges>
 </Role>

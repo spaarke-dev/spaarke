@@ -168,6 +168,7 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 - `az ad app permission admin-consent` fails ("Consent validation failed"). Consent Graph app roles with `POST /servicePrincipals/{graph}/appRoleAssignedTo` (2026-10-02).
 - Granting an MI on an SPE container-type registration: Graph v1.0 `PUT /storage/fileStorage/containerTypeRegistrations/{ct}/applicationPermissionGrants/{appId}` via `Connect-MgGraph -Scopes FileStorageContainerTypeReg.Manage.All`. `Set-SPOApplicationPermission` fails for an MI (2026-10-06).
 - `Deploy-ControlPlane.ps1` via `pwsh -File` stops at the ConfirmImpact=High prompt. Run it in-process with `-Confirm:$false`; `-SkipBuild` reuses a build (2026-10-04).
+- From Git Bash, `pwsh` resolves `pac` to the bash shim `~/bin/pac`, which PowerShell cannot run. `Export-SpaarkeMasterSource.ps1` then fails with "Failed (exit )". Prepend `/c/Users/RalphSchroeder/AppData/Local/Microsoft/PowerAppsCLI` to `PATH` first (2026-10-13).
 
 - The Dataverse MCP `read_query` returns at most 20 rows unless you pass `top`. Two wrong conclusions on 2026-10-07 ("the Console is in no Spaarke solution", "no Spaarke Basic User role") came from capped results. Pass `top`, or use the solution-authoring scripts (2026-10-07).
 - The session's primary working directory can switch to the main repo (`C:\code_files\spaarke`) mid-session. Use absolute worktree paths in every command (2026-10-07).

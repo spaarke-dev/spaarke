@@ -485,6 +485,46 @@
             <Description description="Azure subscription hosting this customer environment. FR-26 v2 addition (design.md §6.1). ADR-044: canonicalize to bare-lowercase GUID at every boundary (callers own normalization)." languagecode="1033" />
           </Descriptions>
         </attribute>
+        <attribute PhysicalName="sprk_bffappid">
+          <Type>nvarchar</Type>
+          <Name>sprk_bffappid</Name>
+          <LogicalName>sprk_bffappid</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <Format>text</Format>
+          <MaxLength>40</MaxLength>
+          <Length>80</Length>
+          <displaynames>
+            <displayname description="BFF App Registration ID" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="Application (client) id of this customer's BFF app registration (D-13, one per customer). H13 promotes it from H3's BffAppRegId at Ready. Read by the Copilot agent render (scope api://{id}/user_impersonation) and by decommission. Added 2026-10-09 (T257). ADR-044: bare lowercase GUID." languagecode="1033" />
+          </Descriptions>
+        </attribute>
         <attribute PhysicalName="sprk_bffversion">
           <Type>nvarchar</Type>
           <Name>sprk_bffversion</Name>
@@ -643,6 +683,46 @@
           </displaynames>
           <Descriptions>
             <Description description="SharePoint Embedded container-type ID (distinct from sprk_specontainerid which stores the container instance ID). FR-26 v2 addition (design.md §6.1)." languagecode="1033" />
+          </Descriptions>
+        </attribute>
+        <attribute PhysicalName="sprk_copilotauthconfigid">
+          <Type>nvarchar</Type>
+          <Name>sprk_copilotauthconfigid</Name>
+          <LogicalName>sprk_copilotauthconfigid</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ImeMode>auto</ImeMode>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>1</IsAuditEnabled>
+          <IsSecured>0</IsSecured>
+          <IntroducedVersion>1.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <Format>text</Format>
+          <MaxLength>500</MaxLength>
+          <Length>1000</Length>
+          <displaynames>
+            <displayname description="Copilot Agent Auth Config ID" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="OAuth auth config (registration) id of this customer's Microsoft Copilot agent - the plugin auth.reference_id. Written by the operator at the /provision-environment post-Ready Copilot gate; read by scripts/copilot-agent/Render-CopilotAgentPackage.ps1 for every re-render and by decommission (delete in the Teams developer portal). Not a secret. Added 2026-10-09 (T257)." languagecode="1033" />
           </Descriptions>
         </attribute>
         <attribute PhysicalName="sprk_credentialmode">

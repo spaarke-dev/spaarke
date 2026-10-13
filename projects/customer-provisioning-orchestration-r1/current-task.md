@@ -15,7 +15,7 @@
 
 ## 🔔 Waiting on the owner
 
-1. **Revoke `Mail.Read`** (app role `810c84a8-4a9e-49e6-bf7d-12d183f40d01`) on the L2 UAMI (principal 38f7693f-…): it is a tenant-wide mailbox read, and nothing uses it since H14b was removed. Recommend yes.
+1. **L2 UAMI mail grants** (principal 38f7693f-…). The owner approved revoking `Mail.Read` 2026-10-13, but the UAMI never held it. It holds `Mail.ReadWrite`, `Mail.Send` and `MailboxSettings.Read` (tenant-wide, granted 2026-08-21), and no L2 code calls Graph mail. Recommend revoking all three; this needs the owner's OK, because it is a different grant from the one approved.
 2. **ISS-026** publisher verification (ADR-028 A9): an owner/business action before the first production customer.
 3. **UAC task 185** (invite code) is with the owner. Our review (2026-10-13): R1 secret-bearing send option, as a T240d production prerequisite; R2 `spaarkeextid` stays email + password. See t240d design §7 step 4 and §10.
 
