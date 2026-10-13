@@ -39,9 +39,13 @@ public sealed class CiamGraphClientFactory
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<CiamGraphClientFactory> _logger;
 
-    private readonly string _authority;        // {Instance}/{TenantId} — https://{sub}.ciamlogin.com/{tid}
-    private readonly string _clientId;         // CIAM provisioner app registration (task 002)
-    private readonly string _certificateName;  // Key Vault certificate name (task 002)
+    // Task 185 slice F (ADR-010 path C): the Ciam:* values are read at construction but VALIDATED at first use
+    // (EnsureConfigured), so a host without CIAM can construct this factory — and the services that depend on it — and only
+    // a CIAM call there throws InvalidOperationException. Configured hosts behave as before.
+    private readonly string? _instance;        // https://{sub}.ciamlogin.com
+    private readonly string? _tenantId;
+    private readonly string? _clientId;         // CIAM provisioner app registration (task 002)
+    private readonly string? _certificateName;  // Key Vault certificate name (task 002)
 
     // Lazily-built, cached per-authority confidential client. MSAL caches app-only tokens internally,
     // so a single instance is reused across provisioning calls. The lock guards the one-time build
@@ -64,19 +68,34 @@ public sealed class CiamGraphClientFactory
         // (task 020). The provisioner app + certificate are a distinct credential nested under
         // Ciam:GraphProvisioner (task 002 — different app registration than the token-validation audience).
         var ciam = configuration.GetSection("Ciam");
-        var instance = ciam["Instance"]?.TrimEnd('/')
-            ?? throw new InvalidOperationException("Ciam:Instance is not configured.");
-        var tenantId = ciam["TenantId"]
-            ?? throw new InvalidOperationException("Ciam:TenantId is not configured.");
+        _instance = ciam["Instance"]?.TrimEnd('/');
+        _tenantId = ciam["TenantId"];
 
         var provisioner = ciam.GetSection("GraphProvisioner");
-        _clientId = provisioner["ClientId"]
-            ?? throw new InvalidOperationException("Ciam:GraphProvisioner:ClientId is not configured.");
-        _certificateName = provisioner["CertificateName"]
-            ?? throw new InvalidOperationException("Ciam:GraphProvisioner:CertificateName is not configured.");
-
-        _authority = $"{instance}/{tenantId}";
+        _clientId = provisioner["ClientId"];
+        _certificateName = provisioner["CertificateName"];
     }
+
+    /// <summary>
+    /// Task 185 slice F: whether every <c>Ciam:*</c> value this factory needs is configured. Pure; never throws.
+    /// </summary>
+    internal bool IsConfigured =>
+        _instance is not null && _tenantId is not null && _clientId is not null && _certificateName is not null;
+
+    /// <summary>
+    /// Task 185 slice F: throws <see cref="InvalidOperationException"/> naming the first <c>Ciam:*</c> value that is not
+    /// configured — the validation the constructor used to run, moved to first use with the same messages.
+    /// </summary>
+    internal void EnsureConfigured()
+    {
+        _ = _instance ?? throw new InvalidOperationException("Ciam:Instance is not configured.");
+        _ = _tenantId ?? throw new InvalidOperationException("Ciam:TenantId is not configured.");
+        _ = _clientId ?? throw new InvalidOperationException("Ciam:GraphProvisioner:ClientId is not configured.");
+        _ = _certificateName ?? throw new InvalidOperationException("Ciam:GraphProvisioner:CertificateName is not configured.");
+    }
+
+    /// <summary>{Instance}/{TenantId} — https://{sub}.ciamlogin.com/{tid}. Only after <see cref="EnsureConfigured"/>.</summary>
+    private string Authority => $"{_instance}/{_tenantId}";
 
     /// <summary>
     /// Acquires an app-only Graph access token for the CIAM tenant via client-credentials against the
@@ -111,6 +130,8 @@ public sealed class CiamGraphClientFactory
 
     private async Task<IConfidentialClientApplication> GetOrCreateAppAsync(CancellationToken ct)
     {
+        EnsureConfigured();
+
         if (_app is not null)
         {
             return _app;
@@ -127,14 +148,14 @@ public sealed class CiamGraphClientFactory
             var certificate = await LoadCertificateAsync(ct).ConfigureAwait(false);
 
             _app = ConfidentialClientApplicationBuilder
-                .Create(_clientId)
+                .Create(_clientId!)
                 .WithCertificate(certificate)
-                .WithAuthority(_authority)
+                .WithAuthority(Authority)
                 .Build();
 
             _logger.LogInformation(
                 "Built CIAM app-only MSAL confidential client. Authority: {Authority}; certificate: {CertName} (thumbprint {Thumbprint}).",
-                _authority, _certificateName, certificate.Thumbprint);
+                Authority, _certificateName, certificate.Thumbprint);
 
             return _app;
         }
@@ -158,5 +179,5 @@ public sealed class CiamGraphClientFactory
     /// diagnostic.</para>
     /// </summary>
     private Task<X509Certificate2> LoadCertificateAsync(CancellationToken ct)
-        => Auth.KeyVaultCertificateLoader.LoadAsync(_secretClient, _certificateName, ct);
+        => Auth.KeyVaultCertificateLoader.LoadAsync(_secretClient, _certificateName!, ct);
 }

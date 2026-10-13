@@ -262,29 +262,28 @@ public class GrantSendsInviteTests
     }
 
     /// <summary>
-    /// A host whose CIAM provisioner cannot be built (no <c>Ciam:*</c> configuration — its constructor throws): the invite
-    /// fails soft and the grant is still written. Resolving it lazily is what keeps /grant from answering 500 there.
+    /// Task 185 slice F (ADR-010 path C): a host with no <c>Ciam:*</c> configuration. The REAL provisioner and CIAM Graph client
+    /// factory are built over that empty configuration — they construct (validation moved to first use) — and the invite
+    /// service is given the provisioner directly. The grant is still written; the invite is answered Failed with
+    /// <c>ciam_not_configured</c>, and nothing is marked, coded or emailed.
     /// </summary>
     [Fact]
-    public async Task Grant_OnAHostWithNoCiamConfiguration_StillCommitsTheGrant_AndSaysFailed()
+    public async Task Grant_OnAHostWithNoCiamConfiguration_StillCommitsTheGrant_AndSaysFailed_CiamNotConfigured()
     {
         var contact = UnboundContact();
-        var invites = _h.InvitesOver(_h.Identities, new NoCiamServices());
+        var invites = _h.InvitesOver(_h.Identities, NoCiamProvisioner());
 
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contact, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
             _h.Materializer, _h.Notifier, invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
-        OkBody(result).Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.InviteFailedReasonCode));
-        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+        OkBody(result).Invite.Should().Be(
+            new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.CiamNotConfiguredReasonCode));
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("I-1: the grant stands");
         _h.Emails.InviteUrls.Should().BeEmpty();
-    }
-
-    private sealed class NoCiamServices : IServiceProvider
-    {
-        public object? GetService(Type serviceType)
-            => throw new InvalidOperationException("Ciam:Domain is not configured (CIAM tenant initial domain).");
+        _h.Identities.Contacts[contact].InvitedOn.Should().BeNull("nothing is marked before the CIAM check");
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().BeNull("no code is made");
     }
 
     [Fact]

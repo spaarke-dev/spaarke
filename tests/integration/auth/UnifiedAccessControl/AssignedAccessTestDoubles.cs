@@ -928,13 +928,6 @@ internal static class AssignedAccessTestDoubles
             .Build();
     }
 
-    /// <summary>Task 185 slice E: the one service the invite service resolves at invite time — the CIAM double.</summary>
-    internal sealed class CiamOnlyServices(Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService ciam) : IServiceProvider
-    {
-        public object? GetService(Type serviceType)
-            => serviceType == typeof(Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService) ? ciam : null;
-    }
-
     /// <summary>Everything one materializer needs, wired, with the production materializer between the doubles.</summary>
     internal sealed class Harness
     {
@@ -1060,15 +1053,16 @@ internal static class AssignedAccessTestDoubles
         public Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService Invites => InvitesOver(Identities);
 
         /// <summary>Task 185 slice E: <see cref="Invites"/> over ANOTHER identity store (a fixture with its own contacts).</summary>
-        /// <param name="services">What the service resolves the CIAM provisioner from; this harness's double when null.</param>
+        /// <param name="ciam">The CIAM provisioner the service is given; this harness's double when null (task 185 slice F:
+        /// injected directly).</param>
         public Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService InvitesOver(
-            InMemoryContactIdentityStore identities, IServiceProvider? services = null)
+            InMemoryContactIdentityStore identities, Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService? ciam = null)
         {
             var settings = new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })
                 .Build();
             return new Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService(
-                Grants, services ?? new CiamOnlyServices(Ciam), Emails, IdentityBindingTestKit.Binder(identities), settings,
+                Grants, ciam ?? Ciam, Emails, IdentityBindingTestKit.Binder(identities), settings,
                 new Sprk.Bff.Api.Configuration.CustomerIdentity(
                     Options.Create(new Sprk.Bff.Api.Configuration.CustomerOptions { Id = "acme" }), settings,
                     NullLogger<Sprk.Bff.Api.Configuration.CustomerIdentity>.Instance),
@@ -1170,6 +1164,21 @@ internal static class AssignedAccessTestDoubles
     /// is found, so nothing is invited (it answers Failed, contact_not_active), and it never throws.
     /// </summary>
     internal static Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService InertInvites() => new Harness().Invites;
+
+    /// <summary>Task 185 slice F: the provisioner and its Graph client factory, REAL, over a configuration with no Ciam:*.</summary>
+    internal static Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService NoCiamProvisioner()
+    {
+        var empty = new ConfigurationBuilder().Build();
+        return new Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService(
+            new Sprk.Bff.Api.Infrastructure.Graph.CiamGraphClientFactory(
+                new Azure.Security.KeyVault.Secrets.SecretClient(new Uri("https://vault.test.invalid/"), NoCredential.Instance),
+                Moq.Mock.Of<IHttpClientFactory>(),
+                empty,
+                NullLogger<Sprk.Bff.Api.Infrastructure.Graph.CiamGraphClientFactory>.Instance),
+            new Sprk.Bff.Api.Services.Registration.PasswordGenerator(),
+            empty,
+            NullLogger<Sprk.Bff.Api.Services.Registration.CiamUserProvisioningService>.Instance);
+    }
 
     /// <summary>
     /// Task 158 r1c-v2 (round 39 item 2): an <see cref="Spaarke.Dataverse.IGenericEntityService"/> that finds no row — the No

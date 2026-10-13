@@ -87,6 +87,11 @@ public static class InviteExternalUserEndpoint
         ILogger<Program> logger,
         CancellationToken ct)
     {
+        // Task 185 slice F: the CIAM provisioner now constructs on a host without Ciam:* and validates at first use. This
+        // route needs CIAM for every request, so it keeps its pre-slice-F answer there: the global handler's 500
+        // (server_error) before anything is read or written, as when the provisioner's constructor threw.
+        ciamProvisioner.EnsureConfigured();
+
         // ── Validation ───────────────────────────────────────────────────────
         if (string.IsNullOrWhiteSpace(request.Email))
             return ProblemDetailsHelper.ValidationError("Email is required.");

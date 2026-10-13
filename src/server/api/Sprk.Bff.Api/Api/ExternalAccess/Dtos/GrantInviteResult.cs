@@ -54,4 +54,10 @@ public static class GrantInviteStatus
 
     /// <summary>The account was made (or found), but the invite email carrying the code did not send.</summary>
     public const string EmailNotSentReasonCode = "sdap.access.invite.email_not_sent";
+
+    /// <summary>
+    /// Task 185 slice F: this host has no <c>Ciam:*</c> configuration, so no CIAM account can be created and no invite was
+    /// sent (nothing was written). The grant stands.
+    /// </summary>
+    public const string CiamNotConfiguredReasonCode = "sdap.access.invite.ciam_not_configured";
 }

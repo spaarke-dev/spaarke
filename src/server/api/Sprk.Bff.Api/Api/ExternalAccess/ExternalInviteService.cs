@@ -38,7 +38,7 @@ internal sealed class ExternalInviteService
     private const string ContactEntitySet = "contacts";
 
     private readonly DataverseWebApiClient _dataverse;
-    private readonly IServiceProvider _services;
+    private readonly CiamUserProvisioningService _ciam;
     private readonly RegistrationEmailService _emails;
     private readonly ContactIdentityBinder _binder;
     private readonly IConfiguration _configuration;
@@ -46,16 +46,16 @@ internal sealed class ExternalInviteService
     private readonly TimeProvider _time;
     private readonly ILogger<ExternalInviteService> _logger;
 
-    /// <param name="services">
-    /// Resolves the CIAM provisioner only when an invite is actually sent. Its constructor throws without the <c>Ciam:*</c>
-    /// configuration, and Minimal API resolves a handler's arguments before its filters run: injected directly, it would turn
-    /// every <c>/grant</c> and <c>/contact-grants</c> request on a host without that configuration into a 500, although the
-    /// grant itself needs no CIAM and a contact grant never invites. Resolved here, inside the fail-soft invite, a missing
-    /// configuration is an invite <see cref="GrantInviteStatus.Failed"/> and the grant stands (I-1).
+    /// <param name="ciam">
+    /// The CIAM provisioner, injected directly (task 185 slice F, ADR-010 path C: lazy validation instead of a service
+    /// locator). It constructs on a host without the <c>Ciam:*</c> configuration and validates at first use, so <c>/grant</c>
+    /// and <c>/contact-grants</c> resolve this service there; an invite on such a host is answered
+    /// <see cref="GrantInviteStatus.Failed"/> with <see cref="GrantInviteStatus.CiamNotConfiguredReasonCode"/> and the grant
+    /// stands (I-1).
     /// </param>
     public ExternalInviteService(
         DataverseWebApiClient dataverse,
-        IServiceProvider services,
+        CiamUserProvisioningService ciam,
         RegistrationEmailService emails,
         ContactIdentityBinder binder,
         IConfiguration configuration,
@@ -64,7 +64,7 @@ internal sealed class ExternalInviteService
         ILogger<ExternalInviteService> logger)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
-        _services = services ?? throw new ArgumentNullException(nameof(services));
+        _ciam = ciam ?? throw new ArgumentNullException(nameof(ciam));
         _emails = emails ?? throw new ArgumentNullException(nameof(emails));
         _binder = binder ?? throw new ArgumentNullException(nameof(binder));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
@@ -170,13 +170,17 @@ internal sealed class ExternalInviteService
             if (string.IsNullOrWhiteSpace(portalUrl))
                 return Logged(contactId, Failed(GrantInviteStatus.InviteFailedReasonCode));
 
+            // Task 185 slice F: a host without Ciam:* constructs the provisioner but cannot create an account. Answered here,
+            // before anything is written (no marker, no code), as the invite core would refuse it.
+            if (!_ciam.IsConfigured)
+                return Logged(contactId, Failed(GrantInviteStatus.CiamNotConfiguredReasonCode));
+
             var (firstName, lastName) = await ReadNamesAsync(contactId).ConfigureAwait(false);
             var request = new InviteExternalUserRequest(
                 email, Guid.Empty, AccessLevel: 0, firstName, lastName, ExpiryDate: null, OrganizationId: null);
 
-            var ciam = _services.GetRequiredService<CiamUserProvisioningService>();
             var outcome = await ProvisionAsync(
-                request, _dataverse, ciam, _emails, _binder, portalUrl, InviteLinkCustomerKey(_customer), _logger,
+                request, _dataverse, _ciam, _emails, _binder, portalUrl, InviteLinkCustomerKey(_customer), _logger,
                 resolution, ct).ConfigureAwait(false);
 
             if (outcome.Refusal is { } refusal)
@@ -289,6 +293,10 @@ internal sealed class ExternalInviteService
             throw new InvalidOperationException(
                 "ExternalAccess:PortalUrl must be an absolute https URL with no credentials to build the invite link.");
         }
+
+        // Task 185 slice F: the CIAM configuration is validated at first use. On a host without Ciam:* this throws
+        // InvalidOperationException HERE, before any contact is resolved, created or marked.
+        ciamProvisioner.EnsureConfigured();
 
         resolution ??= await binder.ResolveInviteContactAsync(request.Email, ct);
 
