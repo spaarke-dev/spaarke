@@ -380,6 +380,24 @@ public sealed record RecordOwnershipContext
         TargetRecordId = parentId,
         KeepCreatorUnlessTargetIsTeamOwned = true,
     };
+
+    /// <summary>
+    /// The owner is the given user's business-unit team; used when a row is owned on behalf of a person who is not the
+    /// caller (D-134: a personal To Do's Assigned To). No parent is named, so the resolver answers through its unfiled
+    /// path (<see cref="UnfiledOwnership.ActingUserTeam"/>) with <paramref name="systemUserId"/> as the user.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="systemUserId"/> is <see cref="Guid.Empty"/>.</exception>
+    public static RecordOwnershipContext ForUserTeam(Guid systemUserId)
+    {
+        if (systemUserId == Guid.Empty)
+            throw new ArgumentException("A user-team owner needs a systemuserid.", nameof(systemUserId));
+
+        return new RecordOwnershipContext
+        {
+            CallerSystemUserId = systemUserId,
+            WhenUnfiled = UnfiledOwnership.ActingUserTeam,
+        };
+    }
 }
 
 /// <summary>

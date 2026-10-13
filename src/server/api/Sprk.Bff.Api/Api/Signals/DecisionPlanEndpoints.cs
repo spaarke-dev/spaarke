@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Signals;
@@ -24,6 +25,7 @@ public static class DecisionPlanEndpoints
     internal const string CallerUnresolvedReasonCode = "sdap.access.deny.caller_unresolved";
     internal const string PlanRefusedReasonCode = "ontology.decisionplan.refused";
     internal const string SuppressionUnavailableReasonCode = "ontology.suppression.unavailable";
+    internal const string AccessUnavailableReasonCode = "ontology.signal.access_unavailable";
 
     public static void MapDecisionPlanEndpoints(this WebApplication app)
     {
@@ -71,6 +73,11 @@ public static class DecisionPlanEndpoints
             return CallerUnresolved(httpContext);
         }
 
+        if (decision.Outcome == SignalAccessOutcome.Unavailable)
+        {
+            return AccessUnavailable(httpContext);
+        }
+
         if (decision.Outcome != SignalAccessOutcome.Allowed)
         {
             return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
@@ -105,6 +112,18 @@ public static class DecisionPlanEndpoints
             : Results.Ok(SuppressionResponse.From(signalId, status));
     }
 
+    /// <summary>A no-core Signal's subject could not be read because of a fault: 503, never the uniform 404 (that is for "not yours").</summary>
+    private static IResult AccessUnavailable(HttpContext httpContext) =>
+        Results.Problem(
+            title: "Service Unavailable",
+            detail: "This item could not be checked right now. Try again.",
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = AccessUnavailableReasonCode,
+                ["correlationId"] = httpContext.TraceIdentifier,
+            });
+
     private static IResult CallerUnresolved(HttpContext httpContext) =>
         Results.Problem(
             title: "Forbidden",
@@ -122,12 +141,18 @@ public static class DecisionPlanEndpoints
         SignalCoreRecordAccess signalAccess,
         DecisionPlanService planService,
         RuleBodyDescriber describer,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromServices] DecisionPlanReadStamp? planReadStamp = null)
     {
         var decision = await signalAccess.AuthorizeAsync(signalId, ct);
         if (decision.Outcome == SignalAccessOutcome.CallerUnresolved)
         {
             return CallerUnresolved(httpContext);
+        }
+
+        if (decision.Outcome == SignalAccessOutcome.Unavailable)
+        {
+            return AccessUnavailable(httpContext);
         }
 
         if (decision.Outcome != SignalAccessOutcome.Allowed || decision.Lane is not { } lane || decision.PolicyVersionId is not { } versionId)
@@ -153,6 +178,14 @@ public static class DecisionPlanEndpoints
         // "How this was determined" (task 026). A body that cannot be described is shown without the description, never
         // as a guess; it does not stop the decision from being taken.
         var described = await describer.DescribeAsync(resolution.RuleBodyJson, ct);
+
+        // Task 043 (K4): the server's own record of when this caller read this plan, so the commit route never trusts a client
+        // time to decide whether a system closure happened during the review. Best effort; it never fails the read.
+        if (planReadStamp is not null)
+        {
+            await planReadStamp.StampAsync(httpContext, signalId, ct);
+        }
+
         return Results.Ok(DecisionPlanResponse.From(signalId, lane, versionId, plan, described.Description));
     }
 }

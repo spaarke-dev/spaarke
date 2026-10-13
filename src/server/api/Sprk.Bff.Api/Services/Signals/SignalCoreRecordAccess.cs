@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <summary>What <see cref="SignalCoreRecordAccess.AuthorizeAsync"/> decided.</summary>
 public enum SignalAccessOutcome
 {
-    /// <summary>The caller may read the Signal and its core record (or owns a no-core Do item).</summary>
+    /// <summary>The caller may read the Signal and its core record (or, for a no-core Do item, its subject row).</summary>
     Allowed,
 
     /// <summary>
@@ -20,16 +20,28 @@ public enum SignalAccessOutcome
 
     /// <summary>The caller could not be resolved to a Dataverse identity (no token, OBO refused): the single 403 (D-29).</summary>
     CallerUnresolved,
+
+    /// <summary>
+    /// A no-core Signal's subject could not be read because of a FAULT (throttling, a 5xx, a failed entity-set lookup), which says
+    /// nothing about whether the caller may read it: the route answers 503, never the uniform 404 that means "not yours" (uac-r2 F4-b).
+    /// Only the no-core subject read produces it; every other fault stays the uniform denial.
+    /// </summary>
+    Unavailable,
 }
 
 /// <summary>The decision, plus what the caller was allowed to learn about the Signal.</summary>
 /// <param name="Outcome">The decision.</param>
 /// <param name="Lane">The Signal's lane; set only when <see cref="Outcome"/> is <see cref="SignalAccessOutcome.Allowed"/>.</param>
 /// <param name="PolicyVersionId">The policy version that raised the Signal; set only when allowed.</param>
-public sealed record SignalAccessDecision(SignalAccessOutcome Outcome, DecisionLane? Lane, Guid? PolicyVersionId)
+/// <param name="CoreTypeId">The core-record pair the caller's own read returned (task 043 K2), so a route that re-reads the
+/// Signal app-only can refuse when the pair changed between the two reads. Both null for a no-core Signal.</param>
+/// <param name="CoreId">The core record id of that pair; null for a no-core Signal.</param>
+public sealed record SignalAccessDecision(
+    SignalAccessOutcome Outcome, DecisionLane? Lane, Guid? PolicyVersionId, Guid? CoreTypeId = null, Guid? CoreId = null)
 {
     public static readonly SignalAccessDecision NotFound = new(SignalAccessOutcome.NotFound, null, null);
     public static readonly SignalAccessDecision CallerUnresolved = new(SignalAccessOutcome.CallerUnresolved, null, null);
+    public static readonly SignalAccessDecision Unavailable = new(SignalAccessOutcome.Unavailable, null, null);
 }
 
 /// <summary>
@@ -42,10 +54,14 @@ public sealed record SignalAccessDecision(SignalAccessOutcome Outcome, DecisionL
 /// Signal's own business unit / secure-child sharing. (2) The caller then reads the Signal's CORE record, whatever its
 /// type: the type comes from the <c>sprk_recordtype_ref</c> catalog row the Signal's <c>sprk_corerecordtype</c> names,
 /// the id from <c>sprk_corerecordid</c>. No code here names a core type (D-36 extensibility). (3) A Signal with NO core
-/// record is owner-only and only in the Do lane (D-35): the caller must be the Signal's owner.</para>
+/// record is visible only in the Do lane (D-35) and only to a caller who can read its SUBJECT row (<c>sprk_regardingrecordtype</c> /
+/// <c>sprk_regardingrecordid</c>, an ownership-parent table) as themselves, in addition to the Signal row (D-129: records are
+/// owned by teams, so the old "caller is the Signal's owner" test matched nobody for a team-owned item). A subject in a secure
+/// record family is unreadable to a non-member, so the Signal is too (D-123).</para>
 /// <para><b>Fail closed, one denial.</b> A row the caller cannot read, a malformed core-record pair, a catalog row that
-/// does not resolve, a Dataverse fault of any kind: all <see cref="SignalAccessOutcome.NotFound"/>. Only a caller who
-/// cannot be resolved at all is <see cref="SignalAccessOutcome.CallerUnresolved"/>.</para>
+/// does not resolve, a Dataverse fault of any kind: all <see cref="SignalAccessOutcome.NotFound"/>, except a fault reading a
+/// no-core Signal's SUBJECT, which is <see cref="SignalAccessOutcome.Unavailable"/> (503, uac-r2 F4-b: a fault is not a
+/// denial). Only a caller who cannot be resolved at all is <see cref="SignalAccessOutcome.CallerUnresolved"/>.</para>
 /// <para>The catalog row and entity-set name are configuration and metadata, not matter data, so they are read with the
 /// BFF's own <see cref="IGenericEntityService"/>; nothing read that way is returned to the caller.</para>
 /// <para><b>Core set (K2).</b> The core record's table must be one of <see cref="CoreAncestorResolver.CoreRecordEntities"/>,
@@ -57,7 +73,7 @@ public sealed record SignalAccessDecision(SignalAccessOutcome Outcome, DecisionL
 /// (uac-r2 task 070) already answers "may this caller read this record" for any entity set, as the caller, failing closed
 /// without a token. Extension: that method needs the caller's user id and bearer token plumbed in and returns a rights
 /// snapshot cached by <c>CachedAccessDataSource</c> (ADR-003 A1, 60 s). The decision here needs more than a rights bit: it needs
-/// the Signal row's own columns (lane, policy version, core-record pair, owner) read under the caller's Dataverse
+/// the Signal row's own columns (lane, policy version, core-record pair, subject pair) read under the caller's Dataverse
 /// security, and a plain read answers "may they read it" and returns those columns in one call, uncached, so a revoked
 /// share takes effect on the next request. Using it would add a second call per record and a stale window for no gain.
 /// Cost of doing nothing: no check at all; the route would serve a plan for a Signal on a matter the caller cannot open.
@@ -96,7 +112,7 @@ public sealed class SignalCoreRecordAccess
         try
         {
             var signal = await _userClient.GetAsync(
-                $"sprk_signals({signalId})?$select=sprk_lane,_sprk_policyversion_value,_sprk_corerecordtype_value,sprk_corerecordid,_ownerid_value",
+                $"sprk_signals({signalId})?$select=sprk_lane,_sprk_policyversion_value,_sprk_corerecordtype_value,sprk_corerecordid,sprk_regardingrecordtype,sprk_regardingrecordid",
                 ct).ConfigureAwait(false);
 
             if (!signal.IsSuccess)
@@ -153,7 +169,7 @@ public sealed class SignalCoreRecordAccess
                 return await DeniedAsync(core, "core record", ct).ConfigureAwait(false);
             }
 
-            return new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId);
+            return new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId, coreTypeId, coreId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -166,27 +182,58 @@ public sealed class SignalCoreRecordAccess
     private async Task<SignalAccessDecision> AuthorizeNoCoreRecordAsync(
         JsonElement signalRow, DecisionLane lane, Guid policyVersionId, CancellationToken ct)
     {
-        // D-35: no core record means owner-only, and only in the Do lane.
-        if (lane != DecisionLane.Do || !TryReadGuid(signalRow, "_ownerid_value", out var ownerId))
+        // D-35 as amended by D-129 (records are owned by teams, never by a person): a no-core item is visible to whoever can read
+        // its SUBJECT row as themselves, and only in the Do lane. The Signal row itself was read as the caller before this point
+        // (both reads must succeed), so the subject's own team and sharing decide, not an owner-equality test; a subject in a
+        // secure record family is unreadable to a non-member and so is the uniform denial (D-123).
+        if (lane != DecisionLane.Do)
         {
             return SignalAccessDecision.NotFound;
         }
 
-        // Under the caller's token WhoAmI cannot name anyone but the caller; no token is the single 403.
-        var who = await _userClient.GetAsync("WhoAmI", ct).ConfigureAwait(false);
-        if (!who.IsSuccess)
+        var subjectType = ReadString(signalRow, "sprk_regardingrecordtype")?.Trim().ToLowerInvariant();
+        if (!Guid.TryParse(ReadString(signalRow, "sprk_regardingrecordid"), out var subjectId) || subjectId == Guid.Empty
+            || !RecordOwnershipResolver.IsOwnershipParent(subjectType))
         {
-            return await DeniedAsync(who, "caller identity", ct).ConfigureAwait(false);
+            // No subject pair, or a table that is not one of uac-r2's ownership parents: a forged or stale pointer (the K2 rule,
+            // applied to the subject).
+            _logger.LogWarning("Signal access: the no-core Signal's subject pair is missing or not an ownership-parent table; denying.");
+            return SignalAccessDecision.NotFound;
         }
 
-        return who.Body is { ValueKind: JsonValueKind.Object } body
-            && TryReadGuid(body, "UserId", out var callerId)
-            && callerId == ownerId
-                ? new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId)
-                : SignalAccessDecision.NotFound;
+        string entitySet;
+        try
+        {
+            entitySet = await _entities.GetEntitySetNameAsync(subjectType!, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError("Signal access: the subject's entity set could not be looked up ({ExceptionType}); unavailable.", ex.GetType().Name);
+            return SignalAccessDecision.Unavailable;
+        }
+
+        // createdon exists on every Dataverse table; the value is not used, only whether the caller may read the row.
+        DataverseUserResponse subject;
+        try
+        {
+            subject = await _userClient.GetAsync($"{entitySet}({subjectId})?$select=createdon", ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError("Signal access: the subject read threw ({ExceptionType}); unavailable.", ex.GetType().Name);
+            return SignalAccessDecision.Unavailable;
+        }
+
+        if (!subject.IsSuccess)
+        {
+            return await DeniedAsync(subject, "subject", ct, faultIsUnavailable: true).ConfigureAwait(false);
+        }
+
+        return new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId);
     }
 
-    private async Task<SignalAccessDecision> DeniedAsync(DataverseUserResponse response, string what, CancellationToken ct)
+    private async Task<SignalAccessDecision> DeniedAsync(
+        DataverseUserResponse response, string what, CancellationToken ct, bool faultIsUnavailable = false)
     {
         if (response.ErrorCode is DataverseUserClientErrorCodes.UserContextRequired
             or DataverseUserClientErrorCodes.OboExchangeFailed
@@ -232,6 +279,11 @@ public sealed class SignalCoreRecordAccess
         else
         {
             _logger.LogWarning("Signal access: reading the {What} failed ({ErrorCode}); denying.", what, response.ErrorCode);
+            if (faultIsUnavailable)
+            {
+                // A throttle, a 5xx or a transport fault says nothing about whether the caller may read the row: not a denial (503).
+                return SignalAccessDecision.Unavailable;
+            }
         }
 
         return SignalAccessDecision.NotFound;
