@@ -140,7 +140,7 @@ Fallback: if the registration POST sees that the token email matches an **enable
   - the `oid` lookup runs first;
   - a concurrent loser gets 412 from the alternate key, re-reads and returns 200 with the same contact;
   - a resubmit creates nothing.
-- **Responses:** 201 `{contactId}` / 200 `{contactId}` / 403 with a reason code.
+- **Responses:** 201 `{contactId}` / 200 `{contactId}` / 403 with a reason code / 409 `existing_record_found` when one bindable contact matches and the body lacks `confirmExistingRecord: true` (added at task creation 2026-10-13 so the form can ask the user to confirm, §4).
 - **Only caller of the create:** an ArchTest pins that only this route reaches the home-plane create.
 - **Placement (`bff-extensions.md`):** in the BFF. It must validate the stamp's user token and write the stamp's Dataverse app-only next to the existing create path. It is not AI and not background work. A Placement Justification, publish-size delta, CVE check and tests ship with it.
 - **§11:**
