@@ -231,10 +231,27 @@ ARM and Graph scopes; the browser consent works). Test ran in a throwaway ACI as
   `spaarkeextid`) applies**, as §8 Outcomes set. (c) is unchanged: the keyless provisioner stays a Spaarke-tenant app with
   its service principal in `spaarkeextid` (proven in (i)). The same mechanism creates the per-customer CIAM API app:
   `Application.ReadWrite.OwnedBy` in `spaarkeextid` creates apps there keylessly (proven by `e2e75783`).
-- **(iv) pending** under option 2: a token for CIAM API app X is refused (401) by a BFF configured for Y and by the
-  workforce scheme; a token for Y passes authentication (R1/FR-22 acceptance shape).
-- Leftover: test local account `spike-s1-20261010154358@spaarke.com` (`ae9c6c5e-…`) — `User.Create` cannot delete it; delete in
-  the Entra admin center when S1 ends, with the spike app, its SP in `spaarkeextid` and the UAMI.
+- **(iii) under option 2 — PASS (2026-10-12).** The spike app created a throwaway API app IN `spaarkeextid`
+  (`9a5da09a-…`: `requestedAccessTokenVersion=2`, scope `user_impersonation`, `identifierUris=api://{appId}`, the test
+  client in `preAuthorizedApplications` → no consent prompt) plus its service principal, all keylessly via
+  `Application.ReadWrite.OwnedBy`. The local account then gets, from `ciamlogin.com`:
+  `aud=9a5da09a-…` (**bare GUID**), `iss=https://7052feba-….ciamlogin.com/7052feba-…/v2.0`, `ver=2.0`,
+  `scp=user_impersonation`, `azp={client}`, `tid=7052feba-…`.
+- **R5 — PASS.** The same session silently gets a second resource (Graph `User.Read`) from the refresh token.
+- **(iv) — PASS.** That token at the dev BFF (CIAM audience configured = `4a4d5126`, i.e. "customer Y"):
+  `/api/v1/external/me` → **401** `invalid_token`, "The audience … is invalid"; workforce `/api/me` → **401** `invalid_token`,
+  "The issuer … is invalid". A token for X is refused by Y's CIAM scheme and by the workforce scheme before any handler runs.
+- **Build findings for H3c (the per-customer CIAM API app):**
+  1. `PATCH /applications/{id}` and `POST /servicePrincipals` right after `POST /applications` fail with 404
+     `Request_ResourceNotFound` and 403 "the backing application … must be in the local tenant" (replication lag). Read the
+     app back until 200 before the follow-up writes.
+  2. Two back-to-back PATCHes on one app fail 400 "identifier Uris changed concurrently". Set `identifierUris` and `api`
+     (scopes + `preAuthorizedApplications`) with retry, or in one PATCH once the app is visible.
+  3. Pre-authorizing the CIAM SPA client on each customer's CIAM API app means no consent prompt for contacts and no
+     admin-consent step per customer.
+- **S1 is complete.** Cleanup: see the task notes. In `spaarkeextid` the owner deletes, in the Entra admin center, the test
+  local account `spike-s1-20261010154358@spaarke.com` (`ae9c6c5e-…`; `User.Create` cannot delete) and the spike app's
+  service principal (Enterprise applications → "Spaarke CIAM Spike S1 - Dev").
 
 ## 9. Open decisions
 
