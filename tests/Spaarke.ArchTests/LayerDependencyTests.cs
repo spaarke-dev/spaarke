@@ -9,9 +9,9 @@ namespace Spaarke.ArchTests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// IMPORTANT — the ACTUAL dependency direction differs from the legacy ideal documented in
-/// <c>src/server/shared/CLAUDE.md</c> ("Spaarke.Core has no Spaarke dependencies; Spaarke.Dataverse
-/// depends on Spaarke.Core"). At head, the real project graph is the reverse:
+/// IMPORTANT — the dependency direction is the reverse of an older documented ideal ("Spaarke.Core has
+/// no Spaarke dependencies; Spaarke.Dataverse depends on Spaarke.Core"). <c>src/server/shared/CLAUDE.md</c>
+/// now documents the real graph (corrected 2026-10-07):
 /// </para>
 /// <code>
 ///   Spaarke.Dataverse   -> (no Spaarke project references) — the BASE layer
@@ -29,8 +29,8 @@ namespace Spaarke.ArchTests;
 ///         (Sprk.Bff.Api) — libraries never depend "up" onto the app composition root.</item>
 /// </list>
 /// <para>
-/// The stale <c>src/server/shared/CLAUDE.md</c> direction (Core-is-base) is a documentation-drift
-/// finding surfaced by task 040; it does not change what is enforceable here.
+/// The old Core-is-base direction was a documentation-drift finding surfaced by task 040 and fixed in
+/// <c>src/server/shared/CLAUDE.md</c> on 2026-10-07; it never changed what is enforceable here.
 /// </para>
 /// </remarks>
 public class LayerDependencyTests

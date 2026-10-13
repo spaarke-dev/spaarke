@@ -348,16 +348,12 @@ Ready to continue. Proceeding with task execution...
 
 ```
 BEFORE loading all project files:
-  CHECK current context usage
+  Claude cannot measure its own context usage (root CLAUDE.md §5), so key on events:
 
-  IF > 50%:
-    → WARN: "Context at {X}%. Loading project files may approach limits."
-    → SUGGEST: "Consider /compact before loading full context"
-
-  IF > 70%:
-    → CRITICAL: "Context too high to safely load project."
-    → SUGGEST: "Run /compact first, then /project-continue"
-    → STOP
+  IF this session already holds substantial other work, or the user/harness has reported context is high:
+    → SUGGEST: "Run /compact first, then /project-continue" — loading a whole project on top of it
+      invites an early compaction
+    → Proceed if the user says so
 ```
 
 ### Human Escalation Triggers

@@ -20,11 +20,11 @@ When child records in a subgrid should trigger recalculation of parent record fi
 - **ADR-006**: No legacy JS orchestration logic; rollup trigger lives in web resource, calculation lives in BFF API
 
 ## Auth (the caller must send a bearer token — 2026-08-14, task 023)
-The classic web resource acquires an AAD access token via MSAL silent SSO and sends `Authorization: Bearer <token>` (reference impl: `sprk_subgrid_parent_rollup.js` v2.0.0):
-1. `GET /api/config/client` (anonymous MSAL bootstrap) → `clientId` / `authority` / `scopes`.
-2. Load MSAL.js (browser build) + build a `PublicClientApplication` (`localStorage` + `storeAuthStateInCookie`; `redirectUri = window.location.origin`).
-3. `acquireTokenSilent` → fall back to `ssoSilent(loginHint)` using the signed-in UPN (from the MSAL account or `Xrm` `userSettings.userName`). **No interactive popup** (ADR-028 INV-5).
-4. On token-acquisition failure → skip the API call gracefully (never throw / never break the form).
+The script calls `Spaarke.BffAuth.authenticatedFetch(url, options, apiBaseUrl)` from `sprk_/scripts/bff_auth.js` (built from `@spaarke/auth`, silent only — ADR-028 A7; reference impl: `sprk_subgrid_parent_rollup.js` v3.0.0):
+1. Register `sprk_/scripts/bff_auth.js` on the form alongside the rollup library.
+2. Build the URL from `sprk_BffApiBaseUrl` with a trailing `/api` stripped (the env var may carry it), then append `/api/...`.
+3. A `null` response means no token could be acquired silently: skip the call (never throw / never break the form). A non-OK response is returned as-is; read its status.
+4. Never inline MSAL or load it from a CDN in a web resource (#1655); no interactive popup (ADR-028 INV-5).
 
 **Deployment prerequisites** (one-time, per BFF app-registration): (a) an SPA redirect URI for the Dataverse app origin; (b) admin consent for `api://{clientId}/user_impersonation`. The token flow requires a live Dataverse session to validate — it cannot be verified offline.
 

@@ -7,8 +7,8 @@
 // UAMI RBAC, no stored key — parity with H2a's ArmDeploymentRunner
 // ResolveArmTemplateJsonAsync, which downloads task 117's ARM-JSON manifest
 // from the SAME `provisioning-artifacts` container). PURE C# — zero
-// Process-spawning shell-out (replaces DotnetR3GateVerifier's dotnet+pwsh
-// shell-outs entirely; the r3 gates themselves now run in CI, not here).
+// Process-spawning shell-out (replaced the retired DotnetR3GateVerifier's
+// dotnet+pwsh shell-outs, deleted by task 253; the r3 gates run in CI).
 // -----------------------------------------------------------------------------
 
 using System.Text.Json;

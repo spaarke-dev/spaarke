@@ -32,14 +32,19 @@
  * (React 19 code-page) view; not shared across the PCF boundary.
  */
 
-/**
- * The subset of `@spaarke/auth` `authenticatedFetch` this view depends on. The
- * component imports the real free-function by default; this alias exists so the
- * dependency is named + documented and so tests can `jest.mock('@spaarke/auth')`.
- */
+import type { AuthenticatedFetchFn as SpaarkeAuthenticatedFetchFn } from '@spaarke/auth';
 import type { EmailCitation } from '../../logic/citations';
 
-export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+/**
+ * The `@spaarke/auth` `authenticatedFetch` this package's views and tabs depend on. The
+ * components import the real free-function by default; this alias exists so the
+ * dependency is named + documented and so tests can `jest.mock('@spaarke/auth')`.
+ *
+ * It is `@spaarke/auth`'s throwing `AuthenticatedFetchFn`: every host is a Dataverse one, so the
+ * fetch resolves only with a success and throws `ApiError` / `AuthError` for a failure. A test
+ * stand-in must throw for a failure, not resolve `{ ok: false }`.
+ */
+export type AuthenticatedFetchFn = SpaarkeAuthenticatedFetchFn;
 
 /**
  * One attachment's extracted content, folded into the reader as readable

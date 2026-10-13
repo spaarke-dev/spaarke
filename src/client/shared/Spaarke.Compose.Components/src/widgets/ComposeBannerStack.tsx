@@ -15,6 +15,7 @@
  *   6. Save-degradation banner (026-F5, task 012 r6) — SAVE-time warnings; its own
  *      family, NOT gated by `hideImportWarnings`; a clean save clears it.
  *   7. Pending assistant draft banner (Flow 5) — when there is a staged draft.
+ *   8. Open-in-Word failure banner — when `wordActionError` is non-null (dismissible).
  *
  * The whole stack renders only when at least one row would surface; the parent
  * decides whether to mount it at all. This keeps the DOM minimal.
@@ -174,6 +175,13 @@ export interface ComposeBannerStackProps {
    * dispatching an empty operand, which is what makes the model fabricate a phantom "[Insertion]".
    */
   changeSummaryMessage?: string | null;
+  /**
+   * A failed Open in Word (web or desktop) — the `actionError` sentence `useDocumentActions` produces,
+   * e.g. "Couldn't open the document: The document was not found.". Without it the failure showed
+   * nothing (the operation spinner just stopped). Null renders nothing; the parent's hook clears it when
+   * the next action starts. Dismissible; a NEW message re-shows.
+   */
+  wordActionError?: string | null;
 }
 
 /** How long the transient "Saved ✓" confirmation stays up before auto-dismissing. */
@@ -465,7 +473,16 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     composeDraftError = null,
     memoActionMessage = null,
     changeSummaryMessage = null,
+    wordActionError = null,
   } = props;
+
+  // Open-in-Word failure: local dismissal, reset whenever the message changes (same rule as the Save
+  // error banner below — the parent owns the message, this only hides the CURRENT one).
+  const [wordActionErrorDismissed, setWordActionErrorDismissed] = React.useState(false);
+  React.useEffect(() => {
+    setWordActionErrorDismissed(false);
+  }, [wordActionError]);
+  const showWordActionError = !!wordActionError && !wordActionErrorDismissed;
 
   // Task 041 (FR-06, PDF intake): per-mount dismissal only — DELIBERATELY not sessionStorage-keyed
   // (unlike the import/save-warning banners): every fresh PDF open must re-warn (honesty over
@@ -623,6 +640,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     !!composeDraftError ||
     !!memoActionMessage ||
     !!changeSummaryMessage ||
+    showWordActionError ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -838,6 +856,28 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
                 icon={<Dismiss16Regular />}
                 data-testid="compose-workspace-error-dismiss"
                 onClick={() => setErrorDismissed(true)}
+              />
+            }
+          />
+        </MessageBar>
+      ) : null}
+
+      {/* Open in Word (web / desktop) failed — the hook's "Couldn't open the document: <reason>". Fluent v9
+          MessageBar intent colors are theme-derived (correct in light and dark); no custom colors. */}
+      {showWordActionError ? (
+        <MessageBar intent="error" data-testid="compose-workspace-word-action-error" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Open in Word</MessageBarTitle>
+            {wordActionError}
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-word-action-error-dismiss"
+                onClick={() => setWordActionErrorDismissed(true)}
               />
             }
           />

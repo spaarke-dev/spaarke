@@ -75,6 +75,43 @@ public class RecordOwnershipResolverTests
         directory.QueriedEntities.Should().NotContain("systemuser", "a resolvable target never consults the caller");
     }
 
+    // Task 035 (owner decision 2026-10-11): a Legal Front Door intake request is owned by the default team of the business
+    // unit that owns the requester's CONTACT. The contact is not an ownership PARENT (a relationship, not a filing), but it is
+    // a valid TARGET: the target path reads the record's owningbusinessunit whatever the table, so no resolver change is needed.
+    [Fact]
+    public async Task ResolveOwner_ForARequesterContactTarget_IsTheDefaultOwnerTeamOfTheBusinessUnitThatOwnsTheContact()
+    {
+        var contactId = Guid.Parse("33333333-3333-3333-3333-333333333035");
+        var directory = Directory().WithRecord("contact", contactId, ChildBu);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { TargetEntityLogicalName = "contact", TargetRecordId = contactId },
+            CancellationToken.None);
+
+        resolution.IsOwned.Should().BeTrue();
+        resolution.OwningTeamId.Should().Be(ChildTeam, "the customer BU's default owner team, not the root's and not an Access team");
+        directory.QueriedEntities.Should().NotContain("systemuser");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_ForARequesterContactThatDoesNotExistOrHasNoBusinessUnit_Refuses()
+    {
+        var absent = Guid.Parse("33333333-3333-3333-3333-333333333036");
+        var unowned = Guid.Parse("33333333-3333-3333-3333-333333333037");
+        var directory = Directory().WithRecord("contact", unowned, owningBusinessUnit: null);
+
+        var resolver = Build(directory);
+        var noRow = await resolver.ResolveOwnerAsync(
+            new RecordOwnershipContext { TargetEntityLogicalName = "contact", TargetRecordId = absent }, CancellationToken.None);
+        var noBu = await resolver.ResolveOwnerAsync(
+            new RecordOwnershipContext { TargetEntityLogicalName = "contact", TargetRecordId = unowned }, CancellationToken.None);
+
+        noRow.IsRefused.Should().BeTrue();
+        noRow.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+        noBu.IsRefused.Should().BeTrue();
+        noBu.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+    }
+
     [Fact]
     public async Task ResolveOwningTeam_WhenFiledToASecureRecord_OwnsItByTheNamedSecureTeam_NeverTheDefaultOrTheCallers()
     {

@@ -108,6 +108,8 @@ export interface TaskPaneShellProps {
   onSendEmail?: () => void;
   /** Task 106: Send Email is opening the compose window. */
   isSendingEmail?: boolean;
+  /** Task 113: opens the dev-only sign-in Diagnostics view ("⋮ → Diagnostics"). */
+  onShowDiagnostics?: () => void;
 }
 
 /**
@@ -161,6 +163,7 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
   noPadding = false,
   onSendEmail,
   isSendingEmail = false,
+  onShowDiagnostics,
 }) => {
   const styles = useStyles();
   const { isCompact } = useResponsiveLayout();
@@ -237,6 +240,7 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
         {...(onThemeChange ? { onThemeChange } : {})}
         {...(resizeSupported ? { onToggleExpand: handleToggleExpand, isExpanded, isResizing } : {})}
         {...(onSendEmail ? { onSendEmail, isSendingEmail } : {})}
+        {...(onShowDiagnostics ? { onShowDiagnostics } : {})}
       />
 
       {/* Main Content with Error Boundary */}

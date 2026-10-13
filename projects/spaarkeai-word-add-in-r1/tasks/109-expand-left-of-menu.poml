@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="109" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 11 (1) — Expand/Collapse sits immediately left of the "⋮" menu</title>
+    <phase>6 UAT round 11 (2026-10-07)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx` (`TaskPaneToolbar.tsx`) and a test.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One-line layout move.</model-tier-reason>
+    <effort>low</effort>
+    <parallel-group>UAT11</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>108</deps>
+    <tags>frontend, office-addins, typescript, unit-test</tags>
+  </metadata>
+
+  <prompt>Owner UAT round 11, item 1: "in word move the expand icon to the left of the 3 dot menu". Record: `notes/042-uat-round11-2026-10-07.md`.</prompt>
+
+  <goal>Expand/Collapse renders immediately before "⋮" (supersedes round 10's right-most position).</goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">The last two toolbar buttons are Expand pane, then More options.</criterion>
+    <criterion testable="true">Gates: toolbar + expand suites green.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Move the Expand block before the overflow menu; update the toolbar header comment and the fit test's order assertion.</step>
+  </steps>
+
+  <justification>
+    <existing>The toolbar (103-108).</existing>
+    <extension>Yes — order change only.</extension>
+    <cost-of-doing-nothing>Owner UAT round 11 item 1.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneToolbar.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/__tests__/TaskPaneToolbar.fit.test.tsx</file>
+  </relevant-files>
+</task>

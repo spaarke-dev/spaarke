@@ -152,6 +152,32 @@ public class CreateTaskNodeExecutorSeamTests
 
     // ── Helpers ────────────────────────────────────────────────────────────────────────────────
 
+    // Task 098: sprk_duedate is Date Only. A template date — "yyyy-MM-dd" or a timestamp with an offset — is the
+    // calendar date AS WRITTEN. DateTime.TryParse + ToUniversalTime() moved "2026-10-20T23:30:00-04:00" to 03:30Z on
+    // Oct 21, and the column stored Oct 21.
+    [Theory]
+    [InlineData("2026-10-20")]
+    [InlineData("2026-10-20T23:30:00-04:00")]
+    [InlineData("2026-10-20T00:00:00Z")]
+    public async Task ExecuteAsync_DueDate_IsTheCalendarDateAsWritten(string dueDate)
+    {
+        var config = $$"""
+        { "subject": "Calendar date", "dueDate": "{{dueDate}}" }
+        """;
+        Entity? captured = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => captured = e)
+            .ReturnsAsync(CreatedTaskId);
+
+        var result = await _executor.ExecuteAsync(CreateContext(config), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        var due = captured!.GetAttributeValue<DateTime>("sprk_duedate");
+        due.Should().Be(new DateTime(2026, 10, 20));
+        due.Kind.Should().Be(DateTimeKind.Unspecified);
+    }
+
     private static NodeExecutionContext CreateContext(string? configJson)
     {
         var actionId = Guid.NewGuid();

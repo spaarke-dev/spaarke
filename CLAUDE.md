@@ -99,8 +99,9 @@ There is no fourth path: no silent violation, no "fix it later". This is not a l
 ### 8.5 Execution and review
 
 - Planning (`design-to-spec`, `project-pipeline`) runs on the top tier (Opus / Fable). Execution defaults to Sonnet 5 at effort `high`; each POML's `<model-tier>` and `<effort>` can raise it (`task-create` Step 3.5.5b). Write POMLs for literal execution: scoped constraints, closed-set acceptance criteria including negative cases, exact files and the reference implementation to copy (`task-create`).
-- **Review limits ceremony, never fixing.** Findings are classified fix-now (F1–F4) or known-limit (K1–K4); a known-limit class never holds a confirmed defect on a real path. Re-checks cover the fix diff and its direct callers and callees; one full adversarial-verifier pass per task (two for `auth`, `security`, `tenant-isolation`). Fixing continues until no F-class finding remains.
+- **Review limits ceremony, never fixing.** Findings are classified fix-now (F1–F4) or known-limit (K1–K4); a known-limit class never holds a confirmed defect on a real path. Re-checks cover the fix diff and its direct callers and callees; one full adversarial-verifier pass per task by default (two for `auth`, `security`, `tenant-isolation`), more when a fix changes the approach, with a one-line reason in the task notes. Fixing continues until no F-class finding remains.
 - **Every defect found is fixed in scope, or filed and reported to the operator** — whether the work caused it or only uncovered it (pre-existing code, another project's code, config, data). Escalate when fixes are not converging, not on a round count. This applies to task-execute Step 9.5 and to verifier loops in workflow scripts sessions write themselves.
+- **Agent cost and model choice** (`.claude/constraints/agent-cost.md`): every agent and workflow `agent()` call states the model and effort chosen for its work (table there; no blanket default), using a definition that sets them (`implementer`, `adversarial-reviewer`, `code-mapper`, `researcher`) or a per-call `model`; a `PreToolUse` hook refuses a launch with none and the session chooses, never the user. One top-tier review per change set; one scoped deliverable per agent; after an idle pause start a fresh agent instead of resuming. Run one or two heavy fan-out projects at a time on one machine.
 
 ## 9. Security
 
@@ -174,13 +175,14 @@ For Microsoft and AI platform topics where training data may be stale (Azure AI 
 ## 16. Hooks and permissions
 
 Configured in `.claude/settings.json`:
-- `PostToolUse` on Edit runs `scripts/quality/post-edit-lint.sh`; `Stop` runs `scripts/quality/task-quality-gate.sh`.
+- `PostToolUse` on Edit/Write runs `scripts/quality/post-edit-lint.sh`, which returns lint findings to the agent as `additionalContext` (advisory, best-effort within its 4-second linter timeout); `Stop` runs `scripts/quality/task-quality-gate.sh`.
 - `SessionStart` with the `compact` matcher runs `.claude/hooks/reinject-project-state.ps1`, which re-injects the current project's `current-task.md` and its standing-directive and gotcha sections after compaction. It finds the project from the `work/<project>` branch or the `spaarke-wt-<project>` worktree folder.
-- `permissions.ask` makes the human confirm Key Vault secret delete/purge/recover/restore and client-secret writes (§9).
+- `PreToolUse` on Agent/Task/Workflow runs `scripts/quality/require-agent-model.py`, which denies an agent launch that names no model (the session then chooses one); `env` and top-level keys set concurrency caps, the workflow size guideline and the auto-compact window (`.claude/constraints/agent-cost.md`).
+- `permissions.ask` makes the human confirm Key Vault secret delete/purge/recover/restore and client-secret writes (§9), and `git stash pop/apply/drop/clear` — the stash stack is shared by every worktree, so a pop can apply another session's work.
 
 Other enforcement runs in skills (`task-execute`, `code-review`, `adr-check`), CI (`.github/workflows/`) and `doc-drift-audit` at project transitions.
 
-Add a hook or permission rule only for a narrow, high-frequency check that runs in under 5 seconds with no false positives. Prefer an `ask` rule (the human confirms) over `deny` for policies that change over time.
+**Enforcement ladder.** A rule in prose drifts and competes for attention; a rule the build enforces reaches the agent at the line it just wrote. When a lesson, ADR rule, constraint or bug fix creates a rule, enforce it with the strongest mechanism that works: a **type** the compiler checks → a **lint rule** (returned to the agent after each edit by the `PostToolUse` hook, and run in CI) → an **ArchTest / source-scan guard** (`Stop` hook and CI) → a **hook or permission rule** → **prose**, only with a one-line reason it cannot be mechanised. Record it with the rule ("Enforced by: …"). A new guard ships with must-fire and must-not-fire controls and, when it finds existing violations, a ratchet baseline (new violations fail; known ones are listed and worked down). Hooks and permission rules stay narrow — under 5 seconds, no false positives — and prefer `ask` over `deny` for policies that change over time. Detail: `ai-procedure-maintenance` Checklist G.
 
 ## 17. Before you … read … (triggers)
 

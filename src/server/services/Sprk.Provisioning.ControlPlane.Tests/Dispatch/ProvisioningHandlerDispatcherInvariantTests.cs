@@ -39,7 +39,7 @@
 //     scans committed source files -- both are stateless + fast.
 //   - Not a DI-registration-only ctor-null-check test -- these assert
 //     LOAD-BEARING correctness properties, exactly the type of freeze
-//     test ADR-038 §7 KEEP category #6 (integrity guard) sanctions.
+//     test ADR-038 §7's build-vs-maintain criteria keep (maintain-class).
 //
 // EXTERN ALIAS:
 //   ProvisioningHandlerDispatcher lives in Sprk.Provisioning.ControlPlane.Worker

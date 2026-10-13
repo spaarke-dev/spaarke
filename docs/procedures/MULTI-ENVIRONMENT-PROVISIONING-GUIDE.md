@@ -135,7 +135,7 @@ This script executes a 13-step idempotent chain:
 4. Configure Key Vault access policies
 5. Create the Dataverse environment via Power Platform Admin API (returns the new Dataverse URL)
 6. Wait for Dataverse environment to reach Ready state
-7. Import Spaarke solutions (managed, current version) — uses `Deploy-DataverseSolutions.ps1`
+7. Import SpaarkeMaster (managed, the CI-published version) — uses `solution-authoring/Import-SpaarkeMasterPackage.ps1` (T218f; `Deploy-DataverseSolutions.ps1` retired)
 8. Set environment-variable values (BFF API base URL, Key Vault URI, etc.)
 9. Provision the demo team + business unit
 10. Create the SharePoint Embedded container
@@ -145,7 +145,7 @@ This script executes a 13-step idempotent chain:
 
 **Resume after failure**: re-run the same command with `-ResumeFromStep N` where N is the step that failed. The state file in `~/.spaarke/provision-state/provision-{customerId}-{envName}.state.json` tracks completed steps.
 
-**Caveat (per github-actions-rationalization-r1 closeout assessment)**: Steps 1–6 + 11 have explicit idempotency checks. Steps 7 (solution import), 8 (env vars), 12 (smoke tests) rely on the underlying tooling's idempotency — most are safe to re-run but `Deploy-DataverseSolutions.ps1` may need additional handling on partial imports (PAC CLI behavior).
+**Caveat (per github-actions-rationalization-r1 closeout assessment)**: Steps 1–6 + 11 have explicit idempotency checks. Steps 7 (solution import), 8 (env vars), 12 (smoke tests) rely on the underlying tooling's idempotency — most are safe to re-run. Step 7 is: `Import-SpaarkeMasterPackage.ps1` skips an equal version, refuses a type switch or downgrade, and verifies the installed version after the import.
 
 ### Step 3 — Register the new environment in `sprk_dataverseenvironment`
 

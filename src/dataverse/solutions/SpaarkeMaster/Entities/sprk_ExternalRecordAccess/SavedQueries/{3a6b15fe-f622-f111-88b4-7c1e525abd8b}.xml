@@ -1,0 +1,42 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{3a6b15fe-f622-f111-88b4-7c1e525abd8b}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_externalrecordaccessid">
+          <cell name="sprk_contact" width="200" />
+          <cell name="sprk_name" width="300" />
+          <cell name="sprk_recordtype" width="112" />
+          <cell name="sprk_accesslevel" width="116" />
+          <cell name="sprk_expiresdate" width="113" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_externalrecordaccess">
+          <attribute name="sprk_externalrecordaccessid" />
+          <attribute name="sprk_name" />
+          <attribute name="createdon" />
+          <order attribute="sprk_name" descending="false" />
+          <attribute name="sprk_accesslevel" />
+          <attribute name="sprk_recordtype" />
+          <attribute name="sprk_expiresdate" />
+          <attribute name="sprk_contact" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="All External Record Access" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

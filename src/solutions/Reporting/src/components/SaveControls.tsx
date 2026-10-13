@@ -50,6 +50,15 @@ import { SaveRegular, SaveCopyRegular } from "@fluentui/react-icons";
 import { updateReport, createReport } from "../services/reportingApi";
 import type { ReportCatalogItem } from "../types";
 
+/**
+ * The Save As dialog's error line for a failed server-side copy. `error` is reportingApi's sentence — the
+ * server's ProblemDetails detail (e.g. a 403 "You do not have permission to change the report catalog.") or
+ * its per-status sentence — shown the way New / Export / Delete show theirs, never replaced by a generic retry.
+ */
+export function saveAsFailureMessage(error: string): string {
+  return `The report copy could not be created: ${error}`;
+}
+
 // ---------------------------------------------------------------------------
 // Styles — Fluent design tokens only (ADR-021)
 // ---------------------------------------------------------------------------
@@ -249,7 +258,7 @@ export const SaveControls: React.FC<SaveControlsProps> = ({
 
       if (!result.ok) {
         console.error("[SaveControls] Save As (server-side copy) failed:", result.error);
-        setSaveAsError("The report copy could not be created. Please try again.");
+        setSaveAsError(saveAsFailureMessage(result.error));
         return;
       }
 
@@ -321,7 +330,7 @@ export const SaveControls: React.FC<SaveControlsProps> = ({
               {/* Error banner */}
               {saveAsError && (
                 <div className={styles.errorWrapper}>
-                  <MessageBar intent="error" layout="singleline">
+                  <MessageBar intent="error" layout="multiline">
                     <MessageBarBody>{saveAsError}</MessageBarBody>
                   </MessageBar>
                 </div>

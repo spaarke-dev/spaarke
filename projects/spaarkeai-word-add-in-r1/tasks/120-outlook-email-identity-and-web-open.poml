@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="120" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 12 (O6 + task 119's web finding) — Outlook knows an email is already saved (BFF resolve-email-identity + pane), and "Open in Spaarke" works on Office on the web</title>
+    <phase>6 UAT round 12 (2026-10-08)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF endpoint behind document authorization (`.cs`), client `.ts/.tsx` across App/SaveFlow/adapters, new tests, publish-size gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authorization-adjacent BFF surface that must not become an existence oracle; cross-cutting pane state (identity, save mode, open gate).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT12</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Builds on the uncommitted 116-119 tree (SaveFlow, App). Must not edit `outlook/commands/**`, `word/commands/**`, `shared/commands/**` (task 118), `ci-gated-suites.txt`, TASK-INDEX, current-task, or UAC-r2 tests.</parallel-reason>
+    <deps>111, 112, 117, 119</deps>
+    <tags>bff-api, api, auth, office-addin, outlook, unit-test, integration-test</tags>
+  </metadata>
+
+  <prompt>Owner UAT round 12 item O6 ("saved an email, closed and reopened the add-in: it does not show it has been saved") plus task 119's residual risk (Find rows / View Document not offered on Office on the web, where guests work). Owner approved the server addition and a dev BFF deploy on 2026-10-08 (main session deploys). Records: `notes/042-uat-round12-2026-10-08.md`, `notes/117-outlook-saved-state-and-record-link.md` §2, `notes/119-find-open-links-and-todo-restriction-check.md`.</prompt>
+
+  <goal>(1) `POST /api/documents/resolve-email-identity` returns the saved `.eml` `sprk_document`'s `DocumentIdentityResponse` for the open email, behind the same per-document read authorization as resolve-identity. (2) Outlook (read mode) shows the green "Saved to Spaarke" box with its record or the filing picker on open, never offers a version of an email, and keeps "save again" behind an explicit action. (3) Every "Open in Spaarke" affordance opens a normal browser tab on Office on the web.</goal>
+
+  <context>
+    <background>
+      - resolve-identity (task 012) = `DocumentUrlIdentityFilter` (URL → documentId route value) + `.AddDocumentAuthorizationFilter("read")` + handler; task 112 extracted `BuildIdentityResponseAsync` and added the by-id route.
+      - `OfficeDocumentPersistence` stamps `sprk_emailmessageid` + `sprk_isemailarchive = true` on every Office email save — with whatever the request carried as `email.internetMessageId`.
+      - MEASURED LIVE 2026-10-08 (read-only Dataverse query, newest 15 `.eml` rows): every pane save stores the Exchange ITEM id (`AAMk…`/`AQMk…`), because `useSaveFlow` sends `internetMessageId: context.itemId` (`getItemId()` = `item.itemId`); Quick Save sends the RFC Message-ID. A lookup on the RFC id alone would never find a pane-saved email — the O6 case.
+      - Task 119: `canOpenBrowserWindow` (OpenBrowserWindowApi 1.1) is false on Office on the web, so every open affordance gated on it was hidden there.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10 / bff-extensions.md">Placement justification; unconditional registration; unit + contract tests in the places task 112 used; route-authorization arch ledger updated; `dotnet build` 0/0; CI office-scope filter green; publish-size delta from fresh short-path worktrees (`C:\wt120m` = origin/master, `C:\wt120b` = origin/master + this task's server files) with equal file counts; CVE check. Never touch `C:/tmp/bffsize/*`, `C:\wt097*`, `C:\wt098*`; remove own worktrees.</constraint>
+    <constraint source="security">Filter finds the NEWEST saved `.eml` (app-only lookup), writes its id into the route values, then `.AddDocumentAuthorizationFilter("read")` decides; 403 with no metadata when the caller may not read it. An older readable copy is NOT searched (no oracle; one authorization per request). Input validated (required, 998-char cap); the message id is never echoed in errors or logged.</constraint>
+    <constraint source="NFR-10">Client gated on capabilities (`canResolveEmailIdentity`, Outlook read mode; false in Word), never `hostType`. Word behaviour unchanged.</constraint>
+    <constraint source="owner">Emails have no version mode; saving an email again (e.g. to another record) only behind an explicit, collapsed-by-default action. Any lookup failure → no box, today's form.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true" status="met">POST /api/documents/resolve-email-identity: 200 DocumentIdentityResponse (same shape as resolve-identity) for a readable saved copy; 200 `{resolved:false, reason:"not_saved"}` when none; 403 problem+json with no metadata when the newest copy is not readable; 400 (required / too long, value not echoed); 401; 503 when Dataverse cannot answer.</criterion>
+    <criterion testable="true" status="met">The lookup matches `sprk_isemailarchive = true` AND `sprk_emailmessageid` = the RFC Message-ID OR the Exchange item id, newest `createdon` first (documentid tie-break), one row.</criterion>
+    <criterion testable="true" status="met">Outlook read mode: after sign-in the email is looked up; a saved copy shows the green box (Filed to … / Not filed yet, View Document, Copy Link) and the "Filed to" card or the filing picker + File to record; no Save / Cancel / attachment picker / version wording; "Save again as a new document" opens the ordinary form whose Save is a CREATE; "Don't save again" returns to the box. Any failure → no identity.</criterion>
+    <criterion testable="true" status="met">After a pane save in Outlook the identity becomes the saved `.eml` (task 112's by-id read); Find and To Do receive it; "Try again" re-runs the email lookup. Word never calls the email lookup.</criterion>
+    <criterion testable="true" status="met">One open gate (`canOpenSpaarkeRecords`: ORG_URL + openBrowserWindow OR window.open) feeds every `canOpenRecord`; `openRecord` opens via openBrowserWindow when supported, else window.open from the click (web) — tested both ways.</criterion>
+    <criterion testable="true" status="met">Gates: dotnet build 0/0; targeted + CI office-scope server tests green; ArchTests RouteAuthorizationGuard green; publish-size delta reported with equal file counts; no vulnerable package; jest full green; lint 0; tsc 0 production, test-file errors 68 (not above 68); prettier clean.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step status="done">Read resolve-identity / task 112 end to end, the .eml persistence, the pane's identity + save-mode machinery, the open launcher; measured live what `sprk_emailmessageid` holds.</step>
+    <step status="done">BFF: `ParseEmailKeys` + `ResolveByEmailMessageIdAsync` in `DocumentUrlIdentityResolution`; `DocumentEmailIdentityFilter`; route + handler in `FileAccessEndpoints`; `ResolveEmailIdentityRequest`; ledger.</step>
+    <step status="done">Client: capability + `getEmailIdentityKeys` (Outlook adapter); `resolveEmailIdentity` / `identityOfSavedDocument`; App lookup, post-save adoption, retry; SaveFlow/SaveModeSection no-version email state.</step>
+    <step status="done">Web open: `canOpenSpaarkeRecords`, `openInBrowserTab`, `openRecord` default opener; App + SaveView use the one gate.</step>
+    <step status="done">Tests, gates, publish size, CVE, `notes/120-outlook-email-identity-and-web-open.md`.</step>
+  </steps>
+
+  <justification>
+    <existing>resolve-identity (URL → identity) and GET /{id}/identity (id → identity) in the same `docs` group; `GET /api/office/communications/by-message-id/{id}` (communication only — no document id; and the communication capture is best-effort, notes/117 §2).</existing>
+    <extension>Yes — same group, same two-filter shape, same authorization filter, same DTO and response builder; only the id source differs (an email's keys). Extending the communication lookup was rejected: it keys on a record the save may not have created.</extension>
+    <cost-of-doing-nothing>Outlook cannot tell that the open email is already saved (UAT round 12 O6): the user re-saves it and gets a duplicate `.eml`, and Find / To Do / the record link are unavailable after reopening.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    <file role="create">src/server/api/Sprk.Bff.Api/Api/Filters/DocumentEmailIdentityFilter.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Documents/DocumentUrlIdentityResolution.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Models/FileOperationModels.cs</file>
+    <file role="edit">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs</file>
+    <file role="create">tests/unit/Sprk.Bff.Api.Tests/Services/Documents/DocumentEmailIdentityResolutionTests.cs</file>
+    <file role="create">tests/integration/contract/Api/Documents/DocumentEmailIdentityContractTests.cs</file>
+    <file role="edit">src/client/office-addins/shared/adapters/{types,IHostAdapter,OutlookAdapter,WordAdapter}.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/App.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/{SaveFlow,SaveModeSection}.tsx, views/SaveView.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/{documentIdentityService,openRecordLauncher}.ts</file>
+    <file role="note">projects/spaarkeai-word-add-in-r1/notes/120-outlook-email-identity-and-web-open.md</file>
+  </relevant-files>
+</task>

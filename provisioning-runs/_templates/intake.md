@@ -14,7 +14,6 @@
 | `identityPreset` | `B2BGuest \| NativeAccount` | operator | H11 (design.md D6). Exact case. T245c. |
 | `users` | **`{userCount}` entries — count only** | operator | H11. 🔒 Names and emails are personal data: they live in the L2 run document (owner decision 2026-10-01) and are **never** written here — this folder is committed to git. |
 | `exchangePolicyScopeGroupId` | `{exchangePolicyScopeGroupId}` | operator (group created by the stamp tenant's Exchange admin — PRQ-C-08) | H14a ApplicationAccessPolicy scope. T245c. |
-| `communicationGraphResource` / `emailGraphResource` | `{communicationGraphResource}` / `{emailGraphResource}` | operator | H14b; at least one. T245c. |
 | `communicationDefaultMailbox` | `{communicationDefaultMailbox}` | operator | H4 → KV `Communication-DefaultMailbox`. T245c. Use a shared/service mailbox — this file is committed, so a personal mailbox (here or in the Graph resources above) would put an individual's address in git. |
 | `profile` | `spaarke-hosted-model2 \| customer-owned-model2` | operator | Follows from `tenancyModel`: `Model1` ↔ `spaarke-hosted-model2`, `Model2` ↔ `customer-owned-model2`. `POST /api/runs` refuses any other value or pair (`tenancy-profile-invalid`). The names predate the D-12 renumbering; `spaarke-hosted-model1-trial` is retired. |
 

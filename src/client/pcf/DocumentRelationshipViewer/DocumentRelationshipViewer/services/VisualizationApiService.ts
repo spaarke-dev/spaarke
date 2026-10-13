@@ -5,7 +5,7 @@
  * and mapping it to the PCF graph types.
  */
 
-import { authenticatedFetch } from '@spaarke/auth';
+import { authenticatedFetch, isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
 import type {
   DocumentGraphResponse,
   ApiDocumentNode,
@@ -34,7 +34,7 @@ export class VisualizationApiService {
    * Token acquisition, caching, and 401 retry are handled by the shared auth library.
    *
    * @param documentId - Source document GUID
-   * @param params - Query parameters including tenantId
+   * @param params - Query parameters
    * @returns Graph data with nodes and edges for visualization
    */
   async getRelatedDocuments(
@@ -47,12 +47,20 @@ export class VisualizationApiService {
   }> {
     const url = this.buildUrl(documentId, params);
 
-    const response = await authenticatedFetch(url, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    let response: Response;
+    try {
+      response = await authenticatedFetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+    } catch (err) {
+      // authenticatedFetch THROWS for a non-OK response — the `!response.ok` branch below never runs
+      // under it. Build the same VisualizationApiError so 404 (empty graph) and 401/403 (permission
+      // text) keep their handling.
+      throw toVisualizationApiError(err);
+    }
 
     if (!response.ok) {
       const errorBody = await this.parseErrorResponse(response);
@@ -69,8 +77,7 @@ export class VisualizationApiService {
   private buildUrl(documentId: string, params: VisualizationQueryParams): string {
     const url = new URL(`${this.apiBaseUrl}/api/ai/visualization/related/${documentId}`);
 
-    // Required parameter
-    url.searchParams.set('tenantId', params.tenantId);
+    // No tenantId parameter: the BFF ignores it and resolves the tenant from the token's `tid` (#1453).
 
     // Optional parameters
     if (params.threshold !== undefined) {
@@ -330,4 +337,20 @@ export class VisualizationApiError extends Error {
   isUnauthorized(): boolean {
     return this.statusCode === 401 || this.statusCode === 403;
   }
+}
+
+/**
+ * The {@link VisualizationApiError} for an error `authenticatedFetch` threw: its `ApiError` (status +
+ * ProblemDetails, same message rule as a returned response), or 401 for an `AuthError` (retries spent).
+ * Anything else (a network failure) is returned unchanged.
+ */
+function toVisualizationApiError(err: unknown): unknown {
+  if (isApiError(err)) {
+    const problem = problemOf(err);
+    return new VisualizationApiError(problem?.detail ?? `API error: ${err.status}`, err.status, problem ?? undefined);
+  }
+  if (isAuthFailure(err)) {
+    return new VisualizationApiError(err instanceof Error ? err.message : 'Authentication failed', 401);
+  }
+  return err;
 }

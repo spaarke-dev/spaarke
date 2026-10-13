@@ -28,7 +28,9 @@ const mockAccount = { username: 'user@tenant.onmicrosoft.com' };
 const mockInstance = {
   initialize: jest.fn(() => Promise.resolve()),
   handleRedirectPromise: jest.fn(() => Promise.resolve(null)),
-  getAllAccounts: jest.fn(() => [mockAccount]),
+  getAllAccounts: jest.fn((): unknown[] => [mockAccount]),
+  getActiveAccount: jest.fn((): unknown => null),
+  setActiveAccount: jest.fn(),
   acquireTokenSilent: jest.fn(),
   ssoSilent: jest.fn(),
   acquireTokenPopup: jest.fn(),
@@ -63,6 +65,7 @@ describe('BrowserMsalStrategy', () => {
       if (typeof fn === 'function' && 'mockClear' in fn) fn.mockClear();
     });
     mockInstance.getAllAccounts.mockReturnValue([mockAccount]);
+    mockInstance.getActiveAccount.mockReturnValue(null);
     // Suppress diagnostic logs during tests
     originalWarn = console.warn;
     originalInfo = console.info;
@@ -213,6 +216,122 @@ describe('BrowserMsalStrategy', () => {
     // Never call acquire — instance stays null
     expect(() => strategy.clearCache()).not.toThrow();
     expect(mockInstance.clearCache).not.toHaveBeenCalled();
+  });
+
+  describe('account selection (#1453)', () => {
+    const SPAARKE_TENANT = 'a221a95e-6abc-4434-aecc-e48338a1b2f2';
+    const HOME_TENANT = 'bc3aa7f4-6abc-4434-aecc-e48338a1b2f2';
+    const tenantConfig: Required<IAuthConfig> = {
+      ...baseConfig,
+      authority: `https://login.microsoftonline.com/${SPAARKE_TENANT}`,
+      tenantId: SPAARKE_TENANT,
+      requireSilentOnly: false,
+      requireTenantAuthority: true,
+    };
+    const fresh = () => ({ accessToken: freshJwt(), expiresOn: new Date(Date.now() + 60 * 60 * 1000) });
+    // The guest's own home-tenant session, cached first.
+    const homeAccount = { username: 'guest@customer.com', tenantId: HOME_TENANT, homeAccountId: `oid.${HOME_TENANT}` };
+    // The same person as a B2B guest in Spaarke's tenant: home tenant differs from tenantId.
+    const guestAccount = {
+      username: 'guest@customer.com',
+      tenantId: SPAARKE_TENANT,
+      homeAccountId: `oid.${HOME_TENANT}`,
+    };
+    const otherAccount = { username: 'someone@customer.com', tenantId: HOME_TENANT, homeAccountId: 'x.y' };
+    // Two different users of Spaarke's tenant on one shared browser.
+    const userA = { username: 'a@spaarke.com', tenantId: SPAARKE_TENANT, homeAccountId: `a.${SPAARKE_TENANT}` };
+    const userB = { username: 'b@spaarke.com', tenantId: SPAARKE_TENANT, homeAccountId: `b.${SPAARKE_TENANT}` };
+
+    it('with two cached accounts, uses the one matching the resolved tenant for silent acquisition', async () => {
+      mockInstance.getAllAccounts.mockReturnValue([homeAccount, guestAccount]);
+      mockInstance.acquireTokenSilent.mockResolvedValueOnce({ ...fresh(), account: guestAccount });
+
+      await new BrowserMsalStrategy(tenantConfig).acquire();
+
+      expect(mockInstance.acquireTokenSilent).toHaveBeenCalledWith({
+        scopes: [tenantConfig.bffApiScope],
+        account: guestAccount,
+      });
+      // The choice is never persisted as MSAL's active account (shared browsers).
+      expect(mockInstance.setActiveAccount).not.toHaveBeenCalled();
+    });
+
+    it('uses the tenant-matching account as the ssoSilent and popup login hint', async () => {
+      const matching = { ...guestAccount, username: 'guest.in.spaarke@customer.com' };
+      mockInstance.getAllAccounts.mockReturnValue([otherAccount, matching]);
+      mockInstance.acquireTokenSilent.mockRejectedValueOnce(new Error('silent failed'));
+      mockInstance.ssoSilent.mockRejectedValueOnce(new Error('sso failed'));
+      mockInstance.acquireTokenPopup.mockResolvedValueOnce(fresh());
+
+      await new BrowserMsalStrategy(tenantConfig).acquire();
+
+      expect(mockInstance.ssoSilent).toHaveBeenCalledWith({
+        scopes: [tenantConfig.bffApiScope],
+        loginHint: matching.username,
+      });
+      expect(mockInstance.acquireTokenPopup).toHaveBeenCalledWith({
+        scopes: [tenantConfig.bffApiScope],
+        loginHint: matching.username,
+      });
+    });
+
+    it('shared browser: two accounts in the tenant → no cached account is guessed; ssoSilent uses the session', async () => {
+      mockInstance.getAllAccounts.mockReturnValue([userA, userB]);
+      mockInstance.ssoSilent.mockResolvedValueOnce({ ...fresh(), account: userB });
+
+      await new BrowserMsalStrategy(tenantConfig).acquire();
+
+      expect(mockInstance.acquireTokenSilent).not.toHaveBeenCalled();
+      expect(mockInstance.ssoSilent).toHaveBeenCalledWith({ scopes: [tenantConfig.bffApiScope], loginHint: undefined });
+    });
+
+    it("shared browser: MSAL's persisted active account (user A) does not override the choice", async () => {
+      mockInstance.getActiveAccount.mockReturnValue(userA);
+      mockInstance.getAllAccounts.mockReturnValue([userA, userB]);
+      mockInstance.ssoSilent.mockResolvedValueOnce({ ...fresh(), account: userB });
+
+      await new BrowserMsalStrategy(tenantConfig).acquire();
+
+      expect(mockInstance.acquireTokenSilent).not.toHaveBeenCalled();
+      expect(mockInstance.getActiveAccount).not.toHaveBeenCalled();
+    });
+
+    it('reuses the account that produced a token on this page, even with another user cached', async () => {
+      mockInstance.getAllAccounts.mockReturnValue([userA, userB]);
+      mockInstance.ssoSilent.mockResolvedValueOnce({ ...fresh(), account: userB });
+      const strategy = new BrowserMsalStrategy(tenantConfig);
+      await strategy.acquire();
+
+      mockInstance.acquireTokenSilent.mockResolvedValueOnce({ ...fresh(), account: userB });
+      await strategy.acquire();
+
+      expect(mockInstance.acquireTokenSilent).toHaveBeenCalledWith({
+        scopes: [tenantConfig.bffApiScope],
+        account: userB,
+      });
+    });
+
+    it('a single cached account is used even from another tenant (members: unchanged)', async () => {
+      mockInstance.getAllAccounts.mockReturnValue([otherAccount]);
+      mockInstance.acquireTokenSilent.mockResolvedValueOnce(fresh());
+
+      await new BrowserMsalStrategy(tenantConfig).acquire();
+
+      expect(mockInstance.acquireTokenSilent).toHaveBeenCalledWith({
+        scopes: [tenantConfig.bffApiScope],
+        account: otherAccount,
+      });
+    });
+
+    it('several cached accounts, none in the tenant → ssoSilent rather than a guess', async () => {
+      mockInstance.getAllAccounts.mockReturnValue([otherAccount, homeAccount]);
+      mockInstance.ssoSilent.mockResolvedValueOnce(fresh());
+
+      await new BrowserMsalStrategy(tenantConfig).acquire();
+
+      expect(mockInstance.acquireTokenSilent).not.toHaveBeenCalled();
+      expect(mockInstance.ssoSilent).toHaveBeenCalled();
+    });
   });
 
   it('getMsalInstance(): returns null before init and the instance after', async () => {

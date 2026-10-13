@@ -31,10 +31,10 @@ describe('EmailComposer — Send button placement (item 1)', () => {
     const fromGroup = screen.getByRole('group', { name: 'From' });
     expect(within(fromGroup).getByRole('button', { name: /send/i })).toBeInTheDocument();
 
-    // The bottom "Composer actions" bar has Cancel + Save Draft but NO Send.
+    // The bottom "Composer actions" bar has Cancel (Save Draft only when the host wires drafts) but NO Send.
     const actionBar = screen.getByRole('region', { name: 'Composer actions' });
     expect(within(actionBar).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-    expect(within(actionBar).getByRole('button', { name: 'Save Draft' })).toBeInTheDocument();
+    expect(within(actionBar).queryByRole('button', { name: 'Save Draft' })).toBeNull();
     expect(within(actionBar).queryByRole('button', { name: /send/i })).toBeNull();
   });
 });

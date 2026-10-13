@@ -16,7 +16,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 **Key Concepts**:
 - **Local quality gates** run before commits (code-review, adr-check, lint)
 - **`CI / Router`** (`ci-router.yml`) is the single required status check on every PR to `master` — it dispatches a blocking Tier 1 and an advisory Tier 2
-- Several other workflows report on PRs (actionlint, `css-reset-gate.yml`, `office-addins-tests.yml`, `provisioning-prereqs-validate.yml`, path-scoped gates) but are **not** in the required-check list, so a red there does not by itself block merge
+- Several other workflows report on PRs (actionlint, `css-reset-gate.yml`, `office-addins-tests.yml`, path-scoped gates) but are **not** in the required-check list, so a red there does not by itself block merge
 - **Deployment is operator-driven**: every deploy workflow in this repo is either `workflow_dispatch`-only, or auto-deploys only to a non-production target (dev slot). Production always requires a manual trigger or a GitHub Environment reviewer approval
 - A legacy monolithic pipeline (`sdap-ci.yml` + its `sdap-ci-docs-only.yml` fallback) still runs but is **no longer the required branch-protection check** — it has been superseded by `CI / Router` and is pending deletion by another project
 
@@ -70,8 +70,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 │   the gate (excluded from adjudication by construction).            │
 └────────────────────────────────────────────────────────────────────┘
    Also run on PRs, REPORTING but NOT in the required-check list:
-   actionlint (every PR) · provisioning-prereqs-validate.yml (every PR,
-   advisory) · css-reset-gate.yml (Code Page index.html paths) ·
+   actionlint (every PR) · css-reset-gate.yml (Code Page index.html paths) ·
    office-addins-tests.yml (office-addins + related server paths) ·
    build-provisioning-sidecar.yml (sidecar paths — build+Trivy+size only
    on PR, no push) · deploy-infrastructure.yml lint + compile only (bicep
@@ -103,6 +102,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 │                               (admin uploads to the org catalog)     │
 │  deploy-external-spa.yml   — deploy the external SPA to an SWA       │
 │  publish-dataverse-solutions-manifest.yml — release-time only        │
+│  publish-copilot-agent-template.yml — release-time only (T257)       │
 └────────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -123,7 +123,6 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | Local Quality | Manual | ~30s | Yes (recommended) |
 | `CI / Router` (`ci-router.yml`) | PR → master, push → master, merge_group | Tier 1 p95 ≤ 3 min, Tier 2 p95 ≤ 8 min (spec budgets) | **Yes — the only required status check** |
 | actionlint (`workflows-validate.yml`) | Every PR, no path filter | ~17s | Reports only — not in the required-check list (see note below) |
-| `provisioning-prereqs-validate.yml` | PR, push → master, merge_group | ~30s cold | Advisory |
 | `css-reset-gate.yml` | PR/push touching Code Page `index.html` | sub-second | Reports only — not in the required-check list |
 | `office-addins-tests.yml` | PR/push touching office-addins + related server/test paths | gated-jest ~16s; other jobs vary | Reports only — not in the required-check list |
 | `build-provisioning-sidecar.yml` | PR/push touching the sidecar; dispatch | n/a | Blocking for its own scope (fixable HIGH/CRITICAL Trivy finding hard-fails); push leg also publishes the image |
@@ -135,7 +134,8 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `deploy-teams-app.yml` | Manual dispatch | n/a | N/A (builds, packages, publishes an artifact — not a live deploy) |
 | `deploy-external-spa.yml` | Manual dispatch | n/a | N/A (deploy) |
 | `publish-provisioning-arm-artifacts.yml` | Push to `master` (bicep paths), dispatch | n/a | N/A (publish) |
-| `publish-dataverse-solutions-manifest.yml` | Manual dispatch (release-time only) | n/a | N/A (publish) |
+| `publish-dataverse-solutions-manifest.yml` | Manual dispatch (release-time); PR dry run on the SpaarkeMaster source | n/a | N/A (publish) |
+| `publish-copilot-agent-template.yml` | Manual dispatch (release-time); PR dry run on the Copilot agent source | n/a | N/A (publish) |
 | `adr-audit.yml` | Weekly (Mon 09:00 UTC), dispatch | ~5 min | No (advisory; tracking issue) |
 | `nightly-health.yml` | Daily (06:00 UTC), dispatch | per-job timeouts 20-60 min | No (advisory; rolling tracking issue) |
 | `client-tests.yml` | Nightly (07:00 UTC), dispatch | n/a | No (advisory baseline over 40 client packages) |
@@ -154,7 +154,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `ci-router.yml` | CI (job: `Router`) | **Blocking — required check** | Single-gate router: classifies the diff, dispatches Tier 1 + Tier 2, aggregates into `CI / Router` |
 | `ci-tier1-blocking.yml` | CI Tier 1 (Blocking) | Blocking (reusable, called by the router) | Compile, full ArchTest suite, changed-surface smoke, auth smoke, eval gate, tenant isolation, Compose fidelity gate, Xrm capability guard; the DataGrid external-host gate is advisory until its flip |
 | `ci-tier2-advisory.yml` | CI Tier 2 (Advisory) | Advisory (reusable, called by the router) | Format, lint, full unit-test suite, ADR compliance, markdown links, Last-Reviewed stamp, plugin size; posts one deduplicated PR comment |
-| `client-tests.yml` | Client Tests (Jest) | Scheduled / advisory | Nightly jest baseline across every client package with a real `test` script (40 packages as of authoring) |
+| `client-tests.yml` | Client Tests | Scheduled / advisory | Nightly test baseline (jest, vitest, node:test) across every client package with a real `test` script (count discovered at runtime; 43 on 2026-10-12) |
 | `css-reset-gate.yml` | CSS Reset Gate | PR/push (scoped); reports only | Verifies every Code Page host `index.html` carries the box-sizing reset |
 | `deploy-bff-api.yml` | Deploy BFF API | Manual deploy | Build, test, publish a versioned artifact to blob storage (H9), deploy to staging slot, verify, swap to production, verify, auto-rollback |
 | `deploy-external-spa.yml` | Deploy External SPA (Static Web App) | Manual deploy | Build + deploy the external Secure Project Workspace SPA to Azure Static Web Apps |
@@ -165,8 +165,8 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `deploy-teams-app.yml` | Deploy Teams App Package | Manual | Build the external-spa Teams surface as a sanity gate, package the Teams manifest, publish it as a GitHub artifact |
 | `nightly-health.yml` | nightly-health | Scheduled / advisory | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy filesystem scan, dependency audit, Graph app-role parity; rolling tracking issue |
 | `office-addins-tests.yml` | Office Add-ins Tests (Gate) | PR/push (scoped); reports only | Gated jest ratchet (56 of 56 suites), production-only TypeScript typecheck, office-scope C# server suites, ESLint |
-| `provisioning-prereqs-validate.yml` | provisioning-prereqs-validate | PR/push/merge_group; advisory | Validates `prereqs.yaml` + `intake.schema.json` shape and parser parity with the `/provision-environment` skill |
-| `publish-dataverse-solutions-manifest.yml` | Publish Dataverse Solutions Manifest | Manual publish (release-time) | Locates the 8 canonical pre-built managed-solution ZIPs, uploads them, and publishes the manifest H6 reads |
+| `publish-dataverse-solutions-manifest.yml` | Publish Dataverse Solutions Manifest | Manual publish (release-time); PR dry run | Packs SpaarkeMaster managed + unmanaged from `src/dataverse/solutions/SpaarkeMaster`, checks both, and publishes them with the `dataverse-solutions-latest.json` manifest H6 reads (T218d) |
+| `publish-copilot-agent-template.yml` | Publish Copilot Agent Template | Manual publish (release-time); PR dry run | Builds the per-customer Copilot agent template from `src/solutions/CopilotAgent`, renders a sample, validates it against Microsoft's schemas, and publishes it with `copilot-agent-template-latest.json` (T257) |
 | `publish-provisioning-arm-artifacts.yml` | Publish Provisioning ARM Artifacts | Auto publish (push, bicep paths) | Compiles `customer.bicep` to ARM JSON and publishes it for H2a (`model1-shared` retired by task 225a) |
 | `report-workflow-health.yml` | report-workflow-health | Scheduled / advisory | Weekly rolling 7-day per-workflow success-rate report (tracking issue) |
 | `sdap-ci-docs-only.yml` | SDAP CI - Docs-Only Fallback | Legacy, PR-scoped | No-op success check pairing with `sdap-ci.yml`'s `paths-ignore` gap |
@@ -497,7 +497,9 @@ The subsections below are grouped by what each workflow does: the PR gate, stand
 
 **Triggers**: `pull_request` → `master`, `push` → `master`, `merge_group`
 
-The single required status check (`CI / Router`). A `classify` job (dorny/paths-filter, no `on:`-level path filter — a path filter here would re-introduce the stuck-pending trap) emits `bff` / `spaarke_ai` / `docs` / `ci_workflows` booleans and a derived `docs_only` flag, which is true only when EVERY changed file is documentation (a second `dorny/paths-filter` step with `predicate-quantifier: 'every'` detects any non-doc file; until 2026-10-06 client code plus a doc file counted as docs-only and skipped Tier 1). `tier1` and `tier2` are reusable-workflow calls gated on `docs_only != 'true'`. The final `router-result` job runs `if: always()` and aggregates via `re-actors/alls-green`, with Tier 2 **excluded from adjudication by construction** (not just `allowed-failures`) so a cancelled or red Tier 2 can never redden the gate. Tier 1 may legitimately be `skipped` (counts as pass) when no Tier-1 surface changed.
+The single required status check (`CI / Router`). A `classify` job (dorny/paths-filter, no `on:`-level path filter — a path filter here would re-introduce the stuck-pending trap) emits `bff` / `spaarke_ai` / `docs` / `ci_workflows` / `provisioning_prereqs` booleans and a derived `docs_only` flag, which is true only when EVERY changed file is documentation (a second `dorny/paths-filter` step with `predicate-quantifier: 'every'` detects any non-doc file; until 2026-10-06 client code plus a doc file counted as docs-only and skipped Tier 1). `tier1` and `tier2` are reusable-workflow calls gated on `docs_only != 'true'`. The final `router-result` job runs `if: always()` and aggregates via `re-actors/alls-green`, with Tier 2 **excluded from adjudication by construction** (not just `allowed-failures`) so a cancelled or red Tier 2 can never redden the gate. Tier 1 may legitimately be `skipped` (counts as pass) when no Tier-1 surface changed.
+
+**`prereqs` job (blocking, since 2026-10-09 — customer-provisioning-orchestration-r1 task 208).** Runs when `scripts/provisioning-prereqs/**`, `.claude/skills/provision-environment/**` or `ci-router.yml` changes — **including docs-only diffs**, because `.claude/**` counts as documentation and would otherwise skip the check for a skill-only change. It validates `scripts/provisioning-prereqs/prereqs.yaml` (top-level shape, per-prereq required fields, scope enum, unique ids, the SPE `never_delete` guard on `PRQ-T-01`) with `validate.ps1`, using the **same** `powershell-yaml` parser the `/provision-environment` skill uses (never substitute another parser), and compiles `intake.schema.json` as a Draft 2020-12 JSON Schema via `ajv-cli` + `ajv-formats` (needed for the `format: uuid` checks on `tenantId`/`subscriptionId`). It is adjudicated by `router-result` (`allowed-skips: tier1,prereqs`), so a red `prereqs` fails `CI / Router`. It replaced the standalone advisory `provisioning-prereqs-validate.yml`, which is deleted.
 
 #### `ci-tier1-blocking.yml` — CI Tier 1 (Blocking)
 
@@ -543,12 +545,6 @@ Every job carries `continue-on-error: true`. Spec budget: p95 ≤ 8 min (NFR-02)
 
 One job (`lint`) downloads `actionlint` and runs it with `-shellcheck=` (shellcheck integration disabled to avoid pre-existing `run:` block noise). Not a required check — see the note under [Pipeline Summary](#pipeline-summary).
 
-#### `provisioning-prereqs-validate.yml`
-
-**Triggers**: `pull_request`, `push` → `master`, `merge_group`
-
-Validates `scripts/provisioning-prereqs/prereqs.yaml` (top-level shape, per-prereq required fields, scope enum, unique ids, the SPE `never_delete` guard on `PRQ-T-01`) using the **same** `powershell-yaml` parser the `/provision-environment` skill uses, plus validates `intake.schema.json` as a Draft 2020-12 JSON Schema via `ajv-cli` + `ajv-formats` (needed for the `format: uuid` checks on `tenantId`/`subscriptionId`). Advisory; a follow-on task is filed to route it through the router's `classify` job.
-
 #### `css-reset-gate.yml` — CSS Reset Gate
 
 **Triggers**: `pull_request` / `push` → `master`, paths: `src/solutions/**/index.html`, `src/client/code-pages/**/index.html`, `scripts/check-html-css-reset.mjs`, or the workflow file itself
@@ -563,7 +559,7 @@ One job runs `node scripts/check-html-css-reset.mjs --all`, verifying every Code
 |-----|---------|
 | `gated-jest` | Runs an explicit, ratchet-only list of jest suites (`ci-gated-suites.txt`) — 56 of the package's 56 suites as of 2026-09-28; fails if a listed suite is missing or if jest runs a different count than the manifest declares (no vacuous green) |
 | `typecheck` | Production-only TypeScript typecheck — fails on any production `error TS`; a pinned, equality-checked count of accepted test-file debt (68 lines as of the last re-baseline) must also match exactly |
-| `server-tests` | A namespace-prefix-filtered slice of `Sprk.Bff.Api.Tests` (office/AI/documents/domain/seam/filters/auth namespaces) with a floor assertion (`MIN_SELECTED_TESTS`) so a renamed namespace can't silently shrink coverage |
+| `server-tests` | A namespace-prefix-filtered slice of `Sprk.Bff.Api.Tests` (what the Office add-ins call: office, documents, record-search/visualization, rag send-to-index, communications send, file access, share-link auth; ~1,441 tests as of 2026-10-12, #1748/#1782) run as a 2-leg matrix (`api-office` / `rest`; checks `Server tests (office scope) (api-office)` and `(rest)`), each leg with its own floor assertion (`MIN_SELECTED_TESTS`) so a renamed namespace can't silently shrink coverage |
 | `lint` | ESLint over `shared/`, `word/`, `outlook/` with `--max-warnings 0` |
 
 **This workflow DOES fail its own run on a red job. It does NOT block a merge** — master's ruleset names only `Router` as required (see the note under [Pipeline Summary](#pipeline-summary)); each job's summary says so explicitly. The companion nightly baseline for the other 39 of 40 client packages is `client-tests.yml`.
@@ -620,13 +616,19 @@ One job (`build_and_deploy`) builds `@spaarke/auth` from source first (its `dist
 
 **Triggers**: `workflow_dispatch` only
 
-`build_and_package` builds the `external-spa` Teams-tab surface as a fail-fast sanity gate (the manifest's `contentUrl` points at that already-deployed bundle), validates `appPackage/manifest.json` + icon assets, zips them into `appPackage.zip`, and uploads it as a build artifact; `deploy` republishes it as the longer-retention `teams-app-package` artifact. "Deploy" here means publishing the artifact — org-catalog submission is a manual tenant-admin action; no programmatic deploy endpoint exists for a Teams org-catalog app.
+**Inputs**: `environment` = `dev` (default) | `prod`. The first step of every job rejects any other value (a REST/`gh` dispatch can pass one the UI would refuse), and a workflow-level `concurrency` group `deploy-teams-app-{environment}` (`cancel-in-progress: false`) queues a second run for the same environment instead of overlapping it.
+
+`build_and_package` runs in the GitHub environment `external-spa-dev` / `external-spa-prod`. It builds the `external-spa` Teams-tab surface as a fail-fast sanity gate (reading the same `VITE_*` environment variables as `deploy-external-spa.yml`), stages the manifest as `appPackage/build/stage/manifest.json` — `dev` copies `appPackage/manifest.json` byte for byte; `prod` renders `appPackage/manifest.prod.json` with the id taken from the environment variable `TEAMS_APP_ID` (must be a GUID, not the all-zero placeholder) — validates the **staged** file (required fields, no `webApplicationInfo` per ADR-028 A8, no unrendered `${{` placeholder) and the icon assets, zips `manifest.json` + `color.png` + `outline.png` into `appPackage.zip`, and uploads it as a build artifact. `deploy` republishes it as the longer-retention artifact. **Artifact names**: `dev` → `teams-app-package-build` / `teams-app-package`; `prod` → `teams-app-package-prod-build` / `teams-app-package-prod`. "Deploy" here means publishing the artifact — org-catalog submission is a manual tenant-admin action; no programmatic deploy endpoint exists for a Teams org-catalog app (the prod package is built only until go-live, task 073).
+
+**Variables** (GitHub environment variables, not secrets, set per environment): `VITE_BFF_API_URL`, `VITE_BACKENDS` (optional), `VITE_MSAL_AUTHORITY`, `VITE_MSAL_CLIENT_ID`, `VITE_MSAL_TENANT_ID`, `VITE_MSAL_BFF_SCOPE`, `VITE_TEAMS_MSAL_CLIENT_ID`, `VITE_TEAMS_MSAL_TENANT_ID`, `VITE_TEAMS_MSAL_BFF_SCOPE`, and `TEAMS_APP_ID` (prod). The owner-supplied list with the dev values is in `projects/spaarke-SPA-external-access-platform-r3/notes/task-043-notes.md` section 3; no environment-specific value is written in the workflow.
 
 #### `deploy-external-spa.yml` — Deploy External SPA (Static Web App)
 
 **Triggers**: `workflow_dispatch` only (manual-only until a later phase adds a push/path trigger)
 
-One job builds the external Secure Project Workspace SPA (Vite production build with hardcoded non-secret CIAM/MSAL identifiers as build-time env vars), stages `staticwebapp.config.json` into the build output, and deploys to Azure Static Web Apps. **Secrets**: `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV`.
+**Inputs**: `environment` = `dev` (default) | `prod`. The job runs in the GitHub environment `external-spa-dev` / `external-spa-prod` (put required reviewers on `external-spa-prod`; the prod run is a deliberate human act). The first step rejects any value other than `dev`/`prod`, and a workflow-level `concurrency` group `deploy-external-spa-{environment}` (`cancel-in-progress: false`) queues overlapping runs for the same environment.
+
+One job validates the environment's variables (a fail-closed preflight before the build: required values present; GUID, `api://{guid}/user_impersonation`, https and JSON-list formats; the authority must be an https URL whose path is one tenant GUID segment), builds the external Secure Project Workspace SPA (Vite production build; every `VITE_*` value is read from the environment's `vars.*` — nothing environment-specific is committed), stages `staticwebapp.config.json` into the build output, and deploys to Azure Static Web Apps: `dev` → `swa-spaarke-external-spa-dev`, `prod` → `swa-spaarke-external-spa-prod`. **Secrets**: `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV` (dev), `AZURE_SWA_TOKEN_EXTERNAL_SPA_PROD` (prod, an `external-spa-prod` environment secret; no fall-back to the dev token). **Variables**: see the task-043 notes section 3 (same list as `deploy-teams-app.yml`, minus `TEAMS_APP_ID`).
 
 ### Provisioning Artifact Publishers
 
@@ -638,9 +640,15 @@ Installs the `az bicep` CLI, compiles `customer.bicep` to flattened ARM JSON (it
 
 #### `publish-dataverse-solutions-manifest.yml` — Publish Dataverse Solutions Manifest
 
-**Triggers**: `workflow_dispatch` only (release-time; deliberately **no** `push` trigger — a push runner has never built the solution ZIPs, so an earlier `push: master` trigger failed on every solution change)
+**Triggers**: `workflow_dispatch` (input `publish`, default false = dry run); `pull_request` on `src/dataverse/solutions/SpaarkeMaster/**`, `scripts/solution-authoring/SpaarkePackageScope.psm1` and the workflow itself (dry run only)
 
-Locates all 8 canonical managed-solution ZIPs under `src/solutions/<Folder>/{bin/Release,bin/Debug,.,out}/*.zip` (fails if any of the 8 is missing — it refuses to publish a partial manifest), reads each ZIP's `solution.xml` version, uploads the ZIPs, and publishes `dataverse-solutions-latest.json` (the exact blob name `SolutionArtifactManifestOptions` resolves) plus a versioned copy. **Secrets/vars**: `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC), repo variable `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT`. This workflow does **not** build/pack the ZIPs — that is a separate, larger follow-on item for 6 of the 8 solutions (Vite/React Code Page source trees with no unpacked-solution scaffolding yet).
+Packs SpaarkeMaster managed + unmanaged from the committed source `src/dataverse/solutions/SpaarkeMaster` with the pac CLI, checks both zips (name, version, managed flag, no environment-variable values) and the source (no missing dependency on `solution="Active"`), writes the manifest with `New-SpaarkeMasterManifest`, and keeps everything as a run artifact. Only a manual run on `master` with `publish: true` uploads the versioned zips, a versioned manifest, the rollback pointer `dataverse-solutions-latest.previous.json` and the new `dataverse-solutions-latest.json` that H6 reads (T218d; ADR-027 §3-§4 amended 2026-10-07). A version publishes once. Runbook: [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](SPAARKE-SOLUTION-RELEASE-PROCESS.md). **Secrets/vars**: `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC), repo variable `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT`.
+
+#### `publish-copilot-agent-template.yml` — Publish Copilot Agent Template
+
+**Triggers**: `workflow_dispatch` (input `publish`, default false = dry run); `pull_request` on `src/solutions/CopilotAgent/**`, `scripts/copilot-agent/**`, `tests/scripts/CopilotAgentPackage.Tests.ps1` and the workflow itself (dry run only)
+
+Runs the package's Pester tests, then builds the per-customer Copilot agent template from `src/solutions/CopilotAgent` (`New-CopilotAgentTemplate` — refuses permissions, `webApplicationInfo`, a bot, a knowledge capability, hard-coded tenant/app/reference ids, or schema versions other than manifest v1.30 / DA v1.8 / plugin v2.4). It writes `copilot-agent-template-latest.json` with `New-CopilotAgentTemplateManifest`, renders a sample package and validates it against Microsoft's published JSON schemas (`scripts/copilot-agent/test_rendered_package.py`). Only a manual run on `master` with `publish: true` uploads the versioned template, a versioned manifest, the rollback pointer and the new latest manifest. A version publishes once (bump `version` in `appPackage/manifest.json`). The operator renders each customer's package from it (`scripts/copilot-agent/Render-CopilotAgentPackage.ps1`; [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §7.12). **Secrets/vars**: as above.
 
 ### Legacy Pipeline (superseded, pending deletion)
 
@@ -673,7 +681,7 @@ Five workflows run on a `schedule:` trigger. There is no longer a single "nightl
 | Workflow | Schedule | What it reports | Blocking |
 |---|---|---|---|
 | `nightly-health.yml` | Daily, 06:00 UTC | Flake hunt, bundle-size drift, vuln scan, full integration suite, coverage observation, Trivy fs scan, dependency audit, Graph app-role parity | No — rolling tracking issue |
-| `client-tests.yml` | Nightly, 07:00 UTC | jest baseline across 40 client packages (pass/fail/install-failed table) | No — job summary + `client-test-baseline` artifact |
+| `client-tests.yml` | Nightly, 07:00 UTC | test baseline (jest, vitest, node:test) across the client packages (pass/fail/install-failed/deps-build-failed table) | No — job summary + `client-test-baseline` artifact |
 | `adr-audit.yml` | Weekly, Monday 09:00 UTC | Full ADR NetArchTest compliance | No — tracking issue (see [above](#weekly-adr-audit)) |
 | `report-workflow-health.yml` | Weekly, Monday 09:00 UTC | Rolling 7-day per-workflow success rate across every `.github/workflows/*.yml` | No — tracking issue |
 | `pcf-build-prod-nightly.yml` | Daily, 08:00 UTC | `npm run build:prod` for every PCF control, judged by the build output (pcf-scripts exits 0 on a failed build) | No — advisory; job summary + artifact |
@@ -698,7 +706,7 @@ Five workflows run on a `schedule:` trigger. There is no longer a single "nightl
 
 ### `client-tests.yml`
 
-Discovers every `package.json` with a real `test` script (filters out the npm-init default), matrix-runs `npm test -- --ci` per package (`max-parallel: 8`, `continue-on-error: true` per leg), and writes a combined pass/fail/install-failed table to the job summary plus a `client-test-baseline` artifact. Deliberately **not** wired into `ci-tier1-blocking.yml`/`ci-tier2-advisory.yml` — see the file's own header for the promotion criteria. `office-addins-tests.yml`'s `gated-jest` job is the one promoted subset that *does* gate PRs today.
+Discovers every `package.json` with a real `test` script (filters out the npm-init default), matrix-runs `npm test -- --ci` per package (jest; vitest packages such as `external-spa` and node:test packages such as `EventCommands` are covered by the same `npm test` script) (`max-parallel: 8`, `continue-on-error: true` per leg; vitest packages get no `--ci`/`--reporters`, which vitest rejects), and writes a combined pass/fail/install-failed/deps-build-failed table to the job summary plus a `client-test-baseline` artifact. Each leg is `npm install` → **install + build the shared libraries the package depends on** → tests. The library set is derived from the package, never listed: `file:` dependencies (transitively; built when `main`/`types` point at `dist/`), siblings that any `../**/dist` path string in a `tsconfig*.json` file points into (not only `paths` entries), and siblings whose source the package imports by relative path without declaring them; any package with a `refreshTypes` script (PCF controls) also runs `npm run refreshTypes` for the gitignored `generated/ManifestTypes`. A library that will not install/build, or a failing `refreshTypes`, is reported as `deps-build-failed`, not `fail` — the package's tests never ran. Jest `moduleNameMapper` is deliberately not used to derive the set (installing a source-mapped library gives it a second copy of react). Deliberately **not** wired into `ci-tier1-blocking.yml`/`ci-tier2-advisory.yml` — see the file's own header for the promotion criteria. `office-addins-tests.yml`'s `gated-jest` job is the one promoted subset that *does* gate PRs today.
 
 **Manual dispatch**: `gh workflow run client-tests.yml -f package_filter=<substring>` to scope to matching package paths.
 
@@ -1056,14 +1064,14 @@ stages until task 249, 2026-10-02 retired them.)*
 | Workflow | Secret |
 |---|---|
 | `deploy-office-addins.yml` | `AZURE_STATIC_WEB_APPS_API_TOKEN` |
-| `deploy-external-spa.yml` | `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV` |
+| `deploy-external-spa.yml` | `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV` (dev), `AZURE_SWA_TOKEN_EXTERNAL_SPA_PROD` (prod) |
 
 ### Provisioning Artifact Publishers
 
 | Workflow | Secret / Variable |
 |---|---|
 | `build-provisioning-sidecar.yml` | `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC); repo variable `SIDECAR_ACR_LOGIN_SERVER` |
-| `publish-provisioning-arm-artifacts.yml`, `publish-dataverse-solutions-manifest.yml` | `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC); repo variable `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT` |
+| `publish-provisioning-arm-artifacts.yml`, `publish-dataverse-solutions-manifest.yml`, `publish-copilot-agent-template.yml` | `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC); repo variable `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT` |
 
 ### Nightly Health — Graph App-Role Parity (currently unconfigured)
 

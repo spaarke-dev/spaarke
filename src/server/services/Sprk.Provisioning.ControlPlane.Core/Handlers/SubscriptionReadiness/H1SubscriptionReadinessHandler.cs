@@ -71,8 +71,8 @@
 //
 // TENANCY MODEL NORMALIZATION:
 //   The POML uses colloquial names (SpaarkeOwned / CustomerOwned); the
-//   ProvisioningRun.TenancyModel typed field uses (Model1Shared /
-//   Model2Dedicated) per design.md §6.2 property comment. Both name
+//   ProvisioningRun.TenancyModel typed field uses Model1 / Model2 (T224; pre-T224
+//   Model1Shared / Model2Dedicated) per design.md §6.2 property comment. Both name
 //   conventions are accepted at read time — the handler normalizes to an
 //   internal enum-like set (CustomerOwned requires the Lighthouse branch).
 //   Any unrecognized value returns HandlerResult.Failure(Resumable,
@@ -327,6 +327,44 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
                 FailureClass.Resumable,
                 SubscriptionReadinessRejectionCodes.SubscriptionUnreachable,
                 reachabilityResult.Diagnostic);
+        }
+
+        // (5.2) T228 (ADR-027 one subscription per customer): the operator typed this id, so before H1 writes anything
+        //       (provider registration below) prove the subscription holds no other customer's stamp.
+        SubscriptionReadinessCheckResult dedicationResult;
+        try
+        {
+            dedicationResult = await _probe.CheckSubscriptionDedicatedAsync(
+                subscriptionId, envelope.CustomerId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H1 subscription-readiness probe (dedication) threw unexpected exception: runId={RunId} " +
+                "customerId={CustomerId} subscriptionId={SubscriptionId}",
+                envelope.RunId, envelope.CustomerId, subscriptionId);
+            var diagnostic =
+                $"Subscription-readiness probe (dedication) infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                "Resumable — nothing was written.";
+            await MarkFailedAsync(
+                run, etag, SubscriptionReadinessRejectionCodes.ProbeInfrastructureError,
+                diagnostic, evidence: null, cancellationToken).ConfigureAwait(false);
+            return new HandlerResult.Failure(
+                FailureClass.Resumable, SubscriptionReadinessRejectionCodes.ProbeInfrastructureError, diagnostic);
+        }
+
+        if (!dedicationResult.Passed)
+        {
+            _logger.LogWarning(
+                "H1 subscription readiness failed (dedication): runId={RunId} customerId={CustomerId} subscriptionId={SubscriptionId}",
+                envelope.RunId, envelope.CustomerId, subscriptionId);
+            var dedicationCode = dedicationResult.ListingFailed
+                ? SubscriptionReadinessRejectionCodes.SubscriptionListingFailed
+                : SubscriptionReadinessRejectionCodes.SubscriptionNotDedicated;
+            await MarkFailedAsync(
+                run, etag, dedicationCode, dedicationResult.Diagnostic, dedicationResult.Evidence, cancellationToken)
+                .ConfigureAwait(false);
+            return new HandlerResult.Failure(FailureClass.Resumable, dedicationCode, dedicationResult.Diagnostic);
         }
 
         // (5.5) HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27) — F6:

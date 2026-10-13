@@ -4,7 +4,8 @@
     <title>Class-B verify-first rows (B10, B14, B16, B18, B20, B22) — grep-verify current state, apply-if-open, annotate punch list</title>
     <phase>Pre-Live-Fire — Class-B verified-open sweep (routing amendment 2026-08-24 SESSION 7)</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <note date="2026-10-08">Executed 2026-08-24 (B10 commit 74efa5053; results in notes/task-204a-execution-results.md). Re-verified 2026-10-08: B10 KV ref still emitted (legacy branch; the keyless D13 branch omits it by design), B14, B16, B18 (n/a), B20 hold. B22 is obsolete: the per-tenant budget gate it wired was replaced by the stamp AiSpendLimit (T254), whose exception maps to 429 + Retry-After in MiddlewarePipelineExtensions.cs, so no per-endpoint wiring is needed.</note>
     <rigor>FULL</rigor>
     <rigor-reason>Touches src/server/api/Sprk.Bff.Api/** and src/server/services/Sprk.Provisioning.ControlPlane.Core/** (BFF + L2 code). Per root CLAUDE.md §8 rigor decision tree: `bff-api` + `l2-controlplane` tags always trigger FULL. Per §10 BFF hygiene: any BFF-touching task requires publish-size verification + adr-check + code-review at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>

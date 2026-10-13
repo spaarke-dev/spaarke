@@ -168,8 +168,18 @@ public sealed class DelegationRuleTestFixture : WorkspaceTestFixture
             // would reach the real DataverseWebApiService — a network call from a unit-test host.
             services.RemoveAll<IDataverseRecordShareService>();
             services.AddSingleton<IDataverseRecordShareService>(RecordShares);
+
+            // Task 175: /can-manage-access reads what a work assignment or project is filed under (followsParents) through
+            // the app-only reader. An in-memory world (empty unless a test seeds it) instead of the real client — a network
+            // call from a unit-test host.
+            services.RemoveAll<Spaarke.Dataverse.IGenericEntityService>();
+            services.AddSingleton(_ => Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.EntitiesOver(() => FilingWorld).Object);
         });
     }
+
+    /// <summary>Task 175: the rows /can-manage-access walks for followsParents (work assignments, projects, their parents).</summary>
+    internal Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld FilingWorld { get; set; } =
+        Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard();
 
     /// <summary>Config sufficient for the real <see cref="DataverseWebApiClient"/> constructor (Moq invokes it).</summary>
     private static IConfiguration ClientConfig() =>

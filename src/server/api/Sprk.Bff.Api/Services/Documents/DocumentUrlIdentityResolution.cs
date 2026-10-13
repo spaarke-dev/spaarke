@@ -1,5 +1,6 @@
 using System.ServiceModel;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
@@ -12,6 +13,8 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// FR-01 (spaarkeai-word-add-in-r1 task 012): which <c>sprk_document</c>, if any, does an open document's URL
 /// denote? <c>Office.context.document.url</c> → Graph <c>/shares/u!{base64url}/driveItem</c> (as the caller) →
 /// <c>driveId</c> + <c>itemId</c> → <c>sprk_document</c> via the <c>sprk_graphitemid_uk</c> alternate key.
+/// Task 112 adds the by-ID entry point (<see cref="ResolveByIdAsync"/>) for a document the pane already knows by its
+/// stamp; both entry points build the same <see cref="Resolution"/>.
 /// </summary>
 /// <remarks>
 /// <para><b>Three answers, never two.</b> Resolved; not a Spaarke document (a definitive "no" the pane treats as a
@@ -50,12 +53,24 @@ public static class DocumentUrlIdentityResolution
     /// </summary>
     public const string ReasonIdentityConflict = "identity_conflict";
 
+    /// <summary>
+    /// Task 120: no saved <c>.eml</c> document carries this email's keys (<c>resolve-email-identity</c>). The pane
+    /// shows its ordinary save form.
+    /// </summary>
+    public const string ReasonNotSaved = "not_saved";
+
+    /// <summary>RFC 5322's line limit — the same cap as <c>EmailMetadata.InternetMessageId</c> on the save.</summary>
+    public const int MaxEmailKeyLength = 998;
+
     // Declared locally, as OfficeDocumentPersistence does, so this path carries no dependency on Compose internals.
     private const string DocumentLogicalName = "sprk_document";
     private const string GraphItemIdAttribute = "sprk_graphitemid";
     private const string GraphDriveIdAttribute = "sprk_graphdriveid";
     private const string DocumentNameAttribute = "sprk_documentname";
     private const string FileNameAttribute = "sprk_filename";
+    private const string EmailMessageIdAttribute = "sprk_emailmessageid";
+    private const string IsEmailArchiveAttribute = "sprk_isemailarchive";
+    private const string CreatedOnAttribute = "createdon";
 
     /// <summary>
     /// The DIRECT association slots, in the regarding priority of the polymorphic-resolver pattern (matter &gt;
@@ -256,13 +271,181 @@ public static class DocumentUrlIdentityResolution
                 row.Id, shared.DriveId);
         }
 
-        return new Result(
-            new Resolution(
-                row.Id,
-                row.GetAttributeValue<string>(DocumentNameAttribute),
-                row.GetAttributeValue<string>(FileNameAttribute),
-                FirstRelatedRecord(row)),
-            null);
+        return new Result(ToResolution(row), null);
+    }
+
+    /// <summary>
+    /// Task 112 (UAT round 11 item 4): the identity of a <c>sprk_document</c> named by its ID — the same
+    /// <see cref="Resolution"/> <see cref="ResolveAsync"/> builds from a URL, from the same columns and the same four
+    /// direct slots, for a document the pane identified by its stamp rather than by its URL (e.g. after Quick Save).
+    /// Returns <see langword="null"/> when no row has this id; throws 503 (<c>identity_resolution_unavailable</c>) when
+    /// Dataverse cannot answer — the same "absent vs. indeterminate" split as the URL path, never a guess.
+    /// </summary>
+    /// <remarks>
+    /// Called from the <c>GET /api/documents/{documentId}/identity</c> HANDLER only, i.e. after
+    /// <c>DocumentAuthorizationFilter("read")</c> allowed the caller on this id. The read itself is app-only (the
+    /// <see cref="IGenericEntityService"/> seam, as on the URL path); it is the filter, not this read, that decides
+    /// whether the caller may learn anything about the row.
+    /// </remarks>
+    public static async Task<Resolution?> ResolveByIdAsync(
+        Guid documentId,
+        IGenericEntityService dataverse,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        Entity? row;
+        try
+        {
+            row = await dataverse.RetrieveAsync(DocumentLogicalName, documentId, LookupColumns, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A wrapped cancellation is the caller's, not an outage (same rule as FindDocumentByGraphItemIdAsync).
+            ct.ThrowIfCancellationRequested();
+
+            if (IsByIdNotFound(ex))
+                return null;
+
+            logger.LogWarning(ex,
+                "Document identity: Dataverse could not answer for sprk_document {DocumentId}; reporting unavailable, " +
+                "NOT absent.",
+                documentId);
+            throw Unavailable("Dataverse could not be reached to identify this document. Try again.");
+        }
+
+        return row is null ? null : ToResolution(row);
+    }
+
+    /// <summary>
+    /// Task 120 (UAT round 12 O6): the email's two keys, validated. <see cref="InternetMessageId"/> is the RFC 5322
+    /// Message-ID Outlook reports; <see cref="ExchangeItemId"/> is the Exchange item id of the same message in the
+    /// caller's mailbox, or <see langword="null"/>.
+    /// </summary>
+    public sealed record EmailKeys(string InternetMessageId, string? ExchangeItemId);
+
+    /// <summary>
+    /// Validates the keys of <c>POST /api/documents/resolve-email-identity</c>: <c>internetMessageId</c> is required,
+    /// both are capped at <see cref="MaxEmailKeyLength"/>. 400 ProblemDetails otherwise — and the value is never echoed
+    /// back (it identifies a message in someone's mailbox).
+    /// </summary>
+    public static EmailKeys ParseEmailKeys(string? internetMessageId, string? exchangeItemId)
+    {
+        var messageId = internetMessageId?.Trim();
+        if (string.IsNullOrEmpty(messageId))
+        {
+            throw new SdapProblemException(
+                "internet_message_id_required", "Internet Message ID Required",
+                "internetMessageId is required.", 400);
+        }
+
+        if (messageId.Length > MaxEmailKeyLength)
+        {
+            throw new SdapProblemException(
+                "internet_message_id_too_long", "Internet Message ID Too Long",
+                $"internetMessageId exceeds {MaxEmailKeyLength} characters.", 400);
+        }
+
+        var itemId = exchangeItemId?.Trim();
+        if (string.IsNullOrEmpty(itemId))
+            return new EmailKeys(messageId, null);
+
+        if (itemId.Length > MaxEmailKeyLength)
+        {
+            throw new SdapProblemException(
+                "exchange_item_id_too_long", "Exchange Item ID Too Long",
+                $"exchangeItemId exceeds {MaxEmailKeyLength} characters.", 400);
+        }
+
+        return new EmailKeys(messageId, string.Equals(itemId, messageId, StringComparison.Ordinal) ? null : itemId);
+    }
+
+    /// <summary>
+    /// Task 120 (UAT round 12 O6): the saved <c>.eml</c> <c>sprk_document</c> of an email —
+    /// <c>sprk_isemailarchive = true</c> and <c>sprk_emailmessageid</c> equal to either of the email's keys — or
+    /// <see langword="null"/> when none exists. When several exist (the same email saved to two records) the NEWEST by
+    /// <c>createdon</c> wins, <c>sprk_documentid</c> breaking a tie so the answer is deterministic. Throws 503
+    /// (<c>identity_resolution_unavailable</c>) when Dataverse cannot answer — never "not saved".
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why two keys.</b> <c>sprk_emailmessageid</c> holds the RFC Message-ID for every save since task 121
+    /// (<c>OfficeEmailEnricher.ResolveStoredMessageId</c>). Before it, the task pane sent the Exchange item id
+    /// (<c>Office.context.mailbox.item.itemId</c> — measured live 2026-10-08: every recent pane save stores an
+    /// <c>AAMk…</c>/<c>AQMk…</c> value), and a request without a Message-ID (an older pane, a draft) still stores the
+    /// item id. Matching only the RFC id would answer "not saved" for those emails, which is the report this route
+    /// exists to fix. The Exchange item id is mailbox-specific, so it only ever matches a save made from the caller's
+    /// own mailbox; the RFC id matches across mailboxes.</para>
+    /// <para><b>One candidate, one authorization.</b> Only the newest row is returned; the route then authorizes the
+    /// caller on THAT row. When the caller may not read it, the answer is 403 — an older copy the caller could read is
+    /// deliberately not searched for: trying rows until one authorizes would turn the route into an oracle over which
+    /// copies exist, and would cost one authorization per candidate on a single request.</para>
+    /// <para>The query is app-only (the <see cref="IGenericEntityService"/> seam, as on the URL path); it is the
+    /// route's <c>DocumentAuthorizationFilter</c>, not this read, that decides whether the caller may learn anything
+    /// about the row. Condition values are query parameters, never interpolated.</para>
+    /// </remarks>
+    public static async Task<Resolution?> ResolveByEmailMessageIdAsync(
+        EmailKeys keys,
+        IGenericEntityService dataverse,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var query = new QueryExpression(DocumentLogicalName)
+        {
+            ColumnSet = new ColumnSet(LookupColumns),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition(IsEmailArchiveAttribute, ConditionOperator.Equal, true);
+        var anyKey = new FilterExpression(LogicalOperator.Or);
+        anyKey.AddCondition(EmailMessageIdAttribute, ConditionOperator.Equal, keys.InternetMessageId);
+        if (keys.ExchangeItemId is not null)
+            anyKey.AddCondition(EmailMessageIdAttribute, ConditionOperator.Equal, keys.ExchangeItemId);
+        query.Criteria.AddFilter(anyKey);
+        query.AddOrder(CreatedOnAttribute, OrderType.Descending);
+        query.AddOrder("sprk_documentid", OrderType.Descending);
+
+        EntityCollection rows;
+        try
+        {
+            rows = await dataverse.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // The message id is not logged: it identifies a message in the caller's mailbox.
+            logger.LogWarning(ex,
+                "Email identity: Dataverse could not answer the saved-email lookup; reporting unavailable, NOT " +
+                "\"not saved\".");
+            throw Unavailable("Dataverse could not be reached to check whether this email is saved. Try again.");
+        }
+
+        var row = rows?.Entities.FirstOrDefault();
+        return row is null ? null : ToResolution(row);
+    }
+
+    /// <summary>The one place a <c>sprk_document</c> row becomes a <see cref="Resolution"/> — shared by the URL, the
+    /// id and the email paths so the routes cannot drift on names or slot order.</summary>
+    private static Resolution ToResolution(Entity row)
+        => new(
+            row.Id,
+            row.GetAttributeValue<string>(DocumentNameAttribute),
+            row.GetAttributeValue<string>(FileNameAttribute),
+            FirstRelatedRecord(row));
+
+    /// <summary>
+    /// Whether a BY-ID retrieve failed because the row does not exist: <c>0x80040217 ObjectDoesNotExist</c> anywhere
+    /// in the inner chain (<see cref="RecordContainerResolver.IsRecordNotFound"/>, typed on the fault code). The
+    /// alternate-key code <c>0x80060891</c> and the client's own alternate-key message do not apply to a by-id read,
+    /// so they are deliberately not matched here.
+    /// </summary>
+    private static bool IsByIdNotFound(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (RecordContainerResolver.IsRecordNotFound(current))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>The first populated direct association slot, in <see cref="RelatedRecordAttributes"/> order.</summary>

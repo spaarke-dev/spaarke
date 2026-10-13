@@ -89,10 +89,10 @@ public static class AppConfigSeedRejectionCodes
     public const string RunDeletedDuringSeed = "appconfig-run-deleted-during-seed";
 
     /// <summary>
-    /// The manifest file (<c>scripts/seed-data/manifest.yaml</c>) was not
-    /// found on disk. Manifest is the source of the manifestHash portion of
-    /// the H12b idempotency key — its absence blocks the run because we
-    /// cannot compute a deterministic key without it.
+    /// The seed manifest (<c>scripts/seed-data/manifest.yaml</c>, embedded in
+    /// the L2 assembly — task 253) could not be read. Manifest is the source of
+    /// the manifestHash portion of the H12b idempotency key — its absence
+    /// blocks the run because we cannot compute a deterministic key without it.
     /// </summary>
     public const string ManifestNotFound = "appconfig-manifest-not-found";
 }

@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{9e34980e-d823-f111-88b4-7ced8d1dc988}</WebResourceId>
+  <Name>sprk_/icons/apps/microsoft-to-do.svg</Name>
+  <DisplayName>Microsoft To Do Icon</DisplayName>
+  <Description>Fluent UI icon:  - Microsoft To Do app icon — task integration branding</Description>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>1</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_iconsappsmicrosoft-to-dosvg9E34980E-D823-F111-88B4-7CED8D1DC988</FileName>
+</WebResource>

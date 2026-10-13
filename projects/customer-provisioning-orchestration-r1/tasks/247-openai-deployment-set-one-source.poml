@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="247" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>OpenAI deployment set — remove the inert AutoRecompose path and make H0's quota + version checks test the deployed set in the OpenAI region (plan G27, owner 2026-10-06)</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T247 (gap G27), re-scoped by the owner 2026-10-06</phase>
+    <gate>startable now (T246 ✅)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies L2 handler code (.cs), H0 preflight probes, DI wiring and tests; failure mode is a fresh subscription without OpenAI quota passing H0 and failing 20 minutes into H2a.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deletion of a self-contained seam plus a catalog alignment with a forcing test; every touched file is named.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/skills/provision-environment/SKILL.md and CHANGELOG (main-session-only)</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, openai, preflight, model1-dedicated, testing</tags>
+    <deps>246</deps>
+  </metadata>
+
+  <prompt>
+    Remove OpenAI AutoRecompose (not needed), and make H0's OpenAI quota and model-version checks test exactly the deployments
+    customer.bicep creates, in the region it creates them.
+  </prompt>
+
+  <role>SPAARKE platform developer (L2 control plane, Azure ARM SDK, Bicep). Follow the provisioning constraints and ADR-038.</role>
+
+  <goal>
+    No AutoRecompose code, option, DI registration or test remains. One C# catalog (PinnedModelCatalog) lists the stamp's
+    OpenAI deployments (name, model, version, capacity) and the default OpenAI region, and a test fails if it differs from
+    the compiled customer.json. H0's TPM-headroom probe requests each model's summed deployment capacity, and both OpenAI
+    probes query the run's openAiLocation (else the template default), so a subscription without quota fails at H0.
+  </goal>
+
+  <justification>
+    <existing>AutoRecompose: BicepInfraDeployOptions.OpenAiDeploymentSetPolicy, IOpenAiDeploymentSetRecomposer, ArmOpenAiDeploymentSetRecomposer, H2a step 8.5, Worker registration — computes a drop set and only logs it (G27). H0: ArmCognitiveServicesTpmProbe (own hard-coded model/TPM table) and ArmOpenAiPinFreshnessProbe (PinnedModelCatalog), both on intake `region`.</existing>
+    <extension>Extend PinnedModelCatalog with the deployment rows + default OpenAI region; the probes read it. No new component.</extension>
+    <cost-of-doing-nothing>H0 checks westus2 while OpenAI deploys to westus3, requests text-embedding-3-small (not deployed) and checks gpt-4o 2024-08-06 (deployed: 2024-11-20) — a quota-less subscription passes H0 and fails ~20 minutes into H2a. AutoRecompose, if ever switched on, could only drop a deployment the BFF calls by name (gpt-4o, gpt-4o-mini, text-embedding-3-large), producing a stamp that deploys green and fails at runtime.</cost-of-doing-nothing>
+  </justification>
+
+  <context>
+    <background>
+      Owner 2026-10-06: "is it needed? if not needed then remove it; if it's needed then build it" → AutoRecompose removed
+      (the frontier models it was built to drop left the set in T225a; the BFF calls every remaining deployment by name),
+      H0's checks built properly. State read 2026-10-06:
+      - openai.bicep `deployments` default: gpt-4o 2024-11-20 cap 150; gpt-4o-mini 2024-07-18 cap 200; spaarke-gpt4o-mini
+        (model gpt-4o-mini) 2024-07-18 cap 30; text-embedding-3-large 1 cap 350. customer.bicep passes none; openAiLocation
+        default westus3.
+      - PinnedModelCatalog.Models: gpt-4o 2024-08-06, gpt-4o-mini 2024-07-18, text-embedding-3-large 1 (used by H0
+        pin-freshness probe, H12c rows, recomposer).
+      - ArmCognitiveServicesTpmProbe.DefaultRequestedTpmPerModel: gpt-4o 150, gpt-4o-mini 200, text-embedding-3-large 30,
+        text-embedding-3-small 350; mirrored by scripts/preflight/Test-AzureOpenAiTpmHeadroom.ps1.
+      - Both OpenAI probes read intake `region` (H0 primary region); H2a sends intake `openAiLocation` to customer.bicep.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/PinnedModelCatalog.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/{ArmCognitiveServicesTpmProbe,ArmOpenAiPinFreshnessProbe}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/{BicepInfraDeployOptions,H2aBicepInfraDeployHandler,IOpenAiDeploymentSetRecomposer,ArmOpenAiDeploymentSetRecomposer}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs (recomposer registration)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/HandlerRunInputs.cs (H0 inputs)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/{H2aBicepInfraDeployHandlerTests,ArmOpenAiDeploymentSetRecomposerTests,ArmCognitiveServicesTpmProbeTests,ArmOpenAiPinFreshnessProbeTests,H12cRuntimeReferencesHandlerTests,ArmTemplateInspectorTests}.cs</file>
+      <file>scripts/preflight/Test-AzureOpenAiTpmHeadroom.ps1; .claude/skills/provision-environment/SKILL.md (F5 auto-recompose text)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md (G27, T247)</file>
+    </files>
+  </knowledge>
+
+  <decisions>
+    <decision date="2026-10-06" by="owner">AI prompts on customer stamps are processed in the US Data Zone: every stamp OpenAI deployment uses SKU DataZoneStandard.</decision>
+    <decision date="2026-10-06" by="agent, from evidence">gpt-4o-mini 2024-07-18 is Deprecating in westus3 (new deployments blocked — 2026-08-22 stand-up F1/O1), so the `gpt-4o-mini` and `spaarke-gpt4o-mini` deployment NAMES (which the BFF addresses) run gpt-4.1-mini 2025-04-14 (Legacy, retires 2027-04-14; same API shape, no BFF change). gpt-4o stays 2024-11-20 (Legacy, retires 2027-04-14). Fresh-sub DataZoneStandard auto-quota (demo/prod/dev, read 2026-10-06): gpt-4o 300, gpt4.1-mini 2000, text-embedding-3-large 1000 — covers 150 / 230 / 350.</decision>
+    <decision date="2026-10-06" by="agent, from evidence">Stamps set AzureOpenAI__ChatModelName=gpt-4o-mini (per_env literal): without it AiModule skips the IChatClient registration (dev sets the same value).</decision>
+  </decisions>
+
+  <constraints>
+    <constraint source="owner 2026-10-06">Remove AutoRecompose completely (option + enum, interface, implementation, H2a step and ctor parameter, Worker registration, tests, skill text). Do not leave a no-op seam.</constraint>
+    <constraint source="single source">The deployment rows and the default OpenAI region live in PinnedModelCatalog only; a test compares them with the compiled customer.json (openai deployments default + openAiLocation default) in both directions. openai.bicep stays the deployed truth — do not change what is deployed.</constraint>
+    <constraint source="H0">TPM probe requests per model = sum of that model's deployment capacities; region = intake `openAiLocation` when set, else the catalog default. Pin-freshness probe uses the same region. Failing H0 behaviour (result shape, block on any model) is unchanged.</constraint>
+    <constraint source="H12c">H12c writes one row per deployment NAME (sprk_name is the lookup key callers use) — never the underlying model id.</constraint>
+    <constraint source="scope">No live Azure change; no BFF code change (one new per_env app setting). Deployment NAMES stay gpt-4o / gpt-4o-mini / spaarke-gpt4o-mini / text-embedding-3-large.</constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>Anything outside the listed files depends on OpenAiDeploymentSetPolicy or the recomposer (config, template, workflow) → STOP and report.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step order="1">Remove AutoRecompose (constraint "owner").</step>
+    <step order="2">PinnedModelCatalog: deployment rows + DefaultOpenAiLocation + RequestedTpmPerModel + region resolver; Models derived; forcing test against customer.json.</step>
+    <step order="3">Probes: TPM probe uses the catalog's requested TPM + OpenAI region; freshness probe uses the OpenAI region; H0 declares openAiLocation as an optional input; tests updated (incl. negative: a run without openAiLocation queries westus3, not `region`).</step>
+    <step order="4">PS script default + skill F5 text + plan G27/T247 + CHANGELOG.</step>
+    <step order="5">Verify (ControlPlane.Tests, Worker build, ArchTests) + Step 9.5 + close + commit + push.</step>
+  </steps>
+
+  <outputs>
+    <output type="file-deleted">IOpenAiDeploymentSetRecomposer.cs, ArmOpenAiDeploymentSetRecomposer.cs, ArmOpenAiDeploymentSetRecomposerTests.cs</output>
+    <output type="file-modified">PinnedModelCatalog.cs, both probes, H2a handler + options, Worker Program.cs, HandlerRunInputs.cs, tests, PS script, skill, plan, CHANGELOG</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`git grep -n -i "recompos\|OpenAiDeploymentSetPolicy" -- src scripts .claude/skills` returns nothing (CHANGELOG/history excepted).</criterion>
+    <criterion testable="true">A test fails if PinnedModelCatalog's deployment rows or default OpenAI region differ from customer.json; it passes today.</criterion>
+    <criterion testable="true">TPM probe requests gpt-4o 150, gpt-4o-mini 230, text-embedding-3-large 350 and no text-embedding-3-small; with no openAiLocation it queries westus3, with openAiLocation=eastus2 it queries eastus2 (tests).</criterion>
+    <criterion testable="true">Pin-freshness probe checks gpt-4o 2024-11-20 in the OpenAI region (test).</criterion>
+    <criterion testable="true">ControlPlane.Tests, Worker build and ArchTests pass; no new failures.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    COMPLETED 2026-10-06 (FULL rigor). Re-scoped with the owner from "make AutoRecompose real" (see decisions).
+
+    Delivered:
+    - AutoRecompose removed: BicepInfraDeployOptions.OpenAiDeploymentSetPolicy + enum, IOpenAiDeploymentSetRecomposer,
+      ArmOpenAiDeploymentSetRecomposer (+ tests), H2a step 8.5 + ctor param, Worker registration.
+    - One deployment set: openai.bicep `deployments` default = gpt-4o (gpt-4o 2024-11-20, 150), gpt-4o-mini
+      (gpt-4.1-mini 2025-04-14, 200), text-embedding-3-large (1, 350), all DataZoneStandard; spaarke-gpt4o-mini dropped.
+      PinnedModelCatalog.cs mirrors it (Deployments, Models, RequestedTpmByQuotaName, DefaultOpenAiLocation).
+    - Forcing test ArmTemplateInspectorTests.PinnedModelCatalog_MatchesTheCompiledCustomerTemplate (both directions,
+      openAiLocation default, no deployments override in customer.bicep, QuotaName prefix = OpenAI.{Sku}.). Seeded a
+      capacity change: it failed with a clear message.
+    - H0: TPM probe requests summed capacity per Azure quota name; both OpenAI probes use
+      ArmCognitiveServicesTpmProbe.ResolveOpenAiRegion (openAiLocation, else westus3); openAiLocation declared as
+      optional H0 intake.
+    - H12c: rows keyed by deployment NAME (sprk_name), sprk_modelid = the model it runs (ModelDeploymentReference gains
+      Name). Nothing reads sprk_modelid today (BFF ModelEndpoints is a stub).
+    - Manifest per_env literal AzureOpenAI__ChatModelName=gpt-4o-mini (AiModule registers no IChatClient without it);
+      catalog regenerated, -Verify OK.
+    - Test-AzureOpenAiTpmHeadroom.ps1 default = the three quota names; it and Test-SubscriptionVCpuQuota.ps1 pass
+      --subscription per call instead of `az account set`.
+    - Dead BFF config AzureOpenAI:ClassificationModelName removed (template is CopyToPublishDirectory=Never: no publish
+      size impact, no BFF code change).
+    - Docs/skills: pattern openai-quota-region-composition.md rewritten; provision-environment SKILL F4/F5/F8/F9;
+      inventory OpenAI row; deployment guide; preflight README; AI-MODEL-SELECTION-GUIDE; design.md §7.4 + ADR-020
+      Path A exception; plan G27/T247; CHANGELOG.
+
+    Verification: ControlPlane.Tests 2110/0/1; Worker build 0 warnings; ArchTests 363/363; bicep-e2e-dry-run PASS;
+    customer.json recompile identical; catalog -Verify OK.
+
+    Step 9.5 dispositions:
+    - adr-check: 0 violations. W1 (az account set in vCPU script) fixed. W2 (ADR-020 name vs model) Path A in design.md
+      + sprk_modelid now records the real model. W3 (mirror-ish tests) left for /test-diet at wrap-up. W4 verified: H4b
+      writes the literal on every run.
+    - code-review: 0 critical. W1 (QuotaName unchecked) fixed in the forcing test. W3 (re-run double count) documented
+      in the probe: fits fresh-sub grants (gpt-4o exactly 2 x 150 = 300). W4 (deployment guide) fixed. Stale comments
+      (H12c header, rejection code, PinnedModel doc, probe diagnostic, IntakeParameterCatalog, openai.bicep header,
+      SKILL Step 2 note) fixed; unused using removed from H2a.
+
+    Follow-ups (not done here):
+    (a) Existing stamps: an upgrade PUT changes the gpt-4o-mini deployment's model and all SKUs Standard ->
+        DataZoneStandard; whether ARM accepts that in place is unverified, and an incremental deploy leaves
+        spaarke-gpt4o-mini behind. Run a what-if before the first upgrade of a pre-T247 stamp (none known).
+    (b) Pin refresh before ~2027-01-14 (gpt-4o 2024-11-20 and gpt-4.1-mini 2025-04-14 retire 2027-04-14).
+    (c) docs/architecture/auth-AI-azure-resources.md still describes the dev-only spaarke-gpt4o-mini as a live
+        classification deployment (dev account fact; nothing reads it).
+  </notes>
+</task>

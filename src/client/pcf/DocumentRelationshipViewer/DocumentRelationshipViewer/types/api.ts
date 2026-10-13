@@ -140,8 +140,6 @@ export interface GraphMetadata {
  * Query parameters for the visualization API.
  */
 export interface VisualizationQueryParams {
-  /** Tenant identifier (required) */
-  tenantId: string;
   /** Minimum similarity threshold (0.0-1.0), default 0.65 */
   threshold?: number;
   /** Maximum documents per level (1-50), default 25 */

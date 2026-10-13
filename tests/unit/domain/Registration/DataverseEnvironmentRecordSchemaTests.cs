@@ -110,4 +110,33 @@ public class DataverseEnvironmentRecordSchemaTests
             because: "PascalCase key must NOT round-trip — the Dataverse wire form " +
                      "is lowercase and TryGetProperty is case-sensitive (REG-06).");
     }
+
+    [Theory]
+    [InlineData(0, TenancyModel.Model1)]
+    [InlineData(1, TenancyModel.Model2)]
+    public void MapFromJson_TenancyModelOptionValue_MapsToTheDataverseOption(int optionValue, TenancyModel expected)
+    {
+        // sprk_tenancymodel is read by its option VALUE. T224 renamed the Dataverse labels (Model1Shared → Model1,
+        // Model2Dedicated → Model2) and kept the values, so a renumbered enum would silently mislabel every record.
+        using var doc = JsonDocument.Parse(
+            $$"""{ "sprk_dataverseenvironmentid": "00000000-0000-0000-0000-000000000001", "sprk_tenancymodel": {{optionValue}} }""");
+
+        var record = DataverseEnvironmentRecord.MapFromJson(doc.RootElement);
+
+        record.TenancyModelValue.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("""{ "sprk_dataverseenvironmentid": "00000000-0000-0000-0000-000000000001" }""")]
+    [InlineData("""{ "sprk_dataverseenvironmentid": "00000000-0000-0000-0000-000000000001", "sprk_tenancymodel": null }""")]
+    [InlineData("""{ "sprk_dataverseenvironmentid": "00000000-0000-0000-0000-000000000001", "sprk_tenancymodel": "Model1" }""")]
+    public void MapFromJson_TenancyModelAbsentOrNotANumber_IsNull(string payload)
+    {
+        // The Web API returns the option VALUE; a missing, null or label-shaped value is not a tenancy model.
+        using var doc = JsonDocument.Parse(payload);
+
+        var record = DataverseEnvironmentRecord.MapFromJson(doc.RootElement);
+
+        record.TenancyModelValue.Should().BeNull();
+    }
 }

@@ -1,0 +1,13 @@
+<environmentvariabledefinition schemaname="sprk_KeyVaultUrl">
+  <description default="Azure Key Vault URL for secret resolution by BFF API. Format: https://{vault-name}.vault.azure.net/">
+    <label description="Azure Key Vault URL for secret resolution by BFF API. Format: https://{vault-name}.vault.azure.net/" languagecode="1033" />
+  </description>
+  <displayname default="Key Vault URL">
+    <label description="Key Vault URL" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

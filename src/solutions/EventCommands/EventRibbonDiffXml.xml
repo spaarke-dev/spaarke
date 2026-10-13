@@ -295,7 +295,9 @@
       <EnableRules>
         <!-- Always enabled - can add memos to any event -->
       </EnableRules>
-      <DisplayRules />
+      <DisplayRules>
+        <DisplayRule Id="sprk.CreatePrivilege.sprk_memo.DisplayRule" />
+      </DisplayRules>
       <Actions>
         <JavaScriptFunction Library="$webresource:sprk_event_ribbon_commands"
                            FunctionName="Spaarke.Event.AddMemo">
@@ -405,7 +407,11 @@
 
   <RuleDefinitions>
     <TabDisplayRules />
-    <DisplayRules />
+    <DisplayRules>
+      <DisplayRule Id="sprk.CreatePrivilege.sprk_memo.DisplayRule">
+        <EntityPrivilegeRule EntityName="sprk_memo" PrivilegeType="Create" PrivilegeDepth="Basic" />
+      </DisplayRule>
+    </DisplayRules>
     <EnableRules>
 
       <!-- Enable rule: Event is Active (status = Active) -->

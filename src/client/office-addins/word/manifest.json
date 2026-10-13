@@ -74,8 +74,7 @@
           "id": "CommandRuntime",
           "type": "general",
           "code": {
-            "page": "https://localhost:3000/word/commands.html",
-            "script": "https://localhost:3000/word/commands.js"
+            "page": "https://localhost:3000/word/commands.html"
           },
           "lifetime": "short",
           "actions": [
@@ -195,9 +194,5 @@
         }
       ]
     }
-  ],
-  "webApplicationInfo": {
-    "id": "b3965ea0-6942-4f17-81b3-2c645bd05ebf",
-    "resource": "api://1e40baad-e065-4aea-a8d4-4b7ab273458c"
-  }
+  ]
 }

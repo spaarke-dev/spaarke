@@ -658,8 +658,9 @@ describe('EmailTrackingPanel', () => {
     expect(switches[1]).toBeChecked(); // highPriority: true
   });
 
-  // unified-access-control-r2 task 138 (owner Q6): a communication INHERITS its parent's Access
-  // Permission; its own column is retired, so the panel offers no access-permission control at all.
+  // unified-access-control-r2 task 138 (owner Q6; task 173, owner round 81): a communication's access comes from its
+  // parent. Its own sprk_accesspermission is a display copy of the parent's value that enforcement never reads, so the
+  // panel offers no access-permission control at all.
   it('renders NO access-permission control — a communication inherits its parent permission (owner Q6)', () => {
     renderWithProvider(<EmailTrackingPanel {...baseTrackingProps()} />);
 

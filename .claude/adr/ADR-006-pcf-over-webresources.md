@@ -1,8 +1,8 @@
 # ADR-006: UI Surface Architecture — Code Pages, PCF, and Web Resources (Concise)
 
-> **Status**: Accepted (Revised 2026-03-19)
+> **Status**: Accepted (Revised 2026-03-19; amended 2026-10-08: form-event scripts)
 > **Domain**: Frontend Architecture
-> **Last Updated**: 2026-03-19
+> **Last Updated**: 2026-10-08
 
 ---
 
@@ -15,11 +15,14 @@ All Spaarke frontend UI is built using **three surface types**, each chosen base
 | **Code Page** (dialog, wizard, full page, side pane) | Standalone HTML web resource (Vite + React 19) | 19 (bundled) | `src/solutions/{Name}/` | **Default for all new UI** — standalone dialogs, wizards, pages, panels |
 | **PCF control** (form-embedded) | PCF (TypeScript/React) | 16/17 (platform) | `src/client/pcf/` | Only when Dataverse form binding is needed (bound properties, `updateView()` lifecycle) |
 | **Ribbon/command script** | Thin JS (invocation only) | N/A | Webresource JS | Invoke `navigateTo` to open Code Pages; no business logic |
+| **Form-event script** | Thin JS (form events only) | N/A | Webresource JS | OnLoad / OnSave / OnChange work that only a form script can do: form or field notifications, read-only/required/visible state, calling the BFF through `Spaarke.BffAuth`. No UI of its own, no access decision (2026-10-08 amendment) |
 | **Shared components** | React library | peer `>=16.14.0` | `src/client/shared/Spaarke.UI.Components/` | Consumed by all surfaces |
 
 ### Legacy Anti-Pattern Rule (Still Active)
 
 **No new legacy JavaScript web resources.** This means no jQuery, no framework-free JS with business logic, no ad hoc scripts. This rule is the origin of ADR-006 and remains in effect.
+
+**Amendment 2026-10-08 — thin form-event scripts.** A framework-free script on form events (OnLoad / OnSave / OnChange / data OnLoad) is allowed ONLY for what no PCF or Code Page can do: form/field notifications and per-record field state (read-only, required, visible). It calls only platform form APIs and the BFF through `Spaarke.BffAuth`, renders no UI of its own, makes no access decision (the server decides; the script displays or locks), fails safe, is namespaced, idempotent and jest-tested, and is registered on forms by a checked-in operator script. Full limits: `docs/adr/ADR-006-prefer-pcf-over-webresources.md` → Exceptions.
 
 ---
 
@@ -85,11 +88,12 @@ public updateView(context: ComponentFramework.Context<IInputs>): React.ReactElem
 - **MUST** use Code Page for all new standalone dialogs, wizards, and full-page UI
 - **MUST** use PCF only for form-embedded controls requiring bound properties
 - **MUST** keep ribbon/command bar scripts minimal (invocation only — call `navigateTo`, nothing else)
+- **MUST** keep form-event scripts within the amendment's limits (platform form APIs + BFF via `Spaarke.BffAuth`; no own UI; no access decision; tested; registered by an operator script)
 - **MUST** use `@spaarke/ui-components` shared library for reusable components
 
 ### MUST NOT
 
-- **MUST NOT** create legacy JavaScript web resources (no-framework JS, jQuery, ad hoc scripts)
+- **MUST NOT** create legacy JavaScript web resources (no-framework JS, jQuery, ad hoc scripts) — except thin form-event scripts within the 2026-10-08 amendment
 - **MUST NOT** add business logic to ribbon scripts
 - **MUST NOT** use a PCF + custom page wrapper when a Code Page achieves the same result
 - **MUST NOT** embed complex dialog UI inline in a PCF when it should be a standalone Code Page (extract to Code Page for reusability)

@@ -112,6 +112,7 @@ public static class SemanticSearchEndpoints
         [FromBody] SemanticSearchRequest request,
         ISemanticSearchService searchService,
         AuthorizationService authorizationService,
+        Sprk.Bff.Api.Services.Ai.PublicContracts.IRetrievalAccessTrim accessTrim,
         HttpContext httpContext,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -204,6 +205,13 @@ public static class SemanticSearchEndpoints
                 response = AuthorizeResults(response, authorization, logger);
             }
 
+            // Task 176 fix round 2 (#1511): the steps above decide by PARENT record (or, for scope=documentIds,
+            // by the named documents). A restricted or secure document under a readable parent passes them, so
+            // every surviving row is also trimmed to documents the CALLER can read (one caller-scoped read per
+            // page). Fail closed: a failed check returns no rows.
+            response = await TrimToReadableDocumentsAsync(
+                response, accessTrim, ExtractCallerObjectId(httpContext), logger, cancellationToken);
+
             logger.LogInformation(
                 "Semantic search completed for tenant {TenantId}: {ReturnedResults}/{TotalResults} results in {DurationMs}ms",
                 tenantId, response.Metadata?.ReturnedResults, response.Metadata?.TotalResults, response.Metadata?.SearchDurationMs);
@@ -228,6 +236,43 @@ public static class SemanticSearchEndpoints
                 detail: ex.Message,
                 statusCode: 500);
         }
+    }
+
+    /// <summary>
+    /// Trims a parent-authorized page to the documents the caller can read (task 176 fix round 2) and recomputes the
+    /// counts: rows the trim removed are subtracted from <c>TotalResults</c>, which keeps each path's paging contract
+    /// (a page total for scope=entity, the returned count for scope=all), and <c>ReturnedResults</c> is the row count.
+    /// </summary>
+    internal static async Task<SemanticSearchResponse> TrimToReadableDocumentsAsync(
+        SemanticSearchResponse response,
+        Sprk.Bff.Api.Services.Ai.PublicContracts.IRetrievalAccessTrim accessTrim,
+        string? callerObjectId,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var trim = await accessTrim.TrimAsync(response.Results, r => r.DocumentId, callerObjectId, cancellationToken);
+        if (trim.Withheld)
+        {
+            logger.LogWarning(
+                "Semantic search withheld all {Count} row(s): document access could not be checked ({Outcome}); fail closed",
+                response.Results.Count, trim.Outcome);
+        }
+
+        var removed = response.Results.Count - trim.Rows.Count;
+        if (removed == 0)
+        {
+            return response;
+        }
+
+        return response with
+        {
+            Results = trim.Rows,
+            Metadata = response.Metadata with
+            {
+                TotalResults = Math.Max(0, response.Metadata.TotalResults - removed),
+                ReturnedResults = trim.Rows.Count,
+            }
+        };
     }
 
     /// <summary>
@@ -687,7 +732,7 @@ public static class SemanticSearchEndpoints
         // Validate scope value
         if (!SearchScope.IsValid(request.Scope))
         {
-            return Results.BadRequest(new ProblemDetails
+            return Results.Problem(new ProblemDetails
             {
                 Title = "Invalid Scope",
                 Detail = $"Invalid scope value '{request.Scope}'. Valid values: all, entity, documentIds.",
@@ -701,7 +746,7 @@ public static class SemanticSearchEndpoints
         {
             if (string.IsNullOrWhiteSpace(request.EntityType))
             {
-                return Results.BadRequest(new ProblemDetails
+                return Results.Problem(new ProblemDetails
                 {
                     Title = "Entity Type Required",
                     Detail = "entityType is required when scope=entity.",
@@ -712,7 +757,7 @@ public static class SemanticSearchEndpoints
 
             if (string.IsNullOrWhiteSpace(request.EntityId))
             {
-                return Results.BadRequest(new ProblemDetails
+                return Results.Problem(new ProblemDetails
                 {
                     Title = "Entity ID Required",
                     Detail = "entityId is required when scope=entity.",
@@ -727,7 +772,7 @@ public static class SemanticSearchEndpoints
         {
             if (request.DocumentIds == null || request.DocumentIds.Count == 0)
             {
-                return Results.BadRequest(new ProblemDetails
+                return Results.Problem(new ProblemDetails
                 {
                     Title = "Document IDs Required",
                     Detail = "documentIds is required and must not be empty when scope=documentIds.",
@@ -753,7 +798,7 @@ public static class SemanticSearchEndpoints
 
             if (invalidTypes.Count > 0)
             {
-                return Results.BadRequest(new ProblemDetails
+                return Results.Problem(new ProblemDetails
                 {
                     Title = "Invalid Entity Types",
                     Detail = $"Invalid entityTypes value(s): {string.Join(", ", invalidTypes.Select(t => $"'{t}'"))}. Valid values: {string.Join(", ", ValidEntityTypes.All)}.",

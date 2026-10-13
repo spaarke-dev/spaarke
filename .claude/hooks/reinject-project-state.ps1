@@ -6,7 +6,7 @@
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
-$maxChars = 15000
+$maxChars = 20000  # raised from 15,000 (owner, uac-r2 round 83, 2026-10-08): project standing rules had reached ~14,800 chars
 
 function Write-CappedSection([string]$Title, [string]$Text) {
     if (-not $Text) { return }

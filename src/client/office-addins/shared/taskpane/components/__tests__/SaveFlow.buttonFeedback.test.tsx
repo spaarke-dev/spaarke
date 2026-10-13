@@ -41,6 +41,8 @@ const MATTER = {
   name: 'Gamma Merger',
 };
 const FILE_URL = 'https://contoso.sharepoint.com/contentstorage/x/Brief.docx';
+// Task 117: Copy Link copies the document's Spaarke RECORD link, not the stored file's URL.
+const RECORD_URL = `${ORG}/main.aspx?appname=sprk_MatterManagement&etn=sprk_document&id=${SAVED_ID}&pagetype=entityrecord&navbar=off`;
 
 type FakeResponse = { ok: boolean; status: number; text: () => Promise<string>; json: () => Promise<unknown> };
 const json = (ok: boolean, status: number, body: unknown): FakeResponse => ({
@@ -68,6 +70,7 @@ const completed = (documentId: string): FakeResponse =>
 
 let saveResponses: FakeResponse[];
 const originalOrgUrl = process.env.ORG_URL;
+const originalAppName = process.env.SPAARKE_APP_NAME;
 const openBrowserWindow = (): jest.Mock => Office.context.ui.openBrowserWindow as unknown as jest.Mock;
 
 beforeEach(() => {
@@ -75,6 +78,7 @@ beforeEach(() => {
   writeText.mockResolvedValue(undefined);
   sessionStorage.clear();
   process.env.ORG_URL = ORG;
+  process.env.SPAARKE_APP_NAME = 'sprk_MatterManagement';
   saveResponses = [];
   mockFetch.mockReset();
   mockFetch.mockImplementation(async (url: string) => {
@@ -94,6 +98,8 @@ afterEach(() => {
 afterAll(() => {
   if (originalOrgUrl === undefined) delete process.env.ORG_URL;
   else process.env.ORG_URL = originalOrgUrl;
+  if (originalAppName === undefined) delete process.env.SPAARKE_APP_NAME;
+  else process.env.SPAARKE_APP_NAME = originalAppName;
 });
 
 function renderSavedWord() {
@@ -132,7 +138,7 @@ describe('SaveFlow — post-save button feedback (task 105)', () => {
       await Promise.resolve();
     });
 
-    expect(writeText).toHaveBeenCalledWith(FILE_URL);
+    expect(writeText).toHaveBeenCalledWith(RECORD_URL);
     expect(screen.getByRole('button', { name: 'Copied' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Copy Link' })).not.toBeInTheDocument();
     // The live region writes on the next animation frame (useAnnounce).
@@ -151,13 +157,16 @@ describe('SaveFlow — post-save button feedback (task 105)', () => {
     expect(screen.getByRole('button', { name: 'Copy Link' })).toBeInTheDocument();
   });
 
-  it('Copy Link: a clipboard failure shows "Couldn\'t copy" and announces the failure', async () => {
+  it('Copy Link: when every copy route fails, shows "Couldn\'t copy", announces it and shows the link to copy by hand', async () => {
     await saveAndWaitForSavedState();
     writeText.mockRejectedValue(new Error('denied'));
+    // Task 116: the selection-based fallback fails too.
+    document.execCommand = jest.fn(() => false);
 
     jest.useFakeTimers();
     fireEvent.click(screen.getByRole('button', { name: 'Copy Link' }));
     await act(async () => {
+      await Promise.resolve();
       await Promise.resolve();
     });
 
@@ -165,12 +174,26 @@ describe('SaveFlow — post-save button feedback (task 105)', () => {
     act(() => {
       jest.advanceTimersByTime(20);
     });
-    expect(screen.getByText('Failed to copy link')).toBeInTheDocument();
+    expect(screen.getByText("Couldn't copy here. The link is shown below to copy by hand.")).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Document link — select and copy' })).toHaveValue(RECORD_URL);
     expect(screen.queryByRole('button', { name: 'Copied' })).not.toBeInTheDocument();
     act(() => {
       jest.advanceTimersByTime(2100);
     });
     expect(screen.getByRole('button', { name: 'Copy Link' })).toBeInTheDocument();
+  });
+
+  it('Copy Link: when Outlook on the web blocks the Clipboard API, the selection copy still copies (task 116)', async () => {
+    await saveAndWaitForSavedState();
+    writeText.mockRejectedValue(new DOMException('blocked by permissions policy', 'NotAllowedError'));
+    const execCommand = jest.fn(() => true);
+    document.execCommand = execCommand;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Link' }));
+
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    expect(execCommand).toHaveBeenCalledWith('copy');
+    expect(screen.queryByRole('textbox', { name: 'Document link — select and copy' })).not.toBeInTheDocument();
   });
 
   it('View Document: opens the record, shows "Opened", then reverts', async () => {

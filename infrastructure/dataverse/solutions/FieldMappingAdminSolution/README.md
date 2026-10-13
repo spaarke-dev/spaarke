@@ -52,7 +52,7 @@ Rendered in this order (execution order first for visual priority):
 
 ```bash
 pac auth select --index <spaarkedev1-index>
-pac solution import --path FieldMappingAdminSolution-v1.0.5.zip --publish-changes --async
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath FieldMappingAdminSolution-v1.0.5.zip -SolutionUniqueName <name>
 ```
 
 ### To UAT / Prod (task 083 in Wave 8)
@@ -62,7 +62,7 @@ Bump version in `Other/Solution.xml` (`<Version>` element), then:
 ```bash
 pac solution pack --zipfile FieldMappingAdminSolution-v1.0.X.zip --folder . --packagetype Unmanaged
 pac auth select --index <target-env-index>
-pac solution import --path FieldMappingAdminSolution-v1.0.X.zip --publish-changes --async
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath FieldMappingAdminSolution-v1.0.X.zip -SolutionUniqueName <name>
 ```
 
 ## Acceptance checklist (per SRFR-060 POML)

@@ -58,6 +58,8 @@
          name is ONE C# constant, compiled into BOTH the BFF and the L2 control plane (which creates the H8 root
          container) from this one source file — see its header. -->
     <Compile Include="..\..\shared\Contracts\SpeContainerBusinessUnitBinding.cs" Link="Shared\SpeContainerBusinessUnitBinding.cs" />
+    <Compile Include="..\..\shared\Contracts\SpeContainerCustomerMarker.cs" Link="Shared\SpeContainerCustomerMarker.cs" />
+    <Compile Include="..\..\shared\Contracts\KeylessProofContract.cs" Link="Shared\KeylessProofContract.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -100,6 +100,8 @@ For each touched test file, enumerate `[Fact]` / `[Theory]` / `[SkippableFact]` 
 | **FITNESS FUNCTION** | Lives under `tests/Spaarke.ArchTests/**`; asserts a STRUCTURAL invariant over source/assemblies rather than runtime behavior | KEEP — see the fitness-function note below. Do NOT apply the naming heuristic (2) or the mock/assertion heuristics (3, 5, 6, 7) to these |
 | **SCAFFOLDING** | Matches any B1-B17 ban (mirror, all-mocks-trivial, internal, pass-through, coverage-filler, language-feature, snapshot-trivial, name-without-scenario, exhaustive-switch, setup-to-assertion >10:1, getter/setter, generated-code, or any of B1-B5 wiring antipatterns) | DELETE — emit `git rm` for whole file OR Edit for method-level |
 | **AMBIGUOUS** | Mixed signals (e.g., setup-heavy but assertion is behavioral) | FLAG for reviewer judgment; do not emit removal command |
+| **ORPHAN** | The production member/type/route the test exercises no longer exists (deleted, not moved — check `git log -S` for a rename) | Emit `git rm` only with the ADR-038 Amendment A3 evidence checklist filled in; under a KEEP path the checklist is mandatory. Never for `*RouteRetirementTests` or `tests/Spaarke.ArchTests/**` |
+| **DETACHED** | The test calls no production code beyond DTO construction or framework calls (it re-creates the logic in the test file) | Recommend REWRITE against production code at the right KEEP path if the named behaviour matters, else DELETE (A3) |
 
 Per-method evaluation heuristics (apply in order):
 
@@ -113,6 +115,8 @@ Per-method evaluation heuristics (apply in order):
 
 1. **Path check (B-path)**: if file is NOT under `tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/**` OR `tests/unit/domain/**` OR `tests/Spaarke.ArchTests/**`, flag as path-violation; recommend `git mv` to canonical path OR delete if no canonical path applies.
 
+   **Grandfathered (owner decision 2026-10-12):** a test file that already existed on master on 2026-10-12 under `tests/unit/Sprk.Bff.Api.Tests/**`, outside the KEEP folders, is **not** a path violation when a project only modifies it. There were about 7,900 such tests, and deleting or relocating them wholesale would lose real coverage. Skip heuristic 1 for those files, and still apply heuristics 2–12 to the methods the project added or changed. A file **added** after 2026-10-12 outside a KEEP path is still a path violation. To tell the two apart, run `git log --diff-filter=A --format=%cs -- <file>` (date first added) or `git cat-file -e e91218e1f:<path>` (present on master that day).
+
    > **Drift correction (2026-08-21, task 063)**: `tests/integration/seam/**` was missing from this list. It has been a KEEP path since 2026-07-09 (ADR-038 §2, added by `spaarke-ai-architecture-redesign-r2` E-40) and is listed as one of the 7 in `tests/CLAUDE.md`, but this heuristic still enumerated six. Every vertical-slice-seam test in the repo was therefore a delete candidate whenever `/test-diet` ran — a far wider exposure than the ArchTests gap that prompted the look.
 2. **Naming check (B13)**: if test name doesn't match `{Method}_{Scenario}_{ExpectedResult}` shape (e.g., `Test1`, `Foo_Works`, `DoIt_Bug417`), classify SCAFFOLDING.
 3. **Mock-shape check (B1, B2, B7, B15)**: if test contains `Mock<HttpMessageHandler>`, `Mock<IServiceClient>`, OR `Mock<>` count ≥ 3 AND assertion count ≤ 2, classify SCAFFOLDING.
@@ -125,6 +129,8 @@ Per-method evaluation heuristics (apply in order):
 10. **Internal-access check (B8)**: if test uses `BindingFlags.NonPublic` reflection OR `[InternalsVisibleTo]` access path, classify SCAFFOLDING.
 11. **Generator check (B17)**: if test asserts field-by-field that a mapper/projection preserves source fields, classify SCAFFOLDING (replace with `AssertConfigurationIsValid()` once).
 12. **Setup ratio check (B15)**: if test's arrange section is >10× its assert section by line count, classify SCAFFOLDING.
+13. **Orphan check (ADR-038 A3)**: if the production type/member/route the test exercises no longer exists in `src/`, confirm it was deleted rather than renamed or moved (`git log -S '<symbol>' -- src/`), then classify ORPHAN and list the A3 evidence (deletion commit, where the behaviour went, retirement test for a removed route or security path, invariants to re-target, dependent tests). Skip `*RouteRetirementTests` and `tests/Spaarke.ArchTests/**`.
+14. **Detached check (ADR-038 A3)**: if the test never calls a production member beyond DTO construction or framework/serializer calls — it re-creates the logic it claims to test — classify DETACHED. Name the behaviours it claims to cover so the reviewer can decide rewrite vs delete.
 
 If a test fails 0 of 1-12 AND lives at a KEEP path AND has a clear `{Method}_{Scenario}_{ExpectedResult}` name, classify MAINTAIN.
 
@@ -148,6 +154,8 @@ Write `projects/{project-name}/notes/test-diet-report.md`:
 | MAINTAIN (KEEP at canonical path) | N | confirmed |
 | SCAFFOLDING (DELETE candidate) | D | review commands below |
 | AMBIGUOUS (reviewer judgment) | A | listed below |
+| ORPHAN (subject deleted — A3 evidence) | O | listed below with evidence |
+| DETACHED (no production call — rewrite or delete) | T | listed below |
 | PATH-VIOLATION (wrong KEEP path) | P | review `git mv` commands below |
 | **Total tests touched** | **N+D+A+P** | — |
 
@@ -246,7 +254,7 @@ If invoked from `090-wrapup-*` task:
 | Contract | Enforcement |
 |---|---|
 | **Read-only by default** | Skill never executes `git rm` or `git mv` — emits commands only |
-| **Path-check protective** | If a delete candidate is under a KEEP path AND has no same-PR replacement, the report flags it as PATH-VIOLATION-PROTECTED instead of SCAFFOLDING |
+| **Path-check protective** | If a delete candidate is under a KEEP path AND has no same-PR replacement, the report flags it as PATH-VIOLATION-PROTECTED instead of SCAFFOLDING — unless it is an ORPHAN with the Amendment A3 evidence filled in |
 | **Ambiguity is honest** | When heuristics conflict, classification is AMBIGUOUS, not biased toward DELETE |
 | **Auditable** | Each classification cites the specific ban(s) (B-number) that triggered it |
 | **Idempotent** | Re-running on unchanged tree produces an identical report |

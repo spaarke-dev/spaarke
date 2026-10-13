@@ -7,6 +7,8 @@ import {
   describeQuickSaveSuccess,
   describeQuickSaveFailure,
   describeUnsavableIdentity,
+  buildQuickSaveRecordLink,
+  isUrlOnConfiguredOrigin,
   type QuickSaveEmailContext,
 } from '../quickSaveHelpers';
 import type { EntitySearchResult } from '../../hooks/useEntitySearch';
@@ -59,11 +61,18 @@ describe('buildEmailSaveRequest', () => {
     expect(req.idempotencyKey).toBe('idem-key-1');
   });
 
+  it('an UNFILED save (target null, task 118) carries no targetEntity at all', () => {
+    const req = buildEmailSaveRequest(context, null, 'idem-key-1');
+
+    expect('targetEntity' in req).toBe(false);
+    expect(req.email.internetMessageId).toBe(context.internetMessageId);
+  });
+
   it('never sends the logical name as targetEntity.entityType (#1075: "sprk_matter" → 400 OFFICE_002)', () => {
     const req = buildEmailSaveRequest(context, target, 'idem-key-1');
 
-    expect(req.targetEntity.entityType).not.toBe(target.logicalName);
-    expect(req.targetEntity.entityType).toBe(target.entityType);
+    expect(req.targetEntity?.entityType).not.toBe(target.logicalName);
+    expect(req.targetEntity?.entityType).toBe(target.entityType);
   });
 
   it("marks the name system-derived: the ribbon files under the email's own subject, never a typed name (task 046)", () => {
@@ -107,7 +116,7 @@ describe('the ribbon quick-save only ever sends a type the save accepts (#1075, 
     (logicalName, entityType) => {
       const predicted: EntitySearchResult = { id: target.id, entityType, logicalName, name: 'Predicted' };
       const req = buildEmailSaveRequest(context, predicted, 'k');
-      expect(SAVE_ACCEPTED_ENTITY_TYPES).toContain(req.targetEntity.entityType.toLowerCase());
+      expect(SAVE_ACCEPTED_ENTITY_TYPES).toContain(req.targetEntity?.entityType.toLowerCase());
     }
   );
 });
@@ -363,5 +372,51 @@ describe('arrayBufferToBase64', () => {
 
   it('handles an empty buffer', () => {
     expect(arrayBufferToBase64(new ArrayBuffer(0))).toBe('');
+  });
+});
+
+describe('buildQuickSaveRecordLink / isUrlOnConfiguredOrigin (task 110 — the "Open in Spaarke" link)', () => {
+  const ID = '2bcfc5d2-0000-4000-8000-000000000001';
+
+  it('builds the sprk_document record URL with the shared builder, tolerating a trailing slash on ORG_URL', () => {
+    expect(buildQuickSaveRecordLink('https://org.crm.dynamics.com/', 'sprk_MatterManagement', ID)).toBe(
+      `https://org.crm.dynamics.com/main.aspx?appname=sprk_MatterManagement&etn=sprk_document&id=${ID}&pagetype=entityrecord&navbar=off`
+    );
+  });
+
+  it('canonicalizes a braced / upper-case id', () => {
+    expect(buildQuickSaveRecordLink('https://org.crm.dynamics.com', '', `{${ID.toUpperCase()}}`)).toContain(
+      `id=${ID}&`
+    );
+  });
+
+  it.each([undefined, '', '   '])('NEGATIVE: ORG_URL %p → no link', orgUrl => {
+    expect(buildQuickSaveRecordLink(orgUrl, 'app', ID)).toBeNull();
+  });
+
+  it.each([null, undefined, '', 'not-a-guid'])('NEGATIVE: id %p → no link', id => {
+    expect(buildQuickSaveRecordLink('https://org.crm.dynamics.com', 'app', id)).toBeNull();
+  });
+
+  it('accepts only a URL on the configured origin', () => {
+    const org = 'https://org.crm.dynamics.com';
+    expect(isUrlOnConfiguredOrigin(`${org}/main.aspx?etn=sprk_document`, org)).toBe(true);
+    expect(isUrlOnConfiguredOrigin(`${org}/main.aspx`, `${org}/`)).toBe(true);
+  });
+
+  it.each([
+    ['another host', 'https://evil.example.com/main.aspx'],
+    ['a look-alike prefix host', 'https://org.crm.dynamics.com.evil.example/x'],
+    ['another scheme on the same host', 'http://org.crm.dynamics.com/x'],
+    ['a javascript: URL', 'javascript:alert(1)'],
+    ['a non-URL', 'main.aspx'],
+    ['a non-string', 42],
+  ])('NEGATIVE: refuses %s', (_label, url) => {
+    expect(isUrlOnConfiguredOrigin(url, 'https://org.crm.dynamics.com')).toBe(false);
+  });
+
+  it('NEGATIVE: refuses everything when ORG_URL is unset', () => {
+    expect(isUrlOnConfiguredOrigin('https://org.crm.dynamics.com/x', undefined)).toBe(false);
+    expect(isUrlOnConfiguredOrigin('https://org.crm.dynamics.com/x', '')).toBe(false);
   });
 });

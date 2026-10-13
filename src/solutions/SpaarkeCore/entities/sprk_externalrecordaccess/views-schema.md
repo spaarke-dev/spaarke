@@ -1,7 +1,7 @@
 # sprk_externalrecordaccess — Views and Subgrid Configuration
 
 > **Purpose**: Documents views and subgrid configuration for the External Record Access table.
-> **Schema Version**: 1.1
+> **Schema Version**: 1.2
 > **Created**: 2026-03-16
 > **Project**: sdap-secure-project-module
 > **Corrected 2026-09-08 (`unified-access-control-r2` task 026, review finding M4)**: this file documented
@@ -18,9 +18,35 @@
 > CLAUDE.md §2. **Verify every column here against `entity-schema.md` or live metadata before trusting it —
 > do not treat this reconciliation as a reason to stop checking.**
 
+> **Corrected 2026-10-07 (`unified-access-control-r2` task 101)**: the four "System Views" below (Active
+> Participants, By Project, By Contact, Expiring Access) were **never applied**. None of them exists live. The live
+> views are listed in "Live views" just below, and they are what to rely on. The four are kept as the original design
+> record only.
+
 ---
 
-## System Views
+## Live views (verified against `savedqueries`, spaarkedev1, 2026-10-07)
+
+| View | Type | Default | Filter | Source |
+|---|---|---|---|---|
+| Active External Record Accesses | public (0) | **Yes** | `statecode = 0` | generated with the table |
+| All External Record Access | public (0) | No | none | maker portal |
+| Inactive External Record Accesses | public (0) | No | `statecode = 1` | generated with the table |
+| External Record Access Advanced Find View / Lookup View / Quick Find Active / Associated View / My External Record Accesses | system | — | — | generated with the table |
+| **Active External Shares by Expiration** | public (0) | No | `statecode = 0`, sorted by `sprk_expiresdate` ascending | task 101, `scripts/Deploy-ExternalShareExpiryViews.ps1` (operator-applied) |
+| **External Shares Expiring in 30 Days** | public (0) | No | the same, expiry on or before today + 30 (relative) | task 101, same script |
+
+The two task-101 views exist only once the operator has run the script. Their FetchXML, their layout and the measured
+semantics of the relative operators are in
+[`projects/unified-access-control-r2/notes/task-101-expiring-shares-views.md`](../../../../../projects/unified-access-control-r2/notes/task-101-expiring-shares-views.md).
+The script is the source of truth for both.
+
+⚠️ `sprk_name`, the primary name, is **empty on every grant row** (no write path sets it,
+[#1394](https://github.com/spaarke-dev/spaarke/issues/1394)), so the Name column of the generated views shows blank.
+
+---
+
+## System Views (original design, 2026-03-16 — NOT applied, see the correction above)
 
 ### 1. Active Participants (Default View)
 
@@ -146,7 +172,7 @@
 
 ---
 
-### 4. Expiring Access (System View)
+### 4. Expiring Access (System View) — superseded by task 101's "External Shares Expiring in 30 Days"
 
 | Property | Value |
 |----------|-------|
@@ -232,4 +258,4 @@ For the subgrid "Add Record" action, configure a Quick Create form:
 
 ---
 
-*Schema version: 1.1 | Created: 2026-03-16 | Project: sdap-secure-project-module | Corrected: 2026-09-08 by `unified-access-control-r2` task 026 (review finding M4 — `sprk_contactid`→`sprk_contact`, `sprk_projectid`→`sprk_project`, `sprk_expirydate`→`sprk_expiresdate`, `sprk_accountid`→`sprk_organization`)*
+*Schema version: 1.2 | Created: 2026-03-16 | Project: sdap-secure-project-module | Corrected: 2026-09-08 by `unified-access-control-r2` task 026 (review finding M4 — `sprk_contactid`→`sprk_contact`, `sprk_projectid`→`sprk_project`, `sprk_expirydate`→`sprk_expiresdate`, `sprk_accountid`→`sprk_organization`); 2026-10-07 by task 101 (the documented views were never applied; live views recorded; expiry views added)*

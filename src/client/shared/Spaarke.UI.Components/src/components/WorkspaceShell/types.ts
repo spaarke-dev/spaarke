@@ -165,10 +165,10 @@ export interface WorkspaceRowConfig {
    * the row `<div>`. Populated from `LayoutJsonRow.rowHeight` by
    * `buildDynamicWorkspaceConfig` (FR-02).
    *
-   * Interaction with section-level `contentSizing`: when both row `maxHeight` and
-   * a section's `contentSizing: 'clamped'` are set, the row's ceiling wins for
-   * the outer wrapper; the section's `defaultHeight` still applies to its inner
-   * card style, but the row's `overflow: hidden` prevents any over-constraint.
+   * Interaction with section-level `defaultHeight`: the row's `rowHeight` wins
+   * (803c77ace) — `buildDynamicWorkspaceConfig` applies it literally to each
+   * section card, and a section's `defaultHeight` applies only when the row has
+   * no `rowHeight`.
    */
   maxHeight?: string;
   /**

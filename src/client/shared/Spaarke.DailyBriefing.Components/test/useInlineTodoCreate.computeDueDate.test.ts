@@ -28,35 +28,37 @@ function makeItem(dueDate: string | null): NotificationItem {
 }
 
 describe('computeDueDate', () => {
-  const NOW = new Date('2026-06-20T14:00:00Z');
+  const NOW = new Date(2026, 5, 20, 10, 0, 0); // 2026-06-20 10:00 local
 
-  it('uses the item dueDate verbatim when present and parseable', () => {
-    const item = makeItem('2026-06-25T17:00:00Z');
-    expect(computeDueDate(item, NOW)).toBe('2026-06-25T17:00:00.000Z');
+  /** The local calendar day of `d` as YYYY-MM-DD (independent of the module under test). */
+  function localDay(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  it('a bare YYYY-MM-DD item dueDate is kept as that calendar day', () => {
+    expect(computeDueDate(makeItem('2026-06-25'), NOW)).toBe('2026-06-25');
   });
 
-  it('falls back to +3 days at 17:00 local when item.dueDate is null', () => {
-    const item = makeItem(null);
-    const result = computeDueDate(item, NOW);
-    const resultDate = new Date(result);
-    const expected = new Date(NOW);
-    expected.setDate(expected.getDate() + 3);
-    expected.setHours(17, 0, 0, 0);
-    // Match to the second (avoid millisecond drift between expected/actual)
-    expect(Math.abs(resultDate.getTime() - expected.getTime())).toBeLessThan(1000);
+  it('a timestamp item dueDate becomes the LOCAL calendar day of that instant (never a timestamp — task 106)', () => {
+    const ts = '2026-06-25T17:00:00Z';
+    expect(computeDueDate(makeItem(ts), NOW)).toBe(localDay(new Date(ts)));
+  });
+
+  it('falls back to +3 local calendar days when item.dueDate is null', () => {
+    expect(computeDueDate(makeItem(null), NOW)).toBe('2026-06-23');
   });
 
   it('falls back to +3 days when item.dueDate is empty string', () => {
-    const item = makeItem('');
-    const result = computeDueDate(item, NOW);
-    expect(result).not.toBe('');
-    expect(new Date(result).getTime()).toBeGreaterThan(NOW.getTime());
+    expect(computeDueDate(makeItem(''), NOW)).toBe('2026-06-23');
   });
 
   it('falls back to +3 days when item.dueDate is unparseable', () => {
-    const item = makeItem('not-a-date');
-    const result = computeDueDate(item, NOW);
-    expect(result).not.toBe('not-a-date');
-    expect(new Date(result).getTime()).toBeGreaterThan(NOW.getTime());
+    expect(computeDueDate(makeItem('not-a-date'), NOW)).toBe('2026-06-23');
+  });
+
+  it('always returns the Date Only wire shape YYYY-MM-DD', () => {
+    for (const due of ['2026-06-25', '2026-06-25T17:00:00Z', null, '', 'not-a-date']) {
+      expect(computeDueDate(makeItem(due), NOW)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
   });
 });

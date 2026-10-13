@@ -209,8 +209,16 @@
             // Populate UI
             document.getElementById('eventName').textContent = data.eventName || 'Unknown Event';
 
-            // Set default completion date to today
-            var today = new Date().toISOString().split('T')[0];
+            // Task 098: the event date columns are Date Only ("YYYY-MM-DD"). Local equivalents of @spaarke/ui-components
+            // dateLocal (a dialog web resource cannot import it): the browser's LOCAL calendar day, never the UTC one.
+            function toDateOnly(date) {
+                var m = String(date.getMonth() + 1);
+                var d = String(date.getDate());
+                return date.getFullYear() + '-' + (m.length < 2 ? '0' + m : m) + '-' + (d.length < 2 ? '0' + d : d);
+            }
+
+            // Set default completion date to today (the user's local day; toISOString() was the UTC date)
+            var today = toDateOnly(new Date());
             document.getElementById('completedDate').value = today;
 
             // Cancel button

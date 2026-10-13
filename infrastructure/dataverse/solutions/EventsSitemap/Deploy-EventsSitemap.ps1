@@ -100,7 +100,7 @@ Write-Host ""
 # Import command
 Write-Host "  # Repack and import:" -ForegroundColor DarkGray
 Write-Host "  pac solution pack --zipfile ./updated.zip --folder ./exported/" -ForegroundColor DarkGray
-Write-Host "  pac solution import --path ./updated.zip --publish-changes" -ForegroundColor DarkGray
+Write-Host "  pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath ./updated.zip -SolutionUniqueName <name>" -ForegroundColor DarkGray
 Write-Host ""
 
 # Verification steps

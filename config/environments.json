@@ -3,6 +3,8 @@
   "$comment": "Environment registry — maps environment names to Azure resource details. BFF URLs MUST be host only (no /api suffix). See docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md for naming patterns.",
   "environments": {
     "dev": {
+      "solutionPackageType": "none",
+      "$solutionPackageTypeComment": "Authoring environment: SpaarkeMaster is authored here and never imported (T218f).",
       "displayName": "Development",
       "dataverseUrl": "https://spaarkedev1.crm.dynamics.com",
       "bffApiUrl": "https://spaarke-bff-dev.azurewebsites.net",
@@ -73,6 +75,8 @@
       "$comment_migration": "Dev migrated 2026-05-24 from Windows spe-api-dev-67e2xz to Linux spaarke-bff-dev (canonical naming). Old env scheduled for decommission after stability period. See projects/sdap-bff-api-remediation-fix/baseline/linux-dev-migration.md."
     },
     "demo": {
+      "solutionPackageType": "unmanaged",
+      "$solutionPackageTypeComment": "Demo holds SpaarkeMaster unmanaged (1.0.0.0, 2026-04-06); the type is never switched in place (ADR-027 §3). Moving demo to managed = rebuild it (owner decision).",
       "displayName": "Demo",
       "dataverseUrl": "https://spaarke-demo.crm.dynamics.com",
       "bffApiUrl": "https://spaarke-bff-demo.azurewebsites.net",
@@ -108,8 +112,10 @@
       "subscriptionId": "2ff9ee48-6f1d-4664-865c-f11868dd1b50",
       "$comment_corrected": "Corrected 2026-10-05 (T242b) from the live subscription \"Spaarke Demo Environment\": the entry named spaarke-bff-prod / rg-spaarke-platform-prod / sprk-platform-prod-kv, which no longer exist. spaarke-bff-demo is Stopped (task 242c). AI Search spaarke-search-demo is NOT present in rg-spaarke-demo. Owner 2026-10-05: demo is the next environment used to test the provisioning orchestration.",
       "speAdminPlatformOperatorEnvironment": false,
-      "$comment_speAdminPlatformOperatorEnvironment": "NOT YET a Spaarke-operated environment (unified-access-control-r2 task 165, owner round 57 item 1). This entry (spaarke-bff-demo, Stopped) is the candidate for Spaarke's production operator environment; only dev carries the marker for now. The change that stands it up sets this to true (a JSON boolean, unquoted) together with SpeAdminOperatorEnvironmentMarkerGuardTests.SpaarkeOperatedEnvironments and the App Service setting; Deploy-BffApi.ps1 then binds the marker to THIS entry's appServiceName / resourceGroup (round 62 item 1). demo is reachable through Deploy-BffApi.ps1 -Environment demo since master T242b added it to the ValidateSet, which is what round 62 item 2 required. Until then its tenant-wide and type-wide SPE admin routes refuse (fail closed)."    },
+      "$comment_speAdminPlatformOperatorEnvironment": "NOT YET a Spaarke-operated environment (unified-access-control-r2 task 165, owner round 57 item 1). This entry (spaarke-bff-demo, Stopped) is the candidate for Spaarke's production operator environment; only dev carries the marker for now. The change that stands it up sets this to true (a JSON boolean, unquoted) together with SpeAdminOperatorEnvironmentMarkerGuardTests.SpaarkeOperatedEnvironments and the App Service setting; Deploy-BffApi.ps1 then binds the marker to THIS entry's appServiceName / resourceGroup (round 62 item 1). demo is reachable through Deploy-BffApi.ps1 -Environment demo since master T242b added it to the ValidateSet, which is what round 62 item 2 required. Until then its tenant-wide and type-wide SPE admin routes refuse (fail closed)."
+    },
     "_template": {
+      "solutionPackageType": "managed | unmanaged | none — what Deploy-Release Phase 3 imports (ADR-027 §3: managed by default, unmanaged on explicit instruction, none for the authoring environment; T218f)",
       "$comment": "Template entry showing the full schema. Copy this to add a new customer environment. All fields are required unless marked optional.",
       "displayName": "REQUIRED — Human-readable name",
       "dataverseUrl": "https://{org}.crm.dynamics.com",

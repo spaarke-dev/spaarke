@@ -133,7 +133,9 @@
         <CommandDefinitions>
           <CommandDefinition Id="Spaarke.Event.AddMemo.Command">
             <EnableRules />
-            <DisplayRules />
+            <DisplayRules>
+              <DisplayRule Id="sprk.CreatePrivilege.sprk_memo.DisplayRule" />
+            </DisplayRules>
             <Actions>
               <JavaScriptFunction FunctionName="Spaarke.Event.AddMemo" Library="$webresource:sprk_event_ribbon_commands.js">
                 <CrmParameter Value="PrimaryControl" />
@@ -293,7 +295,11 @@
         </CommandDefinitions>
         <RuleDefinitions>
           <TabDisplayRules />
-          <DisplayRules />
+          <DisplayRules>
+            <DisplayRule Id="sprk.CreatePrivilege.sprk_memo.DisplayRule">
+              <EntityPrivilegeRule EntityName="sprk_memo" PrivilegeType="Create" PrivilegeDepth="Basic" />
+            </DisplayRule>
+          </DisplayRules>
           <EnableRules>
             <EnableRule Id="Spaarke.Event.CanReschedule.EnableRule">
               <CustomRule FunctionName="Spaarke.Event.CanReschedule" Library="$webresource:sprk_event_ribbon_commands.js" Default="false">

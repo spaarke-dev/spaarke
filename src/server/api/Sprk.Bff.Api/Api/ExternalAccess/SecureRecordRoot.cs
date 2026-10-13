@@ -44,12 +44,13 @@ internal sealed record SecureRecordRoot(
     /// for the project table by <c>ProjectProvisioningSelect_NamesOnlyColumnsThatExistOnTheTable</c>.
     /// </summary>
     /// <remarks>
-    /// Task 133 added <c>_owninguser_value</c> (with <c>_owningteam_value</c>, the owner a failed provisioning moves the
+    /// Task 114 added <c>sprk_accesspermission</c> (on all three roots): a Restricted record is not shared to a person
+    /// flagged external. Task 133 added <c>_owninguser_value</c> (with <c>_owningteam_value</c>, the owner a failed provisioning moves the
     /// record back to) and <c>_createdby_value</c> (the person a resumed provisioning shares to when it is a usable person;
     /// otherwise <see cref="CreatorPersonSelect"/>'s column).
     /// </remarks>
     public string ProvisioningSelect =>
-        $"{IdColumn},{NameColumn},sprk_issecure,sprk_containerid," +
+        $"{IdColumn},{NameColumn},sprk_issecure,sprk_accesspermission,sprk_containerid," +
         "_sprk_securitybu_value,_owningteam_value,_owninguser_value,_owningbusinessunit_value,_createdby_value";
 
     /// <summary>

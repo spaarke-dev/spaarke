@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 using Sprk.Bff.Api.Services.Ai.Insights.Routing;
@@ -223,7 +224,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
             await ExecuteNodeBasedModeAsync(context, nodes, writer, cancellationToken);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || context.CancellationToken.IsCancellationRequested)
         {
             context.MarkCancelled();
             await writer.WriteAsync(PlaybookStreamEvent.RunCancelled(
@@ -232,9 +233,10 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "App-only playbook execution failed - RunId: {RunId}", context.RunId);
-            context.MarkFailed(ex.Message);
+            var failureDetail = ProblemDetailsHelper.Explain("The playbook run failed.", ex);
+            context.MarkFailed(failureDetail);
             await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
-                context.RunId, context.PlaybookId, ex.Message), CancellationToken.None);
+                context.RunId, context.PlaybookId, failureDetail), CancellationToken.None);
         }
         finally
         {
@@ -272,7 +274,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 await ExecuteNodeBasedModeAsync(context, nodes, writer, cancellationToken);
             }
         }
-        catch (OperationCanceledException)
+        // Only a cancellation the CALLER asked for is a cancelled run: the SSE request token, or the run context's own token
+        // (the Stop button: POST /runs/{id}/cancel -> context.Cancel()). Any other OperationCanceledException (an upstream
+        // HTTP timeout surfaces as a TaskCanceledException) is a failure: it falls through to the RunFailed path below
+        // instead of ending the stream as RunCancelled, which the Analysis bridge drops (a silent "success").
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || context.CancellationToken.IsCancellationRequested)
         {
             context.MarkCancelled();
             await writer.WriteAsync(PlaybookStreamEvent.RunCancelled(
@@ -281,9 +287,12 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Playbook execution failed - RunId: {RunId}", context.RunId);
-            context.MarkFailed(ex.Message);
-            await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
-                context.RunId, context.PlaybookId, ex.Message), CancellationToken.None);
+            context.MarkFailed(ProblemDetailsHelper.Explain("The playbook run failed.", ex));
+            // ADR-019: this event goes to the caller's SSE stream. The exception stays in the log above; the stream
+            // gets the fixed text, the stable code and the trace id that finds the log entry.
+            await writer.WriteAsync(PlaybookStreamEvent.BuildRunFailedEvent(
+                context.RunId, context.PlaybookId, context.HttpContext?.TraceIdentifier ?? context.RunId.ToString()),
+                CancellationToken.None);
         }
         finally
         {
@@ -340,6 +349,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     }
                 }
 
+                if (IsReservedOutputVariable(node.OutputVariable))
+                {
+                    errors.Add($"Node '{node.Name}' uses the reserved outputVariable '{node.OutputVariable}' (the per-item root of CreateNotification)");
+                }
+
                 // Check output variable is unique
                 var duplicateOutputs = nodes
                     .Where(n => n.Id != node.Id && n.OutputVariable == node.OutputVariable)
@@ -370,7 +384,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error validating playbook {PlaybookId}", playbookId);
-            return PlaybookValidationResult.Failure($"Validation error: {ex.Message}");
+            return PlaybookValidationResult.Failure(ProblemDetailsHelper.Explain("Validation failed.", ex));
         }
     }
 
@@ -480,7 +494,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 TokensIn = output.Metrics.TokensIn,
                 TokensOut = output.Metrics.TokensOut,
                 Confidence = output.Confidence,
-                ErrorMessage = output.ErrorMessage,
+                ErrorMessage = ProblemDetailsHelper.Redact(output.ErrorMessage),
                 OutputPreview = TruncateOutput(output.TextContent)
             })
             .ToArray();
@@ -630,9 +644,10 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     break;
 
                 case "error":
-                    context.MarkFailed(chunk.Error ?? "Unknown error");
+                    var legacyError = ProblemDetailsHelper.Redact(chunk.Error) ?? "Unknown error";
+                    context.MarkFailed(legacyError);
                     await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
-                        context.RunId, context.PlaybookId, chunk.Error ?? "Unknown error"), cancellationToken);
+                        context.RunId, context.PlaybookId, legacyError), cancellationToken);
                     return;
             }
         }
@@ -739,7 +754,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     "Node {NodeName} in batch {BatchNumber} failed - stopping playbook execution",
                     failedNode.node.Name, batchNumber);
 
-                var failureDetail = $"Node '{failedNode.node.Name}' failed: {failedNode.result.ErrorMessage}";
+                var failureDetail = $"Node '{failedNode.node.Name}' failed: {ProblemDetailsHelper.Redact(failedNode.result.ErrorMessage)}";
                 context.MarkFailed(failureDetail);
 
                 await writer.WriteAsync(PlaybookStreamEvent.RunFailed(
@@ -1082,6 +1097,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 return errorOutput;
             }
 
+            // ISS-018 (#1452): `item` is reserved for the executor-scoped root CreateNotification binds per item. A node
+            // whose output were named `item` would put `item` into every later Layer 1 context, so Layer 1 would render
+            // CreateNotification's per-item templates early again (blank titles, null regardingId). Refuse the name.
+            if (IsReservedOutputVariable(node.OutputVariable))
+            {
+                var errorMsg = $"Node '{node.Name}' (id={node.Id}) uses the reserved outputVariable '{node.OutputVariable}' (the per-item root of CreateNotification); rename it.";
+                var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
+                runContext.StoreNodeOutput(errorOutput);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+
+                EmitNodeCompleted("failed");
+
+                return errorOutput;
+            }
+
             // Resolve scopes (skills, knowledge, tools) for AI nodes only.
             // Structural nodes (Control / Output / Workflow) have no resolved scopes.
             // Use NodeType as the coarse category indicator until Wave 8 collapses it into ExecutorType.
@@ -1235,7 +1267,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 {
                     await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
                         runContext.RunId, runContext.PlaybookId, node.Id, node.Name,
-                        compositeOutput.ErrorMessage ?? "Iteration failed"), cancellationToken);
+                        ProblemDetailsHelper.Redact(compositeOutput.ErrorMessage) ?? "Iteration failed"), cancellationToken);
                 }
 
                 EmitNodeCompleted(compositeOutput.Success ? "completed" : "failed");
@@ -1300,9 +1332,9 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 // existing consumers see unchanged behavior.
                 //
                 // Backward-compat invariant: emits ONLY for actionType == DeliverComposite.
-                // Existing NodeType.Output → DeliverOutput path emits ZERO section events; its
-                // `FieldDelta` stream (via PlaybookExecutionEngine.ExecuteChatSummarizeAsync)
-                // continues UNCHANGED until migrated by FR-58 (task 118R).
+                // Existing NodeType.Output → DeliverOutput path emits ZERO section events. (The legacy
+                // `FieldDelta` stream it once fed was deleted: the engine path on 2026-07-07, the
+                // parser on 2026-10-12.)
                 if (actionType == ExecutorType.DeliverComposite)
                 {
                     await EmitDeliverCompositeSectionEventsAsync(
@@ -1317,7 +1349,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
                 await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name,
-                    output.ErrorMessage ?? "Unknown error"), cancellationToken);
+                    ProblemDetailsHelper.Redact(output.ErrorMessage) ?? "Unknown error"), cancellationToken);
             }
 
             // R3 FR-3H1.4 / AC-H1.2 — scan NodeOutput for literal `{{` substrings
@@ -1344,17 +1376,21 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         {
             _logger.LogError(ex, "Node {NodeName} threw exception", node.Name);
 
+            // The node's error text is stored (run detail) and streamed (NodeFailed): the exception type and a redacted
+            // message, never a secret value.
+            var nodeError = ProblemDetailsHelper.Explain("The node threw an unexpected error.", ex);
+
             // Create error output to store
             var errorOutput = NodeOutput.Error(
                 node.Id,
                 node.OutputVariable,
-                ex.Message,
+                nodeError,
                 NodeErrorCodes.InternalError);
 
             runContext.StoreNodeOutput(errorOutput);
 
             await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
-                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, ex.Message), cancellationToken);
+                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, nodeError), cancellationToken);
 
             EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063) — exception path
 
@@ -1726,7 +1762,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             }
             catch (JsonException ex)
             {
-                errors.Add($"Node '{node.Name}': JPS schema is not valid JSON — {ex.Message}");
+                errors.Add($"Node '{node.Name}': JPS schema is not valid JSON — {ProblemDetailsHelper.Redact(ex.Message)}");
                 continue;
             }
 
@@ -2441,8 +2477,20 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     return;
                 }
 
+                // ISS-018 (#1452, D-77): a template over an EXECUTOR-SCOPED root (`item`, bound only inside
+                // CreateNotification's own per-item loop over itemNotification) cannot render here: the root is not in
+                // the Layer 1 context, so it rendered empty or null BEFORE the loop ran (blank titles, a null
+                // regardingId that defeats dedup). Such a LEAF string is left verbatim for the executor, which renders
+                // it per item with the full context. Checked per leaf string (a nested-JSON wrapper string is rendered
+                // structurally below, so its other leaves still render), and only for the executor that binds the root.
                 if (IsPureTemplate(raw))
                 {
+                    if (ReferencesUnboundExecutorScope(raw, context, executorType))
+                    {
+                        writer.WriteStringValue(raw);
+                        return;
+                    }
+
                     // R7 Wave 11 Option D auto-wrap: source authors write natural Handlebars
                     // (`{{tldrResult}}`, `{{start.channels}}`, `{{distinct (concat …)}}`).
                     // The engine wraps with the `json` helper so the rendered output is
@@ -2492,6 +2540,12 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     }
                 }
 
+                if (ReferencesUnboundExecutorScope(raw, context, executorType))
+                {
+                    writer.WriteStringValue(raw);
+                    return;
+                }
+
                 var renderedString = templateEngine.Render(raw, context);
                 writer.WriteStringValue(renderedString);
                 return;
@@ -2505,6 +2559,66 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 element.WriteTo(writer);
                 return;
         }
+    }
+
+    /// <summary>
+    /// Template roots that only one executor binds, inside its own per-item loop (ISS-018, #1452): CreateNotification
+    /// binds <c>item</c> while iterating the upstream query's items (<c>itemNotification</c>). For that executor Layer 1
+    /// leaves a leaf string that uses the root verbatim, unless the render context binds it (a fan-out overlay whose
+    /// alias is <c>item</c>) or the string binds it itself (<c>{{#each xs as |item|}}</c>). Other executors render as before.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<ExecutorType, string[]> ExecutorScopedTemplateRoots =
+        new Dictionary<ExecutorType, string[]> { [ExecutorType.CreateNotification] = ["item"] };
+
+    /// <summary>
+    /// True when <paramref name="outputVariable"/> is an executor-scoped template root (<c>item</c>) — reserved, because a
+    /// node output with that name would bind the root in every later Layer 1 context (ISS-018).
+    /// </summary>
+    internal static bool IsReservedOutputVariable(string? outputVariable) =>
+        outputVariable is not null
+        && ExecutorScopedTemplateRoots.Values.Any(roots => roots.Contains(outputVariable.Trim(), StringComparer.Ordinal));
+
+    private static readonly System.Text.RegularExpressions.Regex MustacheExpression = new(
+        @"\{\{(.*?)\}\}",
+        System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// True when <paramref name="executorType"/> has executor-scoped roots and a Handlebars expression in
+    /// <paramref name="raw"/> uses one of them as a path root — <c>{{item.x}}</c>, <c>{{lookup item 'm.x'}}</c>,
+    /// <c>{{#if item.y}}</c>; not text inside quotes, not a later path segment like <c>{{q.item}}</c> — that neither
+    /// <paramref name="context"/> nor a block parameter in <paramref name="raw"/> binds.
+    /// </summary>
+    internal static bool ReferencesUnboundExecutorScope(
+        string raw, IReadOnlyDictionary<string, object?> context, ExecutorType? executorType)
+    {
+        if (executorType is not { } type || !ExecutorScopedTemplateRoots.TryGetValue(type, out var roots))
+        {
+            return false;
+        }
+
+        foreach (var root in roots)
+        {
+            // Static Regex.IsMatch uses the framework's pattern cache; the root list is tiny and fixed.
+            if (context.ContainsKey(root)
+                || System.Text.RegularExpressions.Regex.IsMatch(raw, @"\bas\s*\|[^|]*\b" + root + @"\b[^|]*\|"))
+            {
+                continue;
+            }
+
+            var rootPattern = @"(?<![\w.'""@/|])" + root + @"(?![\w'""|])";
+            foreach (System.Text.RegularExpressions.Match expression in MustacheExpression.Matches(raw))
+            {
+                if (System.Text.RegularExpressions.Regex.IsMatch(StripQuoted(expression.Groups[1].Value), rootPattern))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+
+        static string StripQuoted(string expression) =>
+            System.Text.RegularExpressions.Regex.Replace(expression, @"'[^']*'|""[^""]*""", "''");
     }
 
     /// <summary>

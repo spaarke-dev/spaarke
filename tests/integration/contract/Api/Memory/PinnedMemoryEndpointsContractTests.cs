@@ -219,7 +219,9 @@ public class PinnedMemoryEndpointsContractTests : IClassFixture<PinnedMemoryEndp
         listener.Dispose();
 
         // ADR-015 verification — counter emitted, tags = deterministic IDs only.
-        var createMeasurement = capturedMeasurements.FirstOrDefault(m => m.Name == "memory.pin_created");
+        // The meter is process-wide, so other test classes' measurements reach this listener under a parallel run —
+        // pick the one this fixture's tenant produced (its id is used by no other test).
+        var createMeasurement = capturedMeasurements.FirstOrDefault(m => m.Name == "memory.pin_created" && IsThisFixturesTenant(m.Tags));
         createMeasurement.Should().NotBe(default((string, long, KeyValuePair<string, object?>[])),
             "memory.pin_created counter was not emitted");
         createMeasurement.Value.Should().Be(1);
@@ -391,7 +393,9 @@ public class PinnedMemoryEndpointsContractTests : IClassFixture<PinnedMemoryEndp
 
         listener.Dispose();
 
-        var deleteMeasurement = capturedMeasurements.FirstOrDefault(m => m.Name == "memory.pin_deleted");
+        // Process-wide meter: select this fixture's measurement (see PostPin's note) — another class's pin_deleted can
+        // arrive first under a parallel run.
+        var deleteMeasurement = capturedMeasurements.FirstOrDefault(m => m.Name == "memory.pin_deleted" && IsThisFixturesTenant(m.Tags));
         deleteMeasurement.Should().NotBe(default((string, long, KeyValuePair<string, object?>[])));
         var tagDictionary = deleteMeasurement.Tags.ToDictionary(kv => kv.Key, kv => kv.Value);
         tagDictionary["decision"].Should().Be("deleted");
@@ -401,6 +405,9 @@ public class PinnedMemoryEndpointsContractTests : IClassFixture<PinnedMemoryEndp
         tagDictionary.Should().NotContainKey("title");
         tagDictionary.Should().NotContainKey("content");
     }
+
+    private static bool IsThisFixturesTenant(KeyValuePair<string, object?>[] tags)
+        => tags.Any(t => t.Key == "tenantId" && Equals(t.Value, PinnedMemoryEndpointsTestFixture.TestTenantId));
 
     [Fact]
     public async Task DeletePin_NotFound_Returns404()

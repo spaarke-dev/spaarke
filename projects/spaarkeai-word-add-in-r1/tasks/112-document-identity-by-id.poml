@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="112" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 11 (4) — BFF: read a document's identity by id (name + related record) for stamp-identified documents</title>
+    <phase>6 UAT round 11 (2026-10-07)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF endpoint behind document authorization (`.cs`), tests, publish-size gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authorization-adjacent BFF surface; must not become a metadata oracle.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT11</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Server-only; runs beside 110/111 (client). Do not edit `src/client/**`, TASK-INDEX or current-task.</parallel-reason>
+    <deps>—</deps>
+    <tags>bff-api, api, auth, unit-test, integration-test</tags>
+  </metadata>
+
+  <prompt>Owner UAT round 11 item 4; owner approved this server addition + dev deploy on 2026-10-07 ("Yes, add it and deploy"). Record: `notes/042-uat-round11-2026-10-07.md`.</prompt>
+
+  <goal>`GET /api/documents/{documentId}/identity` returns the same `DocumentIdentityResponse` shape that `POST /api/documents/resolve-identity` returns (resolved, document id, names, related record from the same four direct slots), for a caller who may READ that document — so the Word pane can resolve a document identified only by its stamp.</goal>
+
+  <context>
+    <background>
+      - Existing: `Api/FileAccessEndpoints.cs` L363 `docs.MapPost("/resolve-identity", …)` with `DocumentUrlIdentityFilter` (URL → id into route values) then `.AddDocumentAuthorizationFilter("read")`; the handler builds `DocumentIdentityResponse` using `Services/Documents/DocumentUrlIdentityResolution.cs` (`RelatedRecordAttributes` L68 — matter, project, invoice, work assignment; `ResolveRelatedRecordDisplayAsync` L121; first populated slot L268-270).
+      - The pane's stamp path today: `applyStampPrecedence` returns resolved with `relatedRecord: null` and empty names (record UNKNOWN). Task 111 models that as an explicit "record unknown" state; a later client change calls this new route to replace it with a known identity.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10 / bff-extensions.md">Load `.claude/constraints/bff-extensions.md`; state the Placement Justification (extends the existing document-identity surface in the same `docs` group; no new service class unless the handler must share code — extract a shared private helper from the resolve-identity handler rather than duplicating it). Publish-size delta measured per §10 (fresh worktrees of origin/master and the branch at SHORT paths such as `C:\wt112m` / `C:\wt112b`, Compress-Archive Optimal, equal file counts, report both sizes + delta); `dotnet list package --vulnerable --include-transitive` no new HIGH. NEVER touch `C:/tmp/bffsize/*`, `C:\wt097*`, `C:\wt098*` or other sessions' worktrees; remove your own worktrees after.</constraint>
+    <constraint source="security">The route is `.AddDocumentAuthorizationFilter("read")` on the route `documentId` — the same filter/operation as resolve-identity — so no metadata is returned unless the caller may read the document (403 with no body otherwise). Unknown/invalid id → 404 or the same not-resolved shape resolve-identity uses (pick the one consistent with that route and document it). No new authorization rule, no change to the existing filter.</constraint>
+    <constraint source="contract">Additive only: resolve-identity's behaviour and response are unchanged; same response DTO. Unconditional registration (no feature flag).</constraint>
+    <constraint source="coordination">Do not edit UAC-r2's tests (`tests/integration/auth/UnifiedAccessControl/*`, `SecureBuRoleDepthAssertion*`). Before editing, check other active worktrees' unmerged changes to `FileAccessEndpoints.cs` / `DocumentUrlIdentityResolution.cs` (`git worktree list`; `git diff origin/master...<branch> --name-only` per work branch) and report overlaps.</constraint>
+    <constraint source="ADR-038">Tests in the existing places for resolve-identity: authorized caller → identity with related record (each slot type at least once via existing patterns), unauthorized → 403 no metadata, missing → documented result; a contract test for the new route. Same CI scopes stay green (`Server tests (office scope)` etc.).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/documents/{id}/identity returns DocumentIdentityResponse for a readable document, incl. the related record and names.</criterion>
+    <criterion testable="true">403 with no metadata for a caller without read; documented result for unknown id.</criterion>
+    <criterion testable="true">resolve-identity unchanged (its tests green).</criterion>
+    <criterion testable="true">dotnet build 0 errors; relevant test projects green; publish-size delta reported; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Read resolve-identity end to end (filters, handler, DTO, tests) and bff-extensions.md.</step>
+    <step>Add the GET route sharing the handler's identity-building code.</step>
+    <step>Tests; build; gates; publish size; CVE.</step>
+    <step>Write `notes/112-document-identity-by-id.md` (placement justification, auth, contract, sizes).</step>
+  </steps>
+
+  <justification>
+    <existing>POST /api/documents/resolve-identity (URL → identity).</existing>
+    <extension>Yes — same group, same filter, same DTO, same slot logic; only the id source differs (route instead of URL).</extension>
+    <cost-of-doing-nothing>A quick-saved document (stamp-identified) can never show its record or be filed from the pane — owner UAT round 11 item 4.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Documents/DocumentUrlIdentityResolution.cs</file>
+  </relevant-files>
+</task>

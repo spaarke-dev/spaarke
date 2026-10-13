@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{ec5d27d0-9024-f111-88b6-7c1e520aa4df}</WebResourceId>
+  <Name>sprk_/icons/entity/speenvironment.svg</Name>
+  <DisplayName>sprk_speenvironment Icon</DisplayName>
+  <Description>Fluent UI icon: Cloud20Regular - SPE environment — SharePoint Embedded environment configuration</Description>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>1</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_iconsentityspeenvironmentsvgEC5D27D0-9024-F111-88B6-7C1E520AA4DF</FileName>
+</WebResource>

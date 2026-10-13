@@ -137,7 +137,7 @@
     Docs    : projects/unified-access-control-r2/notes/task-168-lock-root-columns-on-forms.md
 
     OPERATOR-RUN ONLY: -Apply and -RestoreFrom are the main session's manual gate. No other formxml writer
-    (Lock-CoreAncestorStampColumnsOnForms.ps1, task 138's Retire-CommunicationAccessPermission.ps1,
+    (Lock-CoreAncestorStampColumnsOnForms.ps1, Set-InheritedAccessPermissionFormLock.ps1,
     Deploy-TodoSubgridsToElevenParentForms.ps1) may run against the same environment at the same time.
     Requires Azure CLI (`az login`). PowerShell 7+.
 

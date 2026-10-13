@@ -1,0 +1,147 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{1823746f-4665-f111-ab0c-7ced8ddc4cc6}</formid>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <FormPresentation>0</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form>
+      <tabs>
+        <tab name="tab_topic" id="{c0a1c012-0001-4000-8000-000000000001}" IsUserDefined="1" locklevel="0" showlabel="true" expanded="true">
+          <labels>
+            <label description="Topic Registration" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="section_identity" showlabel="true" showbar="false" locklevel="0" id="{c0a1c012-0002-4000-8000-000000000101}" IsUserDefined="1" columns="2">
+                  <labels>
+                    <label description="Identity" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{c0a1c012-0003-4000-8000-000000000101}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Topic name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_topicname" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_topicname" />
+                      </cell>
+                      <cell id="{c0a1c012-0003-4000-8000-000000000102}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Mode" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_mode" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_mode" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c0a1c012-0003-4000-8000-000000000103}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                      <cell id="{c0a1c012-0003-4000-8000-000000000104}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Display name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_displayname" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_displayname" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c0a1c012-0003-4000-8000-000000000105}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Icon (Fluent v9 component name)" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_icon" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_icon" />
+                      </cell>
+                      <cell id="{c0a1c012-0003-4000-8000-000000000106}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="section_routing" showlabel="true" showbar="false" locklevel="0" id="{c0a1c012-0002-4000-8000-000000000201}" IsUserDefined="1" columns="2">
+                  <labels>
+                    <label description="Routing" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{c0a1c012-0003-4000-8000-000000000201}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Playbook name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_playbookname" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_playbookname" />
+                      </cell>
+                      <cell id="{c0a1c012-0003-4000-8000-000000000202}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Host entity (logical name)" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_hostentity" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_hostentity" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{c0a1c012-0003-4000-8000-000000000203}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Target field (envelope storage)" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_targetfield" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_targetfield" />
+                      </cell>
+                      <cell id="{c0a1c012-0003-4000-8000-000000000204}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="section_runtime" showlabel="true" showbar="false" locklevel="0" id="{c0a1c012-0002-4000-8000-000000000301}" IsUserDefined="1" columns="2">
+                  <labels>
+                    <label description="Runtime" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{c0a1c012-0003-4000-8000-000000000301}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Cache TTL (minutes)" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_cachettlminutes" classid="{C6D124CA-7EDA-4a60-AEA9-7FB8D318B68F}" datafieldname="sprk_cachettlminutes" />
+                      </cell>
+                      <cell id="{c0a1c012-0003-4000-8000-000000000302}" showlabel="true" locklevel="0">
+                        <labels>
+                          <label description="Enabled" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_enabled" classid="{B0C6723A-8503-4fd7-BB28-C8A06AC933C2}" datafieldname="sprk_enabled" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{c0a1c012-0005-4000-8000-000000000001}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{c0a1c012-0004-4000-8000-000000000001}" showlabel="true" locklevel="0">
+              <labels>
+                <label description="Enabled" languagecode="1033" />
+              </labels>
+              <control id="header_sprk_enabled" classid="{B0C6723A-8503-4fd7-BB28-C8A06AC933C2}" datafieldname="sprk_enabled" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="AI Topic Registration" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="SME-editable model-driven form for AI topic registry rows (Insights Engine Widgets r1, Phase 1 Task 012). Sections: Identity, Routing, Runtime." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

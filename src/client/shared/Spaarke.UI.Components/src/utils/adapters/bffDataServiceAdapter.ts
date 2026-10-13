@@ -34,17 +34,18 @@
  */
 
 import type { IDataService } from '../../types/serviceInterfaces';
+import type { ResponseFetchFn } from '../fetchTypes';
 
 /**
- * Authenticated fetch function type.
+ * Authenticated fetch function type — the EITHER-shape fetch ({@link ResponseFetchFn}).
  *
- * Structurally identical to `AuthenticatedFetchFn` exported by `@spaarke/auth`
- * (kept as a local type alias so this package has zero runtime dependency on
- * the auth library). The expected caller is the `authenticatedFetch` returned
- * by `useAuth()` — it acquires a token, attaches `Authorization: Bearer <jwt>`,
- * and handles silent refresh on 401.
+ * Dataverse hosts pass `@spaarke/auth`'s `authenticatedFetch` (from `useAuth()`), which throws on
+ * failure; the external SPA (`DocumentUploadPage`, `PlaybookLibraryPage`) passes its own
+ * `createAuthenticatedFetch`, which RETURNS non-2xx responses (`ensureOk` turns those into an `Error`;
+ * a thrown `ApiError` propagates as is). So the alias stays the wide type (kept local so this package
+ * has no dependency on the auth library).
  */
-export type AuthenticatedFetch = (url: string, init?: RequestInit) => Promise<Response>;
+export type AuthenticatedFetch = ResponseFetchFn;
 
 /**
  * Creates an IDataService implementation backed by the Spaarke BFF API.

@@ -1,0 +1,73 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<AppModuleSiteMap xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <SiteMapUniqueName>sprk_SpaarkeAISetup</SiteMapUniqueName>
+  <EnableCollapsibleGroups>True</EnableCollapsibleGroups>
+  <ShowHome>True</ShowHome>
+  <ShowPinned>False</ShowPinned>
+  <ShowRecents>False</ShowRecents>
+  <SiteMap IntroducedVersion="7.0.0.0">
+    <Area Id="area_658be132" ResourceId="SitemapDesigner.NewTitle" DescriptionResourceId="SitemapDesigner.NewTitle" ShowGroups="true" IntroducedVersion="7.0.0.0">
+      <Titles>
+        <Title LCID="1033" Title="AI Resources" />
+      </Titles>
+      <Group Id="group_90defdb7" ResourceId="SitemapDesigner.NewGroup" DescriptionResourceId="SitemapDesigner.NewGroup" IntroducedVersion="7.0.0.0" IsProfile="false" ToolTipResourseId="SitemapDesigner.Unknown">
+        <Titles>
+          <Title LCID="1033" Title="AI Configuration" />
+        </Titles>
+        <SubArea Id="subarea_ec54d529" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aiactiontype" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_cc0ba19e" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aichatcontextmap" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_250881c5" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aichatmessage" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_83a3e7ff" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aichatsummary" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_9cee65e3" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aimodeldeployment" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_0990a3aa" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aipersona" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_a759e6de" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_airetrievalmode" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_7c6fd98b" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aisearchindex" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_cf094392" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aitopicregistry" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_4a6b9422" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_analysischatmessage" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_4024d189" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_precedent" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_bbee1a86" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_processingjob" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+      </Group>
+    </Area>
+    <Area Id="area_511f0310" ResourceId="SitemapDesigner.NewTitle" DescriptionResourceId="SitemapDesigner.NewTitle" ShowGroups="true" IntroducedVersion="7.0.0.0">
+      <Titles>
+        <Title LCID="1033" Title="Playbooks" />
+      </Titles>
+      <Group Id="group_d7a380d7" ResourceId="SitemapDesigner.NewGroup" DescriptionResourceId="SitemapDesigner.NewGroup" IntroducedVersion="7.0.0.0" IsProfile="false" ToolTipResourseId="SitemapDesigner.Unknown">
+        <SubArea Id="subarea_ebbba567" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_analysisplaybook" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_7fe0a0d2" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_analysisskill" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_135ff4b8" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_analysistool" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_b429eeef" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_outputtypes" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_d0966a76" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_playbooknode" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_d0461f99" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_playbooknoderun" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_b6bb8156" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_playbookrun" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_b94cd92f" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aiknowledgedeployment" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_4508190d" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aiknowledgesource" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_40471d41" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aiknowledgetype" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_f02519d4" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aioutputtype" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_6fdbac34" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aiskilltype" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_03a45912" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_aitooltype" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_aa03e5ed" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_analysisaction" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_1c47e1b6" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_analysisactiontype" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_b828c5c2" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_analysisdeliverytype" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_060feb05" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_analysisemailmetadata" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_b75e189a" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_analysisknowledge" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_0d816a11" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_analysisoutput" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_f3be72dd" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_playbookconsumer" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+      </Group>
+    </Area>
+    <Area Id="area_adminsetup" ResourceId="SitemapDesigner.NewTitle" DescriptionResourceId="SitemapDesigner.NewTitle" ShowGroups="true" IntroducedVersion="7.0.0.0">
+      <Titles>
+        <Title LCID="1033" Title="Admin Setup" />
+      </Titles>
+      <Group Id="group_f082fae9" ResourceId="SitemapDesigner.NewGroup" DescriptionResourceId="SitemapDesigner.NewGroup" IntroducedVersion="7.0.0.0" IsProfile="false" ToolTipResourseId="SitemapDesigner.Unknown">
+        <SubArea Id="subarea_ddcf8a70" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="appnotification" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_c2269c1b" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_event" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_88dbf512" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_communication" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+        <SubArea Id="subarea_e09b6ad7" Icon="/_imgs/imagestrips/transparent_spacer.gif" Entity="sprk_todo" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" />
+      </Group>
+    </Area>
+  </SiteMap>
+  <LocalizedNames>
+    <LocalizedName description="Spaarke AI Setup" languagecode="1033" />
+  </LocalizedNames>
+</AppModuleSiteMap>

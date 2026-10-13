@@ -103,7 +103,7 @@ pac solution export --name YourAppSolution --path ./exported/ --include-sitemap
 
 # After modifying the sitemap, repack and import:
 pac solution pack --zipfile ./YourAppSolution_updated.zip --folder ./exported/
-pac solution import --path ./YourAppSolution_updated.zip --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath ./YourAppSolution_updated.zip -SolutionUniqueName <name>
 ```
 
 ### Step 4: Test Navigation

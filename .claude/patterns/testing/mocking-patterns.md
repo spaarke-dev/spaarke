@@ -9,7 +9,7 @@ Setting up test doubles for unit or integration tests (Moq for interfaces, WireM
 
 ## Read These Files
 1. `tests/unit/Sprk.Bff.Api.Tests/Mocks/FakeGraphClientFactory.cs` — Custom fake for Graph client
-2. `tests/unit/Sprk.Bff.Api.Tests/Integration/DataverseWebApiWireMockTests.cs` — WireMock request matching and stateful retry
+2. `tests/integration/contract/SpeAdmin/GraphWireMockFixture.cs` — WireMock request matching (Graph)
 3. `tests/unit/Sprk.Bff.Api.Tests/AuthorizationTests.cs` — Moq setup, verification, and test data source
 
 ## Constraints

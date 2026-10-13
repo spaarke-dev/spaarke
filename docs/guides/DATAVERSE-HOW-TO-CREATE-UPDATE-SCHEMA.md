@@ -578,13 +578,13 @@ $result = Invoke-DataverseApi -Endpoint "PublishXml" -Method "POST" -Body $publi
 Write-Host "Customizations published" -ForegroundColor Green
 ```
 
-### Publish All Customizations
+### Publish a different set of components
+
+List exactly what you changed (never an empty or tenant-wide publish). Build the ParameterXml with `New-PublishParameterXml` from `scripts/lib/Publish-SolutionComponents.ps1`:
 
 ```powershell
-$publishRequest = @{
-    "ParameterXml" = "<importexportxml><entities/></importexportxml>"
-}
-
+. ./scripts/lib/Publish-SolutionComponents.ps1
+$publishRequest = @{ ParameterXml = (New-PublishParameterXml -Entities sprk_event -WebResources <guid>) }
 Invoke-DataverseApi -Endpoint "PublishXml" -Method "POST" -Body $publishRequest
 ```
 

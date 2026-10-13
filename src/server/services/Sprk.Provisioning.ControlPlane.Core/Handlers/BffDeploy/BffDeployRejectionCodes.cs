@@ -18,10 +18,8 @@
 //     4 new ArchTests (r1 task 064), naming-conformance (r3 task 063),
 //     Graph app-role parity (r3 task 062 / r1 task 067). Distinct rejection
 //     code per failing gate (POML criterion 2).
-//   - spec.md §4D I1 / FR-28: NO hardcoded default tenant in provisioning
-//     scripts (Gap 2 assertion — POML criterion 5 requires
-//     <see cref="Spaarkedev1HardcodeDetected"/> when the regression is
-//     detected in Deploy-Release.ps1).
+//   - (Retired 2026-10-09: the Gap 2 Deploy-Release.ps1 scan and its code
+//     Spaarkedev1HardcodeDetected — H9 never runs that script.)
 //   - design.md §4C rollback taxonomy — mapping from rejection code to
 //     FailureClass is inline in H9BffDeployHandler file header.
 //
@@ -69,6 +67,7 @@ public static class BffDeployRejectionCodes
     /// default tenant in provisioning scripts. Fails BEFORE any external side
     /// effect so a bad script cannot deploy.
     /// </summary>
+    [Obsolete("Retired 2026-10-09 (task 253 follow-up): H9 no longer scans Deploy-Release.ps1 — it never runs it and the Worker publish does not carry it. Kept so external filters on the string keep compiling.")]
     public const string Spaarkedev1HardcodeDetected = "spaarkedev1-hardcode-detected";
 
     // ---- task 132 (Wave G-3, DS-4 §5 re-scope) — artifact manifest / download / Kudu deploy ----
@@ -132,9 +131,9 @@ public static class BffDeployRejectionCodes
 
     // ---- r3-era gate failures (SUPERSEDED by task 132 — see ArtifactManifestRejected
     //      above; retained per this file's stability policy — "do NOT rename;
-    //      mark old ones @[Obsolete] on removal" — no code path emits these
-    //      anymore, but DotnetR3GateVerifier.cs / IR3GateVerifier.cs remain on
-    //      disk unregistered, so the constants stay defined) ----
+    //      mark old ones @[Obsolete] on removal" — no code path emits these;
+    //      DotnetR3GateVerifier.cs / IR3GateVerifier.cs were deleted by task 253,
+    //      the constants stay defined for the stability policy) ----
 
     /// <summary>
     /// r3-era analyzers-as-errors gate failed — <c>dotnet build</c> exited

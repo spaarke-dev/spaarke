@@ -199,9 +199,18 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
             if (config.DueDate is not null)
             {
                 var dueDateStr = _templateEngine.Render(config.DueDate, templateContext);
-                if (DateTime.TryParse(dueDateStr, out var dueDate))
+                // Task 098: sprk_duedate is Date Only. A "yyyy-MM-dd" (or "yyyy-MM-ddT…") value is the calendar date
+                // as written; ToUniversalTime() moved it by the machine's offset before the column stored its date.
+                if (DataverseDateOnly.TryParse(dueDateStr, out var calendarDate))
                 {
-                    scheduledEnd = dueDate.ToUniversalTime();
+                    scheduledEnd = calendarDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+                }
+                else if (DateTimeOffset.TryParse(dueDateStr, System.Globalization.CultureInfo.InvariantCulture,
+                             System.Globalization.DateTimeStyles.None, out var dueDate))
+                {
+                    // Any other date text: invariant culture, and the clock time AS WRITTEN (its own offset) — never
+                    // converted to the server's local time, which would bring the server's day back in.
+                    scheduledEnd = dueDate.DateTime;
                 }
             }
 

@@ -207,7 +207,7 @@ public sealed class H12aAiSeedChainHandler : IProvisioningHandler
         {
             var diagnostic =
                 "Target Dataverse URL not present on ProvisioningRun.interStepState.dataverseEnvUrl. " +
-                "H5/H6 (Dataverse env creation + solution import) MUST complete before H12a dispatches. " +
+                "H5/H6 (Dataverse env adoption + solution import) MUST complete before H12a dispatches. " +
                 "Handler did NOT invoke the seeder script (POML acceptance criterion 6).";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 AiSeedChainRejectionCodes.MissingDataverseUrl, diagnostic, cancellationToken).ConfigureAwait(false);
@@ -223,7 +223,7 @@ public sealed class H12aAiSeedChainHandler : IProvisioningHandler
         {
             var diagnostic =
                 $"AI seed manifest not found at '{notFound.AttemptedPath}'. " +
-                "Verify scripts/seed-data/manifest.yaml ships in the L2 publish output.";
+                "The manifest is an embedded resource of the L2 assembly — restore its .csproj <EmbeddedResource> item.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 AiSeedChainRejectionCodes.ManifestNotFound, diagnostic, cancellationToken).ConfigureAwait(false);
         }

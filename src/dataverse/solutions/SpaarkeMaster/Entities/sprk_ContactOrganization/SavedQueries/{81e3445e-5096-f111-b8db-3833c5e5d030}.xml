@@ -1,0 +1,41 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{81e3445e-5096-f111-b8db-3833c5e5d030}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_contactorganizationid">
+          <cell name="sprk_isprimary" width="100" />
+          <cell name="sprk_contact" width="100" />
+          <cell name="sprk_contacttype" width="115" />
+          <cell name="sprk_role" width="100" />
+          <cell name="sprk_startdate" width="100" />
+          <cell name="sprk_enddate" width="100" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" output-format="xml-platform" mapping="logical">
+        <entity name="sprk_contactorganization">
+          <attribute name="sprk_contactorganizationid" />
+          <attribute name="sprk_contact" />
+          <attribute name="sprk_contacttype" />
+          <attribute name="sprk_isprimary" />
+          <attribute name="sprk_role" />
+          <attribute name="sprk_startdate" />
+          <attribute name="sprk_enddate" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Contacts" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

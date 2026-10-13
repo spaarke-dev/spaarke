@@ -7,6 +7,7 @@ using Microsoft.Graph;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Contract.SpeAdmin;
@@ -39,6 +40,7 @@ public class SpeAdminIdentityAndGrantContractTests
     private const string RegistrationsPath = "/storage/fileStorage/containerTypeRegistrations";
     private const string ContainerTypeId = "8a6ce34c-6055-4681-8f87-2f4f9f921c06";
     private const string BffManagedIdentityAppId = "5967251e-171c-46fe-a6c2-ef843c90309d";
+    private const string OwnedContainerId = "b!owned-container";
 
     // ─────────────────────────────────────────────────────────────────────────
     // Identity — the BFF's own app-only client, never an owning-app secret
@@ -46,14 +48,14 @@ public class SpeAdminIdentityAndGrantContractTests
 
     [Fact]
     [Trait("Category", "SpeAdminGraphContract")]
-    public async Task GetClientForConfig_ReturnsTheBffAppOnlyClient_EvenWhenTheConfigHasNoSecretName()
+    public async Task GetClientForContainer_ReturnsTheBffAppOnlyClient_EvenWhenTheConfigHasNoSecretName()
     {
         using var graph = new GraphWireMockFixture();
         var bffAppClient = graph.CreateGraphClient();
         var sut = CreateSut(new StubGraphClientFactory(bffAppClient));
 
         // No usable Key Vault secret name — the exact Model 1 shape that used to break every operation.
-        var client = await sut.GetClientForConfigAsync(Config(BffTenant, secretName: "null"));
+        var client = await sut.GetClientForContainerAsync(Config(BffTenant, secretName: "null"), OwnedContainerId);
 
         client.Should().BeSameAs(bffAppClient,
             because: "container work runs as the BFF's own identity; no credential is read from the config");
@@ -61,12 +63,12 @@ public class SpeAdminIdentityAndGrantContractTests
 
     [Fact]
     [Trait("Category", "SpeAdminGraphContract")]
-    public async Task GetClientForConfig_RefusesAConfigFromAnotherTenant()
+    public async Task GetClientForContainer_RefusesAConfigFromAnotherTenant()
     {
         using var graph = new GraphWireMockFixture();
         var sut = CreateSut(new StubGraphClientFactory(graph.CreateGraphClient()));
 
-        var act = () => sut.GetClientForConfigAsync(Config(OtherTenant));
+        var act = () => sut.GetClientForContainerAsync(Config(OtherTenant), OwnedContainerId);
 
         // The BFF identity can only act in its own tenant. Serving this config would list THIS tenant's
         // containers under another tenant's configuration — silently wrong, so it must refuse.
@@ -78,12 +80,12 @@ public class SpeAdminIdentityAndGrantContractTests
     [Trait("Category", "SpeAdminGraphContract")]
     [InlineData("")]
     [InlineData("   ")]
-    public async Task GetClientForConfig_RefusesAConfigWhoseTenantIsUnknown(string tenant)
+    public async Task GetTypeWideClient_RefusesAConfigWhoseTenantIsUnknown(string tenant)
     {
         using var graph = new GraphWireMockFixture();
         var sut = CreateSut(new StubGraphClientFactory(graph.CreateGraphClient()));
 
-        var act = () => sut.GetClientForConfigAsync(Config(tenant));
+        var act = () => sut.GetTypeWideClientForConfigAsync(Config(tenant));
 
         // Fail closed (WP-6): an unestablished tenant cannot be confirmed to be the BFF's.
         (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*has no tenant*");
@@ -91,25 +93,25 @@ public class SpeAdminIdentityAndGrantContractTests
 
     [Fact]
     [Trait("Category", "SpeAdminGraphContract")]
-    public async Task GetClientForConfig_RefusesWhenTheBffTenantIsNotConfigured()
+    public async Task GetClientForContainer_RefusesWhenTheBffTenantIsNotConfigured()
     {
         using var graph = new GraphWireMockFixture();
         var sut = CreateSut(new StubGraphClientFactory(graph.CreateGraphClient()), bffTenant: null);
 
-        var act = () => sut.GetClientForConfigAsync(Config(BffTenant));
+        var act = () => sut.GetClientForContainerAsync(Config(BffTenant), OwnedContainerId);
 
         (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*TENANT_ID*");
     }
 
     [Fact]
     [Trait("Category", "SpeAdminGraphContract")]
-    public async Task GetClientForConfig_WithoutAGraphClientFactory_NamesTheMissingDependency()
+    public async Task GetClientForContainer_WithoutAnOwnershipGuard_NamesTheMissingDependency()
     {
         var sut = CreateSut(graphClientFactory: null);
 
-        var act = () => sut.GetClientForConfigAsync(Config(BffTenant));
+        var act = () => sut.GetClientForContainerAsync(Config(BffTenant), OwnedContainerId);
 
-        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*IGraphClientFactory*");
+        (await act.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*SpeContainerOwnershipGuard*");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -212,6 +214,58 @@ public class SpeAdminIdentityAndGrantContractTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Reading the grants — delegated, never the app-only identity (UAT 2026-10-07)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task GetContainerTypePermissions_ReadsTheGrantsAsTheSignedInAdmin_NotTheAppOnlyIdentity()
+    {
+        // App-only reads of a registration are limited to the app that OWNS it. The BFF identity owns
+        // none, so the Permissions tab returned 403 accessDenied while the Consuming Apps tab — the same
+        // grants, read delegated — worked.
+        using var appOnlyGraph = new GraphWireMockFixture();
+        using var delegatedGraph = new GraphWireMockFixture();
+        delegatedGraph.StubGet(RegistrationsPath, JsonSerializer.Serialize(new
+        {
+            value = new[] { new { appId = BffManagedIdentityAppId, delegatedPermissions = Array.Empty<string>(), applicationPermissions = new[] { "full" } } },
+        }));
+        var sut = CreateSut(new StubGraphClientFactory(appOnlyGraph.CreateGraphClient(), delegatedGraph.CreateGraphClient()));
+
+        var grants = await sut.GetContainerTypePermissionsForUserAsync(new DefaultHttpContext(), ContainerTypeId);
+
+        grants!.Should().ContainSingle().Which.AppId.Should().Be(BffManagedIdentityAppId);
+        delegatedGraph.RequestsFor(RegistrationsPath).Should().ContainSingle()
+            .Which.Path.Should().EndWith($"/containerTypeRegistrations/{ContainerTypeId}/applicationPermissionGrants");
+        appOnlyGraph.AllRequests.Should().BeEmpty(because: "the app-only identity cannot read a registration it does not own");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Reading one container type — no $select, so billingStatus arrives (task 029, UAT 2026-10-07)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public async Task GetContainerType_SendsNoSelect_SoBillingStatusReachesTheDetailPanel()
+    {
+        // The list showed "Valid" while the detail panel showed "Billing: Unknown": the single GET asked
+        // for four named fields and billingStatus was not one of them.
+        using var graph = new GraphWireMockFixture();
+        graph.StubGet("/storage/fileStorage/containerTypes", JsonSerializer.Serialize(new
+        {
+            id = ContainerTypeId,
+            name = "Spaarke SPE Model 1 Owner",
+            billingClassification = "standard",
+            billingStatus = "valid",
+        }));
+
+        var type = await CreateSut().GetContainerTypeAsync(graph.CreateGraphClient(), ContainerTypeId);
+
+        graph.SelectFieldsFor("/storage/fileStorage/containerTypes").Should().BeEmpty();
+        type!.BillingStatus.Should().BeEquivalentTo("valid");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // The register endpoint's legacy permission names → Graph's
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -274,17 +328,22 @@ public class SpeAdminIdentityAndGrantContractTests
                 configuration, NullLogger<DataverseWebApiClient>.Instance, new UnusableCredential()),
             configuration: configuration,
             logger: NullLogger<SpeAdminGraphService>.Instance,
-            graphClientFactory: graphClientFactory);
+            graphClientFactory: graphClientFactory,
+            // Ownership is not what these tests pin (SpeAppOnlyContainerIsolationTests does): every container is owned.
+            ownership: graphClientFactory is null ? null : TestSpeOwnership.AllowAll(graphClientFactory));
     }
 
-    /// <summary>Hands back one pre-built client as the BFF's app-only client; the delegated paths are
-    /// not under test here and throw if reached.</summary>
-    private sealed class StubGraphClientFactory(GraphServiceClient appOnly) : IGraphClientFactory
+    /// <summary>Hands back pre-built clients as the BFF's app-only and (optionally) delegated clients; a
+    /// delegated path reached without a delegated client throws.</summary>
+    private sealed class StubGraphClientFactory(GraphServiceClient appOnly, GraphServiceClient? delegated = null)
+        : IGraphClientFactory
     {
         public GraphServiceClient ForApp() => appOnly;
 
         public Task<GraphServiceClient> ForUserAsync(HttpContext ctx, CancellationToken ct = default) =>
-            throw new InvalidOperationException("Delegated Graph is not under test here.");
+            delegated is not null
+                ? Task.FromResult(delegated)
+                : throw new InvalidOperationException("Delegated Graph is not under test here.");
 
         public Task<GraphServiceClient> ForUserBetaAsync(HttpContext ctx, CancellationToken ct = default) =>
             throw new InvalidOperationException("Delegated Graph is not under test here.");

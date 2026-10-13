@@ -122,11 +122,27 @@ public enum InheritedShareAction
     /// <summary>On the No Access list of the record or a parent: nothing added.</summary>
     Walled,
 
+    /// <summary>
+    /// unified-access-control-r2 task 114 (owner round 67): the filed record is RESTRICTED and the principal is a user flagged
+    /// <c>sprk_isexternal = true</c> — <c>InternalShareEndpoints.ClassifyEligibility</c> refuses it, so nothing is added. A
+    /// KNOWN cause: the share is passed on again once the record is not Restricted.
+    /// </summary>
+    Restricted,
+
     /// <summary>The No Access list could not be checked: nothing added (held).</summary>
     Held,
 
     /// <summary>The write, or its read-back, failed.</summary>
     Failed,
+}
+
+/// <summary>
+/// Task 114: whether a filed secure root is Restricted, and the users flagged external its parents may not pass on to it.
+/// </summary>
+public sealed record RestrictedPrincipalsAnswer(bool IsRestricted, IReadOnlySet<DataversePrincipalRef> Barred)
+{
+    /// <summary>The record is not Restricted (or nobody to ask about): nobody is barred.</summary>
+    public static RestrictedPrincipalsAnswer NotRestricted { get; } = new(false, new HashSet<DataversePrincipalRef>());
 }
 
 /// <summary>One principal of a filed secure root's inherited mirror, with the masks before and after (task 158 r1).</summary>
@@ -210,8 +226,8 @@ public sealed record SecureRootsAbove(
 /// of non-secure roots are never touched. Roots are never mirrored: a root's own shares are provisioning's and the share
 /// endpoints'.</para>
 /// <para><b>The mirror.</b> For each principal (system user or team) with a direct share on the root: the root's rights
-/// restricted to <see cref="RecordShareLevels.ChildMirrorableMask"/> — Read, Write, Append, AppendTo, Delete; never
-/// Share, never Assign (owner round 11 item 4: "ShareAccess is NOT mirrored onto children"). A child under SEVERAL secure
+/// restricted to <see cref="RecordShareLevels.ChildMirrorableMask"/> — Read, Write, Append, AppendTo, Delete and Share,
+/// each only where the root share holds it; never Assign (Share since owner round 91, replacing round 11 item 4). A child under SEVERAL secure
 /// roots gets the INTERSECTION: a principal must be shared on every one of them, at the lowest rights (owner round 11
 /// item 4, fail closed). Every direct share on the child outside the mirror is revoked; a wider one is narrowed; a
 /// missing one is granted. Inherited-only POA rows (mask 0) are neither read as shares nor touched.</para>
@@ -266,6 +282,8 @@ public sealed class SecureChildShareSynchronizer
     private const string OwningUserColumn = "owninguser";
     private const string IsSecureColumn = "sprk_issecure";
     private const int OwnerTeamType = SecureRecordOwnerTeam.OwnerTeamType;
+
+    private const string AccessPermissionColumn = "sprk_accesspermission";
 
     private readonly IGenericEntityService _dataverse;
     private readonly IDataverseRecordShareService _recordShare;
@@ -418,7 +436,7 @@ public sealed class SecureChildShareSynchronizer
     /// unified-access-control-r2 task 147 r1 (owner round 28 item 1): mirrors ONE child — the row a browser writer just
     /// created or re-filed through the BFF — inline, so the people the secure record is shared with see it at once rather
     /// than at the next two-minute reconcile (owner round 11 item 2 remains the backstop). The same mirror the scheduled
-    /// reconcile computes for that row: the INTERSECTION of its secure roots' sharees, never Share or Assign, a No Access
+    /// reconcile computes for that row: the INTERSECTION of its secure roots' sharees, never Assign (Share only where the roots hold it, round 91), a No Access
     /// entry honoured. A row that is not Secure-team-owned answers <see cref="SecureChildShareSyncStatus.NotApplicable"/>
     /// and nothing is written; a fault or an ambiguous Secure team writes nothing (<see cref="SecureChildShareSyncStatus.Failed"/>).
     /// </summary>
@@ -689,7 +707,7 @@ public sealed class SecureChildShareSynchronizer
     /// unified-access-control-r2 task 158 (owner round 6: "The parent's sharees can see it") — gives a secure work
     /// assignment or project that is FILED UNDER secure matters / projects (<paramref name="secureParents"/>) the internal
     /// sharees of those parents, by this class's mirror rule: each parent sharee's rights restricted to
-    /// <see cref="RecordShareLevels.ChildMirrorableMask"/> (never Share, never Assign), the INTERSECTION when there are two
+    /// <see cref="RecordShareLevels.ChildMirrorableMask"/> (Share only where the root holds it, round 91; never Assign), the INTERSECTION when there are two
     /// parents (owner round 11 item 4), a user the No Access list walls off the record or any parent dropped, an unverifiable
     /// wall held. Then the record's own children are brought into line with its shares (<see cref="SyncRootAsync"/>).
     /// </summary>
@@ -814,6 +832,22 @@ public sealed class SecureChildShareSynchronizer
         var outcomes = new Dictionary<DataversePrincipalRef, InheritedShareOutcome>();
         var from = isolatedParents.Select(p => (p.Table, p.Id)).ToList();
 
+        // Task 114 (owner round 67): the ONE share-eligibility rule — a RESTRICTED filed record is never given a parent's
+        // sharee who is flagged external. Read before any write; a read that fails gives nobody anything (ADR-003).
+        RestrictedPrincipalsAnswer restricted;
+        try
+        {
+            restricted = await RestrictedExternalPrincipalsOrThrowAsync(root.Table, root.Id, desired!.Keys, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[SECURE-CHILD-SHARES] Whether {Root} is Restricted, or which of its parents' sharees are flagged external, could " +
+                "not be read; nothing was given.", root);
+            return SecureChildShareSyncResult.Failed(
+                "whether the record is Restricted, or who among its parents' sharees is flagged external, could not be read");
+        }
+
         foreach (var (principal, mask) in desired!.OrderBy(p => p.Key.Id))
         {
             var current = have.TryGetValue(principal, out var c) ? c : 0;
@@ -821,6 +855,14 @@ public sealed class SecureChildShareSynchronizer
             {
                 // Owner round 30: an operator removed it on this record — never re-added while the parent share persists.
                 outcomes[principal] = new InheritedShareOutcome(principal, mask, current, current, InheritedShareAction.Declined);
+                continue;
+            }
+
+            if (restricted.Barred.Contains(principal))
+            {
+                // Task 114: never copied onto a Restricted record — and, held already, not counted as passed on (it is the
+                // Restricted remover's to take). Recorded by the caller as the known cause, never as an operator's removal.
+                outcomes[principal] = new InheritedShareOutcome(principal, mask, current, current, InheritedShareAction.Restricted);
                 continue;
             }
 
@@ -956,6 +998,69 @@ public sealed class SecureChildShareSynchronizer
             Inherited = outcomes.Values.ToList(),
             InheritedFrom = from,
         };
+    }
+
+    /// <summary>
+    /// Task 114 (owner round 67): which of <paramref name="principals"/> a RESTRICTED <paramref name="rootTable"/> record may not
+    /// be shared with — the users <see cref="Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.IsBarredOnRestricted"/> bars
+    /// (a stored <c>sprk_isexternal = true</c>, disabled or not; a blank flag is not external). Empty when the
+    /// record is not Restricted (one read) or names no user. Teams are never barred here. Throws when the record or the users
+    /// cannot be read, so a caller never reads a fault as "nobody is barred".
+    /// </summary>
+    internal async Task<RestrictedPrincipalsAnswer> RestrictedExternalPrincipalsOrThrowAsync(
+        string rootTable, Guid rootId, IEnumerable<DataversePrincipalRef> principals, CancellationToken ct)
+    {
+        var users = principals.Where(p => p.Kind == DataversePrincipalKind.SystemUser).Select(p => p.Id).Distinct().ToList();
+        if (users.Count == 0)
+            return RestrictedPrincipalsAnswer.NotRestricted;
+
+        var rootQuery = new QueryExpression(rootTable)
+        {
+            ColumnSet = new ColumnSet(AccessPermissionColumn),
+            TopCount = 1,
+            NoLock = true,
+        };
+        rootQuery.Criteria.AddCondition(rootTable + "id", ConditionOperator.Equal, rootId);
+        var rootRow = (await _dataverse.RetrieveMultipleAsync(rootQuery, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        var isRestricted = rootRow?.GetAttributeValue<OptionSetValue>(AccessPermissionColumn)?.Value
+                           == ExternalParticipationService.AccessPermissionRestricted;
+
+        // #1478 (task 175): Restricted THROUGH a parent counts (task 174's effective rule), so the mirror never shares a
+        // child of a Restricted matter with a person flagged external while the child's own column catches up. A chain that
+        // cannot be read throws (this method's contract: a fault is never "nobody is barred").
+        if (!isRestricted && rootRow is not null)
+        {
+            isRestricted = await Sprk.Bff.Api.Infrastructure.ExternalAccess.EffectiveRootFlags
+                .RestrictedThroughFilingAsync(_dataverse, _logger, rootTable, rootId, ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException(
+                    $"Whether {rootTable} {rootId:D} is Restricted through what it is filed under could not be read.");
+        }
+
+        if (!isRestricted)
+            return RestrictedPrincipalsAnswer.NotRestricted;
+
+        var barred = new HashSet<DataversePrincipalRef>();
+        foreach (var batch in users.Chunk(DescendantConditionsPerQuery))
+        {
+            var query = new QueryExpression("systemuser")
+            {
+                ColumnSet = new ColumnSet("systemuserid", "sprk_isexternal"),
+                NoLock = true,
+            };
+            query.Criteria.AddCondition("systemuserid", ConditionOperator.In, batch.Cast<object>().ToArray());
+            foreach (var row in (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities)
+            {
+                if (!batch.Contains(row.Id))
+                    continue; // a row for any other user is not an answer about these
+                // Verifier V4: the ONE predicate — disabled or not, person or not — so the inheritance's barred set is the
+                // remover's and the materializer's, never a narrower "eligible AND external".
+                if (Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.IsBarredOnRestricted(
+                        row.GetAttributeValue<bool?>("sprk_isexternal"), rootIsRestricted: true))
+                    barred.Add(DataversePrincipalRef.User(row.Id));
+            }
+        }
+
+        return new RestrictedPrincipalsAnswer(IsRestricted: true, barred);
     }
 
     private async Task<SecureChildShareSyncResult> RunAsync(RowRef? scope, CancellationToken ct)

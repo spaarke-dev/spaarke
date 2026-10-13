@@ -1,0 +1,13 @@
+<environmentvariabledefinition schemaname="sprk_RedisConnectionString">
+  <description default="Azure Cache for Redis connection string for session caching and rate limiting. Store in Azure Key Vault and reference here.">
+    <label description="Azure Cache for Redis connection string for session caching and rate limiting. Store in Azure Key Vault and reference here." languagecode="1033" />
+  </description>
+  <displayname default="Redis Connection String">
+    <label description="Redis Connection String" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000005</type>
+</environmentvariabledefinition>

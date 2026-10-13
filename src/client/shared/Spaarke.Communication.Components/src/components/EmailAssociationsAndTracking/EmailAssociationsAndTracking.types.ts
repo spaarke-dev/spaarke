@@ -121,9 +121,10 @@ export interface EmailConnectionsReviewProps {
 export interface EmailTrackingPanelProps {
   monitor: boolean;
   highPriority: boolean;
-  // No access-permission props (unified-access-control-r2 task 138, owner Q6): a communication
-  // INHERITS its parent's Access Permission; its own column is retired, so this panel neither shows
-  // nor writes one. The parent record's pill is the one place to change it.
+  // No access-permission props (unified-access-control-r2 task 138, owner Q6; task 173, owner round 81): a
+  // communication's access comes from its parent. Its own sprk_accesspermission is a DISPLAY copy of the parent's
+  // value that only the BFF writes and enforcement never reads, so this panel neither shows nor writes it (the
+  // Message form shows it locked). The parent record's pill is the one place to change it.
   onMonitorChange: (value: boolean) => void | Promise<void>;
   onHighPriorityChange: (value: boolean) => void | Promise<void>;
   monitorLabel?: string;

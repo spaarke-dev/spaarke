@@ -11,6 +11,7 @@
 // (the SpeContainerPagingTests precedent). The real request-builder chain, the real OdataNextLink plumbing and the real
 // loop run; no HTTP anywhere. No Mock<HttpMessageHandler>.
 
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Graph;
@@ -49,7 +50,7 @@ public class DocumentVersionListPagingTests
         var adapter = new ScriptedVersionAdapter(pages);
         var factory = new Mock<IGraphClientFactory>();
         factory.Setup(f => f.ForApp()).Returns(new GraphServiceClient(adapter));
-        return (new DriveItemOperations(factory.Object, NullLogger<DriveItemOperations>.Instance), adapter);
+        return (new DriveItemOperations(factory.Object, TestSpeOwnership.AllowAll(factory.Object), NullLogger<DriveItemOperations>.Instance), adapter);
     }
 
     [Fact]

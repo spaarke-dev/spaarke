@@ -31,6 +31,7 @@ public sealed class KnowledgeRetrievalHandlerTests : TypedToolHandlerTestFixture
 
     private KnowledgeRetrievalHandler CreateHandler() => new(
         _ragServiceMock.Object,
+        PermitAllRetrievalAccessTrim.Instance,
         CreateLogger<KnowledgeRetrievalHandler>());
 
     private static AnalysisTool BuildKnowledgeTool(string method) =>

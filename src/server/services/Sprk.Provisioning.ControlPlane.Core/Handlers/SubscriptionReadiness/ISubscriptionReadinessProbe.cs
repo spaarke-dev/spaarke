@@ -98,6 +98,19 @@ public interface ISubscriptionReadinessProbe
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// T228 (ADR-027: one subscription per customer, MUST NOT hold two): passes when the subscription holds no Spaarke
+    /// stamp resource group of ANOTHER customer — no <c>rg-spaarke-{otherId}-{env}</c>
+    /// (<see cref="SubscriptionDedication.FindForeignStampGroups"/>). The operator creates the subscription, so a mistyped
+    /// id could otherwise point a run at another customer's stamp or at Spaarke's own platform subscription
+    /// (<c>rg-spaarke-platform-*</c>). A listing failure returns <c>Passed=false</c> (never "dedicated by default").
+    /// </summary>
+    Task<SubscriptionReadinessCheckResult> CheckSubscriptionDedicatedAsync(
+        string subscriptionId,
+        string customerId,
+        CancellationToken cancellationToken);
+
+
+    /// <summary>
     /// HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27) — F6 verbatim
     /// absorption. Registers each provider in <paramref name="requiredProviders"/>
     /// on the target subscription (POST providers/{ns}/register) and polls
@@ -142,6 +155,10 @@ public interface ISubscriptionReadinessProbe
 /// the operator can resolve the missing precondition without further
 /// probing.
 /// </param>
+/// <param name="ListingFailed">
+/// T228: set by <see cref="ISubscriptionReadinessProbe.CheckSubscriptionDedicatedAsync"/> when the answer is unknown
+/// because the resource groups could not be listed (not because a foreign stamp was found).
+/// </param>
 /// <param name="Evidence">
 /// Arbitrary per-check evidence (raw ARM response body, retrieved
 /// registrationAssignment properties, etc.). Written to
@@ -152,4 +169,5 @@ public interface ISubscriptionReadinessProbe
 public sealed record SubscriptionReadinessCheckResult(
     bool Passed,
     string Diagnostic,
-    JsonElement? Evidence);
+    JsonElement? Evidence,
+    bool ListingFailed = false);

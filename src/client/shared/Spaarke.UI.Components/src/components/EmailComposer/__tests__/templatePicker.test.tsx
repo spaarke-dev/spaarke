@@ -143,7 +143,9 @@ describe('EmailComposer — compose template picker (Wave E)', () => {
     fireEvent.click(screen.getByRole('button', { name: /apply template/i }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Welcome Letter' }));
     await screen.findByText('Apply template?');
-    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Apply' }));
+    fireEvent.click(
+      within(screen.getByRole('alertdialog', { name: 'Apply template?' })).getByRole('button', { name: 'Apply' })
+    );
 
     await waitFor(() => {
       expect(onRenderEmailTemplate).toHaveBeenCalledTimes(1);

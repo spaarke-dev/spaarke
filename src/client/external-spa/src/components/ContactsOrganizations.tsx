@@ -20,6 +20,7 @@ import {
 } from '@fluentui/react-components';
 import { PeopleRegular, BuildingRegular } from '@fluentui/react-icons';
 import { getContacts, getOrganizations, ODataContact, ODataOrganization } from '../api/web-api-client';
+import { TruncatedListNotice } from './TruncatedListNotice';
 import { SectionCard } from './SectionCard';
 
 // ---------------------------------------------------------------------------
@@ -150,9 +151,11 @@ interface ContactsGridProps {
   contacts: ODataContact[];
   loading: boolean;
   error: string | null;
+  /** Task 105: the list is incomplete — an empty one must not claim "no contacts". */
+  truncated: boolean;
 }
 
-const ContactsGrid: React.FC<ContactsGridProps> = ({ contacts, loading, error }) => {
+const ContactsGrid: React.FC<ContactsGridProps> = ({ contacts, loading, error, truncated }) => {
   const styles = useStyles();
 
   if (loading) {
@@ -172,6 +175,8 @@ const ContactsGrid: React.FC<ContactsGridProps> = ({ contacts, loading, error })
   }
 
   if (contacts.length === 0) {
+    // An incomplete empty list is not "no contacts": the notice above says it could not be read.
+    if (truncated) return null;
     return (
       <div className={styles.emptyState} role="status" aria-live="polite">
         <PeopleRegular className={styles.emptyIcon} aria-hidden="true" />
@@ -271,9 +276,11 @@ interface OrganizationsGridProps {
   organizations: ODataOrganizationWithCount[];
   loading: boolean;
   error: string | null;
+  /** Task 105: the list is incomplete — an empty one must not claim "no organisations". */
+  truncated: boolean;
 }
 
-const OrganizationsGrid: React.FC<OrganizationsGridProps> = ({ organizations, loading, error }) => {
+const OrganizationsGrid: React.FC<OrganizationsGridProps> = ({ organizations, loading, error, truncated }) => {
   const styles = useStyles();
 
   if (loading) {
@@ -293,6 +300,7 @@ const OrganizationsGrid: React.FC<OrganizationsGridProps> = ({ organizations, lo
   }
 
   if (organizations.length === 0) {
+    if (truncated) return null;
     return (
       <div className={styles.emptyState} role="status" aria-live="polite">
         <BuildingRegular className={styles.emptyIcon} aria-hidden="true" />
@@ -377,6 +385,8 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({ pr
   const [contacts, setContacts] = React.useState<ODataContact[]>([]);
   const [loadingContacts, setLoadingContacts] = React.useState<boolean>(true);
   const [contactsError, setContactsError] = React.useState<string | null>(null);
+  // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
+  const [contactsTruncated, setContactsTruncated] = React.useState<boolean>(false);
 
   // ---------------------------------------------------------------------------
   // Organizations state
@@ -385,6 +395,7 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({ pr
   const [organizations, setOrganizations] = React.useState<ODataOrganizationWithCount[]>([]);
   const [loadingOrganizations, setLoadingOrganizations] = React.useState<boolean>(true);
   const [organizationsError, setOrganizationsError] = React.useState<string | null>(null);
+  const [organizationsTruncated, setOrganizationsTruncated] = React.useState<boolean>(false);
 
   // ---------------------------------------------------------------------------
   // Fetch contacts
@@ -398,11 +409,14 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({ pr
     const fetchContacts = async () => {
       setLoadingContacts(true);
       setContactsError(null);
+      // Task 105: a flag from an earlier read must not sit beside this read's error.
+      setContactsTruncated(false);
 
       try {
         const data = await getContacts(projectId);
         if (!cancelled) {
-          setContacts(data);
+          setContacts(data.items);
+          setContactsTruncated(data.truncated);
         }
       } catch (err) {
         if (!cancelled) {
@@ -435,17 +449,19 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({ pr
     const fetchOrganizations = async () => {
       setLoadingOrganizations(true);
       setOrganizationsError(null);
+      setOrganizationsTruncated(false);
 
       try {
         const data = await getOrganizations(projectId);
         if (!cancelled) {
           // Compute contact count per organisation from the already-fetched contacts list.
           // This avoids a second round-trip for count data.
-          const withCounts: ODataOrganizationWithCount[] = data.map(org => ({
+          const withCounts: ODataOrganizationWithCount[] = data.items.map(org => ({
             ...org,
             _contactCount: contacts.filter(c => c._parentcustomerid_value === org.accountid).length,
           }));
           setOrganizations(withCounts);
+          setOrganizationsTruncated(data.truncated);
         }
       } catch (err) {
         if (!cancelled) {
@@ -479,12 +495,28 @@ export const ContactsOrganizations: React.FC<ContactsOrganizationsProps> = ({ pr
     <div className={styles.root}>
       {/* Contacts section */}
       <SectionCard title="Contacts">
-        <ContactsGrid contacts={contacts} loading={loadingContacts} error={contactsError} />
+        {!loadingContacts && (
+          <TruncatedListNotice truncated={contactsTruncated} shown={contacts.length} noun="contacts" />
+        )}
+        <ContactsGrid
+          contacts={contacts}
+          loading={loadingContacts}
+          error={contactsError}
+          truncated={contactsTruncated}
+        />
       </SectionCard>
 
       {/* Organisations section */}
       <SectionCard title="Organisations">
-        <OrganizationsGrid organizations={organizations} loading={loadingOrganizations} error={organizationsError} />
+        {!loadingOrganizations && (
+          <TruncatedListNotice truncated={organizationsTruncated} shown={organizations.length} noun="organisations" />
+        )}
+        <OrganizationsGrid
+          organizations={organizations}
+          loading={loadingOrganizations}
+          error={organizationsError}
+          truncated={organizationsTruncated}
+        />
       </SectionCard>
     </div>
   );

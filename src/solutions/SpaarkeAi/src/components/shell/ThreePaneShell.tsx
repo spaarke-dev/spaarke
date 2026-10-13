@@ -58,7 +58,8 @@
 import * as React from "react";
 import { makeStyles, Toaster, useToastController, Toast, ToastTitle } from "@fluentui/react-components";
 import { ChatRegular, AppsListRegular, DocumentRegular } from "@fluentui/react-icons";
-import { ThreePaneLayout } from "@spaarke/ui-components";
+import { ThreePaneLayout, InAppWizardHost, useUiScale } from "@spaarke/ui-components";
+import { authenticatedFetch as spaarkeAuthenticatedFetch, resolveTenantIdSync } from "@spaarke/auth";
 import type { EntityContext, EntityType } from "@spaarke/ai-context";
 import {
   PaneEventBusProvider,
@@ -110,6 +111,7 @@ import { CreateOnSaveAssociationGateDialog } from "../compose/CreateOnSaveAssoci
 // both panes (like ComposeActionBridgeProvider) so the workspace tab-focus feed publishes and the
 // assistant pane consumes the single active-item handle (id/type/label; NEVER bytes — ADR-015 / ADR-030).
 import { ActiveItemConduitProvider } from "../workspace/activeItemConduit";
+import { IN_APP_WIZARD_RENDERERS } from "./inAppWizardRenderers";
 // UAT round-1 follow-on (task 071): "Notify me when completed" — the review-complete toast
 // bridge. Mounted alongside the shell's Toaster below (SPAARKEAI_SHELL_TOASTER_ID) so it shares
 // the SAME portal/stacking order as restore-failure toasts (§11 reuse — no second Toaster).
@@ -775,6 +777,11 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
   const { onCreateOnSaveComplete: onCreateOnSaveAssociationComplete, dialogProps: associationGateDialogProps } =
     useCreateOnSaveAssociationGate();
 
+  // ontology-platform-r1 task 112 (D-26; ADR-050 launch rule (a)): the app-shell uiScale and tenant id
+  // for the ONE in-app Create-wizard host mounted below.
+  const { uiScale } = useUiScale();
+  const tenantId = resolveTenantIdSync();
+
   const composeLaunch = React.useMemo<ComposeLaunchContextValue | null>(
     () =>
       composeMode === "editor"
@@ -941,6 +948,22 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
                * blocked on it (the document is persisted before the gate opens).
                */}
               <CreateOnSaveAssociationGateDialog {...associationGateDialogProps} />
+              {/*
+               * ontology-platform-r1 task 112 (D-26; ADR-050 as amended, launch rule (a)): the ONE
+               * in-app host for the Create Matter / Project / Event / To Do / Work Assignment wizards.
+               * While it is mounted, every Console launch of those wizards — Quick Start and Assistant
+               * hand-offs (launchSurface), the shared launchers, and LegalWorkspace's WorkspaceGrid —
+               * opens them here in SprkModal (themed, explicit dismiss, no white platform header)
+               * instead of in a navigateTo(webresource) dialog. Renders nothing until a launch.
+               * The ribbon scripts are unaffected (they never reach this tree).
+               */}
+              <InAppWizardHost
+                authenticatedFetch={spaarkeAuthenticatedFetch}
+                bffBaseUrl={bffBaseUrl}
+                tenantId={tenantId || undefined}
+                uiScale={uiScale}
+                renderers={IN_APP_WIZARD_RENDERERS}
+              />
             </PaneCollapseContext.Provider>
            </AnalysisLaunchContext.Provider>
           </SessionRestoreManager>

@@ -1,62 +1,57 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Verify Azure AI Content Safety resource exists and that both Prompt Shields
-    and Groundedness Detection API endpoints are reachable.
+    Verify an Azure AI Content Safety account exists and that both Prompt Shields
+    and Groundedness Detection answer a Microsoft Entra (bearer-token) call.
 
 .DESCRIPTION
     This script:
-      1. Checks whether the Content Safety resource exists in the target resource group.
-      2. Confirms the resource is in westus2 (required for Prompt Shields + Groundedness).
-      3. Retrieves the endpoint and API key from Azure.
-      4. Sends a test request to the Prompt Shields API (shieldPrompt) and asserts HTTP 200.
-      5. Sends a test request to the Groundedness Detection API (detectGroundedness) and asserts HTTP 200.
-      6. Optionally stores the API key in Key Vault if it is not already there.
+      1. Checks whether the account exists in the target resource group.
+      2. Reports the account's region (the two API calls below are the real availability test).
+      3. Reports whether local (key) auth is disabled — it is on every customer stamp (task 246).
+      4. Gets an Entra token for https://cognitiveservices.azure.com with the operator's own az login.
+      5. Sends a test request to Prompt Shields (shieldPrompt) and asserts HTTP 200.
+      6. Sends a test request to Groundedness Detection (detectGroundedness) and asserts HTTP 200.
 
-    The script NEVER prints or logs the raw API key. Key Vault secret storage is
-    idempotent — re-running is safe.
+    Keyless (task 246, owner D13): the script reads no API key and writes nothing to Key Vault —
+    the BFF authenticates with its managed identity, and customer-stamp accounts reject keys.
+    The script is read-only: it changes no Azure resource.
+
+    The calling identity needs the "Cognitive Services User" role on the account (the role the
+    BFF identity holds). "Cognitive Services OpenAI User" does NOT cover Content Safety.
 
 .PARAMETER ResourceGroup
-    Azure resource group containing the Content Safety resource.
-    Default: spe-infrastructure-westus2
+    Resource group containing the account.
+    Default: spe-infrastructure-westus2 (shared dev). Customer stamp: rg-spaarke-{customer}-{env}.
 
 .PARAMETER ResourceName
-    Name of the Content Safety Cognitive Services account.
-    Default: spaarke-contentsafety-dev
+    Name of the Cognitive Services account serving Content Safety.
+    Default: spaarke-openai-dev (shared dev serves Content Safety from its multi-service AIServices
+    account). Customer stamp: sprk-{customer}-{env}-contentsafety.
 
-.PARAMETER KeyVaultName
-    Key Vault where the API key secret is stored.
-    Default: spaarke-spekvcert
-
-.PARAMETER KeyVaultSecretName
-    Secret name for the API key in Key Vault.
-    Default: ContentSafety--ApiKey
-
-.PARAMETER SkipKeyVault
-    Skip the Key Vault secret storage step (useful in read-only verification runs).
+.PARAMETER SubscriptionId
+    Subscription holding the account. Default: the az CLI's current subscription. Passed to every az
+    call with --subscription; the script never runs 'az account set'.
 
 .EXAMPLE
-    # Full verification + Key Vault sync
+    # Shared dev
     ./scripts/Verify-ContentSafetyResource.ps1
 
 .EXAMPLE
-    # Verification only, no Key Vault write
-    ./scripts/Verify-ContentSafetyResource.ps1 -SkipKeyVault
+    # A customer stamp
+    ./scripts/Verify-ContentSafetyResource.ps1 -SubscriptionId <sub> -ResourceGroup rg-spaarke-acme-prod -ResourceName sprk-acme-prod-contentsafety
 
 .NOTES
     Requires:
-      - Azure CLI (az) authenticated to the correct subscription
-      - Subscription: 484bc857-3802-427f-9ea5-ca47b43db0f0 (Spaarke Dev)
+      - Azure CLI (az) signed in as the operator (az login)
       - PowerShell 7+ (uses Invoke-RestMethod with -SkipHttpErrorCheck)
 #>
 
 [CmdletBinding()]
 param(
-    [string]$ResourceGroup    = 'spe-infrastructure-westus2',
-    [string]$ResourceName     = 'spaarke-contentsafety-dev',
-    [string]$KeyVaultName     = 'spaarke-spekvcert',
-    [string]$KeyVaultSecretName = 'ContentSafety--ApiKey',
-    [switch]$SkipKeyVault
+    [string]$ResourceGroup  = 'spe-infrastructure-westus2',
+    [string]$ResourceName   = 'spaarke-openai-dev',
+    [string]$SubscriptionId = ''
 )
 
 Set-StrictMode -Version Latest
@@ -82,100 +77,106 @@ function Write-Info([string]$Message) {
     Write-Host "   [INFO] $Message" -ForegroundColor Gray
 }
 
+$subscriptionArgs = if ([string]::IsNullOrWhiteSpace($SubscriptionId)) { @() } else { @('--subscription', $SubscriptionId) }
+
 # ============================================================================
 # STEP 1 — Confirm az CLI is authenticated
 # ============================================================================
 
 Write-Step 'Verifying Azure CLI authentication'
-try {
-    $account = az account show --output json 2>&1 | ConvertFrom-Json
-    Write-Pass "Authenticated as: $($account.user.name)"
-    Write-Info  "Subscription: $($account.name) ($($account.id))"
-} catch {
-    Write-Fail 'az account show failed. Run: az login'
+# stderr is discarded rather than merged: az prints upgrade/extension notices there, which would corrupt the JSON.
+$accountJson = az account show @subscriptionArgs --output json 2>$null
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace("$accountJson")) {
+    Write-Fail 'az account show failed. Run: az login (and check -SubscriptionId).'
     exit 1
 }
+$account = $accountJson | ConvertFrom-Json
+Write-Pass "Authenticated as: $($account.user.name)"
+Write-Info  "Subscription: $($account.name) ($($account.id))"
 
 # ============================================================================
 # STEP 2 — Check resource existence
 # ============================================================================
 
-Write-Step "Checking Content Safety resource: $ResourceName in $ResourceGroup"
+Write-Step "Checking Content Safety account: $ResourceName in $ResourceGroup"
 
 $resourceJson = az cognitiveservices account list `
     --resource-group $ResourceGroup `
+    @subscriptionArgs `
     --query "[?name=='$ResourceName']" `
-    --output json 2>&1
+    --output json 2>$null
 
-$resources = $resourceJson | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "Could not list Cognitive Services accounts in resource group '$ResourceGroup' (does it exist in this subscription?)."
+    exit 1
+}
+
+$resources = @($resourceJson | ConvertFrom-Json)
 
 if ($resources.Count -eq 0) {
-    Write-Fail "Resource '$ResourceName' not found in resource group '$ResourceGroup'."
-    Write-Info 'To provision, run:'
-    Write-Info "  az cognitiveservices account create --name $ResourceName --resource-group $ResourceGroup --kind ContentSafety --sku S0 --location westus2 --yes"
-    Write-Info 'Or deploy via Bicep:'
-    Write-Info "  az deployment group create --resource-group $ResourceGroup --template-file infrastructure/bicep/modules/content-safety.bicep --parameters contentSafetyName=$ResourceName"
+    Write-Fail "Account '$ResourceName' not found in resource group '$ResourceGroup'."
+    Write-Info 'Customer stamps get their account from infrastructure/bicep/customer.bicep (modules/content-safety.bicep).'
     exit 1
 }
 
 $resource = $resources[0]
-Write-Pass "Resource found: $($resource.name)"
+Write-Pass "Account found: $($resource.name)"
 Write-Info  "Kind     : $($resource.kind)"
 Write-Info  "SKU      : $($resource.sku.name)"
 Write-Info  "Location : $($resource.location)"
 Write-Info  "State    : $($resource.properties.provisioningState)"
 
 # ============================================================================
-# STEP 3 — Validate region (Prompt Shields + Groundedness require westus2/eastus2)
+# STEP 3 — Region (informational)
+# Prompt Shields and Groundedness Detection are regional. No fixed list is checked here: the shared dev
+# account is in East US and stamps default to West US 2, and Microsoft extends availability over time.
+# Steps 5 and 6 are the real test — an unsupported region answers with an error, not HTTP 200.
 # ============================================================================
 
-Write-Step 'Validating region compatibility'
-
-$requiredLocations = @('westus2', 'eastus2')
-$actualLocation    = $resource.location.ToLower().Replace(' ', '')
-
-if ($requiredLocations -notcontains $actualLocation) {
-    Write-Fail "Resource is in '$($resource.location)'. Prompt Shields and Groundedness Detection require westus2 or eastus2."
-    Write-Info 'A new resource must be created in the correct region.'
-    exit 1
-}
-
-Write-Pass "Region '$($resource.location)' supports Prompt Shields and Groundedness Detection."
+Write-Step 'Region'
+Write-Info "Region '$($resource.location)' — Steps 5 and 6 confirm both APIs answer there."
 
 # ============================================================================
-# STEP 4 — Retrieve endpoint and API key
+# STEP 4 — Endpoint, local-auth state and Entra token
 # ============================================================================
 
-Write-Step 'Retrieving endpoint and API key'
+Write-Step 'Retrieving endpoint and an Entra token'
 
-$endpoint = az cognitiveservices account show `
-    --name $ResourceName `
-    --resource-group $ResourceGroup `
-    --query 'properties.endpoint' `
-    --output tsv
-
+$endpoint = "$($resource.properties.endpoint)".TrimEnd('/')
 if ([string]::IsNullOrWhiteSpace($endpoint)) {
-    Write-Fail 'Could not retrieve endpoint from resource properties.'
+    Write-Fail 'Could not read the endpoint from the account properties.'
     exit 1
 }
-
-# Trim trailing slash for consistent URL construction
-$endpoint = $endpoint.TrimEnd('/')
 Write-Pass "Endpoint: $endpoint"
 
-# Retrieve key — stored in a SecureString immediately; never written to output
-$apiKeyPlain = az cognitiveservices account keys list `
-    --name $ResourceName `
-    --resource-group $ResourceGroup `
-    --query 'key1' `
-    --output tsv
-
-if ([string]::IsNullOrWhiteSpace($apiKeyPlain)) {
-    Write-Fail 'Could not retrieve API key.'
-    exit 1
+$localAuthDisabled = $resource.properties.PSObject.Properties['disableLocalAuth'] -and $resource.properties.disableLocalAuth
+if ($localAuthDisabled) {
+    Write-Pass 'Local (key) auth is disabled — Entra only.'
+} else {
+    Write-Info 'Local (key) auth is enabled on this account (expected only on shared dev; customer stamps disable it).'
 }
 
-Write-Pass 'API key retrieved (not displayed).'
+$token = az account get-access-token `
+    --resource 'https://cognitiveservices.azure.com' `
+    @subscriptionArgs `
+    --query 'accessToken' `
+    --output tsv 2>$null
+
+if ([string]::IsNullOrWhiteSpace($token)) {
+    Write-Fail 'Could not get an Entra token for https://cognitiveservices.azure.com. Run: az login'
+    exit 1
+}
+Write-Pass 'Entra token acquired (not displayed).'
+
+$headers = @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' }
+
+function Write-HttpFailure([string]$Api, [int]$Status, $Response) {
+    Write-Fail "$Api returned HTTP $Status."
+    if ($Status -in 401, 403) {
+        Write-Info 'Your identity needs the Cognitive Services User role on this account (OpenAI User does not cover Content Safety).'
+    }
+    Write-Info "Response: $($Response | ConvertTo-Json -Depth 5)"
+}
 
 # ============================================================================
 # STEP 5 — Verify Prompt Shields API (shieldPrompt)
@@ -195,7 +196,7 @@ try {
     $response = Invoke-RestMethod `
         -Uri         $promptShieldsUrl `
         -Method      Post `
-        -Headers     @{ 'Ocp-Apim-Subscription-Key' = $apiKeyPlain; 'Content-Type' = 'application/json' } `
+        -Headers     $headers `
         -Body        $promptShieldsBody `
         -StatusCodeVariable statusCode `
         -SkipHttpErrorCheck
@@ -205,8 +206,7 @@ try {
         Write-Info  "userPromptAnalysis.attackDetected: $($response.userPromptAnalysis.attackDetected)"
         Write-Info  "documentsAnalysis count: $($response.documentsAnalysis.Count)"
     } else {
-        Write-Fail "Prompt Shields API returned HTTP $statusCode."
-        Write-Info  "Response: $($response | ConvertTo-Json -Depth 5)"
+        Write-HttpFailure 'Prompt Shields API' $statusCode $response
         exit 1
     }
 } catch {
@@ -238,7 +238,7 @@ try {
     $response = Invoke-RestMethod `
         -Uri         $groundednessUrl `
         -Method      Post `
-        -Headers     @{ 'Ocp-Apim-Subscription-Key' = $apiKeyPlain; 'Content-Type' = 'application/json' } `
+        -Headers     $headers `
         -Body        $groundednessBody `
         -StatusCodeVariable statusCode `
         -SkipHttpErrorCheck
@@ -247,8 +247,7 @@ try {
         Write-Pass "Groundedness Detection API returned HTTP 200."
         Write-Info  "ungroundedDetected: $($response.ungroundedDetected)"
     } else {
-        Write-Fail "Groundedness Detection API returned HTTP $statusCode."
-        Write-Info  "Response: $($response | ConvertTo-Json -Depth 5)"
+        Write-HttpFailure 'Groundedness Detection API' $statusCode $response
         exit 1
     }
 } catch {
@@ -256,33 +255,7 @@ try {
     exit 1
 }
 
-# ============================================================================
-# STEP 7 — Store API key in Key Vault (idempotent)
-# ============================================================================
-
-if (-not $SkipKeyVault) {
-    Write-Step "Storing API key in Key Vault '$KeyVaultName' as secret '$KeyVaultSecretName'"
-
-    try {
-        az keyvault secret set `
-            --vault-name $KeyVaultName `
-            --name       $KeyVaultSecretName `
-            --value      $apiKeyPlain `
-            --output none
-
-        Write-Pass "Secret '$KeyVaultSecretName' set in Key Vault '$KeyVaultName'."
-        Write-Info  "Key Vault reference for App Service settings:"
-        Write-Info  "  @Microsoft.KeyVault(SecretUri=https://$KeyVaultName.vault.azure.net/secrets/$KeyVaultSecretName/)"
-    } catch {
-        Write-Fail "Failed to set Key Vault secret: $_"
-        exit 1
-    }
-} else {
-    Write-Info 'Key Vault step skipped (-SkipKeyVault).'
-}
-
-# Clear the plain-text key from memory
-Remove-Variable -Name apiKeyPlain -ErrorAction SilentlyContinue
+Remove-Variable -Name token, headers -ErrorAction SilentlyContinue
 
 # ============================================================================
 # SUMMARY
@@ -293,14 +266,10 @@ Write-Host '============================================================' -Foreg
 Write-Host ' Content Safety Verification — PASSED' -ForegroundColor Green
 Write-Host '============================================================' -ForegroundColor Cyan
 Write-Host ''
-Write-Host "  Resource   : $ResourceName"
+Write-Host "  Account    : $ResourceName"
 Write-Host "  Endpoint   : $endpoint"
 Write-Host "  Region     : $($resource.location)"
 Write-Host "  SKU        : $($resource.sku.name)"
-Write-Host "  APIs tested: Prompt Shields, Groundedness Detection"
-if (-not $SkipKeyVault) {
-    Write-Host "  Key Vault  : $KeyVaultName / $KeyVaultSecretName"
-}
-Write-Host ''
-Write-Host 'Add to docs/architecture/auth-AI-azure-resources.md if not already present.' -ForegroundColor Yellow
+Write-Host "  Local auth : $(if ($localAuthDisabled) { 'disabled' } else { 'enabled' })"
+Write-Host "  APIs tested: Prompt Shields, Groundedness Detection (Entra token)"
 Write-Host ''

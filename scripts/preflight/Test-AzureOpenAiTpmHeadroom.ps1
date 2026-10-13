@@ -1,14 +1,15 @@
 <#
 .SYNOPSIS
-H0 preflight: verify Azure OpenAI regional TPM headroom for the four models
-required by a +1-customer Model 2 dedicated stamp.
+Operator check: verify Azure OpenAI regional TPM headroom for the OpenAI
+deployments a customer stamp creates.
 
 .DESCRIPTION
 Queries `az cognitiveservices usage list --location <region>` and confirms that
-the CURRENT + REQUESTED TPM (per model deployment kind) does not exceed the
-regional quota. Requirement per spec.md NFR-12: 150+200+30+350 TPM per-model
-sum (default mapping to gpt-4o + gpt-4o-mini + text-embedding-3-large +
-text-embedding-3-small).
+the CURRENT + REQUESTED TPM (per Azure quota name) does not exceed the
+regional quota. The default request is the stamp deployment set (task 247):
+openai.bicep's `deployments` default, mirrored in C# by PinnedModelCatalog.cs,
+which the L2 H0 probe (ArmCognitiveServicesTpmProbe) evaluates the same way.
+Change all three together.
 
 Returns the shared preflight PSCustomObject contract:
     Result / CheckName / Headroom / Diagnostic
@@ -20,18 +21,19 @@ Azure subscription to query. If omitted, uses the currently-selected
 `az account`.
 
 .PARAMETER Region
-Azure region (e.g. `eastus`, `swedencentral`) to query for OpenAI usage.
+The stamp's OpenAI region — customer.bicep `openAiLocation` (default westus3),
+not the primary stamp region.
 
 .PARAMETER RequestedTpmPerModel
-Hashtable of model-name -> requested TPM (in thousands). Default per NFR-12:
-  gpt-4o                 = 150
-  gpt-4o-mini            = 200
-  text-embedding-3-large = 30
-  text-embedding-3-small = 350
+Hashtable of Azure quota name -> requested TPM (in thousands). Default = the
+stamp deployment set (all DataZoneStandard):
+  OpenAI.DataZoneStandard.gpt-4o                 = 150
+  OpenAI.DataZoneStandard.gpt4.1-mini            = 200  (the `gpt-4o-mini` deployment)
+  OpenAI.DataZoneStandard.text-embedding-3-large = 350
 
-Model names are matched against the `Standard.<ModelName>` usage `name.value`
-pattern that Azure OpenAI reports for regional quota. Callers passing
-non-default model names accept responsibility for matching that convention.
+Keys are matched at the END of the usage `name.value`, so a full quota name
+matches exactly one entry. Azure spells these names itself — note
+`gpt4.1-mini` has no hyphen after "gpt".
 
 .PARAMETER UsageJsonPath
 (Test-mode escape hatch) — path to a pre-captured JSON file containing the
@@ -43,13 +45,13 @@ without a live Azure session.
 [PSCustomObject] with Result, CheckName, Headroom, Diagnostic.
 
 .EXAMPLE
-$r = & ./Test-AzureOpenAiTpmHeadroom.ps1 -Region eastus
+$r = & ./Test-AzureOpenAiTpmHeadroom.ps1 -Region westus3
 if ($r.Result -eq 'Fail') { throw $r.Diagnostic }
 
 .EXAMPLE
 $r = & ./Test-AzureOpenAiTpmHeadroom.ps1 `
-    -Region eastus `
-    -RequestedTpmPerModel @{ 'gpt-4o' = 999999 }
+    -Region westus3 `
+    -RequestedTpmPerModel @{ 'OpenAI.DataZoneStandard.gpt-4o' = 999999 }
 # Simulated fail path — Result = Fail with diagnostic citing observed vs requested.
 
 .NOTES
@@ -67,10 +69,9 @@ param(
     [Parameter(Mandatory=$true)][string]$Region,
 
     [Parameter()][hashtable]$RequestedTpmPerModel = @{
-        'gpt-4o'                 = 150
-        'gpt-4o-mini'            = 200
-        'text-embedding-3-large' = 30
-        'text-embedding-3-small' = 350
+        'OpenAI.DataZoneStandard.gpt-4o'                 = 150
+        'OpenAI.DataZoneStandard.gpt4.1-mini'            = 200
+        'OpenAI.DataZoneStandard.text-embedding-3-large' = 350
     },
 
     [Parameter()][string]$UsageJsonPath
@@ -106,18 +107,10 @@ try {
         $usageJson = Get-Content -Raw -Path $UsageJsonPath
     }
     else {
-        # Optional subscription switch
-        if ($SubscriptionId) {
-            $null = az account set --subscription $SubscriptionId 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                $r = New-PreflightResult Fail @{ region = $Region; subscriptionId = $SubscriptionId } `
-                    "az account set failed for subscription '$SubscriptionId'. Run 'az login' + verify subscription id."
-                $r | Write-Output
-                exit 3
-            }
-        }
-
-        $usageJson = az cognitiveservices usage list --location $Region --output json 2>&1
+        # Pass the subscription per call — never `az account set`, which changes the operator's
+        # default subscription for every other shell.
+        $subscriptionArgs = if ($SubscriptionId) { @('--subscription', $SubscriptionId) } else { @() }
+        $usageJson = az cognitiveservices usage list --location $Region @subscriptionArgs --output json 2>&1
         if ($LASTEXITCODE -ne 0) {
             $r = New-PreflightResult Fail @{ region = $Region } `
                 "az cognitiveservices usage list failed for region '$Region'. Raw: $usageJson"

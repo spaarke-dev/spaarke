@@ -1,6 +1,6 @@
 /**
  * Task 108 (owner UAT round 10): one toolbar rule for Word and Outlook — icon-only tabs at a normal pane width,
- * labels once the pane is wide (expanded); Expand/Collapse is always the right-most item. Safety net (task 107):
+ * labels once the pane is wide (expanded); Expand/Collapse sits left of "⋮" (task 109). Safety net (task 107):
  * labels that would overflow stay hidden, and come back only once the toolbar is wider than they needed.
  */
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
@@ -100,7 +100,7 @@ describe('TaskPaneToolbar (task 108)', () => {
     </FluentProvider>
   );
 
-  it('Word at a normal width: icon-only tabs that keep their names; Expand is the right-most item', () => {
+  it('Word at a normal width: icon-only tabs that keep their names; Expand sits immediately left of "⋮"', () => {
     overflow = 0;
     headerWidth = 395;
     render(toolbar('word', { onToggleExpand: jest.fn() }));
@@ -108,8 +108,10 @@ describe('TaskPaneToolbar (task 108)', () => {
     for (const name of ['Save', 'To Do', 'Find', 'Send']) {
       expect(screen.getByRole('tab', { name })).toHaveTextContent('');
     }
+    // Task 109 (owner UAT round 11): Expand, then "⋮" as the last button.
     const buttons = screen.getAllByRole('button');
-    expect(buttons[buttons.length - 1]).toHaveAccessibleName('Expand pane');
+    expect(buttons[buttons.length - 2]).toHaveAccessibleName('Expand pane');
+    expect(buttons[buttons.length - 1]).toHaveAccessibleName('More options');
   });
 
   it('Outlook at a normal width: the same icon-only tabs, and Send is icon-only too', () => {

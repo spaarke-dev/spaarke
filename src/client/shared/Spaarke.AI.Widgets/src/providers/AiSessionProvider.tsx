@@ -176,6 +176,13 @@ export interface AiSessionContextValue {
   playbookId: string | undefined;
   /** Set the playbook ID — called on playbook switch */
   setPlaybookId: (id: string) => void;
+  /**
+   * Clear the active playbook (state + the persisted localStorage/sessionStorage key) so the
+   * next session starts with NO playbook focus. Called by the Assistant's "New session".
+   * Without it a persisted playbookId is permanent: it suppresses the Quick Start welcome
+   * cards and binds every new session to that playbook (R4 UAT 2026-10-08).
+   */
+  clearPlaybookId: () => void;
 
   // ── Entity Context ────────────────────────────────────────────────────────
   /**
@@ -484,6 +491,11 @@ export function AiSessionProvider({
     writeSession(AI_SESSION_PLAYBOOK_KEY, id);
   }, []);
 
+  const clearPlaybookId = useCallback((): void => {
+    setPlaybookIdState(undefined);
+    removeSession(AI_SESSION_PLAYBOOK_KEY);
+  }, []);
+
   // ── Streaming State ────────────────────────────────────────────────────
   //
   // Token count uses a ref for high-frequency updates (one per SSE token)
@@ -641,6 +653,7 @@ export function AiSessionProvider({
       // Playbook
       playbookId,
       setPlaybookId,
+      clearPlaybookId,
 
       // Entity
       entityContext,
@@ -670,6 +683,7 @@ export function AiSessionProvider({
       clearChatSession,
       playbookId,
       setPlaybookId,
+      clearPlaybookId,
       entityContext,
       contextMapping,
       isLoadingContextMapping,

@@ -81,6 +81,7 @@ import { ViewSelector, type SavedView } from './ViewSelector';
 import { useDataGridExternalHost } from './DataGridExternalHost';
 import type { SavedQuerySummary } from '../../services/IDataverseClient';
 import { thinScrollbarStyle } from '../../theme/scrollbar';
+import { isDateOnlyString, parseDueDate } from '../../utils/dateLocal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -584,7 +585,8 @@ export function buildRecordOpenNavArgs(
   return { pageInput, navOptions: LAYOUT_1_NAV_OPTIONS };
 }
 
-function renderCellValue(value: unknown, renderer: string): string {
+/** Formats one cell for display. Exported for tests (task 098). */
+export function renderCellValue(value: unknown, renderer: string): string {
   if (value === null || value === undefined || value === '') return '';
   switch (renderer) {
     case 'currency': {
@@ -601,7 +603,21 @@ function renderCellValue(value: unknown, renderer: string): string {
       if (Number.isNaN(num)) return String(value);
       return `${Math.round(num * 100)}%`;
     }
+    case 'dateonly': {
+      // Task 098: metadata says Date Only BEHAVIOUR — the value is a calendar date ("YYYY-MM-DD"). new Date() would
+      // read it as UTC midnight and show the previous day anywhere west of UTC.
+      if (value instanceof Date) return Number.isNaN(value.getTime()) ? '' : value.toLocaleDateString();
+      const day = parseDueDate(typeof value === 'string' ? value : null);
+      return day ? day.toLocaleDateString() : String(value);
+    }
     case 'date': {
+      // Format DateOnly. A bare "YYYY-MM-DD" is what Dataverse returns ONLY for a Date Only BEHAVIOUR column (UserLocal
+      // and TimeZoneIndependent values always carry a time and "Z"), so it is read as that calendar day even when the
+      // host's metadata did not say so; an instant keeps its local-day rendering.
+      if (isDateOnlyString(value)) {
+        const day = parseDueDate(value);
+        return day ? day.toLocaleDateString() : String(value);
+      }
       try {
         return new Date(value as string | number).toLocaleDateString();
       } catch {

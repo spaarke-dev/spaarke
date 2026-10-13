@@ -65,7 +65,7 @@ Claude Code automatically updates `current-task.md` during task execution:
 - After completing each step
 - When modifying files
 - When making implementation decisions
-- Before context gets too high (>70%)
+- After a deployment, before a large load, and whenever the user or harness reports context is high (Claude cannot see its own usage — root CLAUDE.md §5)
 
 **You don't need to do anything** — the `task-execute` skill handles this.
 
@@ -180,8 +180,7 @@ You: "Continue the in-progress one"
 |---------|-------------|------------------|
 | New session start | "Where was I?" | Full recovery (Step 1-5) |
 | After `/compact` | "Continue task" | Verification recovery (Step 3-5) |
-| Context usage > 70% | (automatic) | Creates handoff, requests new session |
-| Context usage > 85% | (automatic) | Emergency handoff |
+| Context reported high, or a compaction notice | (automatic) | Creates handoff, ready for /compact |
 | Switching projects | "Work on {project}" | Full recovery for specified project |
 
 ---
@@ -454,7 +453,7 @@ When context usage approaches limits, use the **context-handoff** skill to creat
 
 | Condition | Trigger Type | Action |
 |-----------|--------------|--------|
-| Context usage > 70% | Proactive (Claude should self-invoke) | Run context-handoff |
+| User/harness reports context is high, or a compaction notice | Proactive (Claude should self-invoke) | Run context-handoff |
 | User requests `/compact` | Manual | User says "save my progress" first |
 | Session ending mid-task | Manual | User says "save my progress" |
 | After completing 3-5 task steps | Proactive | Claude checkpoints silently |

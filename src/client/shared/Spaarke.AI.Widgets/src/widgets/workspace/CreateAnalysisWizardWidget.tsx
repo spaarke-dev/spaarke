@@ -117,7 +117,9 @@ import {
   resolveAnalysisFilePreview,
   withBffChildWrites,
 } from '@spaarke/ui-components';
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
 import type {
+  AnalysisFilePreviewResolution,
   AssociationResult,
   EntityTypeOption,
   FollowOnCardConfig,
@@ -197,7 +199,7 @@ export interface CreateAnalysisWizardData {
   /** BFF API base URL. */
   bffBaseUrl?: string;
   /** Authenticated fetch injected by the shell (wraps MSAL token acquisition). */
-  authenticatedFetch?: (input: RequestInfo, init?: RequestInit) => Promise<Response>;
+  authenticatedFetch?: AuthenticatedFetchFn;
   /** Dataverse data access (host-context create/read — Data Access Decision Criteria). */
   dataService?: IDataService;
   /** Navigation service (regarding + existing-document lookups). */
@@ -1044,13 +1046,12 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
                 },
               }),
             });
-            if (sessionResp.ok) {
-              const sessionJson = (await sessionResp.json()) as { sessionId?: string };
-              composeSessionId =
-                typeof sessionJson?.sessionId === 'string' && sessionJson.sessionId.length > 0
-                  ? sessionJson.sessionId
-                  : undefined;
-            }
+            // A non-2xx THROWS (ApiError) → the catch degrades to the warning below.
+            const sessionJson = (await sessionResp.json()) as { sessionId?: string };
+            composeSessionId =
+              typeof sessionJson?.sessionId === 'string' && sessionJson.sessionId.length > 0
+                ? sessionJson.sessionId
+                : undefined;
           } catch {
             /* degrade to the warning below — the wizard result is already durable */
           }
@@ -1098,10 +1099,14 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           // Incomplete SPE pointer → read-only preview fallback (correct shape so it
           // doesn't render "Unknown file"). Reuse the shared resolver by treating the
           // document id as the analysis's `sprk_documentid` value.
-          const createdFilePreview = resolveAnalysisFilePreview(
-            { _sprk_documentid_value: documentId, sprk_name: documentName },
-            { bffBaseUrl: bffBaseUrl ?? '', authenticatedFetch: authFetch ?? (globalThis.fetch as typeof fetch) }
-          );
+          // No injected authenticated fetch → the preview is unavailable (never an unauthenticated
+          // `globalThis.fetch` fallback).
+          const createdFilePreview: AnalysisFilePreviewResolution = authFetch
+            ? resolveAnalysisFilePreview(
+                { _sprk_documentid_value: documentId, sprk_name: documentName },
+                { bffBaseUrl: bffBaseUrl ?? '', authenticatedFetch: authFetch }
+              )
+            : { status: 'no-document' };
           dispatch('workspace', {
             type: 'widget_load',
             widgetType: 'document-viewer',
@@ -1195,11 +1200,8 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         webApi={webApiAdapter!}
         config={config}
         embedded={false}
-        // UAT #2: match the Dataverse Create-wizard modal footprint (60% × 70%),
-        // instead of WizardShell's 95vw default which read as oversized next to
-        // "Create New Matter".
-        maxWidth="60vw"
-        height="70vh"
+        // Default `wizard` size (62vw × min(74vh, 760px)) — replaces the former raw 60vw / 70vh
+        // override (ontology task 111; ADR-050).
       />
     );
   }

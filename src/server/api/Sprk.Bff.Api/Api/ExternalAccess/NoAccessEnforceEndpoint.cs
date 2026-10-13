@@ -118,7 +118,8 @@ public static class NoAccessEnforceEndpoint
             case NoAccessEnforcementOutcome.Malformed:
                 return Refused(httpContext, StatusCodes.Status422UnprocessableEntity, Title, EntryMalformedReasonCode,
                     "This No Access entry must name exactly one person, contact or organization, and exactly one record " +
-                    "or organization. It walls nobody off as it is, so nothing was removed.", null);
+                    "or organization. A record must have both its type and its id, and the id must be a record id " +
+                    "without braces. It walls nobody off as it is, so nothing was removed.", null);
 
             case NoAccessEnforcementOutcome.Failed:
                 return Refused(httpContext, StatusCodes.Status500InternalServerError, Title, EntryUnreadableReasonCode,

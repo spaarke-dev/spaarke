@@ -1,0 +1,1231 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ImportExportXml version="9.2.26094.133" SolutionPackageVersion="9.2" languagecode="1033" generatedBy="CrmLive" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" OrganizationVersion="9.2.26094.133" OrganizationSchemaType="Standard" CRMServerServiceabilityVersion="9.2.26094.00142">
+  <SolutionManifest>
+    <UniqueName>SpaarkeMaster</UniqueName>
+    <LocalizedNames>
+      <LocalizedName description="Spaarke Master" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="Complete Spaarke platform solution - all sprk_ components plus customized standard entities" languagecode="1033" />
+    </Descriptions>
+    <Version>1.2.1.0</Version>
+    <Managed>2</Managed>
+    <Publisher>
+      <UniqueName>Spaarke</UniqueName>
+      <LocalizedNames>
+        <LocalizedName description="Spaarke" languagecode="1033" />
+      </LocalizedNames>
+      <Descriptions>
+        <Description description="Spaarke Solutions Publisher" languagecode="1033" />
+      </Descriptions>
+      <EMailAddress xsi:nil="true"></EMailAddress>
+      <SupportingWebsiteUrl xsi:nil="true"></SupportingWebsiteUrl>
+      <CustomizationPrefix>sprk</CustomizationPrefix>
+      <CustomizationOptionValuePrefix>65949</CustomizationOptionValuePrefix>
+      <Addresses>
+        <Address>
+          <AddressNumber>1</AddressNumber>
+          <AddressTypeCode>1</AddressTypeCode>
+          <City xsi:nil="true"></City>
+          <County xsi:nil="true"></County>
+          <Country xsi:nil="true"></Country>
+          <Fax xsi:nil="true"></Fax>
+          <FreightTermsCode xsi:nil="true"></FreightTermsCode>
+          <ImportSequenceNumber xsi:nil="true"></ImportSequenceNumber>
+          <Latitude xsi:nil="true"></Latitude>
+          <Line1 xsi:nil="true"></Line1>
+          <Line2 xsi:nil="true"></Line2>
+          <Line3 xsi:nil="true"></Line3>
+          <Longitude xsi:nil="true"></Longitude>
+          <Name xsi:nil="true"></Name>
+          <PostalCode xsi:nil="true"></PostalCode>
+          <PostOfficeBox xsi:nil="true"></PostOfficeBox>
+          <PrimaryContactName xsi:nil="true"></PrimaryContactName>
+          <ShippingMethodCode xsi:nil="true"></ShippingMethodCode>
+          <StateOrProvince xsi:nil="true"></StateOrProvince>
+          <Telephone1 xsi:nil="true"></Telephone1>
+          <Telephone2 xsi:nil="true"></Telephone2>
+          <Telephone3 xsi:nil="true"></Telephone3>
+          <TimeZoneRuleVersionNumber xsi:nil="true"></TimeZoneRuleVersionNumber>
+          <UPSZone xsi:nil="true"></UPSZone>
+          <UTCOffset xsi:nil="true"></UTCOffset>
+          <UTCConversionTimeZoneCode xsi:nil="true"></UTCConversionTimeZoneCode>
+        </Address>
+        <Address>
+          <AddressNumber>2</AddressNumber>
+          <AddressTypeCode>1</AddressTypeCode>
+          <City xsi:nil="true"></City>
+          <County xsi:nil="true"></County>
+          <Country xsi:nil="true"></Country>
+          <Fax xsi:nil="true"></Fax>
+          <FreightTermsCode xsi:nil="true"></FreightTermsCode>
+          <ImportSequenceNumber xsi:nil="true"></ImportSequenceNumber>
+          <Latitude xsi:nil="true"></Latitude>
+          <Line1 xsi:nil="true"></Line1>
+          <Line2 xsi:nil="true"></Line2>
+          <Line3 xsi:nil="true"></Line3>
+          <Longitude xsi:nil="true"></Longitude>
+          <Name xsi:nil="true"></Name>
+          <PostalCode xsi:nil="true"></PostalCode>
+          <PostOfficeBox xsi:nil="true"></PostOfficeBox>
+          <PrimaryContactName xsi:nil="true"></PrimaryContactName>
+          <ShippingMethodCode xsi:nil="true"></ShippingMethodCode>
+          <StateOrProvince xsi:nil="true"></StateOrProvince>
+          <Telephone1 xsi:nil="true"></Telephone1>
+          <Telephone2 xsi:nil="true"></Telephone2>
+          <Telephone3 xsi:nil="true"></Telephone3>
+          <TimeZoneRuleVersionNumber xsi:nil="true"></TimeZoneRuleVersionNumber>
+          <UPSZone xsi:nil="true"></UPSZone>
+          <UTCOffset xsi:nil="true"></UTCOffset>
+          <UTCConversionTimeZoneCode xsi:nil="true"></UTCConversionTimeZoneCode>
+        </Address>
+      </Addresses>
+    </Publisher>
+    <RootComponents>
+      <RootComponent type="1" schemaName="account" behavior="1" />
+      <RootComponent type="1" schemaName="appnotification" behavior="2" />
+      <RootComponent type="1" schemaName="businessunit" behavior="1" />
+      <RootComponent type="1" schemaName="contact" behavior="1" />
+      <RootComponent type="1" schemaName="email" behavior="2" />
+      <RootComponent type="1" schemaName="sprk_accounttype_ref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_affinity" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_agreement" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_agreementtype" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aiactiontype" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aichatcontextmap" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aichatmessage" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aichatsummary" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aiknowledgedeployment" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aiknowledgesource" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aiknowledgetype" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aimodeldeployment" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aioutputtype" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aipersona" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_airetrievalmode" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aisearchindex" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aiskilltype" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aitooltype" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_aitopicregistry" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_analysis" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_analysisaction" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_analysisactiontype" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_analysischatmessage" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_analysisdeliverytype" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_analysisemailmetadata" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_analysisknowledge" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_analysisoutput" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_analysisplaybook" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_analysisskill" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_analysistool" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_analysisworkingversion" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_approlemodulemap" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_assignedaccess" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_attachmentartifact" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_backgroundjob" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_backgroundjobrun" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_billingevent" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_budget" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_budgetbucket" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_budgetrevision" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_chartdefinition" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_charttype" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_communication" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_communicationaccount" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_communicationattachment" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_communicationchannelref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_communicationparticipant" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_communicationrule" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_communicationthread" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_contactorganization" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_contacttype_ref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_container" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_countryregion_ref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_dataverseenvironment" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_decisionrecord" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_deliverytemplate" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_document" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_documenttype" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_documenttype_ref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_emailartifact" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_emailreviewlog" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_emailsaverule" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_emailupdatefield" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_event" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_eventlog" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_eventset" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_eventtodo" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_eventtype_ref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_externalrecordaccess" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_externalserviceconfig" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_fieldmappingprofile" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_fieldmappingrule" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_fileversion" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_gridconfiguration" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_invoice" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_invoicelineitem" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_kpiassessment" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_matter" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_mattersubtype_ref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_mattertype_ref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_memo" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_navitem" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_noaccessentry" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_notificationoutbox" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_organization" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_organizationtype_ref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_outputtypes" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_playbookconsumer" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_playbooknode" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_playbooknoderun" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_playbookrun" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_policy" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_policyversion" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_practicearea_documenttype" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_practicearea_ref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_precedent" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_processingjob" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_project" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_projecttype_ref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_recordtype_ref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_registrationrequest" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_report" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_reportcard" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_reportingentity" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_reportingview" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_servicerequest" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_signal" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_speauditlog" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_specontainertypeconfig" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_speenvironment" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_spendsignal" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_spendsnapshot" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_timekeeper" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_todo" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_triagecategory" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_uploadcontext" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_userentityassociation" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_userpreferences" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_userprofile" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_usertype_ref" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_workassignment" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_workoffice" behavior="0" />
+      <RootComponent type="1" schemaName="sprk_workspacelayout" behavior="0" />
+      <RootComponent type="1" schemaName="systemuser" behavior="2" />
+      <RootComponent type="20" id="{11f93c04-ddf6-f011-8406-7c1e520aa4df}" behavior="0" />
+      <RootComponent type="20" id="{1201c575-e32d-f111-88b5-7c1e525abd8b}" behavior="0" />
+      <RootComponent type="20" id="{1ac67fb7-cfc2-f111-a05c-3833c5e9614d}" behavior="0" />
+      <RootComponent type="20" id="{2f2b2137-bfbe-f111-aaaf-0022482913fc}" behavior="0" />
+      <RootComponent type="20" id="{3bd6932a-2ee4-f011-8406-7ced8d1dc988}" behavior="0" />
+      <RootComponent type="20" id="{3e54918e-e32d-f111-88b5-7c1e525abd8b}" behavior="0" />
+      <RootComponent type="20" id="{51c924e2-bdbe-f111-a05b-3833c5e9614d}" behavior="0" />
+      <RootComponent type="20" id="{75e1b627-2ab6-f111-aaad-0022482913fc}" behavior="0" />
+      <RootComponent type="20" id="{7862ada0-e32d-f111-88b5-7c1e525abd8b}" behavior="0" />
+      <RootComponent type="20" id="{9af584ac-2ce4-f011-8406-7ced8d1dc988}" behavior="0" />
+      <RootComponent type="20" id="{9e6af7ee-ddf6-f011-8406-7c1e520aa4df}" behavior="0" />
+      <RootComponent type="20" id="{b1fb7ee0-bfbe-f111-aaaf-0022482913fc}" behavior="0" />
+      <RootComponent type="60" id="{4ddb4c94-d1ff-f011-8407-7ced8d1dc988}" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/html/matter_insight_card_host.html" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/apps/microsoft-to-do.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/add.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/analysis-builder.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/analyze.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/assign.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/associate.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/attach.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/back.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/call.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/close.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/delete.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/document-viewer.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/edit.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/email.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/export.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/filter.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/graph-view.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/grid-customizer.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/help.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/more.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/nav-toggle.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/open-desktop.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/open-web.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/playbook-builder.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/print.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/project.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/refresh.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/related.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/run-playbook.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/save.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/search.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/semantic-search.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/settings.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/share.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/sort.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/table-view.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/theme-auto.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/theme-dark.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/theme-light.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/theme-menu.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/cmd/update-related.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/account.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/aichatcontext.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/aiknowledgedeployment.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/aiknowledgesource.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/aiknowledgetype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/aimodel.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/aimodeldeployment.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/aioutputtype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/airetrievalmode.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/aiskilltype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/aitooltype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/analysis.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/analysisaction.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/analysisactiontype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/analysischatmessage.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/analysisemailmetadata.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/analysisknowledge.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/analysisoutput.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/analysisplaybook.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/analysisskill.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/analysistool.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/analysisworkingversion.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/annotation.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/appointment.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/chartdefinition.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/charttype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/client.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/communication.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/contact.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/container.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/document.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/email.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/event.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/eventset.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/eventtodo.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/eventtype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/fieldmappingprofile.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/fieldmappingrule.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/gridconfiguration.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/invoice.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/kpiassessment.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/matter.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/mattersubtype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/mattertype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/organization.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/organizationtype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/outputtypes.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/playbooknode.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/playbooknoderesult.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/playbookrun.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/practicearea.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/project.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/projecttype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/recordtype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/reportcard.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/reportingentity.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/reportingview.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/speauditlog.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/specontainertype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/speenvironment.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/spendsignal.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/spendsnapshot.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/task.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/teamtemplate.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/themeenforcer.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/timekeeper.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/usertype.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/entity/workassignment.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/accounts.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/admin.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/analyses.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/clients.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/contacts.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/documents.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/emails.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/events.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/home.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/invoices.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/matters.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/playbooks.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/projects.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/scorecard.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/teams.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/nav/workspace.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/status/active.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/status/closed.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/status/draft.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/status/error.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/status/overdue.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/status/pending.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/status/processing.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/status/success.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/icons/status/warning.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/js/registrationribbon.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/scripts/access_ribbon.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/scripts/accessstatus_banner.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/scripts/assignedaccess_postsave.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/scripts/bff_auth.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/scripts/communications_grid_onload.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/scripts/matter_insight_card_mount.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/scripts/matter_insight_onload.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/scripts/noaccessentry_postsave.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_/scripts/secure_child_ribbon.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_accesspermission_inherited" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_aichatcontextmap_ribbon.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_alldocuments" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_analysis_commands.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_analysisbuilder" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_analysisworkspace" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_calendarsidepane.html" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_chartdefinition_form.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_communication_send" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_communicationconversationpage.html" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_communicationreconciliation" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_communicationspage.html" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_createeventwizard" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_createinvoicewizard" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_creatematterwizard" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_createprojectwizard" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_createreportcardwizard" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_createtodowizard" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_createworkassignmentwizard" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_dailyupdate" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_docscard" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_DocumentDelete.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_DocumentOperations.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_documentrelationshipviewer" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_documentuploadwizard" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_emailactions.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_emailpage" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_event_ribbon_commands.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_event_sidepane_form.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_eventdetailsidepane.html" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_eventspage.html" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_fieldmapping_push" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_findsimilar" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_graphview" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_invoicespage.html" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_kpi_ribbon_actions.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_kpi_subgrid_refresh.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_kpiassessment_quickcreate.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_kpiassessmentspage.html" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_matter_insight_card_host.html" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_matter_insight_card_mount.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_matter_insight_onload.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_matter_kpi_refresh.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_NavigatorPane.html" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_navigatorstar.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_notepad" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_OpenDocumentQuickCreate" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_openSprkChatPane" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_playbook_commands.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_playbookbuilder" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_playbooklibrary" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_regardingrecordnumber_hyperlink" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_reporting" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_semanticsearch" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_SidePaneManager" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_sidepanespike.html" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_sidepanespikebootstrap.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_smarttodo" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_spaarkeai" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_spaarkeai_analysisrecordlaunch" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_spaarkeai_documentcomposelaunch" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_spaarkeai_entityformlaunch" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_spaarkeai_workspacelaunch" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_SpaarkeBlackFullLogoSVG" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_spaarkefulllogoSVG" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_spaarkelogoallwhite" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_speadmin" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_SPRK_Event_AppFolder" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_SPRK_Matter_FolderOpen" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_SPRK_Project_Wrench" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_sprk_sprkicon" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_SprkChatIcon16.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_subgrid_commands" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_subgrid_parent_rollup.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_summarizefileswizard" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_tableview" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_ThemeAuto16.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_ThemeDark16.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_ThemeLight16.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_ThemeMenu.js" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_ThemeMenu16.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_ThemeMenu32.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_todo_hide_tabnav" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_todo_regarding_presave" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_todo_score_onchange" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_ToDoCheckmark16.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_ToDoCheckmark32.svg" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_tododetailsidepane" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_wizard_commands" behavior="0" />
+      <RootComponent type="61" schemaName="sprk_workspacelayoutwizard" behavior="0" />
+      <RootComponent type="62" schemaName="sprk_MatterManagement" behavior="0" />
+      <RootComponent type="62" schemaName="sprk_SpaarkeAISetup" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.CommunicationActions" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.CommunicationAttachments" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.CommunicationConnections" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.CommunicationConversationPanel" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.CommunicationMessageActions" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.CommunicationTimeline" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.CommunicationTimelineRegarding" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.DocumentRelationshipViewer" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.EventAutoAssociate" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.EventFormController" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.RegardingLink" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.RegardingResolver" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.SpaarkeGridCustomizer" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Controls.TrackingFieldTrio" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Pcf.RelatedDocumentCount.RelatedDocumentCount" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Records.MatterHeader" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Records.RecordHeader" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.SpeDocumentViewer" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Spaarke.Visuals.VisualHost" behavior="0" />
+      <RootComponent type="66" schemaName="sprk_Sprk.SemanticSearchControl" behavior="0" />
+      <RootComponent type="70" id="{42e542c8-47bf-f111-aaaf-0022482913fc}" behavior="0" />
+      <RootComponent type="70" id="{5d02ed7f-89be-f111-aaaf-0022482913fc}" behavior="0" />
+      <RootComponent type="70" id="{5f02ed7f-89be-f111-aaaf-0022482913fc}" behavior="0" />
+      <RootComponent type="70" id="{917b64c5-47bf-f111-a05b-3833c5e9614d}" behavior="0" />
+      <RootComponent type="70" id="{f4be217b-b38f-f111-b8db-7ced8ddc4a05}" behavior="0" />
+      <RootComponent type="80" schemaName="sprk_MatterManagement" behavior="0" />
+      <RootComponent type="80" schemaName="sprk_SpaarkeAISetup" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_accesspermission" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_accessrights" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_aggregationtype" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_aicapability" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_aimodeltier" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_aiprovider" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_budgetcategory" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_colorcodes" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_costtype" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_effort" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_extractionstatus" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_fieldmappingtypes" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_identitycollisionreason" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_identityplane" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_invoicestatus" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_noderunstatus" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_observationdisposition" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_outputformat" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_pagetype" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_performancearea" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_periodtype" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_playbookcapabilities" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_playbookexecutortype" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_playbookmode" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_playbookrunstatus" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_playbooktype" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_precedentstatus" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_relationshiptype" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_signalseverity" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_signaltype" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_source" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_timekeeperrole" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_triggertype" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_type" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_visibilitystate" behavior="0" />
+      <RootComponent type="9" schemaName="sprk_visualtype" behavior="0" />
+    </RootComponents>
+    <MissingDependencies>
+      <MissingDependency>
+        <Required type="1" schemaName="appnotification" displayName="Notification" solution="AppNotifications (10.0.0.17)">
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.62">msft_PowerAppsUnifiedClientInfraExtensions (1.0.0.62)</package>
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.103">PowerAppsUnifiedClientExtensionApp_Anchor (1.0.0.103)</package>
+        </Required>
+        <Dependent type="1" schemaName="appnotification" displayName="Notification" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="appnotification" displayName="Notification" solution="AppNotifications (10.0.0.17)">
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.62">msft_PowerAppsUnifiedClientInfraExtensions (1.0.0.62)</package>
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.103">PowerAppsUnifiedClientExtensionApp_Anchor (1.0.0.103)</package>
+        </Required>
+        <Dependent type="2" schemaName="sprk_briefingstate" displayName="Briefing State" parentSchemaName="appnotification" parentDisplayName="Notification" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="appnotification" displayName="Notification" solution="AppNotifications (10.0.0.17)">
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.62">msft_PowerAppsUnifiedClientInfraExtensions (1.0.0.62)</package>
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.103">PowerAppsUnifiedClientExtensionApp_Anchor (1.0.0.103)</package>
+        </Required>
+        <Dependent type="2" schemaName="sprk_category" displayName="Category" parentSchemaName="appnotification" parentDisplayName="Notification" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="appnotification" displayName="Notification" solution="AppNotifications (10.0.0.17)">
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.62">msft_PowerAppsUnifiedClientInfraExtensions (1.0.0.62)</package>
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.103">PowerAppsUnifiedClientExtensionApp_Anchor (1.0.0.103)</package>
+        </Required>
+        <Dependent type="2" schemaName="sprk_isread" displayName="Is Read" parentSchemaName="appnotification" parentDisplayName="Notification" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="appnotification" displayName="Notification" solution="AppNotifications (10.0.0.17)">
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.62">msft_PowerAppsUnifiedClientInfraExtensions (1.0.0.62)</package>
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.103">PowerAppsUnifiedClientExtensionApp_Anchor (1.0.0.103)</package>
+        </Required>
+        <Dependent type="2" schemaName="sprk_playbookrunid" displayName="Playbook Run ID" parentSchemaName="appnotification" parentDisplayName="Notification" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="appnotification" displayName="Notification" solution="AppNotifications (10.0.0.17)">
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.62">msft_PowerAppsUnifiedClientInfraExtensions (1.0.0.62)</package>
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.103">PowerAppsUnifiedClientExtensionApp_Anchor (1.0.0.103)</package>
+        </Required>
+        <Dependent type="2" schemaName="sprk_regardingid" displayName="Regarding ID" parentSchemaName="appnotification" parentDisplayName="Notification" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="appnotification" displayName="Notification" solution="AppNotifications (10.0.0.17)">
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.62">msft_PowerAppsUnifiedClientInfraExtensions (1.0.0.62)</package>
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.103">PowerAppsUnifiedClientExtensionApp_Anchor (1.0.0.103)</package>
+        </Required>
+        <Dependent type="2" schemaName="sprk_regardingtype" displayName="Regarding Type" parentSchemaName="appnotification" parentDisplayName="Notification" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="appnotification" displayName="Notification" solution="AppNotifications (10.0.0.17)">
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.62">msft_PowerAppsUnifiedClientInfraExtensions (1.0.0.62)</package>
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.103">PowerAppsUnifiedClientExtensionApp_Anchor (1.0.0.103)</package>
+        </Required>
+        <Dependent type="2" schemaName="sprk_source" displayName="Source" parentSchemaName="appnotification" parentDisplayName="Notification" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="appnotification" displayName="Notification" solution="AppNotifications (10.0.0.17)">
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.62">msft_PowerAppsUnifiedClientInfraExtensions (1.0.0.62)</package>
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.103">PowerAppsUnifiedClientExtensionApp_Anchor (1.0.0.103)</package>
+        </Required>
+        <Dependent type="62" schemaName="sprk_SpaarkeAISetup" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="appnotification" displayName="Notification" solution="AppNotifications (10.0.0.17)">
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.62">msft_PowerAppsUnifiedClientInfraExtensions (1.0.0.62)</package>
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.103">PowerAppsUnifiedClientExtensionApp_Anchor (1.0.0.103)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_SpaarkeAISetup" displayName="Spaarke AI Setup" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="chat" displayName="Teams chat" solution="msdynce_ActivitiesPatch (9.0.26093.260917001)">
+          <package appName="msdynce_Activities" version="9.0.26093.260917001">msdynce_EnableUCIByDefault (9.0.26093.260917001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="environmentvariabledefinition" displayName="Environment Variable Definition" solution="EnvironmentVariables (1.0.2406.4)">
+          <package appName="EnvironmentVariables" version="1.0.2406.4">EnvironmentVariablesSolutionAnchor (1.0.2406.4)</package>
+        </Required>
+        <Dependent type="62" schemaName="sprk_MatterManagement" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="environmentvariabledefinition" displayName="Environment Variable Definition" solution="EnvironmentVariables (1.0.2406.4)">
+          <package appName="EnvironmentVariables" version="1.0.2406.4">EnvironmentVariablesSolutionAnchor (1.0.2406.4)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="environmentvariablevalue" displayName="Environment Variable Value" solution="EnvironmentVariables (1.0.2406.4)">
+          <package appName="EnvironmentVariables" version="1.0.2406.4">EnvironmentVariablesSolutionAnchor (1.0.2406.4)</package>
+        </Required>
+        <Dependent type="62" schemaName="sprk_MatterManagement" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="environmentvariablevalue" displayName="Environment Variable Value" solution="EnvironmentVariables (1.0.2406.4)">
+          <package appName="EnvironmentVariables" version="1.0.2406.4">EnvironmentVariablesSolutionAnchor (1.0.2406.4)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="msdyn_aimodel" displayName="AI Model" solution="msdyn_AISolution (202608.5.25.2)">
+          <package appName="PowerAI" version="202608.5.25.2">msdyn_AISolutionAnchor (202608.5.25.2)</package>
+        </Required>
+        <Dependent type="62" schemaName="sprk_MatterManagement" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="msdyn_aimodel" displayName="AI Model" solution="msdyn_AISolution (202608.5.25.2)">
+          <package appName="PowerAI" version="202608.5.25.2">msdyn_AISolutionAnchor (202608.5.25.2)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="msdyn_aimodelcatalog" displayName="AI Model Catalog" solution="msdyn_AISolution (202608.5.25.2)">
+          <package appName="PowerAI" version="202608.5.25.2">msdyn_AISolutionAnchor (202608.5.25.2)</package>
+        </Required>
+        <Dependent type="62" schemaName="sprk_MatterManagement" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="msdyn_aimodelcatalog" displayName="AI Model Catalog" solution="msdyn_AISolution (202608.5.25.2)">
+          <package appName="PowerAI" version="202608.5.25.2">msdyn_AISolutionAnchor (202608.5.25.2)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="msdyn_analysiscomponent" displayName="Analysis Component" solution="msdyn_PowerAppsChecker (2.2.3321.1)">
+          <package appName="PowerAppsChecker" version="2.2.3321.1">msdyn_PowerAppsCheckerAnchor (2.2.3321.1)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="msdyn_analysisjob" displayName="Analysis Job" solution="msdyn_PowerAppsChecker (2.2.3321.1)">
+          <package appName="PowerAppsChecker" version="2.2.3321.1">msdyn_PowerAppsCheckerAnchor (2.2.3321.1)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="msdyn_analysisoverride" displayName="Analysis Override" solution="msdyn_PowerAppsChecker (2.2.3321.1)">
+          <package appName="PowerAppsChecker" version="2.2.3321.1">msdyn_PowerAppsCheckerAnchor (2.2.3321.1)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="msdyn_analysisresult" displayName="Analysis Result" solution="msdyn_PowerAppsChecker (2.2.3321.1)">
+          <package appName="PowerAppsChecker" version="2.2.3321.1">msdyn_PowerAppsCheckerAnchor (2.2.3321.1)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="1" schemaName="msdyn_analysisresultdetail" displayName="Analysis Result Detail" solution="msdyn_PowerAppsChecker (2.2.3321.1)">
+          <package appName="PowerAppsChecker" version="2.2.3321.1">msdyn_PowerAppsCheckerAnchor (2.2.3321.1)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="20" displayName="BizQAApp" solution="S2SApplicationRoles (1.0.0.137)" id="{88b87c37-1472-4798-ac48-d56509eb6e1d}">
+          <package appName="Microsoft S2SCDSCoreApplication Package" version="1.0.1.31">MicrosoftS2SApplicationIdentitiesCoreTst (1.0.1.31)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="26" schemaName="All Contacts" displayName="All Contacts" parentSchemaName="contact" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{0d5d377b-5e7c-47b5-bab1-a5cb8b4ac105}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="60" displayName="Matter main form" parentDisplayName="Matter" id="{4fa382f2-c273-f011-b4cb-6045bdd6a665}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="26" schemaName="All Contacts" displayName="All Contacts" parentSchemaName="contact" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{0d5d377b-5e7c-47b5-bab1-a5cb8b4ac105}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="60" displayName="User main form" parentDisplayName="User" id="{53bf1941-0109-f111-8407-7ced8d1dc988}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="26" schemaName="All Contacts" displayName="All Contacts" parentSchemaName="contact" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{0d5d377b-5e7c-47b5-bab1-a5cb8b4ac105}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="60" displayName="Project main form" parentDisplayName="Project" id="{5aa00242-5212-f111-8342-7ced8d1dc988}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="26" schemaName="All Contacts" displayName="All Contacts" parentSchemaName="contact" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{0d5d377b-5e7c-47b5-bab1-a5cb8b4ac105}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="60" displayName="Invoice main form" parentDisplayName="Invoice" id="{93aa1c69-0406-f111-8406-7c1e525abd8b}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="50" schemaName=":RibbonDiffXml" displayName=":RibbonDiffXml" parentSchemaName="ribboncustomization" parentDisplayName="Application Ribbons" solution="msdynce_AppCommonPatch201904 (9.0.26094.10001)">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="50" schemaName="sprk_matter:RibbonDiffXml" displayName="sprk_matter:RibbonDiffXml" parentSchemaName="ribboncustomization" parentDisplayName="Application Ribbons" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="50" schemaName=":RibbonDiffXml" displayName=":RibbonDiffXml" parentSchemaName="ribboncustomization" parentDisplayName="Application Ribbons" solution="msdynce_AppCommonPatch201904 (9.0.26094.10001)">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="50" schemaName="sprk_project:RibbonDiffXml" displayName="sprk_project:RibbonDiffXml" parentSchemaName="ribboncustomization" parentDisplayName="Application Ribbons" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="50" schemaName=":RibbonDiffXml" displayName=":RibbonDiffXml" parentSchemaName="ribboncustomization" parentDisplayName="Application Ribbons" solution="msdynce_AppCommonPatch201904 (9.0.26094.10001)">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="50" schemaName="sprk_workassignment:RibbonDiffXml" displayName="sprk_workassignment:RibbonDiffXml" parentSchemaName="ribboncustomization" parentDisplayName="Application Ribbons" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="59" schemaName="Emails by Month Due" displayName="Emails by Month Due" parentSchemaName="email" parentDisplayName="Email" solution="msdynce_AppCommon (9.0.4.0066)" id="{1ec1872a-23de-4294-9d7f-1b76272a5fd5}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="60" displayName="Project main form" parentDisplayName="Project" id="{5aa00242-5212-f111-8342-7ced8d1dc988}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Profile Web Form (Enhanced) - Japanese" parentDisplayName="Person" solution="PowerPages_RuntimeCore (1.0.2509.1)" id="{01124dd8-9bff-4cc0-bb33-ea9d943c3f9f}">
+          <package appName="Power Pages Core Package" version="1.0.2506.181">PowerPages_Core (1.0.2506.181)</package>
+          <package appName="Power Pages Core" version="1.1.2510.212">PowerPages_Core (1.1.2510.212)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Account Reference Panel" parentDisplayName="Account" solution="msdynce_AppCommon (9.0.4.0066)" id="{098ae145-1567-41ec-8398-86dbaac70c9b}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Contact main form" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{1fed44d1-ae68-4a41-bd2b-f13acac4acfa}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Social Profiles" parentDisplayName="Account" solution="msdynce_AppCommon (9.0.4.0066)" id="{2205c86d-ed88-4a2f-a447-3b86a8781f2e}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="account contact card" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{29de27bc-a257-4f29-99cf-bab4a84e688f}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Live Persona Card Form" parentDisplayName="Person" solution="msdynce_AppCommonPatch201904 (9.0.26094.10001)" id="{449faa0e-f471-48ec-87d0-4719909546d2}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Team form – Business" parentDisplayName="Team" solution="msdynce_AppCommon (9.0.4.0066)" id="{4aabf594-b30a-490d-bf97-89c67c6777fe}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Contact Quick Create" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{661157fe-2fc9-4eaa-835f-5bfa2f7b64f7}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Account Hierarchy Tile Form" parentDisplayName="Account" solution="msdynce_AppCommon (9.0.4.0066)" id="{69cff312-cfb6-4289-9631-249ab85d2c62}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="contact card" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{707fc57b-c5e6-471b-a180-e37ed28a38e2}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Social Profiles" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{7bb87dfd-ec3e-4ed9-8e3e-5725d3067295}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Account main form" parentDisplayName="Account" solution="msdynce_AppCommon (9.0.4.0066)" id="{8448b78f-8f42-454e-8e2a-f8196b0419af}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="account card" parentDisplayName="Account" solution="msdynce_AppCommon (9.0.4.0066)" id="{b028db32-3619-48a5-ac51-cf3f947b0ef3}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Contact Card form" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{bc0f68dd-a4b1-4a8f-bed3-c8f5db2f89cf}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Contact Quick Form" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{bdb0ae1c-32fa-4374-b637-8dafe107bc44}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Profile Web Form (Enhanced)" parentDisplayName="Person" solution="PowerPages_RuntimeCore (1.0.2509.1)" id="{bddc0100-0dbe-4562-aafe-31d08c8ab506}">
+          <package appName="Power Pages Core Package" version="1.0.2506.181">PowerPages_Core (1.0.2506.181)</package>
+          <package appName="Power Pages Core" version="1.1.2510.212">PowerPages_Core (1.1.2510.212)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Account Quick Create" parentDisplayName="Account" solution="msdynce_AppCommon (9.0.4.0066)" id="{c9e7ec2d-efca-4e4c-b3e3-f63c4bba5e4b}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Account Card form" parentDisplayName="Account" solution="msdynce_AppCommon (9.0.4.0066)" id="{cccff382-2b92-467e-bf1b-3db179512af8}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Contact Reference Panel" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{d880c3cf-80e2-42f3-82f9-24d040d09f17}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="60" displayName="Recent Cases and Entitlements" parentDisplayName="Person" solution="msdynce_AppCommon (9.0.4.0066)" id="{f3b707fb-3b5f-45f9-9c6b-5e573bb5d19e}">
+          <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_MatterManagement" displayName="Matter Management" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="61" schemaName="msdyn_/Images/AppModule_Default_Icon.png" displayName="msdyn_/Images/AppModule_Default_Icon.png" solution="AppModuleWebResources (2.5)">
+          <package appName="AppModule Web Resources Package" version="2.5">AppModuleWebResources (2.5)</package>
+        </Required>
+        <Dependent type="80" schemaName="sprk_SpaarkeAISetup" displayName="Spaarke AI Setup" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="26" schemaName="My Tasks Open" displayName="My Tasks Open" parentSchemaName="sprk_event" parentDisplayName="Event" id="{12a510e4-2517-f111-8343-7ced8d1dc988}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="26" schemaName="All Tasks subgrid" displayName="All Tasks subgrid" parentSchemaName="sprk_event" parentDisplayName="Event" id="{174210c3-ba02-f111-8407-7c1e520aa4df}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="26" schemaName="My Documents" displayName="My Documents" parentSchemaName="sprk_document" parentDisplayName="Document" id="{1ab4a862-3317-f111-8342-7c1e525abd8b}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="26" schemaName="Matter All Tasks Open 7 Days" displayName="Matter All Tasks Open 7 Days" parentSchemaName="sprk_event" parentDisplayName="Event" id="{1e26ed14-0512-f111-8342-7ced8d1dc988}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="26" schemaName="All Tasks" displayName="All Tasks" parentSchemaName="sprk_event" parentDisplayName="Event" id="{32c1041a-ba02-f111-8407-7c1e520aa4df}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="26" schemaName="All Tasks Open 7 Days" displayName="All Tasks Open 7 Days" parentSchemaName="sprk_event" parentDisplayName="Event" id="{491e5733-fb04-f111-8407-7ced8d1dc988}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="26" schemaName="My Events Open" displayName="My Events Open" parentSchemaName="sprk_event" parentDisplayName="Event" id="{9399ba21-2e17-f111-8343-7c1e520aa4df}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="26" schemaName="All Documents" displayName="All Documents" parentSchemaName="sprk_document" parentDisplayName="Document" id="{a2a31a92-40a5-f011-bbd3-7c1e5217cd7c}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="26" schemaName="Attachments" displayName="Attachments" parentSchemaName="sprk_document" parentDisplayName="Document" id="{dc1f574d-1ff3-f011-8406-7c1e525abd8b}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="26" schemaName="All Tasks Open" displayName="All Tasks Open" parentSchemaName="sprk_event" parentDisplayName="Event" id="{e0d27d71-ba02-f111-8407-7c1e520aa4df}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="60" displayName="Analysis Playbook main form" parentDisplayName="Analysis Playbook" id="{4dd4ba0d-66d9-f011-8406-7ced8d1dc988}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="60" displayName="Documents" id="{4ddb4c94-d1ff-f011-8407-7ced8d1dc988}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{010ea626-57ac-4bce-9c90-f8e701bb3dea}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{08cae053-01b2-409d-9e4d-95bd10bba66c}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{0c2dd613-2f23-40c6-9871-a183174a652e}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{0dd4b2f1-200f-4eea-ac8a-e7059558b96b}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{104a1cb7-2cb8-4264-863b-dde8f6374853}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{175e44a3-4048-490d-887a-c360302fe3a0}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{2e3e564a-9b03-4f9d-af14-0c0e973f53ae}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{39425c4e-521b-43c6-a7c6-c17255a37fc7}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{3cdd9e97-d4bf-4080-9839-df780b797fdd}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{3e9e69da-1ec1-47be-9d17-ae37ed55306f}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{5682b978-da71-438c-9e9c-d922dbea2247}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{5d565e4f-5059-446a-9e35-a3e6a693eccf}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{5e3aab7d-e241-426b-9a3c-42670f65222a}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{601a95e6-2882-44bf-9b89-839680bffd60}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{61bfa0e5-f29a-4e97-821e-385e19b1087a}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{75c68001-22ba-443e-a88a-df261da40f56}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{787efe63-03f4-4065-a219-6519e7dc1217}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{7b822b16-5def-4dae-afe1-ffb7dd1cbfdf}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{7f870009-b31f-4a32-80b7-ad82bb113877}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{a6b4d973-600c-4d4a-b2fe-f603f636c75c}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{aac70142-715e-4b9f-a9c2-e88c39148759}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{bdbe3b8a-2b69-41be-a809-ddd032b12508}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{c29948fb-23eb-41d3-96dd-bf30302ddecb}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{cad37f83-36e8-4742-a16b-49307d02f3fe}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{cdaf87ad-f1b9-42a0-91fc-707f13d44f5c}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{d41de326-00b0-4681-b154-c1f32a7f0384}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{d886410f-a192-4413-93cf-842d39df64d6}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{db4c148d-b893-41cd-be8e-6ec58c3d4d60}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="Microsoft.PowerApps.PowerAppsOneGrid" displayName="Microsoft.PowerApps.PowerAppsOneGrid" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="68" id="{f38d5377-4c4d-449f-ab74-10deb8c22c01}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="66" schemaName="MscrmControls.FieldControls.ToggleControl" displayName="MscrmControls.FieldControls.ToggleControl" solution="BaseCustomControlsCore (9.0.2609.4004)">
+          <package appName="Base Custom Controls" version="9.0.2609.4004">BaseCustomControlsCore (9.0.2609.4004)</package>
+        </Required>
+        <Dependent type="60" displayName="Invoice main form" parentDisplayName="Invoice" id="{93aa1c69-0406-f111-8406-7c1e525abd8b}" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="9" schemaName="msdyn_flow_approval_priority" displayName="Priority" solution="msdyn_FlowApprovalsCore (2.2.17.0)">
+          <package appName="msdyn_FlowApprovals" version="2.2.17.0">msdyn_FlowApprovals (2.2.17.0)</package>
+        </Required>
+        <Dependent type="2" schemaName="sprk_triagepriority" displayName="Triage Priority" parentSchemaName="sprk_communication" parentDisplayName="Communication" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="9" schemaName="msdyn_flow_approval_priority" displayName="Priority" solution="msdyn_FlowApprovalsCore (2.2.17.0)">
+          <package appName="msdyn_FlowApprovals" version="2.2.17.0">msdyn_FlowApprovals (2.2.17.0)</package>
+        </Required>
+        <Dependent type="2" schemaName="sprk_priority" displayName="Priority" parentSchemaName="sprk_emailartifact" parentDisplayName="Email Artifact" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="9" schemaName="msdyn_flow_approval_priority" displayName="Priority" solution="msdyn_FlowApprovalsCore (2.2.17.0)">
+          <package appName="msdyn_FlowApprovals" version="2.2.17.0">msdyn_FlowApprovals (2.2.17.0)</package>
+        </Required>
+        <Dependent type="2" schemaName="sprk_priority" displayName="Priority" parentSchemaName="sprk_todo" parentDisplayName="To Do" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="AllowNotificationsEarlyAccess" solution="AppNotifications (10.0.0.17)" id.uniquename="AllowNotificationsEarlyAccess">
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.62">msft_PowerAppsUnifiedClientInfraExtensions (1.0.0.62)</package>
+          <package appName="PowerAppsUnifiedClientExtensionApp Package" version="1.0.0.103">PowerAppsUnifiedClientExtensionApp_Anchor (1.0.0.103)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=AllowNotificationsEarlyAccess" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="AllowNotificationsEarlyAccess" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="AppChannel" solution="msdyn_AppFrameworkInfraExtensions (1.0.0.27)" id.uniquename="AppChannel">
+          <package appName="PowerAppsAppFramework Package" version="1.0.0.27">PowerAppsAppFramework_Anchor (1.0.0.27)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=AppChannel" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="AppChannel" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="AppChannel" solution="msdyn_AppFrameworkInfraExtensions (1.0.0.27)" id.uniquename="AppChannel">
+          <package appName="PowerAppsAppFramework Package" version="1.0.0.27">PowerAppsAppFramework_Anchor (1.0.0.27)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_SpaarkeAISetup,settingdefinitionid.uniquename=AppChannel" id.parentappmoduleid.uniquename="sprk_SpaarkeAISetup" id.settingdefinitionid.uniquename="AppChannel" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="appcopilotenabled" solution="msdyn_AppCopilotAppInfraSettings (9.2.2026084.260813071)" id.uniquename="appcopilotenabled">
+          <package appName="PowerAppsAppCopilotApp Package" version="1.0.0.2">msdyn_SuggestedAction (1.0.0.2)</package>
+          <package appName="PowerAppsAppCopilotApp Package" version="9.2.0.5">msdyn_M365CopilotAppInfraSettings (9.2.0.5)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=appcopilotenabled" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="appcopilotenabled" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="EnablePowerBIQuickReport" solution="SettingDefinitionsData (9.2.2603.2603182)" id.uniquename="EnablePowerBIQuickReport">
+          <package appName="AppModule" version="9.2.2603.2603182">AppModuleSolutionAnchor (9.2.2603.2603182)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=EnablePowerBIQuickReport" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="EnablePowerBIQuickReport" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="FormFillBarUXEnabled" solution="msdyn_FormsInfraSettings (1.0.0.8)" id.uniquename="FormFillBarUXEnabled">
+          <package appName="PowerAppsFormsApp Package" version="1.0.0.5">msdyn_FormsInsightSettings (1.0.0.5)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=FormFillBarUXEnabled" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="FormFillBarUXEnabled" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="HeaderAndNavigationRefresh" solution="msdyn_AppFrameworkInfraExtensions (1.0.0.27)" id.uniquename="HeaderAndNavigationRefresh">
+          <package appName="PowerAppsAppFramework Package" version="1.0.0.27">PowerAppsAppFramework_Anchor (1.0.0.27)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=HeaderAndNavigationRefresh" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="HeaderAndNavigationRefresh" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="HideShowAs" solution="msdyn_PowerAppsHideShowAsSettings (1.0.0.1)" id.uniquename="HideShowAs">
+          <package appName="PowerAppsDataVizApp Package" version="1.0.0.2">msdyn_PowerAppsNLChartVizSettings (1.0.0.2)</package>
+          <package appName="PowerAppsDataVizApp Package" version="1.0.0.2">msdyn_FuzzySearchSettings (1.0.0.2)</package>
+          <package appName="PowerAppsDataVizApp Package" version="1.0.0.5">msdyn_ControlConfiguration (1.0.0.5)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=HideShowAs" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="HideShowAs" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="IsSmartEmailAddressValidationControlEnabled" solution="msdyn_EmailAddressValidation (1.0.0.4)" id.uniquename="IsSmartEmailAddressValidationControlEnabled">
+          <package appName="DataValidationApp Package" version="1.0.0.4">DataValidationApp_Anchor (1.0.0.4)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=IsSmartEmailAddressValidationControlEnabled" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="IsSmartEmailAddressValidationControlEnabled" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="m365copilotmodelappenabled" solution="msdyn_M365CopilotAppInfraSettings (9.2.0.5)" id.uniquename="m365copilotmodelappenabled">
+          <package appName="PowerAppsAppCopilotApp Package" version="9.2.0.5">msdyn_M365CopilotAppInfraSettings (9.2.0.5)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=m365copilotmodelappenabled" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="m365copilotmodelappenabled" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="MobileCommandingImprovements2022Tablet" solution="msdyn_CommandingSettings (1.0.0.2)" id.uniquename="MobileCommandingImprovements2022Tablet">
+          <package appName="PowerAppsCommandingApp Package" version="1.0.0.6">PowerAppsCommandingApp_Anchor (1.0.0.6)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=MobileCommandingImprovements2022Tablet" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="MobileCommandingImprovements2022Tablet" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="msdyn_TimelineCopilotForApps" solution="msdyn_TimelineExtended (9.0.26083.1012)" id.uniquename="msdyn_TimelineCopilotForApps">
+          <package appName="msdyn_CustomControlsExtended" version="9.0.26083.1012">msdyn_TimelineExtended (9.0.26083.1012)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=msdyn_TimelineCopilotForApps" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="msdyn_TimelineCopilotForApps" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="msdyn_TimelineCopilotInteractions" solution="msdyn_TimelineExtended (9.0.26083.1012)" id.uniquename="msdyn_TimelineCopilotInteractions">
+          <package appName="msdyn_CustomControlsExtended" version="9.0.26083.1012">msdyn_TimelineExtended (9.0.26083.1012)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=msdyn_TimelineCopilotInteractions" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="msdyn_TimelineCopilotInteractions" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="msdyn_TimelineModernization" solution="msdyn_TimelineExtended (9.0.26083.1012)" id.uniquename="msdyn_TimelineModernization">
+          <package appName="msdyn_CustomControlsExtended" version="9.0.26083.1012">msdyn_TimelineExtended (9.0.26083.1012)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=msdyn_TimelineModernization" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="msdyn_TimelineModernization" />
+      </MissingDependency>
+      <MissingDependency>
+        <Required type="SettingDefinition" displayName="ServerMode" solution="SettingDefinitionsData (9.2.2603.2603182)" id.uniquename="ServerMode">
+          <package appName="AppModule" version="9.2.2603.2603182">AppModuleSolutionAnchor (9.2.2603.2603182)</package>
+        </Required>
+        <Dependent type="AppSetting" displayName="parentappmoduleid.uniquename=sprk_MatterManagement,settingdefinitionid.uniquename=ServerMode" id.parentappmoduleid.uniquename="sprk_MatterManagement" id.settingdefinitionid.uniquename="ServerMode" />
+      </MissingDependency>
+    </MissingDependencies>
+  </SolutionManifest>
+</ImportExportXml>

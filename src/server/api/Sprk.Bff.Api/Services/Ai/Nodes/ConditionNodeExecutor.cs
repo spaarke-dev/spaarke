@@ -193,14 +193,33 @@ public sealed class ConditionNodeExecutor : INodeExecutor
                 errors.Add($"{path}: unknown operator '{condition.Operator}'. Valid operators: {string.Join(", ", validOps)}, and, or, not");
             }
 
-            if (string.IsNullOrWhiteSpace(condition.Left))
+            if (IsMissingOperand(condition.Left))
             {
                 errors.Add($"{path}: 'left' operand is required for '{op}' operator");
+            }
+            else if (op != "exists" && IsNullOrBlank(condition.Left))
+            {
+                // Only `exists` may see a null/empty left (a missing upstream value → false). For a comparison it means the
+                // upstream value is missing: fail the node, as before ISS-018b, rather than silently take a branch.
+                errors.Add($"{path}: 'left' operand rendered null or empty for '{op}' operator — the upstream value is missing");
             }
         }
 
         return errors;
     }
+
+    /// <summary>
+    /// True when a comparison's <c>left</c> operand is absent from the config. A rendered number is present (ISS-018b:
+    /// Layer 1 renders <c>"left": "{{q.output.count}}"</c> to <c>12</c>); a rendered <c>null</c>/<c>""</c> is present but
+    /// valid only for <c>exists</c> (→ false), see <see cref="IsNullOrBlank"/>. An authored literal <c>"left": null</c> is
+    /// refused at deploy by lint C (scripts/common/Assert-PlaybookFetchXmlShape.ps1).
+    /// </summary>
+    private static bool IsMissingOperand(JsonElement operand) => operand.ValueKind == JsonValueKind.Undefined;
+
+    /// <summary>True for a JSON <c>null</c> or a blank string — valid only as the left operand of <c>exists</c>.</summary>
+    private static bool IsNullOrBlank(JsonElement operand) =>
+        operand.ValueKind == JsonValueKind.Null
+        || (operand.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(operand.GetString()));
 
     /// <inheritdoc />
     public Task<NodeOutput> ExecuteAsync(
@@ -314,7 +333,7 @@ public sealed class ConditionNodeExecutor : INodeExecutor
         var op = condition.Operator!.ToLowerInvariant();
 
         // Resolve left operand (always a template expression)
-        var leftValue = ResolveOperand(condition.Left!, templateContext);
+        var leftValue = ResolveOperand(condition.Left, templateContext);
 
         // Handle exists operator (checks if value is non-null/non-empty)
         if (op == "exists")
@@ -348,6 +367,11 @@ public sealed class ConditionNodeExecutor : INodeExecutor
     {
         if (operand is null)
             return null;
+
+        // An object-typed operand deserializes as a JsonElement. A JSON string is still a string: render it if it is a
+        // template (before ISS-018b only a string-typed Left rendered; a template in Right came back verbatim).
+        if (operand is JsonElement { ValueKind: JsonValueKind.String } stringElement)
+            operand = stringElement.GetString();
 
         if (operand is string strOperand)
         {
@@ -569,10 +593,13 @@ internal sealed record ConditionExpression
     public string? Operator { get; init; }
 
     /// <summary>
-    /// Left operand (template expression like "{{node.output.value}}").
-    /// Required for comparison operators.
+    /// Left operand: a template expression like "{{node.output.value}}", or the value Layer 1 already rendered it to.
+    /// Required for comparison operators. A <see cref="JsonElement"/> (ISS-018b, #1452): Layer 1 renders a pure template to
+    /// its JSON shape, so a count arrives as a JSON number — a <c>string?</c> property failed deserialization for every
+    /// notification playbook — and a missing value arrives as JSON <c>null</c>, which is a value (<c>exists</c> → false),
+    /// not an absent operand. <see cref="JsonValueKind.Undefined"/> means the property was absent.
     /// </summary>
-    public string? Left { get; init; }
+    public JsonElement Left { get; init; }
 
     /// <summary>
     /// Right operand (literal value or template expression).

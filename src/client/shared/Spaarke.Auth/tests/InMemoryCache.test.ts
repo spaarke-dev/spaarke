@@ -128,6 +128,131 @@ describe('InMemoryCache', () => {
     expect(cache.getCachedToken()).toBeNull();
   });
 
+  describe('in-flight sharing (#1453)', () => {
+    /**
+     * Inner strategy whose acquisition completes only when released. InMemoryCache
+     * starts the inner call one microtask after acquire(), so a release that arrives
+     * before the call is held until it starts.
+     */
+    class HeldStrategy implements AuthStrategy {
+      readonly name = 'held';
+      calls = 0;
+      clearCacheCalls = 0;
+      private _release: ((r: TokenResult) => void) | null = null;
+      private _early: TokenResult | null = null;
+      acquire(): Promise<TokenResult> {
+        this.calls++;
+        const early = this._early;
+        this._early = null;
+        if (early) return Promise.resolve(early);
+        return new Promise<TokenResult>(resolve => (this._release = resolve));
+      }
+      release(result: TokenResult): void {
+        if (this._release) {
+          const release = this._release;
+          this._release = null;
+          release(result);
+        } else {
+          this._early = result;
+        }
+      }
+      clearCache(): void {
+        this.clearCacheCalls++;
+      }
+      async logout(): Promise<void> {}
+    }
+
+    it('concurrent cache misses share one inner acquisition', async () => {
+      const held = new HeldStrategy();
+      const shared = new InMemoryCache(held);
+      const token = freshJwt();
+
+      const results = Promise.all([shared.acquire(), shared.acquire(), shared.acquire()]);
+      held.release({ accessToken: token, expiresOn: Date.now() + 60 * 60 * 1000 });
+
+      expect((await results).map(r => r.accessToken)).toEqual([token, token, token]);
+      expect(held.calls).toBe(1);
+      expect(shared.getCachedToken()).toBe(token);
+    });
+
+    it('a failed shared acquisition is not cached; the next call tries again', async () => {
+      const held = new HeldStrategy();
+      const shared = new InMemoryCache(held);
+
+      const first = shared.acquire();
+      held.release({ accessToken: '', expiresOn: 0 });
+      expect((await first).accessToken).toBe('');
+
+      void shared.acquire();
+      await Promise.resolve();
+      expect(held.calls).toBe(2);
+    });
+
+    it('invalidate() keeps sharing the in-flight acquisition (no second popup)', async () => {
+      const held = new HeldStrategy();
+      const shared = new InMemoryCache(held);
+      const token = freshJwt();
+
+      const first = shared.acquire();
+      shared.invalidate();
+      const second = shared.acquire();
+      held.release({ accessToken: token, expiresOn: Date.now() + 60 * 60 * 1000 });
+
+      expect((await second).accessToken).toBe(token);
+      expect(await first).toBe(await second);
+      expect(held.calls).toBe(1);
+    });
+
+    it('an inner strategy that throws synchronously does not leave a stuck rejected acquisition', async () => {
+      const token = freshJwt();
+      let throwNext = true;
+      const throwing: AuthStrategy = {
+        name: 'throwing',
+        acquire: () => {
+          if (throwNext) {
+            throwNext = false;
+            throw new Error('sync failure');
+          }
+          return Promise.resolve({ accessToken: token, expiresOn: Date.now() + 60 * 60 * 1000 });
+        },
+        clearCache: () => undefined,
+        logout: async () => undefined,
+      };
+      const shared = new InMemoryCache(throwing);
+
+      await expect(shared.acquire()).rejects.toThrow('sync failure');
+      expect((await shared.acquire()).accessToken).toBe(token);
+    });
+
+    it('whenIdle() resolves only after the in-flight acquisition settles', async () => {
+      const held = new HeldStrategy();
+      const shared = new InMemoryCache(held);
+      let idle = false;
+
+      void shared.acquire();
+      const waiting = shared.whenIdle().then(() => (idle = true));
+      await Promise.resolve();
+      expect(idle).toBe(false);
+
+      held.release({ accessToken: '', expiresOn: 0 });
+      await waiting;
+      expect(idle).toBe(true);
+    });
+
+    it('clearCache() (logout) during an acquisition: the late result is not cached', async () => {
+      const held = new HeldStrategy();
+      const shared = new InMemoryCache(held);
+
+      const pending = shared.acquire();
+      shared.clearCache();
+      held.release({ accessToken: freshJwt(), expiresOn: Date.now() + 60 * 60 * 1000 });
+      await pending;
+
+      expect(shared.getCachedToken()).toBeNull();
+      expect(held.clearCacheCalls).toBe(1);
+    });
+  });
+
   it('getCachedToken() drops a stale entry on read', async () => {
     // Inject a fresh token, then advance time past its exp + buffer
     const expSeconds = Math.floor(Date.now() / 1000) + 60 * 60;

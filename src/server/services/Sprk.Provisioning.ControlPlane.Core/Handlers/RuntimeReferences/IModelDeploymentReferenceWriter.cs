@@ -38,11 +38,14 @@ public interface IModelDeploymentReferenceWriter
 /// <summary>
 /// One <c>sprk_aimodeldeployment</c> row to upsert.
 /// </summary>
-/// <param name="ModelId">Written to BOTH <c>sprk_name</c> (lookup key) and <c>sprk_modelid</c>.</param>
+/// <param name="Name">Deployment name — what the BFF calls. Written to <c>sprk_name</c> (the lookup key).</param>
+/// <param name="ModelId">The model the deployment runs, written to <c>sprk_modelid</c> (task 247: deployment
+/// <c>gpt-4o-mini</c> runs <c>gpt-4.1-mini</c>, so the two differ).</param>
 /// <param name="Capability">Written to <c>sprk_capability</c>.</param>
-/// <param name="EndpointUri">Written to <c>sprk_endpoint</c> — the Azure OpenAI resource endpoint (customer-dedicated for Model 2, shared-platform for Model 1).</param>
-/// <param name="Description">Optional human-readable note written to <c>sprk_description</c> (e.g. Model 1's metering-attribution note — see H12cRuntimeReferencesHandler.cs "Model 1 metering attribution" remark).</param>
+/// <param name="EndpointUri">Written to <c>sprk_endpoint</c> — the Azure OpenAI resource endpoint — the stamp's own dedicated resource in both models (D-12; the Model 1 shared-platform endpoint is retired).</param>
+/// <param name="Description">Optional human-readable note written to <c>sprk_description</c> (H12c writes "Customer-dedicated Azure OpenAI deployment ({tenancyModel} tenancy)."; the Model 1 per-tenant metering note is retired with D-12).</param>
 public sealed record ModelDeploymentReference(
+    string Name,
     string ModelId,
     ModelCapability Capability,
     string EndpointUri,
@@ -55,7 +58,7 @@ public sealed record ModelDeploymentReference(
 /// <param name="DataverseEnvironmentUrl">Absolute base URL of the target Dataverse environment (e.g. <c>https://spaarke-acme.crm.dynamics.com</c>).</param>
 /// <param name="TenantId">Explicit Entra tenant id for token acquisition (§4D I5 — never an ambient default-tenant credential).</param>
 /// <param name="Provider">Written to every row's <c>sprk_provider</c> — <see cref="ModelProvider.AzureOpenAI"/> for r1's entire scope.</param>
-/// <param name="Deployments">The rows to upsert (typically <see cref="PinnedModelCatalog.Models"/>, projected with an endpoint + description).</param>
+/// <param name="Deployments">The rows to upsert (<see cref="PinnedModelCatalog.Deployments"/>, projected with an endpoint + description).</param>
 public sealed record ModelDeploymentReferenceWriteRequest(
     string DataverseEnvironmentUrl,
     string TenantId,

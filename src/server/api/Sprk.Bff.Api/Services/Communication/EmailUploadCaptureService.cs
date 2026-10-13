@@ -48,14 +48,26 @@ public sealed class EmailUploadCaptureService
     private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly ILogger<EmailUploadCaptureService> _logger;
+    private readonly IThreadResolver? _threadResolver;
+    private readonly Access.IDirectThreadAccessService? _directThreadAccess;
 
+    /// <param name="threadResolver">Spaarkeai-word-add-in-r1 task 129: the captured email gets a thread through the same
+    /// resolution the mailbox and send paths use — without one it never shows on its record's Messages panel, which lists
+    /// threads. Optional
+    /// like theirs; the host registers it unconditionally.</param>
+    /// <param name="directThreadAccess">The #1629 per-message grant for the thread the join returned (the same join→grant
+    /// sequence as <see cref="CommunicationService"/>).</param>
     public EmailUploadCaptureService(
         ICommunicationDataverseService communicationService,
         IncomingAssociationResolver associationResolver,
         ICommunicationEnrichmentService enrichmentService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
-        ILogger<EmailUploadCaptureService> logger)
+        ILogger<EmailUploadCaptureService> logger,
+        IThreadResolver? threadResolver = null,
+        Access.IDirectThreadAccessService? directThreadAccess = null)
     {
+        _threadResolver = threadResolver;
+        _directThreadAccess = directThreadAccess;
         _communicationService = communicationService;
         _associationResolver = associationResolver;
         _enrichmentService = enrichmentService;
@@ -72,7 +84,16 @@ public sealed class EmailUploadCaptureService
     /// failure is swallowed + logged so the caller's save always completes. Returns the canonical communication
     /// id (new or reconciled) when a record was created/matched; null otherwise.
     /// </summary>
-    public async Task<Guid?> CaptureAsync(SaveRequest request, string? userId, CancellationToken ct)
+    public async Task<Guid?> CaptureAsync(SaveRequest request, string? userId, CancellationToken ct) =>
+        (await CaptureWithOutcomeAsync(request, userId, ct))?.CommunicationId;
+
+    /// <summary>
+    /// <see cref="CaptureAsync"/>, also saying whether the email reconciled to a communication that ALREADY existed, with
+    /// the association decision evaluated for this save (spaarkeai-word-add-in-r1 task 121). A reconciled row keeps its
+    /// association here; the Office save decides whether that row may now be filed to the save's record
+    /// (<see cref="Office.ReconciledEmailFiling"/>, owner decision 2026-10-09).
+    /// </summary>
+    public async Task<EmailCaptureOutcome?> CaptureWithOutcomeAsync(SaveRequest request, string? userId, CancellationToken ct)
     {
         // Only emails become intelligence-bearing communications; attachment/document saves stay archive-only.
         if (request.ContentType != SaveContentType.Email || request.Email is null)
@@ -175,7 +196,7 @@ public sealed class EmailUploadCaptureService
                     "Upload email reconciled to existing canonical communication {CommunicationId} " +
                     "(internet-message-id match); skipping re-association (single dedup authority).",
                     communicationId);
-                return communicationId;
+                return new EmailCaptureOutcome(communicationId, ReconciledToExisting: true, decision);
             }
 
             // ── Association: apply the decision evaluated above to the row just created with its owner — only when it
@@ -194,6 +215,11 @@ public sealed class EmailUploadCaptureService
                         communicationId);
                 }
             }
+
+            // ── Thread (task 129): after the association, so a new thread is anchored to the record the email is filed to —
+            //    the same order as the mailbox path (IncomingCommunicationProcessor step 4.6) and the same join→grant sequence
+            //    as the send path (CommunicationService). Best-effort (NFR-02/NFR-04): the record already exists. ──
+            await ResolveThreadAsync(communicationId, envelope, ct);
 
             // ── Triage/enrichment: the SAME entry point the inbound + outbound paths invoke, so upload capture
             //    is not forked. archivedDocumentId=null: the .eml + attachments are RAG-indexed / AI-analyzed by
@@ -217,7 +243,7 @@ public sealed class EmailUploadCaptureService
                 "InternetMessageId: {InternetMessageId}, User: {UserId}",
                 communicationId, email.InternetMessageId, userId);
 
-            return communicationId;
+            return new EmailCaptureOutcome(communicationId, ReconciledToExisting: false, decision);
         }
         catch (Exception ex)
         {
@@ -227,6 +253,39 @@ public sealed class EmailUploadCaptureService
                 "Upload email capture failed (non-fatal) for message {MessageId}; the save proceeds as an archive.",
                 request.Email?.InternetMessageId);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Gives the captured email a thread through the shared resolution and grants it to that thread's audience (#1629: the
+    /// audience the resolution fixed). The upload envelope carries no reply-chain headers (In-Reply-To / References), which
+    /// are what the email key strategy joins on, so in practice a capture starts a new thread anchored to the record it is
+    /// filed to. Never throws: a failure leaves the email without a thread, which the next filing reconcile resolves.
+    /// </summary>
+    private async Task ResolveThreadAsync(Guid communicationId, NormalizedMessage envelope, CancellationToken ct)
+    {
+        if (_threadResolver is null)
+            return;
+
+        try
+        {
+            var assignment = await _threadResolver.ResolveAndAssignAsync(
+                new ThreadResolutionRequest
+                {
+                    CommunicationId = communicationId,
+                    ChannelType = CommunicationType.Email,
+                    Direction = CommunicationDirection.Incoming,
+                    Message = envelope,
+                },
+                ct);
+
+            if (assignment is not null && _directThreadAccess is not null)
+                await _directThreadAccess.GrantMessageAccessAsync(communicationId, assignment, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex, "Upload-capture thread resolution failed (non-fatal) | CommunicationId: {CommunicationId}", communicationId);
         }
     }
 
@@ -386,3 +445,11 @@ public sealed class EmailUploadCaptureService
     private static string TruncateTo(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
 }
+
+/// <summary>
+/// What <see cref="EmailUploadCaptureService.CaptureWithOutcomeAsync"/> produced (spaarkeai-word-add-in-r1 task 121): the
+/// canonical communication, whether it ALREADY existed (the save reconciled to it on the Message-ID alternate key, so this
+/// capture wrote nothing to it), and the association decision evaluated for this save — the save's own record as the
+/// caller-supplied regarding (rung 0).
+/// </summary>
+public sealed record EmailCaptureOutcome(Guid CommunicationId, bool ReconciledToExisting, AssociationDecision Decision);

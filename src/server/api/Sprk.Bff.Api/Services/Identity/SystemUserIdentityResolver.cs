@@ -60,9 +60,15 @@ public interface ISystemUserIdentityResolver
     /// fan-out and (via a coordinated messaging-r3 change) the timeline read path.
     /// </para>
     /// <para>
-    /// <b>Fail-closed:</b> an empty id, a missing systemuser row, or an unreadable flag returns <c>true</c>
-    /// (external) — the safe posture for internal-only exclusion (under-deliver, never leak). A present
-    /// <c>false</c> is honored as internal (the column default is 'No'/internal). Cached like the other
+    /// <b>Only <c>true</c> is external</b> (owner round 67, 2026-10-06: "sprk_isexternal means they're external";
+    /// the same rule as Restricted sharing, <c>InternalShareEndpoints.ClassifyEligibility</c>). A BLANK flag is
+    /// INTERNAL — the column defaults to 'No', and on dev most person users carry no value at all, which
+    /// previously excluded them from every internal-only message. External licensed users are marked
+    /// <c>true</c> explicitly (B2B guests by <c>scripts/Set-ExternalFlagForB2BGuests.ps1</c>).
+    /// </para>
+    /// <para>
+    /// <b>Still fail-closed where nothing is known:</b> an empty id or a missing systemuser row returns
+    /// <c>true</c> (external) — under-deliver, never leak. A read that fails throws. Cached like the other
     /// directions.
     /// </para>
     /// </summary>
@@ -293,8 +299,9 @@ public sealed class SystemUserIdentityResolver : ISystemUserIdentityResolver
 
         var results = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
 
-        // Fail-closed: a missing row or an unreadable/absent flag → external (never leak an internal-only
-        // message to a user whose posture we cannot confirm internal). A present `false` is honored as internal.
+        // A missing row → external (fail closed: nobody to confirm). On a row, ONLY a stored `true` is external:
+        // a blank flag is internal (owner round 67 — the column defaults to 'No', and blank must mean the same
+        // thing here as it does for Restricted sharing).
         bool isExternal;
         if (results.Entities.Count == 0)
         {
@@ -305,18 +312,7 @@ public sealed class SystemUserIdentityResolver : ISystemUserIdentityResolver
         }
         else
         {
-            var flag = results.Entities[0].GetAttributeValue<bool?>(IsExternalColumn);
-            if (flag is null)
-            {
-                _logger.LogWarning(
-                    "SystemUserIdentityResolver: systemuser {SystemUserId} has no readable '{Column}' value — treating as EXTERNAL (fail closed).",
-                    systemUserId, IsExternalColumn);
-                isExternal = true;
-            }
-            else
-            {
-                isExternal = flag.Value;
-            }
+            isExternal = results.Entities[0].GetAttributeValue<bool?>(IsExternalColumn) == true;
         }
 
         // Cache write — fail-open on write errors.

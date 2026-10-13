@@ -39,7 +39,7 @@
     # (or wherever $env:DATAVERSE_URL points).
 
 .EXAMPLE
-    .\Deploy-AllDataGridConsumers.ps1 -Only EventsPage,LegalWorkspace
+    .\Deploy-AllDataGridConsumers.ps1 -Only EventsPage,sprk_invoicespage
     # Only those two.
 
 .EXAMPLE
@@ -76,7 +76,7 @@ if (-not $DataverseUrl) {
 # WhenYouAddANewConsumer:
 #   - SolutionDir: relative to repo root, where `npm run build` lives
 #   - DistFile: relative to SolutionDir/dist/, the artifact to upload
-#               (Vite default is index.html; LegalWorkspace renames to corporateworkspace.html)
+#               (Vite default is index.html)
 #   - WebResource: the Dataverse web resource `name` value to PATCH
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -108,14 +108,9 @@ $Consumers = @(
         DistFile    = 'index.html'
         WebResource = 'sprk_communicationspage.html'
     }
-    [PSCustomObject]@{
-        Name        = 'LegalWorkspace'
-        SolutionDir = 'src\solutions\LegalWorkspace'
-        DistFile    = 'corporateworkspace.html'
-        # LegalWorkspace's web resource name has NO ".html" suffix — preserved
-        # for parity with the existing Deploy-CorporateWorkspace.ps1 contract.
-        WebResource = 'sprk_corporateworkspace'
-    }
+    # LegalWorkspace is NOT a consumer here: its standalone web resource
+    # `sprk_corporateworkspace` was retired (OC-R4-05) and deleted from dev (task 121).
+    # LegalWorkspace code ships inside the Console bundle - deploy that with Deploy-SpaarkeAi.ps1.
 )
 
 # ─────────────────────────────────────────────────────────────────────────────

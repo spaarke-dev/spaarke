@@ -73,10 +73,21 @@
 //   │ NativeAccount: license assignment failed   │ RetryableWithCleanup      │
 //   │                                             │ (user exists; assign-    │
 //   │                                             │ License itself idempotent│
-//   │ B2BGuest: invitation failed                │ Resumable (POST           │
-//   │                                             │ /invitations idempotent)  │
+//   │ B2BGuest: invitation failed                │ Resumable (T232: an       │
+//   │                                             │ existing guest is reused, │
+//   │                                             │ never re-invited — a      │
+//   │                                             │ re-POST re-sends the mail)│
 //   │ B2B consent Pending (WaitingOnGate         │ (NOT a failure — Success  │
 //   │ transition)                                 │ with WaitingOnGate state) │
+//   │ T232: NativeAccount with no licence SKU    │ Resumable (before any     │
+//   │                                             │ user is created)          │
+//   │ T232: security group not this customer's / │ Resumable (before any     │
+//   │ unreadable / not a security group           │ invitation)               │
+//   │ T259: CustomerBusinessUnitId absent        │ Resumable (before any     │
+//   │                                             │ invitation)               │
+//   │ T259: guest already in a foreign unit      │ QuarantineRequired        │
+//   │ T232: group membership / Dataverse user /  │ Resumable (each step      │
+//   │ role write failed; role not in environment │ idempotent on re-run)     │
 //   │ Concurrent Cosmos writer conflict          │ Resumable                 │
 //   │ Run row deleted mid-flight                 │ Resumable                 │
 //   └────────────────────────────────────────────┴───────────────────────────┘
@@ -92,6 +103,28 @@
 //           customer steady state; per-user idempotency is delegated to the
 //           Graph UPN alt-key check inside GraphRestUserProvisioner.CreateUserAsync.
 //
+// TASK 232 (D2, G10 — Model 1 guests usable; owner 2026-10-07: pay-as-you-go):
+//   A Model 1 run takes only B2BGuest (UserProvisioningIntake). Guests get NO
+//   licence — Spaarke pays for their access pay-as-you-go on the stamp
+//   subscription (operator prerequisite PRQ-C-11). Before inviting anyone H11
+//   reads the environment's security group (intake environmentSecurityGroupId,
+//   PRQ-C-10) and refuses one not named sprk-{customerId}-users or not a security
+//   group — the group is what keeps another customer's guests out of this
+//   environment. Once every guest has redeemed, each guest is added to that
+//   group and made a Dataverse user of H5's environment holding
+//   GuestSecurityRoleNames (IDataverseGuestUserWriter; the roles are resolved
+//   before anyone is invited). An existing guest is reused without a second
+//   invitation email (GraphRestB2BInvitationClient). H11 checks the group's NAME;
+//   that it is the group SET ON the environment is an operator check (skill Step
+//   1e-bis, PRQ-C-10 — the binding is visible only to a Power Platform admin).
+//
+// TASK 259 (ISS-010 / #1486, owner decision 2026-10-09 — INCOMING-145 §6 T5):
+//   "Guest users are added to the root customer business unit, NOT the secure business unit." Each guest becomes a
+//   Dataverse user IN the customer's own business unit (H10's InterStepState.CustomerBusinessUnitId — a direct child of
+//   the root, sibling of the Secure Record unit), holding the unit's copies of GuestSecurityRoleNames. Never the root:
+//   Spaarke Basic User holds Deep read on project/matter/work assignment, and Deep at the root reaches the Secure Record
+//   unit. A guest found in any other unit is QuarantineRequired (userprov-guest-in-foreign-business-unit), never moved.
+//
 // DOWNSTREAM ENQUEUE (Wave C4 note):
 //   H11 does not enqueue a specific successor. Parity with H3/H5/H6/H10: the
 //   Wave C5 reconciler owns fan-out from H11 to H12a/b/c per the plan.md
@@ -102,6 +135,7 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -123,6 +157,9 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the JSON-array-encoded user list (see UserProvisioningEntry.cs header for the encoding rationale).</summary>
     public const string UsersJsonParameterKey = "usersJson";
 
+    /// <summary>Task 232: non-secret parameter key carrying the environment security group's object id (B2BGuest).</summary>
+    public const string EnvironmentSecurityGroupIdParameterKey = "environmentSecurityGroupId";
+
     /// <summary>D6 identity preset value — cross-tenant B2B guest access.</summary>
     public const string IdentityPresetB2BGuest = UserProvisioningIntake.B2BGuest;
 
@@ -133,6 +170,9 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
     private readonly IGraphUserProvisioner _userProvisioner;
     private readonly IB2BInvitationClient _b2bInvitationClient;
     private readonly IB2BConsentVerifier _consentVerifier;
+    private readonly IEnvironmentSecurityGroupClient _securityGroupClient;
+    private readonly IDataverseGuestUserWriter _guestUserWriter;
+    private readonly H11UserProvisioningOptions _options;
     private readonly ILogger<H11UserProvisioningHandler> _logger;
 
     /// <inheritdoc/>
@@ -147,18 +187,27 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
         IGraphUserProvisioner userProvisioner,
         IB2BInvitationClient b2bInvitationClient,
         IB2BConsentVerifier consentVerifier,
+        IEnvironmentSecurityGroupClient securityGroupClient,
+        IDataverseGuestUserWriter guestUserWriter,
+        IOptions<H11UserProvisioningOptions> options,
         ILogger<H11UserProvisioningHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(userProvisioner);
         ArgumentNullException.ThrowIfNull(b2bInvitationClient);
         ArgumentNullException.ThrowIfNull(consentVerifier);
+        ArgumentNullException.ThrowIfNull(securityGroupClient);
+        ArgumentNullException.ThrowIfNull(guestUserWriter);
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
         _userProvisioner = userProvisioner;
         _b2bInvitationClient = b2bInvitationClient;
         _consentVerifier = consentVerifier;
+        _securityGroupClient = securityGroupClient;
+        _guestUserWriter = guestUserWriter;
+        _options = options.Value;
         _logger = logger;
     }
 
@@ -231,7 +280,8 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
         //     (task 245c), checked again here for the WHOLE list before the first Graph call.
         parameters.TryGetValue(IdentityPresetParameterKey, out var identityPreset);
         parameters.TryGetValue(UsersJsonParameterKey, out var usersJson);
-        var intake = UserProvisioningIntake.Validate(identityPreset, usersJson);
+        parameters.TryGetValue(EnvironmentSecurityGroupIdParameterKey, out var securityGroupId);
+        var intake = UserProvisioningIntake.Validate(run.TenancyModel, identityPreset, usersJson, securityGroupId);
         if (intake is UserProvisioningIntakeOutcome.Invalid invalid)
         {
             return await FailAsync(run, etag, FailureClass.Resumable, invalid.RejectionCode,
@@ -242,7 +292,8 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
         return valid.IsNativeAccount
             ? await HandleNativeAccountAsync(run, etag, envelope, idempotencyKey, tenantId, valid.Users, stopwatch, cancellationToken)
                 .ConfigureAwait(false)
-            : await HandleB2BGuestAsync(run, etag, envelope, idempotencyKey, tenantId, valid.Users, stopwatch, cancellationToken)
+            : await HandleB2BGuestAsync(run, etag, envelope, idempotencyKey, tenantId, valid.Users,
+                    valid.EnvironmentSecurityGroupId!, stopwatch, cancellationToken)
                 .ConfigureAwait(false);
     }
 
@@ -261,6 +312,15 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
+        // Task 232 (R7): without a licence SKU every user would be created unlicensed and the run would report success.
+        if (_options.LicenseSkuIds.Count == 0)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.LicenseSkuNotConfigured,
+                "No licence SKU is configured for NativeAccount users (H11UserProvisioningOptions: " +
+                "PowerAppsPlan2TrialSkuId / FabricFreeSkuId / PowerAutomateFreeSkuId) — nothing was created.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
         var provisioned = new List<ProvisionedUserRecord>();
         // D15 (task 245c): diagnostics name a user by position in usersJson / Entra object id, never by name or UPN.
         for (var i = 0; i < users.Count; i++)
@@ -273,7 +333,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                 creationOutcome = await _userProvisioner.CreateUserAsync(entry, tenantId, cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (IsFailureNotCallerCancellation(ex, cancellationToken))
             {
                 return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.UserCreationFailed,
                     $"User creation infrastructure error for usersJson entry {position}: " +
@@ -296,7 +356,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                 licenseOutcome = await _userProvisioner.AssignLicenseAsync(created.UserId, tenantId, cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (IsFailureNotCallerCancellation(ex, cancellationToken))
             {
                 return await FailAsync(run, etag, FailureClass.RetryableWithCleanup, H11Rejections.LicenseAssignmentFailed,
                     $"License assignment infrastructure error for usersJson entry {position} (Entra user " +
@@ -329,9 +389,9 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
     }
 
     /// <summary>
-    /// B2BGuest branch (design.md D6): B2B invitation per user + a separate
-    /// consent-verification query. Pending consent transitions the run to
-    /// WaitingOnGate (NOT a failure) — parity with H3's admin-consent gate.
+    /// B2BGuest branch (design.md D6; task 232): check the environment security group, make each user a guest
+    /// (invitation or reuse), wait for redemption (WaitingOnGate — NOT a failure, parity with H3's admin-consent gate),
+    /// then add each guest to the group and make it a Dataverse user with the configured role(s).
     /// </summary>
     private async Task<HandlerResult> HandleB2BGuestAsync(
         ProvisioningRun run,
@@ -340,9 +400,72 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
         string idempotencyKey,
         string tenantId,
         IReadOnlyList<UserProvisioningEntry> users,
+        string securityGroupId,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
+        // H5 adopted the environment (H5 → H10 → H11); its absence is a state defect, refused before any write.
+        var dataverseEnvUrl = run.InterStepState.DataverseEnvUrl;
+        if (string.IsNullOrWhiteSpace(dataverseEnvUrl))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.MissingDataverseEnvUrl,
+                "InterStepState.DataverseEnvUrl (H5) is not set — H11 makes each guest a user of that environment. " +
+                "Resume the run from H5.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        // T259: the customer's business unit (H10 → H11) — every guest goes there; its absence is a state defect.
+        if (!Guid.TryParse(run.InterStepState.CustomerBusinessUnitId, out var customerUnitId) || customerUnitId == Guid.Empty)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.MissingCustomerBusinessUnit,
+                "InterStepState.CustomerBusinessUnitId (H10) is not a GUID — H11 places every guest in the customer's business " +
+                "unit, never the root. H10 records it; a run whose H10 completed without it (before T259) needs a new run. " +
+                "Nothing was written.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        // The group keeps other customers' guests out of this environment: refuse one that is not this customer's
+        // before anyone is invited (nothing written).
+        if (await CheckSecurityGroupAsync(securityGroupId, tenantId, envelope.CustomerId, cancellationToken)
+                .ConfigureAwait(false) is { } groupRejection)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.SecurityGroupRejected,
+                groupRejection, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Guests are blocked from Dataverse while restrictguestuseraccess is on (the default for a new environment).
+        var guestAccess = await _guestUserWriter.ReadGuestAccessAsync(dataverseEnvUrl, tenantId, cancellationToken)
+            .ConfigureAwait(false);
+        if (guestAccess is not GuestAccessOutcome.Allowed)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.GuestAccessRestricted,
+                guestAccess is GuestAccessOutcome.Failure readFailure
+                    ? $"The environment's guest-access setting could not be read: {readFailure.Diagnostic}. Nothing was written."
+                    : "The environment restricts guest access (organization.restrictguestuseraccess = true, the default) — " +
+                      "guests could not use it. Turn it off (prerequisite PRQ-C-12), then resume. Nothing was written.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        // Every role resolved once, before anyone is invited: a missing role (the package is T218's) must not send
+        // invitations or add anyone to the group first.
+        var roleNames = _options.EffectiveGuestSecurityRoleNames;
+        var roles = await _guestUserWriter.ResolveRolesAsync(dataverseEnvUrl, tenantId, customerUnitId, roleNames, cancellationToken)
+            .ConfigureAwait(false);
+        switch (roles)
+        {
+            case GuestRoleResolution.RoleNotFound missingRole:
+                return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.SecurityRoleNotFound,
+                    $"Security role '{missingRole.RoleName}' (H11UserProvisioningOptions:GuestSecurityRoleNames) is not in " +
+                    $"the customer's business unit {customerUnitId:D} — it ships in the Spaarke solution (H6) and Dataverse " +
+                    "copies it into every unit. Nothing was written (no invitation sent).",
+                    cancellationToken).ConfigureAwait(false);
+            case GuestRoleResolution.Failure roleFailure:
+                return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.DataverseUserFailed,
+                    $"The guests' security role(s) could not be resolved: {roleFailure.Diagnostic}. Nothing was written.",
+                    cancellationToken).ConfigureAwait(false);
+        }
+        var roleIds = ((GuestRoleResolution.Resolved)roles).RoleIds;
+
         var invited = new List<ProvisionedUserRecord>();
         var invitedUserIds = new List<string>();
         // Every entry carries an email: UserProvisioningIntake checked the whole list before this branch (T245c).
@@ -357,7 +480,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                 invitationOutcome = await _b2bInvitationClient.InviteAsync(entry, tenantId, cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (IsFailureNotCallerCancellation(ex, cancellationToken))
             {
                 return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.B2BInvitationFailed,
                     $"B2B invitation infrastructure error for usersJson entry {position}: {ex.GetType().Name}: {ex.Message}",
@@ -382,13 +505,15 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             consentResult = await _consentVerifier.VerifyAsync(tenantId, invitedUserIds, cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (IsFailureNotCallerCancellation(ex, cancellationToken))
         {
             _logger.LogError(ex,
                 "H11 B2B consent verifier threw unexpected exception: runId={RunId} customerId={CustomerId}",
                 envelope.RunId, envelope.CustomerId);
             return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.B2BInvitationFailed,
-                $"B2B consent-verification infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                (ex is OperationCanceledException
+                    ? "B2B consent verification timed out."
+                    : $"B2B consent-verification infrastructure error: {ex.GetType().Name}: {ex.Message}.") + " " +
                 $"{invitedUserIds.Count} invitation(s) WERE sent — only consent verification failed. Resumable.",
                 cancellationToken).ConfigureAwait(false);
         }
@@ -420,18 +545,103 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             return HandlePendingReplace(pendingReplace, run, idempotencyKey);
         }
 
-        stopwatch.Stop();
         var verified = (B2BConsentVerificationResult.Verified)consentResult;
+
+        // Task 232: every guest has redeemed — add each to the environment security group, then make it a Dataverse
+        // user holding the configured role(s). Each step is idempotent, so a failed run resumes from the start.
+        var guestUsers = new List<ProvisionedUserRecord>(invited.Count);
+        for (var i = 0; i < invited.Count; i++)
+        {
+            var guest = invited[i];
+            var position = i + 1;
+
+            var membership = await _securityGroupClient
+                .AddMemberAsync(securityGroupId, guest.UserId, tenantId, cancellationToken).ConfigureAwait(false);
+            if (membership is SecurityGroupMembershipOutcome.Failure membershipFailure)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.SecurityGroupMembershipFailed,
+                    $"Adding the guest of usersJson entry {position} (Entra user {guest.UserId}) to the environment " +
+                    $"security group failed: {membershipFailure.Diagnostic}",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            var dataverseUser = await _guestUserWriter.EnsureGuestUserAsync(
+                new DataverseGuestUserRequest(dataverseEnvUrl, tenantId, guest.UserId, customerUnitId, roleIds),
+                cancellationToken).ConfigureAwait(false);
+            if (dataverseUser is DataverseGuestUserOutcome.HoldsRoleOutsideBusinessUnit foreignRole)
+            {
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H11Rejections.GuestHoldsRoleOutsideCustomerUnit,
+                    $"The guest of usersJson entry {position} (Entra user {guest.UserId}, systemuser {foreignRole.SystemUserId}) " +
+                    $"holds role {foreignRole.RoleId} of business unit {foreignRole.BusinessUnitId}, not of the customer's unit " +
+                    $"{customerUnitId:D}. A root role's Deep read reaches the Secure Record unit; H11 removes no role — an owner " +
+                    "decision; then resume.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+            if (dataverseUser is DataverseGuestUserOutcome.InForeignBusinessUnit elsewhere)
+            {
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired, H11Rejections.GuestInForeignBusinessUnit,
+                    $"The guest of usersJson entry {position} (Entra user {guest.UserId}, systemuser {elsewhere.SystemUserId}) is " +
+                    $"already a user in business unit {elsewhere.BusinessUnitId}, neither the customer's unit {customerUnitId:D} " +
+                    "nor the root. H11 never moves it (it may be the Secure Record unit, where no user may be): moving it is an " +
+                    "owner decision; then resume.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+            if (dataverseUser is DataverseGuestUserOutcome.Failure userFailure)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.DataverseUserFailed,
+                    $"Making the guest of usersJson entry {position} (Entra user {guest.UserId}) a Dataverse user " +
+                    $"failed: {userFailure.Diagnostic}",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            guestUsers.Add(guest with { DataverseSystemUserId = ((DataverseGuestUserOutcome.Success)dataverseUser).SystemUserId });
+        }
+
+        stopwatch.Stop();
         _logger.LogInformation(
             "H11 B2BGuest provisioning succeeded: runId={RunId} customerId={CustomerId} userCount={UserCount} " +
             "accepted={AcceptedCount}/{ExpectedCount} durationMs={DurationMs}",
-            envelope.RunId, envelope.CustomerId, invited.Count, verified.AcceptedCount, verified.ExpectedCount,
+            envelope.RunId, envelope.CustomerId, guestUsers.Count, verified.AcceptedCount, verified.ExpectedCount,
             stopwatch.ElapsedMilliseconds);
 
         return await MarkCompleteAsync(
-            run, etag, idempotencyKey, invited, envelope, setB2BConsentGate: true, verified.Evidence,
+            run, etag, idempotencyKey, guestUsers, envelope, setB2BConsentGate: true, verified.Evidence,
             cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// T232: true for a collaborator failure H11 turns into a Resumable result — including an HttpClient timeout, which
+    /// is an <see cref="OperationCanceledException"/> while the caller's token is NOT cancelled. Only the caller's own
+    /// cancellation propagates.
+    /// </summary>
+    private static bool IsFailureNotCallerCancellation(Exception ex, CancellationToken cancellationToken)
+        => ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested;
+
+    /// <summary>
+    /// Task 232: <c>null</c> when <paramref name="groupId"/> is this customer's environment security group
+    /// (<c>sprk-{customerId}-users</c>, security-enabled); otherwise why it is refused.
+    /// </summary>
+    private async Task<string?> CheckSecurityGroupAsync(
+        string groupId, string tenantId, string customerId, CancellationToken cancellationToken)
+    {
+        var expectedName = ExpectedSecurityGroupName(customerId);
+        var read = await _securityGroupClient.ReadAsync(groupId, tenantId, cancellationToken).ConfigureAwait(false);
+        return read switch
+        {
+            SecurityGroupReadOutcome.Failure failure =>
+                $"The environment security group {groupId} could not be read: {failure.Diagnostic}. Nothing was written.",
+            SecurityGroupReadOutcome.Found found when !string.Equals(found.DisplayName, expectedName, StringComparison.OrdinalIgnoreCase) =>
+                $"The environment security group {groupId} is named '{found.DisplayName}', not '{expectedName}' — it is " +
+                "not this customer's group (PRQ-C-10). Nothing was written; correct the group, then resume.",
+            SecurityGroupReadOutcome.Found { SecurityEnabled: false } =>
+                $"Group {groupId} ('{expectedName}') is not a security group — a Dataverse environment's security group " +
+                "must be security-enabled (PRQ-C-10). Nothing was written.",
+            _ => null,
+        };
+    }
+
+    /// <summary>Task 232: the display name of a customer environment's security group (PRQ-C-10).</summary>
+    internal static string ExpectedSecurityGroupName(string customerId) => $"sprk-{customerId}-users";
 
     /// <summary>
     /// Computes the deterministic H11 idempotency key: <c>users-{customerId}</c>.

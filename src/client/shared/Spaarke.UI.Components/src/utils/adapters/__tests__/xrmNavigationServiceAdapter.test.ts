@@ -56,3 +56,34 @@ describe('xrmNavigationServiceAdapter.openRecordModal', () => {
     await expect(nav.openRecordModal!('sprk_matter', 'matter-123')).rejects.toThrow(/Xrm\.Navigation/);
   });
 });
+
+describe('xrmNavigationServiceAdapter.openLookup filters', () => {
+  const originalXrm = (window as { Xrm?: unknown }).Xrm;
+
+  afterEach(() => {
+    if (originalXrm) {
+      (window as { Xrm?: unknown }).Xrm = originalXrm;
+    } else {
+      delete (window as { Xrm?: unknown }).Xrm;
+    }
+  });
+
+  it('passes filters straight through to Xrm.Utility.lookupObjects', async () => {
+    const lookupObjects = jest.fn().mockResolvedValue([]);
+    (window as { Xrm?: unknown }).Xrm = { WebApi: {}, Utility: { lookupObjects } };
+    const filters = [{ entityLogicalName: 'systemuser', filterXml: '<filter><condition attribute="a" operator="null" /></filter>' }];
+
+    await createXrmNavigationService().openLookup({ entityType: 'systemuser', filters });
+
+    expect(lookupObjects).toHaveBeenCalledWith(expect.objectContaining({ entityTypes: ['systemuser'], filters }));
+  });
+
+  it('sends no filters key when none are given', async () => {
+    const lookupObjects = jest.fn().mockResolvedValue([]);
+    (window as { Xrm?: unknown }).Xrm = { WebApi: {}, Utility: { lookupObjects } };
+
+    await createXrmNavigationService().openLookup({ entityType: 'contact' });
+
+    expect(lookupObjects.mock.calls[0][0]).not.toHaveProperty('filters');
+  });
+});

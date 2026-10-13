@@ -295,12 +295,15 @@ public class DeliverOutputNodeExecutorTests
         result.TextContent.Should().EndWith("...(truncated)");
     }
 
-    [Fact(Skip = "DeliverOutputNodeExecutor metadata format changed - assertion outdated")]
+    [Fact]
     public async Task ExecuteAsync_WithIncludeMetadata_AddsMetadata()
     {
         // Arrange
+        // _metadata is emitted only by the JSON renderer, which runs when a template is supplied
+        // (a template that is not itself JSON lands under "_rendered" beside the metadata).
         var config = @"{
             ""deliveryType"":""json"",
+            ""template"":""done"",
             ""outputFormat"":{""includeMetadata"":true}
         }";
         var context = CreateValidContext(config);
@@ -310,7 +313,8 @@ public class DeliverOutputNodeExecutorTests
 
         // Assert
         result.Success.Should().BeTrue();
-        result.TextContent.Should().Contain("_metadata");
+        result.TextContent.Should().Contain("\"_metadata\"");
+        result.TextContent.Should().Contain("\"nodeCount\"");
     }
 
     [Fact]

@@ -215,17 +215,6 @@ export function useChatContextMapping(options: UseChatContextMappingOptions): IU
         headers: { 'Content-Type': 'application/json' },
       });
 
-      if (response.status === 404) {
-        // Analysis record not found — clear mapping silently (not an error for the UI)
-        setContextMapping(null);
-        return;
-      }
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to load analysis chat context (${response.status}): ${errorText}`);
-      }
-
       const data: IAnalysisChatContextResponse = await response.json();
       setContextMapping(data);
     } catch (err: unknown) {

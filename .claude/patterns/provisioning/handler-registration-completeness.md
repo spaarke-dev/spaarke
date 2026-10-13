@@ -14,7 +14,7 @@ Load this pattern when:
 
 ## Read These Files (canonical source)
 
-1. `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerIds.cs` — id constants (`public const string H4 = "H4";`) and `Dispatchable`, the ids the dispatcher may receive (20 since T226 retired H4-shared, 2026-09-30). H14a/H14b/H14c are deliberately NOT in it — H14 runs them in-process.
+1. `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerIds.cs` — id constants (`public const string H4 = "H4";`) and `Dispatchable`, the ids the dispatcher may receive (21 since T256 added H7b). H14a is deliberately NOT in it — H14 runs it in-process (H14b/H14c were removed, ISS-019).
 2. `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerDispatchRegistrationModule.cs` — one keyed factory forwarder per dispatchable id: `services.AddKeyedScoped<IProvisioningHandler>(HandlerIds.H4, (sp, _) => sp.GetRequiredService<H4KvSecretsPopulationHandler>());`
 3. Concrete registrations — `AddScoped<THandler>()` in `Core/Modules/HandlersModule.cs` or `Worker/Program.cs`, plus every constructor dependency (`IKvSecretsWriter`, `IOperatorKvRbacBootstrapper`, …).
 4. `src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/DagAdvancer.cs` — `HandlerDependencies`: each handler's upstream handlers. A dispatchable id with no entry is never dispatched by the reconciler.

@@ -38,6 +38,8 @@
 //   T22 Concurrent write conflict on success path → Failure(Resumable, ConcurrentWriteConflict).
 //   T23 Client-startup-contract proxy: all 7 written values are non-null (no
 //       nulls reach the writer — proxy for task 024's "no missing env var").
+//   T24 (task 227g) the writer is asked to link the root business unit to H8's container, and the
+//       linked unit lands in the gate evidence; the two link refusals map to their own Resumable codes.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -64,6 +66,7 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
     private const string SpeContainerId = "b!acmeContainerIdBase64";
     private const string StampBffUrl = "https://sprk-acme-prod-api.azurewebsites.net";   // H9 output (task 245b)
     private const string ClientSecret = "test-client-secret-placeholder";
+    private static readonly Guid CustomerUnit = Guid.Parse("dddddddd-3333-3333-3333-333333333333");   // T259 (H10)
 
     // ---------- T1 happy path ----------
 
@@ -95,6 +98,64 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         writer.LastRequest.ClientId.Should().Be(BffAppRegId);
         writer.LastRequest.ClientSecret.Should().Be(ClientSecret);
         writer.LastRequest.TargetDataverseUrl.Should().Be(EnvUrl);
+    }
+
+    // ---------- T24 root business unit link (task 227g) ----------
+
+    [Fact]
+    public async Task RootBusinessUnit_IsLinkedToH8sContainer_AndTheLinkIsInTheEvidence()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-24");
+        var rootUnit = Guid.Parse("5a5a5a5a-0000-0000-0000-000000000001");
+        var writer = FakeEnvVarValuesWriter.Success(linkedRootBusinessUnitId: rootUnit);
+        var handler = BuildHandler(repo, writer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.LastRequest!.RootBusinessUnitContainerId.Should().Be(SpeContainerId,
+            "uac-r2 task 076 resolves a non-secure record to its business unit's container — the root unit's is H8's");
+        var evidence = repo.LastWrittenRun!.GateStates[H7DataverseEnvVarValuesHandler.EnvVarsSetGateId].Evidence!.Value;
+        evidence.GetProperty("rootBusinessUnitLinked").GetString().Should().Be(rootUnit.ToString());
+        // T259: the customer's unit is linked to the same container — its users own their records there.
+        writer.LastRequest.CustomerBusinessUnitId.Should().Be(CustomerUnit);
+        evidence.GetProperty("customerBusinessUnitLinked").GetString().Should().Be(CustomerUnit.ToString());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not-a-guid")]
+    public async Task T259_MissingCustomerBusinessUnit_FailsResumable_NoWriterCall(string? unit)
+    {
+        var run = BuildRun();
+        run.InterStepState.CustomerBusinessUnitId = unit;
+        var writer = FakeEnvVarValuesWriter.Success();
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-t259"), writer);
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(EnvVarValuesRejectionCodes.MissingUpstreamState);
+        failure.Diagnostic.Should().Contain("customerBusinessUnitId");
+        writer.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task WriterRootBusinessUnitContainerConflict_FailsResumable_WithExpectedCode()
+    {
+        await AssertWriterFailureMapsTo(
+            EnvVarValuesWriteFailureKind.RootBusinessUnitContainerConflict,
+            EnvVarValuesRejectionCodes.RootBusinessUnitContainerConflict);
+    }
+
+    [Fact]
+    public async Task WriterRootBusinessUnitUnresolved_FailsResumable_WithExpectedCode()
+    {
+        await AssertWriterFailureMapsTo(
+            EnvVarValuesWriteFailureKind.RootBusinessUnitUnresolved,
+            EnvVarValuesRejectionCodes.RootBusinessUnitUnresolved);
     }
 
     // ---------- T2 idempotency ----------
@@ -552,6 +613,10 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
     [InlineData(EnvVarValuesWriteFailureKind.RateLimited, EnvVarValuesRejectionCodes.RateLimited)]
     [InlineData(EnvVarValuesWriteFailureKind.DefinitionNotFound, EnvVarValuesRejectionCodes.EnvVarDefinitionNotFound)]
     [InlineData(EnvVarValuesWriteFailureKind.UnknownInvocationFailure, EnvVarValuesRejectionCodes.WriterInvocationFailed)]
+    [InlineData(EnvVarValuesWriteFailureKind.RootBusinessUnitUnresolved, EnvVarValuesRejectionCodes.RootBusinessUnitUnresolved)]
+    [InlineData(EnvVarValuesWriteFailureKind.RootBusinessUnitContainerConflict, EnvVarValuesRejectionCodes.RootBusinessUnitContainerConflict)]
+    [InlineData(EnvVarValuesWriteFailureKind.CustomerBusinessUnitUnresolved, EnvVarValuesRejectionCodes.CustomerBusinessUnitUnresolved)]
+    [InlineData(EnvVarValuesWriteFailureKind.CustomerBusinessUnitContainerConflict, EnvVarValuesRejectionCodes.CustomerBusinessUnitContainerConflict)]
     public void MapWriterFailure_ProducesExpectedRejection_AllResumable(
         EnvVarValuesWriteFailureKind kind, string expectedRejection)
     {
@@ -845,6 +910,7 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         run.InterStepState.OpenAiEndpoint = OpenAiEndpoint;
         run.InterStepState.SpeContainerId = SpeContainerId;
         run.InterStepState.BffApiUrl = StampBffUrl;
+        run.InterStepState.CustomerBusinessUnitId = CustomerUnit.ToString("D");   // T259: H10's output
         // H8 has completed: it hands the root container to H7 only once bound (unified-access-control-r2 task 165).
         run.CompletedPhases.Add(new CompletedPhase
         {
@@ -927,13 +993,18 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
     private sealed class FakeEnvVarValuesWriter : IEnvVarValuesWriter
     {
         private readonly EnvVarValuesWriteOutcome _outcome;
+        private readonly Guid? _linkedRootBusinessUnitId;
         public int CallCount { get; private set; }
         public EnvVarValuesWriteRequest? LastRequest { get; private set; }
 
-        private FakeEnvVarValuesWriter(EnvVarValuesWriteOutcome outcome) => _outcome = outcome;
+        private FakeEnvVarValuesWriter(EnvVarValuesWriteOutcome outcome, Guid? linkedRootBusinessUnitId = null)
+        {
+            _outcome = outcome;
+            _linkedRootBusinessUnitId = linkedRootBusinessUnitId;
+        }
 
-        public static FakeEnvVarValuesWriter Success()
-            => new(new EnvVarValuesWriteOutcome.Success(new List<KeyValuePair<string, string>>()));
+        public static FakeEnvVarValuesWriter Success(Guid? linkedRootBusinessUnitId = null)
+            => new(new EnvVarValuesWriteOutcome.Success(new List<KeyValuePair<string, string>>()), linkedRootBusinessUnitId);
 
         public static FakeEnvVarValuesWriter Failure(EnvVarValuesWriteFailureKind kind, string diagnostic)
             => new(new EnvVarValuesWriteOutcome.Failure(kind, SchemaName: null, diagnostic));
@@ -943,7 +1014,7 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
             CallCount++;
             LastRequest = request;
             var outcome = _outcome is EnvVarValuesWriteOutcome.Success
-                ? new EnvVarValuesWriteOutcome.Success(request.Values)
+                ? new EnvVarValuesWriteOutcome.Success(request.Values, _linkedRootBusinessUnitId, request.CustomerBusinessUnitId)
                 : _outcome;
             return Task.FromResult(outcome);
         }

@@ -40,6 +40,9 @@ module.exports = {
       "<rootDir>/test/__mocks__/spaarke-ui-components-services.ts",
     "^@spaarke/ui-components$":
       "<rootDir>/test/__mocks__/spaarke-ui-components.tsx",
+    // task 098: the dependency-free `dateLocal` module runs for real (deep import; no mock).
+    "^@spaarke/ui-components/utils/dateLocal$":
+      "<rootDir>/../Spaarke.UI.Components/src/utils/dateLocal.ts",
     // task 092, 2026-10-04 — `legalWorkspaceSectionRegistry.test.ts` imports
     // `sectionRegistry.ts`, whose `composeEditor.registration.ts` section
     // imports `@spaarke/compose-components` (not otherwise a dependency of

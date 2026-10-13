@@ -484,8 +484,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
 
     private static InvariantVerificationRequest BuildRequest(
         string tenantId = TenantId,
-        string aiSearchEndpoint = "",
-        string scriptsDir = "")
+        string aiSearchEndpoint = "")
         => new(
             CustomerId: CustomerId,
             RunId: RunId,
@@ -493,8 +492,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
             SubscriptionId: Guid.NewGuid().ToString(),
             AiSearchEndpoint: aiSearchEndpoint,
             CosmosEndpoint: string.Empty,
-            BffApiUrl: "https://bff.example",
-            ProvisioningScriptsDirectory: scriptsDir);
+            BffApiUrl: "https://bff.example");
 
     private static ProvisioningRun NewRun(string tenancyModel)
     {

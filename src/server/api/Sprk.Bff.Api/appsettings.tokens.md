@@ -38,7 +38,6 @@ Tokens use the format `#{TOKEN_NAME}#` which is compatible with Azure DevOps and
 |-------|-------------|---------------|
 | `#{TENANT_ID}#` | Azure AD tenant ID | `a221a95e-6abc-4434-aecc-e48338a1b2f2` |
 | `#{API_APP_ID}#` | BFF API app registration client ID | `1e40baad-e065-4aea-a8d4-4b7ab273458c` |
-| `#{DEFAULT_CT_ID}#` | Default container type ID for SPE | `8a6ce34c-6055-4681-8f87-2f4f9f921c06` |
 | `#{KEY_VAULT_URL}#` | Key Vault URL (with trailing slash) | `https://spaarke-kv-dev.vault.azure.net/` |
 | `#{DATAVERSE_ORG_NAME}#` | Dataverse organization name | `spaarkedev1` |
 | `#{REDIS_INSTANCE_NAME}#` | Redis cache instance prefix | `spaarke:` |
@@ -121,7 +120,6 @@ $template | Set-Content "appsettings.json"
 ```
 TENANT_ID=a221a95e-6abc-4434-aecc-e48338a1b2f2
 API_APP_ID=1e40baad-e065-4aea-a8d4-4b7ab273458c
-DEFAULT_CT_ID=8a6ce34c-6055-4681-8f87-2f4f9f921c06
 KEY_VAULT_URL=https://spaarke-spekvcert.vault.azure.net/
 DATAVERSE_ORG_NAME=spaarkedev1
 REDIS_INSTANCE_NAME=spaarke:

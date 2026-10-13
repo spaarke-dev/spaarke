@@ -80,7 +80,7 @@ app.MapGet("/api/documents/{id}", ...);
 | [ADR-004](ADR-004-job-contract.md) | Queue-driven work inside the BFF |
 | [ADR-036](ADR-036-background-job-infrastructure.md) | Schedule-driven work inside the BFF |
 | [ADR-008](ADR-008-endpoint-filters.md) | Endpoint filters for authorization (not global middleware) |
-| [ADR-010](ADR-010-di-minimalism.md) | Limit DI registrations to ≤15 non-framework services |
+| [ADR-010](ADR-010-di-minimalism.md) | DI minimalism — feature-module composition in `Program.cs` (~15 lines is a readability target, not a count — ADR-010 concise) |
 | [ADR-017](ADR-017-bff-resiliency.md) | Use Polly for resilience in workers and HTTP clients |
 | [ADR-021](ADR-021-configuration.md) | Configuration management in single runtime |
 

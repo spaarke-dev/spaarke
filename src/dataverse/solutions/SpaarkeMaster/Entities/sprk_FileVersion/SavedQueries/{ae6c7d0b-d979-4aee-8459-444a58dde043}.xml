@@ -1,0 +1,37 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{ae6c7d0b-d979-4aee-8459-444a58dde043}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_versionnumber" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_fileversionid">
+          <cell name="sprk_versionnumber" width="300" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_fileversion">
+          <attribute name="sprk_fileversionid" />
+          <attribute name="sprk_versionnumber" />
+          <attribute name="createdon" />
+          <order attribute="sprk_versionnumber" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="1" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Inactive File Versions" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

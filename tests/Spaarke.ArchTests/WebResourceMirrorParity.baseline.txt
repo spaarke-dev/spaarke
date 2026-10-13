@@ -1,0 +1,4 @@
+# Baseline for WebResourceMirrorParityGuardTests (issue #1651).
+# One line per SpaarkeMaster web-resource mirror that differs (after CRLF/BOM normalisation) from its maintained source:
+#   <mirror path> | <source path> ; <source path>
+# The list only shrinks. Fix a pair by copying the source over the mirror, then DELETE its line. Never add a line.

@@ -176,7 +176,7 @@ npm run build
 
 - Output: `dist/index.html` (renamed to `{pagename}.html` by post-build script)
 - Single self-contained HTML with all JS/CSS inlined
-- Deploy via `Deploy-WizardCodePages.ps1` or `Deploy-CorporateWorkspace.ps1`
+- Deploy via `Deploy-WizardCodePages.ps1`. LegalWorkspace has no standalone web resource any more: it ships inside the Console bundle (`sprk_spaarkeai`), deployed with `Deploy-SpaarkeAi.ps1`.
 
 | Solution | Deployable File | Deploy Script |
 |----------|----------------|---------------|
@@ -189,7 +189,7 @@ npm run build
 | FindSimilarCodePage | `dist/index.html` → `sprk_findsimilar` | `Deploy-WizardCodePages.ps1` |
 | DocumentUploadWizard | `dist/index.html` → `sprk_documentuploadwizard` | `Deploy-WizardCodePages.ps1` |
 | PlaybookLibrary | `dist/index.html` → `sprk_playbooklibrary` | `Deploy-WizardCodePages.ps1` |
-| LegalWorkspace | `dist/corporateworkspace.html` → `sprk_corporateworkspace` | `Deploy-CorporateWorkspace.ps1` |
+| LegalWorkspace | none: compiled into the Console bundle → `sprk_spaarkeai` (`sprk_corporateworkspace` retired and deleted 2026-10-08) | `Deploy-SpaarkeAi.ps1` |
 
 ---
 

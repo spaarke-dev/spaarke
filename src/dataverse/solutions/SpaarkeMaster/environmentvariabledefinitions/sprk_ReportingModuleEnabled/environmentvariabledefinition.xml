@@ -1,0 +1,14 @@
+<environmentvariabledefinition schemaname="sprk_ReportingModuleEnabled">
+  <defaultvalue>yes</defaultvalue>
+  <description default="Power BI module enabled">
+    <label description="Power BI module enabled" languagecode="1033" />
+  </description>
+  <displayname default="Reporting Module Enabled">
+    <label description="Reporting Module Enabled" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.1.0.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000002</type>
+</environmentvariabledefinition>

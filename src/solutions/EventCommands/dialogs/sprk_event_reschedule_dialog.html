@@ -230,6 +230,20 @@
             var data = {};
             var originalDueDate = null;
 
+            // Task 098: the event date columns are Date Only ("YYYY-MM-DD"). Local equivalents of @spaarke/ui-components
+            // dateLocal (a dialog web resource cannot import it): the browser's LOCAL calendar day, never the UTC one.
+            function toDateOnly(date) {
+                var m = String(date.getMonth() + 1);
+                var d = String(date.getDate());
+                return date.getFullYear() + '-' + (m.length < 2 ? '0' + m : m) + '-' + (d.length < 2 ? '0' + d : d);
+            }
+            function parseDateOnly(value) {
+                if (!value) return null;
+                var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value).trim());
+                var date = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value);
+                return isNaN(date.getTime()) ? null : date;
+            }
+
             try {
                 var urlParams = new URLSearchParams(window.location.search);
                 data = {
@@ -238,7 +252,7 @@
                     dueDate: urlParams.get('dueDate')
                 };
                 if (data.dueDate) {
-                    originalDueDate = new Date(data.dueDate);
+                    originalDueDate = parseDateOnly(data.dueDate);
                 }
             } catch (e) {
                 console.error('Error parsing URL params:', e);
@@ -249,7 +263,7 @@
 
             if (originalDueDate && !isNaN(originalDueDate.getTime())) {
                 document.getElementById('currentDueDate').textContent = originalDueDate.toLocaleDateString();
-                document.getElementById('newDueDate').value = originalDueDate.toISOString().split('T')[0];
+                document.getElementById('newDueDate').value = toDateOnly(originalDueDate);
             }
 
             // Update date difference display
@@ -258,7 +272,7 @@
 
             newDueDateInput.addEventListener('change', function() {
                 if (originalDueDate && this.value) {
-                    var newDate = new Date(this.value);
+                    var newDate = parseDateOnly(this.value);
                     var diffDays = Math.round((newDate - originalDueDate) / (1000 * 60 * 60 * 24));
 
                     if (diffDays !== 0) {
@@ -297,7 +311,7 @@
                 sendResult({
                     confirmed: true,
                     newDueDate: newDueDate,
-                    oldDueDate: originalDueDate ? originalDueDate.toISOString() : null,
+                    oldDueDate: originalDueDate ? toDateOnly(originalDueDate) : null,
                     reason: reason
                 });
             });

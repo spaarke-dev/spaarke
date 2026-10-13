@@ -115,8 +115,10 @@ if ($existingNative) {
         $ref = $ribbon.CreateElement('EnableRule', $rules.NamespaceURI)
         $ref.SetAttribute('Id', $RuleId)
         [void] $rules.AppendChild($ref)
+        Write-Host "The export already overrides $NativeCommandId; added $RuleId to it (its own rules kept)."
+    } else {
+        Write-Host "The export already overrides $NativeCommandId and already carries $RuleId; nothing added."
     }
-    Write-Host "The export already overrides $NativeCommandId; added $RuleId to it (its own rules kept)."
 } else {
     [void] $commandDefinitions.AppendChild($ribbon.ImportNode($templateNative, $true))
 }

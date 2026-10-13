@@ -23,17 +23,19 @@
  */
 
 import type { ISprkAnalysisRecord } from '../types/sprkAnalysis';
+import type { ResponseFetchFn } from '../utils/fetchTypes';
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
 /**
- * Minimal fetch signature this module depends on — matches `authenticatedFetch`
- * from `@spaarke/auth`. Modeled structurally (not imported) so this module
- * stays a plain function consumers can unit-test with any fetch stand-in.
+ * Minimal fetch signature this module depends on — the EITHER-shape {@link ResponseFetchFn}
+ * (`utils/fetchTypes`; modeled structurally, not imported from `@spaarke/auth`). Hosts pass
+ * `@spaarke/auth`'s `authenticatedFetch` (throws on failure); kept wide so `fetchPreviewUrl` handles
+ * both shapes: a returned `!ok` and a thrown error each resolve to `null`.
  */
-export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+export type AuthenticatedFetchFn = ResponseFetchFn;
 
 export interface AnalysisFilePreviewDeps {
   /** BFF base URL. When falsy, resolution short-circuits `fetchPreviewUrl` to `null`. */

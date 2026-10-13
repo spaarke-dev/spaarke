@@ -36,7 +36,7 @@
 >
 > As of Spaarke Auth v2 Phase C, **server-side Dataverse access uses the App Service's managed identity via `DefaultAzureCredential`** (when `Graph__ManagedIdentity__Enabled=true`). The `ServiceClient` + `AuthType=ClientSecret` connection-string pattern documented below is the **local-dev fallback only**.
 >
-> **For new-environment provisioning, follow** [`auth-deployment-setup.md`](auth-deployment-setup.md) (the canonical 10-section operator runbook) instead of this guide. That runbook covers §3 App Service settings, §5 Azure AD MI Graph permission grants, §6 Dataverse Application User (the MI is the App User), §7 Exchange ApplicationAccessPolicy.
+> **For new-environment provisioning, follow** [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) instead of this guide: §6.5 App Service configuration, §7.7 Graph app roles and the Dataverse Application User (the managed identity is the App User), §7.9 Exchange mailbox access. (`auth-deployment-setup.md`, which this line used to cite, is a retired stub.)
 >
 > **⚠️ CORRECTION (2026-08-13): `Dataverse-ClientSecret` is STILL required — do NOT remove it.** AUTHV2-042 migrated only the `Services/Ai` raw-HTTP camp; the shared-lib Dataverse path (`DataverseWebApiService.cs:51-52` + `DataverseOptions.cs:32` `[Required]`+`ValidateOnStart`, plus `DataverseServiceClientImpl`) still hard-requires the secret backing `Dataverse:ClientSecret` regardless of `Graph__ManagedIdentity__Enabled` — removing it from Key Vault **crashes the BFF at startup**. Full removal is gated on the #3b shared-lib `ClientSecret`→MI migration (project `code-quality-and-assurance-r3` task 011 / NG1). See `projects/code-quality-and-assurance-r3/notes/bff-auth-surface-map.md`.
 >

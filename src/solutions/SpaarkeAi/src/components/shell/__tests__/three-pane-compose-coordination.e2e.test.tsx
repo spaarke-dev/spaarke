@@ -62,7 +62,9 @@ jest.mock('@spaarke/ai-widgets', () => {
     ...actual,
     useAiSession: () => ({
       isAuthenticated: true,
-      authenticatedFetch: jest.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }) as unknown as Response),
+      authenticatedFetch: jest.fn(async () => {
+        throw httpError(404);
+      }),
       getAccessToken: jest.fn(async () => 'token'),
       bffBaseUrl: '',
       tenantId: 'test-tenant',
@@ -85,6 +87,7 @@ import { ContextPaneController } from '../../context/ContextPaneController';
 import { ComposeAssistantCoordination } from '../../conversation/ComposeAssistantCoordination';
 import type { ShellStageContextValue } from '../ThreePaneShell';
 import { ShellStageContext } from '../ThreePaneShell';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 // ---------------------------------------------------------------------------
 // Harness

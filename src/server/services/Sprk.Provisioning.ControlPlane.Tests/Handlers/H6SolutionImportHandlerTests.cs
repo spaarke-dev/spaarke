@@ -4,60 +4,38 @@
 // Unit tests over H6SolutionImportHandler (task 049 — wave C4 Batch 3D).
 //
 // ADR-038 CATEGORY:
-//   Path #1 — pure C# unit test. NO live pwsh / pac CLI / Dataverse / HTTP.
-//   Fakes replace the repository + catalog + importer + verifier seams so
-//   the handler orchestration logic is exercised in isolation. Live-Dataverse
-//   coverage belongs in env-guarded smoke tests (H6 is not exercised end-
-//   to-end at CI time by design — a real 8-solution import is up to 60 min).
+//   Path #1 — pure C# unit test. NO live Dataverse / HTTP. Fakes replace the
+//   repository + importer + verifier seams so the handler orchestration logic
+//   is exercised in isolation (importer/verifier HTTP behaviour has its own
+//   tests). Live-Dataverse coverage belongs in env-guarded smoke tests.
 //
 // COVERAGE:
 //   T1  Happy path — importer Success + verifier AllPresent → Success + Cosmos
-//       state advances + interStepState.ImportedSolutions populated + gate
-//       Verified with per-solution evidence.
+//       state advances + interStepState.ImportedSolutions = the SpaarkeMaster
+//       record + gate Verified with packageType evidence; managed by default.
 //   T2  Idempotent no-op — CompletedPhases already contains H6 with matching
 //       key → Success (no importer call, no verifier call, no state mutation).
-//   T3  Missing tenantId (§4D I1) → Failure(Resumable, missing-tenant-id) +
-//       NO importer call fired.
+//   T3  Missing tenantId (§4D I1) → Failure(Resumable, missing-tenant-id) + NO importer call.
 //   T4  Missing dataverse URL (H5 not done) → Failure(Resumable, missing-dataverse-url).
 //   T5  Missing bffAppRegId (H3 not done) → Failure(Resumable, missing-bff-app-reg-id).
-//   T6  Missing ClientSecret (config unpopulated) → Failure(Resumable, missing-client-secret).
-//   T7  Retired-solution catalog match (ADR-039) → Failure(QuarantineRequired,
-//       retired-solution-reintroduction) + Cosmos marked Quarantined + NO
-//       importer call fired.
-//   T8  Importer PartialImport → Failure(QuarantineRequired, partial-import-detected)
-//       + Cosmos marked Quarantined with QuarantineInfo.
-//   T9  Importer AuthFailure → Failure(Resumable, pac-auth-failure).
-//   T10 Importer RateLimited → Failure(Resumable, rate-limited).
-//   T11 Importer QuotaExhausted → Failure(Resumable, quota-exhausted).
-//   T12 Importer Timeout → Failure(Resumable, import-timeout).
-//   T13 Importer MissingSolutionZips → Failure(Resumable, missing-solution-zips).
-//   T14 Importer UnknownInvocationFailure → Failure(Resumable, import-invocation-failed).
-//   T15 Verifier Missing (script said success but list disagrees) →
-//       Failure(QuarantineRequired, verification-failed).
+//   T6  Missing ClientSecret (legacy chain, config unpopulated) → Failure(Resumable, missing-client-secret).
+//   T7  T218b package type — unmanaged on explicit instruction reaches the
+//       importer + verifier + key + evidence; an invalid stored value →
+//       Failure(Resumable, package-type-invalid) with no importer call.
+//   T8  Importer PartialImport → Failure(QuarantineRequired, partial-import-detected).
+//   T9–T14 Importer failure kinds → (rejection code, §4C class).
+//   T15 Verifier Missing → Failure(QuarantineRequired, verification-failed).
 //   T16 Importer infrastructure exception → Failure(Resumable, import-invocation-failed).
 //   T17 Verifier infrastructure exception → Failure(QuarantineRequired, verification-failed).
 //   T18 HandlerId mismatch → throws InvalidOperationException.
-//   T19 Idempotency key format — same customerId + catalogHash → same key
-//       (solimport-{customerId}-{catalogHash}).
+//   T19 Idempotency key format — solimport-{customerId}-{packageType}.
 //   T20 Run not found → Failure(Resumable, run-not-found).
-//   T21 MapImporterFailure round-trip — every failure kind maps to (rejection, class).
-//   T22 R5 binding — CanonicalSolutionCatalog mirrors the PS script's
-//       $SolutionImportOrder exactly (8 solutions with expected SolutionUniqueName
-//       per Tier). Parses scripts/Deploy-DataverseSolutions.ps1 at test time.
-//   T23 R5 binding — importer does NOT pass a hardcoded C# solution list
-//       to the PS script (grep-zero check on ArgumentList content — no
-//       -SolutionsToImport flag is set).
-//   T24 Catalog hash determinism — CatalogHash is stable + non-empty +
-//       lowercase hex.
-//   T25 FindRetiredMatch — happy path (clean catalog returns null); positive
-//       case (a retired match returns the pair).
-//   T26 ClassifyOutput mapping table (importer stderr → failure kind).
-//   T27 Verifier ParseListOutput — parses a canned pac output with versions
-//       + solutionIds; missing solution → Missing outcome.
+//   T21 MapImporterFailure round-trip — every failure kind maps to (rejection, class),
+//       incl. T218b PackageTypeMismatch / DowngradeRefused (Resumable).
+//   HANDLER-08 pre-import org-settings gate (HANDLER-07 required apps removed, task 253).
 // -----------------------------------------------------------------------------
 
 using System.Collections.Immutable;
-using System.IO;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -86,16 +64,15 @@ public sealed class H6SolutionImportHandlerTests
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-1");
-        var catalog = new CanonicalSolutionCatalog();
         var importer = FakeSolutionImporter.Success();
-        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest(catalog));
-        var handler = BuildHandler(repo, catalog, importer, verifier);
+        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest());
+        var handler = BuildHandler(repo, importer, verifier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var success = result.Should().BeOfType<HandlerResult.Success>().Subject;
         success.IdempotencyKey.Should().Be(
-            H6SolutionImportHandler.BuildIdempotencyKey(CustomerId, catalog.CatalogHash));
+            H6SolutionImportHandler.BuildIdempotencyKey(CustomerId, "managed"));
 
         repo.LastWrittenRun.Should().NotBeNull();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Running);
@@ -103,16 +80,15 @@ public sealed class H6SolutionImportHandlerTests
         repo.LastWrittenRun.CompletedPhases.Should().ContainSingle().Which.Phase.Should().Be("H6");
 
         repo.LastWrittenRun.InterStepState.ImportedSolutions.Should().NotBeNull();
-        repo.LastWrittenRun.InterStepState.ImportedSolutions!.Should().HaveCount(9);
-        repo.LastWrittenRun.InterStepState.ImportedSolutions!.Select(s => s.SolutionUniqueName)
-            .Should().Contain(new[] { "SpaarkeCore", "SpaarkeWebResources", "LegalWorkspace", "SpaarkeCorporateCounselApp" });
+        repo.LastWrittenRun.InterStepState.ImportedSolutions!.Should().ContainSingle()
+            .Which.SolutionUniqueName.Should().Be("SpaarkeMaster");
 
         var gate = repo.LastWrittenRun.GateStates[H6SolutionImportHandler.SolutionsImportedGateId];
         gate.Status.Should().Be(GateState.Verified);
         gate.VerifierHandler.Should().Be("H6");
         gate.Evidence.Should().NotBeNull();
-        gate.Evidence!.Value.GetProperty("solutionCount").GetInt32().Should().Be(9);
-        gate.Evidence.Value.GetProperty("catalogHash").GetString().Should().Be(catalog.CatalogHash);
+        gate.Evidence!.Value.GetProperty("packageType").GetString().Should().Be("managed");
+        gate.Evidence.Value.GetProperty("solutions")[0].GetProperty("isManaged").GetBoolean().Should().BeTrue();
 
         importer.CallCount.Should().Be(1);
         verifier.CallCount.Should().Be(1);
@@ -120,6 +96,9 @@ public sealed class H6SolutionImportHandlerTests
         importer.LastRequest.ClientId.Should().Be(BffAppRegId);
         importer.LastRequest.ClientSecret.Should().Be(ClientSecret);
         importer.LastRequest.TargetDataverseUrl.Should().Be(EnvUrl);
+        importer.LastRequest.Managed.Should().BeTrue("managed is the default (ADR-027 §3, owner D8)");
+        verifier.LastRequest!.Managed.Should().BeTrue();
+        verifier.LastRequest.ExpectedVersion.Should().Be("1.2.0.0", "the verifier checks the imported version, not only presence");
     }
 
     // ---------- T2 idempotency ----------
@@ -128,8 +107,7 @@ public sealed class H6SolutionImportHandlerTests
     public async Task Idempotent_SecondInvocationWithMatchingCompletedPhase_IsNoOp()
     {
         var run = BuildRun();
-        var catalog = new CanonicalSolutionCatalog();
-        var expectedKey = H6SolutionImportHandler.BuildIdempotencyKey(CustomerId, catalog.CatalogHash);
+        var expectedKey = H6SolutionImportHandler.BuildIdempotencyKey(CustomerId, "managed");
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = "H6",
@@ -138,12 +116,12 @@ public sealed class H6SolutionImportHandlerTests
             CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-40),
             JobId = "prior-run",
         });
-        run.InterStepState.ImportedSolutions = BuildExpectedManifest(catalog).ToList();
+        run.InterStepState.ImportedSolutions = BuildExpectedManifest().ToList();
 
         var repo = new FakeRepository(run, etag: "etag-2");
         var importer = FakeSolutionImporter.Success();
-        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest(catalog));
-        var handler = BuildHandler(repo, catalog, importer, verifier);
+        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest());
+        var handler = BuildHandler(repo, importer, verifier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -161,8 +139,8 @@ public sealed class H6SolutionImportHandlerTests
         var run = BuildRun(includeTenantId: false);
         var repo = new FakeRepository(run, etag: "etag-3");
         var importer = FakeSolutionImporter.Success();
-        var handler = BuildHandler(repo, new CanonicalSolutionCatalog(), importer,
-            FakeSolutionVerifier.AllPresent(BuildExpectedManifest(new CanonicalSolutionCatalog())));
+        var handler = BuildHandler(repo, importer,
+            FakeSolutionVerifier.AllPresent(BuildExpectedManifest()));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -182,8 +160,8 @@ public sealed class H6SolutionImportHandlerTests
         run.InterStepState.DataverseEnvUrl = null;
         var repo = new FakeRepository(run, etag: "etag-4");
         var importer = FakeSolutionImporter.Success();
-        var handler = BuildHandler(repo, new CanonicalSolutionCatalog(), importer,
-            FakeSolutionVerifier.AllPresent(BuildExpectedManifest(new CanonicalSolutionCatalog())));
+        var handler = BuildHandler(repo, importer,
+            FakeSolutionVerifier.AllPresent(BuildExpectedManifest()));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -202,8 +180,8 @@ public sealed class H6SolutionImportHandlerTests
         run.InterStepState.BffAppRegId = null;
         var repo = new FakeRepository(run, etag: "etag-5");
         var importer = FakeSolutionImporter.Success();
-        var handler = BuildHandler(repo, new CanonicalSolutionCatalog(), importer,
-            FakeSolutionVerifier.AllPresent(BuildExpectedManifest(new CanonicalSolutionCatalog())));
+        var handler = BuildHandler(repo, importer,
+            FakeSolutionVerifier.AllPresent(BuildExpectedManifest()));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -221,8 +199,8 @@ public sealed class H6SolutionImportHandlerTests
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-6");
         var importer = FakeSolutionImporter.Success();
-        var handler = BuildHandler(repo, new CanonicalSolutionCatalog(), importer,
-            FakeSolutionVerifier.AllPresent(BuildExpectedManifest(new CanonicalSolutionCatalog())),
+        var handler = BuildHandler(repo, importer,
+            FakeSolutionVerifier.AllPresent(BuildExpectedManifest()),
             clientSecret: null);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -248,8 +226,8 @@ public sealed class H6SolutionImportHandlerTests
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-a44");
         var importer = FakeSolutionImporter.Success();
-        var handler = BuildHandler(repo, new CanonicalSolutionCatalog(), importer,
-            FakeSolutionVerifier.AllPresent(BuildExpectedManifest(new CanonicalSolutionCatalog())),
+        var handler = BuildHandler(repo, importer,
+            FakeSolutionVerifier.AllPresent(BuildExpectedManifest()),
             clientSecret: null,
             credentials: new Sprk.Provisioning.ControlPlane.Handlers.Credentials.WorkerCredentialSelectionOptions
             {
@@ -263,35 +241,45 @@ public sealed class H6SolutionImportHandlerTests
         importer.CallCount.Should().Be(1);
     }
 
-    // ---------- T7 retired-solution catalog match (ADR-039) ----------
+    // ---------- T7 T218b package type ----------
 
     [Fact]
-    public async Task RetiredSolutionCatalogMatch_FailsQuarantineRequired_NoImporterCall()
+    public async Task UnmanagedOnExplicitInstruction_ReachesImporterVerifierKeyAndEvidence()
     {
         var run = BuildRun();
+        run.Parameters.NonSecret[IntakeParameterCatalog.SolutionPackageType] = "unmanaged";
         var repo = new FakeRepository(run, etag: "etag-7");
-        // Craft a catalog that violates ADR-039 by including a solution whose
-        // unique-name matches a retired-artifact pattern.
-        var badCatalog = new StubSolutionCatalog(
-            solutions: ImmutableArray.Create(
-                new CanonicalSolutionEntry("SpaarkeCore", "SpaarkeCore", "Spaarke Core", 1),
-                new CanonicalSolutionEntry("SprkDispatcherLegacy", "SprkDispatcherLegacy", "Old Dispatcher", 2)),
-            retired: ImmutableArray.Create("SprkDispatcher"));
         var importer = FakeSolutionImporter.Success();
-        var handler = BuildHandler(repo, badCatalog, importer,
-            FakeSolutionVerifier.AllPresent(ImmutableArray<ImportedSolutionRecord>.Empty));
+        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest(isManaged: false));
+        var handler = BuildHandler(repo, importer, verifier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>()
+            .Which.IdempotencyKey.Should().Be($"solimport-{CustomerId}-unmanaged");
+        importer.LastRequest!.Managed.Should().BeFalse();
+        verifier.LastRequest!.Managed.Should().BeFalse();
+        repo.LastWrittenRun!.GateStates[H6SolutionImportHandler.SolutionsImportedGateId]
+            .Evidence!.Value.GetProperty("packageType").GetString().Should().Be("unmanaged");
+    }
+
+    [Theory]
+    [InlineData("Managed")]
+    [InlineData("both")]
+    public async Task InvalidStoredPackageType_FailsResumable_NoImporterCall(string stored)
+    {
+        var run = BuildRun();
+        run.Parameters.NonSecret[IntakeParameterCatalog.SolutionPackageType] = stored;
+        var repo = new FakeRepository(run, etag: "etag-7b");
+        var importer = FakeSolutionImporter.Success();
+        var handler = BuildHandler(repo, importer, FakeSolutionVerifier.AllPresent(BuildExpectedManifest()));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.QuarantineRequired);
-        failure.RejectionCode.Should().Be(SolutionImportRejectionCodes.RetiredSolutionReintroduction);
-        failure.Diagnostic.Should().Contain("SprkDispatcher");
-        failure.Diagnostic.Should().Contain("ADR-039");
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SolutionImportRejectionCodes.PackageTypeInvalid);
         importer.CallCount.Should().Be(0);
-        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
-        repo.LastWrittenRun.Quarantine.Should().NotBeNull();
-        repo.LastWrittenRun.Quarantine!.QuarantinedByHandler.Should().Be("H6");
     }
 
     // ---------- T8 importer PartialImport ----------
@@ -303,9 +291,9 @@ public sealed class H6SolutionImportHandlerTests
         var repo = new FakeRepository(run, etag: "etag-8");
         var importer = FakeSolutionImporter.Failure(
             SolutionImportFailureKind.PartialImport,
-            "CRITICAL: Tier 3 had import failure(s): LegalWorkspace. Aborting BEFORE attempting subsequent tiers.");
-        var handler = BuildHandler(repo, new CanonicalSolutionCatalog(), importer,
-            FakeSolutionVerifier.AllPresent(BuildExpectedManifest(new CanonicalSolutionCatalog())));
+            "ImportJob for 'SpaarkeMaster' completed but reported failure: boom");
+        var handler = BuildHandler(repo, importer,
+            FakeSolutionVerifier.AllPresent(BuildExpectedManifest()));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -392,18 +380,33 @@ public sealed class H6SolutionImportHandlerTests
         var repo = new FakeRepository(run, etag: "etag-15");
         var importer = FakeSolutionImporter.Success();
         var verifier = new FakeSolutionVerifier(new SolutionVerificationOutcome.Missing(
-            ImmutableArray.Create("LegalWorkspace", "EventsPage"),
-            "pac solution list did not return the following expected solutions after import: LegalWorkspace, EventsPage"));
-        var handler = BuildHandler(repo, new CanonicalSolutionCatalog(), importer, verifier);
+            ImmutableArray.Create("SpaarkeMaster"),
+            "SpaarkeMaster 1.2.0.0 is installed as unmanaged, but the run imported the managed package."));
+        var handler = BuildHandler(repo, importer, verifier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.QuarantineRequired);
         failure.RejectionCode.Should().Be(SolutionImportRejectionCodes.VerificationFailed);
-        failure.Diagnostic.Should().Contain("LegalWorkspace");
-        failure.Diagnostic.Should().Contain("EventsPage");
+        failure.Diagnostic.Should().Contain("SpaarkeMaster").And.Contain("installed as unmanaged");
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
+    }
+
+    [Fact]
+    public async Task VerifierUnavailable_FailsResumable_NotQuarantined()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-15b");
+        var verifier = new FakeSolutionVerifier(new SolutionVerificationOutcome.Unavailable("Solutions GET returned 503"));
+        var handler = BuildHandler(repo, FakeSolutionImporter.Success(), verifier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SolutionImportRejectionCodes.VerificationUnavailable);
+        repo.LastWrittenRun!.Status.Should().NotBe(RunStatus.Quarantined);
     }
 
     // ---------- T16 importer infrastructure exception ----------
@@ -415,8 +418,8 @@ public sealed class H6SolutionImportHandlerTests
         var repo = new FakeRepository(run, etag: "etag-16");
         var importer = new ThrowingSolutionImporter(
             new InvalidOperationException("pwsh binary not found on PATH"));
-        var handler = BuildHandler(repo, new CanonicalSolutionCatalog(), importer,
-            FakeSolutionVerifier.AllPresent(BuildExpectedManifest(new CanonicalSolutionCatalog())));
+        var handler = BuildHandler(repo, importer,
+            FakeSolutionVerifier.AllPresent(BuildExpectedManifest()));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -436,8 +439,8 @@ public sealed class H6SolutionImportHandlerTests
         var repo = new FakeRepository(run, etag: "etag-17");
         var importer = FakeSolutionImporter.Success();
         var verifier = new ThrowingSolutionVerifier(
-            new InvalidOperationException("pac binary not found on PATH"));
-        var handler = BuildHandler(repo, new CanonicalSolutionCatalog(), importer, verifier);
+            new InvalidOperationException("verifier transport fault"));
+        var handler = BuildHandler(repo, importer, verifier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -455,9 +458,9 @@ public sealed class H6SolutionImportHandlerTests
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-18");
-        var handler = BuildHandler(repo, new CanonicalSolutionCatalog(),
+        var handler = BuildHandler(repo,
             FakeSolutionImporter.Success(),
-            FakeSolutionVerifier.AllPresent(BuildExpectedManifest(new CanonicalSolutionCatalog())));
+            FakeSolutionVerifier.AllPresent(BuildExpectedManifest()));
 
         var wrongEnvelope = new HandlerEnvelope
         {
@@ -476,14 +479,10 @@ public sealed class H6SolutionImportHandlerTests
     // ---------- T19 idempotency key format ----------
 
     [Fact]
-    public void IdempotencyKey_IsDeterministicByCustomerIdAndCatalogHash()
+    public void IdempotencyKey_IsDeterministicByCustomerIdAndPackageType()
     {
-        var catalog = new CanonicalSolutionCatalog();
-        var k1 = H6SolutionImportHandler.BuildIdempotencyKey("acme", catalog.CatalogHash);
-        var k2 = H6SolutionImportHandler.BuildIdempotencyKey("acme", catalog.CatalogHash);
-        k1.Should().Be(k2);
-        k1.Should().StartWith("solimport-acme-");
-        k1.Should().Be($"solimport-acme-{catalog.CatalogHash}");
+        H6SolutionImportHandler.BuildIdempotencyKey("acme", "managed").Should().Be("solimport-acme-managed");
+        H6SolutionImportHandler.BuildIdempotencyKey("acme", "unmanaged").Should().Be("solimport-acme-unmanaged");
     }
 
     // ---------- T20 run not found ----------
@@ -493,8 +492,8 @@ public sealed class H6SolutionImportHandlerTests
     {
         var repo = new FakeRepository(run: null, etag: null);
         var importer = FakeSolutionImporter.Success();
-        var handler = BuildHandler(repo, new CanonicalSolutionCatalog(), importer,
-            FakeSolutionVerifier.AllPresent(BuildExpectedManifest(new CanonicalSolutionCatalog())));
+        var handler = BuildHandler(repo, importer,
+            FakeSolutionVerifier.AllPresent(BuildExpectedManifest()));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -514,6 +513,8 @@ public sealed class H6SolutionImportHandlerTests
     [InlineData(SolutionImportFailureKind.PartialImport, SolutionImportRejectionCodes.PartialImportDetected, FailureClass.QuarantineRequired)]
     [InlineData(SolutionImportFailureKind.Timeout, SolutionImportRejectionCodes.ImportTimeout, FailureClass.Resumable)]
     [InlineData(SolutionImportFailureKind.UnknownInvocationFailure, SolutionImportRejectionCodes.ImportInvocationFailed, FailureClass.Resumable)]
+    [InlineData(SolutionImportFailureKind.PackageTypeMismatch, SolutionImportRejectionCodes.PackageTypeMismatch, FailureClass.Resumable)]
+    [InlineData(SolutionImportFailureKind.DowngradeRefused, SolutionImportRejectionCodes.DowngradeRefused, FailureClass.Resumable)]
     public void MapImporterFailure_ProducesExpectedRejectionAndClass(
         SolutionImportFailureKind kind,
         string expectedRejection,
@@ -522,216 +523,6 @@ public sealed class H6SolutionImportHandlerTests
         var (rejection, cls) = H6SolutionImportHandler.MapImporterFailure(kind);
         rejection.Should().Be(expectedRejection);
         cls.Should().Be(expectedClass);
-    }
-
-    // ---------- T22 R5 binding — CanonicalSolutionCatalog mirrors PS script $SolutionImportOrder ----------
-    //
-    // task 008 R5: "H6 handler MUST source its input list from $SolutionImportOrder,
-    // never from src/solutions/ folder enumeration". The PS script IS the runtime
-    // authority (the importer does not pass -SolutionsToImport). This test asserts
-    // the C#-side mirror (CanonicalSolutionCatalog) stays in lockstep with the PS
-    // script's $SolutionImportOrder hashtable — if the PS list changes and the C#
-    // catalog doesn't (or vice versa), this test fails at CI time forcing the fix.
-
-    [Fact]
-    public void CanonicalSolutionCatalog_MirrorsPowerShellScriptSolutionImportOrder()
-    {
-        var catalog = new CanonicalSolutionCatalog();
-
-        // Read the PS script from disk to extract the $SolutionImportOrder block.
-        var scriptPath = LocatePowerShellScript();
-        var scriptText = File.ReadAllText(scriptPath);
-
-        // Simple regex-parse of the ordered hashtable entries. Format per task 012:
-        //   "FolderName" = @{ DisplayName = "..."; SolutionName = "..."; Tier = N }
-        var entryRegex = new System.Text.RegularExpressions.Regex(
-            @"""(?<folder>[A-Za-z0-9_]+)""\s+=\s+@\{\s*DisplayName\s+=\s+""(?<display>[^""]+)"";\s+SolutionName\s+=\s+""(?<solution>[A-Za-z0-9_]+)"";\s+Tier\s+=\s+(?<tier>\d+)",
-            System.Text.RegularExpressions.RegexOptions.Compiled);
-
-        var psEntries = entryRegex.Matches(scriptText)
-            .Select(m => new
-            {
-                Folder = m.Groups["folder"].Value,
-                Solution = m.Groups["solution"].Value,
-                Display = m.Groups["display"].Value,
-                Tier = int.Parse(m.Groups["tier"].Value),
-            })
-            .ToList();
-
-        // Test-safety guard: if the regex fails to parse ANY entries, the PS
-        // script format has drifted and the test must fail loud rather than
-        // silently pass on an empty match set.
-        psEntries.Should().NotBeEmpty(
-            $"the R5-binding test regex must parse at least one entry from {scriptPath}");
-        psEntries.Should().HaveCount(9, "the PS script's $SolutionImportOrder is authoritative for the 9 solutions (SESSION 19 2026-08-28 raised 8→9 by adding SpaarkeCorporateCounselApp Tier 4 MDA)");
-
-        // Structural equality: same count + same (folder, solution, tier) tuples
-        // in the same order.
-        catalog.Solutions.Should().HaveCount(psEntries.Count,
-            "the C# catalog mirror MUST have the same count as the PS $SolutionImportOrder");
-
-        for (int i = 0; i < psEntries.Count; i++)
-        {
-            catalog.Solutions[i].FolderName.Should().Be(psEntries[i].Folder,
-                $"C# catalog entry {i} folder must match PS entry {i}");
-            catalog.Solutions[i].SolutionUniqueName.Should().Be(psEntries[i].Solution,
-                $"C# catalog entry {i} solution must match PS entry {i}");
-            catalog.Solutions[i].Tier.Should().Be(psEntries[i].Tier,
-                $"C# catalog entry {i} tier must match PS entry {i}");
-        }
-    }
-
-    // ---------- T23 R5 binding — importer does NOT pass -SolutionsToImport ----------
-    //
-    // Guards the "PS script is runtime authority" invariant: if a future change
-    // adds -SolutionsToImport to the runner's ArgumentList, the PS script's
-    // $SolutionImportOrder would be filtered/overridden by a C#-side list, which
-    // is exactly what R5 forbids. This test greps the runner source for the flag.
-
-    [Fact]
-    public void ImporterRunnerSource_DoesNotPassSolutionsToImportFlag()
-    {
-        var runnerSourcePath = LocateImporterSource();
-        var runnerSource = File.ReadAllText(runnerSourcePath);
-
-        // Grep-check that no ArgumentList.Add invocation passes "-SolutionsToImport"
-        // as a command-line arg to the PS child process. The comment that explains
-        // the omission is fine (and expected); the invariant is: no arg-list add
-        // of the flag string. Same for the POSIX-style long-flag variant.
-        var argAddPattern = new System.Text.RegularExpressions.Regex(
-            @"ArgumentList\.Add\s*\(\s*""--?SolutionsToImport""\s*\)",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-        argAddPattern.IsMatch(runnerSource).Should().BeFalse(
-            "R5 binding: the PS script's $SolutionImportOrder is runtime authority — " +
-            "the importer MUST NOT pass a filtered list from C# code (no ArgumentList.Add " +
-            "of a -SolutionsToImport flag is allowed).");
-    }
-
-    // ---------- T24 CatalogHash determinism ----------
-
-    [Fact]
-    public void CatalogHash_IsDeterministicNonEmptyLowercaseHex()
-    {
-        var c1 = new CanonicalSolutionCatalog();
-        var c2 = new CanonicalSolutionCatalog();
-        c1.CatalogHash.Should().NotBeNullOrWhiteSpace();
-        c1.CatalogHash.Should().Be(c2.CatalogHash, "hash is deterministic across instances");
-        c1.CatalogHash.Should().HaveLength(64, "SHA-256 hex is 64 chars");
-        c1.CatalogHash.Should().MatchRegex("^[0-9a-f]{64}$", "lowercase hex only");
-    }
-
-    // ---------- T25 FindRetiredMatch ----------
-
-    [Fact]
-    public void FindRetiredMatch_CleanCatalog_ReturnsNull()
-    {
-        var catalog = new CanonicalSolutionCatalog();
-        var match = H6SolutionImportHandler.FindRetiredMatch(catalog);
-        match.Should().BeNull("the 9 authoritative solutions do NOT overlap the retired-artifact list");
-    }
-
-    [Fact]
-    public void FindRetiredMatch_ViolatingCatalog_ReturnsPair()
-    {
-        var bad = new StubSolutionCatalog(
-            solutions: ImmutableArray.Create(
-                new CanonicalSolutionEntry("Good", "Good", "Good", 1),
-                new CanonicalSolutionEntry("SpaarkePlaybookEmbeddings", "SpaarkePlaybookEmbeddings", "Bad", 2)),
-            retired: ImmutableArray.Create("PlaybookEmbeddings"));
-        var match = H6SolutionImportHandler.FindRetiredMatch(bad);
-        match.Should().NotBeNull();
-        match!.Value.SolutionUniqueName.Should().Be("SpaarkePlaybookEmbeddings");
-        match.Value.Pattern.Should().Be("PlaybookEmbeddings");
-    }
-
-    // ---------- T26 ClassifyOutput mapping ----------
-
-    [Theory]
-    [InlineData("CRITICAL: Tier 3 had import failure(s): LegalWorkspace", SolutionImportFailureKind.PartialImport)]
-    [InlineData("aborting BEFORE attempting subsequent tiers", SolutionImportFailureKind.PartialImport)]
-    [InlineData("PAC CLI authentication failed", SolutionImportFailureKind.AuthFailure)]
-    [InlineData("System Administrator role required", SolutionImportFailureKind.AuthFailure)]
-    [InlineData("HTTP 429 too many requests", SolutionImportFailureKind.RateLimited)]
-    [InlineData("throttled by Dataverse", SolutionImportFailureKind.RateLimited)]
-    [InlineData("tenant quota exhausted", SolutionImportFailureKind.QuotaExhausted)]
-    [InlineData("env storage limit reached", SolutionImportFailureKind.QuotaExhausted)]
-    [InlineData("No solution ZIPs found", SolutionImportFailureKind.MissingSolutionZips)]
-    [InlineData("Ensure managed solution ZIP files exist", SolutionImportFailureKind.MissingSolutionZips)]
-    [InlineData("Something went wrong on the server", SolutionImportFailureKind.UnknownInvocationFailure)]
-    public void DeployDataverseSolutionsScriptImporter_ClassifyOutput_MapsExpectedFailureKind(
-        string combinedOutput,
-        SolutionImportFailureKind expected)
-    {
-        var kind = DeployDataverseSolutionsScriptImporter.ClassifyOutput(combinedOutput);
-        kind.Should().Be(expected);
-    }
-
-    // ---------- T27 verifier ParseListOutput ----------
-
-    [Fact]
-    public void PacCliSolutionVerifier_ParseListOutput_AllPresent_ReturnsFullManifest()
-    {
-        // Canonical `pac solution list` tabular output (line-format may vary
-        // slightly across PAC versions; regex tolerates both with-solutionId
-        // and without-solutionId).
-        // SESSION 19 MDA-GAP FIX: 9th row for SpaarkeCorporateCounselApp (Tier 4)
-        // added to align with CanonicalSolutionCatalog's 9-solution expansion.
-        var stdoutText = @"
-Unique Name                  Friendly Name                                            Version           Solution Id                            Managed
-------------------------------------------------------------------------------------------------------------------------------
-SpaarkeCore                  Spaarke Core                                             1.0.0.0           11111111-2222-3333-4444-555555555555   True
-SpaarkeWebResources          Spaarke Web Resources                                    1.0.0.0           22222222-3333-4444-5555-666666666666   True
-CalendarSidePane             Calendar Side Pane                                       1.0.0.0           33333333-4444-5555-6666-777777777777   True
-DocumentUploadWizard         Document Upload Wizard                                   1.0.0.0           44444444-5555-6666-7777-888888888888   True
-EventRibbons                 Event Ribbon Commands                                    1.0.0.0           55555555-6666-7777-8888-999999999999   True
-EventDetailSidePane          Event Detail Side Pane                                   1.0.0.0           66666666-7777-8888-9999-aaaaaaaaaaaa   True
-EventsPage                   Events Page                                              1.0.0.0           77777777-8888-9999-aaaa-bbbbbbbbbbbb   True
-LegalWorkspace               Legal Workspace                                          1.0.0.0           88888888-9999-aaaa-bbbb-cccccccccccc   True
-SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MDA)    1.0.0.0           99999999-aaaa-bbbb-cccc-dddddddddddd   True
-";
-
-        var catalog = new CanonicalSolutionCatalog();
-        var outcome = PacCliSolutionVerifier.ParseListOutput(stdoutText, catalog.Solutions);
-        var allPresent = outcome.Should().BeOfType<SolutionVerificationOutcome.AllPresent>().Subject;
-        allPresent.ImportedRecords.Should().HaveCount(9);
-        allPresent.ImportedRecords[0].SolutionUniqueName.Should().Be("SpaarkeCore");
-        allPresent.ImportedRecords[0].Version.Should().Be("1.0.0.0");
-        allPresent.ImportedRecords[0].SolutionId.Should().Be("11111111-2222-3333-4444-555555555555");
-        allPresent.ImportedRecords[0].Tier.Should().Be(1);
-
-        var webRes = allPresent.ImportedRecords.Single(r => r.SolutionUniqueName == "SpaarkeWebResources");
-        webRes.Tier.Should().Be(2);
-        webRes.SolutionId.Should().Be("22222222-3333-4444-5555-666666666666");
-
-        var eventRibbons = allPresent.ImportedRecords.Single(r => r.SolutionUniqueName == "EventRibbons");
-        eventRibbons.Tier.Should().Be(3);
-    }
-
-    [Fact]
-    public void PacCliSolutionVerifier_ParseListOutput_OneMissing_ReturnsMissingOutcome()
-    {
-        // Same output as T27 happy but LegalWorkspace omitted.
-        // SESSION 19 MDA-GAP FIX: added 9th row (SpaarkeCorporateCounselApp) so
-        // that LegalWorkspace remains the ONLY missing solution (otherwise both
-        // LegalWorkspace + SpaarkeCorporateCounselApp would be missing and the
-        // ContainSingle assertion would fail).
-        var stdoutText = @"
-Unique Name                  Friendly Name                                            Version           Solution Id                            Managed
-------------------------------------------------------------------------------------------------------------------------------
-SpaarkeCore                  Spaarke Core                                             1.0.0.0           11111111-2222-3333-4444-555555555555   True
-SpaarkeWebResources          Spaarke Web Resources                                    1.0.0.0           22222222-3333-4444-5555-666666666666   True
-CalendarSidePane             Calendar Side Pane                                       1.0.0.0           33333333-4444-5555-6666-777777777777   True
-DocumentUploadWizard         Document Upload Wizard                                   1.0.0.0           44444444-5555-6666-7777-888888888888   True
-EventRibbons                 Event Ribbon Commands                                    1.0.0.0           55555555-6666-7777-8888-999999999999   True
-EventDetailSidePane          Event Detail Side Pane                                   1.0.0.0           66666666-7777-8888-9999-aaaaaaaaaaaa   True
-EventsPage                   Events Page                                              1.0.0.0           77777777-8888-9999-aaaa-bbbbbbbbbbbb   True
-SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MDA)    1.0.0.0           99999999-aaaa-bbbb-cccc-dddddddddddd   True
-";
-        var catalog = new CanonicalSolutionCatalog();
-        var outcome = PacCliSolutionVerifier.ParseListOutput(stdoutText, catalog.Solutions);
-        var missing = outcome.Should().BeOfType<SolutionVerificationOutcome.Missing>().Subject;
-        missing.MissingUniqueNames.Should().ContainSingle().Which.Should().Be("LegalWorkspace");
     }
 
     // ---------- helpers ----------
@@ -744,8 +535,8 @@ SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MD
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-fail");
         var importer = FakeSolutionImporter.Failure(kind, $"canned failure: {kind}");
-        var handler = BuildHandler(repo, new CanonicalSolutionCatalog(), importer,
-            FakeSolutionVerifier.AllPresent(BuildExpectedManifest(new CanonicalSolutionCatalog())));
+        var handler = BuildHandler(repo, importer,
+            FakeSolutionVerifier.AllPresent(BuildExpectedManifest()));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -756,63 +547,33 @@ SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MD
 
     private static H6SolutionImportHandler BuildHandler(
         FakeRepository repo,
-        ISolutionCatalog catalog,
         ISolutionImporter importer,
         ISolutionVerifier verifier,
         string? clientSecret = ClientSecret,
         Sprk.Provisioning.ControlPlane.Handlers.Credentials.WorkerCredentialSelectionOptions? credentials = null,
-        IRequiredApplicationsInstaller? requiredAppsInstaller = null,
         IOrgSettingsContractApplier? orgSettingsApplier = null)
     {
         var options = Options.Create(new SolutionImportOptions
         {
             ClientSecret = clientSecret,
             ImportTimeout = TimeSpan.FromSeconds(10),
-            VerifierCallTimeout = TimeSpan.FromSeconds(5),
             // A44.5: default (unconfigured) = legacy [ClientSecret] chain —
             // every pre-existing test in this file keeps task-141/204a
             // semantics unchanged.
             Credentials = credentials ?? new Sprk.Provisioning.ControlPlane.Handlers.Credentials.WorkerCredentialSelectionOptions(),
         });
-        // HANDLER-07 + HANDLER-08 (Wave 2 pre-dispatch remediation
-        // 2026-08-27; both lifted to LIVE impls 2026-08-27 Wave 2.5):
-        // default to Success-returning stubs so existing H6 orchestration
-        // tests remain focused on H6-level flow (parity with pre-Wave-2.5
-        // scaffold behavior that also returned Success unconditionally).
-        // HANDLER-07/08-specific H6 tests inject Failure-returning fakes
-        // explicitly. Direct coverage of the LIVE
-        // `PacRequiredApplicationsInstaller` shell-out lives in
-        // <see cref="PacRequiredApplicationsInstallerTests"/>; the LIVE
-        // `PacOrgSettingsContractApplier` shell-out in
-        // <see cref="PacOrgSettingsContractApplierTests"/>.
+        // HANDLER-08: default to a Success-returning applier stub so the H6
+        // orchestration tests stay focused on H6-level flow; the HANDLER-08
+        // test injects a Failure-returning one. The live Web API applier is
+        // covered by DataverseWebApiOrgSettingsContractApplierTests (task 253).
         return new H6SolutionImportHandler(
-            repo, catalog, importer, verifier,
-            requiredAppsInstaller ?? new StubRequiredApplicationsInstaller(
-                new RequiredApplicationsInstallOutcome.Success(StaticRequiredApplicationsManifest.DefaultRequiredApplicationNames)),
-            new StaticRequiredApplicationsManifest(),
+            repo, importer, verifier,
             orgSettingsApplier ?? new StubOrgSettingsContractApplier(
                 new OrgSettingsContractOutcome.Success(StaticOrgSettingsContractManifest.DefaultOrgSettings)),
             new StaticOrgSettingsContractManifest(),
             options,
             TimeProvider.System,
             NullLogger<H6SolutionImportHandler>.Instance);
-    }
-
-    // ---------- HANDLER-07 required-applications gate (Wave 2 pre-dispatch remediation 2026-08-27) ----------
-
-    private sealed class StubRequiredApplicationsInstaller : IRequiredApplicationsInstaller
-    {
-        private readonly RequiredApplicationsInstallOutcome _outcome;
-        public int CallCount { get; private set; }
-        public RequiredApplicationsInstallRequest? LastRequest { get; private set; }
-        public StubRequiredApplicationsInstaller(RequiredApplicationsInstallOutcome outcome) => _outcome = outcome;
-        public Task<RequiredApplicationsInstallOutcome> EnsureInstalledAsync(
-            RequiredApplicationsInstallRequest request, CancellationToken ct)
-        {
-            CallCount++;
-            LastRequest = request;
-            return Task.FromResult(_outcome);
-        }
     }
 
     private sealed class StubOrgSettingsContractApplier : IOrgSettingsContractApplier
@@ -830,50 +591,6 @@ SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MD
         }
     }
 
-    [Fact]
-    public async Task Handler07_RequiredApps_FailureFromInstaller_FailsResumable_NoImporterCall()
-    {
-        var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-h07");
-        var catalog = new CanonicalSolutionCatalog();
-        var importer = FakeSolutionImporter.Success();
-        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest(catalog));
-        var failingInstaller = new StubRequiredApplicationsInstaller(
-            new RequiredApplicationsInstallOutcome.Failure("msft_PowerBI_Anchor install timed out at 6min poll."));
-        var handler = BuildHandler(repo, catalog, importer, verifier,
-            requiredAppsInstaller: failingInstaller);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(SolutionImportRejectionCodes.MissingRequiredApplication);
-        failure.Diagnostic.Should().Contain("msft_PowerBI_Anchor");
-        importer.CallCount.Should().Be(0, "importer MUST NOT fire when required-apps gate fails");
-        failingInstaller.CallCount.Should().Be(1);
-        failingInstaller.LastRequest!.RequiredApplicationNames.Should().Contain("msft_PowerBI_Anchor");
-    }
-
-    [Fact]
-    public async Task Handler07_RequiredApps_Success_ProceedsToImporter()
-    {
-        var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-h07-ok");
-        var catalog = new CanonicalSolutionCatalog();
-        var importer = FakeSolutionImporter.Success();
-        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest(catalog));
-        var okInstaller = new StubRequiredApplicationsInstaller(
-            new RequiredApplicationsInstallOutcome.Success(new[] { "msft_PowerBI_Anchor" }));
-        var handler = BuildHandler(repo, catalog, importer, verifier,
-            requiredAppsInstaller: okInstaller);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>();
-        okInstaller.CallCount.Should().Be(1);
-        importer.CallCount.Should().Be(1, "importer MUST fire when required-apps gate passes");
-    }
-
     // ---------- HANDLER-08 org-settings contract gate (Wave 2 pre-dispatch remediation 2026-08-27) ----------
 
     [Fact]
@@ -881,12 +598,11 @@ SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MD
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-h08");
-        var catalog = new CanonicalSolutionCatalog();
         var importer = FakeSolutionImporter.Success();
-        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest(catalog));
+        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest());
         var failingApplier = new StubOrgSettingsContractApplier(
-            new OrgSettingsContractOutcome.Failure("maxuploadfilesize apply failed: pac org update-settings exit 1."));
-        var handler = BuildHandler(repo, catalog, importer, verifier,
+            new OrgSettingsContractOutcome.Failure("The organization PATCH returned 403 Forbidden. Settings not applied: maxuploadfilesize=25600000."));
+        var handler = BuildHandler(repo, importer, verifier,
             orgSettingsApplier: failingApplier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -905,8 +621,6 @@ SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MD
     public void StaticManifests_MatchCanonicalR1Values()
     {
         // Regression guard: the canonical values ship in the constants.
-        StaticRequiredApplicationsManifest.DefaultRequiredApplicationNames
-            .Should().Contain("msft_PowerBI_Anchor");
         StaticOrgSettingsContractManifest.DefaultOrgSettings
             .Should().ContainKey("maxuploadfilesize");
         StaticOrgSettingsContractManifest.DefaultOrgSettings["maxuploadfilesize"]
@@ -944,62 +658,12 @@ SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MD
         return run;
     }
 
-    private static ImmutableArray<ImportedSolutionRecord> BuildExpectedManifest(ISolutionCatalog catalog)
-    {
-        return catalog.Solutions
-            .Select(e => new ImportedSolutionRecord(
-                SolutionUniqueName: e.SolutionUniqueName,
-                Version: "1.0.0.0",
-                SolutionId: Guid.NewGuid().ToString(),
-                Tier: e.Tier))
-            .ToImmutableArray();
-    }
-
-    private static string LocatePowerShellScript()
-    {
-        // Walk up from the test bin dir to the repo root, then locate the PS
-        // script under scripts/. Same navigation strategy as
-        // <c>ProvisionCustomerScriptBicepDeployRunner</c> tests in H2a.
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null)
-        {
-            var candidate = Path.Combine(dir.FullName, "scripts", "Deploy-DataverseSolutions.ps1");
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-            dir = dir.Parent;
-        }
-        throw new FileNotFoundException(
-            "Could not locate scripts/Deploy-DataverseSolutions.ps1 by walking up from " +
-            $"{AppContext.BaseDirectory}. Ensure the test is running inside the repository tree.");
-    }
-
-    private static string LocateImporterSource()
-    {
-        // Path updated by task 100 (DS-3 Option 2 L2 project split, 2026-08-19):
-        // pre-split the handler source lived under Sprk.Provisioning.ControlPlane/
-        // Handlers/SolutionImport/; post-split it lives under
-        // Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/ (Handlers
-        // moved into the Core class library so both .Api and .Worker consume the
-        // same handler types). Namespace preserved.
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null)
-        {
-            var candidate = Path.Combine(dir.FullName,
-                "src", "server", "services", "Sprk.Provisioning.ControlPlane.Core",
-                "Handlers", "SolutionImport", "DeployDataverseSolutionsScriptImporter.cs");
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-            dir = dir.Parent;
-        }
-        throw new FileNotFoundException(
-            "Could not locate DeployDataverseSolutionsScriptImporter.cs by walking up from " +
-            $"{AppContext.BaseDirectory}. Post-task-100 path: src/server/services/" +
-            "Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/.");
-    }
+    private static ImmutableArray<ImportedSolutionRecord> BuildExpectedManifest(bool isManaged = true)
+        => ImmutableArray.Create(new ImportedSolutionRecord(
+            SolutionUniqueName: "SpaarkeMaster",
+            Version: "1.2.0.0",
+            SolutionId: Guid.NewGuid().ToString(),
+            IsManaged: isManaged));
 
     // ---------- fakes ----------
 
@@ -1043,7 +707,7 @@ SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MD
         private FakeSolutionImporter(SolutionImportOutcome outcome) => _outcome = outcome;
 
         public static FakeSolutionImporter Success()
-            => new(new SolutionImportOutcome.Success());
+            => new(new SolutionImportOutcome.Success("1.2.0.0"));
 
         public static FakeSolutionImporter Failure(SolutionImportFailureKind kind, string diagnostic)
             => new(new SolutionImportOutcome.Failure(kind, diagnostic));
@@ -1062,6 +726,7 @@ SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MD
     {
         private readonly SolutionVerificationOutcome _outcome;
         public int CallCount { get; private set; }
+        public SolutionVerificationRequest? LastRequest { get; private set; }
 
         public FakeSolutionVerifier(SolutionVerificationOutcome outcome) => _outcome = outcome;
 
@@ -1072,11 +737,12 @@ SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MD
             SolutionVerificationRequest request, CancellationToken ct)
         {
             CallCount++;
+            LastRequest = request;
             return Task.FromResult(_outcome);
         }
     }
 
-    /// <summary>Importer that always throws — models pwsh binary missing / PATH issue.</summary>
+    /// <summary>Importer that always throws — models an infrastructure fault.</summary>
     private sealed class ThrowingSolutionImporter : ISolutionImporter
     {
         private readonly Exception _exception;
@@ -1086,7 +752,7 @@ SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MD
             => throw _exception;
     }
 
-    /// <summary>Verifier that always throws — models pac binary missing.</summary>
+    /// <summary>Verifier that always throws — models an infrastructure fault.</summary>
     private sealed class ThrowingSolutionVerifier : ISolutionVerifier
     {
         private readonly Exception _exception;
@@ -1094,23 +760,5 @@ SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MD
 
         public Task<SolutionVerificationOutcome> VerifyAsync(SolutionVerificationRequest request, CancellationToken ct)
             => throw _exception;
-    }
-
-    /// <summary>Catalog stub — arbitrary solutions + retired-list for negative-path tests.</summary>
-    private sealed class StubSolutionCatalog : ISolutionCatalog
-    {
-        public StubSolutionCatalog(
-            ImmutableArray<CanonicalSolutionEntry> solutions,
-            ImmutableArray<string> retired)
-        {
-            Solutions = solutions;
-            RetiredSolutionUniqueNames = retired;
-            // Deterministic hash mirrors CanonicalSolutionCatalog.ComputeCatalogHash.
-            CatalogHash = CanonicalSolutionCatalog.ComputeCatalogHash(solutions);
-        }
-
-        public ImmutableArray<CanonicalSolutionEntry> Solutions { get; }
-        public ImmutableArray<string> RetiredSolutionUniqueNames { get; }
-        public string CatalogHash { get; }
     }
 }

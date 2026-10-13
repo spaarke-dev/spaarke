@@ -80,6 +80,11 @@ jobs:
           # task 161 is working so you can proceed". The code default stays OFF (webpack.config.js); only this
           # deploy setting turns it on. Set back to "false" to hide the tab again; no code change either way.
           ADDIN_EMAIL_TAB_ENABLED: "true"
+          # Dev-only sign-in Diagnostics view ("⋮ → Diagnostics"; spaarkeai-word-add-in-r1 task 113, for
+          # customer-provisioning-orchestration-r1's guest sign-in test, 2026-10-07). Shows the backend token's tid,
+          # oid, acct, idp, iss, aud and the sign-in path; never the token. This workflow deploys the DEV site only;
+          # a production build must not set it. Remove (or set "false") once the guest test is done.
+          ADDIN_DIAGNOSTICS_ENABLED: "true"
 
       # Task 078 (FR-05): the combined Outlook + Word unified app package. The build above emits its parts into
       # dist/spaarke/; this zips them for the Microsoft 365 admin center (Integrated apps -> Upload custom apps ->

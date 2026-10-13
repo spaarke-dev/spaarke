@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{287a3e97-e397-f111-b8de-7ced8ddc4cc6}</WebResourceId>
+  <Name>sprk_navigatorstar.svg</Name>
+  <DisplayName>Navigator rail icon (star)</DisplayName>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_navigatorstarsvg287A3E97-E397-F111-B8DE-7CED8DDC4CC6</FileName>
+</WebResource>

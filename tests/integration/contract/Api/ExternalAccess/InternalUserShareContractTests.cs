@@ -77,8 +77,12 @@ public sealed class InternalUserShareContractTests : IClassFixture<ExternalAcces
         (await ReasonCode(response)).Should().Be("sdap.access.user_share.level_invalid");
     }
 
+    /// <summary>
+    /// Task 114 (owner round 67): the retired refusal, inverted — a licensed person flagged external is shared with on a
+    /// record that is not Restricted (owner ruling 2026-09-18).
+    /// </summary>
     [Fact]
-    public async Task PostShareUser_ForAnExternalUser_Returns422WithTheReasonCode()
+    public async Task PostShareUser_ForAnExternalUserOnARecordThatIsNotRestricted_Returns200Created()
     {
         _fixture.Dataverse.ContactQueryResult = SystemUserRow(UserId, isExternal: true);
         using var client = _fixture.CreateAdminClient();
@@ -91,8 +95,58 @@ public sealed class InternalUserShareContractTests : IClassFixture<ExternalAcces
             accessLevel = 100000000
         });
 
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        document.RootElement.GetProperty("accessLevel").GetInt32().Should().Be(100000000);
+        document.RootElement.GetProperty("accessRightsMask").GetInt32().Should().Be(1, "View Only is Read (1)");
+        document.RootElement.GetProperty("outcome").GetString().Should().Be("created");
+    }
+
+    /// <summary>Task 114: the reason code the flag still carries — a Restricted record refuses a user flagged external.</summary>
+    [Fact]
+    public async Task PostShareUser_ForAnExternalUserOnARestrictedRecord_Returns422WithTheReasonCode()
+    {
+        _fixture.Dataverse.ContactQueryResult = SystemUserRow(UserId, isExternal: true);
+        using var client = _fixture.CreateAdminClient();
+        client.DefaultRequestHeaders.Add("X-Test-RestrictedProjects", ProjectId.ToString());
+
+        var response = await client.PostAsJsonAsync(ShareUserPath, new
+        {
+            recordType = "project",
+            recordId = ProjectId,
+            systemUserId = UserId,
+            accessLevel = 100000000
+        });
+
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
         (await ReasonCode(response)).Should().Be("sdap.access.user_share.user_not_internal");
+        _fixture.RecordShares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Task 114 (owner round 67 amendment 4(c)): on a Restricted record a share held by a user flagged external carries
+    /// <c>externalNoAccess: true</c> — Manage Access shows "External user — no access" until it is removed.
+    /// </summary>
+    [Fact]
+    public async Task GetUserShares_OnARestrictedRecord_MarksTheShareOfAUserFlaggedExternal()
+    {
+        var modifiedOn = new DateTimeOffset(2026, 10, 6, 10, 0, 0, TimeSpan.Zero);
+        _fixture.RecordShares.Seed("sprk_project", ProjectId, DataversePrincipalRef.User(UserId), 1, modifiedOn);
+        _fixture.RecordShares.Seed("sprk_project", ProjectId, DataversePrincipalRef.User(OtherUserId), 1, modifiedOn);
+        _fixture.Dataverse.ContactQueryResult =
+            $$"""[{"systemuserid":"{{UserId}}","fullname":"Ada Lovelace","sprk_isexternal":true},{"systemuserid":"{{OtherUserId}}","fullname":"Brook Okafor"}]""";
+        using var client = _fixture.CreateAdminClient();
+        client.DefaultRequestHeaders.Add("X-Test-RestrictedProjects", ProjectId.ToString());
+
+        var response = await client.GetAsync($"{UserSharesPath}?recordType=project&recordId={ProjectId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var shares = document.RootElement.GetProperty("shares").EnumerateArray().ToList();
+        shares.Single(s => s.GetProperty("systemUserId").GetGuid() == UserId)
+            .GetProperty("externalNoAccess").GetBoolean().Should().BeTrue();
+        shares.Single(s => s.GetProperty("systemUserId").GetGuid() == OtherUserId)
+            .GetProperty("externalNoAccess").GetBoolean().Should().BeFalse("a blank flag is not external");
     }
 
     [Fact]
@@ -149,6 +203,7 @@ public sealed class InternalUserShareContractTests : IClassFixture<ExternalAcces
         shares[0].GetProperty("accessRightsMask").GetInt32().Should().Be(23);
         shares[0].GetProperty("accessLevel").GetInt32().Should().Be(100000001);
         shares[0].GetProperty("modifiedOn").GetDateTimeOffset().Should().Be(modifiedOn);
+        shares[0].GetProperty("externalNoAccess").GetBoolean().Should().BeFalse("task 114: only a Restricted record marks a share");
 
         shares[1].GetProperty("systemUserId").GetGuid().Should().Be(OtherUserId);
         shares[1].GetProperty("accessRightsMask").GetInt32().Should().Be(786455);

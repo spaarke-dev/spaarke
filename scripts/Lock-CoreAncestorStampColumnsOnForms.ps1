@@ -14,7 +14,7 @@
     lookup it stages to "always", so a disabled control cannot drop a staged value from the INSERT.
 
     The repo holds no source for these forms, so this script IS the durable record of the change (the same
-    convention as matter-analyses-tab.xml and scripts/Retire-CommunicationAccessPermission.ps1): a Web API
+    convention as matter-analyses-tab.xml and task 138's column-retirement script, deleted by task 173): a Web API
     systemforms PATCH of formxml, then PublishXml for the table.
 
     Scope: every systemform of the scanned tables with type 2 (Main), 7 (Quick Create) or 12 (Main -
@@ -107,7 +107,7 @@
 
     OPERATOR-RUN ONLY. The task agent ran the dry run, -Verify and -SelfTest; -Apply and -RestoreFrom are the
     main session's manual gate (task 168 step 7), AFTER the presave v1.4.0 is deployed. No other formxml-writing
-    script (task 138's Retire-CommunicationAccessPermission.ps1, Deploy-TodoSubgridsToElevenParentForms.ps1) may
+    script (Set-InheritedAccessPermissionFormLock.ps1, Deploy-TodoSubgridsToElevenParentForms.ps1) may
     run against the same environment at the same time: each reads a form's XML and writes the whole document.
     Requires Azure CLI (`az login`) with a principal that can customize the environment. PowerShell 7+.
 
@@ -538,7 +538,7 @@ if ($SelfTest) {
 }
 
 # ============================================================================
-# Live helpers (copied from Retire-CommunicationAccessPermission.ps1)
+# Live helpers (the shared operator-script shape: token, Invoke-Dv, Stop-Refused)
 # ============================================================================
 
 $BaseUrl = $EnvironmentUrl.TrimEnd('/')

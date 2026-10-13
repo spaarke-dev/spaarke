@@ -1,0 +1,49 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{4288069e-c920-f111-88b5-7ced8d1dc988}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_aichatcontextmapid">
+          <cell name="sprk_name" width="200" />
+          <cell name="sprk_entitytype" width="150" />
+          <cell name="sprk_pagetype" width="120" />
+          <cell name="sprk_playbookid" width="200" />
+          <cell name="sprk_sortorder" width="80" />
+          <cell name="sprk_isdefault" width="80" />
+          <cell name="sprk_isactive" width="80" />
+          <cell name="createdon" width="150" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" output-format="xml-platform" mapping="logical" distinct="false">
+        <entity name="sprk_aichatcontextmap">
+          <attribute name="sprk_name" />
+          <attribute name="sprk_entitytype" />
+          <attribute name="sprk_pagetype" />
+          <attribute name="sprk_playbookid" />
+          <attribute name="sprk_sortorder" />
+          <attribute name="sprk_isdefault" />
+          <attribute name="sprk_isactive" />
+          <attribute name="createdon" />
+          <order attribute="sprk_entitytype" descending="false" />
+          <order attribute="sprk_sortorder" descending="false" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="All AI Chat Context Maps" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="All AI Chat Context Map records (active and inactive), sorted by entity type and sort order" languagecode="1033" />
+    </Descriptions>
+  </savedquery>
+</savedqueries>

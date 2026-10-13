@@ -33,9 +33,10 @@ namespace Sprk.Bff.Api.Services.Ai.Safety;
 /// <c>accounts/ContentSafety/text:shieldprompt/action</c>. NOTE that
 /// "Cognitive Services OpenAI User" does NOT cover it — its dataActions are OpenAI-only, so a
 /// principal can hold OpenAI inference rights on the very same account and still get HTTP 401
-/// PermissionDenied here. Content Safety is served by the multi-service AIServices account
-/// (dev: <c>spaarke-openai-dev</c>); there is no dedicated ContentSafety-kind resource in any
-/// Spaarke subscription. Verified present for the dev UAMI on 2026-08-21
+/// PermissionDenied here. Shared dev serves Content Safety from its multi-service AIServices account
+/// (<c>spaarke-openai-dev</c>); each customer stamp has its own <c>kind: ContentSafety</c> account with
+/// local auth disabled and the role granted to the stamp UAMI (customer.bicep, task 246), so the key
+/// branch below is for local development only. Verified present for the dev UAMI on 2026-08-21
 /// (spaarke-auth-v4-dataverse-MI FR-E1). There is no API key: the setting was removed from
 /// appsettings.template.json because it referenced a Key Vault secret that does not exist.
 ///

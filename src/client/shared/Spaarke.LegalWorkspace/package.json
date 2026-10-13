@@ -11,11 +11,7 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "lint": "tsc --noEmit",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
-    "test:ci": "jest --ci --coverage --maxWorkers=2"
+    "lint": "tsc --noEmit"
   },
   "peerDependencies": {
     "@fluentui/react-components": "^9.0.0",

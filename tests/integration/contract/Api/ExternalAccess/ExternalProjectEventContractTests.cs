@@ -86,6 +86,90 @@ public sealed class ExternalProjectEventContractTests : IClassFixture<ExternalAc
     }
 
     // -----------------------------------------------------------------------
+    // GET — matter and work-assignment events (R3 task 039, FR-03): the same read gate, through the real grant
+    // resolution (X-Test-Matters / X-Test-WorkAssignments become Collaborate grant rows).
+    // -----------------------------------------------------------------------
+
+    private static readonly Guid RootA = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    private static readonly Guid RootB = Guid.Parse("44444444-4444-4444-4444-444444444444");
+
+    private static string RootEventsPath(string segment, Guid id) => $"/api/v1/external/{segment}/{id}/events";
+
+    private static string GrantHeader(string segment) => segment == "matters" ? "X-Test-Matters" : "X-Test-WorkAssignments";
+
+    [Theory]
+    [InlineData("matters")]
+    [InlineData("workassignments")]
+    public async Task GetRootEvents_WhenUnauthenticated_Returns401(string segment)
+    {
+        using var client = _fixture.CreateUnauthenticatedClient();
+
+        var response = await client.GetAsync(RootEventsPath(segment, RootA));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Theory]
+    [InlineData("matters")]
+    [InlineData("workassignments")]
+    public async Task GetRootEvents_WhenNotGranted_Returns403_BeforeAnyRead(string segment)
+    {
+        // Authenticated, a project participant, but granted no record of this kind at all.
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA });
+
+        var response = await client.GetAsync(RootEventsPath(segment, RootA));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.DataReads.Should().BeEmpty("the gate runs before the app-only read");
+    }
+
+    [Theory]
+    [InlineData("matters")]
+    [InlineData("workassignments")]
+    public async Task GetRootEvents_WhenGrantedADifferentRecord_Returns403(string segment)
+    {
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: Array.Empty<Guid>());
+        client.DefaultRequestHeaders.Add(GrantHeader(segment), RootB.ToString());
+
+        var response = await client.GetAsync(RootEventsPath(segment, RootA));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.DataReads.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("matters", "Matter")]
+    [InlineData("workassignments", "WorkAssignment")]
+    public async Task GetRootEvents_WhenGranted_Returns200_ReadingThatRootsEvents(string segment, string kind)
+    {
+        // Positive control for the 403s above: the same route, the same caller shape, a granted record.
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: Array.Empty<Guid>());
+        client.DefaultRequestHeaders.Add(GrantHeader(segment), RootA.ToString());
+
+        var response = await client.GetAsync(RootEventsPath(segment, RootA));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _fixture.DataReads.Should().Equal(new[] { $"GetEventsAsync:{kind}:{RootA}" },
+            "exactly one read, for the route's own root kind and id");
+    }
+
+    [Theory]
+    [InlineData("matters")]
+    [InlineData("workassignments")]
+    public async Task GetRootEvents_WhenTheGrantRowHasNoLevel_Returns403(string segment)
+    {
+        // A grant row written outside the BFF with no level is not a grant (owner 2026-09-30), whatever the record kind.
+        using var client = segment == "matters"
+            ? _fixture.CreateAuthenticatedClient(accessibleProjects: Array.Empty<Guid>(), nullLevelMatters: new[] { RootA })
+            : _fixture.CreateAuthenticatedClient(accessibleProjects: Array.Empty<Guid>(), nullLevelWorkAssignments: new[] { RootA });
+
+        var response = await client.GetAsync(RootEventsPath(segment, RootA));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.DataReads.Should().BeEmpty();
+    }
+
+    // -----------------------------------------------------------------------
     // POST — write gate (two stages: participation, then the Create right)
     // -----------------------------------------------------------------------
 

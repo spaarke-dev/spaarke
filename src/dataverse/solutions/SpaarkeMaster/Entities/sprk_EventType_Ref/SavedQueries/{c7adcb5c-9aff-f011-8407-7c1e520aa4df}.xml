@@ -1,0 +1,42 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{c7adcb5c-9aff-f011-8407-7c1e520aa4df}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_eventtype_refid">
+          <cell name="sprk_name" width="168" />
+          <cell name="sprk_eventtypecode" width="137" />
+          <cell name="sprk_description" width="106" />
+          <cell name="sprk_eventtypecolor" width="140" />
+          <cell name="sprk_eventtypeguid" width="143" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_eventtype_ref">
+          <attribute name="sprk_eventtype_refid" />
+          <attribute name="sprk_name" />
+          <attribute name="createdon" />
+          <order attribute="sprk_name" descending="false" />
+          <attribute name="sprk_eventtypecode" />
+          <attribute name="sprk_eventtypecolor" />
+          <attribute name="sprk_eventtypeguid" />
+          <attribute name="sprk_description" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="All Event Types" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

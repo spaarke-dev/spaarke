@@ -88,7 +88,7 @@ $GraphServicePrincipalId = "00000003-0000-0000-c000-000000000000"
 # here without updating GraphAppRoles.cs (and vice-versa) reintroduces the drift this constant closes.
 $PermissionsToAdd = @(
     @{ Name = "User.ReadWrite.All";        Id = "741f803b-c850-494e-b5df-cde7c675a1ca"; Type = "Role" }
-    @{ Name = "GroupMember.ReadWrite.All";  Id = "dbaae8cf-10b5-4b86-a4a1-f871c94c6571"; Type = "Role" }
+    @{ Name = "GroupMember.ReadWrite.All";  Id = "dbaae8cf-10b5-4b86-a4a1-f871c94c6695"; Type = "Role" }
     @{ Name = "Directory.ReadWrite.All";    Id = "19dbc75e-c2e2-444c-a770-ec69d8559fc7"; Type = "Role" }
 )
 

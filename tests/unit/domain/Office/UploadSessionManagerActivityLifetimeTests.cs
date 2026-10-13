@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.Domain.Office;
 
@@ -41,7 +42,7 @@ public class UploadSessionManagerActivityLifetimeTests
         var factory = new Mock<IGraphClientFactory>();
         factory.Setup(f => f.ForApp()).Throws(new InvalidOperationException("Graph boundary — never reached"));
         var sut = new UploadSessionManager(
-            factory.Object,
+            factory.Object, TestSpeOwnership.AllowAll(factory.Object),
             Mock.Of<IHttpClientFactory>(),
             NullLogger<UploadSessionManager>.Instance);
 

@@ -42,6 +42,8 @@ import type {
   DueWindowDays,
 } from '../types/notifications';
 import { CHANNEL_REGISTRY, tryCatch, BRIEFING_STATE_CHECKED, BRIEFING_STATE_REMOVED } from '../types/notifications';
+// Deep import of the pure dateLocal module (task 098): tests map this one subpath to the real source.
+import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 import type { IResult } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
@@ -175,8 +177,11 @@ export function filterByDueWithinDays(
   const boundaryMs = Date.now() + days * 24 * 60 * 60 * 1000;
   return items.filter(item => {
     if (!item.dueDate) return true; // FR-17b: pass through items with no dueDate
-    const dueMs = Date.parse(item.dueDate);
-    if (Number.isNaN(dueMs)) return true; // defensive: unparseable → pass through
+    // Task 098: an event due date is a calendar date ("YYYY-MM-DD", Dataverse Date Only) — that LOCAL day, not
+    // UTC midnight (Date.parse), which put it hours early in every US zone.
+    const due = parseDueDate(item.dueDate);
+    if (!due) return true; // defensive: unparseable → pass through
+    const dueMs = due.getTime();
     return dueMs <= boundaryMs;
   });
 }
@@ -584,4 +589,3 @@ export async function extendBriefingTtl(
 // `markAllNotificationsRead` that briefly mirrored `markBriefingChecked` /
 // `markAllBriefingsChecked` (added by task 020) have been removed now that
 // `useBriefingActions.ts` (task 030) imports the canonical names directly.
-// The smoke test `DailyBriefingApp.smoke.test.tsx` is rewired by task 031.

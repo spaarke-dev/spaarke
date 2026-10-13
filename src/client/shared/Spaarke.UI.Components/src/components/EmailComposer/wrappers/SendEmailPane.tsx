@@ -33,3 +33,9 @@ export const SendEmailPane = forwardRef<IEmailComposerHandle, ISendEmailPaneProp
 ));
 
 SendEmailPane.displayName = 'SendEmailPane';
+
+// The engine's failed-send wording, for a pane that shows send failures itself (`sendFailureDisplay="host"`).
+// Re-exported HERE because a pane host consumes this file by exact alias (the Word add-in's
+// `@spaarke/ui-components/send-email-pane`), never the barrel — and the function is pure (no host dependency).
+export { describeSendFailure } from '../describeSendFailure';
+export type { ISendFailureDescription } from '../describeSendFailure';

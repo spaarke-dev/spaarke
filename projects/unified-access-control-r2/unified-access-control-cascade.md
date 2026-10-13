@@ -34,7 +34,7 @@ This single fact shapes everything below: our "member group" is defined by looku
 
 **Gaps for our requirement:**
 - The resolver answers **user → records**, not **record → members-then-cascade-to-children**. There is **no** access-team, `sprk_matterteammember`, event-attendee, or parent↔child access bridge. `sprk_userentityassociation` is a user↔record *index*, not a cascade.
-- The `sprk_todo` **"Access Permission: Standard"** field seen on the form is **NOT a sprk_todo field** — it is `sprk_communication.sprk_accesspermission` (Standard/Limited/Restricted), rendered by a shared PCF, and **wired to no server-side access logic** (zero `.cs` references). `sprk_todo` access today = standard `ownerid` + `owningbusinessunit` only.
+- The **"Access Permission"** field on the To Do form is `sprk_todo.sprk_accesspermission` (Standard/Limited/Restricted; the column exists on `sprk_todo`, `sprk_event`, `sprk_communication` and `sprk_document`), rendered by the TrackingFieldTrio PCF. *(Corrected 2026-10-08, task 173: this line said the field was not on `sprk_todo`.)* It is a **display copy of the parent's value** (owner round 81; [child-access-permission.md](../../docs/data-model/child-access-permission.md)) and no access decision reads it: a child's access comes from its parent root.
 
 **Good news:** the two hard pieces already exist — a membership resolver (who are a record's members) and a POA grant seam (how to share a record). The missing piece is the **cascade wiring + trigger**.
 

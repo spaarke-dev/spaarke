@@ -19,6 +19,7 @@ import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-co
 import { resolveRuntimeConfig, initAuth, getAuthProvider, authenticatedFetch } from "@spaarke/auth";
 import { readHandoffFromUrl, handoffSeed as computeHandoffSeed } from "@spaarke/ui-components/services/surfaceHandoff";
 import { FindSimilarApp } from "./App";
+import { parseFindSimilarLaunch } from "./launchParams";
 
 const container = document.getElementById("root");
 if (!container) throw new Error("[FindSimilar] Root container #root not found in DOM.");
@@ -54,6 +55,9 @@ async function bootstrap(): Promise<void> {
     clientId: runtimeConfig.msalClientId,
     bffApiScope: runtimeConfig.bffOAuthScope,
     bffBaseUrl: runtimeConfig.bffBaseUrl,
+    // The environment's tenant (sprk_TenantId) — a B2B guest must sign in against it, not their
+    // home tenant (#1453). The library validates it and ignores an invalid value.
+    tenantId: runtimeConfig.tenantId,
   });
 
   // 3. Resolve tenantId
@@ -80,6 +84,7 @@ async function bootstrap(): Promise<void> {
         tenantId={tenantId}
         authenticatedFetch={authenticatedFetch}
         initialFileRefs={initialFileRefs}
+        initialDocument={parseFindSimilarLaunch()}
       />
     </FluentProvider>
   );

@@ -15,7 +15,7 @@ Four reusable PowerShell prep modules invoked by the **H0 preflight handler** (W
 
 **Why four checks** (per spec.md FR-01 + design.md § handlers H0):
 
-1. **Azure OpenAI regional TPM headroom** — 150+200+30+350 per-model TPM sum per NFR-12
+1. **Azure OpenAI regional TPM headroom** — the stamp deployment set (task 247: DataZoneStandard gpt-4o 150, gpt-4.1-mini 200, text-embedding-3-large 350), in the stamp's OpenAI region
 2. **Dataverse environment-creation rate** — ~4/hour per tenant typical
 3. **Subscription vCPU quota** — per SKU family per region for App Service Plan + AI Search stamps
 4. ~~**SPE cert-bootstrap status** — cert present in KV AND ≥24h old (SPE replication complete per FR-11 T6)~~ — **RETIRED 2026-10-03 (task 248)**. The L2 control plane signs in as the SPE owning app through a managed-identity federated identity credential (MI-FIC) trusting the L2 Worker UAMI; there is no certificate to bootstrap. H0 runs `SpeOwnerCredentialProbe` (check `SpeOwnerCredential`) in C# instead — see below.
@@ -54,8 +54,7 @@ Four reusable PowerShell prep modules invoked by the **H0 preflight handler** (W
 
 | Script | Checks | Underlying API |
 |---|---|---|
-| `Test-AzureOpenAiTpmHeadroom.ps1` | Regional TPM headroom for gpt-4o + gpt-4o-mini + text-embedding-3-large + text-embedding-3-small (150+200+30+350 TPM sum per NFR-12) | `az cognitiveservices usage list --location <region>` |
-| `Test-DataverseEnvCreationRate.ps1` | ≥1 environment-creation slot available in the current hourly bucket (~4/hr typical per tenant) | `pac admin list --query` (or Dataverse API for quota when PAC output unavailable) |
+| `Test-AzureOpenAiTpmHeadroom.ps1` | Regional TPM headroom per Azure quota name for the stamp deployment set (task 247 — default mirrors openai.bicep and L2's `PinnedModelCatalog`; L2's H0 runs the C# port `ArmCognitiveServicesTpmProbe`) | `az cognitiveservices usage list --location <openAiLocation> --subscription <id>` |
 | `Test-SubscriptionVCpuQuota.ps1` | Per-SKU-family regional vCPU headroom for the expected +1-customer stamp (App Service Plan + AI Search) | `az vm list-usage --location <region>` |
 | `Test-SpeCertBootstrap.ps1` | **RETIRED 2026-10-03 (task 248) — throws on invocation.** Formerly: KV cert-secret `SPE-OwnerCert-Pfx` exists AND is ≥24h old. Replaced by L2's `SpeOwnerCredentialProbe` (check `SpeOwnerCredential`: owner entry → owning-app token through the Worker UAMI's federated credential → container type registration GET; codes `spe-owner-not-configured`, `spe-owner-token-failed`, `spe-container-type-not-registered`; no age gate). Set-up: `docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md` | — (formerly `az keyvault secret show`) |
 
@@ -69,21 +68,10 @@ Each script is independently invocable. Handler H0 orchestrates them in parallel
 ```powershell
 $r = & ./Test-AzureOpenAiTpmHeadroom.ps1 `
     -SubscriptionId $env:SPAARKE_SUBSCRIPTION_ID `
-    -Region        'eastus' `
-    -RequestedTpmPerModel @{
-        'gpt-4o'                    = 150
-        'gpt-4o-mini'               = 200
-        'text-embedding-3-large'    = 30
-        'text-embedding-3-small'    = 350
-    }
+    -Region        'westus3'   # the stamp's openAiLocation, not its primary region
+# -RequestedTpmPerModel defaults to the stamp set; override with full Azure quota names, e.g.
+#   @{ 'OpenAI.DataZoneStandard.gpt-4o' = 150; 'OpenAI.DataZoneStandard.gpt4.1-mini' = 200 }
 if ($r.Result -eq 'Fail') { Write-Host $r.Diagnostic; exit 1 }
-```
-
-### Dataverse env-creation rate
-```powershell
-$r = & ./Test-DataverseEnvCreationRate.ps1 `
-    -TenantId $env:SPAARKE_TENANT_ID `
-    -MinSlotsRequired 1
 ```
 
 ### Subscription vCPU quota

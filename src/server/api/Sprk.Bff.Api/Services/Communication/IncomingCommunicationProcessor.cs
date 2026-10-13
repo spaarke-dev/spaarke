@@ -18,6 +18,7 @@ using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Communication;
 
@@ -990,8 +991,14 @@ public sealed class IncomingCommunicationProcessor
 
         // FR-D1 / FR-06: resolve the RAG grounding key ONCE for this communication — every attachment
         // shares the same regarding, so resolving inside the per-attachment enqueue would refetch it N times.
-        var parentEntity = await RegardingParentEntityMapper.ResolveAsync(
-            _genericEntityService, communicationId, _logger, ct);
+        // Task 177: the shared index-parent rule (the record that governs the communication) is Scoped.
+        ParentEntityContext? parentEntity;
+        using (var parentScope = _scopeFactory.CreateScope())
+        {
+            parentEntity = await RegardingParentEntityMapper.ResolveAsync(
+                _genericEntityService, parentScope.ServiceProvider.GetService<DocumentIndexParentResolver>(),
+                communicationId, _logger, ct);
+        }
 
         // SpeFileStore + IEmailAttachmentProcessor + CommunicationContainerResolver are Scoped — resolve
         // them once per message from one scope (R4 / R10); shared across this message's attachments
@@ -1307,8 +1314,14 @@ public sealed class IncomingCommunicationProcessor
         if (fileHandle?.Id is not null)
         {
             // FR-D1 / FR-06: resolve the grounding key for the archived .eml (single doc, one resolve).
-            var parentEntity = await RegardingParentEntityMapper.ResolveAsync(
-                _genericEntityService, communicationId, _logger, ct);
+            // Task 177: the shared index-parent rule (the record that governs the communication) is Scoped.
+            ParentEntityContext? parentEntity;
+            using (var parentScope = _scopeFactory.CreateScope())
+            {
+                parentEntity = await RegardingParentEntityMapper.ResolveAsync(
+                    _genericEntityService, parentScope.ServiceProvider.GetService<DocumentIndexParentResolver>(),
+                    communicationId, _logger, ct);
+            }
             await EnqueueRagIndexingAsync(driveId, fileHandle.Id, documentId, emlResult.FileName, communicationId, parentEntity, ct);
         }
     }

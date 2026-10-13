@@ -16,6 +16,9 @@ namespace Sprk.Bff.Api.Api;
 ///      the SpaarkeAi Code Page (and its LegalWorkspace embed) when Xrm context
 ///      + localStorage cache are BOTH absent. Returns MSAL client ID, authority,
 ///      scopes, BFF base URL. Derives values from AzureAd:* / request.Host.
+///      Also returns the browser App Insights connection string (#1537) so every
+///      client surface sends telemetry to ITS environment's resource; @spaarke/auth
+///      fetches this once and caches it per BFF host.
 ///
 ///   2. GET /api/config (FR-36 — this project) — canonical runtime public
 ///      config bundle for external-spa + code-pages, closing the bake-at-build-time
@@ -27,7 +30,11 @@ namespace Sprk.Bff.Api.Api;
 /// SECURITY (both endpoints):
 ///   MUST NOT return secrets (client secret, API keys, KV references, connection
 ///   strings). Returns only client-side values required to initiate an interactive
-///   auth flow + advisory feature flags.
+///   auth flow + advisory feature flags. The one exception is the Application
+///   Insights connection string on /api/config/client: it is not a secret (the
+///   JavaScript SDK ships it to every browser), and it is returned only when it
+///   parses as a plain App Insights connection string
+///   (<see cref="BrowserTelemetryConnectionString"/>).
 ///
 /// PLACEMENT (per CLAUDE.md §10 + §11): extends this existing file rather than
 /// adding a sibling file with duplicated concerns. Both endpoints answer "what
@@ -64,7 +71,8 @@ public static class ConfigEndpoints
             .WithTags("Configuration")
             .WithSummary("Get non-sensitive client configuration for MSAL bootstrap")
             .WithDescription(
-                "Returns MSAL client ID, authority, scopes, and BFF base URL. " +
+                "Returns MSAL client ID, authority, scopes, BFF base URL, and the browser " +
+                "App Insights connection string (null when not configured). " +
                 "Anonymous — used by the Code Page when Xrm context is unavailable " +
                 "(direct URL access without the Dataverse MDA shell).")
             .Produces<ClientConfigResponse>(200)
@@ -98,11 +106,13 @@ public static class ConfigEndpoints
     }
 
     /// <summary>
-    /// Returns non-sensitive MSAL client configuration.
-    /// Reads AzureAd:ClientId, AzureAd:TenantId, AzureAd:Instance from IConfiguration.
+    /// Returns non-sensitive MSAL client configuration, plus the browser telemetry
+    /// connection string for this environment.
+    /// Reads AzureAd:ClientId, AzureAd:TenantId, AzureAd:Instance and
+    /// APPLICATIONINSIGHTS_CONNECTION_STRING from IConfiguration.
     /// HttpContext is injected automatically by Minimal API — no IHttpContextAccessor needed.
     /// </summary>
-    private static IResult GetClientConfig(
+    internal static IResult GetClientConfig(
         IConfiguration configuration,
         HttpContext httpContext)
     {
@@ -138,9 +148,66 @@ public static class ConfigEndpoints
             MsalClientId: clientId,
             MsalAuthority: authority,
             MsalScopes: [scope],
-            TenantId: tenantId ?? string.Empty);
+            TenantId: tenantId ?? string.Empty,
+            AppInsightsConnectionString: BrowserTelemetryConnectionString(configuration));
 
         return Results.Ok(response);
+    }
+
+    /// <summary>
+    /// Keys Microsoft documents for an Application Insights connection string.
+    /// Anything else means the value is not a plain connection string (for example
+    /// an unresolved Key Vault reference) and is not returned.
+    /// </summary>
+    private static readonly HashSet<string> ConnectionStringKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "InstrumentationKey", "IngestionEndpoint", "LiveEndpoint", "ApplicationId",
+        "EndpointSuffix", "Location", "Authorization",
+    };
+
+    /// <summary>
+    /// The App Insights connection string browser telemetry for this environment sends
+    /// to (#1537): the same <c>APPLICATIONINSIGHTS_CONNECTION_STRING</c> the BFF's own
+    /// Azure Monitor exporter uses (Program.cs). A connection string is public by
+    /// design: the JavaScript SDK ships it to every browser. It is returned only when it
+    /// parses as a plain connection string (documented keys only, a GUID
+    /// InstrumentationKey); otherwise, or when unset, the result is <c>null</c> and
+    /// clients run with telemetry off.
+    /// </summary>
+    internal static string? BrowserTelemetryConnectionString(IConfiguration configuration)
+    {
+        var raw = configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]?.Trim();
+        if (string.IsNullOrEmpty(raw))
+        {
+            return null;
+        }
+
+        var hasInstrumentationKey = false;
+        foreach (var part in raw.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var separator = part.IndexOf('=');
+            if (separator <= 0)
+            {
+                return null;
+            }
+
+            var key = part[..separator].Trim();
+            if (!ConnectionStringKeys.Contains(key))
+            {
+                return null;
+            }
+
+            if (key.Equals("InstrumentationKey", StringComparison.OrdinalIgnoreCase))
+            {
+                hasInstrumentationKey = Guid.TryParse(part[(separator + 1)..].Trim(), out _);
+                if (!hasInstrumentationKey)
+                {
+                    return null;
+                }
+            }
+        }
+
+        return hasInstrumentationKey ? raw : null;
     }
 
     /// <summary>
@@ -205,14 +272,16 @@ public static class ConfigEndpoints
 
     /// <summary>
     /// Response model for GET /api/config/client.
-    /// Contains only non-sensitive MSAL configuration values.
+    /// Contains only non-sensitive values: MSAL configuration and the browser
+    /// telemetry connection string (public by design; null when not configured).
     /// </summary>
     internal record ClientConfigResponse(
         string BffBaseUrl,
         string MsalClientId,
         string MsalAuthority,
         string[] MsalScopes,
-        string TenantId);
+        string TenantId,
+        string? AppInsightsConnectionString);
 
     /// <summary>
     /// Response model for GET /api/config (FR-36).

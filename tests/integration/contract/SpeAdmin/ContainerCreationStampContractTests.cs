@@ -8,6 +8,7 @@ using Microsoft.Graph;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Contract.SpeAdmin;
@@ -92,6 +93,15 @@ public sealed class ContainerCreationStampContractTests : IDisposable
 
         created!.Id.Should().Be("c-new");
         AssertStamped(Unit);
+
+        // Then the ownership marker (task 227d) — its own PATCH, after the stamp read back, so a container whose
+        // stamp did not land is never marked.
+        var requests = _graph.RequestsFor($"{ContainersPath}/c-new").Select(r => r.Method).ToList();
+        requests.Should().Equal("PATCH", "GET", "PATCH");
+        var marker = _graph.PatchRequestsFor($"{ContainersPath}/c-new")
+            .Single(p => p.Body!.Contains(SpeContainerOwnershipGuard.MarkerPropertyName));
+        using var body = JsonDocument.Parse(marker.Body!);
+        body.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal(SpeContainerOwnershipGuard.MarkerPropertyName);
     }
 
     [Fact]
@@ -105,6 +115,40 @@ public sealed class ContainerCreationStampContractTests : IDisposable
 
         await act.Should().ThrowAsync<InvalidOperationException>();
         _graph.RequestsFor($"{ContainersPath}/c-new").Should().Contain(r => r.Method == "DELETE");
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenTheCallerCancelsDuringTheBind_StillBindsAndMarks_NeverStrandsIt()
+    {
+        // #1652 round 1, same pattern: once the container exists, a client disconnect must not skip the bind (or its
+        // compensation) — it used to throw TaskCanceledException and leave a live, unbound, unmarked container.
+        StubCreated();
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}", delay: TimeSpan.FromSeconds(2));
+        _graph.StubGet($"{ContainersPath}/c-new", Container(Unit));
+        using var caller = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+
+        var created = await ProvisioningOperations().CreateContainerAsync(TypeId, "Secure", Unit, null, caller.Token);
+
+        created!.Id.Should().Be("c-new");
+        caller.IsCancellationRequested.Should().BeTrue("the caller gave up while the stamp PATCH was in flight");
+        _graph.RequestsFor($"{ContainersPath}/c-new").Select(r => r.Method).Should().Equal("PATCH", "GET", "PATCH");
+    }
+
+    [Fact]
+    public async Task ProvisioningCreate_WhenTheBindTimesOut_DeletesTheContainer_AndThrows()
+    {
+        StubCreated();
+        _graph.StubPatch($"{ContainersPath}/c-new/customProperties", "{}", delay: TimeSpan.FromSeconds(5));
+        _graph.StubGet($"{ContainersPath}/c-new", Container(Unit)); // it WOULD land — only the timeout fails it
+        _graph.StubDelete($"{ContainersPath}/c-new");
+        var operations = ProvisioningOperations();
+        operations.UncancellableStepTimeout = TimeSpan.FromMilliseconds(500);
+
+        var act = () => operations.CreateContainerAsync(TypeId, "Secure", Unit, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        _graph.RequestsFor($"{ContainersPath}/c-new").Should().Contain(r => r.Method == "DELETE",
+            "a bind that never completes is compensated like any other failure");
     }
 
     [Fact]
@@ -150,7 +194,9 @@ public sealed class ContainerCreationStampContractTests : IDisposable
 
     private void AssertStamped(Guid unit)
     {
-        var patch = _graph.PatchRequestsFor($"{ContainersPath}/c-new").Should().ContainSingle().Subject;
+        // The stamp's own PATCH (the provisioning path then writes the ownership marker in a second one — task 227d).
+        var patch = _graph.PatchRequestsFor($"{ContainersPath}/c-new")
+            .Should().ContainSingle(p => p.Body!.Contains(SpeContainerBusinessUnitStamp.PropertyName)).Subject;
         patch.Path.Should().EndWith("/customProperties", "customProperties is its own sub-resource");
         using var body = JsonDocument.Parse(patch.Body!);
         body.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal(new[] { SpeContainerBusinessUnitStamp.PropertyName },
@@ -160,8 +206,11 @@ public sealed class ContainerCreationStampContractTests : IDisposable
         stamp.GetProperty("isSearchable").GetBoolean().Should().BeFalse();
     }
 
-    private ContainerOperations ProvisioningOperations() =>
-        new(new WireMockGraphFactory(_graph), NullLogger<ContainerOperations>.Instance);
+    private ContainerOperations ProvisioningOperations()
+    {
+        var factory = new WireMockGraphFactory(_graph);
+        return new(factory, TestSpeOwnership.AllowAll(factory), NullLogger<ContainerOperations>.Instance);
+    }
 
     private static SpeAdminGraphService AdminGraph()
     {

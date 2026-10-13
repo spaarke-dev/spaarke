@@ -111,6 +111,65 @@ public sealed class ArmSubscriptionReadinessProbeTests
 
     // ---------- Lighthouse delegation ----------
 
+    // ---------- T228: the subscription holds no other customer's stamp (real ARM listing over the fake transport) ----------
+
+    private static string ResourceGroupsBody(params string[] names)
+        => System.Text.Json.JsonSerializer.Serialize(new
+        {
+            value = names.Select(n => new
+            {
+                id = $"/subscriptions/{SubscriptionId}/resourceGroups/{n}",
+                name = n,
+                type = "Microsoft.Resources/resourceGroups",
+                location = "westus2",
+                properties = new { provisioningState = "Succeeded" },
+            }),
+        });
+
+    [Fact]
+    public async Task CheckSubscriptionDedicatedAsync_OnlyThisCustomersAndUnrelatedGroups_Passes()
+    {
+        var handler = ArmSdkTestFakes.NewHandler(request =>
+        {
+            request.RequestUri!.AbsolutePath.Should().EndWith($"/subscriptions/{SubscriptionId}/resourcegroups");
+            return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, ResourceGroupsBody("rg-spaarke-acme-prod", "rg-contoso-erp"));
+        });
+        var probe = new ArmSubscriptionReadinessProbe(ArmSdkTestFakes.NewArmClient(handler), NullLogger<ArmSubscriptionReadinessProbe>.Instance);
+
+        var result = await probe.CheckSubscriptionDedicatedAsync(SubscriptionId, "acme", CancellationToken.None);
+
+        result.Passed.Should().BeTrue();
+        result.ListingFailed.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CheckSubscriptionDedicatedAsync_AnotherStampsGroup_FailsNamingIt()
+    {
+        var handler = ArmSdkTestFakes.NewHandler(_ =>
+            ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, ResourceGroupsBody("rg-spaarke-acme-prod", "rg-spaarke-other-prod")));
+        var probe = new ArmSubscriptionReadinessProbe(ArmSdkTestFakes.NewArmClient(handler), NullLogger<ArmSubscriptionReadinessProbe>.Instance);
+
+        var result = await probe.CheckSubscriptionDedicatedAsync(SubscriptionId, "acme", CancellationToken.None);
+
+        result.Passed.Should().BeFalse();
+        result.ListingFailed.Should().BeFalse();
+        result.Diagnostic.Should().Contain("rg-spaarke-other-prod");
+    }
+
+    [Fact]
+    public async Task CheckSubscriptionDedicatedAsync_ListingForbidden_IsAListingFailure_NotAForeignStamp()
+    {
+        var handler = ArmSdkTestFakes.NewHandler(_ =>
+            ArmSdkTestFakes.JsonResponse(HttpStatusCode.Forbidden, ArmSdkTestFakes.ArmErrorBody("AuthorizationFailed", "The client does not have authorization.")));
+        var probe = new ArmSubscriptionReadinessProbe(ArmSdkTestFakes.NewArmClient(handler), NullLogger<ArmSubscriptionReadinessProbe>.Instance);
+
+        var result = await probe.CheckSubscriptionDedicatedAsync(SubscriptionId, "acme", CancellationToken.None);
+
+        result.Passed.Should().BeFalse();
+        result.ListingFailed.Should().BeTrue("a permissions gap (PRQ-S-04) must not read as another customer's stamp");
+        result.Diagnostic.Should().Contain("PRQ-S-04");
+    }
+
     [Fact]
     public async Task CheckLighthouseDelegationAsync_AssignmentPresent_ReturnsPassedViaGenuineArmCall()
     {

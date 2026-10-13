@@ -80,6 +80,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     public LookupStatus EmailLookupStatus { get; set; } = LookupStatus.Read;
     public bool FailReferences { get; set; }
     public bool FailGetContact { get; set; }
+    /// <summary>Task 181: <see cref="LookupStatus.ColumnMissing"/> makes <c>GetContactAsync</c> answer that a binding column is not provisioned.</summary>
+    public LookupStatus GetContactStatus { get; set; } = LookupStatus.Read;
     public bool FailBind { get; set; }
     public bool FailCreate { get; set; }
     public bool FailFlagWrites { get; set; }
@@ -234,6 +236,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             Reads.Add("contact");
             AfterRead?.Invoke("contact");
             if (FailGetContact) return Task.FromResult(ContactLookup.Failed);
+            if (GetContactStatus == LookupStatus.ColumnMissing) return Task.FromResult(ContactLookup.ColumnMissing);
             return Task.FromResult(Contacts.TryGetValue(contactId, out var c) ? ContactLookup.Of(Row(c)) : ContactLookup.Of());
         }
     }

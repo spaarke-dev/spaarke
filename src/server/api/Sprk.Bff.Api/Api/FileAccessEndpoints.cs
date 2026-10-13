@@ -139,7 +139,8 @@ public static class FileAccessEndpoints
         foreach (var group in roots.GroupBy(r => r.Entity, StringComparer.Ordinal))
         {
             var ids = group.Select(r => r.Id).ToArray();
-            var flags = await participations.GetRootRecordFlagsAsync(group.Key, ids, ct).ConfigureAwait(false);
+            // Task 174 (owner round 84): EFFECTIVE flags — a record under a secure or Restricted parent refuses a link too.
+            var flags = await participations.GetEffectiveRootRecordFlagsAsync(group.Key, ids, ct).ConfigureAwait(false);
             foreach (var id in ids)
             {
                 // Every id asked about is in the map; an unreadable one is secure AND restricted (fail closed).
@@ -373,6 +374,54 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status503ServiceUnavailable);
 
+        // GET /api/documents/{documentId}/identity — spaarkeai-word-add-in-r1 task 112 (UAT round 11 item 4). The same
+        // DocumentIdentityResponse as resolve-identity, for a document the pane already knows by its ID (its stamp —
+        // e.g. after Quick Save) rather than by its URL. Only the id source differs; the authorization filter, its
+        // operation, the DTO and the related-record slot logic are the ones resolve-identity uses.
+        //
+        // The id is in the route, so DocumentAuthorizationFilter("read") decides on it BEFORE the handler runs, exactly
+        // as on /open-links: a caller who may not read the document gets 403 with no metadata. Dataverse grants no
+        // rights on a row that does not exist, so an UNKNOWN id is also 403 — deliberately indistinguishable from "not
+        // yours", so this route is not an existence oracle. 404 document_not_found is reachable only when the row is
+        // gone after the filter allowed (deleted between the two reads); 503 when Dataverse cannot answer.
+        docs.MapGet("/{documentId}/identity", GetDocumentIdentity)
+            .AddDocumentAuthorizationFilter("read")
+            .WithName("GetDocumentIdentity")
+            .WithTags("File Access")
+            .WithDescription("The identity of a Spaarke document by its id: names and the record it is filed to " +
+                "(same shape as resolve-identity). 403 when the caller may not read it — including an unknown id.")
+            .Produces<DocumentIdentityResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
+        // POST /api/documents/resolve-email-identity — spaarkeai-word-add-in-r1 task 120 (UAT round 12 O6). The same
+        // DocumentIdentityResponse as resolve-identity, for the email open in Outlook: is it already saved to Spaarke,
+        // and to which record? The keys travel in the body (they identify a message in the caller's mailbox).
+        //
+        // Same two-filter shape as resolve-identity, and the order is the design:
+        //   1. DocumentEmailIdentityFilter — keys → the NEWEST saved .eml sprk_document (sprk_isemailarchive = true,
+        //      sprk_emailmessageid = either key; app-only read). None: it returns 200 {resolved:false,
+        //      reason:"not_saved"} itself. Otherwise it writes that id into the route values as `documentId`.
+        //   2. DocumentAuthorizationFilter("read") — 403 with no metadata when the caller may not read THAT row. An older
+        //      copy the caller could read is not searched (no oracle; one authorization per request).
+        // No rate-limit policy, matching the sibling routes: the pane calls this once per open and after a save.
+        docs.MapPost("/resolve-email-identity", ResolveEmailIdentity)
+            .AddEndpointFilter<DocumentEmailIdentityFilter>()
+            .AddDocumentAuthorizationFilter("read")
+            .WithName("ResolveEmailDocumentIdentity")
+            .WithTags("File Access")
+            .WithDescription("Find the saved Spaarke document (.eml) of an Outlook email by its message id. " +
+                "resolved=false with reason not_saved (200) means it is not saved; 403 means the newest saved copy " +
+                "is not readable by the caller; 503 means it could not be determined.")
+            .Produces<DocumentIdentityResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
+            .Produces(StatusCodes.Status503ServiceUnavailable);
+
         return app;
 
         // Static local functions (method groups)
@@ -403,6 +452,81 @@ public static class FileAccessEndpoints
                     "resolve-identity reached its handler without a filter-resolved identity.");
             }
 
+            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, logger, ct));
+        }
+
+        /// <summary>
+        /// POST /api/documents/resolve-email-identity (task 120). Reached only after
+        /// <see cref="DocumentEmailIdentityFilter"/> found the email's saved <c>.eml</c> AND
+        /// <see cref="DocumentAuthorizationFilter"/> allowed <c>read</c> on it; like <c>ResolveIdentity</c> it performs
+        /// no access check of its own (ADR-008). <paramref name="request"/> is bound so the filter can read it.
+        /// </summary>
+        static async Task<IResult> ResolveEmailIdentity(
+            ResolveEmailIdentityRequest? request,
+            IGenericEntityService dataverse,
+            ILogger<Program> logger,
+            HttpContext context,
+            CancellationToken ct)
+        {
+            if (context.Items[DocumentUrlIdentityFilter.ResolutionItemKey]
+                is not Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution.Resolution identity)
+            {
+                // Reachable only if this route's filters were removed or reordered.
+                throw new InvalidOperationException(
+                    "resolve-email-identity reached its handler without a filter-resolved identity.");
+            }
+
+            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, logger, ct));
+        }
+
+        /// <summary>
+        /// GET /api/documents/{documentId}/identity (task 112). Reached only after
+        /// <see cref="DocumentAuthorizationFilter"/> allowed <c>read</c> on the route's <c>documentId</c>; like
+        /// <c>ResolveIdentity</c> it performs no access check of its own (ADR-008), and the related-record display
+        /// fields follow the same record-access ⇔ document-access rule (<c>notes/026-slot-scope-decision.md</c> §6).
+        /// </summary>
+        static async Task<IResult> GetDocumentIdentity(
+            string documentId,
+            IGenericEntityService dataverse,
+            ILogger<Program> logger,
+            CancellationToken ct)
+        {
+            if (!Guid.TryParse(documentId, out var docGuid))
+            {
+                throw new SdapProblemException(
+                    "invalid_id",
+                    "Invalid Document ID",
+                    $"Document ID '{documentId}' is not a valid GUID format",
+                    400);
+            }
+
+            var identity = await Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution
+                .ResolveByIdAsync(docGuid, dataverse, logger, ct);
+            if (identity is null)
+            {
+                // Reachable only when the filter allowed the id and the row is gone by the time it is read.
+                throw new SdapProblemException(
+                    "document_not_found",
+                    "Document Not Found",
+                    $"Document with ID '{documentId}' does not exist",
+                    404);
+            }
+
+            return TypedResults.Ok(await BuildIdentityResponseAsync(identity, dataverse, logger, ct));
+        }
+
+        /// <summary>
+        /// The resolved-identity response both identity routes return — extracted from <c>ResolveIdentity</c> by task
+        /// 112 so the URL and id routes share one body (names, related record, display name and number). Call it only
+        /// after the route's <see cref="DocumentAuthorizationFilter"/> has allowed the caller: this is where document
+        /// metadata enters a response.
+        /// </summary>
+        static async Task<DocumentIdentityResponse> BuildIdentityResponseAsync(
+            Sprk.Bff.Api.Services.Documents.DocumentUrlIdentityResolution.Resolution identity,
+            IGenericEntityService dataverse,
+            ILogger logger,
+            CancellationToken ct)
+        {
             var related = identity.RelatedRecord;
             RelatedRecordIdentity? relatedRecordResponse = null;
             if (related is not null)
@@ -413,13 +537,13 @@ public static class FileAccessEndpoints
                     related.LogicalName, related.Id.ToString("D"), related.Name, display.DisplayName, display.Number);
             }
 
-            return TypedResults.Ok(new DocumentIdentityResponse(
+            return new DocumentIdentityResponse(
                 Resolved: true,
                 DocumentId: identity.DocumentId.ToString("D"),
                 DocumentName: identity.DocumentName,
                 FileName: identity.FileName,
                 RelatedRecord: relatedRecordResponse,
-                Reason: null));
+                Reason: null);
         }
 
         /// <summary>

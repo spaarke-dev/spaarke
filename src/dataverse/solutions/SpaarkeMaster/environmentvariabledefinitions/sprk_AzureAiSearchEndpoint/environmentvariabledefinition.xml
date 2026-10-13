@@ -1,0 +1,13 @@
+<environmentvariabledefinition schemaname="sprk_AzureAiSearchEndpoint">
+  <description default="Azure AI Search endpoint for RAG knowledge retrieval. Format: https://{service-name}.search.windows.net">
+    <label description="Azure AI Search endpoint for RAG knowledge retrieval. Format: https://{service-name}.search.windows.net" languagecode="1033" />
+  </description>
+  <displayname default="Azure AI Search Endpoint">
+    <label description="Azure AI Search Endpoint" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

@@ -1,6 +1,12 @@
 import * as React from "react";
 import { tokens, Spinner } from "@fluentui/react-components";
-import { WorkspaceShell, cleanGuid, getXrm } from "@spaarke/ui-components";
+import {
+  WorkspaceShell,
+  cleanGuid,
+  getXrm,
+  isInAppWizardName,
+  navigateToWebResourceSurfaceAsync,
+} from "@spaarke/ui-components";
 import type {
   SectionFactoryContext,
   NavigateTarget,
@@ -287,157 +293,88 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   }, []);
 
   // -------------------------------------------------------------------------
-  // Create New Matter — opens Code Page dialog via navigateTo (UDSS-009)
+  // Create New Matter / Project / Event / To Do / Work Assignment — task 112
+  // (ontology-platform-r1, D-26): routed through the shared
+  // `navigateToWebResourceSurfaceAsync`, which opens the wizard IN-APP (SprkModal, no
+  // white platform header) while the Console's InAppWizardHost is mounted, and falls
+  // back to the same navigateTo(webresource) call otherwise. It resolves when the
+  // wizard closes.
   // -------------------------------------------------------------------------
 
-  const handleOpenWizard = React.useCallback(async () => {
+  const openCreateWizard = React.useCallback(async (webresourceName: string, title: string) => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
-      if (!xrm?.Navigation?.navigateTo) return;
-
-      await xrm.Navigation.navigateTo(
-        {
-          pageType: "webresource",
-          webresourceName: "sprk_creatematterwizard",
-          data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
-        },
-        {
-          target: 2,
-          width: OOB_MODAL_SIZES.wizard.width,
-          height: OOB_MODAL_SIZES.wizard.height,
-          title: "Create New Matter",
-        }
-      );
+      await navigateToWebResourceSurfaceAsync({
+        webresourceName,
+        data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
+        title,
+      });
     } catch {
-      // User cancelled or dialog error — ignore
+      // getBffBaseUrl() throws before runtime config is initialised — nothing opens (as before).
     }
   }, []);
 
-  // -------------------------------------------------------------------------
-  // Create New Project — opens Code Page dialog via navigateTo (UDSS-009)
-  // -------------------------------------------------------------------------
+  const handleOpenWizard = React.useCallback(
+    () => openCreateWizard("sprk_creatematterwizard", "Create New Matter"),
+    [openCreateWizard]
+  );
 
-  const handleOpenProjectWizard = React.useCallback(async () => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
-      if (!xrm?.Navigation?.navigateTo) return;
-
-      await xrm.Navigation.navigateTo(
-        {
-          pageType: "webresource",
-          webresourceName: "sprk_createprojectwizard",
-          data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
-        },
-        {
-          target: 2,
-          width: OOB_MODAL_SIZES.wizard.width,
-          height: OOB_MODAL_SIZES.wizard.height,
-          title: "Create New Project",
-        }
-      );
-    } catch {
-      // User cancelled or dialog error — ignore
-    }
-  }, []);
+  const handleOpenProjectWizard = React.useCallback(
+    () => openCreateWizard("sprk_createprojectwizard", "Create New Project"),
+    [openCreateWizard]
+  );
 
   // -------------------------------------------------------------------------
-  // Summarize Files — opens Code Page dialog via navigateTo (UDSS-017)
+  // Summarize Files / Find Similar — task 113 (ontology-platform-r1, D-26): opened IN-APP through
+  // the shared `navigateToWebResourceSurfaceAsync` while the Console's InAppWizardHost is
+  // mounted; the same navigateTo(webresource) dialog otherwise (UDSS-017). The document list
+  // refetches when the wizard closes, as before.
   // -------------------------------------------------------------------------
 
   const handleOpenSummarize = React.useCallback(async (documentIds?: string[]) => {
     try {
       const bffParam = `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
       const data = documentIds ? `documentIds=${documentIds.join(",")}&${bffParam}` : bffParam;
-      // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
-      // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
-        { pageType: "webresource", webresourceName: "sprk_summarizefileswizard", data },
-        { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Summarize Files" }
-      );
-      docRefetchRef.current?.();
+      await navigateToWebResourceSurfaceAsync({
+        webresourceName: "sprk_summarizefileswizard",
+        data,
+        title: "Summarize Files",
+      });
     } catch {
-      docRefetchRef.current?.();
+      // getBffBaseUrl() throws before runtime config is initialised — nothing opens (as before).
     }
+    docRefetchRef.current?.();
   }, []);
-
-  // -------------------------------------------------------------------------
-  // Find Similar — opens Code Page dialog via navigateTo (UDSS-017)
-  // -------------------------------------------------------------------------
 
   const handleOpenFindSimilar = React.useCallback(async (documentId?: string, containerId?: string) => {
     try {
       const data = `documentId=${documentId || ""}&containerId=${containerId || ""}&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
-      // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
-      // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
-        { pageType: "webresource", webresourceName: "sprk_findsimilar", data },
-        { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Find Similar Documents" }
-      );
-      docRefetchRef.current?.();
+      await navigateToWebResourceSurfaceAsync({
+        webresourceName: "sprk_findsimilar",
+        data,
+        title: "Find Similar Documents",
+      });
     } catch {
-      docRefetchRef.current?.();
+      // getBffBaseUrl() throws before runtime config is initialised — nothing opens (as before).
     }
+    docRefetchRef.current?.();
   }, []);
 
-  // -------------------------------------------------------------------------
-  // Create New Event — opens Code Page dialog via navigateTo (UDSS-017)
-  // -------------------------------------------------------------------------
+  // Event / To Do: the feed / To Do lists refetch after the wizard closes, as before.
 
   const handleOpenEventWizard = React.useCallback(async () => {
-    try {
-      // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
-      // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
-        { pageType: "webresource", webresourceName: "sprk_createeventwizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
-        { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Create New Event" }
-      );
-      feedRefetchRef.current?.();
-    } catch {
-      feedRefetchRef.current?.();
-    }
-  }, []);
-
-  // -------------------------------------------------------------------------
-  // Create New To Do — opens Code Page dialog via navigateTo (UDSS-017)
-  // -------------------------------------------------------------------------
+    await openCreateWizard("sprk_createeventwizard", "Create New Event");
+    feedRefetchRef.current?.();
+  }, [openCreateWizard]);
 
   const handleOpenTodoWizard = React.useCallback(async () => {
-    try {
-      // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
-      // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
-        { pageType: "webresource", webresourceName: "sprk_createtodowizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
-        { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Create New To Do" }
-      );
-      todoRefetchRef.current?.();
-    } catch {
-      todoRefetchRef.current?.();
-    }
-  }, []);
+    await openCreateWizard("sprk_createtodowizard", "Create New To Do");
+    todoRefetchRef.current?.();
+  }, [openCreateWizard]);
 
-  // -------------------------------------------------------------------------
-  // Create Work Assignment — opens Code Page dialog via navigateTo (UDSS-017)
-  // -------------------------------------------------------------------------
-
-  const handleOpenWorkAssignmentWizard = React.useCallback(async () => {
-    try {
-      // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
-      // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
-        { pageType: "webresource", webresourceName: "sprk_createworkassignmentwizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
-        { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Create Work Assignment" }
-      );
-    } catch {
-      // User cancelled or dialog error — ignore
-    }
-  }, []);
+  const handleOpenWorkAssignmentWizard = React.useCallback(
+    () => openCreateWizard("sprk_createworkassignmentwizard", "Create Work Assignment"),
+    [openCreateWizard]
+  );
 
   // -------------------------------------------------------------------------
   // Close Project dialog state
@@ -524,15 +461,10 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     );
   }, []);
 
-  // Open DocumentUploadWizard Code Page dialog (Integration Pattern C — frame-walking)
+  // Open the Document Upload wizard — task 113 (ontology-platform-r1, D-26): IN-APP through the
+  // shared `navigateToWebResourceSurfaceAsync` while the Console's InAppWizardHost is mounted; the
+  // same navigateTo(webresource) dialog otherwise (Integration Pattern C — frame-walking).
   const handleAddDocument = React.useCallback(async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
-    if (!xrm?.Navigation?.navigateTo) {
-      console.warn("[WorkspaceGrid] Xrm.Navigation not available");
-      return;
-    }
-
     // 🔴 DELETED 2026-09-03 (unified-access-control-r2 task 076): the acting user's
     // business-unit container lookup and its `if (!containerId) return;` guard.
     //
@@ -563,23 +495,17 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       "&theme=" + theme +
       "&bffBaseUrl=" + encodeURIComponent(getBffBaseUrl());
 
-    try {
-      await xrm.Navigation.navigateTo(
-        {
-          pageType: "webresource",
-          webresourceName: "sprk_documentuploadwizard",
-          data: encodeURIComponent(dataString),
-        },
-        {
-          target: 2,
-          width: OOB_MODAL_SIZES.wizard.width,
-          height: OOB_MODAL_SIZES.wizard.height,
-        }
-      );
-    } catch (error: any) {
-      if (error?.errorCode !== 2) {
-        console.error("[WorkspaceGrid] Upload dialog error:", error);
-      }
+    // The shared primitive never rejects (cancel / dialog errors resolve as `cancelled`).
+    const outcome = await navigateToWebResourceSurfaceAsync({
+      webresourceName: "sprk_documentuploadwizard",
+      // The envelope is URI-encoded once, as the code page expects (it decodes it in main.tsx);
+      // the in-app renderer reads it with the same `resolveUploadLaunchParams`.
+      data: encodeURIComponent(dataString),
+    });
+    if (outcome.busy) {
+      console.warn("[WorkspaceGrid] A wizard is already open; the upload wizard was not opened.");
+    } else if (!outcome.launched) {
+      console.warn("[WorkspaceGrid] Xrm.Navigation not available");
     }
   }, []);
 
@@ -600,12 +526,21 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleOpenWizardGeneric = React.useCallback(
     async (webResourceName: string, data?: string, options?: DialogOptions) => {
       try {
+        const bffParam = `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
+        const fullData = data ? `${data}&${bffParam}` : bffParam;
+
+        // Task 112 (D-26): the five Create wizards the section cards launch (Get Started,
+        // To Do "+", Latest Updates "+") open IN-APP when the Console's host is mounted —
+        // the same shared primitive the dedicated handlers above use. Every other web
+        // resource keeps the navigateTo below.
+        if (isInAppWizardName(webResourceName)) {
+          await navigateToWebResourceSurfaceAsync({ webresourceName: webResourceName, data: fullData });
+          return;
+        }
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
         if (!xrm?.Navigation?.navigateTo) return;
-
-        const bffParam = `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
-        const fullData = data ? `${data}&${bffParam}` : bffParam;
 
         await xrm.Navigation.navigateTo(
           {
@@ -653,6 +588,21 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     }),
     [playbookHandlers, handleOpenWizard, handleOpenProjectWizard, handleOpenSummarize, handleOpenFindSimilar, handleOpenWorkAssignmentWizard, handleOpenPlaybookLibraryBrowse]
   );
+
+  // Get Started expand dialog: a card click closes the picker, then launches. Task 112 —
+  // the five Create wizards now open in-app (SprkModal), and a picker left open underneath
+  // would stack two modals (the platform dialog used to sit over it instead).
+  const expandCardClickHandlers = React.useMemo(() => {
+    const wrapped: Partial<Record<string, () => void>> = {};
+    for (const [id, handler] of Object.entries(cardClickHandlers)) {
+      if (!handler) continue;
+      wrapped[id] = () => {
+        setIsExpandOpen(false);
+        void (handler as () => unknown)();
+      };
+    }
+    return wrapped;
+  }, [cardClickHandlers]);
 
   // -------------------------------------------------------------------------
   // Stable callbacks for toolbar refetch buttons (avoid re-building config)
@@ -815,13 +765,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     [setActiveLayoutById],
   );
 
-  const handleEditLayout = React.useCallback(() => {
+  const handleEditLayout = React.useCallback(async () => {
     if (!activeLayout) return;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
-      if (!xrm?.Navigation?.navigateTo) return;
-
       const mode = activeLayout.isSystem ? "saveAs" : "edit";
 
       // For saveAs mode, pass the system layout data so the wizard can pre-populate
@@ -833,48 +779,28 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
         dataParams += `&name=${encodeURIComponent(activeLayout.name)}`;
       }
 
-      xrm.Navigation.navigateTo(
-        {
-          pageType: "webresource",
-          webresourceName: "sprk_workspacelayoutwizard",
-          data: dataParams,
-        },
-        {
-          target: 2,
-          width: OOB_MODAL_SIZES.wizard.width,
-          height: OOB_MODAL_SIZES.wizard.height,
-          title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
-        },
-      ).then(() => {
-        // Wizard closed — refetch layouts in case changes were saved
-        refetchLayouts();
-      }).catch(() => { /* user cancelled */ });
+      // Task 113 (D-26): in-app while the Console's host is mounted, else the same navigateTo.
+      const outcome = await navigateToWebResourceSurfaceAsync({
+        webresourceName: "sprk_workspacelayoutwizard",
+        data: dataParams,
+        title: mode === "saveAs" ? "Save As New Workspace" : "Edit Workspace",
+      });
+      // Wizard closed — refetch layouts in case changes were saved (nothing opened or a dialog failure → nothing to refetch)
+      if (outcome.launched && !outcome.failed) refetchLayouts();
     } catch {
       // Navigation not available
     }
   }, [activeLayout, refetchLayouts]);
 
-  const handleCreateLayout = React.useCallback(() => {
+  const handleCreateLayout = React.useCallback(async () => {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
-      if (!xrm?.Navigation?.navigateTo) return;
-
-      xrm.Navigation.navigateTo(
-        {
-          pageType: "webresource",
-          webresourceName: "sprk_workspacelayoutwizard",
-          data: `mode=create&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
-        },
-        {
-          target: 2,
-          width: OOB_MODAL_SIZES.wizard.width,
-          height: OOB_MODAL_SIZES.wizard.height,
-          title: "Create New Workspace",
-        },
-      ).then(() => {
-        refetchLayouts();
-      }).catch(() => { /* user cancelled */ });
+      // Task 113 (D-26): in-app while the Console's host is mounted, else the same navigateTo.
+      const outcome = await navigateToWebResourceSurfaceAsync({
+        webresourceName: "sprk_workspacelayoutwizard",
+        data: `mode=create&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
+        title: "Create New Workspace",
+      });
+      if (outcome.launched && !outcome.failed) refetchLayouts();
     } catch {
       // Navigation not available
     }
@@ -983,7 +909,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
           <LazyGetStartedExpandDialog
             open={isExpandOpen}
             onClose={handleExpandClose}
-            onCardClick={cardClickHandlers}
+            onCardClick={expandCardClickHandlers}
           />
         </React.Suspense>
       )}

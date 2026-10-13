@@ -1,77 +1,44 @@
 // infrastructure/bicep/modules/controlplane-subscription-rbac.bicep
 //
-// L2 CONTROL-PLANE subscription-scope RBAC -- Contributor for the fleet-scoped
-// provisioning UAMI on the deployment subscription.
+// CUSTOMER-SUBSCRIPTION PREREQUISITE -- Owner for the L2 control-plane UAMI on ONE customer's subscription.
 //
-// PURPOSE
-//   Grants the control-plane UAMI (shared by .Api and .Worker per DS-3 §3)
-//   Contributor at SUBSCRIPTION scope. H2a's ArmDeploymentRunner requires it
-//   for BOTH of its ARM operations (Sprk.Provisioning.ControlPlane.Core/
-//   Handlers/BicepInfraDeploy/ArmDeploymentRunner.cs):
-//     - resource-group ensure (GetSubscriptionResource().CreateOrUpdate on
-//       rg-spaarke-{customer} -- an RG create is a subscription-scope write)
-//     - subscription-scope ARM deployments (WhatIfAtSubscriptionScopeAsync +
-//       CreateOrUpdateAsync of the compiled customer/model1-shared templates)
-//   Its own RequestFailedException guidance says to "verify the control-plane
-//   UAMI has Contributor RBAC at the customer subscription scope"
-//   (ArmDeploymentRunner.cs:162) -- but nothing ever granted it.
+// T228 (owner D4, 2026-09-30; grant decided by the owner 2026-10-06): every customer has its OWN Azure subscription
+// (ADR-027), created by the operator before the run. H1 checks it, H2a ensures rg-spaarke-{customerId}-{env} in it and
+// deploys customer.bicep at subscription scope -- which writes ROLE ASSIGNMENTS (the stamp UAMI's Key Vault / AI Search /
+// Cosmos / Content Safety / ACS grants, the L2 -> BFF grants). Contributor cannot write role assignments, so the L2
+// identity holds Owner on the customer's subscription -- and on no other. H1 registers resource providers and lists the
+// subscription's resource groups (one-customer check) with the same grant.
 //
-// AUDIT REFERENCE (post-authoring-audit-2026-08-20.md, Wave G-8 Batch 2)
-//   - Defect #2: this grant existed NOWHERE in infrastructure/** or the
-//     provisioning scripts -- H2a would 403 on its first live RG-ensure.
-//     Fix option (a) chosen: Bicep-managed (auditable + idempotent) over a
-//     manual Deploy-ControlPlane.ps1 pre-req.
+// HOW IT IS APPLIED (prereqs.yaml PRQ-S-04 -- an OPERATOR step, once per customer subscription; never by L2 itself):
+//   az deployment sub create --subscription <customer-subscription-id> --location <region> \
+//     --template-file infrastructure/bicep/modules/controlplane-subscription-rbac.bicep \
+//     --parameters principalId=<L2 control-plane UAMI principal id>
+// Deterministic guid() name: re-applying is a no-op, and a matching manual grant is adopted.
 //
-// WHY A MODULE (vs an inline resource in platform-controlplane.bicep)
-//   platform-controlplane.bicep already has targetScope='subscription', but a
-//   role assignment's resource NAME must be a deterministic
-//   guid(scope, principalId, roleId) -- and the UAMI principalId there is a
-//   MODULE OUTPUT (runtime value), which Bicep rejects in a resource name
-//   (BCP120: names must be calculable at the start of the deployment).
-//   Inside this module the principalId is a PARAM, evaluated when the nested
-//   deployment starts, so the guid() name is legal. Same mechanism-forced
-//   module split as controlplane-sb-queue.bicep / controlplane-sb-rbac.bicep
-//   (theirs was BCP165 cross-RG; this one is BCP120 runtime-name).
-//
-// SCOPE / TENANCY NOTE
-//   Grants on the DEPLOYING subscription (subscription().id of the
-//   platform-controlplane stack). This covers Model 1 shared and any Model 2
-//   stamp provisioned into the SAME fleet subscription. A Model 2 dedicated
-//   stamp in a DIFFERENT customer subscription needs an equivalent grant in
-//   that subscription (out of scope here -- the H0/H1 onboarding path for
-//   foreign subscriptions owns it).
+// HISTORY: until T228 platform-controlplane.bicep deployed this module with Contributor on the PLATFORM ("fleet")
+// subscription, on the assumption that stamps lived there. Under D-12 no stamp does, so that grant is no longer deployed
+// (an existing assignment stays until an owner removes it). The module split itself was forced by BCP120 (a role
+// assignment's guid() name cannot use a runtime module output); here principalId is a plain parameter.
 
 targetScope = 'subscription'
 
-@description('Principal ID of the fleet-scoped control-plane UAMI (from modules/uami.bicep outputs) granted Contributor on this subscription. Pass empty to skip the grant (what-if isolation only -- a real deploy always needs it).')
-param principalId string = ''
+@description('Principal (object) id of the L2 control-plane UAMI (shared by the L2 Api and Worker). Required.')
+@minLength(36)
+param principalId string
 
-// ============================================================================
-// VARIABLES -- built-in Azure role definition IDs
-// ============================================================================
+// Owner -- customer.bicep writes role assignments (Contributor cannot); owner decision 2026-10-06 (T228).
+// https://learn.microsoft.com/azure/role-based-access-control/built-in-roles/privileged#owner
+var ownerRoleId = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635'
 
-// Contributor -- RG-ensure + sub-scope ARM deploys (H2a / ArmDeploymentRunner)
-// https://learn.microsoft.com/azure/role-based-access-control/built-in-roles/privileged#contributor
-var contributorRoleId = 'b24988ac-6180-42a0-ab88-20f7382dd24c'
-
-// ============================================================================
-// RBAC -- control-plane UAMI -> Contributor at subscription scope.
-// Deterministic guid() name (idempotent, no-op over a matching manual grant).
-// ============================================================================
-
-resource controlPlaneSubscriptionContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(principalId)) {
-  name: guid(subscription().id, principalId, contributorRoleId)
+resource controlPlaneSubscriptionOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(subscription().id, principalId, ownerRoleId)
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', contributorRoleId)
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', ownerRoleId)
     principalId: principalId
     principalType: 'ServicePrincipal'
-    description: 'L2 control-plane UAMI ensures customer RGs + runs subscription-scope ARM deployments (H2a ArmDeploymentRunner) -- Wave G-8 Batch 2, audit defect #2'
+    description: 'L2 control plane deploys this customer stamp (H1 checks, H2a RG + customer.bicep incl. its role assignments) -- T228, prereqs.yaml PRQ-S-04'
   }
 }
 
-// ============================================================================
-// OUTPUTS
-// ============================================================================
-
 output subscriptionId string = subscription().subscriptionId
-output contributorRoleAssignmentName string = !empty(principalId) ? guid(subscription().id, principalId, contributorRoleId) : ''
+output ownerRoleAssignmentName string = controlPlaneSubscriptionOwner.name

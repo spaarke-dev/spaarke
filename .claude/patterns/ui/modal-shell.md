@@ -1,6 +1,6 @@
 # Modal Shell Pattern (component layer)
 
-> **Last Reviewed**: 2026-08-01 (spaarke-modal-system FR-10)
+> **Last Reviewed**: 2026-10-07 (ADR-050 amendment D-26) · prior 2026-08-01 (spaarke-modal-system FR-10)
 > **Status**: Current
 
 ## When
@@ -13,7 +13,7 @@ Use whenever a task BUILDS or modifies a modal — a confirm, choice, form, prev
 4. `src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/` — the six presets to configure or copy
 
 ## Constraints
-- **ADR-050** — one canonical `SprkModal` shell + thin presets; compose `ModalWindowControls` / `RecordNavigationModalShell`; no per-surface bespoke envelope
+- **ADR-050** (amended 2026-10-07, D-26) — one canonical `SprkModal` shell + thin presets incl. **`WizardShell`** (the only wizard engine; `WizardModal` retired); compose `ModalWindowControls`; browse via `BrowseModal.onBeforeNavigate` (`RecordNavigationModalShell` is the dirty-check protocol, not an envelope); launch in-app from Spaarke React surfaces, `navigateTo` only from hostless ribbon scripts; no per-surface bespoke envelope; never inject CSS/DOM into platform chrome
 - **ADR-021** (strengthened) — Fluent v9 semantic tokens only; ZERO hex, `'1px'` literals, or inline color in modal components
 - **ADR-012** — the shell + presets live in `@spaarke/ui-components`; do not duplicate per solution
 - **ADR-028** — pass callbacks / `authenticatedFetch` as functions; never snapshot tokens/auth in modal props

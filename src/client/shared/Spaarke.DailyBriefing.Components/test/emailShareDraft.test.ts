@@ -31,7 +31,8 @@ function makeItem(overrides: Partial<HighPriorityItemResult> = {}): HighPriority
 describe('buildRecordDeepLink', () => {
   it('builds the link from entityType + entityId (structured identity), not display text', () => {
     const link = buildRecordDeepLink(CLIENT_URL, 'sprk_matter', '{ABC-123}');
-    expect(link).toBe('https://contoso.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=ABC-123');
+    // Real cleanGuid contract (ADR-044): braces stripped AND bare-lowercase.
+    expect(link).toBe('https://contoso.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=abc-123');
   });
 
   it('returns empty string when identity parts are missing (link omitted, never guessed)', () => {

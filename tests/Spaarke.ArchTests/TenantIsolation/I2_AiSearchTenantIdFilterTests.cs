@@ -137,10 +137,11 @@ public class I2_AiSearchTenantIdFilterTests
     /// </para>
     /// <para>
     /// <b>Reviewer obligation — this waiver expires with the deployment model, not on a date.</b>
-    /// The customer-provisioning Model 1 shared-trial tier is the live path to a shared index.
-    /// Before the first shared tenant is onboarded, this entry MUST be removed and the filter
-    /// enforced on BOTH call paths. Anyone making <c>spaarke-records-index</c> multi-tenant owns
-    /// that change in the same PR.
+    /// Since D-12 every customer stamp has its own AI Search service (the shared Model 1 tier is
+    /// retired — customer-provisioning-orchestration-r1 T229), so the waiver holds while each index
+    /// serves one customer. It expires the moment any deployment lets <c>spaarke-records-index</c>
+    /// serve more than one tenant: this entry MUST then be removed and the filter enforced on BOTH
+    /// call paths, in the same PR as that change.
     /// </para>
     /// </remarks>
     private static readonly HashSet<string> ExcludedFileRelPaths = new(StringComparer.OrdinalIgnoreCase)

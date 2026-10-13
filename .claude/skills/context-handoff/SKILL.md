@@ -70,15 +70,15 @@ This skill creates a checkpoint of working state that enables another Claude ins
 - User requests `/context-handoff` or `/checkpoint` (alias)
 
 ### Proactive Triggers (Claude Should Self-Invoke)
-- Context usage approaches 70% (check with `/context`)
+- The user or harness reports that context is high, or a compaction notice appears (Claude cannot see its own usage — root CLAUDE.md §5)
 - Before a large operation that might push context over limits
 - After completing significant work that should be checkpointed
 - When switching between projects
 
 ### Automatic Detection (Claude Should Monitor)
-- Long-running tasks (> 30 minutes of work)
-- After every 3-5 completed task steps
-- After creating or modifying many files
+- After a deployment or live environment change
+- After every 3 completed task steps (task-execute Step 8.5)
+- After creating or modifying 5+ files
 
 ---
 
@@ -287,9 +287,9 @@ project-continue: Reads checkpoint → restores context
 | Completed a task step | Update current-task.md completed steps |
 | Modified 5+ files | Run full context-handoff |
 | Made significant decision | Log in current-task.md decisions |
-| 30+ minutes of work | Run full context-handoff |
+| After a deployment or live change | Run full context-handoff |
 | Before large operation | Run full context-handoff |
-| Context feels "heavy" | Check /context, consider checkpoint |
+| User or harness reports context is high | Run full context-handoff, then compact |
 
 ---
 
@@ -414,7 +414,7 @@ This can be automatic if the user's first message is work-related, or explicit v
 
 **At end of skill** (after handoff document written): invoke `/devops-project-sync`.
 
-Per spec §6.2: this is the **highest-value hook** — compaction checkpoints (every 3 steps, >60% context, 5+ files modified) coincide with portfolio checkpoints so the GitHub board is never more than 3 task steps stale.
+Per spec §6.2: this is the **highest-value hook** — compaction checkpoints (every 3 steps, after a deploy, 5+ files modified, context reported high) coincide with portfolio checkpoints so the GitHub board is never more than 3 task steps stale.
 
 Silent on success. Failure degrades to ⚠️ warn; does NOT block handoff write.
 

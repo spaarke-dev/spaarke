@@ -88,6 +88,43 @@ param jwtTenantId = 'a221a95e-6abc-4434-aecc-e48338a1b2f2'
 param controlPlaneAppRegClientId = '965a4a01-01e1-442b-97a6-6a98308018b3'
 
 // ============================================================================
+// RESERVED TENANTS (task 255, INCOMING-141)
+// ============================================================================
+
+// The Entra External ID (CIAM) tenant external contacts sign in to: spaarkeextid.onmicrosoft.com
+// (config/spaarke-resources.yaml external_identity.ciam_tenant). Emitted with the deployment tenant as
+// ReservedTenants__* on the Api and the Worker; POST /api/runs, H4b and H13 refuse both as a customer
+// workforce tenant. Required: both hosts refuse to start without it.
+param ciamTenantIds = [
+  '7052feba-bfc4-43e0-b09e-65014b429131'
+]
+
+// ISS-008 (#1484), owner OK 2026-10-09: the CustomerRunGuard (spec §4D I5 / FR-32) is on. The L2 UAMI
+// sprk-controlplane-dev-uami (965a4a01-…) is an Application User on the admin environment (spaarkedev1) with the scoped
+// role 'Spaarke Provisioning Registry' (Grant-ControlPlaneIdentity.ps1, verified 2026-10-09) — the guard needs no more.
+param customerRunGuardEnabled = true
+
+// ============================================================================
+// WORKER CREDENTIAL CHAIN (task 252, owner-approved 2026-10-09)
+// ============================================================================
+// Secret-free: the Worker signs in to customer Dataverse environments (H6, H7, H7b) with the
+// FR-39 chain [ManagedIdentityFederated] only, and carries NO Key Vault reference to
+// BFF-API-ClientSecret. Stated explicitly so dev never depends on the template default. Before
+// task 252 dev ran the legacy [ClientSecret] chain against a SENTINEL value in
+// sprk-controlplane-dev-kv (never a usable secret); that secret is left in the vault, untouched
+// and unreferenced (never delete -- provisioning.md KV credential lifecycle).
+param requireSecretFreeIdentity = true
+
+// ============================================================================
+// COPILOT AGENT CLIENT (T257)
+// ============================================================================
+
+// The shared Copilot agent client for this control plane: "Spaarke Copilot Agent - Dev" (public, PKCE, no secret;
+// created 2026-10-09 with owner OK, SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md section 7.12; admin consent openid/profile/
+// offline_access). H3 pre-authorizes it on every customer BFF app it provisions or reconciles.
+param copilotAgentClientAppId = '3a36eac4-10c5-4b90-9a83-913138a466af'
+
+// ============================================================================
 // SIDECAR IMAGE (customer-provisioning-orchestration-r1 Wave H-3, 2026-08-21)
 // ============================================================================
 // Points the Worker sitecontainer at the platform ACR image built by

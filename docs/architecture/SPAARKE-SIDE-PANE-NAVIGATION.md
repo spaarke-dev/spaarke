@@ -138,7 +138,7 @@ Plus the matching `LocLabels` (`sprk.Navigator.Button.LabelText` / `.Alt` / `.To
 **How-to** (via the `/ribbon-edit` skill):
 1. Export the entity's ribbon solution unmanaged (e.g. `{Entity}Ribbons`). If none exists, create it: an unmanaged solution under the **Spaarke** publisher containing only that table (metadata-only) — creatable via the Web API (`POST /solutions` + `AddSolutionComponent` ComponentType 1) when the maker portal isn't handy.
 2. Insert the 4 blocks above into `customizations.xml`, substituting the entity's schema name for `sprk_matter`. **Make every id entity-scoped** — not just the two `Location` attributes and `CustomAction Id`s, but ALSO the `Command`, `EnableRule`, and `LocLabel` ids (e.g. `sprk.Navigator.Todo.Open.Command` / `.Open.EnableRule`, not the shared `sprk.Navigator.Open.Command`). This prevents id collisions when several `{Entity}Ribbons` solutions coexist in the same environment. (The `MatterRibbons` proof above predates this convention and uses the shared `sprk.Navigator.Open.*` ids; `CommunicationRibbons`/`TodoRibbons` and all later ones use entity-scoped ids — copy those.)
-3. `pac solution import --publish-changes`.
+3. `pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath <zip> -SolutionUniqueName <name>` (imports, then publishes only the solution's components).
 
 **Currently wired (as of 2026-08-18):** entity ribbons on **Matter, Document, Project, Event, Communication, Todo**; code-page registrars in **SpaarkeAi, Email (`sprk_emailpage`), Communication Reconciliation**. Adding a surface = one more `{Entity}Ribbons` import (entity) or one `ensureNavigatorSidePane()` line (code page).
 
@@ -184,7 +184,7 @@ React.useEffect(() => {
 1. Confirm the three web resources below already exist in the target environment (they are global, not per-entity — deploy once via §6, not per new entity).
 2. Export the entity's ribbon solution unmanaged (`/ribbon-edit` skill).
 3. Insert the 4 RibbonDiffXml blocks from §3(a), substituting the entity's schema name.
-4. `pac solution import --publish-changes`.
+4. `pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath <zip> -SolutionUniqueName <name>` (imports, then publishes only the solution's components).
 5. Hard-refresh the app; the enable rule fires on the entity's grid/form load and silently registers the pane — no click required.
 
 ### New code page

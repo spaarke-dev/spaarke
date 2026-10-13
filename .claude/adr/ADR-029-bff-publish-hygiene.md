@@ -58,7 +58,7 @@ The BFF publish package grew from ~60 MB to 75.2 MB compressed between 2026-03 a
 
 Framework-dependent Linux-x64 publish is the maximum-leverage rule: it eliminates 10 RIDs at once. Sourcemap exclusion is a smaller win (~1 MB) but addresses a production hygiene + IP-exposure concern. The transitive override pattern is documented because it is genuinely the right tool when major version bumps of the parent identity stack are out of scope — and it is a surgical alternative that does not preclude a later full IdentityModel bump if other work requires it.
 
-The publish-size baseline is documented here for CI to enforce (FR-C5; CI workflow guard is a follow-up). This ADR records the canonical baseline (49.63 MB compressed incl. PDBs, 2026-07-08) governed by NFR-01's thresholds (60 hard stop / 55 review). **Guard-drift note (task 055)**: `Deploy-BffApi.ps1` only WARNS above 100 MB — the previously documented 50 MB hard-fail guard never existed as described; reconcile the script when next touched.
+The publish-size baseline is documented here for CI to enforce (FR-C5; CI workflow guard is a follow-up). This ADR records the 2026-07-08 baseline (49.63 MB compressed incl. PDBs — historical; tasks measure against a fresh master build per `.claude/rules/bff-hygiene.md` item 4) governed by NFR-01's thresholds (60 hard stop / 55 review). **Guard-drift note (task 055)**: `Deploy-BffApi.ps1` only WARNS above 100 MB — the previously documented 50 MB hard-fail guard never existed as described; reconcile the script when next touched.
 
 ---
 
@@ -71,7 +71,7 @@ How to confirm any of these rules is currently honored:
 | Linux-x64 only | `find publish/runtimes -type d` | Returns empty (no `runtimes/` directory) |
 | No sourcemaps in publish | `find publish/wwwroot -name "*.js.map" \| wc -l` | Returns `0` |
 | No HIGH transitive CVE for SCC.Xml | `dotnet list package --vulnerable --include-transitive \| grep "System.Security.Cryptography.Xml"` | Returns no output |
-| Compressed publish size | `scripts/Deploy-BffApi.ps1` package-size line | ≤ 60 MB hard stop / ≥ 55 MB review (49.63 MB current incl. PDBs) |
+| Compressed publish size | `scripts/Deploy-BffApi.ps1` package-size line | ≤ 60 MB hard stop / ≥ 55 MB review (49.63 MB on 2026-07-08, historical — compare against a fresh master build) |
 | Uncompressed publish size | `du -sm deploy/api-publish/` | ≤ 150 MB (143.75 MB current) |
 | csproj has all four rules | `grep -E "RuntimeIdentifier\|SelfContained\|wwwroot.*js\.map\|System\.Security\.Cryptography\.Xml" Sprk.Bff.Api.csproj` | Returns ≥ 4 matching lines |
 

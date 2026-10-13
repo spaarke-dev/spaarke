@@ -217,8 +217,12 @@ export function detectDarkModeFromNavbar(): boolean | null {
  *
  * Priority:
  * 1. localStorage (user's explicit preference)
- * 2. Power Platform context (fluentDesignLanguage.isDarkTheme)
- * 3. DOM navbar detection
+ * 2. URL flags (`themeOption=dark|darkmode|light`) — the switch the Spaarke Dark Mode command sets
+ *    (`applyMdaTheme`). Before the context because a STANDARD control's `fluentDesignLanguage.isDarkTheme` reads
+ *    false in that dark mode, so the context alone kept TrackingFieldTrio light (owner test 2026-10-07); code pages
+ *    already used this order (`resolveCodePageTheme`).
+ * 3. Power Platform context (fluentDesignLanguage.isDarkTheme)
+ * 4. DOM navbar detection
  *
  * Defaults to false (light mode) when no preference is found.
  * OS `prefers-color-scheme` is intentionally NOT consulted — ADR-021 requires
@@ -234,7 +238,10 @@ export function getEffectiveDarkMode(context?: unknown): boolean {
   if (preference === 'dark') return true;
   if (preference === 'light') return false;
 
-  // Auto mode: check Power Platform context first
+  // Auto mode: the URL flag the Spaarke Dark Mode command sets, then the Power Platform context.
+  const urlDark = detectDarkModeFromUrl();
+  if (urlDark !== null) return urlDark;
+
   const ctx = context as { fluentDesignLanguage?: { isDarkTheme?: boolean } } | undefined;
   if (ctx?.fluentDesignLanguage?.isDarkTheme !== undefined) {
     return ctx.fluentDesignLanguage.isDarkTheme;

@@ -1,0 +1,47 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{1ad5e8f3-4408-f111-8406-7c1e525abd8b}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_invoiceid">
+          <cell name="sprk_name" width="300" />
+          <cell name="sprk_invoicenumber" width="132" />
+          <cell name="sprk_confidence" width="105" />
+          <cell name="sprk_vendororg" width="157" />
+          <cell name="sprk_totalamount_base" width="158" />
+          <cell name="sprk_invoicedate" width="112" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical" distinct="true">
+        <entity name="sprk_invoice">
+          <attribute name="sprk_invoiceid" />
+          <attribute name="sprk_name" />
+          <attribute name="createdon" />
+          <order attribute="sprk_name" descending="false" />
+          <attribute name="sprk_invoicenumber" />
+          <attribute name="sprk_confidence" />
+          <attribute name="sprk_vendororg" />
+          <attribute name="sprk_totalamount_base" />
+          <attribute name="sprk_invoicedate" />
+          <filter type="and">
+            <condition attribute="sprk_invoicestatus" operator="eq" value="100000000" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Invoice Review Queue Projects" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

@@ -7,11 +7,14 @@
 // (parity with ArmSubscriptionReadinessProbeTests.cs task 121 +
 // ArmKeyVaultRefProbeTests.cs task 123 — ADR-038 path #1).
 //
-// COVERAGE (maps to POML acceptance criteria):
-//   - Every container has correct pk='/customerId'                → Passed
-//   - One container has wrong pk path                              → Failed
-//   - One container has NO partition key (paths null/empty)        → Failed
-//   - Multiple containers, mixed correct + violations              → Failed (all listed)
+// COVERAGE (task 230a: the stamp's containers carry the keys cosmos-db.bicep declares):
+//   - Exactly the declared containers, each with its declared key  → Passed
+//   - A declared container with another key / hierarchical key     → Failed
+//   - A declared container with NO partition key                   → Failed
+//   - A declared container absent / an undeclared keyed container  → Passed (membership drift logged)
+//   - An undeclared container with NO partition key                → Failed
+//   - Several violations                                           → Failed (all listed)
+//   - The probe's table equals cosmos-db.bicep (+ customer.bicep's database name)
 //   - Cosmos endpoint invalid host shape                           → InfraFault
 //   - Empty SubscriptionId                                         → InfraFault
 //   - Empty CosmosEndpoint                                         → InfraFault
@@ -24,6 +27,7 @@
 
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using Azure.Core;
 using Azure.Core.Pipeline;
 using Azure.ResourceManager;
@@ -52,8 +56,7 @@ public sealed class CosmosPartitionKeyInvariantProbeTests
             SubscriptionId: subscriptionId ?? SubscriptionId,
             AiSearchEndpoint: "",
             CosmosEndpoint: cosmosEndpoint ?? CosmosEndpoint,
-            BffApiUrl: "",
-            ProvisioningScriptsDirectory: "");
+            BffApiUrl: "");
 
     // ---------- Kind + Structural ----------
 
@@ -102,18 +105,41 @@ public sealed class CosmosPartitionKeyInvariantProbeTests
 
     // ---------- Happy path ----------
 
-    [Fact]
-    public async Task ProbeAsync_SingleContainerCorrectPartitionKey_ReturnsPassedViaGenuineArmCalls()
+    private static (string dbName, string containerName, string[] pkPaths)[] StampContainers(
+        Func<string, string[]?>? overrideKey = null, string? omit = null, (string, string, string[])? extra = null)
     {
-        var handler = ArmSdkTestFakes.NewHandler(request => RouteCosmosRequest(request,
-            containers: new[] { (dbName: "spaarke-runtime", containerName: "runs", pkPaths: new[] { "/customerId" }) }));
+        var list = CosmosPartitionKeyInvariantProbe.DeclaredPartitionKeys
+            .Where(kv => kv.Key != omit)
+            .Select(kv => (dbName: CosmosPartitionKeyInvariantProbe.DeclaredDatabaseName, containerName: kv.Key,
+                pkPaths: overrideKey?.Invoke(kv.Key) ?? new[] { kv.Value }))
+            .ToList();
+        if (extra is { } e)
+        {
+            list.Add(e);
+        }
+        return list.ToArray();
+    }
+
+    private static async Task<InvariantVerificationOutcome> ProbeStamp((string, string, string[])[] containers)
+    {
+        var handler = ArmSdkTestFakes.NewHandler(request => RouteCosmosRequest(request, containers));
+        var probe = new CosmosPartitionKeyInvariantProbe(
+            ArmSdkTestFakes.NewArmClient(handler), NullLogger<CosmosPartitionKeyInvariantProbe>.Instance);
+        return await probe.ProbeAsync(NewRequest(), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_TheStampTemplatesContainersWithTheirDeclaredKeys_ReturnsPassedViaGenuineArmCalls()
+    {
+        var handler = ArmSdkTestFakes.NewHandler(request => RouteCosmosRequest(request, StampContainers()));
 
         var probe = new CosmosPartitionKeyInvariantProbe(
             ArmSdkTestFakes.NewArmClient(handler),
             NullLogger<CosmosPartitionKeyInvariantProbe>.Instance);
 
         var result = await probe.ProbeAsync(NewRequest(), CancellationToken.None);
-        result.Should().BeOfType<InvariantVerificationOutcome.Passed>();
+        result.Should().BeOfType<InvariantVerificationOutcome.Passed>(
+            "a correctly deployed stamp uses /tenantId, /partitionKey and /subjectId — not /customerId (task 230a)");
 
         // Real-call assertion: probe MUST have hit ARM management-plane
         // endpoints (accounts list + databases list + containers list) —
@@ -129,68 +155,107 @@ public sealed class CosmosPartitionKeyInvariantProbeTests
             "asserts the containers enumeration was invoked");
     }
 
-    // ---------- Silent-fail-audit critical: wrong PK path ----------
+    // ---------- Silent-fail-audit critical: the deployed partitioning differs from the template ----------
 
-    [Fact]
-    public async Task ProbeAsync_ContainerWithWrongPartitionKeyPath_ReturnsFailed()
+    [Theory]
+    [InlineData("/customerId")]           // the L2 ProvisioningRun convention, wrong for a stamp container
+    [InlineData("/tenantId", "/userId")]  // hierarchical
+    public async Task ProbeAsync_ADeclaredContainerWithAnotherKey_ReturnsFailed(params string[] paths)
     {
-        var handler = ArmSdkTestFakes.NewHandler(request => RouteCosmosRequest(request,
-            containers: new[] { (dbName: "spaarke-runtime", containerName: "runs", pkPaths: new[] { "/tenantId" }) }));
+        var result = await ProbeStamp(StampContainers(overrideKey: name => name == "sessions" ? paths : null));
 
-        var probe = new CosmosPartitionKeyInvariantProbe(
-            ArmSdkTestFakes.NewArmClient(handler),
-            NullLogger<CosmosPartitionKeyInvariantProbe>.Instance);
-
-        var result = await probe.ProbeAsync(NewRequest(), CancellationToken.None);
-        result.Should().BeOfType<InvariantVerificationOutcome.Failed>();
-        var failed = (InvariantVerificationOutcome.Failed)result;
+        var failed = result.Should().BeOfType<InvariantVerificationOutcome.Failed>().Subject;
         failed.Kind.Should().Be(InvariantKind.I3CosmosPartitionKey);
-        failed.Diagnostic.Should().Contain("/tenantId");
-        failed.Diagnostic.Should().Contain("/customerId");
-        failed.Diagnostic.Should().Contain("spaarke-runtime/runs");
+        failed.Diagnostic.Should().Contain("spaarke-ai/sessions").And.Contain(paths[0]).And.Contain("declares '/tenantId'");
     }
 
     [Fact]
-    public async Task ProbeAsync_ContainerWithNoPartitionKey_ReturnsFailed()
+    public async Task ProbeAsync_ADeclaredContainerWithNoPartitionKey_ReturnsFailed()
     {
-        var handler = ArmSdkTestFakes.NewHandler(request => RouteCosmosRequest(request,
-            containers: new[] { (dbName: "spaarke-runtime", containerName: "runs", pkPaths: Array.Empty<string>()) }));
+        var result = await ProbeStamp(StampContainers(overrideKey: name => name == "memory-items" ? Array.Empty<string>() : null));
 
-        var probe = new CosmosPartitionKeyInvariantProbe(
-            ArmSdkTestFakes.NewArmClient(handler),
-            NullLogger<CosmosPartitionKeyInvariantProbe>.Instance);
-
-        var result = await probe.ProbeAsync(NewRequest(), CancellationToken.None);
-        result.Should().BeOfType<InvariantVerificationOutcome.Failed>();
-        var failed = (InvariantVerificationOutcome.Failed)result;
-        failed.Diagnostic.Should().Contain("NO partition-key definition");
-        failed.Diagnostic.Should().Contain("CATASTROPHIC");
+        var failed = result.Should().BeOfType<InvariantVerificationOutcome.Failed>().Subject;
+        failed.Diagnostic.Should().Contain("memory-items").And.Contain("NO partition-key definition").And.Contain("CATASTROPHIC");
     }
 
     [Fact]
-    public async Task ProbeAsync_MixedCorrectAndViolationContainers_FailedListsEveryOffender()
+    public async Task ProbeAsync_ADeclaredContainerIsAbsent_IsMembershipDrift_NotAFailure()
     {
-        var handler = ArmSdkTestFakes.NewHandler(request => RouteCosmosRequest(request,
-            containers: new[]
-            {
-                (dbName: "db1", containerName: "goodOne",  pkPaths: new[] { "/customerId" }),
-                (dbName: "db1", containerName: "badPath",  pkPaths: new[] { "/tenantId" }),
-                (dbName: "db1", containerName: "noPk",     pkPaths: Array.Empty<string>()),
-            }));
+        // The Worker's table and the template H2a deploys ship on different schedules (task 230a review F3).
+        var result = await ProbeStamp(StampContainers(omit: "feedback"));
 
-        var probe = new CosmosPartitionKeyInvariantProbe(
-            ArmSdkTestFakes.NewArmClient(handler),
-            NullLogger<CosmosPartitionKeyInvariantProbe>.Instance);
+        result.Should().BeOfType<InvariantVerificationOutcome.Passed>();
+    }
 
-        var result = await probe.ProbeAsync(NewRequest(), CancellationToken.None);
-        result.Should().BeOfType<InvariantVerificationOutcome.Failed>();
-        var failed = (InvariantVerificationOutcome.Failed)result;
-        failed.Diagnostic.Should().Contain("badPath");
-        failed.Diagnostic.Should().Contain("noPk");
-        failed.Diagnostic.Should().NotContain("goodOne violate",
-            "the passing container must NOT appear in the violation list");
-        failed.Diagnostic.Should().Contain("2 of 3 container(s)",
-            "aggregate summary shows partial-violation count");
+    [Theory]
+    [InlineData("spaarke-ai", "scratch")]       // a container the template does not declare (e.g. retired — ARM never deletes it)
+    [InlineData("spaarke-runtime", "sessions")]  // a declared name in another database
+    public async Task ProbeAsync_AnUndeclaredContainerWithAKey_IsMembershipDrift_NotAFailure(string dbName, string containerName)
+    {
+        var result = await ProbeStamp(StampContainers(extra: (dbName, containerName, new[] { "/tenantId" })));
+
+        result.Should().BeOfType<InvariantVerificationOutcome.Passed>();
+    }
+
+    [Fact]
+    public async Task ProbeAsync_AnUndeclaredContainerWithNoPartitionKey_ReturnsFailed()
+    {
+        var result = await ProbeStamp(StampContainers(extra: ("spaarke-ai", "scratch", Array.Empty<string>())));
+
+        result.Should().BeOfType<InvariantVerificationOutcome.Failed>()
+            .Which.Diagnostic.Should().Contain("spaarke-ai/scratch").And.Contain("NO partition-key definition");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_SeveralViolations_FailedListsEveryOffender()
+    {
+        var result = await ProbeStamp(StampContainers(
+            overrideKey: name => name switch { "prompts" => new[] { "/customerId" }, "audit" => Array.Empty<string>(), _ => null },
+            extra: ("spaarke-ai", "scratch", Array.Empty<string>())));
+
+        var failed = result.Should().BeOfType<InvariantVerificationOutcome.Failed>().Subject;
+        failed.Diagnostic.Should().Contain("spaarke-ai/prompts").And.Contain("spaarke-ai/audit").And.Contain("spaarke-ai/scratch");
+        failed.Diagnostic.Should().Contain("3 violation(s)");
+        failed.Diagnostic.Should().NotContain("spaarke-ai/feedback", "a correctly keyed container is not an offender");
+    }
+
+    // ---------- The probe's table is the stamp template's (task 230a) ----------
+
+    [Fact]
+    public void DeclaredPartitionKeys_EqualCosmosDbBicep_AndTheDatabaseIsCustomerBiceps()
+    {
+        var root = RepoRoot();
+        var bicep = File.ReadAllText(Path.Combine(root, "infrastructure", "bicep", "modules", "cosmos-db.bicep"));
+        var declared = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var block in Regex.Split(bicep, @"(?=^resource\s)", RegexOptions.Multiline)
+                     .Where(b => b.Contains("'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@", StringComparison.Ordinal)))
+        {
+            var name = Regex.Match(block, @"^\s*name:\s*'([^']+)'", RegexOptions.Multiline).Groups[1].Value;
+            var paths = Regex.Match(block, @"paths:\s*\[([^\]]*)\]").Groups[1].Value;
+            declared[name] = string.Join(",", Regex.Matches(paths, @"'([^']+)'").Select(m => m.Groups[1].Value));
+        }
+
+        declared.Should().NotBeEmpty("the parser must find the container resources");
+        declared.Keys.Should().NotContain(string.Empty,
+            "every container resource must have a literal name the parser can read (a loop or variable name needs the table updated by hand)");
+        CosmosPartitionKeyInvariantProbe.DeclaredPartitionKeys.Should().BeEquivalentTo(declared,
+            "I3 compares the deployed account with exactly what the stamp template declares");
+
+        File.ReadAllText(Path.Combine(root, "infrastructure", "bicep", "customer.bicep"))
+            .Should().Contain($"databaseName: '{CosmosPartitionKeyInvariantProbe.DeclaredDatabaseName}'");
+    }
+
+    private static string RepoRoot()
+    {
+        // A worktree's .git is a FILE; a regular checkout's is a directory (parity with RunContextContractTests).
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var gitMarker = Path.Combine(dir.FullName, ".git");
+            if (Directory.Exists(gitMarker) || File.Exists(gitMarker)) return dir.FullName;
+            dir = dir.Parent;
+        }
+        throw new InvalidOperationException($"Could not locate the repo root walking up from '{AppContext.BaseDirectory}'.");
     }
 
     // ---------- Infrastructure faults ----------

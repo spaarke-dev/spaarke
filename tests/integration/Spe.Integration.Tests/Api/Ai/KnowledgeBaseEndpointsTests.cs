@@ -81,8 +81,8 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
 
         var content = await response.Content.ReadFromJsonAsync<KnowledgeIndexHealthResult>(_jsonOptions);
         content.Should().NotBeNull();
-        content!.KnowledgeDocCount.Should().BeGreaterOrEqualTo(0);
-        content.DiscoveryDocCount.Should().BeGreaterOrEqualTo(0);
+        content!.KnowledgeDocCount.Should().Be(42); // fixture's mocked IRagService.GetIndexHealthAsync
+        content.DiscoveryDocCount.Should().Be(17);
         content.LastUpdated.Should().NotBe(default);
         content.KnowledgeIndexName.Should().Be(KnowledgeIndexName);
         content.DiscoveryIndexName.Should().Be(DiscoveryIndexName);

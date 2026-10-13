@@ -9,7 +9,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { readSseStream, parseSseEvent } from './useSseStream';
+import { readSseStream, parseSseEvent, errorBodyReason, describeStreamError } from './useSseStream';
 
 /**
  * Stable playbook ID (GUID format) for the "Document Profile" playbook used by
@@ -212,6 +212,8 @@ interface SseChunk {
   result?: DocumentAnalysisResult;
   /** Error message (for type="error") */
   error?: string;
+  /** Correlation id of a terminal error (ADR-019), quoted to support */
+  correlationId?: string;
   /** Analysis ID from Dataverse */
   analysisId?: string;
   /** Whether storage partially succeeded (soft failure) */
@@ -375,7 +377,7 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
           signal: abortController.signal,
           mapHttpError: async response => {
             const errorText = await response.text();
-            return new Error(errorText || `HTTP ${response.status}`);
+            return new Error(errorBodyReason(errorText) || `HTTP ${response.status}`);
           },
           onLine: (line: string) => {
             if (finished) return;
@@ -387,7 +389,7 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
 
             // Handle error event
             if (chunk.type === 'error' || chunk.error) {
-              throw new Error(chunk.error || 'Unknown error');
+              throw new Error(describeStreamError(chunk));
             }
 
             // Handle metadata event (analysisId, documentName)

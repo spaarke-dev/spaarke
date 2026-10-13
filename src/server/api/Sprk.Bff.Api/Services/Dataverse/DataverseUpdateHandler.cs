@@ -14,15 +14,20 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
     private readonly IRecordOwnershipResolver _ownership;
     private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
     private readonly ILogger<DataverseUpdateHandler> _logger;
+    private readonly Sprk.Bff.Api.Services.Communication.IThreadResolver? _threads;
 
+    /// <param name="threads">Spaarkeai-word-add-in-r1 task 129: the thread reconcile after a re-filed communication.
+    /// Optional so the test compositions keep compiling; the host registers it unconditionally.</param>
     public DataverseUpdateHandler(
         IFieldMappingDataverseService fieldMappingService,
         IGenericEntityService genericEntityService,
         CoreAncestorRestamper restamper,
         IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
-        ILogger<DataverseUpdateHandler> logger)
+        ILogger<DataverseUpdateHandler> logger,
+        Sprk.Bff.Api.Services.Communication.IThreadResolver? threads = null)
     {
+        _threads = threads;
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _restamper = restamper ?? throw new ArgumentNullException(nameof(restamper));
@@ -92,6 +97,15 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // Task 158: a work assignment or project this write filed under a secure record is secured now (never thrown; an
         // incomplete securing is logged and the secure-root inheritance job completes it).
         await _rootFiling.SecureAfterWriteAsync(entityLogicalName, recordId, fields.Keys, traceId: null);
+
+        // Spaarkeai-word-add-in-r1 task 129: a re-filed communication's thread follows the filing, so it shows on the record's
+        // Messages panel. This handler's re-file does not run SecureChildReconciler.AfterRefileAsync (the step the other
+        // re-file writers share, which reconciles), so it reconciles here — once. Never throws.
+        if (parentChanges.Count > 0 && _threads is not null
+            && string.Equals(entityLogicalName, "sprk_communication", StringComparison.OrdinalIgnoreCase))
+        {
+            await _threads.ReconcileThreadForFilingAsync(recordId, CancellationToken.None).ConfigureAwait(false);
+        }
     }
 
     private async Task WriteAsync(

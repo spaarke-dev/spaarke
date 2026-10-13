@@ -130,7 +130,7 @@ public class ADR007_NestedDomainRecordTests
                 {
                     // `GraphServiceClient` is the client itself, not a data model. Returning it IS the
                     // contract of a client factory (`IGraphClientFactory.ForUserAsync`,
-                    // `SpeAdminGraphService.GetClientForConfigAsync`) — ADR-007 governs Graph *models*
+                    // `SpeAdminGraphService.GetClientForContainerAsync`) — ADR-007 governs Graph *models*
                     // crossing the facade, not the plumbing that builds the client. Verified 2026-08-27:
                     // narrowing to this one exemption leaves 9 legitimate factory methods passing and
                     // still fails on any `Microsoft.Graph.Models.*` return.

@@ -1,0 +1,40 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<optionset Name="sprk_precedentstatus" localizedName="Precedent Status" description="Lifecycle status for a Precedent (D-46/D-61)." xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <OptionSetType>picklist</OptionSetType>
+  <IsGlobal>1</IsGlobal>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsCustomizable>1</IsCustomizable>
+  <displaynames>
+    <displayname description="Precedent Status" languagecode="1033" />
+  </displaynames>
+  <Descriptions>
+    <Description description="Lifecycle status for a Precedent (D-46/D-61)." languagecode="1033" />
+  </Descriptions>
+  <options>
+    <option value="100000000" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Tentative" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000001" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Confirmed" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000002" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Under Drift Review" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000003" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Deprecated" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000004" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Retired" languagecode="1033" />
+      </labels>
+    </option>
+  </options>
+</optionset>

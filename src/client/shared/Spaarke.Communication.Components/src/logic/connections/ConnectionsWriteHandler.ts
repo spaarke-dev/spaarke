@@ -32,6 +32,7 @@ import {
   type IPolymorphicWebApi,
   type ITodoRegardingTargetCatalogEntry,
 } from '@spaarke/ui-components';
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
 
 // `sprk_associationstatus` = Resolved (task 002 verified integer).
 const ASSOCIATION_STATUS_RESOLVED = 100000000;
@@ -84,13 +85,23 @@ export interface IResolverWriteContext {
 /**
  * Task 147 r1: the {@link IResolverWriteContext.refileThroughBff} for a host holding a BFF-authenticated fetch (`bffBaseUrl`
  * may be `''` for a fetch that resolves relative `/api` paths).
+ *
+ * `bffBaseUrl` may be a getter, read at write time. A host whose runtime config is set after its first render passes
+ * its config getter here: reading it while building the refile throws before the config exists, which blanked the
+ * Reconciliation code page (owner UAT 2026-10-11).
  */
 export function bffRefile(
-  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
-  bffBaseUrl: string
+  authenticatedFetch: AuthenticatedFetchFn,
+  bffBaseUrl: string | (() => string)
 ): (hostEntity: string, hostRecordId: string, payload: Record<string, unknown>) => Promise<void> {
   return (hostEntity, hostRecordId, payload) =>
-    updateChildRecordViaBff(authenticatedFetch, bffBaseUrl, hostEntity, hostRecordId, payload);
+    updateChildRecordViaBff(
+      authenticatedFetch,
+      typeof bffBaseUrl === 'function' ? bffBaseUrl() : bffBaseUrl,
+      hostEntity,
+      hostRecordId,
+      payload
+    );
 }
 
 /** Task 147 r1: a regarding write of the host — through the BFF re-file (fail closed when it is not wired). */

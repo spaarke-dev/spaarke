@@ -5,16 +5,19 @@
  * synchronous contexts where the async SpaarkeAuthProvider.getTenantId()
  * cannot be awaited.
  *
- * Resolution order:
- *   1. MSAL auth provider config authority URL (tenant-specific authority only)
- *   2. MSAL accounts[0].tenantId — from the JWT, populated after silent auth
- *   3. Xrm.organizationSettings.tenantId via frame hierarchy walk (fallback)
+ * Resolution order (every value validated — a GUID or dotted domain, never
+ * 'organizations' / 'common' / 'consumers' / 'undefined' / 'null'):
+ *   1. Tenant segment of the provider's authority URL (trailing '/' and '/v2.0'
+ *      tolerated; a non-tenant or malformed authority is skipped)
+ *   2. `tid` of the cached access token
+ *   3. window.__SPAARKE_TENANT_ID__ → persisted runtime config →
+ *      Xrm.organizationSettings.tenantId via frame walk ("TENANT PRECEDENCE", tenant.ts)
  *   4. Empty string
  *
- * Why step 2 matters: when initAuth() is called without an explicit tenantId,
- * MSAL defaults to the 'organizations' authority. Step 1 filters this out.
- * But after MSAL completes a silent token acquisition, accounts[0].tenantId
- * contains the real tenant GUID extracted from the JWT — step 2 captures this.
+ * Inside a Dataverse host the authority is always tenant-specific (#1453 —
+ * resolveConfig refuses /organizations there), so step 1 normally answers.
+ * Steps 2-3 cover a provider outside Dataverse that fell back to
+ * /organizations, and calls made before initAuth() has run.
  *
  * This consolidates the pattern that previously existed independently in:
  *   - DocumentUploadWizard/src/services/nextStepLauncher.ts
@@ -23,8 +26,8 @@
  */
 
 import { getAuthProvider } from './initAuth';
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import { discoverTenantSync } from './config';
+import { normalizeTenant, tenantFromAuthority } from './tenant';
 
 /**
  * Resolve the Azure AD tenant ID synchronously.
@@ -32,62 +35,25 @@ import { getAuthProvider } from './initAuth';
  * Safe to call from click handlers — both MSAL and Xrm are fully
  * available long before any user interaction can trigger this.
  *
- * @returns Tenant ID GUID string, or empty string if not resolvable.
+ * @returns Tenant ID string, or empty string if not resolvable.
  */
 export function resolveTenantIdSync(): string {
-  // 1. MSAL authority URL — reliable if initAuth() has been called.
-  //    Authority format: "https://login.microsoftonline.com/{tenantId}"
+  // 1. Authority URL of the initialized provider.
   try {
-    const authority = getAuthProvider().getConfig().authority ?? '';
-    if (authority) {
-      const parts = authority.split('/');
-      const tenantId = parts[parts.length - 1] ?? '';
-      if (tenantId && tenantId !== 'common' && tenantId !== 'organizations') {
-        return tenantId;
-      }
-    }
-  } catch {
-    // Auth provider not yet initialized — try Xrm fallback.
-  }
-
-  // 2. MSAL accounts — populated after initAuth() completes silent token acquisition.
-  //    getAllAccounts() is synchronous; tenantId is extracted from the JWT.
-  //    This covers the common case where initAuth() uses the 'organizations' authority
-  //    (no tenant-specific URL to parse from step 1) but MSAL has already authenticated.
-  try {
-    const tenantId = getAuthProvider().getCachedTenantId();
+    const tenantId = tenantFromAuthority(getAuthProvider().getConfig().authority);
     if (tenantId) return tenantId;
   } catch {
-    // Auth provider not yet initialized — continue to Xrm fallback.
+    // Auth provider not yet initialized — try the fallbacks.
   }
 
-  // 3. Xrm.organizationSettings.tenantId via frame hierarchy walk.
-  if (typeof window !== 'undefined') {
-    const frames: Window[] = [window];
-    try {
-      if (window.parent && window.parent !== window) frames.push(window.parent);
-    } catch {
-      /* cross-origin */
-    }
-    try {
-      if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
-    } catch {
-      /* cross-origin */
-    }
-
-    for (const frame of frames) {
-      try {
-        const tenantId = (frame as any).Xrm?.Utility?.getGlobalContext?.()?.organizationSettings?.tenantId as
-          | string
-          | undefined;
-        if (tenantId) return tenantId;
-      } catch {
-        /* cross-origin */
-      }
-    }
+  // 2. tid of the cached token — populated after initAuth() acquires a token.
+  try {
+    const tenantId = normalizeTenant(getAuthProvider().getCachedTenantId());
+    if (tenantId) return tenantId;
+  } catch {
+    // Auth provider not yet initialized — continue to the host chain.
   }
 
-  return '';
+  // 3. Host chain: window.__SPAARKE_TENANT_ID__ → persisted runtime config → Xrm.
+  return discoverTenantSync()?.tenant ?? '';
 }
-
-/* eslint-enable @typescript-eslint/no-explicit-any */

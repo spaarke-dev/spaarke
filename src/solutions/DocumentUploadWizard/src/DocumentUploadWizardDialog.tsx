@@ -72,6 +72,7 @@ import type {
     OrchestratorFileProgress,
     OrchestratorResult,
 } from "./services/uploadOrchestrator";
+import { addSelectedFiles } from "./fileSelection";
 import { FileUploadProgress } from "./components/FileUploadProgress";
 import type { ConflictResolution } from "./components/FileUploadProgress";
 import { buildSuccessConfig } from "./components/SuccessScreen";
@@ -143,18 +144,10 @@ const INITIAL_FILE_STATE: IFileState = {
 function fileReducer(state: IFileState, action: FileAction): IFileState {
     switch (action.type) {
         case "ADD_FILES": {
-            // De-duplicate by name + size (same logic as LegalWorkspace reference)
-            const existing = new Set(
-                state.selectedFiles.map((f) => `${f.name}::${f.sizeBytes}`)
-            );
-            const newFiles = action.files.filter(
-                (f) => !existing.has(`${f.name}::${f.sizeBytes}`)
-            );
-            return {
-                ...state,
-                selectedFiles: [...state.selectedFiles, ...newFiles],
-                validationErrors: [], // Clear errors on successful add
-            };
+            // A re-picked file is ignored; a different file with a selected file's name is refused
+            // (every row, retry and result below is keyed by name — task 128 review K1).
+            const { selectedFiles, validationErrors } = addSelectedFiles(state.selectedFiles, action.files);
+            return { ...state, selectedFiles, validationErrors };
         }
         case "REMOVE_FILE":
             return {
@@ -232,6 +225,9 @@ export function DocumentUploadWizardDialog({
     parentEntityId,
     parentEntityName,
     onClose,
+    embedded = true,
+    uiScale,
+    bffBaseUrl: bffBaseUrlProp,
 }: IDocumentUploadWizardDialogProps): JSX.Element {
     const styles = useStyles();
 
@@ -240,7 +236,7 @@ export function DocumentUploadWizardDialog({
     // NOTE: Must be inside the component body — module-level code runs synchronously
     // at bundle parse time, before the async bootstrap() in main.tsx can set this.
     // ---------------------------------------------------------------------------
-    const bffBaseUrl = window.__SPAARKE_BFF_BASE_URL__ ?? (() => {
+    const bffBaseUrl = bffBaseUrlProp ?? window.__SPAARKE_BFF_BASE_URL__ ?? (() => {
         throw new Error(
             '[DocumentUploadWizard] window.__SPAARKE_BFF_BASE_URL__ is not set. ' +
             'resolveRuntimeConfig() must be called in main.tsx before rendering.'
@@ -695,18 +691,20 @@ export function DocumentUploadWizardDialog({
         return buildSuccessConfig({
             uploadResults: uploadResultRef.current,
             onClose,
+            closeWindow: embedded,
         });
-    }, [onClose]);
+    }, [onClose, embedded]);
 
     // ── Render ──────────────────────────────────────────────────────────────
 
-    return (
-        <div className={styles.root}>
+    const content = (
+        <>
             <WizardShell
                 ref={wizardRef}
                 open={true}
-                embedded={true}
-                hideTitle={true}
+                embedded={embedded}
+                hideTitle={embedded}
+                {...(uiScale !== undefined ? { uiScale } : {})}
                 title={
                     effectiveParentEntityName
                         ? `Upload Files \u2014 ${effectiveParentEntityName}`
@@ -748,6 +746,10 @@ export function DocumentUploadWizardDialog({
             )}
 
             {/* Find Similar now opens in a new tab via nextStepLauncher */}
-        </div>
+        </>
     );
+
+    // In-app (embedded=false) the wizard and its prompt portal out of the host tree (SprkModal /
+    // ChoiceModal), so no layout wrapper may be left behind in the shell the host is mounted in.
+    return embedded ? <div className={styles.root}>{content}</div> : content;
 }

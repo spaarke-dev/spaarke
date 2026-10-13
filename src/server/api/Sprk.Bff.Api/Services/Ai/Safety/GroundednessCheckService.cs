@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Azure.Identity;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Safety;
@@ -15,7 +17,9 @@ namespace Sprk.Bff.Api.Services.Ai.Safety;
 ///     emitted as a <c>safety_annotation</c> SSE event. The user sees the AI response
 ///     immediately; ungrounded segments are annotated after.
 ///   - Fail-open: HTTP 429, 5xx, and timeouts all return <see cref="GroundednessResult.AssumeGrounded"/>
-///     with a warning log. The check MUST NOT suppress a valid AI response.
+///     with a warning log. The check MUST NOT suppress a valid AI response. An auth failure (HTTP 401/403,
+///     or no token) also fails open, but with an ERROR log and the distinct outcome <c>fail_open_auth</c>:
+///     it is not transient (task 230b).
 ///   - Skip on empty sources: when no RAG passages were retrieved there is nothing to check
 ///     against; the API call is skipped and IsGrounded=true is returned immediately.
 ///   - ADR-015 compliance: response text and document content MUST NOT appear in logs.
@@ -38,7 +42,7 @@ public sealed class GroundednessCheckService : IGroundednessCheckService
     /// Relative path + query for the Groundedness Detection endpoint.
     /// Base address is the Content Safety endpoint (https://{resource}.cognitiveservices.azure.com/).
     /// </summary>
-    private const string GroundednessPath =
+    internal const string GroundednessPath =
         "contentsafety/text:detectGroundedness?api-version=2024-09-15-preview";
 
     // -------------------------------------------------------------------------
@@ -131,6 +135,28 @@ public sealed class GroundednessCheckService : IGroundednessCheckService
                 ungroundedSegmentCount: 0,
                 latencyMs: latencyMs,
                 outcome: GroundednessCheckTelemetry.OutcomeFailOpen);
+
+            return GroundednessResult.AssumeGrounded(latencyMs);
+        }
+        catch (Exception ex) when (ex is AuthenticationFailedException or CredentialUnavailableException
+                                   || (ex is HttpRequestException { StatusCode: HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden }))
+        {
+            sw.Stop();
+            var latencyMs = sw.Elapsed.TotalMilliseconds;
+
+            _logger.LogError(
+                ex,
+                "Groundedness AUTH FAILURE: Content Safety refused the BFF identity or no token could be acquired " +
+                "(StatusCode={StatusCode}). Returning assumed grounded — every check fails open until the identity holds " +
+                "Cognitive Services User on the Content Safety account. LatencyMs={LatencyMs:F1}",
+                (ex as HttpRequestException)?.StatusCode,
+                latencyMs);
+
+            _telemetry.RecordCheck(
+                isGrounded: true,
+                ungroundedSegmentCount: 0,
+                latencyMs: latencyMs,
+                outcome: GroundednessCheckTelemetry.OutcomeFailOpenAuth);
 
             return GroundednessResult.AssumeGrounded(latencyMs);
         }

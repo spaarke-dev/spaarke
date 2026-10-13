@@ -14,13 +14,12 @@ Use when adding a new playbook node executor (new `ActionType` value) — read t
 3. `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs` — R3 worked example: in-process call to a Scoped resolver service; binds IDs to `OutputVariable`
 4. `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/QueryDataverseNodeExecutor.cs` — closest analog for "fetch IDs → bind to OutputVariable" shape; mirror its `Validate()` + `ExecuteAsync()` signatures
 5. `src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs` — server-side canvas-type→ActionType mapping (you MUST add an arm here)
-6. `src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts` + `types/playbook.ts` — client-side mapping + ActionType enum (you MUST add matching entries)
 
 ## Constraints
 - **ADR-010**: executor is `Singleton`; if you depend on `Scoped` services (Dataverse client, OBO token cache), inject `IServiceScopeFactory` and `CreateScope()` per `ExecuteAsync` invocation. NEVER inject a Scoped service directly into a Singleton executor.
 - **ADR-013**: extend the existing node-executor framework; do NOT invent new pipeline primitives, new context shapes, or new output-binding mechanisms.
 - **`bff-extensions.md` §A**: pre-merge checklist (publish-size delta + CVE scan + test update) applies to every new executor.
-- **Canvas↔server symmetry**: every canvas type in `playbookNodeSync.ts` MUST have a matching arm in `NodeService.cs` (and vice versa). The CI drift test (`tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks/CanvasServerMappingDriftTests.cs`, R3 task 065) catches missing pairs at build time.
+- **Canvas→server mapping**: `NodeService.MapCanvasTypeToActionType` is the only mapping now. The client `playbookNodeSync.ts` and its CI drift test were removed when PlaybookBuilder was cut back to the catalog editor (`df874a910`, `485f6a65a`), so nothing checks this arm for you — add it by hand.
 
 ## Key Rules
 - `SupportedActionTypes = new[] { ActionType.YourNew }` — mirror existing executors exactly
@@ -30,9 +29,6 @@ Use when adding a new playbook node executor (new `ActionType` value) — read t
 - Register in `NodeExecutorRegistry` AND in the DI module (mirror the AnalysisServicesModule sibling registration block exactly)
 - **Tests** (mandatory per `bff-extensions.md` §F test-update obligation): `Validate_Missing*_ReturnsError` cases, `ExecuteAsync_HappyPath_BindsOutput`, `ExecuteAsync_UsesScopePerInvocation` (assert `IServiceScopeFactory.CreateScope()` called once per execute)
 
-## Canvas↔Server Drift Checklist
-Before opening the PR, verify ALL three sides updated:
-- [ ] Client `types/playbook.ts` ActionType enum has your new value
-- [ ] Client `services/playbookNodeSync.ts` has the canvas-type case (both canvas→config + config→canvas mappings)
+## Canvas→Server Mapping Checklist
+Before opening the PR (no automated drift test exists since `485f6a65a`):
 - [ ] Server `Services/Ai/NodeService.cs` has the ActionType + canvas-type arms (MapCanvasTypeToNodeType + MapCanvasTypeToActionType)
-- [ ] CI drift test passes locally (`dotnet test --filter "FullyQualifiedName~CanvasServerMappingDriftTests"`)

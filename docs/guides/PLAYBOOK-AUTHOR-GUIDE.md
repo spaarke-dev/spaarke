@@ -42,7 +42,7 @@ Pre-R7, authoring a playbook meant **picking an Action first**, dragging it onto
 This guide walks you through authoring a multi-node playbook end-to-end, both in PlaybookBuilder (visual canvas) and via a `Deploy-Playbook.ps1` JSON input file. It is the maker-facing companion to [`JPS-AUTHORING-GUIDE.md`](JPS-AUTHORING-GUIDE.md) (which covers JPS at the prompt-template / Action level — what the LLM sees) and to the [actions-nodes-scopes boundary doc](../architecture/ai-architecture-actions-nodes-scopes.md) (which covers "where does this config field belong"). After R7, two flows live in this guide:
 
 1. **Node-first dispatch model (R7, §"Authoring a Playbook in 5 Steps")**: pick the executor per node FIRST, then choose an Action when the executor is prompt-driven, then configure typed config, then wire edges + scope, then deploy. This is the canonical authoring flow for every NEW playbook.
-2. **R3 visual-canvas recipe (preserved verbatim, §"Quick-Start Recipe")**: a fully worked notification playbook using `LookupUserMembership` + `joinIds` + `Condition` + `CreateNotification`. The R3 recipe is still current — it just operates on top of the R7 dispatch model (every node carries `sprk_executortype` whether you set it explicitly or PlaybookBuilder defaults it from the palette item you dragged).
+2. **R3 visual-canvas recipe (§"Quick-Start Recipe")**: a fully worked notification playbook using `LookupUserMembership` + `fetchInGuids` + `Condition` + `CreateNotification` (the FetchXML list form was corrected 2026-10-08, ISS-018 #1452). The R3 recipe is still current — it just operates on top of the R7 dispatch model (every node carries `sprk_executortype` whether you set it explicitly or PlaybookBuilder defaults it from the palette item you dragged).
 
 You don't write code. You drag, connect, fill in forms — OR you author JSON and run `Deploy-Playbook.ps1`. PlaybookBuilder validates your work as you go and warns you when something is likely to break.
 
@@ -102,7 +102,7 @@ Examples of executor-specific `configJson`: `QueryDataverse` needs `entityType` 
 
 Connect nodes with edges. Each edge declares a data dependency; the orchestrator runs independent nodes in parallel (default 3-wide) and serializes connected pairs. The R3 [edge perf hint](#c-edge-perf-hint-advisory) flags edges that serialize without moving data.
 
-Output Variables: each node sets an `sprk_outputvariable` name; downstream nodes reference upstream outputs as `{{upstreamName.output.field}}`. The R3 [rename guard](#a-outputvariable-rename-guard) auto-updates references on rename. The R3 [`joinIds`](#joinids-new-in-r3) and [`default`](#default-new-in-r3) Handlebars helpers stay current under R7.
+Output Variables: each node sets an `sprk_outputvariable` name; downstream nodes reference upstream outputs as `{{upstreamName.output.field}}`. The R3 [rename guard](#a-outputvariable-rename-guard) auto-updates references on rename. The [`fetchInGuids`](#fetchinguids-for-fetchxml-list-operators) (FetchXML id lists — corrected 2026-10-08, ISS-018 #1452) and R3 [`default`](#default-new-in-r3) Handlebars helpers are current under R7.
 
 Playbook-level scope (Home D): attach Actions / Skills / Knowledge / Tools via N:N relationships on the playbook row (`sprk_analysisplaybook_action`, `sprk_playbook_skill`, `sprk_playbook_knowledge`, `sprk_playbook_tool`); per-node scope variants attach via `sprk_playbooknode_{skill,knowledge,tool}`. Scope arrays are **advisory**, not enforcing (see [playbook-runtime §6](../architecture/ai-architecture-playbook-runtime.md)).
 
@@ -403,7 +403,7 @@ A control-flow playbook that branches on a deterministic condition. Use case: "s
 | What | Where you'll see it | Why it matters |
 |---|---|---|
 | **`LookupUserMembership` node** | New drag-target in the node palette | One node replaces every hand-rolled "is this user on this matter?" FetchXML query. Talks to the same `MembershipResolverService` your tenant configures once for everyone. |
-| **`{{joinIds X.ids}}` helper** | Use it inside a downstream FetchXML node | Renders an array of GUIDs as `"guid1,guid2,guid3"` — exactly the shape FetchXML `operator='in'` wants. No hand-written `{{#each}}` loops. |
+| **`{{fetchInGuids X.ids}}` helper** (replaces `joinIds` for FetchXML — corrected 2026-10-08, ISS-018 #1452) | Use it as the body of a downstream FetchXML `operator="in"` condition | Renders an array of GUIDs as one `<value>` child per id — the only shape Dataverse reads for a list operator. No hand-written `{{#each}}` loops. (`joinIds`, the R3 helper, writes a comma list into the `value` attribute, which Dataverse ignores — see [Handlebars helpers](#handlebars-template-helpers-r3-update).) |
 | **`{{default X 'Y'}}` helper** | Use it inside any template field | Returns `X` if it resolves to a value, else `Y`. Replaces the broken `{{X ?? 'Y'}}` pattern (which used to render the raw `??` text in production — see Pitfall G1). |
 | **OutputVariable rename guard** | Pops up when you rename a node's Output Variable | Auto-renames downstream `{{X.output.field}}` references in one click. Never breaks references silently. |
 | **Branch wiring picker** | Pops up when you draw an edge from a Condition node | Asks "True / False / Both?" so you don't end up with a Condition node whose branches both fire. |
@@ -414,7 +414,7 @@ A control-flow playbook that branches on a deterministic condition. Use case: "s
 
 ## Quick-Start Recipe: Notify Me About New Documents on My Matters
 
-This is the canonical R3 recipe. It uses every new building block: `LookupUserMembership` → `QueryDataverse` with `joinIds` → `Condition` → `CreateNotification`. Total time end-to-end: about 10 minutes for a maker who's seen PlaybookBuilder once. The recipe is fully current under R7 — every node carries an `sprk_executortype` value (set automatically by PlaybookBuilder when you drag from the palette).
+This is the canonical R3 recipe. It uses every new building block: `LookupUserMembership` → `QueryDataverse` with `fetchInGuids` → `Condition` → `CreateNotification`. Total time end-to-end: about 10 minutes for a maker who's seen PlaybookBuilder once. The recipe is fully current under R7 — every node carries an `sprk_executortype` value (set automatically by PlaybookBuilder when you drag from the palette).
 
 ### Before you start
 
@@ -454,7 +454,7 @@ This is the R3 control-flow building block. It answers: "what matters is the exe
 
 > **What the node will produce at runtime**: `myMatters.ids` (a deduped list of matter GUIDs), `myMatters.byRole` (the same IDs grouped by role: `owner`, `assignedAttorney`, `assignedParalegal`), `myMatters.count`. The server resolver does the heavy lifting in one call — you don't need separate FetchXML for each role.
 
-### Step 4 — Drop a QueryDataverse node and use `{{joinIds myMatters.ids}}`
+### Step 4 — Drop a QueryDataverse node and use `{{fetchInGuids myMatters.ids}}`
 
 1. From the palette, drag **Update Record** to the right of the Lookup node. (Yes — confusingly, `QueryDataverse` is exposed as the `updateRecord` canvas type with `queryMode: true`. This is a pre-R3 legacy quirk and will be cleaned up in a future release.) PlaybookBuilder sets `sprk_executortype = 10 (QueryDataverse)` when query-mode is on.
 2. Click the node and open Properties. Set:
@@ -472,7 +472,7 @@ This is the R3 control-flow building block. It answers: "what matters is the exe
          <attribute name="sprk_documentid" />
          <attribute name="sprk_matter" />
          <filter type="and">
-           <condition attribute="sprk_matter" operator="in" value="{{joinIds myMatters.ids}}" />
+           <condition attribute="sprk_matter" operator="in">{{fetchInGuids myMatters.ids}}</condition>
            <condition attribute="createdon" operator="last-x-hours" value="{{timeWindowHours}}" />
            <condition attribute="createdby" operator="ne-userid" />
          </filter>
@@ -487,7 +487,7 @@ This is the R3 control-flow building block. It answers: "what matters is the exe
      ```
 3. Connect Lookup User Membership → Query New Documents.
 
-> **What the `{{joinIds myMatters.ids}}` does at runtime**: rewrites to `"guid1,guid2,guid3"` (a single CSV string) so FetchXML's `operator='in'` accepts it. If `myMatters.ids` is empty (user has zero matters), it renders as `""` → the IN clause matches zero rows → no notifications. That's the **fail-closed** behavior you want.
+> **What the `{{fetchInGuids myMatters.ids}}` does at runtime** (corrected 2026-10-08, ISS-018 #1452): writes one `<value>{guid}</value>` child per distinct matter id inside the condition — the only form Dataverse reads for `operator="in"`. If `myMatters.ids` is empty (user has zero matters), it writes the single impossible match `<value>00000000-0000-0000-0000-000000000000</value>`, so the condition stays valid and selects nothing → no notifications. That's the **fail-closed** behavior you want. Do **not** write `operator="in" value="{{joinIds …}}"`: Dataverse ignores the `value` attribute on a list operator, so the condition has zero values and the query fails ("The value passed for ConditionOperator.In is empty") for every user, whether the list is empty or not. An `in` with zero `<value>` children is an error, not "matches zero rows".
 
 > **What the `{{default userPreferences.timeWindowHours '24'}}` does**: returns `userPreferences.timeWindowHours` if it resolves to a value, else `'24'`. Replaces the broken `{{userPreferences.timeWindowHours ?? '24'}}` pattern that used to emit raw text.
 
@@ -521,7 +521,7 @@ This is the R3 control-flow building block. It answers: "what matters is the exe
 ### Step 7 — Save and deploy
 
 1. Press **Ctrl+S** (or wait 30 seconds for auto-save).
-2. Watch for validation warnings in the bottom-right Notification badge on each node. If the **edge perf hint** fires on any edge ("this edge forces sequential execution but moves no data") — verify the downstream node actually references the upstream node's Output Variable. In our case, every edge moves data (Lookup → joinIds usage → count check → notification creation), so this advisory should NOT fire.
+2. Watch for validation warnings in the bottom-right Notification badge on each node. If the **edge perf hint** fires on any edge ("this edge forces sequential execution but moves no data") — verify the downstream node actually references the upstream node's Output Variable. In our case, every edge moves data (Lookup → fetchInGuids usage → count check → notification creation), so this advisory should NOT fire.
 3. Save complete? Now **schedule it**:
    - The notification scheduler picks up `sprk_playbooktype = Notification` playbooks automatically once they're saved. No separate deploy step.
    - The scheduler runs hourly by default; your `schedule: { frequency: "daily", time: "06:00" }` configures the actual cadence.
@@ -532,7 +532,7 @@ The next morning (or the next time the scheduler runs after the `time` you confi
 
 > **"3 new document(s) on your matters"** — clicking expands to one notification per document, each clickable to open the document record.
 
-If the user has zero matters they're a member of, OR zero new documents on those matters in the past 24 hours, NOTHING is created — no empty notification, no error. This is the fail-closed behavior built into both `LookupUserMembership` (empty `ids` array) and `joinIds` (empty CSV).
+If the user has zero matters they're a member of, OR zero new documents on those matters in the past 24 hours, NOTHING is created — no empty notification, no error. This is the fail-closed behavior built into both `LookupUserMembership` (empty `ids` array) and `fetchInGuids` (empty list → the impossible-match `<value>`).
 
 ---
 
@@ -554,7 +554,7 @@ The full node catalog with all 33 executor types lives in [`ai-architecture-acti
 |---|---|---|---|
 | Entity Type | yes | `sprk_matter` | Dataverse logical name; free text, validity is determined by the discovery service at runtime |
 | Roles (comma-separated) | no | `owner, assignedAttorney, assignedParalegal` | Case-insensitive; matches roles discovered by the membership service for your tenant; empty = all roles |
-| Output Variable | yes | `myMatters` | Canvas variable name; downstream nodes reference as `{{myMatters.ids}}` or `{{joinIds myMatters.ids}}` |
+| Output Variable | yes | `myMatters` | Canvas variable name; downstream nodes reference as `{{myMatters.ids}}` or, in FetchXML, `{{fetchInGuids myMatters.ids}}` |
 | Include related (1-hop) | no | off | Phase 1D feature, currently accepted-but-ignored — leave off |
 
 **Output shape**:
@@ -563,7 +563,7 @@ The full node catalog with all 33 executor types lives in [`ai-architecture-acti
 {
   "entityType": "sprk_matter",
   "count": 47,
-  "ids": ["guid1", "guid2", "..."],              // deduped list — use with {{joinIds}}
+  "ids": ["guid1", "guid2", "..."],              // deduped list — in FetchXML use with {{fetchInGuids}}
   "byRole": {                                     // same IDs grouped by role
     "owner": ["guid1"],
     "assignedAttorney": ["guid1", "guid2"],
@@ -582,38 +582,49 @@ The full node catalog with all 33 executor types lives in [`ai-architecture-acti
 
 ## Handlebars Template Helpers (R3 Update)
 
-Existing helpers (`safe`, simple variable interpolation, `{{#each}}`, nested property access, etc.) are unchanged — the [architecture doc](../architecture/playbook-architecture.md#templateengine) covers them. R3 added two new helpers, both registered unconditionally — no feature flag needed. Both remain current under R7.
+Existing helpers (`safe`, simple variable interpolation, `{{#each}}`, nested property access, etc.) are unchanged — the [architecture doc](../architecture/playbook-architecture.md#templateengine) covers them. R3 added `joinIds` and `default`; ISS-018 (#1452) added `fetchInGuids`. All are registered unconditionally — no feature flag needed.
 
-### `joinIds` (NEW in R3)
+### `fetchInGuids` (for FetchXML list operators)
+
+> **Corrected 2026-10-08, ISS-018 #1452.** Earlier versions of this guide told you to write `operator="in" value="{{joinIds myMatters.ids}}"`. That premise was false: Dataverse **ignores the `value` attribute** on a FetchXML list operator (`in`, `not-in`, `between`, `not-between`, `contain-values`, `not-contain-values`, `in-fiscal-period-and-year` and its `-or-after-` / `-or-before-` variants). Those operators read their values **only** from `<value>` child elements, so the `joinIds` form produced a condition with zero values and the query failed with "The value passed for ConditionOperator.In is empty" — for real id lists as well as empty ones. All seven notification playbooks failed this way in dev. An `in` with zero `<value>` children is an error, not "matches zero rows".
+
+```handlebars
+<condition attribute="sprk_matter" operator="in">{{fetchInGuids varName.ids}}</condition>
+```
+
+**What it does**: Writes one `<value>{guid}</value>` child per distinct GUID in the list (canonical `D` form, sorted). It never writes caller text into the markup — each id is re-emitted from a parsed GUID.
+
+**Example**: if `myMatters.ids` is `["BBBBBBBB-0000-0000-0000-000000000002", "aaaaaaaa-0000-0000-0000-000000000001"]`, the rendered XML is:
+
+```xml
+<condition attribute="sprk_matter" operator="in"><value>aaaaaaaa-0000-0000-0000-000000000001</value><value>bbbbbbbb-0000-0000-0000-000000000002</value></condition>
+```
+
+**Behavior with edge cases (fail-closed)**:
+
+| Input | Renders as |
+|---|---|
+| A list of GUIDs | One `<value>` per distinct GUID, sorted |
+| `[]` (empty list), `null` or unresolved binding | `<value>00000000-0000-0000-0000-000000000000</value>` — the condition stays valid and selects nothing; other `or` branches in the filter still work |
+| A list where ANY element is not a GUID | The same single impossible match (never a partial or broader list) |
+
+> **Do NOT** hand-roll a `{{#each ids}}<value>{{this}}</value>{{/each}}` substitute — an empty list leaves an `in` with no values (a query error), and the loop writes caller text into the markup. Use `fetchInGuids`.
+
+**Checks that catch the wrong shape**: one shared check, `FetchXmlShapeValidator`, rejects a list operator that carries a `value` attribute, has the wrong number of `<value>` children, or uses `joinIds` anywhere in FetchXML. It runs (1) in the `QueryDataverse` executor on the rendered query — the node fails loudly with `INVALID_NODE_CONFIGURATION` naming the node, attribute and operator, and the query is never rewritten; (2) as **deploy lint C** in `Deploy-Playbook.ps1` and `Deploy-NotificationPlaybooks.ps1` (which also refuses a Playbook Designer canvas-stub node config holding only `__canvasNodeId` / `__actionType`); and (3) in the repo regression test that renders every repo playbook.
+
+### `joinIds` (R3 — NOT for FetchXML)
 
 ```handlebars
 {{joinIds varName.ids}}
 ```
 
-**What it does**: Converts an array of GUIDs (or any list of stringifiable values) into a comma-separated string. The output is the exact shape FetchXML's `operator='in'` clause expects.
+**What it does**: Converts a list into a comma-separated string (`["a","b"]` → `"a,b"`; empty, `null`, unresolved or scalar → `""`). That shape suits an Azure AI Search filter such as `search.in(field, '{{joinIds varName.ids}}', ',')`. It is **not** a FetchXML list (corrected 2026-10-08, ISS-018 #1452): use `fetchInGuids` above. Deploy lint C and the executor reject `joinIds` inside FetchXML.
 
-**Example**:
+### Aliased link-entity columns: use `lookup item 'alias.column'`
 
-```xml
-<condition attribute="sprk_matter" operator="in" value="{{joinIds myMatters.ids}}" />
-```
+Columns from an aliased `<link-entity alias="m">` appear in the query output keys as `alias.column` (e.g. `m.sprk_mattername`). Reference them with `{{lookup item 'm.sprk_mattername'}}` — not `{{item.m_sprk_mattername}}` (no such key) and not `{{item.m.sprk_mattername}}` (Handlebars reads the dot as a path). (Added 2026-10-08, ISS-018 #1452.)
 
-If `myMatters.ids` is `["a", "b", "c"]`, the rendered XML is:
-
-```xml
-<condition attribute="sprk_matter" operator="in" value="a,b,c" />
-```
-
-**Behavior with edge cases**:
-
-| Input | Renders as |
-|---|---|
-| `["a", "b", "c"]` | `"a,b,c"` |
-| `[]` (empty list) | `""` — IN clause matches zero rows (fail-closed) |
-| `null` or unresolved binding | `""` |
-| A scalar (string, number, bool) | `""` (defensive — caller likely passed the wrong shape) |
-
-> **Do NOT** hand-roll a `{{#each ids}}{{this}},{{/each}}` substitute. That pattern leaves a trailing comma, doesn't handle empty lists correctly, and bypasses the unresolved-binding defense. Use `joinIds`.
+`item` is the executor-scoped root inside `CreateNotification`'s per-item loop (`itemNotification`). Because of that, **`item` is a reserved `outputVariable`**: a node named `item` fails at run time, in `ValidateAsync` and at deploy lint C (2026-10-08, ISS-018). A Condition comparison's `left` must be authored (a template or a value); only `exists` accepts a rendered null/empty value (→ false), every other operator fails the node when `left` renders null or empty, and lint C refuses an authored literal `"left": null`. The orchestrator's config render (Layer 1) leaves strings that use `item` unrendered so the executor renders them once per item.
 
 ### `default` (NEW in R3)
 
@@ -829,7 +840,7 @@ Three pre-R3 playbooks shared a common defect class: their "user's matters" filt
 }
 ```
 
-**After** (R3 + R7): a `LookupUserMembership` node feeding a downstream FetchXML via `{{joinIds}}`. Both nodes carry explicit `sprk_executortype` per R7.
+**After** (R3 + R7, list form corrected 2026-10-08, ISS-018 #1452): a `LookupUserMembership` node feeding a downstream FetchXML via `{{fetchInGuids}}`. Both nodes carry explicit `sprk_executortype` per R7.
 
 ```jsonc
 // New node 1 — resolve memberships
@@ -856,7 +867,7 @@ Three pre-R3 playbooks shared a common defect class: their "user's matters" filt
   "configJson": {
     "queryMode": true,
     "entityLogicalName": "sprk_document",
-    "fetchXml": "<fetch top='50'><entity name='sprk_document'>...<filter><condition attribute='sprk_matter' operator='in' value='{{joinIds myMatters.ids}}' /><condition attribute='createdon' operator='last-x-hours' value='{{timeWindowHours}}' /></filter>...</entity></fetch>",
+    "fetchXml": "<fetch top='50'><entity name='sprk_document'>...<filter><condition attribute='sprk_matter' operator='in'>{{fetchInGuids myMatters.ids}}</condition><condition attribute='createdon' operator='last-x-hours' value='{{timeWindowHours}}' /></filter>...</entity></fetch>",
     "templateParameters": {
       "timeWindowHours": "{{default userPreferences.timeWindowHours '24'}}"
     }
@@ -864,7 +875,7 @@ Three pre-R3 playbooks shared a common defect class: their "user's matters" filt
 }
 ```
 
-The other two migrated playbooks (`notification-new-emails.json`, `notification-new-events.json`) follow the same shape: `Start → LookupUserMembership → QueryDataverse with joinIds → Condition → CreateNotification`, with explicit `sprk_executortype` on every node.
+The other two migrated playbooks (`notification-new-emails.json`, `notification-new-events.json`) follow the same shape: `Start → LookupUserMembership → QueryDataverse with fetchInGuids → Condition → CreateNotification`, with explicit `sprk_executortype` on every node.
 
 > **`targeting` (unified-access-control-r2 task 152, ADR-034 Amendment A3).** A LookupUserMembership node whose output
 > reaches a **CreateNotification, SendEmail or briefing** node MUST set `"targeting": "people"`. It selects the records
@@ -882,6 +893,7 @@ The other two migrated playbooks (`notification-new-emails.json`, `notification-
 3. **Even if junctions exist**, prefer `LookupUserMembership` over hand-rolled joins. The membership service auto-discovers every Lookup column on the parent entity that points to an identity table — so adding a new "assigned" column in Dataverse appears in your playbook results automatically (within an hour, or immediately after `POST /api/admin/membership/refresh-metadata`).
 4. **Audit playbooks with NO user filter at all**: these silently iterate every row in the tenant. If a `Notification`-type playbook fans out a notification per row, it'll spam every user. Confirm the filter is there.
 5. **(R7) Verify every node carries `sprk_executortype`**: per [FR-19](../../projects/spaarke-ai-platform-unification-r7/spec.md), the 94 pre-R7 nodes in spaarkedev1 undergo owner-reviewed backfill. If your env has playbooks predating R7, expect a one-time backfill — the migration script (Wave 5) lists each node with its inferred executor + space for owner override.
+6. **Check every FetchXML list operator** (added 2026-10-08, ISS-018 #1452): search node configs for `value="{{joinIds` (or any `operator="in"` / `not-in` / `between` … with a `value` attribute). Rewrite each as `<condition … operator="in">{{fetchInGuids path.ids}}</condition>`. Deploy lint C and the `QueryDataverse` executor reject the old form.
 
 ---
 
@@ -916,6 +928,8 @@ Look at the most recent run. Expected:
 - `success`: `true`
 - `errors`: `0`
 - `processedItems > 0` if any user has memberships matching your playbook's criteria
+
+If **every** user's run of a playbook fails, the scheduler logs an Error ("… failed for every user …"), marks that playbook's child run Failed, fails the job run, and does **not** advance the playbook's `sprk_lastrundate` — the next hourly tick retries. If only some users fail, each failure is a per-user Warning trace, the rest proceed, and `sprk_lastrundate` advances. (Added 2026-10-08, ISS-018 #1452.)
 
 If `processedItems = 0`:
 

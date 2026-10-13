@@ -35,7 +35,7 @@ import {
 } from "@fluentui/react-components";
 import { DismissRegular } from "@fluentui/react-icons";
 import { getBffBaseUrl } from "../config/runtimeConfig";
-import { getXrm } from "@spaarke/ui-components";
+import { canOpenInApp, getXrm, navigateToWebResourceSurfaceAsync } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Session storage key for banner dismissal
@@ -226,6 +226,17 @@ export const PersonalizeBanner: React.FC = React.memo(() => {
 
   const handleOpenWizard = React.useCallback(() => {
     try {
+      // Task 113 (ontology-platform-r1, D-26): while the Console's InAppWizardHost is mounted the
+      // layout wizard opens IN-APP (named size, no platform header). With no host, the navigateTo
+      // dialog below is byte-identical to before — including its bespoke 80% x 80% size.
+      if (canOpenInApp("sprk_workspacelayoutwizard")) {
+        void navigateToWebResourceSurfaceAsync({
+          webresourceName: "sprk_workspacelayoutwizard",
+          data: `mode=create&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`,
+          title: "Create New Workspace",
+        });
+        return;
+      }
       // Shared cross-frame walker (task 081 / C-8).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const xrm: any = getXrm('navigation');

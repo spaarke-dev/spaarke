@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Tests.Seam.SpeAdmin;
 /// </para>
 /// <para>
 /// <b>Which app-only identity, and why it is not production's (changed 2026-10-04).</b> Production
-/// (<c>SpeAdminGraphService.GetClientForConfigAsync</c>) now runs as the BFF's own identity — on Azure, its
+/// (<c>SpeAdminGraphService.GetClientForContainerAsync</c>) now runs as the BFF's own identity — on Azure, its
 /// user-assigned managed identity — which does not exist on an operator's workstation. This fixture
 /// therefore authenticates as the dev container type's OWNING app (<see cref="OwningAppClientId"/>), with
 /// its secret read from Key Vault under the operator's own <c>az login</c>. That is a TEST credential, built

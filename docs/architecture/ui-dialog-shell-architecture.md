@@ -29,10 +29,16 @@ Layer 2: Code Page wrappers (~30-50 LOC each)
 └── src/solutions/{WizardName}/   → sprk_{wizardname} (web resource)
 
 Layer 3: Consumers
-├── Corporate Workspace (navigateTo calls)
-├── Entity form command bars (ribbon → sprk_wizard_commands.js → navigateTo)
+├── Spaarke React surfaces (Console widgets, workspace, code pages, PCFs) → mount the
+│   wizard IN-APP inside SprkModal (ADR-050 launch rule, amended 2026-10-07)
+├── Entity form command bars (ribbon → sprk_wizard_commands.js → navigateTo) — the ONLY
+│   path that uses the Layer 2 wrapper inside a Dataverse dialog (white platform chrome)
 └── Power Pages SPA (BFF adapters, direct component import)
 ```
+
+> **Amended 2026-10-07 (ADR-050, D-26)**: the Layer 2 Code Page wrapper embedded inside a Dataverse `navigateTo`
+> dialog is the **ribbon (hostless) path only**. Its title bar and close button are platform chrome — light-only and
+> not themeable — so a consumer that already runs Spaarke React opens the wizard in-app instead.
 
 ### Why Three Layers?
 
@@ -40,7 +46,7 @@ Layer 3: Consumers
 |-------|---------------|-----------------|
 | **Layer 1** (shared library) | All domain logic, UI rendering, service contracts | Business rules change, new fields, new step logic |
 | **Layer 2** (Code Page wrapper) | Mount React, resolve theme, create adapters, pass props | Never (boilerplate is stable) |
-| **Layer 3** (consumer) | Trigger `navigateTo` with entity context | New entry points, new button placements |
+| **Layer 3** (consumer) | Open the wizard in-app (React hosts) or trigger `navigateTo` (ribbon only) with entity context | New entry points, new button placements |
 
 A bug fix in a wizard component is made once in Layer 1 and automatically available to all consumers without modification.
 
@@ -114,7 +120,7 @@ Key constraint: wrappers use React 18 `createRoot` (bundled). The shared compone
 1. Create the wizard component in `@spaarke/ui-components` — accept `IDataService`, `IUploadService`, `INavigationService` as props; pass `embedded` through to the shell
 2. Create a Code Page wrapper in `src/solutions/{Name}/` following the standard pattern
 3. Deploy via code-page-deploy skill
-4. Wire `navigateTo` from consumers (workspace or ribbon command handler in `sprk_wizard_commands.js`)
+4. Wire consumers: Spaarke React hosts open the wizard **in-app** (ADR-050 launch rule); ribbon command handlers in `sprk_wizard_commands.js` use `navigateTo` to the Layer 2 wrapper
 5. If steps are dynamic, use `handle.addDynamicStep(config, canonicalOrder)` inside `renderContent`
 
 ---
@@ -173,7 +179,7 @@ Workspace layouts are user-configurable and persisted in Dataverse (`sprk_sectio
 
 ## Related Documentation
 
-- [ADR-006: PCF over Web Resources](../adr/ADR-006-pcf-over-webresources.md)
+- [ADR-006: PCF over Web Resources](../adr/ADR-006-prefer-pcf-over-webresources.md)
 - [ADR-012: Shared Component Library](../adr/ADR-012-shared-component-library.md)
-- [ADR-021: Fluent UI v9 Design System](../adr/ADR-021-fluent-ui-v9.md)
-- [ADR-026: UI Dialog Shell Standardization](../adr/ADR-026-ui-dialog-shell-standardization.md)
+- [ADR-021: Fluent UI v9 Design System](../adr/ADR-021-fluent-ui-design-system.md)
+- [ADR-026: UI Dialog Shell Standardization](../adr/ADR-026-full-page-custom-page-standard.md)

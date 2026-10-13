@@ -23,6 +23,7 @@ $headers = @{
     "OData-Version" = "4.0"
 }
 $apiUrl = "$orgUrl/api/data/v9.2"
+. (Join-Path $PSScriptRoot "lib" "Publish-SolutionComponents.ps1")
 
 Write-Host "====================================="
 Write-Host "Publishing Theme Web Resources"
@@ -61,38 +62,16 @@ if ($webResourceIds.Count -eq 0) {
 Write-Host ""
 Write-Host "Publishing $($webResourceIds.Count) web resources..."
 
-# Build publish XML
-$webResourcesXml = ""
-foreach ($id in $webResourceIds) {
-    $webResourcesXml += "<webresource>{$id}</webresource>"
-}
-
-$publishXml = "<importexportxml><webresources>$webResourcesXml</webresources></importexportxml>"
-
-$publishUrl = "$apiUrl/PublishXml"
-$publishBody = @{ ParameterXml = $publishXml } | ConvertTo-Json
-
+# Publish exactly these web resources (shared scoped-publish module).
 try {
-    Invoke-RestMethod -Uri $publishUrl -Headers $headers -Method Post -Body $publishBody | Out-Null
+    Invoke-PublishXml -Context @{ Api = $apiUrl; Headers = $headers } -ParameterXml (New-PublishParameterXml -WebResources $webResourceIds)
     Write-Host "Published successfully!" -ForegroundColor Green
 } catch {
     Write-Host "Error publishing: $_" -ForegroundColor Red
     exit 1
 }
 
-Write-Host ""
-Write-Host "====================================="
-Write-Host "Now publishing all ribbon customizations..."
-Write-Host "====================================="
-
-# Also publish ribbon customizations
-$publishAllUrl = "$apiUrl/PublishAllXml"
-try {
-    Invoke-RestMethod -Uri $publishAllUrl -Headers $headers -Method Post | Out-Null
-    Write-Host "All customizations published!" -ForegroundColor Green
-} catch {
-    Write-Host "Error publishing all: $_" -ForegroundColor Red
-}
+# Task 130 (D-83): only the web resources above are published. The theme menu ribbon needs no publish of its own here.
 
 Write-Host ""
 Write-Host "Done! Please hard-refresh the browser (Ctrl+F5) to see the icons."

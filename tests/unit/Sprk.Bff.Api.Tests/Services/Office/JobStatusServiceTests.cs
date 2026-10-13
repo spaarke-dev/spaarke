@@ -138,7 +138,7 @@ public class JobStatusServiceTests
         result.Should().BeFalse();
     }
 
-    [Fact(Skip = "Redis subscriber mock Callback lambda parameter count mismatch")]
+    [Fact]
     public async Task PublishStatusUpdateAsync_IncrementsSequence_ForSameJob()
     {
         // Arrange
@@ -187,7 +187,12 @@ public class JobStatusServiceTests
 
         // Verify sequences increment
         var sequences = capturedMessages
-            .Select(m => System.Text.Json.JsonSerializer.Deserialize<JobStatusUpdate>(m.ToString())!)
+            .Select(m => System.Text.Json.JsonSerializer.Deserialize<JobStatusUpdate>(
+                m.ToString(),
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+                {
+                    Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+                })!)
             .Select(u => u.Sequence)
             .ToList();
 

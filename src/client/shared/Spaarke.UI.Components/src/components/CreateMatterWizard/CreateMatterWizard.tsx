@@ -48,7 +48,8 @@ import { EventService } from '../CreateEventWizard/eventService';
 import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
-import type { AuthenticatedFetchFn, IUserBuCascadeDefaults } from '../../services/EntityCreationService';
+import type { IUserBuCascadeDefaults } from '../../services/EntityCreationService';
+import type { AuthenticatedFetchFn } from '../../utils/fetchTypes';
 import type { AssociationResult } from '../AssociateToStep/types';
 import { resolveCurrentUserAsContactAssignee } from '../../services/userLookup';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
@@ -206,6 +207,11 @@ export interface ICreateMatterWizardProps {
    */
   embedded?: boolean;
   /**
+   * App-shell `--sprk-ui-scale`, forwarded to the wizard's SprkModal (non-embedded only).
+   * Task 112 (InAppWizardHost).
+   */
+  uiScale?: number;
+  /**
    * Resolves the SPE container ID for file uploads.
    * Called once during the finish handler. If not provided, file uploads
    * will be skipped.
@@ -306,6 +312,7 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   bffBaseUrl,
   navigationService,
   embedded,
+  uiScale,
   resolveSpeContainerId,
   resolveUserBuDefaults,
   tenantId,
@@ -714,7 +721,14 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
   );
 
   return (
-    <CreateRecordWizard open={open} onClose={onClose} webApi={webApiAdapter} config={config} embedded={embedded} />
+    <CreateRecordWizard
+      open={open}
+      onClose={onClose}
+      webApi={webApiAdapter}
+      config={config}
+      embedded={embedded}
+      uiScale={uiScale}
+    />
   );
 };
 

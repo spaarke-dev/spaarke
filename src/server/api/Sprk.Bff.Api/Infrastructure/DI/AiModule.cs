@@ -149,8 +149,12 @@ public static class AiModule
             // feeds the result back into the conversation, and continues until the LLM
             // produces a text response.  Without this, tool calls go unexecuted and
             // the streaming response contains only FunctionCallContent (no text tokens).
+            // Task 254: the stamp's optional OpenAI spend limit — added AFTER UseFunctionInvocation so it sits inside
+            // it (the first Use is outermost) and checks / counts every model round-trip of a tool-calling turn.
             services.AddChatClient(sp => BuildInnerClient(sp, azureOpenAiEndpoint, azureOpenAiChatModel))
-                .UseFunctionInvocation();
+                .UseFunctionInvocation()
+                .Use((inner, sp) => new Services.Ai.Metering.AiSpendLimitChatClient(
+                    inner, sp.GetRequiredService<Services.Ai.Metering.AiSpendLimit>()));
 
             // IEmailDraftAi — compose "sparkle" facade (email-communication-solution-r5 Wave E, ADR-013/§10).
             // Real impl wraps the IChatClient just registered; the Null-Object mirror below covers the gate-off

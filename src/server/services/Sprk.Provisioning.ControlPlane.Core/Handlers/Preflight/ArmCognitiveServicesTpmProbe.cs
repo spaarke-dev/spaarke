@@ -20,10 +20,20 @@
 //   - Match(es) found -> observed = SUM(currentValue), limit = MAX(limit),
 //     projected = observed + requested, fits = projected <= limit.
 //   - H0 blocks the run if ANY requested model fails (no advisory results).
+//   - A re-run against a stamp that already exists counts its own deployments
+//     twice (they are in currentValue, and requested again). With the
+//     fresh-subscription grants (westus3, 2026-10-06: gpt-4o 300, gpt4.1-mini
+//     2000, text-embedding-3-large 1000) and one stamp per subscription, 2x the
+//     request still fits (gpt-4o exactly: 2 x 150 = 300). If an upgrade run
+//     fails here on a subscription with lower limits, raise the quota.
 //
-// DEFAULT REQUESTED TPM: NFR-12's 150+200+30+350 per-model sum (gpt-4o /
-// gpt-4o-mini / text-embedding-3-large / text-embedding-3-small) — matches
-// Test-AzureOpenAiTpmHeadroom.ps1's -RequestedTpmPerModel default exactly.
+// REQUESTED TPM + REGION (task 247): PinnedModelCatalog.RequestedTpmByQuotaName — the summed
+// capacity of the stamp's deployments per Azure quota name (SKU + model, e.g.
+// OpenAI.DataZoneStandard.gpt4.1-mini), so a quota name matches exactly one usage entry. The
+// region is the run's OpenAI region (openAiLocation, else customer.bicep's default westus3) — NOT
+// the primary `region`, where no OpenAI account is deployed. Before task 247 this probe requested
+// a fixed table (incl. text-embedding-3-small, which no stamp deploys) by bare model name across
+// every SKU, in the primary region. Test-AzureOpenAiTpmHeadroom.ps1's default mirrors the catalog.
 //
 // ADR-038 TEST-BOUNDARY DESIGN: task 121 (Wave G-2, same wave —
 // ArmSubscriptionReadinessProbe) established the codebase's precedent for
@@ -57,6 +67,7 @@ using Azure.Core;
 using Azure.ResourceManager;
 using Azure.ResourceManager.CognitiveServices;
 using Azure.ResourceManager.Resources;
+using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 
@@ -69,26 +80,20 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 /// </summary>
 public sealed class ArmCognitiveServicesTpmProbe : IPreflightQuotaProbe
 {
-    /// <summary>Run-parameter key for the target Azure region.</summary>
-    public const string RegionParameterKey = "region";
-
     /// <summary>Run-parameter key for the target Azure subscription id.</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
 
+    /// <summary>Run parameter carrying the stamp's OpenAI region — the same key H2a sends to customer.bicep (task 247).</summary>
+    public const string OpenAiLocationParameterKey = "openAiLocation";
+
     /// <summary>
-    /// NFR-12 default per-model TPM (thousands) — ported verbatim from
-    /// Test-AzureOpenAiTpmHeadroom.ps1's <c>$RequestedTpmPerModel</c> default.
-    /// Not run-parameter-overridable (NFR-12 is a fixed contractual sum);
-    /// mirrors the PS script's own documented default exactly.
+    /// The run's OpenAI region: <c>openAiLocation</c> when set, else customer.bicep's default
+    /// (<see cref="PinnedModelCatalog.DefaultOpenAiLocation"/>). Shared by both H0 OpenAI probes (task 247).
     /// </summary>
-    internal static readonly IReadOnlyDictionary<string, int> DefaultRequestedTpmPerModel =
-        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["gpt-4o"] = 150,
-            ["gpt-4o-mini"] = 200,
-            ["text-embedding-3-large"] = 30,
-            ["text-embedding-3-small"] = 350,
-        };
+    internal static string ResolveOpenAiRegion(IReadOnlyDictionary<string, string> nonSecretParameters)
+        => nonSecretParameters.TryGetValue(OpenAiLocationParameterKey, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value.Trim()
+            : PinnedModelCatalog.DefaultOpenAiLocation;
 
     private readonly ArmClient _armClient;
     private readonly ILogger<ArmCognitiveServicesTpmProbe> _logger;
@@ -115,10 +120,7 @@ public sealed class ArmCognitiveServicesTpmProbe : IPreflightQuotaProbe
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        if (!input.NonSecretParameters.TryGetValue(RegionParameterKey, out var region) || string.IsNullOrWhiteSpace(region))
-        {
-            return ConfigError($"Run parameter '{RegionParameterKey}' is required by {CheckName} (no az CLI region default under Option D).");
-        }
+        var region = ResolveOpenAiRegion(input.NonSecretParameters);
         if (!input.NonSecretParameters.TryGetValue(SubscriptionIdParameterKey, out var subscriptionId) || string.IsNullOrWhiteSpace(subscriptionId))
         {
             return ConfigError($"Run parameter '{SubscriptionIdParameterKey}' is required by {CheckName} (no 'currently selected az account' fallback under Option D).");
@@ -137,7 +139,7 @@ public sealed class ArmCognitiveServicesTpmProbe : IPreflightQuotaProbe
             usage.Add(new CognitiveServicesUsageEntry(u.Name?.Value ?? string.Empty, u.CurrentValue ?? 0, u.Limit ?? 0));
         }
 
-        return Evaluate(region, DefaultRequestedTpmPerModel, usage);
+        return Evaluate(region, PinnedModelCatalog.RequestedTpmByQuotaName, usage);
     }
 
     /// <summary>
@@ -219,8 +221,8 @@ public sealed class ArmCognitiveServicesTpmProbe : IPreflightQuotaProbe
             {
                 lines.Add(
                     $"  - Model '{m}': NOT REPORTED by Azure.ResourceManager.CognitiveServices usage for region '{region}' " +
-                    $"(requested {p["requested"]} TPM). Verify model name matches Azure's naming (e.g. 'gpt-4o', not 'GPT-4') " +
-                    "and that model is available in region. File quota-bump request if expected.");
+                    $"(requested {p["requested"]} TPM). The model is not offered with this SKU in this region, or Azure renamed " +
+                    "the quota (compare `az cognitiveservices usage list --location <region>`). Choose another openAiLocation or update PinnedModelCatalog.");
             }
             else
             {

@@ -77,6 +77,7 @@ public class AnalysisOrchestrationServiceTests
             new RagQueryBuilder(),
             tenantCacheMock.Object,
             httpContextAccessorMock.Object,
+            PermitAllRetrievalAccessTrim.Instance,
             options,
             new Mock<ILogger<AnalysisRagProcessor>>().Object);
 
@@ -143,7 +144,7 @@ public class AnalysisOrchestrationServiceTests
     // ContinueAnalysisAsync Tests region (1 test) was DELETED here: the legacy in-memory session
     // production method was deleted in the same task (superseded by ChatEndpoints Redis→Cosmos
     // model per task 020), so the test could no longer defend any contract. Per ADR-038 §7
-    // build-vs-maintain criteria — this test lived outside the 7 KEEP paths (build-class), so no
+    // build-vs-maintain criteria — this test lived outside the KEEP paths (build-class), so no
     // same-PR replacement is required.
 
     // unified-access-control-r2 task 162 (owner round 10 item 1): the SaveWorkingDocumentAsync and
@@ -249,62 +250,9 @@ public class AnalysisOrchestrationServiceTests
             Times.Once);
     }
 
-    [Fact(Skip = "Requires complete mock setup for playbook execution pipeline including tool scope resolution")]
-    public async Task ExecutePlaybookAsync_WithToolScopes_ResolvesToolsFromPlaybook()
-    {
-        // Arrange - PB-010 Risk Scan simulation with tools
-        var playbookId = Guid.NewGuid();
-        var documentId = Guid.NewGuid();
-        var tool1Id = Guid.NewGuid();
-        var tool2Id = Guid.NewGuid();
-
-        var request = new PlaybookExecuteRequest
-        {
-            PlaybookId = playbookId,
-            DocumentIds = [documentId]
-        };
-
-        var document = CreateDocument(documentId);
-        var playbook = CreatePlaybook(playbookId, "Risk Scan");
-
-        // Create scopes with tools
-        var tools = new[]
-        {
-            new AnalysisTool { Id = tool1Id, Name = "Entity Extractor", HandlerClass = "GenericAnalysisHandler" },
-            new AnalysisTool { Id = tool2Id, Name = "Risk Detector", HandlerClass = "GenericAnalysisHandler" }
-        };
-        var scopes = new ResolvedScopes([], [], tools);
-
-        // Setup PlaybookService mock
-        _playbookServiceMock
-            .Setup(x => x.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbook);
-
-        _scopeResolverMock
-            .Setup(x => x.ResolvePlaybookScopesAsync(playbookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(scopes);
-
-        _dataverseServiceMock
-            .Setup(x => x.GetDocumentAsync(documentId.ToString(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(document);
-
-        // Setup tool handler registry to return empty collection (no handlers available)
-        _toolHandlerRegistryMock
-            .Setup(x => x.GetHandlersByType(It.IsAny<ToolType>()))
-            .Returns(Array.Empty<IAnalysisToolHandler>());
-
-        // Act
-        var chunks = new List<AnalysisStreamChunk>();
-        await foreach (var chunk in _service.ExecutePlaybookAsync(request, _mockHttpContext, CancellationToken.None))
-        {
-            chunks.Add(chunk);
-        }
-
-        // Assert - Scope resolution should return our tools
-        _scopeResolverMock.Verify(
-            x => x.ResolvePlaybookScopesAsync(playbookId, It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
+    // ExecutePlaybookAsync_WithToolScopes_ResolvesToolsFromPlaybook REMOVED (C# test-diet): Skip since written; its only
+    // assertion (ResolvePlaybookScopesAsync called once) is already made, with the same mocks, by
+    // ExecutePlaybookAsync_ValidPlaybook_LoadsPlaybookAndResolvesScopesAndYieldsMetadata, and it never inspected the tools.
 
     [Fact]
     public async Task ExecutePlaybookAsync_DocumentNotFound_ThrowsKeyNotFoundException()
@@ -386,71 +334,8 @@ public class AnalysisOrchestrationServiceTests
             Times.Never);
     }
 
-    [Fact(Skip = "Requires complete mock setup for playbook execution pipeline including skill and knowledge scope resolution")]
-    public async Task ExecutePlaybookAsync_WithSkillsAndKnowledge_ResolvesAllScopes()
-    {
-        // Arrange - PB-002 Full Contract Analysis with all scope types
-        var playbookId = Guid.NewGuid();
-        var documentId = Guid.NewGuid();
-
-        var request = new PlaybookExecuteRequest
-        {
-            PlaybookId = playbookId,
-            DocumentIds = [documentId]
-        };
-
-        var document = CreateDocument(documentId);
-        var playbook = CreatePlaybook(playbookId, "Full Contract Analysis");
-
-        // Create full scopes with skills, knowledge, and tools
-        var skills = new[]
-        {
-            new AnalysisSkill { Id = Guid.NewGuid(), Name = "Contract Analysis", PromptFragment = "Analyze contracts..." },
-            new AnalysisSkill { Id = Guid.NewGuid(), Name = "Risk Assessment", PromptFragment = "Assess risks..." }
-        };
-        var knowledge = new[]
-        {
-            new AnalysisKnowledge { Id = Guid.NewGuid(), Name = "Standard Contract Terms", Content = "..." },
-            new AnalysisKnowledge { Id = Guid.NewGuid(), Name = "Best Practices", Content = "..." }
-        };
-        var tools = new[]
-        {
-            new AnalysisTool { Id = Guid.NewGuid(), Name = "Entity Extractor", HandlerClass = "GenericAnalysisHandler" },
-            new AnalysisTool { Id = Guid.NewGuid(), Name = "Clause Analyzer", HandlerClass = "GenericAnalysisHandler" }
-        };
-        var scopes = new ResolvedScopes(skills, knowledge, tools);
-
-        // Setup PlaybookService mock
-        _playbookServiceMock
-            .Setup(x => x.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbook);
-
-        _scopeResolverMock
-            .Setup(x => x.ResolvePlaybookScopesAsync(playbookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(scopes);
-
-        _dataverseServiceMock
-            .Setup(x => x.GetDocumentAsync(documentId.ToString(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(document);
-
-        // Setup tool handler registry to return empty collection (no handlers available)
-        _toolHandlerRegistryMock
-            .Setup(x => x.GetHandlersByType(It.IsAny<ToolType>()))
-            .Returns(Array.Empty<IAnalysisToolHandler>());
-
-        // Act
-        var chunks = new List<AnalysisStreamChunk>();
-        await foreach (var chunk in _service.ExecutePlaybookAsync(request, _mockHttpContext, CancellationToken.None))
-        {
-            chunks.Add(chunk);
-        }
-
-        // Assert - Should have metadata chunk and resolve full scopes
-        chunks.Should().HaveCountGreaterOrEqualTo(1);
-        _scopeResolverMock.Verify(
-            x => x.ResolvePlaybookScopesAsync(playbookId, It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
+    // ExecutePlaybookAsync_WithSkillsAndKnowledge_ResolvesAllScopes REMOVED (C# test-diet): same reasoning as above -
+    // Skip since written, and it only re-verified ResolvePlaybookScopesAsync was called once.
 
     #endregion
 

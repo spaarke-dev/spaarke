@@ -51,6 +51,12 @@
 //   AC-KV-1  Deferred KV commit fails AFTER consent verified → QuarantineRequired
 //            (app-reg + consent both real; KV state now ambiguous).
 //   AC-PARSE KV URI reference round-trip parse (vault, secretName).
+//   T240a-1  The request carries the customer's Dataverse origin as the only SPA
+//            redirect and the configured shared clients (canonical, de-duplicated).
+//   T240a-2  An intake URL that is missing or names another customer's environment
+//            → Resumable DataverseEnvUrlInvalid; provisioner never called.
+//   T240a-3  A non-GUID pre-authorized client id → Resumable
+//            PreAuthorizedClientAppIdInvalid; provisioner never called.
 //
 // RETIRED 2026-09-29 (task 222 per D-13): the shared multitenant BFF app-reg
 // branch was deleted from H3EntraAppRegHandler. The three tests that pinned
@@ -83,6 +89,8 @@ public sealed class H3EntraAppRegHandlerTests
     private const string BffAppRegId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     private const string UamiObjectId = "ffffffff-1111-2222-3333-000000000000";
     private const int ExpectedScopeCount = 5;
+    private const string DataverseEnvUrl = "https://spaarke-acme.crm.dynamics.com/";
+    private const string AddInClientId = "c1258e2d-1688-49d2-ac99-a7485ebd9995";
 
     private static readonly string ExpectedKvUriRef =
         GraphAppRegistrationProvisioner.BuildKvUriReference(KeyVaultName, GraphAppRegistrationProvisioner.ClientSecretName);
@@ -508,6 +516,85 @@ public sealed class H3EntraAppRegHandlerTests
         provisioner.ProvisionCallCount.Should().Be(0);
     }
 
+    // ---------- T240a client access ----------
+
+    [Fact]
+    public async Task T240a_1_Request_CarriesTheDataverseOriginAndTheConfiguredClients()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var repo = new FakeRepository(run, etag: "etag-t240a-1");
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var verifier = FakeVerifier.Verified(ExpectedScopeCount);
+        var handler = BuildHandler(repo, provisioner, verifier,
+            preAuthorizedClientAppIds: [AddInClientId.ToUpperInvariant(), AddInClientId]);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var request = provisioner.LastProvisionRequest!;
+        request.SpaRedirectUris.Should().Equal(["https://spaarke-acme.crm.dynamics.com"],
+            "the code pages send window.location.origin — no trailing slash");
+        request.PreAuthorizedClientAppIds.Should().Equal([AddInClientId],
+            "client ids are canonical (lowercase) and de-duplicated");
+    }
+
+    [Fact]
+    public async Task T240a_1b_EnvironmentNamedUrl_IsTheRedirect()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1),
+            dataverseEnvUrl: "https://spaarke-acme-prod.crm4.dynamics.com/");
+        run.Parameters.NonSecret[IntakeParameterCatalog.EnvironmentName] = "prod";
+        var repo = new FakeRepository(run, etag: "etag-t240a-1b");
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified(ExpectedScopeCount));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.SpaRedirectUris.Should().Equal(["https://spaarke-acme-prod.crm4.dynamics.com"]);
+        provisioner.LastProvisionRequest.PreAuthorizedClientAppIds.Should().BeEmpty("none configured");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("https://spaarke-other.crm.dynamics.com/")]
+    [InlineData("http://spaarke-acme.crm.dynamics.com/")]
+    public async Task T240a_2_InvalidDataverseEnvUrl_FailsResumable_NoProvisionerCall(string? dataverseEnvUrl)
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1),
+            dataverseEnvUrl: dataverseEnvUrl);
+        var repo = new FakeRepository(run, etag: "etag-t240a-2");
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified(ExpectedScopeCount));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(EntraAppRegRejectionCodes.DataverseEnvUrlInvalid);
+        provisioner.ProvisionCallCount.Should().Be(0, "nothing is written to Entra");
+    }
+
+    [Theory]
+    [InlineData("not-a-guid")]
+    [InlineData("")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task T240a_3_InvalidPreAuthorizedClientId_FailsResumable_NoProvisionerCall(string badClientId)
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
+        var repo = new FakeRepository(run, etag: "etag-t240a-3");
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified(ExpectedScopeCount),
+            preAuthorizedClientAppIds: [AddInClientId, badClientId]);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(EntraAppRegRejectionCodes.PreAuthorizedClientAppIdInvalid);
+        provisioner.ProvisionCallCount.Should().Be(0, "nothing is written to Entra");
+    }
+
     // ---------- AC-KV-1 deferred commit failure after consent verified ----------
 
     [Fact]
@@ -535,11 +622,13 @@ public sealed class H3EntraAppRegHandlerTests
         FakeRepository repo,
         FakeProvisioner provisioner,
         FakeVerifier verifier,
-        int expectedScopeCount = ExpectedScopeCount)
+        int expectedScopeCount = ExpectedScopeCount,
+        List<string>? preAuthorizedClientAppIds = null)
     {
         var options = Options.Create(new EntraAppRegOptions
         {
             ExpectedDelegatedScopeCount = expectedScopeCount,
+            PreAuthorizedClientAppIds = preAuthorizedClientAppIds ?? [],
         });
         return new H3EntraAppRegHandler(
             repo, provisioner, verifier, options,
@@ -559,7 +648,8 @@ public sealed class H3EntraAppRegHandlerTests
         string tenancyModel,
         bool includeTenantId = true,
         bool includeKvName = true,
-        bool includeUamiObjectId = true)
+        bool includeUamiObjectId = true,
+        string? dataverseEnvUrl = DataverseEnvUrl)
     {
         var run = new ProvisioningRun
         {
@@ -582,6 +672,11 @@ public sealed class H3EntraAppRegHandlerTests
         if (includeUamiObjectId)
         {
             run.InterStepState.MiObjectId = UamiObjectId;
+        }
+        if (dataverseEnvUrl is not null)
+        {
+            // T240a: H3 derives the code pages' SPA redirect from the intake environment URL.
+            run.Parameters.NonSecret[IntakeParameterCatalog.DataverseEnvUrl] = dataverseEnvUrl;
         }
         return run;
     }

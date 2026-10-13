@@ -91,6 +91,66 @@ public sealed class H1SubscriptionReadinessHandlerTests
         next.CustomerId.Should().Be(CustomerId);
     }
 
+    // ---------- T228: the subscription must be this customer's alone (ADR-027) ----------
+
+    [Fact]
+    public async Task T228_ASubscriptionHoldingAnotherStamp_IsRefused_BeforeAnythingIsWritten()
+    {
+        var run = BuildRun(tenancy: "SpaarkeOwned");
+        var repo = new FakeRepository(run, etag: "etag-1");
+        var enqueuer = new FakeEnqueuer();
+        var probe = FakeProbe.AllPass();
+        probe.DedicationResult = new(false, "holds rg-spaarke-other-prod", null);
+        var handler = NewHandler(repo, enqueuer, probe);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SubscriptionReadinessRejectionCodes.SubscriptionNotDedicated);
+        probe.LastDedicationCustomerId.Should().Be(CustomerId);
+        probe.ProviderRegistrationCalls.Should().Be(0, "provider registration writes to the subscription — never on another customer's");
+        enqueuer.Sent.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task T228_AListingFailure_HasItsOwnCode()
+    {
+        var probe = FakeProbe.AllPass();
+        probe.DedicationResult = new(false, "listing failed (PRQ-S-04)", null, ListingFailed: true);
+        var handler = NewHandler(new FakeRepository(BuildRun(tenancy: "SpaarkeOwned"), etag: "etag-1"), new FakeEnqueuer(), probe);
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.RejectionCode.Should().Be(SubscriptionReadinessRejectionCodes.SubscriptionListingFailed);
+        probe.ProviderRegistrationCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task T228_TheDedicationCheck_RunsOnEveryModel()
+    {
+        foreach (var tenancy in new[] { "SpaarkeOwned", "CustomerOwned" })
+        {
+            var probe = FakeProbe.AllPass();
+            var handler = NewHandler(new FakeRepository(BuildRun(tenancy: tenancy), etag: "etag-1"), new FakeEnqueuer(), probe);
+            (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None)).Should().BeOfType<HandlerResult.Success>();
+            probe.DedicationCalls.Should().Be(1, "{0}: one subscription per customer applies to both models", tenancy);
+        }
+    }
+
+    [Theory]
+    [InlineData("rg-spaarke-other-prod", true)]
+    [InlineData("rg-spaarke-platform-prod", true)]       // Spaarke's own platform subscription
+    [InlineData("RG-SPAARKE-OTHER-DEV", true)]
+    [InlineData("rg-spaarke-acme-prod", false)]          // this customer's own stamp (an upgrade run)
+    [InlineData("rg-spaarke-acme-dev", false)]
+    [InlineData("rg-contoso-erp", false)]                // the customer's unrelated resources
+    [InlineData("rg-spaarke-acmexx-prod", true)]         // a longer id is another customer
+    public void SubscriptionDedication_FlagsOnlyAnotherStampsGroups(string group, bool foreign)
+        => SubscriptionDedication.FindForeignStampGroups(new[] { group }, "acme")
+            .Should().HaveCount(foreign ? 1 : 0);
+
     // ---------- AC-2 CustomerOwned happy path w/ Lighthouse present ----------
 
     [Fact]
@@ -715,6 +775,17 @@ public sealed class H1SubscriptionReadinessHandlerTests
         // exercise the unaffected happy path.
         public SubscriptionReadinessCheckResult ProviderRegistrationResult { get; set; }
             = new(true, "ok", null);
+        public SubscriptionReadinessCheckResult DedicationResult { get; set; } = new(true, "ok", null);
+        public int DedicationCalls { get; private set; }
+        public string? LastDedicationCustomerId { get; private set; }
+
+        public Task<SubscriptionReadinessCheckResult> CheckSubscriptionDedicatedAsync(
+            string subscriptionId, string customerId, CancellationToken cancellationToken)
+        {
+            DedicationCalls++;
+            LastDedicationCustomerId = customerId;
+            return Task.FromResult(DedicationResult);
+        }
 
         public int ReachabilityCalls { get; private set; }
         public int LighthouseCalls { get; private set; }

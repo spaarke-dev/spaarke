@@ -195,7 +195,11 @@ export function parseLayoutColumns(layoutXml: string | undefined): {
 // Renderer derivation from attribute type — used when configjson does not override
 // ─────────────────────────────────────────────────────────────────────────────
 
-function rendererFromAttributeType(attributeType: string | undefined, format: string | undefined): string {
+function rendererFromAttributeType(
+  attributeType: string | undefined,
+  format: string | undefined,
+  dateTimeBehavior?: string
+): string {
   if (!attributeType) return 'default';
   switch (attributeType) {
     case 'Money':
@@ -203,6 +207,9 @@ function rendererFromAttributeType(attributeType: string | undefined, format: st
     case 'Decimal':
       return format === 'Percentage' ? 'percentage' : 'default';
     case 'DateTime':
+      // Task 098: a Date Only BEHAVIOUR column holds a calendar date ("YYYY-MM-DD") — rendered as that day, never as
+      // a UTC instant. Format DateOnly with UserLocal behaviour still stores an instant ('date' renders it local).
+      if (dateTimeBehavior === 'DateOnly') return 'dateonly';
       return format === 'DateOnly' ? 'date' : 'datetime';
     case 'Picklist':
     case 'Status':
@@ -320,7 +327,7 @@ function buildResolvedColumn(
   const isPrimaryName =
     layoutCol.name === entityMetadata.primaryNameAttribute || attrMeta?.isPrimaryName === true || layoutCol.isFirstCell;
 
-  const derivedRenderer = isPrimaryName ? 'link' : rendererFromAttributeType(attrMeta?.attributeType, attrMeta?.format);
+  const derivedRenderer = isPrimaryName ? 'link' : rendererFromAttributeType(attrMeta?.attributeType, attrMeta?.format, attrMeta?.dateTimeBehavior);
 
   return {
     name: layoutCol.name,

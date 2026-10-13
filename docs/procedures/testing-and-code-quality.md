@@ -637,6 +637,72 @@ dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
 ---
 
+## Client type-aware lint ratchet (`client-lint`)
+
+One shared, **type-aware** ESLint 9 toolchain lints the client packages against each package's own tsconfig and blocks only **new** violations. It lives in `scripts/quality/client-lint/` (own `package.json`; packages do not get their own ESLint setups).
+
+- **Rule (P2):** `@typescript-eslint/no-unnecessary-condition` at `error`, on non-test `src/**`. It flags a dead `if (!res.ok)` / `res.status === 404` after `AuthenticatedFetchFn` (which resolves to `OkResponse`: `ok: true`, 2xx). Nothing else is enabled; existing rules are untouched.
+- **Covered:** Spaarke.UI.Components, AI.Widgets, Compose.Components, Communication.Components, DocumentOperations, DailyBriefing.Components, `src/solutions/{SpaarkeAi,LegalWorkspace,Reporting}`, `src/client/code-pages/SemanticSearch`. Not covered: external SPA and office-addins (their fetch returns non-2xx on purpose).
+- **Type resolution:** the runner generates a lint tsconfig per package (`.generated/`, gitignored) that extends the package tsconfig and points every `@spaarke/*` at sibling **source**, so nothing has to be built first. Third-party types come from each package's own `node_modules`, hence the `install` step.
+
+### Run it
+
+```bash
+# once: toolchain, then the covered packages' dependencies (slow; ~7 min with 4-way parallel npm on a dev box)
+npm install --legacy-peer-deps --no-audit --no-fund --prefix scripts/quality/client-lint
+node scripts/quality/client-lint/client-lint.mjs install
+
+node scripts/quality/client-lint/client-lint.mjs check                          # all packages; exit 0 = no new violations
+node scripts/quality/client-lint/client-lint.mjs check --package spaarkeai      # one package (ids: see eslint.client.config.mjs)
+node scripts/quality/client-lint/client-lint.mjs controls                       # must-fire / must-not-fire fixtures
+```
+
+`check` takes about 1 minute for all ten packages on a warm dev box (UI.Components is the longest at 10-65 s depending on machine load). CI runs `controls` then `check` in the standalone workflow `.github/workflows/client-lint.yml` (check `Client lint (type-aware ratchet)`). It runs on every PR and reports success without linting when no covered path changed, so it can be a required check without leaving unrelated PRs waiting; master pushes run it only when a covered path changed. It is kept out of the router/tier files so the CI shadow window's comparison is untouched, and is not yet a required check: the owner approved (2026-10-10) adding it to the master ruleset once the shadow window has closed.
+
+### How suppressions work
+
+Today's violations are recorded per file and rule in `scripts/quality/client-lint/eslint-suppressions.json` (ESLint bulk suppressions, ESLint 9.24+). A violation not covered by it fails the run. A suppression whose violation is gone **also fails** ("unused suppressions") so the file can only shrink.
+
+- **You fixed existing debt:** `node scripts/quality/client-lint/client-lint.mjs prune`, then commit the smaller `eslint-suppressions.json` with the fix.
+- **You added a violation:** fix it. If the condition is genuinely defensive (for example a dual-shape fetch), narrow the type or use `// eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- <reason>`. Do not hand-edit the JSON to add entries.
+- **After moving or renaming a file with recorded findings:** run `client-lint.mjs baseline --package <id>` (re-records only that package, merging into the JSON and pruning the old path), then explain the diff in the PR.
+- **Lockfiles:** on a dev box, `install` can rewrite a stale tracked `package-lock.json`; commit the regenerated lock (CI fails on a stale one: `npm install --package-lock-only --legacy-peer-deps` in that dir).
+- **Re-baselining everything** (`client-lint.mjs baseline`) is rare and reviewed in the PR; the diff must be explained.
+- **Controls:** `scripts/quality/client-lint/controls/` holds a dead `!res.ok` after `AuthenticatedFetchFn` (must fire) and `!res.ok` after `ResponseFetchFn` / raw `fetch` (must not).
+
+#### Catch policy
+
+Besides `no-unnecessary-condition`, the same ratchet enforces that a `catch` handles the error, surfaces it to the user, or rethrows. Rules (all `error`, same baseline mechanism):
+
+- `no-restricted-syntax` (selectors in `eslint.client.config.mjs`): an **empty or comment-only** catch; a catch whose **only statement is a `console.*` call**; a catch whose only statement is a **telemetry call** (`logTelemetryError`, `reportClientError`, `trackException`); a catch whose only statement is a **logger call** (`logger.*` / `this.logger.*` with `logError`, `logWarn`, `error`, `warn`). Telemetry-only and logger-only count as swallowing: the failure is recorded but the user and the caller never learn of it.
+- `spaarke-client/catch-disable-needs-reason`: an `eslint-disable*` directive naming `no-restricted-syntax` must carry a reason.
+
+**A flagged catch:** (1) handle it (fall back, retry, return an error result); (2) surface it (error state, toast, message bar) in addition to logging; or (3) rethrow / return a failure the caller checks. Logging plus real handling (e.g. `console.error(...)` then `return null`) is fine: only a catch that does nothing else is flagged.
+
+**A deliberate swallow** (best-effort cache warm, optional telemetry, cleanup) needs a reasoned disable directly above the line ESLint reports: the `} catch {` line for an empty or comment-only catch, otherwise the catch's lone statement. Above `try {` it does nothing (unused-directive reporting is off, so nothing tells you):
+
+```ts
+try {
+  await warmCache();
+  // eslint-disable-next-line no-restricted-syntax -- best-effort cache warm; failure is harmless
+} catch {
+  /* intentionally ignored */
+}
+
+try {
+  persistDraft();
+} catch (e) {
+  // eslint-disable-next-line no-restricted-syntax -- quota errors are expected; the draft also lives in state
+  console.warn("draft not persisted", e);
+}
+```
+
+A disable without ` -- <reason>` fails `catch-disable-needs-reason`, and so does a bare `// eslint-disable-next-line` with no rule list (it would silence every rule). Existing violations are baselined in `eslint-suppressions.json`; fixing one means `prune`. `controls` asserts exact must-fire counts per rule (`EXPECTED_FIRE` in `client-lint.mjs`), so adding or removing a catch-policy fixture means updating that table. If `controls` fails, the toolchain or the `@spaarke/auth` types regressed and a green `check` means nothing.
+
+### Pre-commit
+
+`.lintstagedrc.mjs` does **not** run this on commit: a typed program for even one file builds the whole package program (10-65 s for UI.Components alone), far over the pre-commit budget. Use `npm run lint:client` (or `check --package <id>`) before pushing changes to a covered package.
+
 ## PR Quality Gates (sdap-ci.yml)
 
 The `sdap-ci.yml` workflow runs on every pull request and push to `master`. All jobs must pass before a PR can merge.
@@ -996,7 +1062,7 @@ This section defines **which tests to run when you modify code in a specific mod
 
 | Test Project | Path | Framework | Covers |
 |-------------|------|-----------|--------|
-| **Sprk.Bff.Api.Tests** | `tests/unit/Sprk.Bff.Api.Tests/` | xUnit + NSubstitute + Moq + FluentAssertions + WireMock.Net | BFF API endpoints, services, filters, infrastructure |
+| **Sprk.Bff.Api.Tests** | `tests/unit/Sprk.Bff.Api.Tests/` | xUnit + Moq + FluentAssertions + WireMock.Net | BFF API endpoints, services, filters, infrastructure |
 | **Spaarke.Core.Tests** | `tests/unit/Spaarke.Core.Tests/` | xUnit + FluentAssertions | Shared .NET library (Spaarke.Core) |
 | **Spe.Integration.Tests** | `tests/integration/Spe.Integration.Tests/` | xUnit + FluentAssertions + Moq + Mvc.Testing | End-to-end API integration (auth, AI, reporting, RAG) |
 | **Spaarke.ArchTests** | `tests/Spaarke.ArchTests/` | xUnit + NetArchTest.Rules | ADR compliance via architecture reflection tests |

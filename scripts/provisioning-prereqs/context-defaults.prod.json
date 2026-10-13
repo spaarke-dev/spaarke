@@ -5,132 +5,160 @@
   "environment": "prod",
   "tokenMap": {
     "customerId": {
+      "availability": "customer",
       "source": "intake",
       "shape": "customerId standard ^[a-z][a-z0-9]{2,7}$ (3-8 lowercase letters/digits, starts with a letter; AZURE-RESOURCE-NAMING-CONVENTION.md)",
       "populatedBy": "intake.schema.json customerId property"
     },
     "runId": {
+      "availability": "always",
       "source": "runtime",
       "shape": "GUID lowercase",
       "populatedBy": "L2 CreateRun endpoint at intake"
     },
     "env": {
+      "availability": "env",
       "source": "intake",
       "shape": "'prod' (for this file)",
       "populatedBy": "intake.schema.json controlPlaneEnv property (ISH-12 SESSION 18 rename from `environment` → `controlPlaneEnv`)"
     },
     "region": {
+      "availability": "always",
       "source": "intake",
       "shape": "Azure region string",
       "populatedBy": "intake.schema.json region property; aliased to openAiRegion in Step 0.5b"
     },
     "openAiRegion": {
+      "availability": "always",
       "source": "intake",
       "shape": "Azure OpenAI region (defaults to westus3)",
       "populatedBy": "intake.schema.json openAiRegion property"
     },
     "subId": {
+      "availability": "always",
       "source": "runtime-az",
       "shape": "Azure subscription GUID",
       "populatedBy": "az account show --query id -o tsv (prod subscription context)"
     },
     "sub": {
+      "availability": "always",
       "source": "runtime-az",
       "shape": "Alias for {subId}",
       "populatedBy": "az account show --query id -o tsv"
     },
     "l2UamiPrincipalId": {
+      "availability": "env",
       "source": "runtime-az",
       "shape": "Managed Identity object id (GUID)",
       "populatedBy": "az identity show -g rg-spaarke-platform-prod -n sprk-controlplane-prod-uami --query principalId"
     },
     "l2UamiClientId": {
+      "availability": "env",
       "source": "runtime-az",
       "shape": "Managed Identity clientId (GUID)",
       "populatedBy": "az identity show ... --query clientId"
     },
     "l2UamiSpId": {
+      "availability": "env",
       "source": "runtime-az",
       "shape": "Service principal object id",
       "populatedBy": "az ad sp show --id {l2UamiClientId} --query id -o tsv"
     },
     "graphAppId": {
+      "availability": "always",
       "source": "constants",
       "shape": "Fixed Microsoft Graph appId (invariant across envs)",
       "populatedBy": "spaarke-constants.yaml microsoft_constants.graphAppId"
     },
+    "customerManagementGroupId": {
+      "availability": "always",
+      "source": "constants",
+      "shape": "Management-group id (name): spaarke-customers (tenant-wide, invariant across envs)",
+      "populatedBy": "spaarke-constants.yaml management_groups.customers.id"
+    },
     "sbNamespace": {
+      "availability": "env",
       "source": "constants-template",
       "shape": "spaarke-servicebus-prod",
       "populatedBy": "spaarke-constants.yaml name_templates.sbNamespace with env=prod"
     },
-    "sbName": {
-      "source": "constants-template",
-      "shape": "Same as {sbNamespace}",
-      "populatedBy": "Alias — should consolidate onto {sbNamespace}"
-    },
     "artifactsStorageId": {
+      "availability": "env",
       "source": "runtime-az",
       "shape": "Azure resource id",
       "populatedBy": "az storage account show -g rg-spaarke-platform-prod -n sprkprodartifacts --query id -o tsv"
     },
     "acrId": {
+      "availability": "env",
       "source": "runtime-az",
       "shape": "Azure resource id",
       "populatedBy": "az acr show -g rg-spaarke-platform-prod -n sprkprodacr --query id -o tsv"
     },
-    "bffAppServiceId": {
-      "source": "runtime-az",
-      "shape": "Azure resource id",
-      "populatedBy": "az webapp list --resource-group rg-spaarke-platform-prod ..."
-    },
     "kvResourceId": {
+      "availability": "env",
       "source": "runtime-az",
       "shape": "Azure resource id",
       "populatedBy": "az keyvault show -g rg-spaarke-platform-prod -n sprk-prod-kv --query id -o tsv"
     },
     "containerTypeId": {
+      "availability": "env",
       "source": "constants-per-env-operator",
       "shape": "SPE container-type GUID",
       "populatedBy": "spaarke-constants.yaml per_env_constants.prod.containerTypeId (operator MUST populate)"
     },
-    "bffAppId": {
-      "source": "constants-per-env-operator",
-      "shape": "Entra appId",
-      "populatedBy": "spaarke-constants.yaml per_env_constants.prod.bffApiAppId (RENAMED 2026-08-30 task 212 from bffMultiTenantAppId — BFFs are single-tenant per topology doc §3A rows 4-6)"
-    },
     "dvUrl": {
+      "availability": "customer",
       "source": "runtime-context",
       "shape": "Customer Dataverse URL",
-      "populatedBy": "Runtime — per-customer sprk_dataverseenvironment row"
+      "populatedBy": "intake dataverseEnvUrl — the environment the operator created (PRQ-C-09), canonical https://{host}/ with a trailing slash (T228)"
     },
     "adminDvUrl": {
+      "availability": "env",
       "source": "constants-per-env-template",
       "shape": "Central-managing Dataverse URL for prod",
       "populatedBy": "spaarke-constants.yaml name_templates.registryDvUrl.prod (currently placeholder — not yet provisioned)"
     },
     "stampSubscriptionId": {
+      "availability": "customer",
       "source": "intake",
       "shape": "Azure subscription GUID — the customer stamp's own subscription",
       "populatedBy": "intake.schema.json subscriptionId (ADR-027: one subscription per customer)",
-      "note": "Used by PRQ-E-05 (once_per_customer, an H2a postcondition) — documented for operators, not substituted by Step 0.5b."
+      "note": "Used by PRQ-S-00 / PRQ-S-04 and PRQ-E-05 (once_per_customer) — substituted by the skill's customer pass (Step 1e-ter)."
     },
     "stampEnvironment": {
+      "availability": "customer",
       "source": "intake",
       "shape": "dev | staging | prod — the customer stamp's environment segment (customer.bicep environmentName)",
       "populatedBy": "nonSecretParameters environmentName (default 'prod', owner D6)",
-      "note": "Distinct from {env} (the L2 control-plane tier). Used by PRQ-E-05 — not substituted by Step 0.5b."
+      "note": "Distinct from {env} (the L2 control-plane tier). Used by PRQ-E-05 — the customer pass (Step 1e-ter) substitutes L2's default 'prod'; the intake has no override."
+    },
+    "environmentSecurityGroupId": {
+      "availability": "customer",
+      "source": "intake",
+      "shape": "Object id (GUID) of the security group sprk-{customerId}-users",
+      "populatedBy": "intake.schema.json environmentSecurityGroupId property (skill Step 1e-bis); the operator creates the group and sets it on the environment (PRQ-C-10)",
+      "note": "PRQ-C-10 is once_per_customer — run by the skill's customer pass (Step 1e-ter). Required for B2BGuest (every Model 1 run)."
     },
     "exchangePolicyScopeGroupId": {
+      "availability": "customer",
       "source": "intake",
       "shape": "Email address or object id of a mail-enabled security group",
       "populatedBy": "intake.schema.json exchangePolicyScopeGroupId property (skill Step 1e-bis); the group is created by the stamp tenant's Exchange admin (PRQ-C-08)",
-      "note": "PRQ-C-08 is once_per_customer — documented for the Exchange admin, not run by Step 0.5b."
+      "note": "PRQ-C-08 is once_per_customer — run by the skill's customer pass (Step 1e-ter)."
     },
-    "pinnedVer": {
-      "source": "recipe-internal",
-      "shape": "OpenAI model:version tuple string",
-      "populatedBy": "PRQ-E-14 recipe iterates in-line — no substitution required"
+    "customerWorkforceTenantIds": {
+      "availability": "customer",
+      "source": "intake",
+      "shape": "Space-separated Entra tenant ids (GUIDs) — the intake array customerWorkforceTenantIds joined with spaces",
+      "populatedBy": "intake.schema.json customerWorkforceTenantIds property (skill Step 1e-bis); the customer's IT gives the tenant id(s) (PRQ-C-13)",
+      "note": "PRQ-C-13 is once_per_customer — run by the skill's customer pass (Step 1e-ter). Required for every run (T255, INCOMING-141)."
+    },
+    "customerOutboundB2BAttested": {
+      "availability": "customer",
+      "source": "intake",
+      "shape": "true | notApplicable — `true` only when the customer's Entra admin has confirmed outbound B2B collaboration to Spaarke's tenant; `notApplicable` for a run that is not B2BGuest; anything else (false, absent) fails the check",
+      "populatedBy": "intake.schema.json customerOutboundB2BAttested property (skill Step 1e-bis); the skill maps a non-B2BGuest run to notApplicable (PRQ-C-14)",
+      "note": "PRQ-C-14 is once_per_customer — run by the skill's customer pass (Step 1e-ter). A customer attestation: Spaarke's operator cannot read another tenant's cross-tenant access settings. Skill-local intake field, NOT sent to POST /api/runs."
     }
   }
 }

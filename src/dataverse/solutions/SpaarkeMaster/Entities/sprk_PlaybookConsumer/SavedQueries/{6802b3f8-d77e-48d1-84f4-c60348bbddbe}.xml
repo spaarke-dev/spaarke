@@ -1,0 +1,49 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{6802b3f8-d77e-48d1-84f4-c60348bbddbe}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_playbookconsumerid">
+          <cell name="sprk_name" width="300" />
+          <cell name="sprk_playbook" width="100" />
+          <cell name="sprk_consumercode" width="131" />
+          <cell name="sprk_consumertype" width="129" />
+          <cell name="sprk_priority" width="100" />
+          <cell name="sprk_environment" width="114" />
+          <cell name="sprk_enabled" width="100" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_playbookconsumer">
+          <attribute name="sprk_playbookconsumerid" />
+          <attribute name="sprk_name" />
+          <attribute name="createdon" />
+          <order attribute="sprk_name" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+          <attribute name="sprk_consumercode" />
+          <attribute name="sprk_consumertype" />
+          <attribute name="sprk_enabled" />
+          <attribute name="sprk_priority" />
+          <attribute name="sprk_playbook" />
+          <attribute name="sprk_environment" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Active Playbook Consumers" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

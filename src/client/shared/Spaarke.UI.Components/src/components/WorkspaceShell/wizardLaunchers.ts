@@ -2,7 +2,10 @@
  * wizardLaunchers.ts
  *
  * Shared Xrm.Navigation.navigateTo launchers for the seven Get Started wizards
- * used by both LegalWorkspace and SpaarkeAi. Hoisted in Round 4 Fix 2 (task 085)
+ * used by both LegalWorkspace and SpaarkeAi. Since task 112 (ontology-platform-r1,
+ * D-26; task 113 added four more) the Create/Summarize/Upload/Find Similar/Workspace-layout
+ * wizards open IN-APP instead when an `InAppWizardHost` supports them and is
+ * mounted — see "In-app routing seam" below. Hoisted in Round 4 Fix 2 (task 085)
  * to STOP the parallel-implementation bug — previously SpaarkeAi had its own
  * `launchCodePagePopup` helper (Round 3 task 068) and `launchAssignWorkWizard`
  * (task 045) and widget-load dispatchers (tasks 043/044) that subtly diverged
@@ -79,6 +82,108 @@ export function resolveXrmNavigation(): any | null {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ---------------------------------------------------------------------------
+// In-app routing seam (spaarke-ontology-platform-r1 task 112; D-26; ADR-050 as
+// amended 2026-10-07, launch rule (a)).
+//
+// When a Spaarke React surface has mounted `InAppWizardHost` (the Console /
+// SpaarkeAi does, and LegalWorkspace runs inside it), these five Create wizards
+// open IN-APP, in SprkModal, instead of in a `navigateTo(webresource)` dialog
+// whose white title bar is platform chrome that cannot be themed. With no host
+// mounted, every launcher below keeps calling `navigateTo` exactly as before.
+// Task 113 adds Summarize Files, Upload Documents, Find Similar and the Workspace
+// layout wizard to the same seam.
+// The ribbon scripts (`sprk_wizard_commands.js`) do not use this module and stay
+// on `navigateTo` (launch rule (b)); the code pages stay deployable for them.
+// ---------------------------------------------------------------------------
+
+/** The web resources whose launches route to a mounted in-app host (task 112 + 113 scope). */
+const IN_APP_WIZARD_NAMES = [
+  // Task 112: the five Create wizards (all live in this library).
+  'sprk_creatematterwizard',
+  'sprk_createprojectwizard',
+  'sprk_createeventwizard',
+  'sprk_createtodowizard',
+  'sprk_createworkassignmentwizard',
+  // Task 113: Summarize Files lives in this library too ...
+  'sprk_summarizefileswizard',
+  // ... but these three are code-page solutions (`DocumentUploadWizard`, `FindSimilarCodePage`,
+  // `WorkspaceLayoutWizard`) a shared library cannot import, so the mounting app supplies their
+  // renderers to `InAppWizardHost` (`renderers` prop) and the host declares which names it can open.
+  'sprk_documentuploadwizard',
+  'sprk_findsimilar',
+  'sprk_workspacelayoutwizard',
+] as const;
+
+/** A wizard web resource the in-app host can mount. */
+export type InAppWizardName = (typeof IN_APP_WIZARD_NAMES)[number];
+
+/** `true` when `name` is one of the wizards that open in-app while a host that supports it is mounted. */
+export function isInAppWizardName(name: string): name is InAppWizardName {
+  return (IN_APP_WIZARD_NAMES as readonly string[]).includes(name);
+}
+
+/** One in-app launch: the wizard and the launch `data` string its code page would receive. */
+export interface InAppWizardRequest {
+  readonly webresourceName: InAppWizardName;
+  /** The `key=value&…` launch data (e.g. `handoffId=…&bffBaseUrl=…`). */
+  readonly data: string;
+}
+
+/**
+ * Opens a wizard in-app; the promise resolves when it closes (the `navigateTo` promise equivalent).
+ * It resolves `{ busy: true }` at once, opening nothing, when another in-app wizard is already open.
+ */
+export type InAppWizardOpener = (request: InAppWizardRequest) => Promise<void | { readonly busy: true }>;
+
+/** What a host with nothing but its built-in wizards can open (the task 112 five + Summarize Files). */
+export const DEFAULT_IN_APP_WIZARD_NAMES: readonly InAppWizardName[] = [
+  'sprk_creatematterwizard',
+  'sprk_createprojectwizard',
+  'sprk_createeventwizard',
+  'sprk_createtodowizard',
+  'sprk_createworkassignmentwizard',
+  'sprk_summarizefileswizard',
+];
+
+let inAppWizardOpener: InAppWizardOpener | null = null;
+let inAppSupportedNames: ReadonlySet<string> = new Set();
+
+/**
+ * Register the mounted in-app host and the wizards it can open. Called by `InAppWizardHost` on
+ * mount; the returned function unregisters it (only if it is still the registered one). A launch of
+ * any name the host did not declare keeps using `navigateTo`, so a host that was not given a
+ * renderer for a code-page wizard never swallows that launch.
+ */
+export function registerInAppWizardHost(
+  opener: InAppWizardOpener,
+  supportedNames: readonly InAppWizardName[] = DEFAULT_IN_APP_WIZARD_NAMES
+): () => void {
+  inAppWizardOpener = opener;
+  inAppSupportedNames = new Set(supportedNames);
+  return () => {
+    if (inAppWizardOpener === opener) {
+      inAppWizardOpener = null;
+      inAppSupportedNames = new Set();
+    }
+  };
+}
+
+/**
+ * `true` when a mounted host would open `name` in-app right now. For callers that must keep their
+ * own `navigateTo` shape (a bespoke size or option) byte-identical when no host is mounted.
+ */
+export function canOpenInApp(name: string): boolean {
+  return inAppWizardOpener !== null && isInAppWizardName(name) && inAppSupportedNames.has(name);
+}
+
+/** Open in-app when a host is mounted and supports the wizard; `null` → use `navigateTo`. */
+function tryOpenInApp(webresourceName: string, data: string): Promise<void | { readonly busy: true }> | null {
+  if (inAppWizardOpener === null || !isInAppWizardName(webresourceName)) return null;
+  if (!inAppSupportedNames.has(webresourceName)) return null;
+  return inAppWizardOpener({ webresourceName, data });
+}
+
+// ---------------------------------------------------------------------------
 // Common dialog options (matches LegalWorkspace WorkspaceGrid.tsx verbatim)
 // ---------------------------------------------------------------------------
 
@@ -133,10 +238,25 @@ export interface PlaybookIntentLauncherOptions extends BaseLauncherOptions {
 interface NavigateToParams {
   webresourceName: string;
   data: string;
-  title: string;
+  /** Platform dialog title. Omitted → no `title` navOption (the dialog shows none). */
+  title?: string;
+}
+
+/**
+ * A `navigateTo` rejection that is NOT the user closing/cancelling the dialog (Dataverse errorCode 2)
+ * is a real dialog failure: log it with the surface name (never a token or payload; ADR-019) instead
+ * of swallowing it. Cancels stay silent. Returns `true` for a real failure.
+ */
+function logNavigateFailure(webresourceName: string, err: unknown): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if ((err as any)?.errorCode === 2) return false;
+  console.error(`[wizardLaunchers] navigateTo failed for ${webresourceName}:`, err);
+  return true;
 }
 
 function fireNavigateTo({ webresourceName, data, title }: NavigateToParams): void {
+  // Tasks 112/113: a mounted in-app host opens the wizards it supports itself.
+  if (tryOpenInApp(webresourceName, data) !== null) return;
   const nav = resolveXrmNavigation();
   if (nav === null) {
     return; // Non-host environment (Vite dev, jsdom) — silent no-op.
@@ -153,12 +273,12 @@ function fireNavigateTo({ webresourceName, data, title }: NavigateToParams): voi
           target: DEFAULT_TARGET,
           width: DEFAULT_WIDTH,
           height: DEFAULT_HEIGHT,
-          title,
+          ...(title !== undefined ? { title } : {}),
         }
       )
-      .catch(() => {
-        // Intentional: user cancel / dialog error — ignore (matches
-        // WorkspaceGrid.tsx's try/await/catch swallow precedent).
+      .catch((err: unknown) => {
+        // User cancel is silent; a real dialog failure is logged (not thrown: fire-and-forget).
+        logNavigateFailure(webresourceName, err);
       });
   } catch {
     /* xrm getter threw — silent */
@@ -319,6 +439,17 @@ export interface NavigateToOutcome {
    */
   readonly cancelled?: boolean;
   /**
+   * `true` (with `cancelled`) when the `navigateTo` promise rejected for a reason that is NOT the
+   * user closing the dialog - a real dialog failure (also logged with the surface name). Carries no
+   * rejection detail (ADR-019).
+   */
+  readonly failed?: boolean;
+  /**
+   * `true` (with `launched: false`) when an in-app host is mounted but another in-app wizard is
+   * already open, so this launch opened nothing. Distinct from "no Xrm host".
+   */
+  readonly busy?: boolean;
+  /**
    * The saved-entity reference returned by an `entityrecord` navigation when a
    * record was created/saved (OOB-form return path). Absent for web resources
    * (those return their outcome via the sessionStorage result envelope instead).
@@ -335,6 +466,15 @@ export interface NavigateToOutcome {
  * bffBaseUrl (the payload rides sessionStorage, not the URL — design §2).
  */
 export async function navigateToWebResourceSurfaceAsync(params: NavigateToParams): Promise<NavigateToOutcome> {
+  // Tasks 112/113: a mounted in-app host opens the wizards it supports itself; the
+  // promise resolves when the wizard closes, exactly like the `navigateTo` one.
+  const inApp = tryOpenInApp(params.webresourceName, params.data);
+  if (inApp !== null) {
+    const opened = await inApp;
+    // Another in-app wizard is open: nothing opened. Say so (callers must not report "opened").
+    if (opened && opened.busy) return { launched: false, busy: true };
+    return { launched: true };
+  }
   const nav = resolveXrmNavigation();
   if (nav === null) {
     return { launched: false };
@@ -342,12 +482,18 @@ export async function navigateToWebResourceSurfaceAsync(params: NavigateToParams
   try {
     await nav.navigateTo(
       { pageType: 'webresource', webresourceName: params.webresourceName, data: params.data },
-      { target: DEFAULT_TARGET, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT, title: params.title }
+      {
+        target: DEFAULT_TARGET,
+        width: DEFAULT_WIDTH,
+        height: DEFAULT_HEIGHT,
+        ...(params.title !== undefined ? { title: params.title } : {}),
+      }
     );
     return { launched: true };
-  } catch {
-    // User cancel / dialog error — the outcome (if any) is in sessionStorage.
-    return { launched: true, cancelled: true };
+  } catch (err) {
+    // The outcome (if any) is in sessionStorage; a real dialog failure is logged, a cancel is silent.
+    const failed = logNavigateFailure(params.webresourceName, err);
+    return failed ? { launched: true, cancelled: true, failed: true } : { launched: true, cancelled: true };
   }
 }
 

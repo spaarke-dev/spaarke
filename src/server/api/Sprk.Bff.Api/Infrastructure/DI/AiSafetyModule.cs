@@ -27,27 +27,41 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///   - <c>IConfiguration</c>  — registered by the host
 ///   - <c>ILogger&lt;T&gt;</c> — registered via <c>AddLogging</c> (implicit in WebApplication.CreateBuilder)
 ///
+/// Content Safety endpoint (task 246, plan G26): <c>AiSafety:ContentSafety:Endpoint</c> is REQUIRED outside
+/// Development and Testing — startup throws without it. There is no default: the old fallback named Spaarke's
+/// dev account, so a stamp missing the setting would have sent customer prompt text to it (and failed open).
+/// Customer stamps get their own account's endpoint from customer.bicep + H4b. In Development/Testing an unset
+/// endpoint registers the client with no base address; every scan then fails open through the services'
+/// existing catch (logged warning, <c>ai.safety.shield_evaluations outcome=failed_open_error</c>).
+///
 /// Usage in Program.cs:
 /// <code>
-/// builder.Services.AddAiSafetyModule(builder.Configuration);
+/// builder.Services.AddAiSafetyModule(builder.Configuration, builder.Environment);
 /// </code>
 /// </remarks>
 public static class AiSafetyModule
 {
+    /// <summary>Configuration key for the Content Safety endpoint (app setting <c>AiSafety__ContentSafety__Endpoint</c>).</summary>
+    public const string EndpointConfigKey = "AiSafety:ContentSafety:Endpoint";
+
     /// <summary>
     /// Registers AI Safety services with the DI container.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configuration">Application configuration.</param>
+    /// <param name="environment">Host environment — the Content Safety endpoint is required outside Development/Testing.</param>
     /// <returns>The service collection for chaining.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="EndpointConfigKey"/> is unset outside Development/Testing, or is not an absolute https URI.
+    /// </exception>
     public static IServiceCollection AddAiSafetyModule(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IHostEnvironment environment)
     {
-        // Named HttpClient "ContentSafety" — base address from AiSafety:ContentSafety:Endpoint.
-        // Timeout is set to 120ms (generous outer limit; PromptShieldService enforces 100ms internally).
-        var endpoint = configuration["AiSafety:ContentSafety:Endpoint"]
-            ?? "https://spaarke-contentsafety-dev.cognitiveservices.azure.com/";
+        // Named HttpClient "ContentSafety" — base address from AiSafety:ContentSafety:Endpoint (task 246: no
+        // default; required outside Development/Testing — see the remarks above).
+        var contentSafetyBaseAddress = ResolveContentSafetyBaseAddress(configuration, environment);
 
         // ContentSafetyTokenProvider — singleton: caches the Entra ID bearer token across the
         // ~2-minute HttpClientFactory handler rotation (a per-scan token fetch would blow the
@@ -77,9 +91,20 @@ public static class AiSafetyModule
 
         services.AddHttpClient(PromptShieldService.HttpClientName, client =>
         {
-            client.BaseAddress = new Uri(endpoint.TrimEnd('/') + "/");
+            client.BaseAddress = contentSafetyBaseAddress;
             client.DefaultRequestHeaders.Add("Accept", "application/json");
             client.Timeout = TimeSpan.FromMilliseconds(shieldTimeoutMs + 50);
+        })
+        .AddHttpMessageHandler<ContentSafetyAuthHandler>();
+
+        // Task 230b — the keyless proof's Content Safety client: same base address, same ContentSafetyAuthHandler, but a
+        // timeout long enough for the identity's answer to arrive (the client above is held to the Prompt Shield budget,
+        // so a probe through it would report a timeout, not a refusal). Used only by AiKeylessProbe.
+        services.AddHttpClient(Sprk.Bff.Api.Services.Ai.Diagnostics.AiKeylessProbe.ContentSafetyProbeHttpClientName, client =>
+        {
+            client.BaseAddress = contentSafetyBaseAddress;
+            client.DefaultRequestHeaders.Add("Accept", "application/json");
+            client.Timeout = Sprk.Bff.Api.Infrastructure.Diagnostics.KeylessProbeRunner.DefaultTimeout;
         })
         .AddHttpMessageHandler<ContentSafetyAuthHandler>();
 
@@ -164,5 +189,40 @@ public static class AiSafetyModule
         services.AddSingleton<CrossMatterSafetyTelemetry>();
 
         return services;
+    }
+
+    /// <summary>
+    /// The Content Safety base address, or <c>null</c> in Development/Testing when the endpoint is unset (scans then
+    /// fail open). Throws outside Development/Testing when it is unset, and anywhere when it is not an absolute https URI.
+    /// </summary>
+    internal static Uri? ResolveContentSafetyBaseAddress(IConfiguration configuration, IHostEnvironment environment)
+    {
+        var endpoint = configuration[EndpointConfigKey];
+        if (string.IsNullOrWhiteSpace(endpoint))
+        {
+            // Same carve-out as CacheModule: WebApplicationFactory hosts run as Testing; App Service never does.
+            var isLocalLike = environment.IsDevelopment() ||
+                string.Equals(environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase);
+            if (isLocalLike)
+            {
+                return null;
+            }
+
+            throw new InvalidOperationException(
+                $"'{EndpointConfigKey}' is not set (app setting 'AiSafety__ContentSafety__Endpoint'). It is required for " +
+                $"AiSafetyModule in every environment except Development and Testing (current ASPNETCORE_ENVIRONMENT='{environment.EnvironmentName}'). " +
+                "Set it to this environment's Azure AI Content " +
+                "Safety endpoint (https://{account}.cognitiveservices.azure.com/). There is no default: Prompt Shield and " +
+                "groundedness checks must go to this environment's own account. Customer stamps get it from customer.bicep " +
+                "and H4b (task 246).");
+        }
+
+        if (!Uri.TryCreate(endpoint.Trim().TrimEnd('/') + "/", UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new InvalidOperationException(
+                $"'{EndpointConfigKey}' must be an absolute https URI (https://{{account}}.cognitiveservices.azure.com/).");
+        }
+
+        return uri;
     }
 }

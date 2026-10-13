@@ -29,6 +29,7 @@ import type {
 } from '../types';
 import type { IOutcomeCard } from '../OutcomeCard';
 import { getXrm } from '../../../utils/xrmContext';
+import { isApiError, problemOf } from '../../../utils/thrownFetchError';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -381,39 +382,17 @@ async function resolveGate(
     );
 
     if (response.status === 409) {
-      return {
-        success: false,
-        errorCode: 'gate.not-pending',
-        message: `${pendingAction.actionName} was already resolved or has expired. Please retry the request in chat.`,
-      };
+      return gateNotPendingOutcome(pendingAction);
     }
 
     if (!response.ok) {
-      let errorCode = 'gate.resolve-failed';
-      let detail: string | undefined;
+      let problem: { errorCode?: unknown; detail?: unknown } | null = null;
       try {
-        const problem = (await response.json()) as { errorCode?: string; detail?: string };
-        if (problem && typeof problem.errorCode === 'string') {
-          errorCode = problem.errorCode;
-        }
-        // G-P3 UAT round-2 R2-A (2026-07-07): the ProblemDetails `detail` carries the
-        // handler's REAL failure reason (e.g. the write-mapper's instructive validation
-        // message). Surfacing it lets the user (and, via the server-persisted transcript
-        // message, the next turn's model) understand and correct the failure instead of
-        // seeing a generic code.
-        if (problem && typeof problem.detail === 'string' && problem.detail.length > 0) {
-          detail = problem.detail;
-        }
+        problem = (await response.json()) as { errorCode?: unknown; detail?: unknown };
       } catch {
         // Non-JSON body — keep the fallback code (ADR-019: stable codes only surface).
       }
-      return {
-        success: false,
-        errorCode,
-        message: detail
-          ? `${pendingAction.actionName} failed: ${detail}`
-          : `${pendingAction.actionName} could not be ${approved ? 'dispatched' : 'cancelled'} (${errorCode}).`,
-      };
+      return gateFailureOutcome(pendingAction, approved, problem);
     }
 
     const result = (await response.json()) as {
@@ -451,12 +430,52 @@ async function resolveGate(
         }
       : { success: true, message: `${pendingAction.actionName} was cancelled.` };
   } catch (err: unknown) {
+    // The injected authenticatedFetch THROWS for a non-OK response (ApiError with the parsed
+    // ProblemDetails) — the 409 / ProblemDetails outcomes above are reached from here in production,
+    // including `gate.no-binding-target`, which SprkChat renders as an honest transcript message.
+    if (isApiError(err, 409)) {
+      return gateNotPendingOutcome(pendingAction);
+    }
+    if (isApiError(err)) {
+      return gateFailureOutcome(pendingAction, approved, problemOf(err));
+    }
     const message = err instanceof Error ? err.message : 'Network error';
     return {
       success: false,
       message: `${pendingAction.actionName} could not be ${approved ? 'dispatched' : 'cancelled'}: ${message}`,
     };
   }
+}
+
+/** 409: the gate is no longer pending (already resolved, or expired). */
+function gateNotPendingOutcome(pendingAction: IPendingAction): IGateResolveOutcome {
+  return {
+    success: false,
+    errorCode: 'gate.not-pending',
+    message: `${pendingAction.actionName} was already resolved or has expired. Please retry the request in chat.`,
+  };
+}
+
+/** Any other failed resolve, from its ProblemDetails body (`null` when the body was not JSON). */
+function gateFailureOutcome(
+  pendingAction: IPendingAction,
+  approved: boolean,
+  problem: { errorCode?: unknown; detail?: unknown } | null
+): IGateResolveOutcome {
+  const errorCode = problem && typeof problem.errorCode === 'string' ? problem.errorCode : 'gate.resolve-failed';
+  // G-P3 UAT round-2 R2-A (2026-07-07): the ProblemDetails `detail` carries the
+  // handler's REAL failure reason (e.g. the write-mapper's instructive validation
+  // message). Surfacing it lets the user (and, via the server-persisted transcript
+  // message, the next turn's model) understand and correct the failure instead of
+  // seeing a generic code.
+  const detail = problem && typeof problem.detail === 'string' && problem.detail.length > 0 ? problem.detail : undefined;
+  return {
+    success: false,
+    errorCode,
+    message: detail
+      ? `${pendingAction.actionName} failed: ${detail}`
+      : `${pendingAction.actionName} could not be ${approved ? 'dispatched' : 'cancelled'} (${errorCode}).`,
+  };
 }
 
 /**

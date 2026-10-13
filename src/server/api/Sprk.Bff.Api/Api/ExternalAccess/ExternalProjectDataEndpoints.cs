@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -21,6 +22,8 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   POST /projects/{id}/todos            — create a new to-do regarding the project
 ///   GET  /projects/{id}/events           — CALENDAR events for a project (sprk_event)
 ///   POST /projects/{id}/events           — create a calendar event on the project
+///   GET  /matters/{id}/events            — CALENDAR events for a matter (task 039; read only)
+///   GET  /workassignments/{id}/events    — CALENDAR events for a work assignment (task 039; read only)
 ///   GET  /projects/{id}/contacts         — contacts with access to the project
 ///   GET  /projects/{id}/organizations    — organizations linked to project contacts
 ///   GET  /matters/{id}/todos             — to-dos for a matter (sprk_todo, regarding=matter)
@@ -28,6 +31,17 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   GET  /workassignments/{id}/todos     — to-dos for a work assignment
 ///   POST /workassignments/{id}/todos     — create a new to-do regarding the work assignment
 ///   PATCH /todos/{id}                    — update a to-do (scoped to its own accessible root)
+///   GET  /{matters|workassignments|servicerequests|invoices}/{id}/documents                          — documents (task 031)
+///   GET  /{matters|workassignments|servicerequests|invoices}/{id}/documents/{documentId}/content     — download
+///   POST /{matters|workassignments|servicerequests|invoices}/{id}/documents                          — upload
+///   GET  /{matters|workassignments|servicerequests|invoices}/{id}/documents/{documentId}/versions    — version history
+///   DELETE /{documents|todos|events}/{id} — delete a record the caller created, with Read on its parent (task 032)
+///
+/// DOCUMENTS ON EVERY CORE RECORD (task 031 / FR-24): one list, download, versions and upload handler,
+/// generalized over the document parent (ExternalDataService.DocumentParentKind). Project, matter and
+/// work assignment rights come from RightsForRoot; a service request's from the submitter scope (the
+/// Service Requests module's accessible set); an invoice's are inherited from its matter and project
+/// (owner decision 2026-10-11, option A — the union, RightsForInvoiceAsync).
 ///
 /// READ routes verify the caller holds Read on the requested record (HoldsReadOnProject /
 /// ListTodosForRoot, both through RightsForRoot). Returns 403 if not; NEVER an empty collection, which
@@ -107,7 +121,7 @@ public static class ExternalProjectDataEndpoints
         group.MapGet("/projects/{id:guid}/documents", GetDocuments)
             .WithName("GetExternalProjectDocuments")
             .WithSummary("Get documents for a Secure Project")
-            .Produces<ExternalCollectionResponse<ExternalDocumentDto>>(StatusCodes.Status200OK)
+            .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
 
@@ -211,10 +225,188 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
+        // ---------------------------------------------------------------------------------------
+        // Documents on the other core records (spaarke-SPA-external-access-platform-r3 task 031, FR-24).
+        //
+        // The same four document routes as the project's, for matters, work assignments and service
+        // requests, through the SAME four handlers (generalized over the document parent). Each checks
+        // Tier-2 on the route record: Read to list, download and read versions, Create to upload. A
+        // service request is checked through the submitter scope (the requester is the caller). Invoice
+        // routes follow below (owner option A, 2026-10-11). The templates are literal, one registration
+        // per route, so the route-authorization ArchTest reads each one.
+        // ---------------------------------------------------------------------------------------
+
+        group.MapGet("/matters/{id:guid}/documents", GetMatterDocuments)
+            .WithName("GetExternalMatterDocuments")
+            .WithSummary("Get documents for a matter the caller can read")
+            .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        group.MapGet("/matters/{id:guid}/documents/{documentId:guid}/content", DownloadMatterDocumentContent)
+            .WithName("DownloadExternalMatterDocument")
+            .WithSummary("Download a matter document's content (authz-before-stream, app-only)")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapPost("/matters/{id:guid}/documents", UploadMatterDocument)
+            .WithName("UploadExternalMatterDocument")
+            .WithSummary("Upload a document to a matter (server-derived container, app-only)")
+            .Accepts<IFormFile>("multipart/form-data")
+            .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
+            .Produces<ExternalDocumentDto>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+
+        group.MapGet("/matters/{id:guid}/documents/{documentId:guid}/versions", GetMatterDocumentVersions)
+            .WithName("GetExternalMatterDocumentVersions")
+            .WithSummary("Get SPE version history for a document on a matter")
+            .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapGet("/workassignments/{id:guid}/documents", GetWorkAssignmentDocuments)
+            .WithName("GetExternalWorkAssignmentDocuments")
+            .WithSummary("Get documents for a work assignment the caller can read")
+            .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        group.MapGet("/workassignments/{id:guid}/documents/{documentId:guid}/content", DownloadWorkAssignmentDocumentContent)
+            .WithName("DownloadExternalWorkAssignmentDocument")
+            .WithSummary("Download a work assignment document's content (authz-before-stream, app-only)")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapPost("/workassignments/{id:guid}/documents", UploadWorkAssignmentDocument)
+            .WithName("UploadExternalWorkAssignmentDocument")
+            .WithSummary("Upload a document to a work assignment (server-derived container, app-only)")
+            .Accepts<IFormFile>("multipart/form-data")
+            .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
+            .Produces<ExternalDocumentDto>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+
+        group.MapGet("/workassignments/{id:guid}/documents/{documentId:guid}/versions", GetWorkAssignmentDocumentVersions)
+            .WithName("GetExternalWorkAssignmentDocumentVersions")
+            .WithSummary("Get SPE version history for a document on a work assignment")
+            .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        group.MapGet("/servicerequests/{id:guid}/documents", GetServiceRequestDocuments)
+            .WithName("GetExternalServiceRequestDocuments")
+            .WithSummary("Get documents for a service request the caller submitted")
+            .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        group.MapGet("/servicerequests/{id:guid}/documents/{documentId:guid}/content", DownloadServiceRequestDocumentContent)
+            .WithName("DownloadExternalServiceRequestDocument")
+            .WithSummary("Download a service request document's content (authz-before-stream, app-only)")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
+
+        group.MapPost("/servicerequests/{id:guid}/documents", UploadServiceRequestDocument)
+            .WithName("UploadExternalServiceRequestDocument")
+            .WithSummary("Upload a document to a service request the caller submitted (server-derived container, app-only)")
+            .Accepts<IFormFile>("multipart/form-data")
+            .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
+            .Produces<ExternalDocumentDto>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
+
+        group.MapGet("/servicerequests/{id:guid}/documents/{documentId:guid}/versions", GetServiceRequestDocumentVersions)
+            .WithName("GetExternalServiceRequestDocumentVersions")
+            .WithSummary("Get SPE version history for a document on a service request the caller submitted")
+            .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        // Invoice documents (task 031, owner decision 2026-10-11, option A "inherit"): the same four handlers. An invoice
+        // is not a root, so its rights are the caller's rights on its PARENT records — the union over the invoice's
+        // sprk_matter and sprk_project (RightsForInvoiceAsync). Read lists, downloads and reads versions; Create uploads.
+        group.MapGet("/invoices/{id:guid}/documents", GetInvoiceDocuments)
+            .WithName("GetExternalInvoiceDocuments")
+            .WithSummary("Get documents for an invoice whose matter or project the caller can read")
+            .Produces<ExternalDocumentListResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapGet("/invoices/{id:guid}/documents/{documentId:guid}/content", DownloadInvoiceDocumentContent)
+            .WithName("DownloadExternalInvoiceDocument")
+            .WithSummary("Download an invoice document's content (authz-before-stream, app-only)")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapPost("/invoices/{id:guid}/documents", UploadInvoiceDocument)
+            .WithName("UploadExternalInvoiceDocument")
+            .WithSummary("Upload a document to an invoice (Create inherited from its matter or project; server-derived container, app-only)")
+            .Accepts<IFormFile>("multipart/form-data")
+            .DisableAntiforgery() // multipart upload; auth is the JWT + Tier-2 gate, not a form token
+            .Produces<ExternalDocumentDto>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapGet("/invoices/{id:guid}/documents/{documentId:guid}/versions", GetInvoiceDocumentVersions)
+            .WithName("GetExternalInvoiceDocumentVersions")
+            .WithSummary("Get SPE version history for a document on an invoice")
+            .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         // GET /api/v1/external/projects/{id}/events — calendar events for the project
         group.MapGet("/projects/{id:guid}/events", GetEvents)
             .WithName("GetExternalProjectEvents")
             .WithSummary("Get calendar events for a Secure Project (sprk_event records regarding the project)")
+            .Produces<ExternalCollectionResponse<ExternalEventDto>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        // Task 039 (FR-03): the same read for the other two roots that have events. The handler is ListEventsForRoot, the
+        // project route's own, so the Read check and the DTO are identical. Read only: event CREATE stays project-only.
+        group.MapGet("/matters/{id:guid}/events", GetMatterEvents)
+            .WithName("GetExternalMatterEvents")
+            .WithSummary("Get calendar events regarding an accessible matter (sprk_event, sprk_regardingmatter)")
+            .Produces<ExternalCollectionResponse<ExternalEventDto>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        group.MapGet("/workassignments/{id:guid}/events", GetWorkAssignmentEvents)
+            .WithName("GetExternalWorkAssignmentEvents")
+            .WithSummary("Get calendar events regarding an accessible work assignment (sprk_event, sprk_regardingworkassignment)")
             .Produces<ExternalCollectionResponse<ExternalEventDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
@@ -253,6 +445,56 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        // ---------------------------------------------------------------------------------------
+        // Delete-own (spaarke-SPA-external-access-platform-r3 task 032, FR-26) — the first DELETE routes on this plane.
+        //
+        // Hard delete of a document, to-do or event the CALLER created (the task-030 stamp), while the caller still holds
+        // Read on every parent this plane authorizes (the modelled parent lookups; other lookups on the row are not
+        // consulted). One check decides all three (AuthorizeDeleteOwnAsync); no access level
+        // and no Dataverse role lets a caller delete someone else's row here. General delete stays a Dataverse role in the
+        // model-driven app. There is no DELETE for messages (owner 2026-10-10: messages are not deletable). The service
+        // request delete (owner 2026-10-11, option A) is the fourth route below.
+        // ---------------------------------------------------------------------------------------
+
+        group.MapDelete("/documents/{id:guid}", DeleteOwnDocument)
+            .WithName("DeleteOwnExternalDocument")
+            .WithSummary("Delete a document the caller created, and its file (creator stamp + Read on its parent)")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapDelete("/todos/{id:guid}", DeleteOwnTodo)
+            .WithName("DeleteOwnExternalTodo")
+            .WithSummary("Delete a to-do the caller created (creator stamp + Read on its root)")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        group.MapDelete("/events/{id:guid}", DeleteOwnEvent)
+            .WithName("DeleteOwnExternalEvent")
+            .WithSummary("Delete a calendar event the caller created (creator stamp + Read on its root)")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        // Owner decision 2026-10-11 (task 032 follow-up, FR-26), option A: the REQUESTER may delete a service request that has
+        // no related row at all; any related row (documents, messages, threads, events, to-dos, memos, analyses, signals)
+        // is a 409 has_related_records, and the requester asks legal to recall it by posting on the request's thread
+        // (POST /servicerequests/{id}/messages, task 034). Hard delete.
+        group.MapDelete("/servicerequests/{id:guid}", DeleteOwnServiceRequest)
+            .WithName("DeleteOwnExternalServiceRequest")
+            .WithSummary("Delete a service request the caller requested, while it is open and has no related records (else 409 service_request_closed or has_related_records)")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
     }
 
     // =========================================================================
@@ -273,8 +515,8 @@ public static class ExternalProjectDataEndpoints
         if (projectIds.Count == 0)
             return Results.Ok(new ExternalCollectionResponse<ExternalProjectDto>());
 
-        var projects = await dataService.GetProjectsAsync(projectIds, ct);
-        return Results.Ok(new ExternalCollectionResponse<ExternalProjectDto> { Value = projects });
+        // Task 105: the service's response carries `truncated` when the list was cut short (additive field).
+        return Results.Ok(await dataService.GetProjectsAsync(projectIds, ct));
     }
 
     private static async Task<IResult> GetProjectById(
@@ -294,37 +536,59 @@ public static class ExternalProjectDataEndpoints
         return project is null ? Results.NotFound() : Results.Ok(project);
     }
 
-    private static async Task<IResult> GetDocuments(
-        Guid id,
+    // -------------------------------------------------------------------------------------------
+    // Documents on every core record (spaarke-SPA-external-access-platform-r3 task 031, FR-24).
+    //
+    // ONE implementation each of list, download, versions and upload, generalized over the document
+    // parent (project, matter, work assignment, service request), as task 029 did for to-dos. The route
+    // handlers are thin adapters that name their parent kind. The project routes keep their templates,
+    // names, statuses and messages: "project" is now one row of the parent map, not a separate code path.
+    // -------------------------------------------------------------------------------------------
+
+    private static async Task<IResult> ListDocumentsForParent(
+        ExternalDataService.DocumentParentKind parentKind,
+        Guid parentId,
         HttpContext httpContext,
         ExternalDataService dataService,
+        ExternalModuleRegistry modules,
         CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        if (!HoldsReadOnProject(callerContext, id))
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this project");
+        // ADR-003: an inaccessible parent DENIES, never an empty list (task 136).
+        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, parentId, dataService, modules, ct);
+        if (upstreamFault is not null) return upstreamFault;
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
+            return DenyDocumentParent(parentKind);
 
-        var documents = await dataService.GetDocumentsAsync(id, ct);
-        return Results.Ok(new ExternalCollectionResponse<ExternalDocumentDto> { Value = documents });
+        var documents = await dataService.GetDocumentsAsync(parentKind, parentId, callerContext, ct);
+        return Results.Ok(new ExternalDocumentListResponse
+        {
+            Value = documents.Value,
+            Truncated = documents.Truncated,
+            // The upload route's own Create check, on the rights just used for Read (task 054 review: a ViewOnly reader
+            // must not be offered an upload that can only fail).
+            CanCreate = rights.HasFlag(Spaarke.Dataverse.AccessRights.Create),
+        });
     }
 
     /// <summary>
     /// Streams a document's content to an authorized external caller.
     ///
-    /// <b>Authz-before-stream (highest-consequence property).</b> Authorization — project access AND
-    /// document→project scoping — is fully enforced BEFORE any SPE pointer resolution or Graph read.
+    /// <b>Authz-before-stream (highest-consequence property).</b> Authorization — Read on the parent AND
+    /// document→parent scoping — is fully enforced BEFORE any SPE pointer resolution or Graph read.
     /// An unauthorized caller receives 403 with NO bytes and NO Graph call. Broker-only: streaming uses
     /// the existing app-only <see cref="SpeFileStore.DownloadFileAsync(string, string, CancellationToken)"/>
     /// — NOT the OBO path — and no Graph pointer (driveId/itemId) is ever returned to the client.
     /// </summary>
-    private static async Task<IResult> DownloadDocumentContent(
+    private static async Task<IResult> DownloadDocumentForParent(
+        ExternalDataService.DocumentParentKind parentKind,
         Guid id,
         Guid documentId,
         HttpContext httpContext,
         ExternalDataService dataService,
+        ExternalModuleRegistry modules,
         IDocumentStorageResolver storageResolver,
         ISpeFileOperations fileStore,
         ILogger<Program> logger,
@@ -334,28 +598,35 @@ public static class ExternalProjectDataEndpoints
         if (callerContext is null) return MissingContextResult();
 
         // ── AUTHORIZATION FIRST — nothing below reads SPE/Graph until BOTH checks pass ──
-        // (1) Read on the project (task 136 · C2). Presence in the caller's map is NOT enough: a Secure
+        // (1) Read on the parent (task 136 · C2). Presence in the caller's map is NOT enough: a Secure
         //     project reached only through an organization grant used to sit there with no rights, and this
         //     route then streamed its documents app-only.
-        if (!HoldsReadOnProject(callerContext, id))
+        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        if (upstreamFault is not null) return upstreamFault;
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
-            logger.LogWarning("[EXT-DOWNLOAD] Contact {ContactId} denied — no access to project {ProjectId}",
-                callerContext.ContactId, id);
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this project");
+            logger.LogWarning("[EXT-DOWNLOAD] Contact {ContactId} denied — no access to {ParentKind} {ParentId}",
+                callerContext.ContactId, parentKind, id);
+            return DenyDocumentParent(parentKind);
         }
 
-        // (2) Document→project scoping — the requested document MUST belong to the requested project.
-        //     A mismatch OR a non-existent document is a uniform 403 (do not leak document existence).
-        //     This is an app-only Dataverse authorization read — it resolves NO Graph pointer.
-        var (documentProjectId, documentName) = await dataService.GetDocumentProjectAndNameAsync(documentId, ct);
-        if (documentProjectId is null || documentProjectId.Value != id)
+        // (2) Document→parent scoping — the requested document MUST belong to the requested record through
+        //     that record type's own lookup. A mismatch OR a non-existent document is a uniform 403 (do not
+        //     leak document existence). This is an app-only Dataverse authorization read — it resolves NO
+        //     Graph pointer.
+        //     Fix round for task 039 (ExternalMultiRootRule, owner decision 2026-10-12, option B): a document also filed to
+        //     a SECURE root the caller cannot read (or one whose secure state cannot be read) is withheld exactly as one not
+        //     under this parent, with the SAME response, so the answer cannot be used to tell whether such a document
+        //     exists. Without it a reader of project P who knew the id of a document filed to P and to secure matter M
+        //     downloaded it through P's route.
+        var document = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
+        var documentName = document.DocumentName;
+        if (!await IsDocumentReadableUnderAsync(document, id, callerContext, dataService, ct))
         {
             logger.LogWarning(
-                "[EXT-DOWNLOAD] Contact {ContactId} denied — document {DocumentId} not in project {ProjectId}",
-                callerContext.ContactId, documentId, id);
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "This document is not part of the requested project");
+                "[EXT-DOWNLOAD] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, or also filed to a secure record the caller cannot read",
+                callerContext.ContactId, documentId, parentKind, id);
+            return DenyDocumentNotUnderParent(parentKind);
         }
 
         // ── AUTHORIZED — only now resolve SPE pointers (server-side) and stream app-only ──
@@ -372,8 +643,8 @@ public static class ExternalProjectDataEndpoints
             }
 
             logger.LogInformation(
-                "[EXT-DOWNLOAD] Contact {ContactId} downloaded document {DocumentId} from project {ProjectId}",
-                callerContext.ContactId, documentId, id);
+                "[EXT-DOWNLOAD] Contact {ContactId} downloaded document {DocumentId} from {ParentKind} {ParentId}",
+                callerContext.ContactId, documentId, parentKind, id);
 
             // application/octet-stream + attachment: force download of untrusted external content
             // (no inline rendering). Pointers are never surfaced to the client.
@@ -418,8 +689,7 @@ public static class ExternalProjectDataEndpoints
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
             return DenyRoot(rootKind);
 
-        var todos = await dataService.GetTodosAsync(rootKind, rootId, ct);
-        return Results.Ok(new ExternalCollectionResponse<ExternalTodoDto> { Value = todos });
+        return Results.Ok(await dataService.GetTodosAsync(rootKind, rootId, callerContext, ct));
     }
 
     private static async Task<IResult> CreateTodoForRoot(
@@ -462,6 +732,11 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "sprk_name is required");
 
+        // Task 106: sprk_todo.sprk_duedate is a calendar date (Dataverse Date Only); refuse what is not one rather than
+        // let Dataverse answer 400 behind a 500.
+        if (DueDateProblem(request.SprkDuedate) is { } badDueDate)
+            return badDueDate;
+
         // The parent flows from the ROUTE — the owner's "flows from the creation context". The
         // caller cannot name a parent in the body: CreateExternalTodoRequest is a closed DTO with no
         // regarding member, so the root gated above is necessarily the root written.
@@ -475,12 +750,14 @@ public static class ExternalProjectDataEndpoints
 
         // Task 152 (#1044 split): the calling contact is the triggering person — it becomes Assigned To. A workforce
         // systemuser with no linked contact carries Guid.Empty here; the to-do is then created unassigned (logged).
+        // Task 030 (FR-25): the resolved principal is also the creator stamp — never anything from the request body.
         var created = await dataService.CreateTodoAsync(
             rootKind,
             rootId,
             request,
             owningTeamId,
             callerContext.ContactId == Guid.Empty ? null : callerContext.ContactId,
+            callerContext,
             ct);
         return Results.Created($"/api/v1/external/todos/{created.SprkTodoid}", created);
     }
@@ -553,6 +830,338 @@ public static class ExternalProjectDataEndpoints
         RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, projectId)
             .HasFlag(Spaarke.Dataverse.AccessRights.Read);
 
+    /// <summary>
+    /// The caller's rights on one document parent (task 031, FR-24): Read gates list, download and versions;
+    /// Create gates upload. Fail-closed: a parent the caller cannot reach is <see cref="Spaarke.Dataverse.AccessRights.None"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Project, matter, work assignment</b> are accessible roots: their rights are the evaluator's answer on
+    /// the principal, through the same <see cref="RightsForRoot"/> the to-do routes use.</para>
+    /// <para><b>A service request is not a root.</b> It is authorized through the submitter scope, the Service
+    /// Requests module's accessible set (<c>sprk_requestedby</c> = the caller's contact; CIAM partners only when
+    /// <c>ExternalAccess:PartnerServiceRequestsEnabled</c> is on). The requester alone gets Read and Create; anyone
+    /// else, and a request that does not exist, gets None. Both deny identically, so an id cannot be probed. A missing
+    /// module descriptor, or a module that grants the caller nothing, denies before any read. A requester read that
+    /// FAILS (throttle, outage) is a 503 <see cref="ServiceRequestUnreadableReasonCode"/>, never a 403.</para>
+    /// <para><b>An invoice is not a root either</b> (owner decision 2026-10-11, option A): it INHERITS the caller's
+    /// rights on its parent records — the union over its matter and project (<see cref="RightsForInvoiceAsync"/>). An
+    /// invoice read that FAILS is a 503 <see cref="InvoiceUnreadableReasonCode"/>.</para>
+    /// </remarks>
+    private static async Task<(Spaarke.Dataverse.AccessRights Rights, IResult? Fault)> RightsForDocumentParentAsync(
+        CallerPrincipal caller,
+        ExternalDataService.DocumentParentKind parentKind,
+        Guid parentId,
+        ExternalDataService dataService,
+        ExternalModuleRegistry modules,
+        CancellationToken ct)
+    {
+        switch (parentKind)
+        {
+            case ExternalDataService.DocumentParentKind.Project:
+                return (RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, parentId), null);
+            case ExternalDataService.DocumentParentKind.Matter:
+                return (RightsForRoot(caller, ExternalDataService.TodoRootKind.Matter, parentId), null);
+            case ExternalDataService.DocumentParentKind.WorkAssignment:
+                return (RightsForRoot(caller, ExternalDataService.TodoRootKind.WorkAssignment, parentId), null);
+            case ExternalDataService.DocumentParentKind.ServiceRequest:
+                try
+                {
+                    return ((await RightsForServiceRequestAsync(caller, parentId, dataService, modules, withState: false, ct)).Rights, null);
+                }
+                catch (ExternalDataService.DataverseUnavailableException)
+                {
+                    // The requester could not be READ — a fault, not an answer. "Could not tell" must never read as
+                    // "no access" (a throttle would 403 the real requester), and it must not read as access either.
+                    // Nothing has touched SPE or been written. The detail is generic, so it leaks nothing.
+                    return (Spaarke.Dataverse.AccessRights.None, ServiceRequestUnreadableProblem());
+                }
+            case ExternalDataService.DocumentParentKind.Invoice:
+                try
+                {
+                    return (await RightsForInvoiceAsync(caller, parentId, dataService, ct), null);
+                }
+                catch (ExternalDataService.DataverseUnavailableException)
+                {
+                    // Same posture as the service request: an unreadable invoice is a fault (503), never "no access" and
+                    // never access. Nothing has touched SPE or been written.
+                    return (Spaarke.Dataverse.AccessRights.None, Results.Problem(
+                        statusCode: StatusCodes.Status503ServiceUnavailable,
+                        title: "Invoice unavailable",
+                        detail: "The invoice could not be checked right now. Try again shortly.",
+                        extensions: new Dictionary<string, object?> { ["reasonCode"] = InvoiceUnreadableReasonCode }));
+                }
+            default:
+                return (Spaarke.Dataverse.AccessRights.None, null);
+        }
+    }
+
+    /// <summary>The 503 reason code when a service request's requester could not be read (task 031 review).</summary>
+    internal const string ServiceRequestUnreadableReasonCode = "sdap.access.service_request_unreadable";
+
+    /// <summary>The 503 answered when a service request's row could not be read (generic detail; leaks nothing).</summary>
+    private static IResult ServiceRequestUnreadableProblem() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Service request unavailable",
+            detail: "The service request could not be checked right now. Try again shortly.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = ServiceRequestUnreadableReasonCode });
+
+    /// <summary>The 503 reason code when an invoice's parents could not be read (task 031, owner option A).</summary>
+    internal const string InvoiceUnreadableReasonCode = "sdap.access.invoice_unreadable";
+
+    /// <summary>
+    /// The caller's rights on an invoice's documents (task 031, owner decision 2026-10-11, option A "inherit"): the UNION
+    /// of the caller's rights on the invoice's parent records, its <c>sprk_matter</c> and <c>sprk_project</c>, through
+    /// the same <see cref="RightsForRoot"/> the matter and project routes use.
+    /// </summary>
+    /// <remarks>
+    /// <para>The union is the rule the invoices module already applies to make an invoice visible (its matter OR its
+    /// project in the caller's Read set) and the rule the message routes apply to an invoice post
+    /// (<c>ExternalMessageEndpoints.RightsThroughParents</c>). So Read on either parent lists, downloads and reads
+    /// versions; Create on either parent uploads; a ViewOnly parent alone gives Read without Create.</para>
+    /// <para>A caller holding Read on no matter and no project is denied before any read (the read could not change the
+    /// answer). A missing invoice and an invoice under records the caller cannot read deny identically (no oracle).</para>
+    /// </remarks>
+    private static async Task<Spaarke.Dataverse.AccessRights> RightsForInvoiceAsync(
+        CallerPrincipal caller,
+        Guid invoiceId,
+        ExternalDataService dataService,
+        CancellationToken ct)
+    {
+        if (caller.GetAccessibleMatterIds().Count == 0 && !caller.GetAccessibleProjectIds().Any())
+            return Spaarke.Dataverse.AccessRights.None;
+
+        var parents = await dataService.GetInvoiceParentsAsync(invoiceId, ct);
+        if (parents is not { } invoiceParents)
+            return Spaarke.Dataverse.AccessRights.None;
+
+        var rights = Spaarke.Dataverse.AccessRights.None;
+        if (invoiceParents.MatterId is { } matterId)
+            rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.Matter, matterId);
+        if (invoiceParents.ProjectId is { } projectId)
+            rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, projectId);
+
+        return rights;
+    }
+
+    /// <summary>
+    /// The caller's rights on a service request (the requester gate) and, when <paramref name="withState"/> is set, its
+    /// open / closed state from the SAME row read (the delete route: one read, not two). The state is
+    /// <see cref="ExternalDataService.ServiceRequestOpenState.Unknown"/> unless it was asked for AND the caller holds
+    /// rights: a caller without rights never has a state to use.
+    /// </summary>
+    private static async Task<(Spaarke.Dataverse.AccessRights Rights, ExternalDataService.ServiceRequestOpenState State)>
+        RightsForServiceRequestAsync(
+            CallerPrincipal caller,
+            Guid serviceRequestId,
+            ExternalDataService dataService,
+            ExternalModuleRegistry modules,
+            bool withState,
+            CancellationToken ct)
+    {
+        const ExternalDataService.ServiceRequestOpenState noState = ExternalDataService.ServiceRequestOpenState.Unknown;
+        var entity = ExternalDataService
+            .GetDocumentParentBinding(ExternalDataService.DocumentParentKind.ServiceRequest).EntityLogicalName;
+        var module = modules.FindByEntity(entity);
+        if (module is null)
+            return (Spaarke.Dataverse.AccessRights.None, noState);
+
+        // The module grants this caller nothing at all (a CIAM partner with PartnerServiceRequestsEnabled off, or a
+        // principal with no contact): deny BEFORE any Dataverse read. The read could not change the answer.
+        if (!module.EffectiveDimensions.Any(d => d.AccessibleIds(caller).Count > 0))
+            return (Spaarke.Dataverse.AccessRights.None, noState);
+
+        // A genuine "no such request" is null (uniform 403, no oracle); a read that failed throws
+        // DataverseUnavailableException, which the caller turns into 503.
+        Guid? requester;
+        var state = noState;
+        if (withState)
+        {
+            var read = await dataService.GetServiceRequestRequesterAndStateAsync(serviceRequestId, ct);
+            requester = read?.RequesterId;
+            state = read?.State ?? noState;
+        }
+        else
+        {
+            requester = await dataService.GetServiceRequestRequesterAsync(serviceRequestId, ct);
+        }
+
+        return requester is { } requesterId && module.IsRecordAccessible(caller, requesterId)
+            ? (Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Create, state)
+            : (Spaarke.Dataverse.AccessRights.None, noState);
+    }
+
+    /// <summary>The noun a document parent is named by in a ProblemDetails detail.</summary>
+    private static string DocumentParentNoun(ExternalDataService.DocumentParentKind parentKind) => parentKind switch
+    {
+        ExternalDataService.DocumentParentKind.Matter => "matter",
+        ExternalDataService.DocumentParentKind.WorkAssignment => "work assignment",
+        ExternalDataService.DocumentParentKind.ServiceRequest => "service request",
+        ExternalDataService.DocumentParentKind.Invoice => "invoice",
+        _ => "project",
+    };
+
+    private static IResult DenyDocumentParent(ExternalDataService.DocumentParentKind parentKind) =>
+        Results.Problem(statusCode: 403, title: "Forbidden",
+            detail: $"You do not have access to this {DocumentParentNoun(parentKind)}");
+
+    /// <summary>
+    /// The single-document check (download, versions): the document is under the route parent AND the caller holds Read on
+    /// every SECURE root it is filed to (<see cref="ExternalMultiRootRule"/>, owner decision 2026-10-12, option B). The
+    /// secure flags of its unreadable linked roots are read app-only, only once the document is known to be under the
+    /// route parent; a document not under it is refused without that read.
+    /// </summary>
+    private static async Task<bool> IsDocumentReadableUnderAsync(
+        ExternalDataService.DocumentScopeRead document, Guid routeParentId, CallerPrincipal caller,
+        ExternalDataService dataService, CancellationToken ct)
+    {
+        if (!document.IsUnder(routeParentId))
+            return false;
+        var flags = await dataService.ReadSecureRootFlagsAsync(caller, new[] { document.Roots.Links }, ct);
+        return document.IsReadableUnder(routeParentId, caller, flags);
+    }
+
+    /// <summary>
+    /// The ONE response for "this document is not (readably) under this record": not filed to the route's parent, absent, or
+    /// (fix round for task 039) also filed to a secure root the caller cannot read. A single body for all three, so the
+    /// refusal cannot be used to probe whether a document exists or where else it is filed.
+    /// </summary>
+    private static IResult DenyDocumentNotUnderParent(ExternalDataService.DocumentParentKind parentKind) =>
+        Results.Problem(statusCode: 403, title: "Forbidden",
+            detail: $"This document is not part of the requested {DocumentParentNoun(parentKind)}");
+
+    // Route adapters (task 031). Each names its parent kind; the behaviour lives in the four *ForParent handlers.
+
+    private static Task<IResult> GetDocuments(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        CancellationToken ct) =>
+        ListDocumentsForParent(ExternalDataService.DocumentParentKind.Project, id, httpContext, dataService, modules, ct);
+
+    private static Task<IResult> GetMatterDocuments(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        CancellationToken ct) =>
+        ListDocumentsForParent(ExternalDataService.DocumentParentKind.Matter, id, httpContext, dataService, modules, ct);
+
+    private static Task<IResult> GetWorkAssignmentDocuments(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        CancellationToken ct) =>
+        ListDocumentsForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, httpContext, dataService, modules, ct);
+
+    private static Task<IResult> GetServiceRequestDocuments(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        CancellationToken ct) =>
+        ListDocumentsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, httpContext, dataService, modules, ct);
+
+    private static Task<IResult> GetInvoiceDocuments(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        CancellationToken ct) =>
+        ListDocumentsForParent(ExternalDataService.DocumentParentKind.Invoice, id, httpContext, dataService, modules, ct);
+
+    private static Task<IResult> DownloadDocumentContent(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        ILogger<Program> logger, CancellationToken ct) =>
+        DownloadDocumentForParent(ExternalDataService.DocumentParentKind.Project, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, logger, ct);
+
+    private static Task<IResult> DownloadMatterDocumentContent(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        ILogger<Program> logger, CancellationToken ct) =>
+        DownloadDocumentForParent(ExternalDataService.DocumentParentKind.Matter, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, logger, ct);
+
+    private static Task<IResult> DownloadWorkAssignmentDocumentContent(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        ILogger<Program> logger, CancellationToken ct) =>
+        DownloadDocumentForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, logger, ct);
+
+    private static Task<IResult> DownloadServiceRequestDocumentContent(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        ILogger<Program> logger, CancellationToken ct) =>
+        DownloadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, logger, ct);
+
+    private static Task<IResult> DownloadInvoiceDocumentContent(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        ILogger<Program> logger, CancellationToken ct) =>
+        DownloadDocumentForParent(ExternalDataService.DocumentParentKind.Invoice, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, logger, ct);
+
+    private static Task<IResult> UploadDocument(
+        Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
+        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        UploadDocumentForParent(ExternalDataService.DocumentParentKind.Project, id, file, httpContext, dataService,
+            modules, containerResolver, fileStore, ownership, logger, ct);
+
+    private static Task<IResult> UploadMatterDocument(
+        Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
+        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        UploadDocumentForParent(ExternalDataService.DocumentParentKind.Matter, id, file, httpContext, dataService,
+            modules, containerResolver, fileStore, ownership, logger, ct);
+
+    private static Task<IResult> UploadWorkAssignmentDocument(
+        Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
+        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        UploadDocumentForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, file, httpContext, dataService,
+            modules, containerResolver, fileStore, ownership, logger, ct);
+
+    private static Task<IResult> UploadServiceRequestDocument(
+        Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
+        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        UploadDocumentForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, file, httpContext, dataService,
+            modules, containerResolver, fileStore, ownership, logger, ct);
+
+    private static Task<IResult> UploadInvoiceDocument(
+        Guid id, IFormFile file, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, RecordContainerResolver containerResolver, ISpeFileOperations fileStore,
+        IRecordOwnershipResolver ownership, ILogger<Program> logger, CancellationToken ct) =>
+        UploadDocumentForParent(ExternalDataService.DocumentParentKind.Invoice, id, file, httpContext, dataService,
+            modules, containerResolver, fileStore, ownership, logger, ct);
+
+    private static Task<IResult> GetDocumentVersions(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.Project, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+
+    private static Task<IResult> GetMatterDocumentVersions(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.Matter, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+
+    private static Task<IResult> GetWorkAssignmentDocumentVersions(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.WorkAssignment, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+
+    private static Task<IResult> GetServiceRequestDocumentVersions(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.ServiceRequest, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+
+    private static Task<IResult> GetInvoiceDocumentVersions(
+        Guid id, Guid documentId, HttpContext httpContext, ExternalDataService dataService,
+        ExternalModuleRegistry modules, IDocumentStorageResolver storageResolver, ISpeFileOperations fileStore,
+        Spaarke.Dataverse.IGenericEntityService entityService, ILogger<Program> logger, CancellationToken ct) =>
+        ListDocumentVersionsForParent(ExternalDataService.DocumentParentKind.Invoice, id, documentId, httpContext,
+            dataService, modules, storageResolver, fileStore, entityService, logger, ct);
+
     private static IResult DenyRoot(ExternalDataService.TodoRootKind rootKind)
     {
         var noun = rootKind switch
@@ -594,16 +1203,18 @@ public static class ExternalProjectDataEndpoints
         CreateTodoForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, request, httpContext, dataService, ownership, ct);
 
     /// <summary>
-    /// POST /api/v1/external/projects/{id}/documents — upload a file and create its <c>sprk_document</c>.
+    /// POST /api/v1/external/{projects|matters|workassignments|servicerequests}/{id}/documents — upload a file
+    /// and create its <c>sprk_document</c> (task 031 generalized it from project to every document parent).
     /// </summary>
     /// <remarks>
-    /// <para><b>Two-stage gate, mirroring <see cref="CreateEvent"/>:</b> project participation, then the
-    /// <c>Create</c> right. A View-Only participant can read documents but must never add one.</para>
+    /// <para><b>Two-stage gate, mirroring <see cref="CreateEvent"/>:</b> Read on the parent, then the
+    /// <c>Create</c> right (<see cref="RightsForDocumentParentAsync"/>). A View-Only participant can read
+    /// documents but must never add one.</para>
     ///
     /// <para><b>The container is SERVER-DERIVED and the client cannot name it</b> (#858). The request
     /// carries only the file; the container comes from
-    /// <c>RecordContainerResolver.ResolveForRecordAsync("sprk_project", id)</c>, so the authorization key
-    /// and the storage target both derive from the same project id and no code path lets them disagree.
+    /// <c>RecordContainerResolver.ResolveForRecordAsync(parent entity, id)</c>, so the authorization key
+    /// and the storage target both derive from the same record id and no code path lets them disagree.
     /// The old route this replaces (<c>POST /api/v1/external/documents/upload</c>) never existed
     /// server-side at all, so there is no prior contract to preserve here.</para>
     ///
@@ -625,11 +1236,13 @@ public static class ExternalProjectDataEndpoints
     /// orphaned file in the container rather than a document record pointing at nothing — the recoverable
     /// direction, and the same order the wizard's pipeline uses.</para>
     /// </remarks>
-    private static async Task<IResult> UploadDocument(
+    private static async Task<IResult> UploadDocumentForParent(
+        ExternalDataService.DocumentParentKind parentKind,
         Guid id,
         IFormFile file,
         HttpContext httpContext,
         ExternalDataService dataService,
+        ExternalModuleRegistry modules,
         RecordContainerResolver containerResolver,
         ISpeFileOperations fileStore,
         IRecordOwnershipResolver ownership,
@@ -639,27 +1252,43 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        // ── AUTHORIZATION FIRST — nothing below touches Dataverse or SPE until both checks pass ──
-        if (!callerContext.HasProjectAccess(id))
+        var noun = DocumentParentNoun(parentKind);
+        var parentEntity = ExternalDataService.GetDocumentParentBinding(parentKind).EntityLogicalName;
+
+        // ── AUTHORIZATION FIRST — nothing below touches SPE, or writes Dataverse, until both checks pass ──
+        // (A service request's rights need one app-only read of its requester; nothing is written.)
+        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        if (upstreamFault is not null) return upstreamFault;
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
-            logger.LogWarning("[EXT-UPLOAD] Contact {ContactId} denied — no access to project {ProjectId}",
-                callerContext.ContactId, id);
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this project");
+            logger.LogWarning("[EXT-UPLOAD] Contact {ContactId} denied — no access to {ParentKind} {ParentId}",
+                callerContext.ContactId, parentKind, id);
+            return DenyDocumentParent(parentKind);
         }
 
-        var rights = callerContext.GetEffectiveRights(id);
         if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
         {
             logger.LogWarning(
-                "[EXT-UPLOAD] Contact {ContactId} denied — access level lacks Create on project {ProjectId}",
-                callerContext.ContactId, id);
+                "[EXT-UPLOAD] Contact {ContactId} denied — access level lacks Create on {ParentKind} {ParentId}",
+                callerContext.ContactId, parentKind, id);
             return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "Your access level does not permit uploading documents to this project",
+                detail: $"Your access level does not permit uploading documents to this {noun}",
                 extensions: new Dictionary<string, object?>
                 {
                     ["reasonCode"] = "sdap.access.deny.insufficient_rights"
                 });
+        }
+
+        // FR-25 (task 030): the document row is stamped with its creator AFTER the SPE write, and the stamp fails closed
+        // for an unattributable principal. Refuse here, before the bytes land, so that failure cannot leave an orphaned
+        // file in the container (same rule StampCreator enforces).
+        if (!ExternalDataService.CanStampCreator(callerContext))
+        {
+            logger.LogWarning(
+                "[EXT-UPLOAD] Refused upload to {ParentKind} {ParentId}: the caller resolves to neither a systemuser nor a contact",
+                parentKind, id);
+            return Results.Problem(statusCode: 403, title: "Forbidden",
+                detail: "Your identity could not be attributed, so the document cannot be uploaded");
         }
 
         if (file is null || file.Length == 0)
@@ -672,22 +1301,23 @@ public static class ExternalProjectDataEndpoints
         // it to a single bare segment. Both facts are enforced by SpeUploadPathIsFlatGuardTests.
         var uploadPath = SpeUploadPath.SanitizeFileName(file.FileName);
 
-        // ── AUTHORIZED — resolve the document's OWNER from the project BEFORE any write (task 146) ──
-        // A document filed to a secure project is owned by the named Secure team. Resolved before the SPE upload so a
+        // ── AUTHORIZED — resolve the document's OWNER from the parent BEFORE any write (task 146) ──
+        // A document filed to a secure record is owned by the named Secure team. Resolved before the SPE upload so a
         // refusal leaves neither bytes nor a row behind.
-        var (owningTeamId, ownerRefusal) = await ResolveChildOwnerAsync(ownership, "sprk_project", id, "document", ct);
+        var (owningTeamId, ownerRefusal) = await ResolveChildOwnerAsync(ownership, parentEntity, id, "document", ct);
         if (ownerRefusal is not null)
         {
             logger.LogWarning(
-                "[EXT-UPLOAD] Refused upload to project {ProjectId}: no owner could be resolved for the document", id);
+                "[EXT-UPLOAD] Refused upload to {ParentKind} {ParentId}: no owner could be resolved for the document",
+                parentKind, id);
             return ownerRefusal;
         }
 
-        // ── Derive the container from the PROJECT, never from the request ──
+        // ── Derive the container from the PARENT RECORD, never from the request ──
         ContainerDecision decision;
         try
         {
-            decision = await containerResolver.ResolveForRecordAsync("sprk_project", id, ct);
+            decision = await containerResolver.ResolveForRecordAsync(parentEntity, id, ct);
         }
         catch (SdapProblemException ex)
         {
@@ -699,13 +1329,13 @@ public static class ExternalProjectDataEndpoints
             || string.IsNullOrWhiteSpace(decision.ContainerId))
         {
             // Refuse rather than write into whatever container happens to be reachable. For a secure
-            // project that substitution IS the leak this project exists to close.
+            // record that substitution IS the leak this project exists to close.
             logger.LogWarning(
-                "[EXT-UPLOAD] No usable container for project {ProjectId} (outcome {Outcome}) — refusing upload",
-                id, decision.Outcome);
+                "[EXT-UPLOAD] No usable container for {ParentKind} {ParentId} (outcome {Outcome}) — refusing upload",
+                parentKind, id, decision.Outcome);
             return Results.Problem(statusCode: 422, title: "Storage not configured",
-                detail: "This project has no storage container configured, so the document cannot be "
-                        + "uploaded. Please contact the project owner.");
+                detail: $"This {noun} has no storage container configured, so the document cannot be "
+                        + $"uploaded. Please contact the {noun} owner.");
         }
 
         FileHandleDto? uploaded;
@@ -720,21 +1350,22 @@ public static class ExternalProjectDataEndpoints
             // Nothing was written — the existing document is intact. Stated plainly so the SPA can tell
             // the user to rename, rather than the upload silently replacing someone else's file.
             logger.LogInformation(
-                "[EXT-UPLOAD] Contact {ContactId} hit a name collision on '{FileName}' in project {ProjectId}",
-                callerContext.ContactId, uploadPath, id);
+                "[EXT-UPLOAD] Contact {ContactId} hit a name collision on '{FileName}' in {ParentKind} {ParentId}",
+                callerContext.ContactId, uploadPath, parentKind, id);
             return Results.Problem(statusCode: 409, title: "File already exists",
-                detail: $"A file named '{uploadPath}' already exists in this project. Nothing was uploaded "
+                detail: $"A file named '{uploadPath}' already exists in this {noun}. Nothing was uploaded "
                         + "or changed — rename the file and try again.");
         }
 
         if (uploaded is null)
         {
-            logger.LogError("[EXT-UPLOAD] Upload returned no handle for project {ProjectId}", id);
+            logger.LogError("[EXT-UPLOAD] Upload returned no handle for {ParentKind} {ParentId}", parentKind, id);
             return Results.Problem(statusCode: 502, title: "Upload failed",
                 detail: "The document could not be stored. Please try again.");
         }
 
         var created = await dataService.CreateDocumentAsync(
+            parentKind,
             id,
             new ExternalUploadedFilePointers(
                 // FileHandleDto.DriveId is the drive resolved during the upload; fall back to the
@@ -745,36 +1376,50 @@ public static class ExternalProjectDataEndpoints
                 FileSizeBytes: uploaded.Size,
                 WebUrl: uploaded.WebUrl),
             owningTeamId,
+            callerContext, // task 030 (FR-25): the creator stamp comes from the resolved principal
             ct);
 
         logger.LogInformation(
-            "[EXT-UPLOAD] Contact {ContactId} uploaded '{FileName}' to project {ProjectId} as document {DocumentId}",
-            callerContext.ContactId, uploadPath, id, created.SprkDocumentid);
+            "[EXT-UPLOAD] Contact {ContactId} uploaded '{FileName}' to {ParentKind} {ParentId} as document {DocumentId}",
+            callerContext.ContactId, uploadPath, parentKind, id, created.SprkDocumentid);
 
         // Response carries the document row only — Graph pointers are never surfaced on this surface.
         return Results.Created(
-            $"/api/v1/external/projects/{id}/documents/{created.SprkDocumentid}", created);
+            $"/api/v1/external/{DocumentParentSegment(parentKind)}/{id}/documents/{created.SprkDocumentid}", created);
     }
 
+    /// <summary>The route segment of a document parent, for the Location of a created document.</summary>
+    private static string DocumentParentSegment(ExternalDataService.DocumentParentKind parentKind) => parentKind switch
+    {
+        ExternalDataService.DocumentParentKind.Matter => "matters",
+        ExternalDataService.DocumentParentKind.WorkAssignment => "workassignments",
+        ExternalDataService.DocumentParentKind.ServiceRequest => "servicerequests",
+        ExternalDataService.DocumentParentKind.Invoice => "invoices",
+        _ => "projects",
+    };
+
     /// <summary>
-    /// GET /api/v1/external/projects/{id}/documents/{documentId}/versions — SPE version history.
+    /// GET /api/v1/external/{projects|matters|workassignments|servicerequests}/{id}/documents/{documentId}/versions
+    /// — SPE version history.
     /// </summary>
     /// <remarks>
-    /// Authorization is the SAME two-stage gate as <c>DownloadDocumentContent</c>, deliberately
+    /// Authorization is the SAME two-stage gate as <c>DownloadDocumentForParent</c>, deliberately
     /// mirrored rather than reinvented, and for the same reason: nothing touches SPE/Graph until BOTH
     /// checks pass.
-    ///   (1) Read on the project (task 136 — was project presence), and
-    ///   (2) document→project scoping — a mismatch OR a non-existent document is a UNIFORM 403, so
+    ///   (1) Read on the parent (task 136 — was project presence; task 031 — any document parent), and
+    ///   (2) document→parent scoping — a mismatch OR a non-existent document is a UNIFORM 403, so
     ///       this route cannot be used to probe which document ids exist.
     /// Only then are the SPE pointers resolved and the version list read APP-ONLY. It must not use
     /// the OBO ListFileVersionsAsUserAsync path: an external CIAM contact is not a Dataverse
     /// principal and holds no delegated permission on the drive item.
     /// </remarks>
-    private static async Task<IResult> GetDocumentVersions(
+    private static async Task<IResult> ListDocumentVersionsForParent(
+        ExternalDataService.DocumentParentKind parentKind,
         Guid id,
         Guid documentId,
         HttpContext httpContext,
         ExternalDataService dataService,
+        ExternalModuleRegistry modules,
         IDocumentStorageResolver storageResolver,
         ISpeFileOperations fileStore,
         Spaarke.Dataverse.IGenericEntityService entityService,
@@ -785,22 +1430,24 @@ public static class ExternalProjectDataEndpoints
         if (callerContext is null) return MissingContextResult();
 
         // ── AUTHORIZATION FIRST — nothing below reads SPE/Graph until BOTH checks pass ──
-        if (!HoldsReadOnProject(callerContext, id))
+        var (rights, upstreamFault) = await RightsForDocumentParentAsync(callerContext, parentKind, id, dataService, modules, ct);
+        if (upstreamFault is not null) return upstreamFault;
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
         {
-            logger.LogWarning("[EXT-VERSIONS] Contact {ContactId} denied — no access to project {ProjectId}",
-                callerContext.ContactId, id);
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this project");
+            logger.LogWarning("[EXT-VERSIONS] Contact {ContactId} denied — no access to {ParentKind} {ParentId}",
+                callerContext.ContactId, parentKind, id);
+            return DenyDocumentParent(parentKind);
         }
 
-        var (documentProjectId, _) = await dataService.GetDocumentProjectAndNameAsync(documentId, ct);
-        if (documentProjectId is null || documentProjectId.Value != id)
+        // Fix round for task 039 (ExternalMultiRootRule, owner option B): as the download route, a document also filed to a
+        // SECURE root the caller cannot read is the same uniform 403 as one not under this parent.
+        var document = await dataService.GetDocumentParentAndNameAsync(parentKind, documentId, ct);
+        if (!await IsDocumentReadableUnderAsync(document, id, callerContext, dataService, ct))
         {
             logger.LogWarning(
-                "[EXT-VERSIONS] Contact {ContactId} denied — document {DocumentId} not in project {ProjectId}",
-                callerContext.ContactId, documentId, id);
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "This document is not part of the requested project");
+                "[EXT-VERSIONS] Contact {ContactId} denied — document {DocumentId} not in {ParentKind} {ParentId}, or also filed to a secure record the caller cannot read",
+                callerContext.ContactId, documentId, parentKind, id);
+            return DenyDocumentNotUnderParent(parentKind);
         }
 
         // ── AUTHORIZED — resolve SPE pointers server-side and read app-only ──
@@ -847,14 +1494,25 @@ public static class ExternalProjectDataEndpoints
     }
 
     /// <summary>
-    /// GET /api/v1/external/projects/{id}/events — calendar events for a project.
+    /// The calendar events of one accessible root, shared by the project, matter and work-assignment routes (task 039,
+    /// FR-03): ONE implementation, three thin adapters that name their root kind, as <see cref="ListTodosForRoot"/>.
     /// </summary>
     /// <remarks>
-    /// Same gate as every other project-scoped read: the caller must hold Read on {id}
-    /// (<see cref="HoldsReadOnProject"/>, task 136) or this returns 403 before any Dataverse read happens.
+    /// <para><b>Gate:</b> Read on the route root from <see cref="RightsForRoot"/>, or 403 before any Dataverse read. A root
+    /// the caller cannot reach, one that does not exist and one the caller holds nothing on are the same answer
+    /// (<see cref="DenyRoot"/>), so an id cannot be probed. The rights come from the principal, so there is no Dataverse
+    /// read in the decision and nothing here can be a 503; an unreadable events read is flagged <c>truncated</c> like
+    /// every other list on this plane (task 105).</para>
+    /// <para><b>The project route is the shipped one:</b> the same Read test (<see cref="HoldsReadOnProject"/> is
+    /// <c>RightsForRoot(Project)</c>), the same 403 body, the same DTO.</para>
+    /// <para><b>Secure records:</b> a secure matter or work assignment is reachable only through the rights the principal
+    /// holds on it (a grant row with a level), exactly as for its to-dos and documents; nothing here widens that. An
+    /// event also filed to a root the caller cannot read is withheld (<c>ExternalDataService.GetEventsAsync</c>), the same
+    /// rule delete-own applies.</para>
     /// </remarks>
-    private static async Task<IResult> GetEvents(
-        Guid id,
+    private static async Task<IResult> ListEventsForRoot(
+        ExternalDataService.TodoRootKind rootKind,
+        Guid rootId,
         HttpContext httpContext,
         ExternalDataService dataService,
         CancellationToken ct)
@@ -862,13 +1520,27 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        if (!HoldsReadOnProject(callerContext, id))
-            return Results.Problem(statusCode: 403, title: "Forbidden",
-                detail: "You do not have access to this project");
+        // ADR-003: an out-of-scope root DENIES, never an empty list.
+        if (!RightsForRoot(callerContext, rootKind, rootId).HasFlag(Spaarke.Dataverse.AccessRights.Read))
+            return DenyRoot(rootKind);
 
-        var events = await dataService.GetEventsAsync(id, ct);
-        return Results.Ok(new ExternalCollectionResponse<ExternalEventDto> { Value = events });
+        return Results.Ok(await dataService.GetEventsAsync(rootKind, rootId, callerContext, ct));
     }
+
+    /// <summary>GET /api/v1/external/projects/{id}/events — calendar events for a project.</summary>
+    private static Task<IResult> GetEvents(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, CancellationToken ct) =>
+        ListEventsForRoot(ExternalDataService.TodoRootKind.Project, id, httpContext, dataService, ct);
+
+    /// <summary>GET /api/v1/external/matters/{id}/events — calendar events for a matter (task 039).</summary>
+    private static Task<IResult> GetMatterEvents(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, CancellationToken ct) =>
+        ListEventsForRoot(ExternalDataService.TodoRootKind.Matter, id, httpContext, dataService, ct);
+
+    /// <summary>GET /api/v1/external/workassignments/{id}/events — calendar events for a work assignment (task 039).</summary>
+    private static Task<IResult> GetWorkAssignmentEvents(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, CancellationToken ct) =>
+        ListEventsForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, httpContext, dataService, ct);
 
     /// <summary>
     /// POST /api/v1/external/projects/{id}/events — create a calendar event on a project.
@@ -913,12 +1585,18 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "sprk_status must be Draft (1) or Open (659490001); omit it to create the event Open.");
 
+        // Task 098: sprk_event.sprk_duedate is a calendar date (Dataverse Date Only); refuse what is not one rather than let
+        // Dataverse answer 400 behind a 500.
+        if (DueDateProblem(request.SprkDuedate) is { } badDueDate)
+            return badDueDate;
+
         // Task 146: owned by the project's team (the named Secure team for a secure project), or refused.
         var (owningTeamId, ownerRefusal) = await ResolveChildOwnerAsync(ownership, "sprk_project", id, "event", ct);
         if (ownerRefusal is not null)
             return ownerRefusal;
 
-        var created = await dataService.CreateEventAsync(id, request, owningTeamId, ct);
+        // Task 030 (FR-25): the creator stamp comes from the resolved principal.
+        var created = await dataService.CreateEventAsync(id, request, owningTeamId, callerContext, ct);
         return Results.Created($"/api/v1/external/projects/{id}/events/{created.SprkEventid}", created);
     }
 
@@ -935,8 +1613,7 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "You do not have access to this project");
 
-        var contacts = await dataService.GetContactsAsync(id, ct);
-        return Results.Ok(new ExternalCollectionResponse<ExternalContactDto> { Value = contacts });
+        return Results.Ok(await dataService.GetContactsAsync(id, ct));
     }
 
     private static async Task<IResult> GetOrganizations(
@@ -952,8 +1629,7 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "You do not have access to this project");
 
-        var organizations = await dataService.GetOrganizationsAsync(id, ct);
-        return Results.Ok(new ExternalCollectionResponse<ExternalOrganizationDto> { Value = organizations });
+        return Results.Ok(await dataService.GetOrganizationsAsync(id, ct));
     }
 
     private static async Task<IResult> UpdateTodo(
@@ -1019,9 +1695,364 @@ public static class ExternalProjectDataEndpoints
                     ["reasonCode"] = "sdap.access.deny.insufficient_rights"
                 });
 
+        if (DueDateProblem(request.SprkDuedate) is { } badDueDate)
+            return badDueDate;
+
+        // Task 106: only a to-do status reason (its state is written with it — ExternalDataService.TodoStateCodeFor).
+        if (request.Statuscode is { } status && ExternalDataService.TodoStateCodeFor(status) is null)
+            return Results.Problem(statusCode: 400, title: "Bad Request",
+                detail: "statuscode must be Open (1), In Progress (659490001), Completed (2) or Dismissed (659490002).");
+
         await dataService.UpdateTodoAsync(id, request, ct);
         return Results.NoContent();
     }
+
+    // -------------------------------------------------------------------------------------------
+    // Delete-own (spaarke-SPA-external-access-platform-r3 task 032, FR-26)
+    // -------------------------------------------------------------------------------------------
+
+    /// <summary>The reason code of every delete-own refusal: one code, so a refusal says nothing about WHY.</summary>
+    internal const string DeleteOwnDeniedReasonCode = "sdap.access.deny.delete_own";
+
+    /// <summary>The reason code when the row could not be read or deleted right now (nothing was deleted).</summary>
+    internal const string DeleteOwnUnavailableReasonCode = "sdap.access.delete_own_unavailable";
+
+    /// <summary>
+    /// THE delete-own check (FR-26): every external delete runs it, and nothing is deleted unless it returns
+    /// <see langword="null"/>. Otherwise it returns the response to send.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Both halves must hold</b> (project CLAUDE.md §2):</para>
+    /// <list type="number">
+    /// <item><b>The caller created the row</b>: <see cref="ExternalDataService.IsCreatedByCaller"/> over the row's
+    /// task-030 stamps (owner decision 2026-10-11, option (b) widened). A row with no stamp is nobody's. No access level
+    /// (FullAccess included) and no Dataverse role can stand in for the stamp.</item>
+    /// <item><b>The caller still holds Read on EVERY parent this plane authorizes</b>, through the same
+    /// <see cref="RightsForDocumentParentAsync"/> the list and download routes use (a project, matter or work assignment
+    /// from the principal's rights; a service request through the requester scope). The parents consulted are the
+    /// lookups <c>ExternalDataService</c> models for the kind: a document's <c>sprk_project</c>, <c>sprk_matter</c>,
+    /// <c>sprk_workassignment</c>, <c>sprk_relatedservicerequest</c> and — since the owner's invoice decision of
+    /// 2026-10-11 (option A) — <c>sprk_invoice</c>, whose Read is inherited from the invoice's matter and project; a
+    /// to-do's or event's <c>sprk_regardingproject</c>, <c>sprk_regardingmatter</c> and
+    /// <c>sprk_regardingworkassignment</c>. Other lookups on the row (for example <c>sprk_relatedinvoice</c>,
+    /// <c>sprk_relatedagreement</c>, <c>sprk_relatedcontact</c>, <c>sprk_parentdocument</c>, <c>sprk_email</c>) are not
+    /// consulted. A row filed to none of the modelled parents is refused. Every modelled
+    /// parent, not any: a document also filed by staff to a modelled record the caller can no longer read is not the
+    /// caller's to destroy.</item>
+    /// </list>
+    /// <para><b>No existence oracle.</b> A row that does not exist, someone else's row, an unstamped row and a row whose
+    /// parent the caller lost all get the SAME 403 (<see cref="DeleteOwnDeniedReasonCode"/>). A read that FAILED is a 503
+    /// (<see cref="DeleteOwnUnavailableReasonCode"/>, or the service-request 503 of
+    /// <see cref="RightsForDocumentParentAsync"/>), never a 403 and never a delete.</para>
+    /// <para>App-only, like every read on this plane: no OBO (ADR-028).</para>
+    /// </remarks>
+    private static async Task<IResult?> AuthorizeDeleteOwnAsync(
+        CallerPrincipal caller,
+        ExternalDataService.DeletableKind kind,
+        Guid id,
+        ExternalDataService dataService,
+        ExternalModuleRegistry modules,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        ExternalDataService.DeleteTarget? target;
+        try
+        {
+            target = await dataService.GetDeleteTargetAsync(kind, id, ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return DeleteOwnUnavailable();
+        }
+
+        // (1) The creator stamp. Absent and not-yours deny identically.
+        if (target is null || !ExternalDataService.IsCreatedByCaller(target, caller))
+        {
+            logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: absent or not created by the caller", kind, id);
+            return DenyDeleteOwn();
+        }
+
+        // (2) Read on every parent this plane authorizes (the modelled lookups only).
+        if (target.Parents.Count == 0 || target.HasUnreadableParentLink)
+        {
+            logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: filed to no parent this plane authorizes", kind, id);
+            return DenyDeleteOwn();
+        }
+
+        foreach (var parent in target.Parents)
+        {
+            var (rights, fault) = await RightsForDocumentParentAsync(caller, parent.Kind, parent.Id, dataService, modules, ct);
+            if (fault is not null)
+                return fault;
+            if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
+            {
+                logger.LogWarning("[EXT-DELETE] Refused {Kind} {Id}: no Read on its {ParentKind} {ParentId}",
+                    kind, id, parent.Kind, parent.Id);
+                return DenyDeleteOwn();
+            }
+        }
+
+        return null;
+    }
+
+    private static IResult DenyDeleteOwn() =>
+        Results.Problem(statusCode: 403, title: "Forbidden",
+            detail: "You can only delete a record you created, on a record you can still open.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = DeleteOwnDeniedReasonCode });
+
+    private static IResult DeleteOwnUnavailable() =>
+        Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Delete unavailable",
+            detail: "The record could not be checked or deleted right now, and nothing was deleted. Try again shortly.",
+            extensions: new Dictionary<string, object?> { ["reasonCode"] = DeleteOwnUnavailableReasonCode });
+
+    /// <summary>
+    /// DELETE /api/v1/external/documents/{id} — hard-delete a document the caller created, and its SPE file.
+    /// </summary>
+    /// <remarks>
+    /// <para>Authorized by <see cref="AuthorizeDeleteOwnAsync"/>, then deleted through the internal plane's delete,
+    /// <see cref="DocumentCheckoutService.DeleteAsync(Guid, string, DocumentFileDeletePolicy, CancellationToken)"/>
+    /// (reused, not forked): the checkout lock is honoured, then the file goes app-only through <see cref="SpeFileStore"/>
+    /// (<c>SpeContainerOwnershipGuard</c>), then the row.</para>
+    /// <para><b>Order and partial failure</b> (<see cref="DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure"/>,
+    /// ADR-007): the row's pointer is verified, the FILE is deleted first, and only then the row. If the file cannot be
+    /// deleted the row is kept and this answers 409 (pointer refused) or 503 (try again). If the file went but the row
+    /// could not be deleted, this answers 500: the row then points at a deleted file. A retry here is refused by the
+    /// pointer check (the item no longer exists), so only a staff delete in the model-driven app clears it; the task 032
+    /// notes record this known limit. A file that was already gone before the delete counts as deleted.</para>
+    /// <para><b>One problem key.</b> Every problem body on the delete routes (403, 409, 500, 503, including the
+    /// service-request 503 of <see cref="RightsForDocumentParentAsync"/>) carries its code in <c>reasonCode</c>, so the
+    /// SPA reads one key. The older <c>code</c> key of the upload and download routes is not used here.</para>
+    /// </remarks>
+    private static async Task<IResult> DeleteOwnDocument(
+        Guid id,
+        HttpContext httpContext,
+        ExternalDataService dataService,
+        ExternalModuleRegistry modules,
+        DocumentCheckoutService documents,
+        ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        if (await AuthorizeDeleteOwnAsync(callerContext, ExternalDataService.DeletableKind.Document, id, dataService,
+                modules, logger, ct) is { } refusal)
+            return refusal;
+
+        DeleteResult result;
+        try
+        {
+            result = await documents.DeleteAsync(
+                id, httpContext.TraceIdentifier, DocumentFileDeletePolicy.VerifiedFileFirstKeepRowOnFailure, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // DeleteAsync throws only from its token and document read, before anything is deleted. An HttpClient timeout
+            // is a TaskCanceledException while ct is NOT cancelled: that is a failed read (503), not the caller leaving.
+            logger.LogError(ex, "[EXT-DELETE] Document {DocumentId} could not be read for the delete", id);
+            return DeleteOwnUnavailable();
+        }
+
+        switch (result)
+        {
+            case SuccessDeleteResult:
+            case NotFoundDeleteResult: // gone between the check and the delete: the end state the caller asked for
+                logger.LogInformation("[EXT-DELETE] Document {DocumentId} deleted by its creator (or already gone)", id);
+                return Results.NoContent();
+
+            case CheckedOutDeleteResult:
+                // The lock holder's name is not shown on the external plane.
+                return Results.Problem(statusCode: 409, title: "Document checked out",
+                    detail: "This document is being edited, so it cannot be deleted now. Nothing was deleted.",
+                    extensions: new Dictionary<string, object?> { ["reasonCode"] = "document_locked" });
+
+            case FileNotDeletedDeleteResult notDeleted:
+                return Results.Problem(statusCode: notDeleted.FailureStatusCode, title: "Document not deleted",
+                    detail: "The document's file could not be deleted, so the document was kept. Nothing was deleted.",
+                    extensions: new Dictionary<string, object?> { ["reasonCode"] = notDeleted.Code });
+
+            case FailedDeleteResult:
+                // Under VerifiedFileFirstKeepRowOnFailure the file step ran first and succeeded, so a failed result is
+                // the row delete failing after the file went.
+                logger.LogError(
+                    "[EXT-DELETE] Document {DocumentId}: the file was deleted but the row was not ({Result})",
+                    id, result.GetType().Name);
+                return Results.Problem(statusCode: 500, title: "Document not fully deleted",
+                    detail: "The document's file was deleted, but its record could not be removed. Ask the record's "
+                            + "owner to remove it.",
+                    extensions: new Dictionary<string, object?> { ["reasonCode"] = "document_row_not_deleted" });
+
+            default:
+                // A result this route does not map. It makes no claim about what was deleted.
+                logger.LogError(
+                    "[EXT-DELETE] Document {DocumentId}: unmapped delete result {Result}", id, result.GetType().Name);
+                return Results.Problem(statusCode: 500, title: "Document delete failed",
+                    detail: "The document could not be deleted. Try again shortly.",
+                    extensions: new Dictionary<string, object?> { ["reasonCode"] = "document_delete_failed" });
+        }
+    }
+
+    /// <summary>DELETE /api/v1/external/todos/{id} — hard-delete a to-do the caller created (FR-26).</summary>
+    private static async Task<IResult> DeleteOwnTodo(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        ILogger<Program> logger, CancellationToken ct)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        if (await AuthorizeDeleteOwnAsync(callerContext, ExternalDataService.DeletableKind.Todo, id, dataService,
+                modules, logger, ct) is { } refusal)
+            return refusal;
+
+        return await DeleteAuthorizedRowAsync(ExternalDataService.DeletableKind.Todo, id, dataService, logger, ct);
+    }
+
+    /// <summary>DELETE /api/v1/external/events/{id} — hard-delete a calendar event the caller created (FR-26).</summary>
+    private static async Task<IResult> DeleteOwnEvent(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        ILogger<Program> logger, CancellationToken ct)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        if (await AuthorizeDeleteOwnAsync(callerContext, ExternalDataService.DeletableKind.Event, id, dataService,
+                modules, logger, ct) is { } refusal)
+            return refusal;
+
+        return await DeleteAuthorizedRowAsync(ExternalDataService.DeletableKind.Event, id, dataService, logger, ct);
+    }
+
+    /// <summary>The 409 reason code when a service request has related records (owner decision 2026-10-11, option A).</summary>
+    internal const string HasRelatedRecordsReasonCode = "has_related_records";
+
+    /// <summary>The 409 reason code when a service request is closed (owner decision 2026-10-12: no deleting once closed).</summary>
+    internal const string ServiceRequestClosedReasonCode = "service_request_closed";
+
+    /// <summary>
+    /// DELETE /api/v1/external/servicerequests/{id} — hard-delete a service request the caller REQUESTED, while NOTHING is
+    /// related to it (owner decision 2026-10-11, option A; FR-26).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>1. Requester only.</b> <c>sprk_requestedby</c> must be the caller's contact: the same requester scope the
+    /// message and document routes use (<see cref="RightsForDocumentParentAsync"/>, the Service Requests module's accessible
+    /// set), so the partner switch (<c>ExternalAccess:PartnerServiceRequestsEnabled</c>) is honoured. Absent, someone
+    /// else's and a no-access caller get the SAME 403 as the other delete routes (<see cref="DeleteOwnDeniedReasonCode"/>);
+    /// an unreadable requester is the existing 503 (<see cref="ServiceRequestUnreadableReasonCode"/>).</para>
+    /// <para><b>2. Open only (owner decision 2026-10-12).</b> A closed (inactive) request is never deleted: 409
+    /// <see cref="ServiceRequestClosedReasonCode"/>, decided BEFORE the related-records probe and before any delete. The state
+    /// is <c>statecode</c> (0 open, 1 closed; the table has no other status), read in the SAME row read as the requester. A
+    /// state that is not a readable 0 or 1 fails closed: refused with the retryable 503 <c>delete_own_unavailable</c>,
+    /// nothing deleted.</para>
+    /// <para><b>3. Option A.</b> If ANY row is related (every 1:N relationship from <c>sprk_servicerequest</c>:
+    /// documents, messages, threads, events, to-dos, memos, analyses, signals - active or not), nothing is deleted and the
+    /// answer is 409 <c>has_related_records</c>: all eight relationships are <c>RemoveLink</c>, so a delete would orphan
+    /// staff records. The relationship probes are app-only; one that cannot be read is a 503 and nothing is deleted.</para>
+    /// <para><b>4. Recall.</b> The 409 tells the user to ask legal to recall it. That request is a plain message posted on
+    /// the request's own thread, <c>POST /api/v1/external/servicerequests/{id}/messages</c> (task 034, requester only, no
+    /// email) - no endpoint or column of its own.</para>
+    /// <para>Known limits: the state read, the probe and the delete are separate calls. A related row created between the
+    /// probe and the delete (for example by staff) is unlinked, not deleted. A request closed by staff between the state
+    /// read and the delete is still deleted (an <c>If-Match</c> delete would close that window; not done).</para>
+    /// </remarks>
+    private static async Task<IResult> DeleteOwnServiceRequest(
+        Guid id, HttpContext httpContext, ExternalDataService dataService, ExternalModuleRegistry modules,
+        ILogger<Program> logger, CancellationToken ct)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        // ONE row read gives the requester and the state. The requester gate decides first (a non-requester never has the
+        // state used); a read that fails is the existing 503 service_request_unreadable and nothing is deleted.
+        Spaarke.Dataverse.AccessRights rights;
+        ExternalDataService.ServiceRequestOpenState state;
+        try
+        {
+            (rights, state) = await RightsForServiceRequestAsync(callerContext, id, dataService, modules, withState: true, ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return ServiceRequestUnreadableProblem();
+        }
+
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Read))
+        {
+            logger.LogWarning("[EXT-DELETE] Refused ServiceRequest {Id}: absent or not requested by the caller", id);
+            return DenyDeleteOwn();
+        }
+
+        // Owner decision 2026-10-12: no deleting once the request is closed. Before the related-records probe and any delete.
+        if (state == ExternalDataService.ServiceRequestOpenState.Closed)
+        {
+            logger.LogInformation("[EXT-DELETE] Refused ServiceRequest {Id}: it is closed", id);
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Service request is closed",
+                detail: "This request is closed, so it can't be deleted.",
+                extensions: new Dictionary<string, object?> { ["reasonCode"] = ServiceRequestClosedReasonCode });
+        }
+
+        if (state != ExternalDataService.ServiceRequestOpenState.Open)
+        {
+            // Fail closed: a state this check cannot read as Active is never treated as open.
+            logger.LogWarning("[EXT-DELETE] Refused ServiceRequest {Id}: its state could not be read as open or closed", id);
+            return DeleteOwnUnavailable();
+        }
+
+        bool hasRelated;
+        try
+        {
+            hasRelated = await dataService.HasRelatedRecordsAsync(id, ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return DeleteOwnUnavailable();
+        }
+
+        if (hasRelated)
+        {
+            logger.LogInformation("[EXT-DELETE] Refused ServiceRequest {Id}: it has related records", id);
+            return Results.Problem(statusCode: StatusCodes.Status409Conflict, title: "Service request has activity",
+                detail: "This request already has activity (documents, messages or other records), so it can't be deleted. "
+                        + "You can ask legal to recall it by sending a request to recall.",
+                extensions: new Dictionary<string, object?> { ["reasonCode"] = HasRelatedRecordsReasonCode });
+        }
+
+        return await DeleteAuthorizedRowAsync(ExternalDataService.DeletableKind.ServiceRequest, id, dataService, logger, ct);
+    }
+
+    /// <summary>
+    /// The to-do, event and service request row delete, app-only. Call ONLY after <see cref="AuthorizeDeleteOwnAsync"/>
+    /// returned <see langword="null"/> (a service request: after <see cref="DeleteOwnServiceRequest"/>'s own checks).
+    /// </summary>
+    private static async Task<IResult> DeleteAuthorizedRowAsync(
+        ExternalDataService.DeletableKind kind,
+        Guid id,
+        ExternalDataService dataService,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        try
+        {
+            // A row gone between the check and the delete (false) is the end state the caller asked for.
+            await dataService.DeleteRecordAsync(kind, id, ct);
+        }
+        catch (ExternalDataService.DataverseUnavailableException)
+        {
+            return DeleteOwnUnavailable();
+        }
+
+        logger.LogInformation("[EXT-DELETE] {Kind} {Id} deleted by its creator", kind, id);
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Tasks 098 / 106: an event or to-do <c>sprk_duedate</c> (Dataverse Date Only) must be a calendar date
+    /// (<c>yyyy-MM-dd</c>, or a timestamp from an earlier SPA build, read as its leading ten characters by
+    /// <see cref="Spaarke.Dataverse.DataverseDateOnly"/>); anything else is a 400 here rather than Dataverse's 400 behind
+    /// a 500. Null (not sent) passes.
+    /// </summary>
+    private static IResult? DueDateProblem(string? dueDate) =>
+        dueDate is not null && !Spaarke.Dataverse.DataverseDateOnly.TryParse(dueDate, out _)
+            ? Results.Problem(statusCode: 400, title: "Bad Request", detail: "sprk_duedate must be a calendar date (yyyy-MM-dd).")
+            : null;
 
     // =========================================================================
     // Helpers

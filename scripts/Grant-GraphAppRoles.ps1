@@ -1,27 +1,33 @@
 <#
 .SYNOPSIS
-    Idempotently grants the 14 Microsoft Graph application (app-only) roles
-    enumerated in Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles onto a
-    specified User-Assigned Managed Identity service principal. Re-run safe.
+    Idempotently grants the Microsoft Graph application (app-only) roles
+    listed in a role-catalog source file onto a specified service principal
+    (a managed identity). Re-run safe. ADD-ONLY: it never removes a role.
 
 .DESCRIPTION
-    H10 (customer-provisioning-orchestration-r1) Graph app-role parity
-    mechanism per spec.md FR-13 + trap T3 (design.md §4B). Reads the 14-role
-    catalog from the compile-time constant
-    src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs
-    (r3 task 062; all 14 AppRoleId GUIDs populated by r1 task 005 on
-    2026-08-17) and syncs those grants onto the UAMI service principal that
-    authenticates the BFF's app-only Graph calls (mi-bff-api-{env}).
+    Operator helper (customer-provisioning-orchestration-r1 task 015). Two
+    catalogs, two identities (task 261 / G31 split them):
+      - scripts/provisioning/Grant-ControlPlaneIdentity.ps1 passes
+        src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/ControlPlaneGraphAppRoles.cs
+        for the L2 control-plane Worker identity.
+      - The default, src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs,
+        is the CUSTOMER STAMP identity's set. Do NOT run this script against a
+        customer stamp identity: H10 owns stamps (it grants the Entra role and
+        removes everything else), and the mailbox rows in that catalog are
+        granted through Exchange RBAC on stamps (H14a) — an Entra grant of
+        them reaches every mailbox in the tenant. Its remaining use is
+        Spaarke's own platform BFF identities (mi-bff-api-{env}), which use
+        Entra mailbox grants today.
 
     IDEMPOTENCY CONTRACT (spec.md FR-13 + task 015 POML step 4):
       - Fully-granted UAMI: re-run emits "No changes needed" and exits 0.
-      - Partially-granted UAMI: re-run applies only the missing (14 - present)
-        delta, verifies via re-read, and exits 0.
+      - Partially-granted UAMI: re-run applies only the missing delta,
+        verifies via re-read, and exits 0.
       - Real errors (Graph 403, unreachable, malformed principal): exits
         non-zero with a diagnostic. NEVER silent-skips a role — silent skip
         re-introduces trap T3 silent-fail per design.md §4B.
 
-    SOURCE-OF-TRUTH: GraphAppRoles.cs is the single canonical list. This
+    SOURCE-OF-TRUTH: the catalog file is the single canonical list. This
     script parses (Value, AppRoleId) pairs via regex; NO hardcoded role GUIDs
     live in this script (any hardcoded GUID would reintroduce the drift the
     constant was created to close — r3 task 062 rationale).
@@ -48,7 +54,7 @@
 
 .PARAMETER UamiPrincipalId
     Object ID (NOT appId) of the UAMI service principal on which to grant the
-    14 Graph app roles. MANDATORY. Obtain via:
+    catalog's Graph app roles. MANDATORY. Obtain via:
       # PREFERRED — deterministic ARM resource ID lookup (no name ambiguity):
       az identity show --ids /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<mi-name> --query principalId -o tsv
 
@@ -57,10 +63,14 @@
       # If you use this shape, confirm --resource-group matches the intended UAMI's RG.
       az identity show --name <mi-name> --resource-group <rg> --query principalId -o tsv
 
-.PARAMETER GraphAppRolesPath
-    Optional explicit path to GraphAppRoles.cs. Default resolves to
-    src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs relative
-    to this script.
+.PARAMETER CatalogPath
+    MANDATORY (task 261: there is no default - a default made the customer stamp catalog the answer to "grant the BFF's
+    roles", which is wrong for every identity but a stamp). One of:
+      - src/server/api/Sprk.Bff.Api/Infrastructure/Auth/PlatformBffGraphAppRoles.cs     (Spaarke's platform/demo BFF)
+      - src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/ControlPlaneGraphAppRoles.cs (the L2 Worker)
+      - src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs                (the stamp set - H10 owns it)
+    The script refuses the stamp catalog for any principal that is not a customer stamp identity (mi-spaarke-*), and
+    refuses any other catalog for a stamp identity. Alias: -GraphAppRolesPath.
 
 .PARAMETER DryRun
     Preview mode. Reads current UAMI SP appRoleAssignments and reports the
@@ -68,7 +78,7 @@
     T3 verification (nothing was applied).
 
 .EXAMPLE
-    # Grant the 14 roles onto a customer environment's UAMI
+    # Grant the platform BFF identity's roles (NOT a customer stamp — H10 owns those)
     .\Grant-GraphAppRoles.ps1 `
         -TenantId "<customer-tenant-guid>" `
         -UamiPrincipalId "<uami-object-id>"
@@ -82,7 +92,7 @@
 
 .EXAMPLE
     # Re-run against a fully-granted UAMI — expected output ends with:
-    #   [SUCCESS] No changes needed - UAMI SP already has all 14 grants.
+    #   [SUCCESS] No changes needed - UAMI SP already has every catalog grant.
     # Exit code: 0
     .\Grant-GraphAppRoles.ps1 `
         -TenantId "<tenant-guid>" `
@@ -91,8 +101,10 @@
 .NOTES
     Project:      customer-provisioning-orchestration-r1
     Task:         015 — Author Grant-GraphAppRoles.ps1 helper
-    Depends on:   005 (all 14 AppRoleId GUIDs populated in GraphAppRoles.cs)
-    Consumed by:  H10 handler (Wave C4, task 053) — Graph app-role parity step
+    Depends on:   005 (AppRoleId GUIDs populated); 261 (catalog split + evidence)
+    Consumed by:  Grant-ControlPlaneIdentity.ps1 (L2 identity); operators for
+                  platform BFF identities. H10 does NOT call it (it has its own
+                  REST granter, which also removes extra roles).
     Boundary:     Does NOT touch the BFF app-registration grants (that is
                   Register-EntraAppRegistrations.ps1's surface).
     Idempotent:   Yes — pre-check + delta apply + verify pattern (matches
@@ -103,7 +115,7 @@
     const string X = "Value";` + `private const string IdX = "GUID";` + `new
     GraphAppRole(NameConstant, "Display", IdConstant, ...)` array — all three
     parseable with unambiguous regex. Parser guards: if the parser matches
-    fewer than 14 roles OR references an unknown constant name, it fails
+    zero roles OR references an unknown constant name, it fails
     fast with a "parser desync" diagnostic pointing at the file. No new .NET
     project needed; no scripts/GraphAppRolesReader/ created.
 
@@ -119,9 +131,17 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$UamiPrincipalId,
 
-    [string]$GraphAppRolesPath,
+    [Parameter(Mandatory = $true)]
+    [Alias('GraphAppRolesPath')]
+    [string]$CatalogPath,
 
-    [switch]$DryRun
+    [switch]$DryRun,
+
+    # Task 261: a customer STAMP identity (mi-spaarke-{customerId}-{env}) is reconciled by H10 — it holds exactly
+    # FileStorageContainer.Selected in Entra and H10 removes everything else. This script is add-only and its default
+    # catalog carries the mailbox roles that are Exchange-scoped on stamps, so it refuses a stamp identity unless the
+    # operator says so explicitly.
+    [switch]$AllowStampPrincipal
 )
 
 $ErrorActionPreference = "Stop"
@@ -159,14 +179,14 @@ $script:AlreadyPresent = New-Object System.Collections.Generic.List[string]
 # ─────────────────────────────────────────────────────────────────────────────
 # Parses three shapes from the constant file (r3 task 062):
 #
-#   public  const string <RoleValueName>  = "<StableStringValue>";  // 14 entries + GraphResourceAppId
-#   private const string Id<Whatever>     = "<GUID>";               // 14 entries
-#   new GraphAppRole(<RoleValueName>, "<Display>", Id<Whatever>, ...) // 14 rows
+#   public  const string <RoleValueName>  = "<StableStringValue>";  // one per role + GraphResourceAppId
+#   private const string Id<Whatever>     = "<GUID>";               // one per role
+#   new GraphAppRole(<RoleValueName>, "<Display>", Id<Whatever>, ...) // one row per role
 #
 # The third shape binds pairs (RoleValueName -> IdConstantName). We then
 # resolve each side against the first two maps to yield (Value, AppRoleId).
 #
-# Parser is deliberately strict: unknown names or fewer than 14 matches abort
+# Parser is deliberately strict: unknown names or zero matches abort
 # with a "parser desync" diagnostic. If GraphAppRoles.cs is refactored into a
 # non-flat form (partial class, generated code, expression-bodied members),
 # the parser will fail fast rather than silently produce a wrong grant set.
@@ -372,37 +392,27 @@ if ($account.tenantId -ne $TenantId) {
 }
 Write-Success "Authenticated as '$($account.user.name)' in tenant $TenantId"
 
-# Resolve GraphAppRoles.cs path.
-if (-not $GraphAppRolesPath) {
-    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-    $default = Join-Path $scriptDir "..\src\server\api\Sprk.Bff.Api\Infrastructure\Auth\GraphAppRoles.cs"
-    $resolved = Resolve-Path -LiteralPath $default -ErrorAction SilentlyContinue
-    if ($resolved) { $GraphAppRolesPath = $resolved.Path }
-}
-if (-not $GraphAppRolesPath -or -not (Test-Path $GraphAppRolesPath)) {
-    Write-Fail "GraphAppRoles.cs not resolved (default relative path failed). Pass -GraphAppRolesPath explicitly."
+# Resolve the catalog path (mandatory; no default).
+if (-not (Test-Path -LiteralPath $CatalogPath)) {
+    Write-Fail "Catalog not found: $CatalogPath"
     exit 2
 }
-Write-Success "GraphAppRoles.cs source: $GraphAppRolesPath"
+$GraphAppRolesPath = (Resolve-Path -LiteralPath $CatalogPath).Path
+$isStampCatalog = $GraphAppRolesPath -match 'Sprk\.Bff\.Api[\\/]Infrastructure[\\/]Auth[\\/]GraphAppRoles\.cs$'
+Write-Success "Catalog source: $GraphAppRolesPath$(if ($isStampCatalog) { ' (customer STAMP set)' })"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 1 — Parse GraphAppRoles.cs (source of truth for 14 role IDs)
+# Step 1 — Parse the catalog (source of truth for the role IDs)
 # ─────────────────────────────────────────────────────────────────────────────
 
-Write-Step 1 "Parse GraphAppRoles.cs (single source of truth for 14 role IDs)"
+Write-Step 1 "Parse the role catalog (single source of truth for the role IDs)"
 
 $parsed        = Get-GraphAppRolesFromSource -SourcePath $GraphAppRolesPath
 $requiredRoles = $parsed.Roles
 
-# r3 task 062 established the catalog at 14 entries. Fewer = truncated/parser bug;
-# more = catalog expansion (report + continue, but flag for operator awareness).
-if ($requiredRoles.Count -lt 14) {
-    Write-Fail "Parsed $($requiredRoles.Count) roles from GraphAppRoles.cs, expected >= 14 (r3 task 062 baseline). Parser desync or file truncated. Aborting."
-    exit 3
-}
-if ($requiredRoles.Count -ne 14) {
-    Write-Warn "Parsed $($requiredRoles.Count) roles from GraphAppRoles.cs (spec.md expects 14). Continuing — verify catalog change is intentional."
-}
+# Task 261 (G31): the catalogs are evidence-backed and their sizes differ (stamp set 4, L2 set 8) —
+# no fixed count. The parser already fails on zero rows or an unknown constant; the role list is
+# printed below for the operator to compare with the task 261 note.
 
 # Fail fast on any null AppRoleId (r1 task 005 escalation gate — a null GUID silently
 # fails T3 in production per design.md §4B trap catalog).
@@ -440,6 +450,20 @@ try {
     exit 3
 }
 Write-Success "UAMI SP: '$($uamiSp.displayName)' (type=$($uamiSp.servicePrincipalType), appId=$($uamiSp.appId))"
+
+$isStampPrincipal = $uamiSp.displayName -like 'mi-spaarke-*'
+if ($isStampCatalog -and -not $isStampPrincipal) {
+    Write-Fail "The stamp catalog (GraphAppRoles.cs) is for customer stamp identities only; '$($uamiSp.displayName)' is not one (mi-spaarke-*). Use PlatformBffGraphAppRoles.cs for the platform BFF or ControlPlaneGraphAppRoles.cs for the L2 Worker."
+    exit 6
+}
+if ($isStampPrincipal -and -not $isStampCatalog) {
+    Write-Fail "'$($uamiSp.displayName)' is a customer stamp identity: it holds exactly the stamp set. Another catalog must never be granted to it."
+    exit 6
+}
+if ($isStampPrincipal -and -not $AllowStampPrincipal) {
+    Write-Fail "'$($uamiSp.displayName)' is a customer stamp identity. H10 owns it (grants FileStorageContainer.Selected, removes every other Graph role); this script is add-only. Re-run with -AllowStampPrincipal only if that is deliberate."
+    exit 6
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 4 — Read current app-role assignments on UAMI SP (Graph-resource-scoped)

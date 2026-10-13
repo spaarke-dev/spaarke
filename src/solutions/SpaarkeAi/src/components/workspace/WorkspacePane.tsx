@@ -61,7 +61,7 @@ import type {
 // Those symbols are no longer needed at this site; capability dispatchers
 // (the shared dispatchConsumer helper via its `workspaceTarget` arg +
 // FilePreviewContextWidget.dispatchSummarizeOnly) own them now.
-import { buildBffApiUrl } from '@spaarke/auth';
+import { buildBffApiUrl, isApiError } from '@spaarke/auth';
 import { usePaneCollapseContext, useComposeLaunch, useAnalysisLaunch } from '../shell/ThreePaneShell';
 // R3 ("Visible to assistant") — deep-import the cross-pane bridge hook (not the
 // `@spaarke/compose-components` barrel) so this workspace-pane module does NOT transitively pull the
@@ -600,7 +600,7 @@ export function WorkspacePane(): React.JSX.Element {
 
         try {
           const url = buildBffApiUrl(bffBaseUrl, `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`);
-          const response = await authenticatedFetch(url, {
+          await authenticatedFetch(url, {
             method: 'PATCH',
             headers: {
               'Content-Type': 'application/json',
@@ -608,11 +608,10 @@ export function WorkspacePane(): React.JSX.Element {
             },
             body: JSON.stringify(snap),
           });
-          // 404 = session not yet known to BFF — treat as benign (best-effort).
-          if (!response.ok && response.status !== 404) {
-            throw new Error(`HTTP ${response.status}`);
-          }
         } catch (err) {
+          // authenticatedFetch THROWS ApiError(404) rather than returning it: the session is not yet
+          // known to the BFF — benign (best-effort), not a save failure.
+          if (isApiError(err, 404)) return;
           logTelemetryError(TELEMETRY_TAB_RESTORE_SAVE_FAILURE, {
             sessionId: chatSessionId,
             message: err instanceof Error ? err.message : String(err),
@@ -909,28 +908,27 @@ export function WorkspacePane(): React.JSX.Element {
           });
           if (cancelled) return;
 
-          if (response.ok) {
-            const snapshot = (await response.json()) as WorkspaceTabPersistenceSnapshot;
-            if (cancelled) return;
+          const snapshot = (await response.json()) as WorkspaceTabPersistenceSnapshot;
+          if (cancelled) return;
 
-            await managerRef.current.restoreFromPersistence(snapshot, resolveWorkspaceWidget);
-            if (cancelled) return;
+          await managerRef.current.restoreFromPersistence(snapshot, resolveWorkspaceWidget);
+          if (cancelled) return;
 
-            // restoreFromPersistence no-ops if a non-Home tab already exists (e.g.
-            // the user opened a tab during the restore window) — treat that as a
-            // successful server restore too, since a widget tab is present either way.
-            restoredFromServer = managerRef.current.getSnapshot().tabs.some(t => t.kind === 'widget');
-          } else if (response.status !== 404) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          // 404 falls through to the local anchor-keyed fallback below (benign —
-          // no tabs known to the BFF for this session yet).
+          // restoreFromPersistence no-ops if a non-Home tab already exists (e.g.
+          // the user opened a tab during the restore window) — treat that as a
+          // successful server restore too, since a widget tab is present either way.
+          restoredFromServer = managerRef.current.getSnapshot().tabs.some(t => t.kind === 'widget');
         } catch (err) {
           if (cancelled) return;
-          logTelemetryError(TELEMETRY_TAB_RESTORE_LOAD_FAILURE, {
-            sessionId: chatSessionId,
-            message: err instanceof Error ? err.message : String(err),
-          });
+          // authenticatedFetch THROWS ApiError(404) rather than returning it — the benign "no tabs
+          // known to the BFF yet" case, which falls through to the local anchor-keyed fallback
+          // below silently.
+          if (!isApiError(err, 404)) {
+            logTelemetryError(TELEMETRY_TAB_RESTORE_LOAD_FAILURE, {
+              sessionId: chatSessionId,
+              message: err instanceof Error ? err.message : String(err),
+            });
+          }
           // Degrade gracefully — fall through to the local anchor-keyed fallback below.
         }
       }
@@ -1364,7 +1362,6 @@ export function WorkspacePane(): React.JSX.Element {
             headers: { Accept: 'application/json' },
           });
           if (cancelled) return;
-          if (!resp.ok) return; // transient; keep polling until the deadline
           const outputs = (await resp.json()) as ComposeLedgerOutputLike[];
           if (cancelled) return;
           const present = hasFindings(outputs);
@@ -1528,22 +1525,20 @@ export function WorkspacePane(): React.JSX.Element {
             headers: { Accept: 'application/json' },
           });
           if (cancelled) return;
-          // 404 (no session ever bound) / any non-OK → fall through to the
-          // document-only surface below; never mint an empty session (task 031).
-          if (response.ok) {
-            const session = (await response.json()) as { sessionId?: string };
-            if (!cancelled && session.sessionId) {
-              // Restores the transcript (Assistant history) + session-keyed
-              // review/findings widgets. The Compose document is mounted separately
-              // below so it survives a cross-browser reopen (no localStorage tab).
-              dispatch("conversation", {
-                type: "session_switch",
-                sessionId: session.sessionId,
-              });
-            }
+          // 404 (no session ever bound) / any non-OK is THROWN (ApiError) → the catch falls
+          // through to the document-only surface below; never mint an empty session (task 031).
+          const session = (await response.json()) as { sessionId?: string };
+          if (!cancelled && session.sessionId) {
+            // Restores the transcript (Assistant history) + session-keyed
+            // review/findings widgets. The Compose document is mounted separately
+            // below so it survives a cross-browser reopen (no localStorage tab).
+            dispatch("conversation", {
+              type: "session_switch",
+              sessionId: session.sessionId,
+            });
           }
         } catch {
-          // Network/parse failure — fall through to the document-only surface.
+          // Non-OK (thrown ApiError) / network / parse failure — fall through to the document-only surface.
         }
 
         // Surface the analysis's linked document in the EDITABLE Compose/TipTap

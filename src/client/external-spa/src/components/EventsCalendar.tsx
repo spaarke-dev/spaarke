@@ -9,8 +9,12 @@
  * list format with date, title, status badge, and description.
  *
  * Props:
- *   projectId   — Dataverse GUID of the sprk_project record
+ *   projectId   — Dataverse GUID of the record whose events to list: a sprk_project unless `root` says otherwise
+ *   root        — which kind of record that is (task 057): 'projects' (default), 'matters' or 'workassignments'. Reads
+ *                 GET /api/v1/external/{root}/{id}/events; Create is a project-only action and is never offered otherwise.
  *   accessLevel — The authenticated user's access level (determines create visibility)
+ *   caller      — The signed-in principal (task 054, FR-26): an event the caller CREATED shows Delete (asks first;
+ *                 a refusal shows an error and the event stays). Independent of accessLevel; none without `caller`.
  *
  * ADR-021: All styles use Fluent UI v9 makeStyles + tokens. No hard-coded colors.
  * ADR-022: React 18 component (bundled, not platform-provided).
@@ -38,10 +42,25 @@ import {
   Select,
   MessageBar,
   MessageBarBody,
+  MessageBarActions,
 } from '@fluentui/react-components';
-import { AddRegular, CalendarEmptyRegular } from '@fluentui/react-icons';
-import { getEvents, createEvent, ODataEvent, CreateEventPayload } from '../api/web-api-client';
+import { AddRegular, CalendarEmptyRegular, DeleteRegular } from '@fluentui/react-icons';
+import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
+import {
+  getRootEvents,
+  createEvent,
+  deleteOwnEvent,
+  ODataEvent,
+  CreateEventPayload,
+  EVENTS_TODOS_ROOT_NOUN,
+  type EventsTodosRoot,
+} from '../api/web-api-client';
+import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
+import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
+import { TruncatedListNotice } from './TruncatedListNotice';
+import { BffAccessState, accessFailureOf, type BffAccessFailure } from './auth/BffAccessState';
 import { AccessLevel, ApiError } from '../types';
+import { problemMessage } from '../auth/bff-client';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -230,10 +249,13 @@ interface ParsedDate {
   full: string;
 }
 
+/**
+ * sprk_duedate is a calendar date ("yyyy-MM-dd" — Dataverse Date Only, task 098). `new Date("yyyy-MM-dd")` is UTC
+ * midnight, which every zone west of UTC shows as the PREVIOUS day; parseDueDate builds the local calendar date.
+ */
 function parseDateParts(iso: string | null | undefined): ParsedDate | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return null;
+  const d = parseDueDate(iso);
+  if (!d) return null;
 
   return {
     month: d.toLocaleDateString('en-US', { month: 'short' }),
@@ -279,9 +301,12 @@ const EventDateColumn: React.FC<EventDateColumnProps> = ({ duedate }) => {
 interface EventRowProps {
   event: ODataEvent;
   isLast: boolean;
+  /** Show Delete (the caller created this event). */
+  canDelete?: boolean;
+  onDelete?: (event: ODataEvent) => void;
 }
 
-const EventRow: React.FC<EventRowProps> = ({ event, isLast }) => {
+const EventRow: React.FC<EventRowProps> = ({ event, isLast, canDelete, onDelete }) => {
   const styles = useStyles();
 
   return (
@@ -311,6 +336,17 @@ const EventRow: React.FC<EventRowProps> = ({ event, isLast }) => {
             <Text className={styles.eventMeta}>Added {parseDateParts(event.createdon)?.full ?? ''}</Text>
           )}
         </div>
+
+        {/* Delete: only an event the caller created (the server re-checks every delete). */}
+        {canDelete && onDelete && (
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<DeleteRegular />}
+            onClick={() => onDelete(event)}
+            aria-label={`Delete event ${event.sprk_name}`}
+          />
+        )}
       </div>
 
       {!isLast && <Divider className={styles.divider} />}
@@ -377,7 +413,9 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, 
     try {
       const payload: CreateEventPayload = {
         sprk_name: title.trim(),
-        ...(dueDate ? { sprk_duedate: new Date(dueDate).toISOString() } : {}),
+        // Task 098: the date input's own "yyyy-MM-dd" — the column is Date Only and Dataverse refuses a timestamp
+        // (the former toISOString() also turned the picked day into a UTC instant).
+        ...(dueDate ? { sprk_duedate: dueDate } : {}),
         // sprk_status omitted: the BFF creates the event Open (statuscode 659490001) — task 097 review F9.
         // Note: the event-as-todo toggle was removed in R3 task 007 — events are not to-dos.
         'sprk_RegardingProject@odata.bind': `/sprk_projects(${projectId})`, // R5 002: PascalCase nav prop (metadata-verified)
@@ -489,10 +527,14 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, 
 // ---------------------------------------------------------------------------
 
 export interface EventsCalendarProps {
-  /** Dataverse GUID of the parent sprk_project record */
+  /** Dataverse GUID of the record whose events to list (a sprk_project unless `root` says otherwise). */
   projectId: string;
+  /** Which kind of record `projectId` is (task 057). Defaults to a project. */
+  root?: EventsTodosRoot;
   /** The authenticated user's access level — determines create visibility */
   accessLevel: AccessLevel;
+  /** The signed-in principal. With it, events the caller created show Delete (task 054); without it, none do. */
+  caller?: CallerIdentity | null;
 }
 
 /**
@@ -507,7 +549,12 @@ export interface EventsCalendarProps {
  * Loading and empty states follow the SectionCard + PageContainer pattern
  * established by other SPA components.
  */
-export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, accessLevel }) => {
+export const EventsCalendar: React.FC<EventsCalendarProps> = ({
+  projectId,
+  root = 'projects',
+  accessLevel,
+  caller,
+}) => {
   const styles = useStyles();
 
   // -------------------------------------------------------------------------
@@ -518,12 +565,27 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
   const [loading, setLoading] = React.useState<boolean>(true);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = React.useState<boolean>(false);
+  // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
+  const [truncated, setTruncated] = React.useState<boolean>(false);
+  // A 401/403 on the list is the shared sign-in / denied state; "Try again" re-runs the read (task 057).
+  const [accessFailure, setAccessFailure] = React.useState<BffAccessFailure | null>(null);
+  const [attempt, setAttempt] = React.useState<number>(0);
+  const noun = EVENTS_TODOS_ROOT_NOUN[root];
 
   // -------------------------------------------------------------------------
   // Access level check
   // -------------------------------------------------------------------------
 
-  const canCreate = accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess;
+  // Creating an event is a project-only route (the matter and work assignment routes are read-only).
+  const canCreate =
+    root === 'projects' && (accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess);
+
+  // Delete-own (task 054): the event leaves the list on the server's 204; any refusal keeps it and is shown.
+  const del = useDeleteOwn<ODataEvent>({
+    noun: 'event',
+    remove: event => deleteOwnEvent(event.sprk_eventid),
+    onRemoved: event => setEvents(prev => prev.filter(e => e.sprk_eventid !== event.sprk_eventid)),
+  });
 
   // -------------------------------------------------------------------------
   // Data fetching
@@ -537,23 +599,26 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
     const fetchEvents = async () => {
       setLoading(true);
       setLoadError(null);
+      setAccessFailure(null);
 
       try {
-        const data = await getEvents(projectId, {
-          // Upcoming: order by due date ascending, exclude completed and cancelled
+        // The BFF returns every event up to its row cap and says `truncated` when it stops short (task 105).
+        const data = await getRootEvents(root, projectId, {
           $orderby: 'sprk_duedate asc',
-          $top: 50,
         });
 
         if (!cancelled) {
-          setEvents(data);
+          setEvents(data.items);
+          setTruncated(data.truncated);
         }
       } catch (err) {
         if (!cancelled) {
-          if (err instanceof ApiError) {
-            setLoadError(`Failed to load events: ${err.message}`);
+          const failure = accessFailureOf(err);
+          if (failure) {
+            setAccessFailure(failure);
           } else {
-            setLoadError('An unexpected error occurred loading events.');
+            // The server's ProblemDetails `detail` when it wrote one; never the raw response body.
+            setLoadError(problemMessage(err, 'Events could not be loaded just now.'));
           }
         }
       } finally {
@@ -568,7 +633,7 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, root, attempt]);
 
   // -------------------------------------------------------------------------
   // Handler: event created
@@ -579,8 +644,8 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
       // Insert new event and re-sort by due date ascending
       const updated = [...prev, newEvent];
       updated.sort((a, b) => {
-        const da = a.sprk_duedate ? new Date(a.sprk_duedate).getTime() : Infinity;
-        const db = b.sprk_duedate ? new Date(b.sprk_duedate).getTime() : Infinity;
+        const da = parseDueDate(a.sprk_duedate)?.getTime() ?? Infinity;
+        const db = parseDueDate(b.sprk_duedate)?.getTime() ?? Infinity;
         return da - db;
       });
       return updated;
@@ -606,10 +671,24 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
   // Render: error
   // -------------------------------------------------------------------------
 
+  if (accessFailure) {
+    return (
+      <BffAccessState
+        failure={accessFailure}
+        deniedMessage={`You do not have permission to view events on this ${noun}.`}
+      />
+    );
+  }
+
   if (loadError) {
     return (
       <MessageBar intent="error" className={styles.errorBar}>
         <MessageBarBody>{loadError}</MessageBarBody>
+        <MessageBarActions>
+          <Button appearance="secondary" size="small" onClick={() => setAttempt(n => n + 1)}>
+            Try again
+          </Button>
+        </MessageBarActions>
       </MessageBar>
     );
   }
@@ -633,26 +712,40 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
         )}
       </div>
 
+      <TruncatedListNotice truncated={truncated} shown={events.length} noun="events" />
+      <DeleteFailureNotice del={del} />
+
       {/* Event list or empty state */}
+      {/* Task 105: an incomplete empty list is not "no events" — the notice says it could not be read. */}
       {events.length === 0 ? (
-        <div className={styles.emptyState}>
-          <CalendarEmptyRegular className={styles.emptyStateIcon} />
-          <Text size={400} weight="semibold">
-            No events yet
-          </Text>
-          <Text size={300} className={styles.emptyStateText}>
-            {canCreate
-              ? 'No events have been added to this project. Use the Create Event button to add the first event.'
-              : 'No events have been added to this project yet.'}
-          </Text>
-        </div>
+        truncated ? null : (
+          <div className={styles.emptyState}>
+            <CalendarEmptyRegular className={styles.emptyStateIcon} />
+            <Text size={400} weight="semibold">
+              No events yet
+            </Text>
+            <Text size={300} className={styles.emptyStateText}>
+              {canCreate
+                ? `No events have been added to this ${noun}. Use the Create Event button to add the first event.`
+                : `No events have been added to this ${noun} yet.`}
+            </Text>
+          </div>
+        )
       ) : (
         <div className={styles.eventList}>
           {events.map((event, index) => (
-            <EventRow key={event.sprk_eventid} event={event} isLast={index === events.length - 1} />
+            <EventRow
+              key={event.sprk_eventid}
+              event={event}
+              isLast={index === events.length - 1}
+              canDelete={isCreatedByCaller(event, caller)}
+              onDelete={e => del.ask(e, e.sprk_name)}
+            />
           ))}
         </div>
       )}
+
+      <DeleteOwnConfirm del={del} />
 
       {/* Create event dialog — rendered only for Collaborate/Full Access */}
       {canCreate && (

@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{57a39fc4-8c87-f111-8076-7ced8ddc4a05}</WebResourceId>
+  <Name>sprk_/icons/cmd/project.svg</Name>
+  <DisplayName>Project Icon</DisplayName>
+  <Description>Fluent UI icon: ClipboardTask20Regular - Project command — create or open a project from toolbar/command bar</Description>
+  <WebResourceType>11</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>1</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_iconscmdprojectsvg57A39FC4-8C87-F111-8076-7CED8DDC4A05</FileName>
+</WebResource>

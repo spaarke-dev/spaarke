@@ -92,13 +92,11 @@ IF no commits (already up to date):
   → CONFIRM: "Master is already up to date"
 ```
 
-**If running from a worktree** (e.g., `spaarke-wt-project-planning-and-documentation`):
-```powershell
-# You can update master without switching to it
-cd C:\code_files\spaarke
-git fetch origin master:master
-```
-This fetches and fast-forwards master without needing to checkout.
+**If running from a worktree** (e.g., `spaarke-wt-project-planning-and-documentation`): update the
+main checkout with `/merge-to-master` Step A.6 (HEAD guard; `git -C C:\code_files\spaarke pull --ff-only
+origin master` when it has `master` checked out, else `fetch origin master:master`; STOP on refusal).
+(Corrected 2026-10-10: this said `cd C:\code_files\spaarke; git fetch origin master:master`, which git
+always refuses while `master` is checked out there — "refusing to fetch into branch ... checked out".)
 
 #### Step 3: Verify Main Repo
 
@@ -415,10 +413,9 @@ Store as: `{new-project-name}`
 
 #### Step 4: Sync Master
 
-```powershell
-cd C:\code_files\spaarke
-git fetch origin master:master
-```
+Run `/merge-to-master` Step A.6 against `C:\code_files\spaarke` (HEAD guard, fast-forward only, STOP on
+refusal). (Previously `git fetch origin master:master`, always refused while the main checkout has
+`master` checked out.)
 
 #### Step 5: Create New Branch in Worktree
 
@@ -740,7 +737,7 @@ Use `/conflict-check` skill to detect file overlap with active PRs before starti
 |---|---|---|
 | Two Claude sessions edit the same file in different worktrees without conflict warning | Sessions are isolated; git only catches conflict at merge time | Before starting work in a worktree, run `/conflict-check` against active PRs AND against other worktrees (`git worktree list` + `git status` per worktree). |
 | Worktree commands operate on the wrong directory — accidentally modify main repo | Agent ran `git checkout master` in a worktree, OR used `cd` to change directory and didn't track which dir is which | Detect worktree vs main repo via `git rev-parse --git-dir` — `.git` = main repo, anything else = worktree. Refuse `git checkout master` in a worktree. |
-| Creating a new worktree but the branch already exists somewhere else | Branch was created previously and not cleaned up | Always `git fetch origin master:master` BEFORE creating worktree (refreshes origin tracking). Check `git branch -a` for the branch name first. |
+| Creating a new worktree but the branch already exists somewhere else | Branch was created previously and not cleaned up | Always `git fetch origin` BEFORE creating the worktree and create it from `origin/master` (`git fetch origin master:master` is refused while the main checkout has `master` checked out). Check `git branch -a` for the branch name first. |
 | Worktree directory deleted via `rm -rf` instead of `git worktree remove` | User cleaned up the directory directly | Git leaves an orphan worktree record. Run `git worktree prune` to clean up. Verify with `git worktree list`. |
 | Main repo's `*.sln` edited while worktree session was active — Visual Studio confused | Multiple sessions touching the same root-level file | Avoid editing root `*.sln` in parallel worktrees. If unavoidable, designate one worktree as "owner" of the sln file. |
 

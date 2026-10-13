@@ -14,6 +14,7 @@ import { associateToRecord } from '../CreateMatterWizard';
 import { withBffChildWrites } from '../../../utils/adapters/bffChildWriteAdapter';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import type { AssociationResult } from '../../AssociateToStep/types';
+import { apiErrorFor } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 const MATTER_ID = '11111111-1111-1111-1111-111111111111';
 const INVOICE_ID_RAW = '{22222222-2222-2222-2222-222222222222}';
@@ -103,11 +104,12 @@ describe('associateToRecord — the invoice re-file goes through the BFF (UAC-r2
 
   it('a refused re-file is a warning (success: false), never a client-side fallback write', async () => {
     const updateRecord = jest.fn().mockResolvedValue(undefined);
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 404,
-      json: async () => ({ detail: 'The record was not found, or you do not have access to it.' }),
-    } as Response);
+    // authenticatedFetch THROWS ApiError for a non-2xx; it never resolves { ok: false }.
+    const fetchMock = jest
+      .fn()
+      .mockRejectedValue(
+        apiErrorFor(404, { title: 'Not Found', detail: 'The record was not found, or you do not have access to it.' })
+      );
 
     const result = await associateToRecord(
       withBffChildWrites(makeDataService({ updateRecord }), fetchMock, 'https://bff.example'),

@@ -119,6 +119,14 @@ public record NodeExecutionContext
     public Guid? UserId { get; init; }
 
     /// <summary>
+    /// The Entra object id (<c>oid</c>) of the signed-in user who started the run (<c>PlaybookRunContext.StartedByOid</c>).
+    /// Null for app-only and scheduled runs. NOT <see cref="UserId"/>, which is a Dataverse systemuserid. Document
+    /// retrieval (node L2 context, retrieval tools) is trimmed to what this user can read and returns nothing when it is
+    /// null (unified-access-control-r2 task 176, #1511).
+    /// </summary>
+    public string? CallerObjectId { get; init; }
+
+    /// <summary>
     /// Timestamp when this execution context was created.
     /// </summary>
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;

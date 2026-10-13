@@ -1,0 +1,211 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{59d88274-a1a0-f111-aaac-000d3a99d1d7}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls">
+      <tabs>
+        <tab verticallayout="true" id="{55192a4d-8ab9-495c-beb2-5c7d9b61cba8}" IsUserDefined="1" labelid="{2121ed0a-08ae-4ac4-9e86-22c490e7d815}" name="General">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="67%">
+              <sections>
+                <section name="General_section_agreementinformation" id="8a62313a-6cc2-46eb-b1be-59f67be1bb63" IsUserDefined="0" locklevel="0" showlabel="false" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="AGREEMENT INFORMATION" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{61402681-0d90-42b2-b1c0-78e4c307eb6f}" colspan="1" rowspan="1" showlabel="false">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" datafieldname="sprk_name" uniqueid="{f95deba8-4024-4398-8165-0c373d7baa59}" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section showlabel="true" showbar="false" IsUserDefined="0" id="{94e20a80-bc23-4bff-859b-9a01138d2aa0}" labelid="{51c2d920-c76c-46d8-850e-cf3e77afce9e}" name="Agreement Information Old" visible="false">
+                  <labels>
+                    <label description="AGREEMENT INFORMATION OLD" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{0c15bad9-5ea7-45b1-ac85-b9f031324dcb}" labelid="{a53ac88b-1966-4525-a314-42c59cde1919}">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{f7a7cc08-8b79-4417-801e-2205a12b2fa4}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Agreement Type" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_agreementtype" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_agreementtype" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{23afe001-face-4c31-a36c-9c40abd6c1fd}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Effective Date" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_effectivedate" classid="{5B773807-9FB2-42DB-97C3-7A91EFF8ADFF}" datafieldname="sprk_effectivedate" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{db9d4d97-0dbb-494c-960a-273cf9797253}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Status" languagecode="1033" />
+                        </labels>
+                        <control id="statecode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statecode" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{7bbdecc0-cb16-4c85-bc96-9a6d61d9774d}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Regarding Matter" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_regardingmatter" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingmatter" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{6f4c5f93-c9cd-43a4-a0d7-3cd4465b65d7}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Agreement Description" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_agreementdescription" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_agreementdescription" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{6c25fbbe-aafd-42c8-a9d8-ccc18bd0bdc0}" labelid="{718ff2b2-5c81-40a2-bdf7-aaf0773105e1}">
+                        <labels>
+                          <label description="Owner" languagecode="1033" />
+                        </labels>
+                        <control id="ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+            <column width="33%">
+              <sections>
+                <section name="_section_808" id="17c94f84-e2ed-440e-9e8a-7dbf668b2427" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="New Section" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{9cb254b8-92c6-4337-9c41-1db33f1b558a}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{bb1620b4-9dc4-49c2-861b-f8a64816c2c7}" showlabel="false" labelid="{0b9e3ff9-517b-4413-9401-a396341b566c}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{c902b5cf-75b5-46d9-babc-a9014b2ace52}" showlabel="false" labelid="{be2274cb-2b16-4dc5-bd5b-49d78ec54c25}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{1993e58f-c6dd-411c-9dfa-a0aa6717aab7}" showlabel="false" labelid="{915b11e5-9b22-4d9e-8e8a-0d45742a1d5d}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{be97ce9d-f4da-46b6-8a2f-065398d5f4ad}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{c8d37d42-edf3-492d-bfbe-e60338596b77}" showlabel="false" labelid="{d7cf9177-99d8-4de7-b5cd-f4eb7522536f}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{4c2916e6-2c74-4268-ba28-5c175d18d684}" showlabel="false" labelid="{84dbf811-8359-46e7-b9a8-0c67f31aa873}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{e1d16e44-9935-4d1a-9035-959c7500ca07}" showlabel="false" labelid="{c786616b-b3c0-4301-a176-eb2fa3d4a481}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="1" FallbackForm="true">
+        <Role Id="{e865e125-ceeb-43fa-b4eb-0c0e1e4111a3}" />
+        <Role Id="{f83c57f8-bc9c-415b-b20a-1b169edaa3a1}" />
+        <Role Id="{3980a53d-b0cf-3ded-37c8-4d4f9b94acef}" />
+        <Role Id="{d129cd37-e777-8de1-6cc5-762510e8b769}" />
+        <Role Id="{627090ff-40a3-4053-8790-584edc5be201}" />
+        <Role Id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+      </DisplayConditions>
+      <controlDescriptions>
+        <controlDescription forControl="{f95deba8-4024-4398-8165-0c373d7baa59}">
+          <customControl id="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}">
+            <parameters>
+              <datafieldname>sprk_name</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl id="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}">
+            <parameters>
+              <datafieldname>sprk_name</datafieldname>
+            </parameters>
+          </customControl>
+          <customControl formFactor="0" name="sprk_Spaarke.Records.RecordHeader">
+            <parameters>
+              <boundField type="SingleLine.Text">sprk_name</boundField>
+              <title type="SingleLine.Text" static="true">AGREEMENT INFORMATION</title>
+              <showVersion type="TwoOptions" static="true">true</showVersion>
+              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Agreement","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_name","span":2,"required":true},{"name":"sprk_agreementtype","span":1},{"name":"sprk_effectivedate","span":1},{"name":"statuscode","span":1},{"name":"sprk_regardingmatter","span":1},{"name":"sprk_agreementdescription","span":3,"renderer":"textarea"}]}</layoutJson>
+            </parameters>
+          </customControl>
+          <customControl formFactor="2" name="sprk_Spaarke.Records.RecordHeader">
+            <parameters>
+              <boundField type="SingleLine.Text">sprk_name</boundField>
+              <title type="SingleLine.Text" static="true">AGREEMENT INFORMATION</title>
+              <showVersion type="TwoOptions" static="true">true</showVersion>
+              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Agreement","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_name","span":2,"required":true},{"name":"sprk_agreementtype","span":1},{"name":"sprk_effectivedate","span":1},{"name":"statuscode","span":1},{"name":"sprk_regardingmatter","span":1},{"name":"sprk_agreementdescription","span":3,"renderer":"textarea"}]}</layoutJson>
+            </parameters>
+          </customControl>
+          <customControl formFactor="1" name="sprk_Spaarke.Records.RecordHeader">
+            <parameters>
+              <boundField type="SingleLine.Text">sprk_name</boundField>
+              <title type="SingleLine.Text" static="true">AGREEMENT INFORMATION</title>
+              <showVersion type="TwoOptions" static="true">true</showVersion>
+              <layoutJson type="Multiple" static="true">{"_version":"1.0","title":"Agreement","columns":3,"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_name","span":2,"required":true},{"name":"sprk_agreementtype","span":1},{"name":"sprk_effectivedate","span":1},{"name":"statuscode","span":1},{"name":"sprk_regardingmatter","span":1},{"name":"sprk_agreementdescription","span":3,"renderer":"textarea"}]}</layoutJson>
+            </parameters>
+          </customControl>
+        </controlDescription>
+      </controlDescriptions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Agreement main form" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

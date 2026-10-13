@@ -37,34 +37,44 @@ All new resources **MUST** follow these conventions. The existing dev environmen
 
 ## Azure Subscription Organization
 
-Each environment gets its own Azure subscription for clean cost allocation, quota isolation, and RBAC boundaries.
+Every customer gets its own Azure subscription (ADR-027, amended 2026-09-28: one subscription **per customer**, not per environment). Spaarke's own environments keep their own subscriptions. Subscriptions are grouped in two **management groups** so that common policy is assigned once and inherited by every customer subscription (ADR-027: "MUST use Azure Management Groups for common policy across customer subscriptions").
 
 ```
-Billing Account: Spaarke
-└── Management Group: Spaarke Environments
-    ├── Subscription: spaarke-dev            ← Development (existing: "Spaarke SPE Subscription 1")
-    │   └── Dev resources (legacy names, not renamed)
-    │
-    ├── Subscription: spaarke-demo           ← Beta/demo environment
-    │   └── rg-spaarke-demo                  ← All demo resources
-    │
-    ├── Subscription: spaarke-prod           ← Production (future - shared infra for paying customers)
-    │   ├── rg-spaarke-prod                  ← Shared prod BFF API, AI services
-    │   └── rg-spaarke-prod-{customer}       ← Per-customer resources (future)
-    │
-    └── Subscription: spaarke-{customer}     ← Dedicated customer (future, if needed)
-        └── rg-spaarke-{customer}            ← All customer resources
+Tenant Root Group (tenant id)
+├── Management Group: Spaarke Environments      id: spaarke-environments
+│   ├── Subscription: Spaarke Devlopment Environment   ← dev, the dev control plane (legacy names, not renamed)
+│   ├── Subscription: Spaarke Shared Production        ← rg-spaarke-shared-prod (SPE billing account — never delete), add-in/SPA sites
+│   │
+│   └── Management Group: Spaarke Customers     id: spaarke-customers   ← common customer policy assigned HERE
+│       ├── Subscription: Spaarke Demo Environment     ← the T186 customer stamp's subscription (owner 2026-10-09)
+│       └── Subscription: <one per customer>           ← rg-spaarke-{customerId}-{env} (customer.bicep)
+│
+├── Subscription: SPRK Power Platform 1         ← stays at the root: Power Platform, not a Spaarke environment
+└── Subscription: Spaarke Legal Rules Solution  ← stays at the root: a separate solution
 ```
 
-**Cost tracking**: Each subscription has independent billing. Use Azure Cost Management > Cost Analysis to see per-subscription spend. Tag all resources with `environment` and `component` tags for drill-down.
+- **Ids** are lowercase-hyphenated and immutable once created; display names as shown. Source of truth:
+  `scripts/provisioning-prereqs/spaarke-constants.yaml` `management_groups`; created by
+  `infrastructure/bicep/management-groups.bicep` through `scripts/provisioning/Deploy-ManagementGroups.ps1`.
+- **Common customer policy**: `infrastructure/bicep/customer-policy.bicep` at `spaarke-customers` — built-in definitions
+  only, reporting (Audit / DoNotEnforce), never blocking: allowed regions, resource-group tags, storage HTTPS + TLS 1.2,
+  Key Vault RBAC + purge protection. No policy is assigned at `spaarke-environments` today.
+- **A new customer subscription joins `spaarke-customers` before its first run** (prerequisite PRQ-S-06).
+- The two subscriptions left at the root are outside the platform; moving them would only subject them to future
+  environment-wide policy they were not built for.
 
-**Required tags on all resources**:
+**Cost tracking**: each subscription is its own billing boundary, so per-customer spend is the subscription's spend (Azure Cost Management > Cost Analysis). Tags drill down inside a subscription.
+
+**Tags a customer stamp sets** (`customer.bicep` param `tags`, on the resource group and every resource):
 
 | Tag | Values | Purpose |
 |-----|--------|---------|
-| `environment` | `dev`, `demo`, `prod`, `{customer}` | Cost allocation |
-| `component` | `bff-api`, `ai`, `storage`, `cache`, `messaging` | Component-level costs |
-| `managedBy` | `bicep`, `manual`, `script` | Track how resource was created |
+| `customer` | `{customerId}` | Which customer (audited on resource groups by `customer-policy.bicep`) |
+| `environment` | `prod` (default), `{environmentName}` | Environment within the customer (audited) |
+| `application` | `spaarke` | Product |
+| `managedBy` | `bicep` | Track how the resource was created (audited) |
+
+`component` (bff-api, ai, storage, …) was named here before but no template sets it; it is not required.
 
 ---
 
@@ -484,7 +494,10 @@ resource name**.
    template, seeder, IaC, and tokens doc. Canonical casing for **new** KV secrets is **kebab-case**
    (`communication-webhook-signing-key`); existing PascalCase live secrets (`BFF-API-ClientSecret`) are
    grandfathered but MUST NOT gain a second casing. Never two casings for one value simultaneously.
-3. **Canonical vault name (R3)** — `sprk-{env}-kv` (e.g. `sprk-demo-kv`). **Codified legacy exception
+3. **Canonical vault name (R3)** — `sprk-{env}-kv` (e.g. `sprk-demo-kv`) for platform environments, and
+   `sprk-{customerId}-{env}-kv` (e.g. `sprk-acme-prod-kv`, at most 24 characters) for a customer stamp — the form
+   `customer.bicep` composes (T230a, 2026-10-06). The customerId segment may not be a reserved id (`platform`, `shared`,
+   `byok`) or an env token, so `sprk-platform-prod-kv` / `sprk-demo-prod-kv` remain drift. **Codified legacy exception
    (DO-NOT-RENAME): `spaarke-spekvcert`** — the only live dev vault; bicep accepts the vault name as a
    parameter rather than hardcoding a divergent form. `kv-sdap-{env}`, `spaarke-kv-dev`,
    `sprkshareddev-kv`, and `sprk-{workload}-{env}-kv` are drift.
@@ -502,7 +515,9 @@ KV references use the Key Vault-reference form with an env-parameterized vault n
 
 `scripts/naming-conformance-check.ps1` implements rules R1–R3 (read-only; renames nothing). It runs
 `-SelfTest` (a seeded env-token/casing violation MUST fail, conformant names MUST pass) and scans the
-canonical secret-name sources. **Activation is per-surface + advisory-until-remediated**: because the
+canonical secret-name sources. **Since 2026-10-06 (customer-provisioning-orchestration-r1 T230a) it is a
+merge-blocking job in `.github/workflows/ci-tier1-blocking.yml`** (self-test, then the scan) — the repository is at zero
+violations, and H13 no longer re-runs it per customer. *History:* **activation was per-surface + advisory-until-remediated**: because the
 live environments still carry the 017-census drift (r1's remediation backlog), the gate runs
 **advisory** (reports, does not block) until `customer-provisioning-orchestration-r1` applies the
 current→canonical rename map; it flips to **blocking** per-surface as each surface reaches zero

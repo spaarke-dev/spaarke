@@ -571,6 +571,87 @@ public class NoAccessListReaderTests
         result.FailedClosed.Should().BeTrue("a systemuser subject must reach the query — and a fault there denies");
     }
 
+    // ── Task 154: the object record id must be in the form the record filter matches ────────────────
+
+    private const string Id = "abcdef01-2345-6789-abcd-ef0123456789";
+
+    // Each case was probed against Dataverse's own `eq` on spaarkedev1 (2026-10-07): "accepted" rows are values the
+    // record filter matches, "refused" rows are values it never matches. The rule must agree with the filter both ways.
+    [Theory]
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789", true)]           // canonical: what the form and the picker write
+    [InlineData("ABCDEF01-2345-6789-ABCD-EF0123456789", true)]           // upper case: case-insensitive
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789  ", true)]         // trailing spaces: padding
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u3000", true)]     // trailing ideographic space: width-insensitive padding
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789 \u3000", true)]
+    [InlineData("\uFEFFabcdef01-2345-6789-abcd-ef0123456789\uFEFF", true)] // U+FEFF is ignored anywhere
+    [InlineData("\uFF41bcdef01-2345-6789-abcd-ef0123456789", true)]      // full-width a: width-insensitive
+    [InlineData("\u00E1bcdef01-2345-6789-abcd-ef0123456789", true)]      // accented a: accent-insensitive
+    [InlineData("a\u0301bcdef01-2345-6789-abcd-ef0123456789", true)]     // a + combining acute
+    [InlineData("{abcdef01-2345-6789-abcd-ef0123456789}", false)]        // braces: never matched by the filter
+    [InlineData("(abcdef01-2345-6789-abcd-ef0123456789)", false)]
+    [InlineData("abcdef0123456789abcdef0123456789", false)]              // 32 digits, no hyphens
+    [InlineData(" abcdef01-2345-6789-abcd-ef0123456789", false)]         // leading space: never matched
+    [InlineData("\u3000abcdef01-2345-6789-abcd-ef0123456789", false)]    // leading ideographic space
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\t", false)]        // trailing tab: significant to Dataverse
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u00A0", false)]    // trailing NBSP: significant
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u2003", false)]    // trailing em space: significant
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\n", false)]        // trailing LF: significant
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u200B", false)]    // trailing zero-width space: significant
+    [InlineData("abcdef01-2345-6789\u3000abcd-ef0123456789", false)]     // a U+3000 inside the value
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u064b", false)]    // Arabic fathatan: a mark Dataverse does NOT ignore
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u0651", false)]    // Arabic shadda: significant
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u0e31", false)]    // Thai mai han-akat: significant
+    [InlineData("a\u0e34bcdef01-2345-6789-abcd-ef0123456789", false)]    // Thai sara i inside the value: significant
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\u036f", true)]     // the last mark of U+0300-U+036F: ignored
+    [InlineData("abcdef01-2345-6789-abcd-ef0123456789\uD800", false)]    // a lone surrogate: never a record id
+    [InlineData("00000000-0000-0000-0000-000000000000", false)]          // the empty id names no record
+    [InlineData("not a record id", false)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData(null, false)]
+    public void TryParseObjectRecordId_AcceptsExactlyWhatTheRecordFilterMatches(string? raw, bool expected)
+    {
+        NoAccessListReader.TryParseObjectRecordId(raw, out var id).Should().Be(expected);
+        id.Should().Be(expected ? Guid.Parse(Id) : Guid.Empty, "the parsed id is the record the filter matched");
+    }
+
+    [Fact]
+    public async Task GetDeniedRecordsAsync_ARecordIdWithBraces_IsMalformed_AndDeniesNothing()
+    {
+        // The pre-154 fail-open: Guid.TryParse accepted the braces, so the row counted as well-formed while no
+        // string-equality filter could ever return it for the record it names. Now the row is malformed, as the
+        // enforcer also says (NoAccessShareEnforcer), so the two never disagree about it.
+        var row = RecordObjectRow(EntryId, subjectContact: Contact, objectRecordId: RecordA);
+        row.sprk_objectrecordid = "{" + RecordA + "}";
+        var sut = FakeNoAccessListReader.ReturningRows(orgLoop: new(), recordLoop: new() { row });
+
+        var result = await sut.GetDeniedRecordsAsync(
+            Contact, Array.Empty<Guid>(),
+            new[] { new NoAccessCandidateRecord("sprk_matter", RecordA, Array.Empty<Guid>()) },
+            CancellationToken.None);
+
+        result.DeniedRecordIds.Should().BeEmpty("a braced id is not in the form the record filter matches");
+        result.FailedClosed.Should().BeFalse("a malformed row is a data-quality guard, not a read fault");
+    }
+
+    [Fact]
+    public async Task GetDeniedRecordsAsync_AnUpperCaseRecordId_StillDenies_BecauseDataverseMatchedIt()
+    {
+        // Dataverse string equality is case-insensitive, so the record filter returns an upper-case row. Rejecting it
+        // here would turn a working wall into one that denies nothing.
+        var table = new TableNoAccessListReader();
+        var row = RecordObjectRow(EntryId, subjectContact: Contact, objectRecordId: RecordB);
+        row.sprk_objectrecordid = RecordB.ToString().ToUpperInvariant();
+        table.Add(row);
+
+        var result = await table.GetDeniedRecordsAsync(
+            Contact, Array.Empty<Guid>(),
+            new[] { new NoAccessCandidateRecord("sprk_matter", RecordB, Array.Empty<Guid>()) },
+            CancellationToken.None);
+
+        result.DeniedRecordIds.Should().BeEquivalentTo(new[] { RecordB });
+    }
+
     // ── Test double ──────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -703,10 +784,19 @@ public class NoAccessListReaderTests
                      || (r._sprk_subjectorganization_value is { } o && organizations.Contains(o))
                      || (r._sprk_subjectsystemuser_value is { } u && users.Contains(u)))
                     && ((r._sprk_objectorganization_value is { } oo && objectOrganizations.Contains(oo))
-                        || (Guid.TryParse(r.sprk_objectrecordid, out var rid) && objectRecords.Contains(rid))))
+                        || objectRecords.Any(id => MatchesLikeDataverse(r.sprk_objectrecordid, id))))
                 .ToList();
             return Task.FromResult<List<NoAccessEntryRow>?>(rows);
         }
+
+        /// <summary>
+        /// Dataverse's <c>sprk_objectrecordid eq '{id}'</c> on a text column, for the values these tests store:
+        /// case-insensitive, trailing U+0020 / U+3000 ignored (task 154, measured live). A braced or otherwise
+        /// non-canonical stored value never matches. Deliberately written independently of the production rule.
+        /// </summary>
+        private static bool MatchesLikeDataverse(string? stored, Guid id)
+            => stored is not null
+               && string.Equals(stored.TrimEnd(' ', '\u3000'), id.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static NoAccessEntryRow OrganizationObjectRow(

@@ -52,6 +52,13 @@ public sealed class SpeContainerCreationRecord
     public const string StatusBound = "bound";
 
     /// <summary>
+    /// Status (customer-provisioning-orchestration-r1 task 227e): the root container is the customer's EXISTING one — a
+    /// later run, whose environment records it in <c>sprk_SharePointEmbeddedContainerId</c>. H8 created nothing, and it
+    /// never removes this container (a failed bind stops the run instead).
+    /// </summary>
+    public const string StatusAdopted = "adopted";
+
+    /// <summary>
     /// The root container H8 created — UNBOUND until H8 completes. Null when
     /// no root container is known. Not the H7 hand-off: <see cref="InterStepState.SpeContainerId"/> is written only on
     /// completion, after the bind.
@@ -87,6 +94,13 @@ public sealed class SpeContainerCreationRecord
     [JsonPropertyName("status")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Status { get; set; }
+
+    /// <summary>
+    /// Task 227e: the customer's EXISTING container this run reuses (a later run — the environment records it in
+    /// <c>sprk_SharePointEmbeddedContainerId</c>). Set once, when H8 adopts it, and kept by every later write of this
+    /// record — so no re-entry ever treats it as a container H8 created (which a failed bind would remove).
+    /// </summary>
+    public string? AdoptedRootContainerId { get; set; }
 
     /// <summary>When H8 last wrote this record.</summary>
     [JsonPropertyName("updatedAt")]

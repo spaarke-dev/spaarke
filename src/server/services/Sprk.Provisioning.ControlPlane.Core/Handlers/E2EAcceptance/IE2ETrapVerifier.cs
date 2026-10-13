@@ -92,6 +92,16 @@ public interface IE2ETrapVerifier
 /// The run's intake <c>exchangePolicyScopeGroupId</c> — the group H14a scopes the stamp identity's Exchange
 /// mailbox roles to (task 251). T4 judges every assignment against it. OPTIONAL TRAILING FIELD; empty → T4 InfraFault.
 /// </param>
+/// <param name="CustomerWorkforceTenantIds">
+/// Task 255 (INCOMING-141): the run's intake <c>customerWorkforceTenantIds</c>, canonical. T7 passes only when both
+/// slots carry exactly these as <c>WorkforceIdentity__CustomerTenantIds__N</c>. OPTIONAL TRAILING FIELD; null or empty
+/// → T7 Failed (a stamp with no list denies every first sign-in of a customer employee).
+/// </param>
+/// <param name="TenancyModel">
+/// Task 255: the run's tenancy model. On <c>Model1</c> T7 also fails when a listed tenant equals the slot's
+/// <c>AzureAd__TenantId</c> (Spaarke's tenant — it would bind Spaarke's staff into the customer's environment).
+/// OPTIONAL TRAILING FIELD.
+/// </param>
 public sealed record TrapVerificationRequest(
     string CustomerId,
     string RunId,
@@ -106,7 +116,9 @@ public sealed record TrapVerificationRequest(
     string UamiObjectId = "",
     string ContainerTypeId = "",
     string SpeContainerId = "",
-    string ExchangeScopeGroupId = "");
+    string ExchangeScopeGroupId = "",
+    IReadOnlyList<string>? CustomerWorkforceTenantIds = null,
+    string TenancyModel = "");
 
 /// <summary>
 /// The 7 §4B silent-fail traps, enumerated (matches design.md §4B; T7 added by task 238).
@@ -134,7 +146,9 @@ public enum TrapKind
     /// <summary>
     /// T7 — both App Service slots carry <c>Customer__Id</c> equal to the run's customerId (task 238; D-14,
     /// INCOMING-CUSTOMER-RUNTIME-IDENTITY §1.2). Without it the BFF derives its identity from the resource
-    /// group with a warning — a stamp that "was never finished".
+    /// group with a warning — a stamp that "was never finished". Task 255: and exactly the run's customer
+    /// workforce tenant list (<c>WorkforceIdentity__CustomerTenantIds__N</c>) — without it the BFF denies every
+    /// first sign-in of a customer employee.
     /// </summary>
     T7CustomerIdentityExplicit = 7,
 }

@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{73ff63dc-049b-f111-b8de-70a8a590c51c}</WebResourceId>
+  <Name>sprk_todo_hide_tabnav</Name>
+  <DisplayName>Smart To Do Hide Tab Navigator</DisplayName>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_todo_hide_tabnav73FF63DC-049B-F111-B8DE-70A8A590C51C</FileName>
+</WebResource>

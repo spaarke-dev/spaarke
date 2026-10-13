@@ -57,9 +57,9 @@ public static class AiSeedChainRejectionCodes
     public const string MissingDataverseUrl = "missing-dataverse-url";
 
     /// <summary>
-    /// Manifest.yaml not present on disk at the configured path. Configuration
-    /// / deployment error — verify <c>scripts/seed-data/</c> ships in the L2
-    /// publish output (parity with NFR-05 fail-fast rule).
+    /// The seed manifest's embedded resource is missing from the L2 assembly
+    /// (task 253 — it is no longer read from disk). A build defect: restore the
+    /// .csproj <c>&lt;EmbeddedResource&gt;</c> for <c>scripts/seed-data/manifest.yaml</c>.
     /// </summary>
     public const string ManifestNotFound = "manifest-not-found";
 

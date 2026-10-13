@@ -210,6 +210,24 @@ describe('readSseStream — fetchImpl mode (task 045)', () => {
     ).rejects.toThrow('custom failure (500)');
   });
 
+  // Without a mapper the error line used to carry the whole JSON body.
+  it.each([
+    [
+      'ProblemDetails detail',
+      '{"type":"about:blank","title":"Not Found","status":404,"detail":"Session s1 not found","error":"Session s1 not found"}',
+      'Chat request failed (404): Session s1 not found',
+    ],
+    ['legacy { error } body', '{"error":"Session s1 not found"}', 'Chat request failed (404): Session s1 not found'],
+    ['ProblemDetails title only', '{"title":"Not Found","status":404}', 'Chat request failed (404): Not Found'],
+    ['plain-text body', 'upstream gone', 'Chat request failed (404): upstream gone'],
+  ])('default non-OK message reads the %s', async (_label, body, expected) => {
+    const fetchImpl = jest.fn().mockResolvedValue(sseResponse(body, 404));
+
+    const failure = readSseStream({ url: 'https://bff.test/stream', body: {}, fetchImpl, onLine: () => undefined });
+
+    await expect(failure).rejects.toThrow(new Error(expected));
+  });
+
   it('delivers the trailing remainder buffer (final event without a closing blank line)', async () => {
     const fetchImpl = jest
       .fn()

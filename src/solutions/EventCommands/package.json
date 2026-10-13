@@ -1,0 +1,8 @@
+{
+  "name": "@spaarke/event-commands",
+  "private": true,
+  "description": "sprk_event ribbon web resources (deployed as-is; no build). This package exists only so the client-tests workflow discovers and runs the node:test suite in __tests__ (task 098).",
+  "scripts": {
+    "test": "node __tests__/run.mjs"
+  }
+}

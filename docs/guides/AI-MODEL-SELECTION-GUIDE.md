@@ -34,12 +34,14 @@ The following models are deployed to Azure OpenAI resource `spaarke-openai-dev` 
 |----------------|-------|--------|----------|-------------|
 | `gpt-4o` | gpt-4o 2024-08-06 | **Deployed** (150K TPM) | Standard | Scope content generation, complex document analysis, default fallback |
 | `gpt-4o-mini` | gpt-4o-mini 2024-07-18 | **Deployed** (200K TPM) | Standard | General classification, validation, entity resolution, explanation, summarization, tool handlers |
-| `spaarke-gpt4o-mini` | gpt-4o-mini 2024-07-18 | **Deployed** (30K TPM) | Standard | **Layer 2 classification workloads** — capability routing, safety pre-checks, feedback triage, session summarization. Isolated quota prevents classification traffic from contending with general mini usage. Config key: `AzureOpenAI:ClassificationModelName`. |
+| `spaarke-gpt4o-mini` | gpt-4o-mini 2024-07-18 | **Deployed** (30K TPM) | Standard | **Layer 2 classification workloads** — capability routing, safety pre-checks, feedback triage, session summarization. Isolated quota prevents classification traffic from contending with general mini usage. **No BFF code reads it** (the `AzureOpenAI:ClassificationModelName` key was removed from the template 2026-10-06); dev-only. |
 | `text-embedding-3-large` | text-embedding-3-large | **Deployed** (350K TPM) | Standard | Document and knowledge embeddings (primary) |
 | `text-embedding-3-small` | text-embedding-3-small | **Deployed** (120K TPM) | Standard | Legacy embeddings (kept for backward compatibility) |
 | `o1-mini` | o1-mini 2024-09-12 | **NOT YET DEPLOYED** | — | Multi-step plan generation |
 
-> **R2 (AIPU2-004)**: `spaarke-gpt4o-mini` was added as a dedicated classification deployment on 2026-05-17. The BFF references it via `AzureOpenAI:ClassificationModelName` in `appsettings.template.json`. Set the value to `gpt-4o-mini` to fall back to the shared deployment if the named deployment is not available in a given environment.
+> **R2 (AIPU2-004)**: `spaarke-gpt4o-mini` was added as a dedicated classification deployment on 2026-05-17, but nothing in the BFF ever read `AzureOpenAI:ClassificationModelName`, so it carries no traffic. The config key was removed in 2026-10-06 (customer-provisioning-orchestration-r1 task 247).
+
+> **Customer stamps** deploy a different set: `gpt-4o` (2024-11-20), `gpt-4o-mini` (runs **gpt-4.1-mini 2025-04-14**) and `text-embedding-3-large`, all DataZoneStandard — see `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md` and `infrastructure/bicep/modules/openai.bicep`.
 
 > **Note**: `o1-mini` is referenced as the intended model for plan generation but is not yet deployed in the dev environment. As a workaround set `ModelSelector:PlanGenerationModel` to `gpt-4o`. See the [model inventory notes](../../projects/ai-spaarke-platform-enhancments-r3/notes/azure-openai-model-inventory.md) for deployment commands.
 

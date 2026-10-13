@@ -74,16 +74,17 @@
 //     - manifestHash: SHA-256 of scripts/seed-data/manifest.yaml contents.
 //       Same-manifest re-invocation → same key → durable no-op. Manifest
 //       edit (add a new app-config scope entry, retire an artifact, etc.)
-//       → new key → re-drives the seeders. Aligns with sibling H12a
-//       (task 070) which uses the identical manifestHash formula so
-//       operators reason about ONE manifest state across both handlers.
+//       → new key → re-drives the seeders. Task 253: the hash comes from
+//       H12a's ISeedManifestReader (the EMBEDDED manifest — the Worker
+//       publish has no scripts/ folder), so both handlers share ONE
+//       manifest state by construction.
 // -----------------------------------------------------------------------------
 
 using System.Diagnostics;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
 
@@ -114,7 +115,7 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
     private readonly IProvisioningRunRepository _repository;
     private readonly IHandlerEnqueuer _enqueuer;
     private readonly IReadOnlyList<IAppConfigSeeder> _seeders;
-    private readonly AppConfigSeedOptions _options;
+    private readonly ISeedManifestReader _manifestReader;
     private readonly ILogger<H12bAppConfigSeedHandler> _logger;
 
     /// <inheritdoc/>
@@ -126,25 +127,25 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
     /// <param name="repository">Cosmos-backed run state store (task 037).</param>
     /// <param name="enqueuer">Service Bus enqueuer used to dispatch H12c on success (wave-C4 temporary bridge — see file header).</param>
     /// <param name="seeders">Registered per-scope seeders. Registration order is preserved (data-grid → workspace-layout → field-mapping → chart-def is the canonical sequence but the handler does not enforce a specific order — it aggregates all outcomes).</param>
-    /// <param name="options">Bound app-config seed options (manifest path, pwsh path, timeout).</param>
+    /// <param name="manifestReader">The seed manifest reader H12a uses (its content hash is H12b's idempotency-key suffix).</param>
     /// <param name="logger">Structured logger.</param>
     public H12bAppConfigSeedHandler(
         IProvisioningRunRepository repository,
         IHandlerEnqueuer enqueuer,
         IEnumerable<IAppConfigSeeder> seeders,
-        Microsoft.Extensions.Options.IOptions<AppConfigSeedOptions> options,
+        ISeedManifestReader manifestReader,
         ILogger<H12bAppConfigSeedHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(enqueuer);
         ArgumentNullException.ThrowIfNull(seeders);
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(manifestReader);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
         _enqueuer = enqueuer;
         _seeders = seeders.ToList();
-        _options = options.Value;
+        _manifestReader = manifestReader;
         _logger = logger;
     }
 
@@ -172,34 +173,29 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
             "H12b app-config seed starting: runId={RunId} customerId={CustomerId} seederCount={SeederCount}",
             envelope.RunId, envelope.CustomerId, _seeders.Count);
 
-        // (1) Compute manifest hash — the H12b idempotency key incorporates
-        // SHA-256 of manifest.yaml so a manifest edit forces a re-seed.
-        // Aligns with sibling H12a (task 070) for a single-manifest-state
-        // mental model. Failure here is Resumable (operator restores the
-        // manifest file + resumes).
-        string manifestHash;
-        try
-        {
-            manifestHash = ComputeManifestHash(_options.ManifestPath);
-        }
-        catch (FileNotFoundException ex)
+        // (1) Manifest hash — the H12b idempotency key incorporates SHA-256 of
+        // manifest.yaml so a manifest edit forces a re-seed. Read through
+        // H12a's ISeedManifestReader (task 253: the embedded manifest, never a
+        // disk path) so both handlers see ONE manifest state. NotFound = the
+        // embedded resource is missing (a build defect) → Resumable.
+        var manifestRead = await _manifestReader.ReadAsync(cancellationToken).ConfigureAwait(false);
+        if (manifestRead is SeedManifestReadResult.NotFound notFound)
         {
             var diagnostic =
-                $"Manifest file not found at '{_options.ManifestPath}'. " +
-                "H12b requires the seed manifest to compute a deterministic idempotency key. " +
-                $"Verify scripts/seed-data/manifest.yaml ships in the L2 publish output. " +
-                $"Inner: {ex.Message}";
-            _logger.LogWarning(ex,
-                "H12b app-config seed aborted — manifest not found: runId={RunId} customerId={CustomerId} " +
-                "manifestPath={ManifestPath}",
-                envelope.RunId, envelope.CustomerId, _options.ManifestPath);
+                $"Seed manifest not found ({notFound.AttemptedPath}). H12b requires it to compute a deterministic " +
+                "idempotency key. The manifest is an embedded resource of the L2 assembly — restore its .csproj " +
+                "<EmbeddedResource> item.";
+            _logger.LogWarning(
+                "H12b app-config seed aborted — seed manifest not found: runId={RunId} customerId={CustomerId} attempted={Attempted}",
+                envelope.RunId, envelope.CustomerId, notFound.AttemptedPath);
             return new HandlerResult.Failure(
                 Class: FailureClass.Resumable,
                 RejectionCode: AppConfigSeedRejectionCodes.ManifestNotFound,
                 Diagnostic: diagnostic);
         }
 
-        var idempotencyKey = $"h12b-{envelope.CustomerId}-{manifestHash}";
+        var manifestHash = ((SeedManifestReadResult.Success)manifestRead).ContentHash;
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, manifestHash);
 
         // (2) Load the ProvisioningRun. §4D I3: partition-key predicate
         // required by construction (repository shape enforces it).
@@ -350,25 +346,6 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
 
         return await MarkCompleteAndAdvanceAsync(
             run, etag, idempotencyKey, envelope, scopeOutcomes, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Computes the SHA-256 hash of the manifest.yaml file contents as a
-    /// hex string. Aligned with sibling H12a (task 070) so operators reason
-    /// about ONE manifest state across both parallel handlers.
-    /// Exposed as internal so unit tests can validate the exact key format
-    /// without duplicating the hash algorithm.
-    /// </summary>
-    internal static string ComputeManifestHash(string manifestPath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
-        if (!File.Exists(manifestPath))
-        {
-            throw new FileNotFoundException($"Manifest not found: {manifestPath}", manifestPath);
-        }
-        var bytes = File.ReadAllBytes(manifestPath);
-        var hash = SHA256.HashData(bytes);
-        return Convert.ToHexString(hash);
     }
 
     /// <summary>

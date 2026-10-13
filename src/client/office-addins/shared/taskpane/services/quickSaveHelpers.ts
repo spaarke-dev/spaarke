@@ -2,6 +2,9 @@ import type { EntitySearchResult } from '../hooks/useEntitySearch';
 import { stripDocumentExtension, toDocxFileName } from '../utils/documentFileName';
 import { mapProblemDetailsToMessage, type ProblemDetails } from '../utils/errorMessages';
 import type { DocumentIdentityOutcome } from './documentIdentityService';
+import { cleanGuid } from '@spaarke/ui-components/guid';
+import { buildOpenRecordUrl } from './openRecordLauncher';
+import type { CapturedAttachment, EmailContentCapture } from './emailContentCapture';
 
 /**
  * quickSaveHelpers.ts
@@ -27,7 +30,10 @@ export interface QuickSaveRecipient {
 
 /** The email context the ribbon command reads from Office.js before quick-saving. */
 export interface QuickSaveEmailContext {
+  /** `item.internetMessageId` — the RFC 5322 Message-ID. */
   internetMessageId: string;
+  /** Task 121: `item.itemId` — the Exchange item id, the server's Graph-fallback key. */
+  exchangeItemId?: string;
   subject: string;
   senderEmail?: string;
   senderName?: string;
@@ -41,19 +47,29 @@ export interface OfficeSaveRequestBody {
   triggerAiProcessing: boolean;
   aiOptions: { profileSummary: boolean; ragIndex: boolean; deepAnalysis: boolean };
   documentMetadata: { name: string; description?: string };
-  targetEntity: { entityType: string; entityId: string; displayName: string };
+  /** Absent for an UNFILED save (task 118): association is optional on the server. */
+  targetEntity?: { entityType: string; entityId: string; displayName: string };
   email: {
     subject: string;
     senderEmail: string;
     senderName?: string;
     recipients: Array<{ type: 'To' | 'Cc' | 'Bcc'; email: string; name?: string }>;
     sentDate?: string;
-    body: undefined;
+    /** Task 116a: read in the add-in. Undefined only when the host cannot read it — the server then uses Graph. */
+    body: string | undefined;
     isBodyHtml: true;
+    /** Task 116a: the attachments read in the add-in (absent when nothing was read). */
+    attachments?: CapturedAttachment[];
     /** Task 046 (b): always true here; the ribbon files under the email's own subject and never takes a typed name. */
     isNameSystemDerived: true;
     internetMessageId: string;
-    selectedAttachmentFileNames: undefined;
+    /**
+     * Task 121: the Exchange item id, in its own field — what the server's Graph fallback fetches the email by when no
+     * content was read here. `internetMessageId` (the RFC id) cannot address a message in Graph.
+     */
+    exchangeItemId?: string;
+    /** Undefined = "all" (server rule); with a capture, the names of the attachments actually sent. */
+    selectedAttachmentFileNames: string[] | undefined;
   };
   idempotencyKey: string;
 }
@@ -66,14 +82,26 @@ function mapRecipientType(type: 'to' | 'cc' | 'bcc'): 'To' | 'Cc' | 'Bcc' {
 }
 
 /**
- * Build the `POST /api/office/save` body that files an email to the engine-predicted
- * record. The email body + attachment content are fetched server-side via Graph (OBO),
- * so the client sends only the internetMessageId + metadata — identical to useSaveFlow.
+ * The save's `targetEntity` for a filing target. The FRIENDLY type name ("Matter"), never the logical name
+ * ("sprk_matter"): the save accepts only friendly names (`OfficeEndpoints.ValidateSaveRequest` → 400 OFFICE_002
+ * otherwise), and the finalization worker matches on them. Sending `logicalName` refused every quick-save (#1075).
+ */
+function buildTargetEntity(target: EntitySearchResult): NonNullable<OfficeSaveRequestBody['targetEntity']> {
+  return { entityType: target.entityType, entityId: target.id, displayName: target.name };
+}
+
+/**
+ * Build the `POST /api/office/save` body that files an email to the engine-predicted record.
+ *
+ * Task 116a: `content` is the body + attachments read in the add-in (`captureEmailContent`), sent the same way the
+ * pane sends them. Without it the request carries only the internetMessageId + metadata and the server fetches the
+ * email through Graph — which cannot reach a B2B guest's home-tenant mailbox, so a guest needs `content`.
  */
 export function buildEmailSaveRequest(
   context: QuickSaveEmailContext,
-  target: EntitySearchResult,
-  idempotencyKey: string
+  target: EntitySearchResult | null,
+  idempotencyKey: string,
+  content?: EmailContentCapture
 ): OfficeSaveRequestBody {
   return {
     contentType: 'Email',
@@ -81,14 +109,8 @@ export function buildEmailSaveRequest(
       DEFAULT_AI_OPTIONS.profileSummary || DEFAULT_AI_OPTIONS.ragIndex || DEFAULT_AI_OPTIONS.deepAnalysis,
     aiOptions: { ...DEFAULT_AI_OPTIONS },
     documentMetadata: { name: context.subject || 'Untitled Email' },
-    targetEntity: {
-      // The FRIENDLY type name ("Matter"), never the logical name ("sprk_matter"): the save accepts only
-      // friendly names (`OfficeEndpoints.ValidateSaveRequest` → 400 OFFICE_002 otherwise), and the
-      // finalization worker matches on them. Sending `logicalName` refused every quick-save (#1075).
-      entityType: target.entityType,
-      entityId: target.id,
-      displayName: target.name,
-    },
+    // Task 118: `null` = an unfiled save (the supported "no related record" case) — no targetEntity at all.
+    ...(target ? { targetEntity: buildTargetEntity(target) } : {}),
     email: {
       subject: context.subject || 'Untitled Email',
       senderEmail: context.senderEmail || 'unknown@placeholder.com',
@@ -101,10 +123,12 @@ export function buildEmailSaveRequest(
       ...(context.sentDate ? { sentDate: context.sentDate.toISOString() } : {}),
       // Task 046 (b): the subject is the email's own, so the server stores it with a short unique suffix.
       isNameSystemDerived: true,
-      body: undefined,
+      body: content?.body,
       isBodyHtml: true,
+      ...(content ? { attachments: content.attachments } : {}),
       internetMessageId: context.internetMessageId,
-      selectedAttachmentFileNames: undefined,
+      ...(context.exchangeItemId ? { exchangeItemId: context.exchangeItemId } : {}),
+      selectedAttachmentFileNames: content?.selectedAttachmentFileNames,
     },
     idempotencyKey,
   };
@@ -121,7 +145,7 @@ export function buildEmailSaveRequest(
  * forever. `kind` is a real discriminant (not a label) so each source's canonical shape stays honest.
  */
 export type QuickSaveIdempotencySource =
-  | { readonly kind: 'email'; readonly internetMessageId: string; readonly target: EntitySearchResult }
+  | { readonly kind: 'email'; readonly internetMessageId: string; readonly target: EntitySearchResult | null }
   | {
       readonly kind: 'document';
       readonly title: string;
@@ -136,7 +160,9 @@ export type QuickSaveIdempotencySource =
 
 function canonicalQuickSaveKey(source: QuickSaveIdempotencySource): string {
   if (source.kind === 'email') {
-    return `email:${source.internetMessageId}|${source.target.logicalName}:${source.target.id}`;
+    return source.target
+      ? `email:${source.internetMessageId}|${source.target.logicalName}:${source.target.id}`
+      : `email:${source.internetMessageId}|unfiled`;
   }
   return source.existingDocumentId
     ? `document-version:${source.existingDocumentId}|${source.title}|${source.contentBase64}`
@@ -395,4 +421,40 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode(bytes[i] ?? 0);
   }
   return btoa(binary);
+}
+
+/**
+ * The "Open in Spaarke" link for a Quick Save's document record (task 110, UAT round 11 item 2): the existing
+ * {@link buildOpenRecordUrl} for `sprk_document/{id}` — no second builder. `null` (so no link is shown, and nothing
+ * is said about it) when `ORG_URL` is unset or blank or the id is not a GUID, never a broken link.
+ */
+export function buildQuickSaveRecordLink(
+  orgUrl: string | undefined,
+  appName: string,
+  documentId: string | null | undefined
+): string | null {
+  const org = (orgUrl ?? '').trim().replace(/\/+$/, '');
+  const id = cleanGuid(documentId);
+  if (!org || !id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return null;
+  }
+  return buildOpenRecordUrl(org, 'sprk_document', id, appName);
+}
+
+/**
+ * Whether `url` is an https/http URL on the SAME ORIGIN as the configured `orgUrl`. The Quick Save dialog asks the
+ * command to open a link; the command only opens one that points at the user's own Spaarke environment (task 110
+ * NFR/security) — anything else, including an unset `orgUrl`, is refused.
+ */
+export function isUrlOnConfiguredOrigin(url: unknown, orgUrl: string | undefined): boolean {
+  if (typeof url !== 'string' || !(orgUrl ?? '').trim()) {
+    return false;
+  }
+  try {
+    const target = new URL(url);
+    const org = new URL((orgUrl ?? '').trim());
+    return (target.protocol === 'https:' || target.protocol === 'http:') && target.origin === org.origin;
+  } catch {
+    return false;
+  }
 }

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Azure.Core;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -14,16 +15,20 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// <see cref="CallerPrincipal"/> (which records the caller may see): Tier-1 = "which module tabs",
 /// Tier-2 = "which records within a module" (<see cref="ExternalModuleRegistry"/>).
 ///
-/// <para><b>Option B (owner, 2026-08-10)</b> — resolved WITHOUT ever fabricating a Contact for an
-/// internal user:</para>
+/// <para><b>Default modules by principal kind</b> (ADR-028 Amendment A8; owner 2026-10-09 option (b) and the
+/// 2026-10-10 partner switch; external-access-platform-r3 task 011, spec FR-19 / FR-06). The kind is the
+/// SERVER-resolved <see cref="CallerPrincipal.Plane"/> (validated <c>iss</c>/<c>tid</c> only), never client input.
+/// Resolved WITHOUT ever fabricating a Contact for an internal user:</para>
 /// <list type="bullet">
-///   <item><b>Workforce (internal)</b>: the caller's Entra <b>App-Role</b> claims (<c>roles</c>) are
-///   mapped through the active <c>sprk_approlemodulemap</c> rows (<c>sprk_approlename</c> →
-///   <c>sprk_modulecode</c>) to a de-duplicated module-code set. No Contact record is involved. Adding
-///   a role→module mapping later is a single data row — no code or schema change (FR-08).</item>
-///   <item><b>CIAM (external outside counsel)</b>: BLANKET-entitled to the outside-counsel module set
-///   (<see cref="OutsideCounselEntitlements"/>) — there is no per-Contact external entitlement table.
-///   Record VISIBILITY is governed purely by Tier-2 grants (tasks 028 read / 070+071 write).</item>
+///   <item><b>Workforce</b> (a <c>systemuser</c> or a workforce contact): the default set
+///   <see cref="WorkforceDefaultEntitlements"/> (<c>legal-front-door</c> + <c>policy-library</c>), plus any
+///   EXTRAS the caller's Entra <b>App-Role</b> claims (<c>roles</c>) map to through the active
+///   <c>sprk_approlemodulemap</c> rows (<c>sprk_approlename</c> → <c>sprk_modulecode</c>). The map is never
+///   required for the defaults; adding a role→module mapping is a single data row (FR-08).</item>
+///   <item><b>CIAM (external partner)</b>: the outside-counsel set (<see cref="OutsideCounselEntitlements"/>,
+///   <c>assigned-work</c>), plus <c>legal-front-door</c> when
+///   <see cref="ExternalAccessOptions.PartnerServiceRequestsEnabled"/> is on (default off). There is no
+///   per-Contact external entitlement table; record VISIBILITY is governed purely by Tier-2.</item>
 /// </list>
 ///
 /// <para>NFR-06: this is UX-honest entitlement DATA only — it never over-reports, and it is not the
@@ -43,6 +48,18 @@ public class ModuleEntitlementResolver
     /// </summary>
     private static readonly IReadOnlyList<string> OutsideCounselModules = new[] { "assigned-work" };
 
+    /// <summary>
+    /// The CIAM set when the partner service-request switch is on (FR-06/FR-19): the outside-counsel set plus
+    /// <c>legal-front-door</c>. Never <c>policy-library</c> — A8 gives partners only the Front Door.
+    /// </summary>
+    private static readonly IReadOnlyList<string> PartnerServiceRequestModules = new[] { "assigned-work", "legal-front-door" };
+
+    /// <summary>
+    /// The workforce default set (A8): every workforce caller — <c>systemuser</c> or workforce contact — gets these
+    /// with no <c>sprk_approlemodulemap</c> row. The map only adds extras on top.
+    /// </summary>
+    private static readonly IReadOnlyList<string> WorkforceDefaultModules = new[] { "legal-front-door", "policy-library" };
+
     private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
     // ITenantCache resource key. Cached value is the small, GLOBAL App-Role→module config map (DATA per
     // ADR-009), not an authorization decision. Keyed per tenant by ITenantCache; a single logical id.
@@ -55,6 +72,7 @@ public class ModuleEntitlementResolver
     private readonly IConfiguration _configuration;
     private readonly TokenCredential _credential;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly ExternalAccessOptions _options;
     private readonly ILogger<ModuleEntitlementResolver> _logger;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
@@ -65,22 +83,87 @@ public class ModuleEntitlementResolver
         IConfiguration configuration,
         TokenCredential credential,
         IHttpContextAccessor httpContextAccessor,
+        IOptions<ExternalAccessOptions> options,
         ILogger<ModuleEntitlementResolver> logger)
     {
+        ArgumentNullException.ThrowIfNull(options);
         _httpClient = httpClient;
         _cache = cache;
         _configuration = configuration;
         _credential = credential;
         _httpContextAccessor = httpContextAccessor;
+        _options = options.Value;
         _logger = logger;
     }
 
     /// <summary>The outside-counsel blanket entitlement set surfaced for the endpoint + tests.</summary>
     public static IReadOnlyList<string> OutsideCounselEntitlements => OutsideCounselModules;
 
+    /// <summary>The workforce default entitlement set (A8) surfaced for tests.</summary>
+    public static IReadOnlyList<string> WorkforceDefaultEntitlements => WorkforceDefaultModules;
+
+    /// <summary>The Legal Front Door module code: the four intake wizards and their submit route (r3 task 035, FR-05).</summary>
+    public const string LegalFrontDoorModule = "legal-front-door";
+
     /// <summary>
-    /// Resolves the caller's module entitlement codes per plane (Option B). CIAM → blanket
-    /// outside-counsel set; workforce → App-Role claims ∩ active <c>sprk_approlemodulemap</c>.
+    /// THE server-side Tier-1 check for a module-gated route (r3 task 035; review 011 K2): whether
+    /// <paramref name="moduleCode"/> is in the set <see cref="ResolveAsync"/> returns for this caller — the same set
+    /// <c>/me/entitlements</c> reports, from the same <see cref="ExternalAccessOptions"/> value the module descriptors are
+    /// built from. A route asks this instead of re-deriving the rule from the plane or the partner switch, so the route,
+    /// <c>/me</c> and the descriptor cannot drift apart. Case-insensitive on the module code; fail-closed on a blank one.
+    /// </summary>
+    public async Task<bool> IsEntitledAsync(
+        CallerPrincipal principal, ClaimsPrincipal user, string moduleCode, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        if (string.IsNullOrWhiteSpace(moduleCode))
+        {
+            return false;
+        }
+
+        var entitlements = await ResolveAsync(principal, user, ct).ConfigureAwait(false);
+        return entitlements.Contains(moduleCode, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The <c>sprk_requesttype</c> option for Invention Submission: the one intake type a CIAM partner needs a flag for.</summary>
+    public const int InventionSubmissionRequestType = 100000001;
+
+    /// <summary>
+    /// Whether this caller may submit the intake type <paramref name="requestType"/> (owner decision 2026-10-12). Workforce
+    /// callers (staff and workforce contacts) may submit every type; a CIAM partner may submit every type except
+    /// Invention Submission, which also needs <see cref="ExternalAccessOptions.PartnerInventionIntakeEnabled"/>. An unknown
+    /// type is never available. This is a TYPE gate only: Tier-1 module entitlement to <c>legal-front-door</c> is
+    /// <see cref="IsEntitledAsync"/>, asked first. The plane is the SERVER-resolved <see cref="CallerPrincipal.Plane"/>.
+    /// </summary>
+    public bool IsIntakeTypeAvailable(CallerPrincipal principal, int requestType)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        if (!ExternalDataService.ServiceRequestTypes.ContainsKey(requestType))
+        {
+            return false;
+        }
+
+        return principal.Plane != CallerPrincipalPlane.CiamContact
+            || requestType != InventionSubmissionRequestType
+            || _options.PartnerInventionIntakeEnabled;
+    }
+
+    /// <summary>
+    /// The intake request types this caller may submit (the <c>sprk_requesttype</c> option values, ascending): what
+    /// <c>/me/entitlements</c> reports so the SPA can hide a tile the submit route would refuse. Same rule as
+    /// <see cref="IsIntakeTypeAvailable"/>. It does NOT consider module entitlement - the caller of this method reports an
+    /// empty list when the caller is not entitled to <c>legal-front-door</c>.
+    /// </summary>
+    public IReadOnlyList<int> IntakeRequestTypesFor(CallerPrincipal principal) =>
+        ExternalDataService.ServiceRequestTypes.Keys
+            .Where(type => IsIntakeTypeAvailable(principal, type))
+            .OrderBy(type => type)
+            .ToList();
+
+    /// <summary>
+    /// Resolves the caller's module entitlement codes by server-resolved principal kind (A8). CIAM → the
+    /// outside-counsel set, plus <c>legal-front-door</c> when the partner switch is on; workforce → the
+    /// default set ∪ the extras its App-Role claims map to through active <c>sprk_approlemodulemap</c> rows.
     /// </summary>
     /// <param name="principal">The resolved plane-agnostic caller (its <see cref="CallerPrincipal.Plane"/>
     /// selects the resolution term).</param>
@@ -91,24 +174,29 @@ public class ModuleEntitlementResolver
     {
         ArgumentNullException.ThrowIfNull(principal);
 
-        // External (CIAM) plane → blanket outside-counsel set. No map read, no Contact lookup.
+        // External (CIAM) plane → the outside-counsel set, plus legal-front-door when the per-customer partner
+        // service-request switch is on (FR-06). No map read, no Contact lookup.
         if (principal.Plane == CallerPrincipalPlane.CiamContact)
         {
-            return OutsideCounselModules;
+            return _options.PartnerServiceRequestsEnabled ? PartnerServiceRequestModules : OutsideCounselModules;
         }
 
-        // Internal (workforce) plane → App-Role claims ∩ active sprk_approlemodulemap.
+        // Workforce plane (systemuser or workforce contact) → the default set; no map row is needed for it (A8).
         var roles = ExtractAppRoles(user);
         if (roles.Count == 0)
         {
-            // No App-Roles on the token → no internal modules (NFR-06: never over-report). This is the
-            // negative case: an internal caller whose token carries no mapped role sees no internal tabs.
-            _logger.LogInformation("[EXT-ENTITLE] Workforce caller has no App-Role claims — 0 internal modules.");
-            return Array.Empty<string>();
+            // No App-Roles on the token → no extras can apply, so the map is not read.
+            _logger.LogInformation("[EXT-ENTITLE] Workforce caller has no App-Role claims — default modules only.");
+            return WorkforceDefaultModules;
         }
 
+        // Extras: App-Role claims ∩ active sprk_approlemodulemap, unioned onto the defaults (deterministic order).
         var map = await GetActiveMapAsync(ct).ConfigureAwait(false);
-        var entitlements = ResolveWorkforceEntitlements(roles, map);
+        var entitlements = WorkforceDefaultModules
+            .Concat(ResolveWorkforceEntitlements(roles, map))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(c => c, StringComparer.Ordinal)
+            .ToList();
         _logger.LogInformation(
             "[EXT-ENTITLE] Workforce caller with {RoleCount} App-Role(s) → {ModuleCount} module(s): {Modules}",
             roles.Count, entitlements.Count, string.Join(",", entitlements));

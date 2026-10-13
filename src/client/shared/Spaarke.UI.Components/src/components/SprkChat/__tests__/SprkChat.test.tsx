@@ -15,6 +15,7 @@ import { screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SprkChat } from '../SprkChat';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
+import { authExhausted } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 // ---------------------------------------------------------------------------
 // Mock fetch
@@ -231,7 +232,8 @@ describe('SprkChat', () => {
       // letting createSession hit the default 200 success. Reset and make all
       // mounted fetches fail so we definitely exercise the session-error path.
       mockFetch.mockReset();
-      mockFetch.mockResolvedValue(createFetchResponse('Unauthorized', 401));
+      // authenticatedFetch THROWS (AuthError once its 401 retries are spent); it never resolves a 401.
+      mockFetch.mockRejectedValue(authExhausted());
 
       await act(async () => {
         renderWithProviders(<SprkChat {...defaultProps} />);
@@ -282,6 +284,54 @@ describe('SprkChat', () => {
 
       expect(screen.queryByText('Document:')).not.toBeInTheDocument();
       expect(screen.queryByText('Playbook:')).not.toBeInTheDocument();
+    });
+
+    // Regression (R4 UAT 2026-10-08): once the BFF playbooks owner filter was corrected
+    // (uac-r2 #1312), unconditional discovery surfaced every owned playbook as a raw
+    // "Playbook:" dropdown + chip wall in the Assistant. Discovery is now opt-in.
+    describe('playbook discovery', () => {
+      const routeDiscoveredPlaybooks = () =>
+        mockFetch.mockImplementation((url: string) =>
+          Promise.resolve(
+            url.includes('/api/ai/chat/playbooks')
+              ? createFetchResponse({
+                  playbooks: [
+                    { id: 'pb-a', name: 'Discovered Playbook A' },
+                    { id: 'pb-b', name: 'Discovered Playbook B' },
+                  ],
+                })
+              : createFetchResponse({ sessionId: 'session-123', createdAt: '2026-02-23T10:00:00Z' })
+          )
+        );
+
+      it('SprkChat_DiscoveryNotEnabled_DoesNotFetchOrRenderDiscoveredPlaybooks', async () => {
+        routeDiscoveredPlaybooks();
+
+        await act(async () => {
+          renderWithProviders(<SprkChat {...defaultProps} />);
+        });
+        await act(async () => {
+          await new Promise(r => setTimeout(r, 0));
+        });
+
+        const playbookCalls = mockFetch.mock.calls.filter(([url]) => String(url).includes('/api/ai/chat/playbooks'));
+        expect(playbookCalls).toHaveLength(0);
+        expect(screen.queryByText('Playbook:')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('playbook-chips')).not.toBeInTheDocument();
+      });
+
+      it('SprkChat_DiscoveryEnabled_RendersDiscoveredPlaybookSelectorAndChips', async () => {
+        routeDiscoveredPlaybooks();
+
+        await act(async () => {
+          renderWithProviders(<SprkChat {...defaultProps} enablePlaybookDiscovery />);
+        });
+
+        await waitFor(() => {
+          expect(screen.getByText('Playbook:')).toBeInTheDocument();
+        });
+        expect(screen.getByTestId('playbook-chips')).toBeInTheDocument();
+      });
     });
   });
 

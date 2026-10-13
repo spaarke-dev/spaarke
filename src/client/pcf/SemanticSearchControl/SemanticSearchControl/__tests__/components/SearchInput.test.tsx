@@ -36,7 +36,16 @@ describe('SearchInput', () => {
   it('should render search button', () => {
     renderWithProvider(<SearchInput {...defaultProps} />);
 
-    expect(screen.getByRole('button')).toBeInTheDocument();
+    // The component now also renders an info-popover button ("Search info"), so the
+    // search button must be addressed by its accessible name, not by bare role.
+    expect(screen.getByRole('button', { name: 'Search' })).toBeInTheDocument();
+  });
+
+  it('should render the info popover trigger separately from the search button', () => {
+    renderWithProvider(<SearchInput {...defaultProps} />);
+
+    expect(screen.getAllByRole('button')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Search info' })).toBeInTheDocument();
   });
 
   it('should display value in input', () => {
@@ -60,7 +69,7 @@ describe('SearchInput', () => {
     const onSearch = jest.fn();
     renderWithProvider(<SearchInput {...defaultProps} value="test" onSearch={onSearch} />);
 
-    fireEvent.click(screen.getByRole('button'));
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 
     expect(onSearch).toHaveBeenCalledTimes(1);
   });
@@ -88,7 +97,10 @@ describe('SearchInput', () => {
     renderWithProvider(<SearchInput {...defaultProps} disabled={true} />);
 
     expect(screen.getByRole('textbox')).toBeDisabled();
-    expect(screen.getByRole('button')).toBeDisabled();
+    // While disabled the search button is relabelled "Searching..." and is disabled;
+    // the info trigger stays usable.
+    expect(screen.getByRole('button', { name: 'Searching...' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Search info' })).toBeEnabled();
   });
 
   it('should not call onSearch when disabled and Enter pressed', () => {
@@ -100,12 +112,13 @@ describe('SearchInput', () => {
     expect(onSearch).not.toHaveBeenCalled();
   });
 
-  it('should have search icon on button', () => {
-    const { container } = renderWithProvider(<SearchInput {...defaultProps} />);
+  it('should have a search icon inside the input (not on the button)', () => {
+    renderWithProvider(<SearchInput {...defaultProps} />);
 
-    // Check for SVG icon (Search icon from Fluent)
-    const button = screen.getByRole('button');
-    const svg = button.querySelector('svg');
-    expect(svg).toBeInTheDocument();
+    // Search20Regular is the Input's `contentBefore`; the Search button is text-only
+    // while idle (a spinner replaces it only when disabled).
+    const input = screen.getByRole('textbox');
+    expect(input.parentElement?.querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Search' }).querySelector('svg')).not.toBeInTheDocument();
   });
 });

@@ -14,6 +14,17 @@ import {
   type QuickSaveEmailContext,
   type QuickSaveRecipient,
 } from '@shared/taskpane/services/quickSaveHelpers';
+import {
+  captureEmailContent,
+  hostAdapterEmailReader,
+  EmailCaptureError,
+  type EmailContentCapture,
+} from '@shared/taskpane/services/emailContentCapture';
+import { OutlookAdapter } from '@shared/adapters/OutlookAdapter';
+import { openQuickSaveDialog } from '@shared/commands/quickSaveDialog';
+import { readSavedDocument, type QuickSaveResponse } from '@shared/commands/readSavedDocument';
+import { buildQuickSaveRecordLink } from '@shared/taskpane/services/quickSaveHelpers';
+import { configuredSpaarkeAppName } from '@shared/taskpane/services/openRecordLauncher';
 
 // Register global functions for Office to call
 declare global {
@@ -51,46 +62,6 @@ async function ensureBootstrapped(): Promise<void> {
   bootstrapped = true;
 }
 
-/** Outlook refuses a notification message longer than 150 characters (`NotificationMessageDetails.message`). */
-const MAX_NOTIFICATION_LENGTH = 150;
-
-/** The longest record name quoted inside a notification, so the fixed sentence around it always fits. */
-const MAX_NOTIFIED_NAME_LENGTH = 60;
-
-/** A record name shortened to fit inside a notification sentence. */
-function notifiedName(name: string): string {
-  return name.length <= MAX_NOTIFIED_NAME_LENGTH ? name : `${name.slice(0, MAX_NOTIFIED_NAME_LENGTH - 1)}…`;
-}
-
-/** A message cut to Outlook's limit, as a backstop: a longer one is refused and nothing is shown. */
-function fitNotification(message: string): string {
-  return message.length <= MAX_NOTIFICATION_LENGTH ? message : `${message.slice(0, MAX_NOTIFICATION_LENGTH - 1)}…`;
-}
-
-/**
- * Post a transient informational notification on the current mail item, replacing any earlier one under `key`.
- *
- * `replaceAsync`, not `addAsync` (task 084): quick-save first posts "Saving to Spaarke…" under `spaarke_save`
- * and then its outcome under the same key. `replaceAsync` adds the message when the key is new and replaces it
- * when it is not, so the outcome always takes the place of "Saving…".
- */
-function notifyInfo(key: string, message: string): void {
-  Office.context.mailbox.item?.notificationMessages.replaceAsync(key, {
-    type: Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage,
-    message: fitNotification(message),
-    icon: 'Icon.16x16',
-    persistent: false,
-  });
-}
-
-/** Post an error notification on the current mail item, replacing any earlier error. */
-function notifyError(message: string): void {
-  Office.context.mailbox.item?.notificationMessages.replaceAsync('spaarke_error', {
-    type: Office.MailboxEnums.ItemNotificationMessageType.ErrorMessage,
-    message: fitNotification(message),
-  });
-}
-
 /** Read the open email's metadata for quick-save (reading pane — synchronous properties). */
 function readEmailContext(): QuickSaveEmailContext | null {
   const item = Office.context.mailbox.item;
@@ -102,6 +73,8 @@ function readEmailContext(): QuickSaveEmailContext | null {
 
   return {
     internetMessageId: item.internetMessageId,
+    // Task 121: the Exchange item id travels in its own field — the server's Graph fallback key.
+    ...(item.itemId ? { exchangeItemId: item.itemId } : {}),
     subject: item.subject ?? '',
     ...(item.from?.emailAddress ? { senderEmail: item.from.emailAddress } : {}),
     ...(item.from?.displayName ? { senderName: item.from.displayName } : {}),
@@ -110,13 +83,42 @@ function readEmailContext(): QuickSaveEmailContext | null {
   };
 }
 
-/** Open the taskpane programmatically, where the host supports it. */
-async function openTaskpane(): Promise<void> {
-  try {
-    await Office.addin?.showAsTaskpane?.();
-  } catch {
-    // Host may not support programmatic taskpane open — the notification already guides the user.
+/**
+ * Task 116a: read the email's body and attachments here, in the add-in, for the save — the server's Graph fetch
+ * cannot reach a B2B guest's home-tenant mailbox. Every attachment goes into the `.eml` (the complete email); the
+ * non-inline ones also become documents (inline images are part of the body, not files the sender attached).
+ * `undefined` when the host cannot read attachment content (no Mailbox 1.8 read access): then nothing is read and the
+ * server fetches the email through Graph as before — sending a body alone would switch that fetch off and lose the
+ * attachments.
+ */
+async function readEmailContent(): Promise<EmailContentCapture | undefined> {
+  const adapter = new OutlookAdapter();
+  await adapter.initialize();
+  if (!adapter.getCapabilities().canGetAttachments) return undefined;
+  const attachments = await adapter.getAttachments();
+  const documentsToCreate = new Set(attachments.filter(a => !a.isInline).map(a => a.id));
+  return captureEmailContent(hostAdapterEmailReader(adapter), attachments, documentsToCreate);
+}
+
+/** The sentence naming how many attachments were left out of the saved email (empty when none). */
+function skippedNotice(content: EmailContentCapture | undefined): string {
+  const skipped = content?.skipped.length ?? 0;
+  if (skipped === 0) return '';
+  return ` ${skipped === 1 ? '1 attachment was' : `${skipped} attachments were`} left out: too large, a cloud link or unreadable.`;
+}
+
+/** The result-dialog text for a saved email. Names how many attachments were left out — never silent. */
+function describeEmailSaved(
+  target: { name: string } | null,
+  content: EmailContentCapture | undefined,
+  duplicate: boolean
+): string {
+  if (duplicate) {
+    return 'This email is already saved in Spaarke. Nothing new was saved.';
   }
+  return target
+    ? `Saved to Spaarke and filed to ${target.name}.${skippedNotice(content)}`
+    : `Saved to Spaarke — not filed to a record. Open Spaarke to file it.${skippedNotice(content)}`;
 }
 
 /**
@@ -129,62 +131,90 @@ function showTaskPane(event: Office.AddinCommands.Event): void {
 }
 
 /**
- * One-click quick-save (FR-B2 / GitHub #234): file the current email to the Association
- * Engine's PREDICTED record. Reuses the SHARED candidate model (`derivePrimaryReview`
- * via fetchEnginePreSelection — no fork) so the prediction matches the taskpane picker
- * and the code page. When the engine has no prediction (email not captured / no usable
- * candidate), it does NOT auto-file a guess — it opens the taskpane so the user chooses.
+ * One-click quick-save (FR-B2 / GitHub #234), with the same progress -> result dialog as Word's Quick Save (task 118,
+ * UAT round 12 item O5; the controller and page are shared: `shared/commands/quickSaveDialog.ts`).
  *
- * Task 084 (#1037): when the caller cannot file to the predicted record (`predicted.canFile === false`
- * — the save would refuse it, filing needs AppendTo), it does NOT post the save either: it says so and
- * opens the taskpane, the same path as "no prediction".
+ * The dialog opens at once ("Saving to Spaarke…"), then shows the outcome in place — success with an "Open in
+ * Spaarke" link to the saved .eml's `sprk_document`, or the error. It replaces the Outlook item info bar, which
+ * stayed behind after the click and could not carry a link.
+ *
+ * Filing: the Association Engine's PREDICTED record (the SHARED `derivePrimaryReview` model via
+ * `fetchEnginePreSelection` — no fork) when the caller can file to it. When there is no prediction — including the
+ * 404 "not saved yet" answer, which is a normal state, not an error — or the caller cannot file to it (task 084: a
+ * contact, a record without AppendTo), the email is saved UNFILED and the dialog says so. An unfiled save is a
+ * supported case (owner standing decision); the user files it later from the pane. A guess is never auto-filed.
+ *
+ * `event.completed()` runs exactly once, when the save is over and the dialog is gone (see `quickSaveDialog.ts`).
  */
 async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
+  const dialog = await openQuickSaveDialog({
+    onComplete: () => event.completed(),
+    orgUrl: process.env.ORG_URL,
+    pagePath: '/outlook/commands-notify.html',
+  });
   try {
-    notifyInfo('spaarke_save', 'Saving to Spaarke…');
     await ensureBootstrapped();
 
     const context = readEmailContext();
     if (!context) {
-      notifyError('Could not read the current email.');
+      await dialog.show({ message: 'Could not read the current email.', status: 'error' });
       return;
     }
 
-    // Best-effort prediction (a failure must not block — falls through to the picker).
-    const pre = await fetchEnginePreSelection(context.internetMessageId).catch(() => null);
+    // Best-effort prediction. 404 ("not saved yet") resolves null inside the service; any other failure only
+    // means no suggestion — it must never block the save.
+    const pre = await fetchEnginePreSelection(context.internetMessageId).catch(error => {
+      console.warn('[Spaarke] Quick Save: the suggested record could not be read; saving unfiled', error);
+      return null;
+    });
+    const target = pre && pre.predicted.canFile !== false ? pre.predicted : null;
 
-    if (!pre) {
-      // No prediction → open the taskpane for an explicit choice (never auto-file a guess).
-      notifyInfo('spaarke_save', 'No suggested record — open Spaarke to choose where to file.');
-      await openTaskpane();
-      return;
-    }
-
-    if (pre.predicted.canFile === false) {
-      // The caller can see the prediction but cannot file to it → never post a save the server would
-      // refuse (403 OFFICE_009); let the user choose in the pane instead.
-      notifyInfo(
-        'spaarke_save',
-        `Spaarke suggests ${notifiedName(pre.predicted.name)}, but you can't file to it. Open Spaarke to choose where to file.`
-      );
-      await openTaskpane();
+    let content: EmailContentCapture | undefined;
+    try {
+      content = await readEmailContent();
+    } catch (error) {
+      // A read failure stops the save: nothing is posted (task 116a — never save an email without the content).
+      console.error('Quick save could not read the email:', error);
+      await dialog.show({
+        message:
+          error instanceof EmailCaptureError
+            ? "Couldn't read this email or an attachment, so nothing was saved. Open Spaarke to try again."
+            : 'Could not read the current email.',
+        status: 'error',
+      });
       return;
     }
 
     const idempotencyKey = await computeQuickSaveIdempotencyKey({
       kind: 'email',
       internetMessageId: context.internetMessageId,
-      target: pre.predicted,
+      target,
     });
-    const request = buildEmailSaveRequest(context, pre.predicted, idempotencyKey);
-    await apiClient.post('/api/office/save', request);
+    const request = buildEmailSaveRequest(context, target, idempotencyKey, content);
+    const response = await apiClient.post<QuickSaveResponse>('/api/office/save', request);
 
-    notifyInfo('spaarke_save', `Filed to ${notifiedName(pre.predicted.name)}.`);
+    const saved = await readSavedDocument(response?.statusUrl, null);
+    if (saved.kind === 'failed') {
+      await dialog.show({
+        message: `Spaarke could not finish saving this email: ${saved.reason}.`,
+        status: 'error',
+      });
+      return;
+    }
+
+    await dialog.show({
+      message: describeEmailSaved(target, content, response?.duplicate === true),
+      status: 'success',
+      linkUrl:
+        saved.kind === 'saved'
+          ? buildQuickSaveRecordLink(process.env.ORG_URL, configuredSpaarkeAppName(), saved.document.documentId)
+          : null,
+    });
   } catch (error) {
     console.error('Quick save failed:', error);
-    notifyError('Failed to save email. Open Spaarke to try manually.');
+    await dialog.show({ message: 'Failed to save email. Open Spaarke to try manually.', status: 'error' });
   } finally {
-    event.completed();
+    dialog.finish();
   }
 }
 
@@ -200,4 +230,4 @@ Office.onReady(() => {
 });
 
 // Export for module systems
-export { showTaskPane, quickSave };
+export { showTaskPane, quickSave, describeEmailSaved };

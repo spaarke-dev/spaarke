@@ -1,6 +1,6 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/copilot/plugin/v2.2/schema.json",
-  "schema_version": "v2.2",
+  "$schema": "https://developer.microsoft.com/json-schemas/copilot/plugin/v2.4/schema.json",
+  "schema_version": "v2.4",
   "name_for_human": "Spaarke Legal AI",
   "description_for_human": "Search documents, run playbooks, manage matters and tasks with Spaarke AI.",
   "description_for_model": "This plugin connects to the Spaarke legal document management platform. Use it when the user asks about legal documents, matters, tasks, deadlines, playbook analysis, financial summaries, or communications. All data is scoped to what the authenticated user is permitted to access.",
@@ -10,7 +10,7 @@
       "type": "OpenApi",
       "auth": {
         "type": "OAuthPluginVault",
-        "reference_id": "YTIyMWE5NWUtNmFiYy00NDM0LWFlY2MtZTQ4MzM4YTFiMmYyIyM3ZmFjM2E2Zi1mZDYwLTQ4MTQtYTEzNC1kMTlkNzIwN2E1ZGY="
+        "reference_id": "${{SPAARKE_COPILOT_AUTH_CONFIG_ID}}"
       },
       "spec": {
         "url": "spaarke-bff-openapi.yaml"

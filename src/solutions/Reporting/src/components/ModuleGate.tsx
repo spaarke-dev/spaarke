@@ -30,6 +30,7 @@ import {
   Text,
 } from "@fluentui/react-components";
 import { LockClosedRegular, WarningRegular } from "@fluentui/react-icons";
+import { isApiError, isAuthFailure } from "@spaarke/auth";
 import { authenticatedFetch } from "../services/authInit";
 import { getBffBaseUrl } from "../config/runtimeConfig";
 import { REPORTING_STATUS_PATH } from "../config/reportingConfig";
@@ -109,23 +110,32 @@ function resolveUrlParamOverride(): ModuleStatus | null {
  * - 401 / 403 → "unauthorized"
  * - anything else → "error"
  */
-async function probeModuleStatus(): Promise<ModuleStatus> {
+export async function probeModuleStatus(): Promise<ModuleStatus> {
   try {
     const url = `${getBffBaseUrl()}${REPORTING_STATUS_PATH}`;
     const response = await authenticatedFetch(url, { method: "GET" });
 
+    // `@spaarke/auth`'s authenticatedFetch throws for every non-2xx (see the catch), so only the
+    // 2xx line below runs in production; the status lines stay for a fetch that returns failures.
     if (response.ok) return "ok";
-    if (response.status === 404) return "disabled";
-    if (response.status === 401 || response.status === 403) return "unauthorized";
-
-    console.warn(
-      `[ModuleGate] Unexpected status from ${REPORTING_STATUS_PATH}: ${response.status}`
-    );
-    return "error";
+    return statusFromHttpFailure(response.status);
   } catch (err) {
+    // The gate's designed answers arrive here: ApiError(404) / ApiError(403), or AuthError once the
+    // 401 retries are spent.
+    if (isApiError(err)) return statusFromHttpFailure(err.status);
+    if (isAuthFailure(err)) return "unauthorized";
     console.error("[ModuleGate] BFF probe failed:", err);
     return "error";
   }
+}
+
+/** The gate state for a non-2xx status from the probe (see the file header for the contract). */
+function statusFromHttpFailure(status: number): ModuleStatus {
+  if (status === 404) return "disabled";
+  if (status === 401 || status === 403) return "unauthorized";
+
+  console.warn(`[ModuleGate] Unexpected status from ${REPORTING_STATUS_PATH}: ${status}`);
+  return "error";
 }
 
 // ---------------------------------------------------------------------------

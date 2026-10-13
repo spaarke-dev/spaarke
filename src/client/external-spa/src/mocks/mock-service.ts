@@ -34,8 +34,48 @@ function collection<T>(items: T[]): { value: T[] } {
   return { value: items };
 }
 
+/** Local-dev notification feed (task 055): two items on the first mock project; `/seen` marks them read. */
+let mockNotificationsSeenAt: string | null = null;
+const MOCK_NOTIFICATION_TIMES = [new Date(Date.now() - 20 * 60_000), new Date(Date.now() - 3 * 3_600_000)];
+
+function mockNotificationFeed() {
+  const value = [
+    {
+      kind: 'message',
+      id: '00000000-0000-4000-8000-0000000a0001',
+      recordType: 'projects',
+      recordId: '00000000-0000-4000-8000-0000000b0001',
+      recordTitle: 'Mock project',
+      occurredOn: MOCK_NOTIFICATION_TIMES[0].toISOString(),
+      senderName: 'Sam Rivera',
+    },
+    {
+      kind: 'grant',
+      id: '00000000-0000-4000-8000-0000000a0002',
+      recordType: 'matters',
+      recordId: '00000000-0000-4000-8000-0000000b0002',
+      recordTitle: null,
+      occurredOn: MOCK_NOTIFICATION_TIMES[1].toISOString(),
+      senderName: null,
+    },
+  ].map(item => ({
+    ...item,
+    isUnread: mockNotificationsSeenAt === null || Date.parse(item.occurredOn) > Date.parse(mockNotificationsSeenAt),
+  }));
+  return { value, unreadCount: value.filter(i => i.isUnread).length, lastSeenAt: mockNotificationsSeenAt };
+}
+
 export function getMockResponse<T>(path: string, options: RequestInit = {}): Promise<T> {
   const method = (options.method ?? 'GET').toUpperCase();
+
+  // GET / POST /api/v1/external/notifications[/seen] (task 055)
+  if (method === 'GET' && path === '/api/v1/external/notifications') {
+    return delay(mockNotificationFeed() as unknown as T);
+  }
+  if (method === 'POST' && path === '/api/v1/external/notifications/seen') {
+    mockNotificationsSeenAt = new Date().toISOString();
+    return delay({ lastSeenAt: mockNotificationsSeenAt } as unknown as T);
+  }
 
   // GET /api/v1/external/me
   if (method === 'GET' && path === '/api/v1/external/me') {
@@ -61,16 +101,17 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
     return delay(collection(MOCK_DOCUMENTS[docsByProject[1]] ?? []) as unknown as T);
   }
 
-  // GET /api/v1/external/projects/:id/events
-  const eventsByProject = path.match(/^\/api\/v1\/external\/projects\/([^/]+)\/events/);
-  if (method === 'GET' && eventsByProject) {
-    return delay(collection(MOCK_EVENTS[eventsByProject[1]] ?? []) as unknown as T);
+  // GET /api/v1/external/{projects|matters|workassignments}/:id/events (matter and work assignment: task 039 / 057;
+  // the mock has no matter or work assignment rows, so those answer an empty list)
+  const eventsByRoot = path.match(/^\/api\/v1\/external\/(?:projects|matters|workassignments)\/([^/]+)\/events/);
+  if (method === 'GET' && eventsByRoot) {
+    return delay(collection(MOCK_EVENTS[eventsByRoot[1]] ?? []) as unknown as T);
   }
 
-  // GET /api/v1/external/projects/:id/todos (NEW — R3 task 007)
-  const todosByProject = path.match(/^\/api\/v1\/external\/projects\/([^/]+)\/todos/);
-  if (method === 'GET' && todosByProject) {
-    return delay(collection(MOCK_TODOS[todosByProject[1]] ?? []) as unknown as T);
+  // GET /api/v1/external/{projects|matters|workassignments}/:id/todos (project: R3 task 007; the others: task 057)
+  const todosByRoot = path.match(/^\/api\/v1\/external\/(?:projects|matters|workassignments)\/([^/]+)\/todos/);
+  if (method === 'GET' && todosByRoot) {
+    return delay(collection(MOCK_TODOS[todosByRoot[1]] ?? []) as unknown as T);
   }
 
   // GET /api/v1/external/projects/:id/contacts
@@ -132,6 +173,11 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
   const updateTodoPath = path.match(/^\/api\/v1\/external\/todos\/([^/]+)$/);
   if (method === 'PATCH' && updateTodoPath) {
     return delay(undefined as unknown as T, 300);
+  }
+
+  // POST /api/v1/external/servicerequests (Legal Front Door intake, r3 task 052): echo a created id.
+  if (method === 'POST' && path === '/api/v1/external/servicerequests') {
+    return delay({ sprk_servicerequestid: '00000000-0000-4000-8000-0000000c0001' } as unknown as T, 600);
   }
 
   // Contact-side Grant Access (task 140) — POST/GET /api/v1/external/contact-grants, POST …/contact-grants/revoke.

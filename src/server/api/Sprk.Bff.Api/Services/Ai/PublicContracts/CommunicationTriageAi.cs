@@ -49,14 +49,17 @@ public sealed class CommunicationTriageAi : ICommunicationTriageAi
     private readonly IActionResolver _actionResolver;
     private readonly IActionRunner _actionRunner;
     private readonly IRagService _ragService;
+    private readonly IRetrievalAccessTrim _accessTrim;
     private readonly ILogger<CommunicationTriageAi> _logger;
 
     public CommunicationTriageAi(
         IActionResolver actionResolver,
         IActionRunner actionRunner,
         IRagService ragService,
+        IRetrievalAccessTrim accessTrim,
         ILogger<CommunicationTriageAi> logger)
     {
+        _accessTrim = accessTrim ?? throw new ArgumentNullException(nameof(accessTrim));
         _actionResolver = actionResolver ?? throw new ArgumentNullException(nameof(actionResolver));
         _actionRunner = actionRunner ?? throw new ArgumentNullException(nameof(actionRunner));
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
@@ -126,14 +129,22 @@ public sealed class CommunicationTriageAi : ICommunicationTriageAi
     /// Best-effort — any failure or empty result degrades to <c>null</c> (context-free run), never
     /// blocks the triage completion (NFR-04).
     /// </summary>
+    /// <remarks>
+    /// <b>Task 176 (#1511): withheld.</b> Triage runs unattended (communication enrichment) and its output is persisted on
+    /// the communication record for every reader of that record, so there is no single caller whose read access could
+    /// bound the grounding: the chunks could be another, restricted document under the same matter. The retrieval goes
+    /// through <see cref="IRetrievalAccessTrim"/> with NO caller, which returns nothing (and logs it) without running the
+    /// search, so triage runs context-free. Owner question raised in the task 176 notes.
+    /// </remarks>
     private async Task<string?> RetrieveMatterCorrespondenceGroundingAsync(
         Guid matterId, string tenantId, CancellationToken ct)
     {
         try
         {
-            var response = await _ragService.SearchAsync(
-                query: "prior correspondence for this matter",
-                options: new RagSearchOptions
+            var (response, _) = await _accessTrim.SearchReadableAsync(
+                _ragService,
+                "prior correspondence for this matter",
+                new RagSearchOptions
                 {
                     TenantId = tenantId,
                     ParentEntityType = "sprk_matter",
@@ -141,7 +152,8 @@ public sealed class CommunicationTriageAi : ICommunicationTriageAi
                     TopK = GroundingTopK,
                     MinScore = GroundingMinScore,
                 },
-                cancellationToken: ct).ConfigureAwait(false);
+                callerObjectId: null,
+                ct).ConfigureAwait(false);
 
             return CommunicationTriageGrounding.BuildFragment(response.Results);
         }

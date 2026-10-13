@@ -428,6 +428,26 @@ public class ContactGrantAuthorizationTests
         _dataverse.Updates.Should().BeEmpty("nothing to raise and nothing to lengthen — a no-op");
     }
 
+    /// <summary>
+    /// Owner round 80 (task 113): a dateless re-add of the caller's own LAPSED grant restores it at the picked level — and
+    /// the restored date is still capped at the grantor's own (round 42 item 2 / owner G2 (i)), here 30 days, not 90.
+    /// </summary>
+    [Fact]
+    public async Task Grant_ReAddOfTheCallersOwnLapsedRow_RestoresItAtThePickedLevel_CappedAtTheGrantorsOwnDate()
+    {
+        _dataverse.Clear();
+        _dataverse.Seed(Grantor, ProjectId, (int)ExternalAccessLevel.Collaborate, Today.AddDays(30), issuedByContact: null);
+        var own = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(-2), issuedByContact: Grantor);
+
+        var result = await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate));
+
+        var body = Ok<ContactGrantResponse>(result);
+        body.GrantedAccessLevel.Should().Be(ExternalAccessLevel.Collaborate);
+        body.ExpiryDate.Should().Be(Today.AddDays(30), "capped at the grantor's own date");
+        own.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
+        own.ExpiresDate.Should().Be(Today.AddDays(30));
+    }
+
     /// <summary>The positive twin: a LATER expiry on the caller's own row lengthens it.</summary>
     [Fact]
     public async Task Grant_OnTheCallersOwnRow_ALaterExpiryLengthensIt()

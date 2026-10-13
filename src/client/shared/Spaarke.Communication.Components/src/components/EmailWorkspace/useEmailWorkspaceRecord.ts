@@ -37,8 +37,9 @@ export interface UseEmailWorkspaceRecordResult {
   retry: () => void;
   updateMonitor: (value: boolean) => Promise<void>;
   updateHighPriority: (value: boolean) => Promise<void>;
-  // No updateAccessPermission (task 138, owner Q6): a communication inherits its parent's Access
-  // Permission; its own column is retired and never written.
+  // No updateAccessPermission (task 138, owner Q6; task 173, owner round 81): a communication's access comes from its
+  // parent. Its own sprk_accesspermission is a display copy of the parent's value, written only by the BFF and never
+  // read by enforcement, so the workspace never writes it.
 }
 
 /**

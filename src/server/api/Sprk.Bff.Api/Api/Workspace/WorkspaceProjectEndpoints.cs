@@ -1,8 +1,8 @@
 using System.Security.Claims;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Workspace.Models;
-using Sprk.Bff.Api.Services.Workspace;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Api.Workspace;
 
@@ -12,7 +12,7 @@ namespace Sprk.Bff.Api.Api.Workspace;
 /// </summary>
 /// <remarks>
 /// Follows ADR-001: Minimal API pattern — MapPost with handler delegate.
-/// Follows ADR-007: File uploads through SpeFileStore facade (delegated to ProjectPreFillService).
+/// Uploaded files are not stored: ProjectPreFillService extracts their text in memory (task 227f retired the staging upload).
 /// Follows ADR-008: Endpoint authorization filter per endpoint.
 /// Follows ADR-013: AI document analysis rate-limited (uses existing "ai-stream" policy at 10 req/min).
 /// </remarks>
@@ -30,7 +30,7 @@ public static class WorkspaceProjectEndpoints
 
         // POST /api/workspace/projects/pre-fill
         // Accepts multipart/form-data with one or more file uploads.
-        // Stores files temporarily via SpeFileStore, runs AI extraction, returns pre-filled project fields.
+        // Extracts text in memory (nothing is stored), runs AI extraction, returns pre-filled project fields.
         group.MapPost("/pre-fill", HandlePreFill)
             .AddEndpointFilter<WorkspaceAuthorizationFilter>()
             .RequireRateLimiting("ai-stream")          // 10 req/min per user (ADR-013)
@@ -39,7 +39,7 @@ public static class WorkspaceProjectEndpoints
             .WithSummary("AI pre-fill for Create Project wizard")
             .WithDescription(
                 "Accepts multipart/form-data uploads (PDF, DOCX, XLSX — max 10 MB each). " +
-                "Files are stored temporarily via SpeFileStore, analyzed by the AI, and structured " +
+                "Text is extracted in memory (files are not stored), analyzed by the AI, and structured " +
                 "project field values are returned. Partial extraction is handled gracefully — " +
                 "unextracted fields are null. Returns empty response (confidence=0) on AI timeout.")
             .Accepts<IFormFileCollection>("multipart/form-data")

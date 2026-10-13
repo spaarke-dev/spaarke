@@ -21,6 +21,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.RecordMatching;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Tests.Contract.SpeAdmin;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Sprk.Bff.Api.Tests.Integration.Workspace;
 
 namespace Sprk.Bff.Api.Tests.Auth.SpeAdmin;
@@ -60,6 +61,12 @@ public class AdminSurfaceHostFixture : WorkspaceTestFixture
     /// and unmarked hosts override it.
     /// </summary>
     protected virtual string? PlatformOperatorEnvironmentSetting => "true";
+
+    /// <summary>
+    /// The customer id the host's REAL <c>SpeContainerOwnershipGuard</c> expects on a container's marker (task 227d), or
+    /// null for a guard that admits every container (the default: most of these tests are about business-unit scope).
+    /// </summary>
+    protected virtual string? OwnershipCustomerId => null;
     internal const string RolesHeader = "X-Test-App-Roles";
     internal const string ScopesHeader = "X-Test-Scopes";
 
@@ -117,6 +124,12 @@ public class AdminSurfaceHostFixture : WorkspaceTestFixture
     /// </summary>
     public RecordingLoggerProvider Logs { get; } = new();
 
+    /// <summary>
+    /// The deleted-container ownership records (#1652): the REAL store over an in-memory Cosmos container. A container in
+    /// the recycle bin is this stamp's only when a record here says so — Graph keeps no marker on a deleted container.
+    /// </summary>
+    public FakeSpeDeletedContainerRecords DeletedRecords { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
@@ -150,7 +163,7 @@ public class AdminSurfaceHostFixture : WorkspaceTestFixture
             services.AddSingleton<ILoggerProvider>(Logs);
 
             // Batch-4 integration (master bb8ba7251 x task 165): SPE Admin runs as the BFF's OWN app-only Graph client
-            // (IGraphClientFactory.ForApp) for every config, so this host points that one client at the fake Graph. The
+            // (through SpeContainerOwnershipGuard since T227d) for every config, so this host points that one client at the fake Graph. The
             // tenant guard compares a config's environment tenant with the BFF's, so the BFF tenant here is the one the
             // tests seed on their environments (SeededTenant).
             services.RemoveAll<SpeAdminGraphService>();
@@ -161,7 +174,13 @@ public class AdminSurfaceHostFixture : WorkspaceTestFixture
                     .AddInMemoryCollection(new Dictionary<string, string?> { ["TENANT_ID"] = SeededTenant })
                     .Build(),
                 sp.GetRequiredService<ILogger<SpeAdminGraphService>>(),
-                new FakeGraphClientFactory(Graph)));
+                new FakeGraphClientFactory(Graph),
+                // T227d: every container-scoped call asks the ownership guard; these tests are about business-unit scope,
+                // so the guard admits every container (tests/integration/tenant covers the refusals).
+                OwnershipCustomerId is { } customer
+                    ? TestSpeOwnership.Real(new FakeGraphClientFactory(Graph), customer)
+                    : TestSpeOwnership.AllowAll(new FakeGraphClientFactory(Graph)),
+                DeletedRecords.Store));
         });
     }
 
@@ -203,6 +222,7 @@ public class AdminSurfaceHostFixture : WorkspaceTestFixture
         IndexSync.Reset();
         Graph.Reset();
         Logs.Clear();
+        DeletedRecords.Reset();
     }
 
     protected override void Dispose(bool disposing)
@@ -552,6 +572,18 @@ public sealed class AdminSurfaceCustomerEnvironmentHostFixture : AdminSurfaceHos
 public sealed class AdminSurfaceUnmarkedHostFixture : AdminSurfaceHostFixture
 {
     protected override string? PlatformOperatorEnvironmentSetting => null;
+}
+
+/// <summary>
+/// A host whose SPE ownership guard is the REAL one (task 227d) for customer <see cref="Customer"/>: a container is this
+/// stamp's only when its marker says so — F-165-RB's refusals are observable end to end.
+/// </summary>
+public sealed class AdminSurfaceRealOwnershipHostFixture : AdminSurfaceHostFixture
+{
+    /// <summary>The customer id this host's containers must carry as their ownership marker.</summary>
+    public const string Customer = "cust1";
+
+    protected override string? OwnershipCustomerId => Customer;
 }
 
 /// <summary>A host whose marker is not a boolean — it must not start (the options are validated on start).</summary>

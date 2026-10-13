@@ -73,6 +73,7 @@ describe('applyStampPrecedence (owner precedence, task 051)', () => {
         documentName: '',
         fileName: '',
         relatedRecord: null,
+        relatedRecordKnown: false,
       });
     });
 
@@ -85,6 +86,7 @@ describe('applyStampPrecedence (owner precedence, task 051)', () => {
         documentName: '',
         fileName: '',
         relatedRecord: null,
+        relatedRecordKnown: false,
       });
     });
 
@@ -97,6 +99,7 @@ describe('applyStampPrecedence (owner precedence, task 051)', () => {
         documentName: '',
         fileName: '',
         relatedRecord: null,
+        relatedRecordKnown: false,
       });
     });
 

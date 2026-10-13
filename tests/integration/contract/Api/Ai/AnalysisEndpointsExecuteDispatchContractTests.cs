@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
@@ -11,6 +12,8 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
@@ -155,6 +158,287 @@ public class AnalysisEndpointsExecuteDispatchContractTests
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
+
+    // =========================================================================================
+    // Terminal error event (ADR-019): a run that fails after the stream has started
+    // =========================================================================================
+
+    [Fact]
+    public async Task Post_EngineRunFailsAfterTheFirstEvent_EndsWithExactlyOneSafeTerminalErrorChunk()
+    {
+        _fx.Reset();
+        const string secret = "SENTINEL-upstream-provider-internal tools[3].function.parameters";
+        _fx.PlaybookOrchestratorMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns(FailsAfterFirstEvent(new InvalidOperationException(secret, new TimeoutException("SENTINEL-inner"))));
+
+        var response = await _fx.CreateAuthenticatedClient().PostAsJsonAsync("/api/ai/analysis/execute", new
+        {
+            documentIds = new[] { Guid.NewGuid() },
+            playbookId = Guid.NewGuid(),
+        });
+        var body = await response.Content.ReadAsStringAsync();
+
+        // The stream was already committed, so the failure surfaces as an SSE frame on a 200.
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var chunks = ParseChunks(body);
+        chunks.Select(c => c.GetProperty("type").GetString()).Should().Equal("metadata", "error");
+
+        var error = chunks.Last();
+        error.GetProperty("done").GetBoolean().Should().BeTrue();
+        error.GetProperty("error").GetString().Should().Be(PlaybookStreamEvent.RunFailedMessage);
+        error.GetProperty("errorCode").GetString().Should().Be("playbook.run-failed");
+        error.GetProperty("correlationId").GetString().Should().NotBeNullOrWhiteSpace(
+            "ADR-019: the user can quote the correlation id so support finds the server log entry");
+
+        // Nothing from the exception reaches the wire, and nothing follows the error.
+        body.Should().NotContain("SENTINEL", "the exception and inner-exception messages must never reach the wire");
+        body.Should().NotContain(nameof(InvalidOperationException), "the exception type must never reach the wire");
+        body.Should().NotContain(nameof(TimeoutException), "the inner exception type must never reach the wire");
+        body.Should().NotContain(" at Sprk.", "no stack frame may reach the wire");
+        body.Should().NotContain("[DONE]", "the error chunk is the terminal event");
+    }
+
+    [Fact]
+    public async Task Post_EngineRunEndsInItsOwnRunFailedEvent_ShowsTheError_AndSendsNoCompletionNotification()
+    {
+        _fx.Reset();
+        var playbookId = Guid.NewGuid();
+        _fx.PlaybookOrchestratorMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns(EndsInRunFailed(playbookId));
+        var notificationLookup = _fx.WatchForNotificationLookup();
+
+        var response = await _fx.CreateAuthenticatedClient().PostAsJsonAsync("/api/ai/analysis/execute", new
+        {
+            documentIds = new[] { Guid.NewGuid() },
+            playbookId,
+        });
+        var body = await response.Content.ReadAsStringAsync();
+
+        var chunks = ParseChunks(body);
+        chunks.Select(c => c.GetProperty("type").GetString()).Should().Equal("metadata", "error");
+        chunks.Last().GetProperty("error").GetString().Should().Be(PlaybookStreamEvent.RunFailedMessage);
+
+        // The "AI analysis complete" notification is fire-and-forget (no handle to await), so give it a generous
+        // window to start: a pre-fix run sends it within milliseconds of the response ending.
+        var completed = await Task.WhenAny(notificationLookup, Task.Delay(TimeSpan.FromSeconds(2)));
+        completed.Should().NotBeSameAs(notificationLookup,
+            "a failed run must not tell the user their analysis is complete");
+    }
+
+    // =========================================================================================
+    // Document Profile branch: failure must not read as success (ADR-019)
+    // =========================================================================================
+
+    [Fact]
+    public async Task Post_DocumentProfileRunFails_ShowsTheError_AndSendsNoCompletionNotification()
+    {
+        // Default fixture: the Action cannot be resolved, so the pipeline yields an error chunk and ends (a failed
+        // profile run - the same shape as "Document has no extractable text").
+        _fx.Reset();
+        var notificationLookup = _fx.WatchForNotificationLookup();
+
+        var response = await _fx.CreateAuthenticatedClient().PostAsJsonAsync("/api/ai/analysis/execute", new
+        {
+            documentIds = new[] { Guid.NewGuid() },
+            playbookId = AnalysisExecuteDispatchTestFixture.DocumentProfilePlaybookId,
+        });
+        var chunks = ParseChunks(await response.Content.ReadAsStringAsync());
+
+        chunks.Select(c => c.GetProperty("type").GetString()).Should().EndWith("error");
+        chunks.Count(c => c.GetProperty("type").GetString() == "error").Should().Be(1);
+
+        // The notification is fire-and-forget: give a pre-fix run (it sends within milliseconds) a generous window.
+        var completed = await Task.WhenAny(notificationLookup, Task.Delay(TimeSpan.FromSeconds(2)));
+        completed.Should().NotBeSameAs(notificationLookup,
+            "a failed profile run must not tell the user their analysis is complete");
+    }
+
+    [Fact]
+    public async Task Post_DocumentProfileUpstreamTimeout_EndsWithExactlyOneSafeTerminalErrorChunk()
+    {
+        // A timeout is a TaskCanceledException while the CLIENT is still connected: the pipeline rethrows it, and it
+        // used to be swallowed as a "client disconnected", closing the stream with no error and no [DONE].
+        _fx.Reset();
+        _fx.ActionResolverMock
+            .Setup(a => a.ResolveAsync(ConsumerTypes.DocumentProfile, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("SENTINEL-HttpClient.Timeout elapsed"));
+        var notificationLookup = _fx.WatchForNotificationLookup();
+
+        var response = await _fx.CreateAuthenticatedClient().PostAsJsonAsync("/api/ai/analysis/execute", new
+        {
+            documentIds = new[] { Guid.NewGuid() },
+            playbookId = AnalysisExecuteDispatchTestFixture.DocumentProfilePlaybookId,
+        });
+        var body = await response.Content.ReadAsStringAsync();
+
+        var chunks = ParseChunks(body);
+        chunks.Count(c => c.GetProperty("type").GetString() == "error").Should().Be(1);
+        var error = chunks.Last();
+        error.GetProperty("type").GetString().Should().Be("error");
+        error.GetProperty("error").GetString().Should().Be(PlaybookStreamEvent.RunFailedMessage);
+        error.GetProperty("errorCode").GetString().Should().Be(PlaybookStreamEvent.RunFailedErrorCode);
+        body.Should().NotContain("SENTINEL").And.NotContain(nameof(TaskCanceledException));
+        body.Should().NotContain("[DONE]", "the error chunk is the terminal event");
+
+        var completed = await Task.WhenAny(notificationLookup, Task.Delay(TimeSpan.FromSeconds(1)));
+        completed.Should().NotBeSameAs(notificationLookup, "a timed-out profile run is not a completed one");
+    }
+
+    [Fact]
+    public async Task Post_DocumentProfileClientAborts_WritesNoErrorChunk()
+    {
+        // Control: when the CLIENT goes away the close stays silent - there is nobody to tell.
+        _fx.Reset();
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _fx.ActionResolverMock
+            .Setup(a => a.ResolveAsync(ConsumerTypes.DocumentProfile, It.IsAny<CancellationToken>()))
+            .Returns<string, CancellationToken>(async (_, ct) =>
+            {
+                reached.TrySetResult();
+                await Task.Delay(Timeout.Infinite, ct);
+                return default(AnalysisAction)!;
+            });
+
+        using var cts = new CancellationTokenSource();
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/ai/analysis/execute")
+        {
+            Content = JsonContent.Create(new
+            {
+                documentIds = new[] { Guid.NewGuid() },
+                playbookId = AnalysisExecuteDispatchTestFixture.DocumentProfilePlaybookId,
+            }),
+        };
+        // The first chunk (the branch marker) is flushed before the Action is resolved, so the headers arrive first.
+        var response = await _fx.CreateAuthenticatedClient()
+            .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        await reached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await cts.CancelAsync();
+        response.Dispose(); // dropping the connection is what aborts the server-side request
+
+        await _fx.RequestHandled.WaitAsync(TimeSpan.FromSeconds(10));
+        ParseChunks(_fx.ServerWire).Select(c => c.GetProperty("type").GetString()).Should().NotContain("error");
+        _fx.ServerWire.Should().NotContain("[DONE]");
+    }
+
+    [Theory]
+    [InlineData("profile")]
+    [InlineData("engine")]
+    public async Task Post_AFailedRunWhoseTerminatorWriteThrows_StillEndsWithExactlyOneErrorChunk(string branch)
+    {
+        // The run already put its own error on the wire; the flush after [DONE] then fails (not a client abort). The handler's
+        // catch-all must see the error is already there and not append a second terminal error.
+        _fx.Reset();
+        Guid playbookId;
+        if (branch == "profile")
+        {
+            playbookId = AnalysisExecuteDispatchTestFixture.DocumentProfilePlaybookId;
+        }
+        else
+        {
+            playbookId = Guid.NewGuid();
+            _fx.PlaybookOrchestratorMock
+                .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+                .Returns(EndsInRunFailed(playbookId));
+        }
+
+        _fx.ThrowWhenTheTerminatorIsWritten = true;
+        var response = await _fx.CreateAuthenticatedClient().PostAsJsonAsync("/api/ai/analysis/execute", new
+        {
+            documentIds = new[] { Guid.NewGuid() },
+            playbookId,
+        });
+        await response.Content.ReadAsStringAsync();
+
+        ParseChunks(_fx.ServerWire).Count(c => c.GetProperty("type").GetString() == "error").Should().Be(1,
+            "ADR-019: a stream ends in exactly one terminal error");
+    }
+
+    [Theory]
+    [InlineData("profile")]
+    [InlineData("engine-run-failed")]
+    [InlineData("engine-node-failed")]
+    public async Task Post_AFailureWhoseTextCarriesASecret_NeverPutsTheSecretOnTheWire(string scenario)
+    {
+        const string leaky = "Upstream rejected the request: client_secret=SUPERSECRET";
+        _fx.Reset();
+        var playbookId = AnalysisExecuteDispatchTestFixture.DocumentProfilePlaybookId;
+        if (scenario == "profile")
+        {
+            _fx.ActionResolverMock
+                .Setup(a => a.ResolveAsync(ConsumerTypes.DocumentProfile, It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException(leaky));
+        }
+        else
+        {
+            playbookId = Guid.NewGuid();
+            _fx.PlaybookOrchestratorMock
+                .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+                .Returns(scenario == "engine-run-failed" ? FailsWith(playbookId, leaky) : NodeFailsWith(playbookId, leaky));
+        }
+
+        var response = await _fx.CreateAuthenticatedClient().PostAsJsonAsync("/api/ai/analysis/execute", new
+        {
+            documentIds = new[] { Guid.NewGuid() },
+            playbookId,
+        });
+        var body = await response.Content.ReadAsStringAsync();
+
+        body.Should().NotContain("SUPERSECRET", "a credential value must never reach the SSE stream");
+        body.Should().Contain("client_secret=[redacted]", "the secret NAME stays so the failure is diagnosable");
+    }
+
+    private static async IAsyncEnumerable<PlaybookStreamEvent> FailsWith(Guid playbookId, string error)
+    {
+        var runId = Guid.NewGuid();
+        yield return PlaybookStreamEvent.RunStarted(runId, playbookId, 1);
+        await Task.Yield();
+        yield return PlaybookStreamEvent.RunFailed(runId, playbookId, error);
+    }
+
+    private static async IAsyncEnumerable<PlaybookStreamEvent> NodeFailsWith(Guid playbookId, string error)
+    {
+        var runId = Guid.NewGuid();
+        yield return PlaybookStreamEvent.RunStarted(runId, playbookId, 1);
+        await Task.Yield();
+        yield return PlaybookStreamEvent.NodeFailed(runId, playbookId, Guid.NewGuid(), "Step", error);
+    }
+
+    private static List<JsonElement> ParseChunks(string body)
+    {
+        var chunks = new List<JsonElement>();
+        foreach (var frame in body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries))
+        {
+            frame.Should().StartWith("data: ");
+            var payload = frame["data: ".Length..];
+            if (payload == "[DONE]")
+            {
+                continue;
+            }
+
+            chunks.Add(JsonDocument.Parse(payload).RootElement.Clone());
+        }
+
+        return chunks;
+    }
+
+    private static async IAsyncEnumerable<PlaybookStreamEvent> FailsAfterFirstEvent(Exception toThrow)
+    {
+        yield return PlaybookStreamEvent.RunStarted(Guid.NewGuid(), Guid.NewGuid(), 1);
+        await Task.Yield();
+        throw toThrow;
+    }
+
+    private static async IAsyncEnumerable<PlaybookStreamEvent> EndsInRunFailed(Guid playbookId)
+    {
+        var runId = Guid.NewGuid();
+        yield return PlaybookStreamEvent.RunStarted(runId, playbookId, 1);
+        await Task.Yield();
+        yield return PlaybookStreamEvent.RunFailed(runId, playbookId, "The playbook run failed. See the server log for details.");
+    }
 }
 
 /// <summary>
@@ -174,6 +458,39 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
     public Mock<IConsumerRoutingService> ConsumerRoutingMock { get; } = new();
     public Mock<IPlaybookOrchestrationService> PlaybookOrchestratorMock { get; } = new();
     public Mock<IActionResolver> ActionResolverMock { get; } = new();
+
+    /// <summary>The Dataverse boundary of the fire-and-forget "analysis complete" notification.</summary>
+    public Mock<IGenericEntityService> EntityServiceMock { get; } = new();
+
+    /// <summary>
+    /// Completes when the notification path first looks up the caller's systemuser - the first thing it does. Used to
+    /// observe whether a run sent the completion notification.
+    /// </summary>
+    public Task WatchForNotificationLookup()
+    {
+        var seen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        EntityServiceMock.Reset();
+        EntityServiceMock
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback(() => seen.TrySetResult())
+            .ReturnsAsync(new EntityCollection());
+        return seen.Task;
+    }
+
+    /// <summary>Every byte the handler wrote to the response body, as the server wrote it (survives a client abort).</summary>
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _serverWrites = new();
+
+    public string ServerWire => string.Concat(_serverWrites);
+
+    /// <summary>When set, the flush after the SSE <c>[DONE]</c> terminator throws (a non-abort I/O failure after the body began).</summary>
+    public bool ThrowWhenTheTerminatorIsWritten { get; set; }
+
+    private TaskCompletionSource _requestHandled = NewSignal();
+
+    /// <summary>Completes when the handler of the current test's request has returned.</summary>
+    public Task RequestHandled => _requestHandled.Task;
+
+    private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private WebApplication? _app;
 
@@ -250,7 +567,7 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
         builder.Services.AddSingleton(Mock.Of<IPostUploadIndexingEnqueuer>());
 
         // Real NotificationService (fire-and-forget completion notification path).
-        builder.Services.AddSingleton(Mock.Of<IGenericEntityService>());
+        builder.Services.AddSingleton(EntityServiceMock.Object);
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership); // task 146 — the owner resolver at its module boundary
         builder.Services.AddSingleton<NotificationService>();
 
@@ -280,6 +597,22 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
         _app.UseAuthorization();
         _app.UseRateLimiter();
 
+        // Records what the handler writes, observes when it has returned, and can make the [DONE] write fail.
+        _app.Use(async (ctx, next) =>
+        {
+            var inner = ctx.Response.Body;
+            ctx.Response.Body = new RecordingBodyStream(inner, this);
+            try
+            {
+                await next(ctx);
+            }
+            finally
+            {
+                ctx.Response.Body = inner;
+                _requestHandled.TrySetResult();
+            }
+        });
+
         _app.MapAnalysisEndpoints();
 
         await _app.StartAsync();
@@ -291,6 +624,9 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
 
     public void Reset()
     {
+        _serverWrites.Clear();
+        ThrowWhenTheTerminatorIsWritten = false;
+        _requestHandled = NewSignal();
         ConsumerRoutingMock.Reset();
         PlaybookOrchestratorMock.Reset();
         ActionResolverMock.Reset();
@@ -337,5 +673,43 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
     {
         await Task.CompletedTask;
         yield break;
+    }
+
+    /// <summary>Delegating write-only stream that records each write and can fail the SSE terminator write.</summary>
+    private sealed class RecordingBodyStream(Stream inner, AnalysisExecuteDispatchTestFixture owner) : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            // Fails the flush that follows the [DONE] terminator (a stream-level I/O failure, not a client abort). Failing
+            // the terminator write itself would fault the response pipe and hide a second error write.
+            if (owner.ThrowWhenTheTerminatorIsWritten && owner.ServerWire.EndsWith("[DONE]\n\n", StringComparison.Ordinal))
+            {
+                throw new IOException("simulated failure flushing the SSE terminator");
+            }
+
+            return inner.FlushAsync(cancellationToken);
+        }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) =>
+            WriteAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var text = System.Text.Encoding.UTF8.GetString(buffer.Span);
+            owner._serverWrites.Enqueue(text);
+            await inner.WriteAsync(buffer, cancellationToken);
+        }
     }
 }

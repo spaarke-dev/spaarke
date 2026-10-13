@@ -20,5 +20,7 @@ A test in this directory must fail when the boundary is actually crossed — it 
 |---|---|---|
 | 2026-07-26 (`ai-advanced-capabilities-nda-r1` task 052) | `Ai/ReferenceRetrievalTenantPinTests.cs` | AI Search `spaarke-rag-references` — caller tenant + the `"system"` sentinel, nothing wider |
 | 2026-08-25 (`spaarkeai-compose-r8` task 060) | `Ai/SessionFileBlobStoreTenantIsolationTests.cs` | Durable session-file blob store — `{tenantId}/session-files/{sessionId}/{fileId}`; cross-tenant read, identifier injection, case sensitivity |
+| 2026-09 (`spaarkeai-compose-r8` task 059) | `Ai/TenantSelectionByRequestTests.cs` | A caller cannot NAME its own tenant (header / query-string tenant selection) |
+| 2026-10-06 (`customer-provisioning-orchestration-r1` T227d) | `Spe/SpeAppOnlyContainerIsolationTests.cs` | App-only SharePoint Embedded calls reach only the stamp's own containers (shared Model 1 container type): every facade path refuses a foreign container before any content call (404, same as nonexistent); SPE Admin lists/searches/deleted bin filtered, no search-paging oracle |
 
-**2** KEEP-tenant-isolation files. The category was flagged **CRITICAL BACKFILL** in `notes/test-inventory-summary.md` at the 2026-06-26 inventory (zero compiled files at the time). Backfill continues as part of the ≥6-month cultural change window (per design.md §257) — every new persisted-data store should add a file here.
+**4** KEEP-tenant-isolation files. The category was flagged **CRITICAL BACKFILL** in `notes/test-inventory-summary.md` at the 2026-06-26 inventory (zero compiled files at the time). Backfill continues as part of the ≥6-month cultural change window (per design.md §257) — every new persisted-data store should add a file here.

@@ -1,10 +1,10 @@
 # Authentication Azure Resources & GUIDs
 
 > **Source**: AUTHENTICATION-ARCHITECTURE.md
-> **Last Updated**: 2026-05-17
-> **Last Reviewed**: 2026-05-17
-> **Reviewed By**: ai-platform-unification-r2
-> **Status**: Current (R2: Cosmos DB containers added; Content Safety resource added; RBAC updated)
+> **Last Updated**: 2026-10-06
+> **Last Reviewed**: 2026-10-06 (Content Safety section only)
+> **Reviewed By**: customer-provisioning-orchestration-r1 task 246 (Content Safety); earlier ai-platform-unification-r2
+> **Status**: Current (R2: Cosmos DB containers added; RBAC updated. 2026-10-06: Content Safety section corrected — keyless, served by `spaarke-openai-dev` in shared dev)
 > **Applies To**: Debugging, deployment, configuration lookup
 
 ---
@@ -130,14 +130,19 @@ Both are listed in `knownClientApplications` on the BFF API app (`1e40baad-e065-
 
 | Property | Value |
 |----------|-------|
-| **Name** | `spe-api-dev-67e2xz` |
-| **Resource Group** | `spe-infrastructure-westus2` |
+| **Name** | `spaarke-bff-dev` (Linux; deployment slot `staging`) |
+| **Resource Group** | `rg-spaarke-dev` |
 | **Region** | West US 2 |
-| **URL** | `https://spe-api-dev-67e2xz.azurewebsites.net` |
+| **URL** | `https://spaarke-bff-dev.azurewebsites.net` |
+
+> **Corrected 2026-10-07.** The dev BFF moved on 2026-05-24 from the Windows app `spe-api-dev-67e2xz`
+> (`spe-infrastructure-westus2`) to the Linux app `spaarke-bff-dev` (`rg-spaarke-dev`) —
+> `config/spaarke-resources.yaml` (`environments.dev.bff`, `_changelog` 2026-05-24) and the `bff-deploy` skill. The old
+> name is NOT the dev BFF; every command on this page now names `spaarke-bff-dev`.
 
 **View Logs**:
 ```bash
-az webapp log tail --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2
+az webapp log tail --name spaarke-bff-dev --resource-group rg-spaarke-dev
 ```
 
 ---
@@ -187,7 +192,7 @@ requests
 |----------|-------|
 | **Name** | `spaarke-openai-dev` |
 | **Resource Group** | `spe-infrastructure-westus2` |
-| **Region** | West US 2 (dev — production deploys to `westus3` per `infrastructure/bicep/parameters/platform-prod.bicepparam`) |
+| **Region** | East US (`spaarke-openai-dev` — Azure reports `eastus`, checked 2026-10-06; customer stamps deploy OpenAI to `openAiLocation`, default `westus3`) |
 | **Endpoint** | `https://spaarke-openai-dev.openai.azure.com/` |
 | **SKU** | S0 (Standard) |
 
@@ -252,22 +257,32 @@ DocumentIntelligence__ReasoningModel=(unset until task 013 provisioning lands; t
 
 ### Azure AI Content Safety (R2)
 
+> **Corrected 2026-10-06 (task 246)**: there is no `spaarke-contentsafety-dev` account and no Content Safety API key. Shared dev serves Content Safety from the multi-service AIServices account `spaarke-openai-dev`, and the BFF authenticates with its managed identity.
+
 | Property | Value |
 |----------|-------|
-| **Name** | `spaarke-contentsafety-dev` |
+| **Name** | `spaarke-openai-dev` (kind `AIServices`; shared with Azure OpenAI) |
 | **Resource Group** | `spe-infrastructure-westus2` |
-| **Region** | West US 2 |
-| **Endpoint** | `https://spaarke-contentsafety-dev.cognitiveservices.azure.com/` |
+| **Region** | East US (as Azure reports it, 2026-10-06) |
+| **Endpoint** | `https://spaarke-openai-dev.cognitiveservices.azure.com/` |
 | **SKU** | S0 (Standard) |
+| **Auth** | Managed identity. The BFF identity needs **Cognitive Services User** on the account ("Cognitive Services OpenAI User" does NOT cover Content Safety dataActions). |
 | **Purpose** | Prompt injection detection (PromptShieldService) and groundedness annotation (GroundednessCheckService) |
 
-**App Service Settings** (bound via `AiSafetyModule`):
+**App Service Settings** (read by `AiSafetyModule` / `ContentSafetyAuthHandler`; shared dev BFF `spaarke-bff-dev`, RG `rg-spaarke-dev`):
 ```
-AiSafety__ContentSafety__Endpoint=https://spaarke-contentsafety-dev.cognitiveservices.azure.com/
-AiSafety__ContentSafety__ApiKey=(from Key Vault or App Settings)
+AiSafety__ContentSafety__Endpoint=https://spaarke-openai-dev.cognitiveservices.azure.com/
+AiSafety__ContentSafety__ManagedIdentity__Enabled=true
+AiSafety__PromptShield__ChatPipelineEnabled=true
 ```
 
-**API used**: `POST {endpoint}/contentsafety/text:shieldPrompt?api-version=2024-09-01`
+`AiSafety__ContentSafety__Endpoint` is **required** outside Development/Testing: the BFF refuses to start without it, and there is no default. `AiSafety__ContentSafety__ApiKey` is read only when set and is for local development; do not set it in a deployed environment.
+
+**Customer stamps**: each stamp has its own `sprk-{customer}-{env}-contentsafety` account (kind `ContentSafety`, custom subdomain, local auth disabled; the stamp's user-assigned managed identity holds Cognitive Services User), deployed by `infrastructure/bicep/customer.bicep` via `modules/content-safety.bicep`. `customer.bicep` sets `AiSafety__ContentSafety__Endpoint`, and provisioning handler H4b re-applies it from H2a's `contentSafetyEndpoint` output. No customer vault holds a Content Safety key.
+
+**APIs used**: `POST {endpoint}/contentsafety/text:shieldPrompt?api-version=2024-09-01` and `POST {endpoint}/contentsafety/text:detectGroundedness?api-version=2024-09-15-preview`
+
+**Verify**: `./scripts/Verify-ContentSafetyResource.ps1` (keyless and read-only; calls both APIs with your own Entra token).
 
 ---
 
@@ -445,8 +460,8 @@ dotnet user-secrets set "API_CLIENT_SECRET" "your-secret-value"
 **Azure App Service**:
 ```bash
 az webapp config appsettings set \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2 \
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev \
   --settings API_CLIENT_SECRET="your-secret-value"
 ```
 
@@ -459,8 +474,8 @@ az keyvault secret set \
 
 # Then reference in App Service:
 az webapp config appsettings set \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2 \
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev \
   --settings API_CLIENT_SECRET="@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/API-CLIENT-SECRET/)"
 ```
 
@@ -680,8 +695,8 @@ else
 ```powershell
 # Use PowerShell to avoid bash escaping issues with '!' character
 az webapp config appsettings set `
-  --name spe-api-dev-67e2xz `
-  --resource-group spe-infrastructure-westus2 `
+  --name spaarke-bff-dev `
+  --resource-group rg-spaarke-dev `
   --settings "EmailProcessing__DefaultContainerId=b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50"
 ```
 
@@ -715,7 +730,7 @@ See [sdap-auth-patterns.md](sdap-auth-patterns.md) Pattern 6 for details.
 
 ```bash
 # Check App Service configuration
-az webapp config appsettings list --name spe-api-dev-67e2xz -g spe-infrastructure-westus2
+az webapp config appsettings list --name spaarke-bff-dev -g rg-spaarke-dev
 
 # Verify Key Vault access
 az keyvault secret show --vault-name spe-kv-dev-67e2xz --name API-CLIENT-SECRET
@@ -791,8 +806,8 @@ If using direct App Service settings (not Key Vault references):
 
 ```bash
 az webapp config appsettings set \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2 \
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev \
   --settings API_CLIENT_SECRET="<NEW_SECRET_VALUE>"
 ```
 
@@ -804,8 +819,8 @@ The App Service must be restarted to pick up the new secret value:
 
 ```bash
 az webapp restart \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev
 ```
 
 Allow 30-60 seconds for the app to fully restart.
@@ -814,13 +829,13 @@ Allow 30-60 seconds for the app to fully restart.
 
 ```bash
 # Check health endpoint
-curl https://spe-api-dev-67e2xz.azurewebsites.net/healthz
+curl https://spaarke-bff-dev.azurewebsites.net/healthz
 
 # Check Dataverse-specific health (if applicable)
-curl https://spe-api-dev-67e2xz.azurewebsites.net/healthz/dataverse
+curl https://spaarke-bff-dev.azurewebsites.net/healthz/dataverse
 
 # Check App Service logs for auth errors
-az webapp log tail --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2
+az webapp log tail --name spaarke-bff-dev --resource-group rg-spaarke-dev
 ```
 
 Expected results:
@@ -926,7 +941,7 @@ api://{client-id}/user_impersonation
 |----------|-----|------------|
 | **BFF API Name** | SPE BFF API | spaarke-bff-api-prod |
 | **BFF API Client ID** | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | *(after creation)* |
-| **Redirect URI** | `https://spe-api-dev-67e2xz.azurewebsites.net` | `https://api.spaarke.com` |
+| **App Service** | `https://spaarke-bff-dev.azurewebsites.net` (until 2026-05-24: `spe-api-dev-67e2xz`) | `https://api.spaarke.com` |
 | **Secret Storage** | App Service settings / user-secrets | Key Vault (`sprk-platform-prod-kv`) |
 | **Naming** | Legacy (pre-convention) | FR-11 compliant (`spaarke-` prefix) |
 

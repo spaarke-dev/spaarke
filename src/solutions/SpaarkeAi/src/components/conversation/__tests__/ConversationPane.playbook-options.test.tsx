@@ -36,6 +36,8 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
 import type { ISprkChatProps } from '@spaarke/ui-components';
+// The real error classes (the jest map points @spaarke/auth at a stub that re-exports them).
+import { ApiError, AuthError } from '@spaarke/auth';
 
 // ---------------------------------------------------------------------------
 // Mock @spaarke/ui-components — SprkChat is the heavy child.
@@ -305,7 +307,58 @@ describe('ConversationPane → SprkChat playbook-options wiring (FR-49 / 50 / 51
     });
   });
 
-  it('onSelectPlaybook surfaces a friendly fallback message when the dispatcher returns 404 (orchestrator not wired yet)', async () => {
+  async function selectPlaybookAndSettle(): Promise<{ content: string } | null> {
+    renderPane();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const props = sprkChatPropsRef.current as any;
+    React.act(() => {
+      props.onSelectPlaybook('00000000-0000-0000-0000-000000000001', ['file-id-1']);
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (sprkChatPropsRef.current as any).injectLocalMessage;
+  }
+
+  // The production shape: `@spaarke/auth`'s authenticatedFetch THROWS for a non-2xx — it never returns it.
+  it('onSelectPlaybook surfaces the 404 fallback message when authenticatedFetch THROWS ApiError(404)', async () => {
+    authenticatedFetchMock.mockRejectedValueOnce(new ApiError('Not Found', 404, { title: 'Not Found', status: 404 }));
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const msg = await selectPlaybookAndSettle();
+    errSpy.mockRestore();
+
+    expect(msg).not.toBeNull();
+    expect(msg!.content).toContain('dispatcher endpoint');
+  });
+
+  it('onSelectPlaybook surfaces the generic failure message when authenticatedFetch THROWS any other ApiError', async () => {
+    authenticatedFetchMock.mockRejectedValueOnce(new ApiError('Server error', 500, { title: 'Server error', status: 500 }));
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const msg = await selectPlaybookAndSettle();
+    errSpy.mockRestore();
+
+    expect(msg).not.toBeNull();
+    expect(msg!.content).toBe("I couldn't start that playbook. Please try again.");
+  });
+
+  it('onSelectPlaybook surfaces the generic failure message when sign-in failed (AuthError)', async () => {
+    authenticatedFetchMock.mockRejectedValueOnce(
+      new AuthError('Authentication failed after all retry attempts', 'auth_exhausted'),
+    );
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const msg = await selectPlaybookAndSettle();
+    errSpy.mockRestore();
+
+    expect(msg).not.toBeNull();
+    expect(msg!.content).toBe("I couldn't start that playbook. Please try again.");
+  });
+
+  // A host fetch that RETURNS failures takes the `!response.ok` branch.
+  it('onSelectPlaybook surfaces a friendly fallback message when the dispatcher RETURNS 404 (non-throwing fetch)', async () => {
     authenticatedFetchMock.mockResolvedValueOnce(
       new Response('not found', { status: 404 }),
     );

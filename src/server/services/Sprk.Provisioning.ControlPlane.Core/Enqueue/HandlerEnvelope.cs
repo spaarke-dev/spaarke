@@ -9,7 +9,7 @@
 //   + execute a provisioning handler:
 //
 //     - HandlerId       — string handler identifier (e.g. "H4",
-//                         "H5-DataverseEnvCreation"). Copied into the
+//                         "H5"). Copied into the
 //                         Service Bus message's ApplicationProperties["JobType"]
 //                         and Subject; L2's ProvisioningHandlerDispatcher
 //                         resolves the keyed IProvisioningHandler by this
@@ -92,7 +92,7 @@ namespace Sprk.Provisioning.ControlPlane.Enqueue;
 public sealed record HandlerEnvelope
 {
     /// <summary>
-    /// String handler identifier (e.g. <c>"H4"</c>, <c>"H5-DataverseEnvCreation"</c>).
+    /// String handler identifier (e.g. <c>"H4"</c>, <c>"H5"</c>).
     /// Copied into the Service Bus message's <c>ApplicationProperties["JobType"]</c>
     /// and <c>Subject</c> for dispatch-side routing.
     /// </summary>

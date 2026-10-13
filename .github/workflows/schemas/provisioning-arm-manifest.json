@@ -30,11 +30,11 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["customer"],
-      "description": "One entry per Bicep template this workflow compiles. Keys are stable file-basename identifiers (NOT raw TenancyModel enum strings) so this manifest does not need to change shape if the TenancyModel vocabulary grows -- see each entry's resolutionHint for the exact selection rule H2a must apply, mirrored from Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy.ArmDeploymentRunner.ResolveArmTemplateAsync (the authoritative C# source: an exhaustive switch over TenancyModel -- Model2 selects 'customer'; Model1 fails closed until tasks 225b + 228 (task 225a); any other value throws).",
+      "description": "One entry per Bicep template this workflow compiles. Keys are stable file-basename identifiers (NOT raw TenancyModel enum strings) so this manifest does not need to change shape if the TenancyModel vocabulary grows -- see each entry's resolutionHint for the exact selection rule H2a must apply, mirrored from Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy.ArmDeploymentRunner.ResolveArmTemplateAsync (the authoritative C# source: an exhaustive switch over TenancyModel -- Model1 and Model2 both select 'customer' (D-12; Model1 since task 228); any other value throws).",
       "properties": {
         "customer": {
           "$ref": "#/definitions/templateEntry",
-          "description": "Compiled from infrastructure/bicep/customer.bicep. Selected for TenancyModel.Model2; Model1 joins it with tasks 225b + 228 (D-12 -- both models are dedicated customer stamps)."
+          "description": "Compiled from infrastructure/bicep/customer.bicep. Selected for both TenancyModel.Model1 and TenancyModel.Model2 (D-12 -- both models are dedicated customer stamps; Model1 since task 228)."
         },
         "model1-shared": {
           "$ref": "#/definitions/templateEntry",

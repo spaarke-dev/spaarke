@@ -134,7 +134,7 @@ const authenticatedFetchMock = jest.fn(async (url: string) => {
   if (url.includes('/compose-outputs')) {
     return { ok: true, status: 200, json: async () => [] } as unknown as Response;
   }
-  return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
+  throw httpError(404);
 });
 
 const captured: {
@@ -229,6 +229,7 @@ import { ConversationPane } from '../ConversationPane';
 // dispatching the review — this harness clicks the real `<ConsumerChips>` button (rendered inside
 // the stubbed SprkChat's `transcriptFooterSlot`) to answer it.
 import { LOCAL_CHIP } from '../localActionChips';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 const workspaceEvents: WorkspacePaneEvent[] = [];
 let bus: PaneEventBus;

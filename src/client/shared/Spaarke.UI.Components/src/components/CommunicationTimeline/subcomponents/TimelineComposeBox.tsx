@@ -38,6 +38,7 @@ import * as React from 'react';
 import { Button, Field, Input, Spinner, Text, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
 import { Attach20Regular } from '@fluentui/react-icons';
 import { RecipientField, BodyEditor, AttachmentList, validateLocalAttachmentFile } from '../../EmailComposer';
+import { SendCommunicationError } from '../../../services/communicationApi';
 import type { IRecipient, IAttachmentItem, EmailComposerBodyFormat } from '../../EmailComposer';
 import type { ILookupItem } from '../../../types/LookupTypes';
 import type { CommunicationTimelinePrefill } from '../CommunicationTimeline.types';
@@ -218,7 +219,15 @@ export const TimelineComposeBox: React.FC<ITimelineComposeBoxProps> = ({
       // mirrors the existing `to` behavior (a reply box keeps its recipients
       // and topic for the next message in the same conversation).
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send message.');
+      // A refused send arrives as SendCommunicationError: its `detail` is the server's sentence for
+      // the user, its `message` the developer form "sendCommunication failed (status): …".
+      setError(
+        err instanceof SendCommunicationError
+          ? err.detail
+          : err instanceof Error
+            ? err.message
+            : 'Failed to send message.'
+      );
     }
   }, [to, cc, bcc, subject, body, bodyFormat, attachments, onSend]);
 

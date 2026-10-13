@@ -6,7 +6,9 @@ using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using Sprk.Bff.Api.Models.Ai;
+using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Models.Insights;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
 
@@ -46,6 +48,17 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// <c>MultiIndexComposer</c> helper at the synthesis-prompt layer (the helper is invoked by
 /// downstream <c>AiCompletion</c> nodes, not here); IndexRetrieveNode itself emits raw rows.
 /// </para>
+/// <para>
+/// <b>Access trim (unified-access-control-r2 task 176, #1511; DEP-3 closed for this node).</b> The tenant filter alone
+/// returned Observations from EVERY matter in the tenant, secure ones included (predict-matter-cost's cohort reaches
+/// <c>POST /api/insights/ask</c>). Every retrieved row is now trimmed through <see cref="IRetrievalAccessTrim"/> as the run
+/// principal (<see cref="NodeExecutionContext.CallerObjectId"/>), from a 2x candidate pool, against the record that
+/// decides it: EVERY source document its <c>document</c> evidence names (a bare or <c>file://</c> <c>sprk_document</c>
+/// id, or <c>spe://drive/{d}/item/{i}</c> matched on <c>sprk_driveitemid</c>), so a restricted document under a
+/// readable matter is caught; otherwise its scope record (matter / project / invoice / work assignment). A row with neither is
+/// dropped. A Precedent is kept only when the caller can read EVERY supporting matter (owner decision, option b); one
+/// with no supporting-matter evidence, or an unreadable one, is dropped. One batched check per page. With no run principal (app-only, scheduled) nothing is returned, and the EvidenceGuard then applies.
+/// </para>
 /// </remarks>
 public sealed class IndexRetrieveNode : INodeExecutor
 {
@@ -76,17 +89,27 @@ public sealed class IndexRetrieveNode : INodeExecutor
         "scope"
     };
 
+    // Document evidence ref of the form spe://drive/{driveId}/item/{itemId} (the dominant emission shape:
+    // FilesIndexIngestDocumentSource, ObservationEmitter, Layer1ClassificationEmitter). Same pattern as
+    // DataverseObservationMirror.
+    private static readonly Regex SpeDocumentRef = new(
+        @"^spe://drive/(?<driveId>[^/]+)/item/(?<itemId>[^/?#]+)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     private readonly SearchIndexClient _searchIndexClient;
     private readonly IOpenAiClient _openAiClient;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<IndexRetrieveNode> _logger;
 
     public IndexRetrieveNode(
         SearchIndexClient searchIndexClient,
         IOpenAiClient openAiClient,
+        IServiceScopeFactory scopeFactory,
         ILogger<IndexRetrieveNode> logger)
     {
         _searchIndexClient = searchIndexClient;
         _openAiClient = openAiClient;
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _logger = logger;
     }
 
@@ -214,10 +237,12 @@ public sealed class IndexRetrieveNode : INodeExecutor
             var filter = BuildFilter(context.TenantId, config);
 
             // 2. Build SearchOptions
+            // Task 176: a 2x candidate pool, cut back to topK after the access trim below.
+            var poolSize = RetrievalAccessTrim.CandidatePoolSize(topK);
             var searchOptions = new SearchOptions
             {
                 Filter = filter,
-                Size = topK,
+                Size = poolSize,
                 IncludeTotalCount = true
             };
             foreach (var field in SelectFields)
@@ -248,7 +273,7 @@ public sealed class IndexRetrieveNode : INodeExecutor
             {
                 var vectorQuery = new VectorizedQuery(queryEmbedding)
                 {
-                    KNearestNeighborsCount = topK,
+                    KNearestNeighborsCount = poolSize,
                     Fields = { VectorFieldName }
                 };
                 searchOptions.VectorSearch = new VectorSearchOptions
@@ -268,14 +293,50 @@ public sealed class IndexRetrieveNode : INodeExecutor
             var response = await searchClient.SearchAsync<SearchDocument>(
                 searchText, searchOptions, cancellationToken).ConfigureAwait(false);
 
-            // 5. Materialize rows + parse valueJson into InsightArtifact-shaped projections
-            var rows = new List<InsightRowProjection>();
+            // 5. Materialize rows + parse valueJson into InsightArtifact-shaped projections, each with the record
+            //    that decides whether the run principal may see it.
+            var candidates = new List<InsightRowProjection>();
+            var checks = new List<(int Row, RetrievalRecordKey Key)>();
             await foreach (var hit in response.Value.GetResultsAsync().ConfigureAwait(false))
             {
-                rows.Add(MapToProjection(hit));
+                var projection = MapToProjection(hit);
+                foreach (var key in AccessRecordsOf(hit.Document, projection))
+                {
+                    checks.Add((candidates.Count, key));
+                }
+
+                candidates.Add(projection);
             }
 
-            var totalCount = response.Value.TotalCount ?? rows.Count;
+            // 5b. Task 176 (#1511): trim to what the run principal can read, in ONE batched pass for the page. A row is
+            //     kept only when it has at least one deciding record and EVERY one of them is readable. Fail closed: no
+            //     principal or a failed check keeps nothing.
+            RetrievalTrimResult<(int Row, RetrievalRecordKey Key)> trim;
+            using (var scope = _scopeFactory.CreateScope())
+            {
+                var accessTrim = scope.ServiceProvider.GetRequiredService<IRetrievalAccessTrim>();
+                trim = await accessTrim.TrimByRecordAsync<(int Row, RetrievalRecordKey Key)>(
+                    checks, c => c.Key, context.CallerObjectId, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (trim.Withheld)
+            {
+                _logger.LogWarning(
+                    "IndexRetrieveNode {NodeId}: all {Count} retrieved artifact(s) withheld: {Outcome} (task 176, fail closed)",
+                    context.Node.Id, candidates.Count, trim.Outcome);
+            }
+
+            var required = checks.GroupBy(c => c.Row).ToDictionary(g => g.Key, g => g.Count());
+            var passed = trim.Rows.GroupBy(c => c.Row).ToDictionary(g => g.Key, g => g.Count());
+            var rows = candidates
+                .Where((_, i) => required.TryGetValue(i, out var need)
+                                 && passed.TryGetValue(i, out var got)
+                                 && got == need)
+                .Take(topK)
+                .ToList();
+
+            // The count of rows the caller may see, never the index count (which would disclose unreadable matches).
+            var totalCount = rows.Count;
 
             // 6. D-A23 / D-48 EvidenceGuard
             if (requireEvidence && rows.Count == 0)
@@ -429,6 +490,112 @@ public sealed class IndexRetrieveNode : INodeExecutor
 
     private static string EscapeODataValue(string value) =>
         value.Replace("'", "''");
+
+    /// <summary>
+    /// Every record the caller must be able to read to see this artifact (task 176). A Precedent needs ALL of its
+    /// supporting matters (<c>supporting-matter</c> evidence, <c>matter://{id}</c>; owner decision, option b); any
+    /// other artifact needs EVERY one of its <c>document</c> evidence refs, or, with none, its scope record. Empty means the row is dropped.
+    /// </summary>
+    internal static IReadOnlyList<RetrievalRecordKey> AccessRecordsOf(IDictionary<string, object> doc, InsightRowProjection row)
+    {
+        if (string.Equals(row.ArtifactType, "precedent", StringComparison.OrdinalIgnoreCase))
+        {
+            var matters = new List<RetrievalRecordKey>();
+            foreach (var entry in EvidenceEntries(doc))
+            {
+                if (!string.Equals(Get(entry, "refType"), "supporting-matter", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var reference = Get(entry, "ref")?.Trim();
+                var id = reference is not null && reference.StartsWith("matter://", StringComparison.OrdinalIgnoreCase)
+                    ? reference["matter://".Length..]
+                    : reference;
+                if (RetrievalRecordKey.ParentRecord("matter", id) is not { } key)
+                {
+                    // An unparseable supporting matter cannot be checked, so the Precedent cannot be shown.
+                    return Array.Empty<RetrievalRecordKey>();
+                }
+
+                matters.Add(key);
+            }
+
+            return matters;
+        }
+
+        // Any other artifact: EVERY document evidence ref must be readable (task 176 fix round 2, K2 hardening: one
+        // readable ref no longer vouches for a second, restricted one). A document ref that names no checkable
+        // document drops the row. With no document evidence at all, the scope record decides.
+        var documents = new List<RetrievalRecordKey>();
+        foreach (var entry in EvidenceEntries(doc))
+        {
+            if (!string.Equals(Get(entry, "refType"), "document", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (DocumentKeyOf(Get(entry, "ref")) is not { } key)
+            {
+                return Array.Empty<RetrievalRecordKey>();
+            }
+
+            documents.Add(key);
+        }
+
+        if (documents.Count > 0)
+        {
+            return documents;
+        }
+
+        return ScopeRecordOf(row) is { } scope ? new[] { scope } : Array.Empty<RetrievalRecordKey>();
+    }
+
+    private static IEnumerable<IDictionary<string, object>> EvidenceEntries(IDictionary<string, object> doc)
+    {
+        if (doc.TryGetValue("evidence", out var evidenceObj)
+            && evidenceObj is System.Collections.IEnumerable evidence
+            && evidenceObj is not string)
+        {
+            foreach (var item in evidence)
+            {
+                if (item is IDictionary<string, object> entry)
+                {
+                    yield return entry;
+                }
+            }
+        }
+    }
+
+    private static string? Get(IDictionary<string, object> entry, string key) =>
+        entry.TryGetValue(key, out var v) ? v?.ToString() : null;
+
+    /// <summary>
+    /// A <c>document</c> evidence ref as a checkable record: a bare <c>sprk_document</c> id, the ingest fallback
+    /// <c>file://{sprk_document id}</c> (FilesIndexIngestDocumentSource), or an <c>spe://</c> item.
+    /// </summary>
+    private static RetrievalRecordKey? DocumentKeyOf(string? reference)
+    {
+        reference = reference?.Trim();
+        if (reference is not null && reference.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+        {
+            reference = reference["file://".Length..];
+        }
+
+        if (RetrievalRecordKey.Document(reference) is { } byId)
+        {
+            return byId;
+        }
+
+        return reference is not null && SpeDocumentRef.Match(reference) is { Success: true } spe
+            ? RetrievalRecordKey.DocumentByDriveItem(spe.Groups["itemId"].Value)
+            : null;
+    }
+
+    /// <summary>The artifact's scope record: <c>scope.entityType</c> + <c>scope.entityId</c>, or the legacy <c>scope.matterId</c>.</summary>
+    private static RetrievalRecordKey? ScopeRecordOf(InsightRowProjection row) =>
+        RetrievalRecordKey.ParentRecord(row.Scope?.EntityType, row.Scope?.EntityId)
+        ?? RetrievalRecordKey.ParentRecord("matter", row.Scope?.MatterId);
 
     /// <summary>
     /// Maps a raw <see cref="SearchDocument"/> to the canonical <see cref="InsightRowProjection"/>.

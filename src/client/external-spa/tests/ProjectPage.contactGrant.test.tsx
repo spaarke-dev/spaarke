@@ -38,8 +38,8 @@ vi.mock('../src/api/web-api-client', async () => {
       sprk_status: 1,
       sprk_issecure: false,
     }),
-    getContacts: vi.fn().mockResolvedValue([]),
-    getOrganizations: vi.fn().mockResolvedValue([]),
+    getContacts: vi.fn().mockResolvedValue({ items: [], truncated: false }),
+    getOrganizations: vi.fn().mockResolvedValue({ items: [], truncated: false }),
   };
 });
 

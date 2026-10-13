@@ -2063,6 +2063,28 @@ public partial class RouteAuthorizationGuardTests
             + string.Join(", ", added) + "\n  removed: " + string.Join(", ", removed));
     }
 
+    /// <summary>
+    /// Task 035 review F2: <c>IsEntitledAsync</c> is a Tier-1 MODULE entitlement, in <see cref="CallerContextSeams"/> whose
+    /// contract is per-resource decisions. It decides nothing about a record, so a decision crediting a route that names one
+    /// (a <c>{...}</c> segment) with it is a false credit.
+    /// </summary>
+    private static IEnumerable<string> ModuleSeamOnRecordRouteViolations(IEnumerable<HandlerDecision> decisions) =>
+        decisions
+            .Where(d => d.Seam == "IsEntitledAsync" && d.Route.Contains('{'))
+            .Select(d => $"{d.Route}: IsEntitledAsync is a module-level entitlement and decides nothing about a record — a "
+                + "route with a {parameter} segment needs a per-record seam (IsRecordAccessible, a filter, ...)");
+
+    [Fact(DisplayName = "Task 035 review: a module-entitlement seam cannot credit a route that names a record")]
+    public void ModuleEntitlementSeam_CannotCreditARecordRoute()
+    {
+        var onRecord = new HandlerDecision("GET /api/v1/external/{root}/{id:guid}/thing", "Handle", "IsEntitledAsync", Array.Empty<string>(), "x");
+        var onModule = new HandlerDecision("POST /api/v1/external/servicerequests", "Handle", "IsEntitledAsync", Array.Empty<string>(), "x");
+        var otherSeam = new HandlerDecision("GET /api/v1/external/{root}/{id:guid}/thing", "Handle", "IsRecordAccessible", Array.Empty<string>(), "x");
+
+        Assert.Single(ModuleSeamOnRecordRouteViolations(new[] { onRecord }));
+        Assert.Empty(ModuleSeamOnRecordRouteViolations(new[] { onModule, otherSeam }));
+    }
+
     [Fact(DisplayName = "Task 167: every HandlerDecision is verified in source and none is redundant")]
     public void EveryHandlerDecisionIsVerified()
     {
@@ -2096,6 +2118,8 @@ public partial class RouteAuthorizationGuardTests
         {
             violations.Add($"{dup.Key}: declared {dup.Count()} times");
         }
+
+        violations.AddRange(ModuleSeamOnRecordRouteViolations(HandlerDecisions));
 
         foreach (var (seam, entry) in CallerContextSeams)
         {
@@ -2477,8 +2501,7 @@ public partial class RouteAuthorizationGuardTests
                      "PATCH /api/ai/chat/sessions/{sessionId}/tabs",
                      "GET /healthz",                                              // MapHealthChecks
                      "GET /healthz/catalog",
-                     "GET /api/diagnostics/tenant-container-resolver",            // const path
-                     "POST /api/onboarding/consent-callback",
+                     "POST /api/onboarding/consent-callback",                     // const path
                      "GET /api/spe/configs/{configId:guid}",                      // aggregator, extension form + nested group
                      "GET /api/spe/containers/{containerId}",                     // aggregator, static form
                      "POST /api/compose/upload",
@@ -6325,11 +6348,14 @@ public partial class RouteAuthorizationGuardTests
         Assert.Empty(UnusedEntryViolations(used, CreditedForms.Select(c => c.Form)));
     }
 
-    [Fact(DisplayName = "Task 167 controls: admin credit is exactly four mechanisms, and the admin pin fires both ways")]
-    public void Admin_NegativeControl_PinFiresAndOnlyFourMechanismsCount()
+    [Fact(DisplayName = "Task 167 controls: admin credit is exactly five mechanisms, and the admin pin fires both ways")]
+    public void Admin_NegativeControl_PinFiresAndOnlyFiveMechanismsCount()
     {
+        // Five since customer-provisioning task 230b added AddKeylessProofAuthorizationFilter (an application role on
+        // an app-only token, held only by the L2 Worker identity). A sixth needs the same review.
         Assert.Equal(new[]
         {
+            "AddKeylessProofAuthorizationFilter",
             "AddRegistrationAuthorizationFilter", "AddSpeAdminAuthorizationFilter",
             "RequireAuthorization(\"SystemAdmin\")", "RequireAuthorization(AuthPolicies.RagApiKey)",
         }, AdminMechanisms.Select(a => a.Form).OrderBy(f => f, StringComparer.Ordinal));

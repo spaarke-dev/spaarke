@@ -212,6 +212,11 @@ export interface ICreateProjectWizardProps {
   navigationService?: INavigationService;
   /** When true, hides the title bar (Dataverse modal provides chrome). */
   embedded?: boolean;
+  /**
+   * App-shell `--sprk-ui-scale`, forwarded to the wizard's SprkModal (non-embedded only).
+   * Task 112 (InAppWizardHost).
+   */
+  uiScale?: number;
   /** MSAL-backed authenticated fetch function for BFF API calls. */
   authenticatedFetch?: typeof fetch;
   /** BFF API base URL. */
@@ -343,6 +348,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   uploadService: _uploadService,
   navigationService,
   embedded,
+  uiScale,
   authenticatedFetch: authFetch,
   bffBaseUrl,
   resolveSpeContainerId,
@@ -943,7 +949,14 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   // ── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <CreateRecordWizard open={open} onClose={onClose} webApi={webApiAdapter} config={config} embedded={embedded} />
+    <CreateRecordWizard
+      open={open}
+      onClose={onClose}
+      webApi={webApiAdapter}
+      config={config}
+      embedded={embedded}
+      uiScale={uiScale}
+    />
   );
 };
 

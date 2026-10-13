@@ -130,7 +130,7 @@ public class EventStatusWritePathTests
         var result = await Complete(dv, NullLogger<Program>.Instance);
 
         StatusOf(result).Should().Be(StatusCodes.Status200OK);
-        dv.Verify(d => d.UpdateEventStatusAsync(EventId, 659490002, It.Is<DateTime?>(dt => dt.HasValue), It.IsAny<CancellationToken>()),
+        dv.Verify(d => d.UpdateEventStatusAsync(EventId, 659490002, It.Is<DateOnly?>(d => d.HasValue), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -147,7 +147,7 @@ public class EventStatusWritePathTests
         var result = await Complete(dv, NullLogger<Program>.Instance);
 
         StatusOf(result).Should().Be(StatusCodes.Status400BadRequest);
-        dv.Verify(d => d.UpdateEventStatusAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()),
+        dv.Verify(d => d.UpdateEventStatusAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<DateOnly?>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -194,8 +194,19 @@ public class EventStatusWritePathTests
     }
 
     private static Task<IResult> Complete(Mock<IEventDataverseService> dv, ILogger<Program> log) =>
-        EventEndpoints.CompleteEventAsync(EventId, new DefaultHttpContext(), dv.Object,
-            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), log, default);
+        EventEndpoints.CompleteEventAsync(EventId,
+            new DefaultHttpContext { RequestServices = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(new Microsoft.Extensions.DependencyInjection.ServiceCollection()) },
+            dv.Object, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            // Task 098: an unresolvable caller dates the completion by UTC (the date itself is pinned in EventDateOnlyTests).
+            UnresolvedCaller(), Mock.Of<IGenericEntityService>(), log, default);
+
+    private static Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver UnresolvedCaller()
+    {
+        var resolver = new Mock<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolution.Unresolved("no-oid-claim"));
+        return resolver.Object;
+    }
     // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────────
 
     private static Mock<IEventDataverseService> EventService(int currentStatus, bool auditThrows = false)

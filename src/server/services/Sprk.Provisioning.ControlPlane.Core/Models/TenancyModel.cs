@@ -47,19 +47,12 @@
 //    absence is load-bearing — silent defaulting is the pre-Item-2 failure
 //    mode this file's existence retires.
 //
-// PARALLEL ENUM NOTE (documented, non-blocking): a name-INcompatible
-// TenancyModel enum exists at
+// PARALLEL ENUM NOTE: the BFF has its own TenancyModel enum at
 // `src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentRecord.cs`
-// in the Sprk.Bff.Api.Services.Registration namespace (task 023 v3 addition).
-// That enum's members are still the pre-T224 names (`Model1Shared` /
-// `Model2Dedicated`). The two enums live in separate assemblies with no
-// cross-reference; both serve internal handler branching in their own layer.
-// The BFF's own consumers of that enum need a matching rename (out of scope
-// for T224 per constraint on scope creep — file a follow-up if the BFF
-// starts reading `sprk_tenancymodel` values written post-T224). Until then
-// the BFF layer will read the new Dataverse label values as its enum's
-// (name-mismatched) values and fail to parse them — acceptable while no
-// customers exist to trigger the read.
+// (Sprk.Bff.Api.Services.Registration, task 023). The two enums live in separate
+// assemblies with no cross-reference. Since T233 (2026-10-07) both use the same
+// names and values (Model1 = 0, Model2 = 1). The BFF reads `sprk_tenancymodel` by
+// its integer option value, so T224's label rename never affected its parsing.
 // ---------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Core.Models;

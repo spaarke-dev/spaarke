@@ -53,6 +53,8 @@ import {
 // The package's BFF convention (briefingService, DailyBriefingApp): @spaarke/auth's authenticatedFetch with relative
 // /api paths.
 import { authenticatedFetch } from '@spaarke/auth';
+// Deep import of the pure dateLocal module (task 098): tests map this one subpath to the real source.
+import { formatDateOnly, parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 import type { IWebApi, NotificationItem, NotificationPriority } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
@@ -91,27 +93,29 @@ const STATUSCODE_OPEN = 1;
  * R2.2 Item 3 — Default due-date strategy for new To Dos created from
  * Daily Briefing notifications:
  *   1. If the source notification carries `item.dueDate` (task notifications
- *      from the R2.2 plumbing change), use it verbatim — preserves the actual
- *      task due date so the To Do inherits the original deadline.
- *   2. Otherwise default to **+3 calendar days from now, end of day (17:00 local)**
- *      — gives the user a reasonable working window without being too aggressive.
+ *      from the R2.2 plumbing change), use its calendar day — preserves the
+ *      actual task due date so the To Do inherits the original deadline.
+ *   2. Otherwise default to **+3 calendar days from today (local)** — gives the
+ *      user a reasonable working window without being too aggressive.
  *      Notifications without a real due date (documents, emails, events) get
  *      this default; the user can edit later in the To Do app.
+ * Both are a calendar date: sprk_todo.sprk_duedate is Date Only (task 106).
  */
 const DEFAULT_DUE_OFFSET_DAYS = 3;
-const DEFAULT_DUE_HOUR_LOCAL = 17;
 
 export function computeDueDate(item: NotificationItem, now: Date = new Date()): string {
+  // Task 106: sprk_todo.sprk_duedate is Date Only — the Web API accepts only "YYYY-MM-DD" (a timestamp is HTTP 400),
+  // so this returns the LOCAL calendar day. Task 098: a bare "YYYY-MM-DD" (an event's Date Only due date) is that
+  // local day; a timestamp is the local day of that instant (the day the MDA showed this user before task 106).
   if (item.dueDate) {
-    const parsed = new Date(item.dueDate);
-    if (!isNaN(parsed.getTime())) {
-      return parsed.toISOString();
+    const parsed = parseDueDate(item.dueDate);
+    if (parsed) {
+      return formatDateOnly(parsed);
     }
   }
   const fallback = new Date(now);
   fallback.setDate(fallback.getDate() + DEFAULT_DUE_OFFSET_DAYS);
-  fallback.setHours(DEFAULT_DUE_HOUR_LOCAL, 0, 0, 0);
-  return fallback.toISOString();
+  return formatDateOnly(fallback);
 }
 
 // ---------------------------------------------------------------------------

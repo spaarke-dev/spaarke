@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<optionset Name="sprk_aimodeltier" localizedName="AI Model Tier" description="Model tier for AI execution: Fast (cheap, e.g. gpt-4o-mini), Standard (capable, e.g. gpt-4o), Reasoning (e.g. o-series). Action sets the default; Binding may override." xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <OptionSetType>picklist</OptionSetType>
+  <IsGlobal>1</IsGlobal>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsCustomizable>1</IsCustomizable>
+  <displaynames>
+    <displayname description="AI Model Tier" languagecode="1033" />
+  </displaynames>
+  <Descriptions>
+    <Description description="Model tier for AI execution: Fast (cheap, e.g. gpt-4o-mini), Standard (capable, e.g. gpt-4o), Reasoning (e.g. o-series). Action sets the default; Binding may override." languagecode="1033" />
+  </Descriptions>
+  <options>
+    <option value="100000000" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Fast" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000001" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Standard" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100000002" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Reasoning" languagecode="1033" />
+      </labels>
+    </option>
+  </options>
+</optionset>

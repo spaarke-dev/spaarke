@@ -13,6 +13,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import { SecureProvisioningOutcome } from '../SecureProvisioningOutcome';
+import { apiErrorFor } from '../../../__tests__/helpers/authenticatedFetchDouble';
 import {
   classifyProvisioningFailure,
   type IProvisionProjectResult,
@@ -141,11 +142,14 @@ describe('SecureProvisioningOutcome — the wizard provisioning-failure state', 
   });
 
   it('when the retry lands in a state only an administrator can finish, takes the action away', async () => {
-    const authFetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: async () => ({ reasonCode: 'sdap.provision.creator_share_failed_resumable', detail: 'operator text' }),
-    } as unknown as Response);
+    const authFetch = jest.fn().mockRejectedValue(
+      apiErrorFor(500, {
+        title: 'Provisioning failed',
+        status: 500,
+        reasonCode: 'sdap.provision.creator_share_failed_resumable',
+        detail: 'operator text',
+      })
+    );
     renderWithProviders(
       <SecureProvisioningOutcome
         projectId={PROJECT_ID}

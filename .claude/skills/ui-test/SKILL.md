@@ -154,7 +154,7 @@ EXTRACT:
 ```
 CHECK deployment status:
   IF PCF control:
-    VERIFY pac pcf push completed
+    VERIFY the pcf-deploy solution import completed
     GET environment URL from dataverse-deploy output
 
   IF localhost:
@@ -451,7 +451,7 @@ GIFs are useful for:
 
 ### Example 1: PCF Control Deployment Test
 
-**Trigger**: After `pac pcf push` completes
+**Trigger**: After the `pcf-deploy` solution import completes
 
 **Claude**:
 ```

@@ -6,7 +6,7 @@
 
 ## What lives here
 
-Integration tests covering **authentication, authorization, OBO exchange, claims handling, token validation**. This is one of the 6 KEEP-protected path categories.
+Integration tests covering **authentication, authorization, OBO exchange, claims handling, token validation**. This is one of the eight KEEP-protected path categories (ADR-038 §2).
 
 ## Deletion-safety rule
 

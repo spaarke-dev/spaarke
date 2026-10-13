@@ -30,6 +30,9 @@ if (typeof (globalThis as { ResizeObserver?: unknown }).ResizeObserver === 'unde
 
 const authenticatedFetchMock = jest.fn();
 jest.mock('@spaarke/auth', () => ({
+  // The REAL error class (pure, no MSAL): ComposeWorkspace branches on `err instanceof ApiError`, so the
+  // thrown failures in this suite must be instances of the class the component imports.
+  ApiError: jest.requireActual('@spaarke/auth').ApiError,
   authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...args),
   useAuth: () => ({
     isAuthenticated: true,
@@ -86,6 +89,7 @@ jest.mock('./ComposeEditor', () => {
 import { ComposeWorkspace } from './ComposeWorkspace';
 // eslint-disable-next-line import/first
 import { registerComposeAiToolbarAction, __resetComposeAiToolbarActionsForTests } from './ComposeAiToolbar';
+import { httpError } from '../__tests__/helpers/httpError';
 
 const SPE_ID = 'spe-item-123';
 const DRIVE_ID = 'drive-abc';
@@ -108,7 +112,7 @@ function renderWorkspace(props: Partial<React.ComponentProps<typeof ComposeWorks
 function mockFetchRoutes(pullPayload: { revisions?: unknown[]; comments?: unknown[] } | null): void {
   authenticatedFetchMock.mockImplementation(async (url: string) => {
     if (typeof url === 'string' && url.includes('/pull-annotations')) {
-      if (pullPayload === null) return { ok: false, status: 500, json: async () => ({}), text: async () => '' };
+      if (pullPayload === null) throw httpError(500);
       return {
         ok: true,
         status: 200,
@@ -137,7 +141,7 @@ function mockFetchRoutes(pullPayload: { revisions?: unknown[]; comments?: unknow
         }),
       };
     }
-    return { ok: false, status: 404, json: async () => [], text: async () => '' };
+    throw httpError(404);
   });
 }
 
@@ -161,7 +165,7 @@ const REVISION = {
 
 beforeEach(() => {
   authenticatedFetchMock.mockReset();
-  authenticatedFetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => [], text: async () => '' });
+  authenticatedFetchMock.mockRejectedValue(httpError(404));
   editorProps.current = {};
   editorIsDirty = false;
   __resetComposeAiToolbarActionsForTests();

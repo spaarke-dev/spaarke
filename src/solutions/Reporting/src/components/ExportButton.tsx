@@ -269,7 +269,7 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
       {/* Error message */}
       {error && (
         <div className={styles.errorMessage} role="alert" aria-live="assertive">
-          <MessageBar intent="error" layout="singleline">
+          <MessageBar intent="error" layout="multiline">
             <MessageBarBody>{error}</MessageBarBody>
           </MessageBar>
         </div>

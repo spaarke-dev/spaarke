@@ -8,20 +8,17 @@
 // seam gates H6 on applying the canonical Org Settings contract (e.g.
 // maxuploadfilesize=25_600_000) BEFORE any solution import fires.
 //
-// PRODUCTION IMPL:
-//   <see cref="PacOrgSettingsContractApplier"/> shells out to
-//   <c>pac org update-settings --property "{name}" --value {value}</c>
-//   per manifest entry. For Wave 2 the production impl ships as a
-//   scaffold returning Success unconditionally with an informational log
-//   line; the manifest + interface + wiring + H6 gate + tests are the
-//   actual pain-point remediations F14 requires (operator can apply the
-//   settings via `pac org update-settings` once until the incremental
-//   change lands).
+// PRODUCTION IMPL (task 253, G38):
+//   <see cref="DataverseWebApiOrgSettingsContractApplier"/> — one GET of the
+//   environment's `organization` row, then one PATCH of the settings below
+//   target, through the Dataverse Web API as H6's importer identity. It
+//   replaced PacOrgSettingsContractApplier (`pac org update-settings`): the
+//   L2 Worker host has no pac CLI.
 //
 // MANIFEST:
-//   Canonical set of (settingName, expectedValue) ships in
-//   <c>scripts/canonical-solutions/org-settings-contract.yaml</c>. Read
-//   by <see cref="IOrgSettingsContractManifest"/> at process start.
+//   The canonical (column name → minimum value) map is
+//   <see cref="StaticOrgSettingsContractManifest"/> below — code, not a file
+//   (the Worker publish carries no scripts/ folder).
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
@@ -41,8 +38,8 @@ public interface IOrgSettingsContractApplier
 
 /// <summary>Input for <see cref="IOrgSettingsContractApplier.ApplyAsync"/>.</summary>
 /// <param name="TenantId">Entra tenant id (§4D I1 — must be explicit).</param>
-/// <param name="ClientId">BFF app-reg id for pac auth.</param>
-/// <param name="ClientSecret">BFF app-reg secret for pac auth (may be null on secret-free envs).</param>
+/// <param name="ClientId">BFF app-reg id — the identity H6 signs in to the environment as.</param>
+/// <param name="ClientSecret">BFF app-reg secret for the legacy FR-39 ClientSecret chain (null on secret-free envs).</param>
 /// <param name="TargetDataverseUrl">Customer Dataverse env URL (H5 output).</param>
 /// <param name="OrgSettings">Canonical (settingName, expectedValue) map from the manifest.</param>
 public sealed record OrgSettingsContractApplyRequest(
@@ -65,8 +62,8 @@ public abstract record OrgSettingsContractOutcome
 }
 
 /// <summary>
-/// Manifest reader for the canonical Org Settings contract. Ships under
-/// <c>scripts/canonical-solutions/org-settings-contract.yaml</c>.
+/// The canonical Org Settings contract: <c>organization</c> column name → minimum value. Production impl:
+/// <see cref="StaticOrgSettingsContractManifest"/>.
 /// </summary>
 public interface IOrgSettingsContractManifest
 {

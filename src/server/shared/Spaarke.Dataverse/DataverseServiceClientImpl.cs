@@ -2033,6 +2033,40 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return entity == null ? null : ToProcessingJobRecord(entity);
     }
 
+    /// <inheritdoc />
+    public async Task<ProcessingJobRecord?> GetCallersProcessingJobByIdempotencyKeyAsync(
+        string idempotencyKey, string initiatorObjectId, CancellationToken ct = default)
+    {
+        const string initiatorAlias = "initiator";
+        if (!Guid.TryParse(initiatorObjectId, out var initiatorOid))
+            return null; // not an Entra object id: no row can name it as its initiator
+
+        var query = new QueryExpression("sprk_processingjob")
+        {
+            ColumnSet = new ColumnSet(ProcessingJobColumns),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition("sprk_idempotencykey", ConditionOperator.Equal, idempotencyKey);
+        // The caller's rows only (task 121): an INNER join to the initiating systemuser, matched on the caller's Entra object
+        // id. A row that records no initiator is nobody's duplicate.
+        var initiator = query.AddLink("systemuser", "sprk_initiatedby", "systemuserid", JoinOperator.Inner);
+        initiator.EntityAlias = initiatorAlias;
+        initiator.Columns = new ColumnSet("azureactivedirectoryobjectid");
+        initiator.LinkCriteria.AddCondition("azureactivedirectoryobjectid", ConditionOperator.Equal, initiatorOid);
+        // The caller's NEWEST row with this key decides (task 039).
+        query.AddOrder("createdon", OrderType.Descending);
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        var entity = results.Entities.FirstOrDefault();
+
+        return entity == null
+            ? null
+            : ToProcessingJobRecord(entity) with
+            {
+                InitiatedByOid = ExtractAliasedGuid(entity, $"{initiatorAlias}.azureactivedirectoryobjectid")
+            };
+    }
+
     /// <summary>
     /// The request property an artifact create maps to <c>ownerid</c> (a team) — task 146. A create without it is
     /// REFUSED: an app-only create would be owned by the application user in the root business unit, readable only
@@ -2312,7 +2346,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("CreateEventAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
     }
 
-    public Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
+    public Task UpdateEventStatusAsync(Guid id, int statusCode, DateOnly? completedDate = null, CancellationToken ct = default)
     {
         // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
         throw new NotImplementedException("UpdateEventStatusAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");

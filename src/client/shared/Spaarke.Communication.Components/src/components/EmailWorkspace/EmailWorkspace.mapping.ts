@@ -38,9 +38,11 @@ export const COMMUNICATION_ENTITY = 'sprk_communication';
  * notes/defer-issues.md`) rather than invented as new schema in this task.
  *
  * There is deliberately NO access-permission field here (unified-access-control-r2
- * task 138, owner Q6): a communication INHERITS its parent record's Access
- * Permission, its own `sprk_accesspermission` copy is retired, and no client or
- * server code may read or write it. The parent's pill is the one place to change it.
+ * task 138, owner Q6; task 173, owner round 81): a communication's access comes
+ * from its parent record. Its own `sprk_accesspermission` is a DISPLAY copy of the
+ * parent's value that only the BFF writes (the shared stamp path and the
+ * secure-child reconcile), shown as a plain, locked field on the Message form; no
+ * access decision reads it, and this workspace neither reads nor writes it.
  */
 export const EMAIL_TRACKING_FIELDS = {
   monitor: 'sprk_ismonitored',

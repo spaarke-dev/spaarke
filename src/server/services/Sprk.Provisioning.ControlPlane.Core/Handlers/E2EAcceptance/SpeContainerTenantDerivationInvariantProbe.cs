@@ -3,7 +3,7 @@
 //
 // H13 I4 REAL invariant probe (task 204c B07 — sub-agent authored 2026-08-26).
 // INDEPENDENT re-verification variant for InvariantKind.I4SpeContainerResolver
-// — replaces the earlier SpeContainerResolverInvariantProbe (task 176) whose
+// — replaces the earlier task-176 resolver probe (deleted by task 227f) whose
 // verdict was mediated by the customer BFF's own /api/diagnostics/tenant-
 // container-resolver endpoint. Per task 204c dispatch directive:
 //
@@ -11,11 +11,9 @@
 //      re-read the underlying Azure/Cosmos/Graph/SPE surface directly."
 //
 // This probe reads the DEPLOYED App Service configuration DIRECTLY via ARM
-// (`Microsoft.Web/sites/{name}/config/appsettings/list`), inspects the
-// canonical SPE container-id app-setting VALUE, and verifies it is a
-// `@Microsoft.KeyVault(...)` reference expression rather than a hardcoded
-// container-id literal — the runtime static-config assertion §4D I4 (FR-31)
-// mandates. This runs even when the BFF diagnostic endpoint is unreachable
+// (`Microsoft.Web/sites/{name}/config/appsettings/list`) and verifies the SPE
+// settings name THIS run's container type and THIS customer's container (task
+// 227c — see step 3 below; the original KV-reference rule is retired). This runs even when the BFF diagnostic endpoint is unreachable
 // (task 176's biggest limitation), because it inspects the App Service
 // configuration surface, not the BFF's own responses.
 //
@@ -36,65 +34,42 @@
 //      — read app-settings dictionary (POST-not-GET is intentional: the App
 //      Service management API only exposes secret app-settings values via a
 //      POST /list operation).
-//   3. Look for the CANONICAL `SharePointEmbedded__ContainerTypeId` setting
-//      (colon in code → double-underscore in App Service app-settings, per
-//      ASP.NET Core config-provider convention; see
-//      Sprk.Bff.Api/Configuration/SharePointEmbeddedOptions.cs).
-//   4. Classify the VALUE:
-//      * `@Microsoft.KeyVault(SecretUri=https://{vault}.vault.azure.net/...)`
-//        → PASSED (tenant-derived from KV — the compliant lookup pattern
-//        documented by the I4 ArchTest, tests/Spaarke.ArchTests/TenantIsolation/
-//        I4_SpeContainerIdLiteralTests.cs).
-//      * Empty/whitespace / missing key → FAILED (blank; the resolver has no
-//        source and would fall back to any wired default at BFF boot).
-//      * Canonical Graph SPE container-id literal (`b!` + 20+ URL-safe base64
-//        chars, matching the I4 ArchTest regex) → FAILED CATASTROPHIC (the
-//        exact class of bug I4 exists to catch — inline literal instead of
-//        KV reference).
-//      * Any other value shape (looks like an option-string, a partial URL,
-//        etc.) → FAILED (unexpected value; not a KV reference; assume worst).
+//   3. TASK 227c REWRITE (owner D28). The original classifier PASSED only when
+//      `SharePointEmbedded__ContainerTypeId` was a `@Microsoft.KeyVault(...)`
+//      reference — but H4b writes that setting as a plain value (the container
+//      TYPE id is the same for every Model 1 customer and is not a secret), so
+//      it failed every stamp, and it never looked at the customer's CONTAINER.
+//      Now it compares the deployed settings with the run's own values:
+//      * `SharePointEmbedded__ContainerTypeId` (or the colon form) must equal
+//        the run's containerTypeId (intake) — missing/blank/different → FAILED.
+//      * `EmailProcessing__DefaultContainerId` and
+//        `Communication__ArchiveContainerId` must equal the container H8 created
+//        (InterStepState.SpeContainerId) — missing/blank → FAILED; a different
+//        id → FAILED CATASTROPHIC: every Model 1 stamp's identity can reach every
+//        container of the shared type (owner D28), so a wrong id here reads or
+//        writes another customer's documents.
+//      Literal values ARE the tenant derivation: H4b writes them from this run's
+//      intake and H8 output (PerEnvSourceCatalog).
 //
-// WHAT THIS PROBE CAN AND CANNOT DETECT:
+// WHAT THIS PROBE CAN AND CANNOT DETECT (task 227c):
 //   CAN detect (Failed, CATASTROPHIC):
-//     * App-setting value is a canonical `b!...` SPE container id literal
-//       (hardcoded value in Bicep / deploy pipeline, bypassing KV).
-//     * App-setting is missing / empty (BFF would fail-fast at boot OR fall
-//       back to a compiled-in default — either way, no tenant derivation).
+//     * A container setting names a container other than the one H8 created for
+//       this customer — every Model 1 stamp identity reaches every container of
+//       the shared type (owner D28), so that is another customer's documents.
 //   CAN detect (Failed):
-//     * App-setting value is a non-KV-reference string that isn't the SPE
-//       shape — the value is not sourced from KV even if it happens to be
-//       the right container id, so the tenant-derivation invariant is not
-//       met (the resolver isn't reading the tenant-scoped secret at runtime).
+//     * Container-type setting missing / blank / not the run's container type.
+//     * A container setting missing / blank, or still a Key Vault reference (a
+//       stamp configured before 227c that H4b has not rewritten yet).
 //   CAN detect (InfraFault):
-//     * ARM enumeration fails (401/403/404/5xx) — L2 UAMI lacks Reader RBAC
-//       on the customer subscription, or the App Service doesn't exist yet
-//       (H9 hasn't deployed / DNS not propagated).
-//     * Matching App Service not found (BffApiUrl points at a non-existent
-//       or foreign App Service — probe classifies Resumable so the operator
-//       can investigate the BFF URL misconfig without a false Pass).
-//   CANNOT detect (falls to Passed under this probe alone):
-//     * A KV reference that resolves at runtime to a wrong-tenant secret (the
-//       vault URI *shape* is a KV reference, but the referenced secret happens
-//       to be another customer's — would require cross-checking the secret
-//       value at runtime; that's task 176's SpeContainerResolverInvariantProbe
-//       coverage, not this probe's). This probe + task 176's probe are
-//       COMPLEMENTARY; when both wire in parallel via distinct kinds, both
-//       run. When they overlap on I4, task 204c's B07 dispatch keeps THIS
-//       probe (independent re-verification) as the I4 registration and
-//       retires task 176's registration (see § SILENT-FAIL AUDIT below).
+//     * The run's containerTypeId or SpeContainerId is empty (H8 not run).
+//     * ARM enumeration / app-settings read fails, or no matching App Service.
+//   CANNOT detect:
+//     * The staging slot's settings (only the production slot is read).
+//     * What the BFF code does with the values — 227d guards app-only SPE calls.
 //
-// SILENT-FAIL AUDIT (§4D CATASTROPHIC class prevented by this probe):
-//   The failure mode this probe catches is a compromised deploy that ships
-//   a BFF whose ContainerTypeId is set to a HARDCODED container id in Bicep
-//   (bypassing the KV secret / tenant-scoped derivation) — but whose runtime
-//   `ITenantContainerResolver` diagnostic still returns a plausible-looking
-//   response (resolvedFromLiteral=false, echoed tenantId matching the query)
-//   because the resolver implementation itself was compromised or misordered
-//   in DI so it echoes rather than resolves. Task 176's BFF-diagnostic probe
-//   would PASS in that scenario (the BFF lies to itself); THIS probe FAILS
-//   (the deployed app-setting VALUE reveals the hardcoding directly). That's
-//   the "assert EFFECTS not intentions" R7 principle applied to I4: read the
-//   deployed configuration, do not trust the runtime's own self-report.
+// SILENT-FAIL AUDIT: the probe reads the DEPLOYED configuration and compares it
+//   with the run's own values, instead of trusting the BFF's self-report (task
+//   176's retired diagnostic probe) — "assert effects, not intentions" (R7).
 //
 // EDGE CASES + INFRA-FAULT DISCIPLINE (parity with sibling probes 171/174/179):
 //   * request.TenantId blank                       → Failed (§4D I1 defense-
@@ -133,7 +108,7 @@
 //   types (ADR-013). No BFF-facade dependencies. No shell-out.
 //
 // COMPONENT JUSTIFICATION (CLAUDE.md §11):
-//   Existing: SpeContainerResolverInvariantProbe (task 176) — its verdict
+//   Existing: the task-176 resolver probe (deleted by task 227f) — its verdict
 //     depends on the customer BFF's own /api/diagnostics/tenant-container-
 //     resolver endpoint being deployed AND being truthful. That coverage is
 //     legitimate but NOT INDEPENDENT of the subject BFF.
@@ -156,19 +131,12 @@
 //   * ADR-038 (integration-heavy pyramid): tests exercise the probe against a
 //     hand-rolled FakeHttpMessageHandler (never Mock<HttpMessageHandler>),
 //     hand-rolled FakeTokenCredential — parity with
-//     SpeContainerResolverInvariantProbeTests (task 176) and
+//     the task-176 probe's tests (deleted with it) and
 //     AiSearchTenantFilterInvariantProbeTests (task 173).
 //
-// DI SWAP NOTE (task 204c B07 dispatch — main-session action):
-//   The composite CompositeInvariantVerifier throws at composition time if two
-//   probes register for the same InvariantKind (fail-loud silent-fail
-//   protection). Wiring THIS probe requires REPLACING task 176's registration
-//   in E2EAcceptanceModule.cs (currently lines 183-184: HttpClient +
-//   AddSingleton<IInvariantProbe, SpeContainerResolverInvariantProbe>). Both
-//   probes cover InvariantKind.I4SpeContainerResolver; keep exactly ONE
-//   registered. Recommended swap: retire task 176's registration; keep task
-//   176's class on disk with an updated banner explaining the retirement (per
-//   Wave G-6 retired-on-disk-with-banner convention).
+// DI HISTORY: this probe replaced task 176's registration for InvariantKind.I4SpeContainerResolver (task 204c B07;
+//   CompositeInvariantVerifier refuses two probes for one kind). Task 176's class stayed on disk unregistered until
+//   task 227f deleted it with the BFF diagnostic route it called.
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -183,10 +151,9 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 
 /// <summary>
 /// Independent H13 I4 invariant probe — reads the deployed App Service
-/// configuration directly via ARM to verify the canonical SPE container-id
-/// app-setting is a `@Microsoft.KeyVault(...)` reference (tenant-derived),
-/// NOT a hardcoded literal. Runs independently of the customer BFF's own
-/// diagnostic endpoint (contrast task 176's SpeContainerResolverInvariantProbe).
+/// configuration directly via ARM and verifies the SPE settings name this run's
+/// container type and this customer's own container (task 227c, owner D28). Runs independently of the customer BFF's own
+/// diagnostic endpoint (contrast task 176's resolver probe, deleted by task 227f).
 /// See file header for the honest can-vs-cannot-detect breakdown and the
 /// silent-fail class this probe catches that task 176's probe cannot.
 /// </summary>
@@ -195,7 +162,7 @@ public sealed class SpeContainerTenantDerivationInvariantProbe : IInvariantProbe
     /// <summary>
     /// Named HttpClient key the DI module registers so the probe can pull an
     /// isolated client via <see cref="IHttpClientFactory"/> (parity with
-    /// <see cref="SpeContainerResolverInvariantProbe.HttpClientName"/>).
+    /// <see cref="AiSearchTenantFilterInvariantProbe.HttpClientName"/>).
     /// </summary>
     public const string HttpClientName = "H13-I4-SpeContainerTenantDerivationProbe";
 
@@ -211,8 +178,8 @@ public sealed class SpeContainerTenantDerivationInvariantProbe : IInvariantProbe
     /// <summary>
     /// Canonical BFF App Service app-setting name for the SPE container-type
     /// id. ASP.NET Core config-provider convention converts the code-level
-    /// key <c>SharePointEmbedded:ContainerTypeId</c> (see
-    /// <c>Sprk.Bff.Api/Configuration/SharePointEmbeddedOptions.cs</c>) to
+    /// key <c>SharePointEmbedded:ContainerTypeId</c> (read by the BFF's
+    /// <c>ProvisionProjectEndpoint</c>) to
     /// double-underscore in Azure App Service app-settings.
     /// </summary>
     public const string ContainerTypeAppSettingName = "SharePointEmbedded__ContainerTypeId";
@@ -226,24 +193,11 @@ public sealed class SpeContainerTenantDerivationInvariantProbe : IInvariantProbe
     public const string ContainerTypeAppSettingNameColon = "SharePointEmbedded:ContainerTypeId";
 
     /// <summary>
-    /// Canonical `@Microsoft.KeyVault(...)` reference-expression detector —
-    /// case-insensitive prefix match. A value starting with this prefix is a
-    /// tenant-derived reference by construction (the App Service resolver
-    /// binds it to the referenced KV secret at boot).
+    /// The BFF settings that name the customer's own SPE container (task 227c) — both must equal the container H8
+    /// created (the customer's root container, owner D28; secure-record containers are the BFF's, created at runtime).
     /// </summary>
-    private static readonly Regex KvReferenceExpression = new(
-        @"^\s*@Microsoft\.KeyVault\s*\(",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-    /// <summary>
-    /// Canonical Graph SPE container-id literal shape — parity with the
-    /// tests/Spaarke.ArchTests/TenantIsolation/I4_SpeContainerIdLiteralTests
-    /// regex so a value the ArchTest would flag as an inline literal is
-    /// flagged HERE as a runtime FAILED verdict.
-    /// </summary>
-    private static readonly Regex CanonicalContainerIdLiteralShape = new(
-        @"^b![A-Za-z0-9_\-]{20,}$",
-        RegexOptions.Compiled);
+    public static readonly IReadOnlyList<string> CustomerContainerAppSettingNames =
+        ["EmailProcessing__DefaultContainerId", "Communication__ArchiveContainerId"];
 
     /// <summary>URL scheme allow-list — accepts only http(s).</summary>
     private static readonly HashSet<string> AllowedSchemes = new(StringComparer.OrdinalIgnoreCase)
@@ -332,6 +286,13 @@ public sealed class SpeContainerTenantDerivationInvariantProbe : IInvariantProbe
                 $"BffApiUrl hostname '{bffUri.Host}' does not follow the App Service " +
                 $"'{AppServiceHostSuffix}' convention. Custom-domain BFFs are not covered by this MVP " +
                 "probe — plumb the App Service resource id explicitly (documented limitation).");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ContainerTypeId) || string.IsNullOrWhiteSpace(request.SpeContainerId))
+        {
+            return InfraFault(
+                "I4 needs the run's containerTypeId (intake) and the customer's container (InterStepState.SpeContainerId, " +
+                "H8) to compare the BFF's settings with — one is empty. H8 must have run before H13.");
         }
 
         // (2) Acquire ARM token.
@@ -428,8 +389,8 @@ public sealed class SpeContainerTenantDerivationInvariantProbe : IInvariantProbe
                 "Cannot verdict I4 without a valid app-settings dictionary.");
         }
 
-        // (5) Classify the SPE container-id app-setting VALUE.
-        return ClassifyContainerTypeAppSetting(appSettings, siteResourceId);
+        // (5) Compare the deployed SPE settings with this run's own values (task 227c).
+        return ClassifyAppSettings(appSettings, siteResourceId, request.ContainerTypeId, request.SpeContainerId);
     }
 
     /// <summary>
@@ -547,81 +508,76 @@ public sealed class SpeContainerTenantDerivationInvariantProbe : IInvariantProbe
     }
 
     /// <summary>
-    /// Classifies the SPE container-type app-setting VALUE. Exposed as
-    /// internal-static so unit tests can exercise the classifier directly
-    /// without needing to stub the ARM HTTP path.
+    /// Compares the deployed SPE settings with this run's own values (task 227c): the container-type setting must equal
+    /// <paramref name="expectedContainerTypeId"/>, and each <see cref="CustomerContainerAppSettingNames"/> setting must
+    /// equal <paramref name="expectedContainerId"/>. Internal so unit tests exercise it without the ARM path.
     /// </summary>
-    internal InvariantVerificationOutcome ClassifyContainerTypeAppSetting(
-        IReadOnlyDictionary<string, string> appSettings, string siteResourceId)
+    internal InvariantVerificationOutcome ClassifyAppSettings(
+        IReadOnlyDictionary<string, string> appSettings, string siteResourceId,
+        string expectedContainerTypeId, string expectedContainerId)
     {
-        string? value = null;
-        string? matchedKey = null;
+        string? containerType = null;
+        var containerTypeKey = ContainerTypeAppSettingName;
         if (appSettings.TryGetValue(ContainerTypeAppSettingName, out var v1))
         {
-            value = v1;
-            matchedKey = ContainerTypeAppSettingName;
+            containerType = v1;
         }
         else if (appSettings.TryGetValue(ContainerTypeAppSettingNameColon, out var v2))
         {
-            value = v2;
-            matchedKey = ContainerTypeAppSettingNameColon;
+            containerType = v2;
+            containerTypeKey = ContainerTypeAppSettingNameColon;
         }
 
-        if (value is null)
+        if (string.IsNullOrWhiteSpace(containerType))
         {
             return Failed(
-                $"observed=App Service '{siteResourceId}' has NO '{ContainerTypeAppSettingName}' " +
-                $"(or '{ContainerTypeAppSettingNameColon}') app-setting; expected=a " +
-                $"'@Microsoft.KeyVault(SecretUri=https://{{vault}}.vault.azure.net/secrets/SPE-ContainerTypeId/)' " +
-                "reference. §4D I4 (FR-31) — without a source, ITenantContainerResolver would return no value " +
-                "or fall back to a compiled-in default at BFF boot; either way the tenant-derivation invariant is not met.");
+                $"observed=App Service '{siteResourceId}' has {(containerType is null ? "NO" : "a BLANK")} " +
+                $"'{ContainerTypeAppSettingName}' (or '{ContainerTypeAppSettingNameColon}') app-setting; expected the run's " +
+                $"container type '{expectedContainerTypeId}'. §4D I4 (FR-31) — the BFF has no container type to work in.");
         }
-
-        if (string.IsNullOrWhiteSpace(value))
+        if (!string.Equals(containerType.Trim(), expectedContainerTypeId.Trim(), StringComparison.OrdinalIgnoreCase))
         {
             return Failed(
-                $"observed=App Service '{siteResourceId}' has '{matchedKey}' app-setting present but " +
-                $"BLANK; expected=non-empty '@Microsoft.KeyVault(...)' reference expression. §4D I4 " +
-                "(FR-31) — a blank container-id setting resolves to null at BFF boot; ITenantContainerResolver " +
-                "returns no tenant-derived value, silent-fail trap.");
+                $"observed=App Service '{siteResourceId}' '{containerTypeKey}'='{Display(containerType)}'; expected the run's " +
+                $"container type '{expectedContainerTypeId}'. §4D I4 (FR-31) — the BFF is not configured with this run's " +
+                "container type (H4b writes it from the run's intake).");
         }
 
-        if (KvReferenceExpression.IsMatch(value))
+        foreach (var name in CustomerContainerAppSettingNames)
         {
-            _logger.LogInformation(
-                "H13 I4 tenant-derivation probe passed: App Service '{Site}' '{Key}' is a KV reference expression " +
-                "(tenant-derived per §4D I4 / FR-31).", siteResourceId, matchedKey);
-            return new InvariantVerificationOutcome.Passed(InvariantKind.I4SpeContainerResolver);
+            if (appSettings.TryGetValue(name, out var kvRef) && kvRef.TrimStart().StartsWith("@Microsoft.KeyVault(", StringComparison.OrdinalIgnoreCase))
+            {
+                return Failed(
+                    $"observed=App Service '{siteResourceId}' '{name}' is still a Key Vault reference (set before task 227c); " +
+                    $"expected this customer's container '{Display(expectedContainerId)}' (H8) as a plain value — re-run H4b.");
+            }
+            if (!appSettings.TryGetValue(name, out var value) || string.IsNullOrWhiteSpace(value))
+            {
+                return Failed(
+                    $"observed=App Service '{siteResourceId}' has no (or a blank) '{name}' app-setting; expected this " +
+                    $"customer's container '{Display(expectedContainerId)}' (H8). §4D I4 (FR-31) — H4b writes it from H8's output.");
+            }
+            if (!string.Equals(value.Trim(), expectedContainerId.Trim(), StringComparison.Ordinal))
+            {
+                return Failed(
+                    $"CATASTROPHIC — App Service '{siteResourceId}' '{name}' names container '{Display(value)}', not this " +
+                    $"customer's container '{Display(expectedContainerId)}' (H8). Every Model 1 stamp's identity can reach every " +
+                    "container of the shared container type (owner D28), so a wrong id here reads or writes another customer's " +
+                    "documents — cross-customer leak. §4D I4 (FR-31).");
+            }
         }
 
-        if (CanonicalContainerIdLiteralShape.IsMatch(value.Trim()))
-        {
-            // Truncate to avoid echoing a real container id into logs — parity
-            // with the I4 ArchTest's identical defense-in-depth on the failure
-            // message itself.
-            var displayed = value.Trim().Length <= 30
-                ? value.Trim()
-                : value.Trim().Substring(0, 20) + "...[truncated]";
-            return Failed(
-                $"CATASTROPHIC — App Service '{siteResourceId}' '{matchedKey}' app-setting is a HARDCODED " +
-                $"canonical SPE container-id literal ('{displayed}') instead of a '@Microsoft.KeyVault(...)' " +
-                "reference. §4D I4 (FR-31) — the customer's BFF resolves ContainerTypeId from a static " +
-                "literal, NOT from tenant-scoped KV storage. Uploads route to WHATEVER container that literal " +
-                "names — cross-tenant leak by construction. Fix the Bicep app-setting to a KV reference " +
-                "expression: '@Microsoft.KeyVault(SecretUri=https://{vault}.vault.azure.net/secrets/SPE-ContainerTypeId/)'.");
-        }
+        _logger.LogInformation(
+            "H13 I4 probe passed: App Service '{Site}' names the run's container type and this customer's container in " +
+            "{Count} container settings.", siteResourceId, CustomerContainerAppSettingNames.Count);
+        return new InvariantVerificationOutcome.Passed(InvariantKind.I4SpeContainerResolver);
+    }
 
-        // Any other non-empty value shape — not a KV reference, not a canonical
-        // container-id shape either. Could be a placeholder, an option string,
-        // a partial URL, or malformed. Assume worst: the resolver is not
-        // reading tenant-scoped storage at runtime.
-        var displayedOther = value.Length <= 60 ? value : value.Substring(0, 50) + "...[truncated]";
-        return Failed(
-            $"observed=App Service '{siteResourceId}' '{matchedKey}' app-setting value='{displayedOther}'; " +
-            "expected='@Microsoft.KeyVault(...)' reference expression. §4D I4 (FR-31) — value is not a KV " +
-            "reference; ITenantContainerResolver is not sourcing ContainerTypeId from tenant-scoped storage " +
-            "at runtime, so the tenant-derivation invariant is not met even if the literal value happens to " +
-            "be a benign string.");
+    /// <summary>Truncates an id for diagnostics (parity with the I4 ArchTest's no-full-id-echo defence).</summary>
+    private static string Display(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.Length <= 30 ? trimmed : trimmed[..20] + "...[truncated]";
     }
 
     private InvariantVerificationOutcome Failed(string diagnostic)

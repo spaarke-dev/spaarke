@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -157,7 +158,7 @@ public static class ContainerPermissionEndpoints
                 containerId, configGuid, sse.StatusCode, context.TraceIdentifier);
             return GraphApiProblem(sse, context);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex, "ListPermissions: unexpected error for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
@@ -234,7 +235,7 @@ public static class ContainerPermissionEndpoints
                 containerId, configGuid, sse.StatusCode, context.TraceIdentifier);
             return GraphApiProblem(sse, context);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex, "GrantPermission: unexpected error for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
@@ -338,7 +339,7 @@ public static class ContainerPermissionEndpoints
                 permissionId, containerId, configGuid, sse.StatusCode, context.TraceIdentifier);
             return GraphApiProblem(sse, context);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex, "UpdatePermission: unexpected error for permission '{PermissionId}', container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
@@ -438,7 +439,7 @@ public static class ContainerPermissionEndpoints
                 permissionId, containerId, configGuid, sse.StatusCode, context.TraceIdentifier);
             return GraphApiProblem(sse, context);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex, "RevokePermission: unexpected error for permission '{PermissionId}', container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",

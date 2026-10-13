@@ -28,8 +28,11 @@ import { ComposeAiToolbar, __resetComposeAiToolbarActionsForTests } from './Comp
 import { useComposeToolbarActivation } from './useComposeToolbarActivation';
 import type { DispatchPaneEvent } from '@spaarke/ai-widgets/events';
 import type { DispatchConsumer } from '@spaarke/ui-components';
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
+import { httpError } from '../__tests__/helpers/httpError';
 
 jest.mock('@spaarke/auth', () => ({
+  ApiError: jest.requireActual('@spaarke/auth').ApiError,
   useAuth: () => ({
     isAuthenticated: true,
     getAccessToken: async () => 'test-access-token',
@@ -71,13 +74,13 @@ function noopDispatch(): DispatchPaneEvent {
 }
 
 /** Builds a fake `fetch` returning the given capability list (ok:200). */
-function stubCapabilitiesFetch(capabilities: Array<{ bindingId: string; consumerType: string }>): typeof fetch {
+function stubCapabilitiesFetch(capabilities: Array<{ bindingId: string; consumerType: string }>): AuthenticatedFetchFn {
   const response = {
     ok: true,
     status: 200,
     json: async () => ({ capabilities }),
   } as unknown as Response;
-  return jest.fn().mockResolvedValue(response) as unknown as typeof fetch;
+  return jest.fn().mockResolvedValue(response) as unknown as AuthenticatedFetchFn;
 }
 
 const BFF = 'https://bff.example.test';
@@ -90,7 +93,7 @@ const BFF = 'https://bff.example.test';
  */
 function ActivationHost(props: {
   editor: Editor;
-  fetchOverride: typeof fetch;
+  fetchOverride: AuthenticatedFetchFn;
   dispatchConsumerOverride?: DispatchConsumer;
 }): React.JSX.Element {
   useComposeToolbarActivation({ bffBaseUrl: BFF, surface: 'compose', fetchOverride: props.fetchOverride });
@@ -193,11 +196,9 @@ describe('useComposeToolbarActivation — activation (E2E DoD row 3)', () => {
 
   it('a fetch failure leaves buttons DISABLED — no throw, no error UI', async () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
-    const failing = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: async () => ({}),
-    } as unknown as Response) as unknown as typeof fetch;
+    // The fetchOverride stands in for `authenticatedFetch`, which THROWS ApiError for a non-2xx
+    // (it never resolves { ok: false }).
+    const failing = jest.fn().mockRejectedValue(httpError(500)) as unknown as AuthenticatedFetchFn;
 
     render(<ActivationHost editor={editor} fetchOverride={failing} />);
 

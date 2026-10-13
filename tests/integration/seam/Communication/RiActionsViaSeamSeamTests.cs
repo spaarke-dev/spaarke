@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
@@ -83,7 +84,8 @@ public sealed class RiActionsViaSeamSeamTests
     /// (<c>task</c> / <c>sprk_notificationoutbox</c> / <c>appnotification</c>) record their creation into the shared
     /// ordering log so the seam→outbox→ping→mirror ordering is assertable.
     /// </summary>
-    private static Harness BuildHarness(decimal ruleThreshold)
+    private static Harness BuildHarness(
+        decimal ruleThreshold, TimeProvider? clock = null, int recipientTimeZoneCode = 92, string recipientZoneName = "UTC")
     {
         var communicationId = Guid.NewGuid();
         var threadId = Guid.NewGuid();
@@ -109,6 +111,19 @@ public sealed class RiActionsViaSeamSeamTests
         entity
             .Setup(s => s.RetrieveAsync("sprk_communication", communicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(communication);
+
+        // Task 098: the RI task's due dates count from the RECIPIENT's today, in their Dataverse time zone.
+        entity
+            .Setup(s => s.RetrieveAsync("usersettings", ownerId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataverseEntity("usersettings", ownerId) { ["timezonecode"] = recipientTimeZoneCode });
+        entity
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "timezonedefinition"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<DataverseEntity>
+            {
+                new("timezonedefinition") { ["standardname"] = recipientZoneName },
+            }));
 
         // Rule store: one enabled rule matching the matter at the given threshold.
         var rule = new DataverseEntity("sprk_communicationrule", ruleId)
@@ -160,7 +175,7 @@ public sealed class RiActionsViaSeamSeamTests
         var notifications = new NotificationService(entity.Object, NullLogger<NotificationService>.Instance); // REAL mirror
 
         var riAction = new CommunicationRiActionService(
-            seam, outbox, delivery, notifications, entity.Object, NullLogger<CommunicationRiActionService>.Instance);
+            seam, outbox, delivery, notifications, entity.Object, NullLogger<CommunicationRiActionService>.Instance, clock);
 
         var consumer = new RuleGatedAssessedConsumer(
             entity.Object, gate, riAction, NullLogger<RuleGatedAssessedConsumer>.Instance);
@@ -231,6 +246,28 @@ public sealed class RiActionsViaSeamSeamTests
         // Ordering: seam record → outbox BEFORE ping → appnotification mirror (ADR-041/043 outbox-before-ping;
         // seam-before-outbox per the task-042 escalation guard).
         h.Events.Should().Equal("seam-task-create", "outbox-write", $"ping:{h.OwnerId}", "appnotification-create");
+    }
+
+    // ── Task 098: the RI task's due dates are the RECIPIENT's calendar dates, not UTC dates. ──
+    // Reproduces the two live "ONTOLOGY DEV SEED 005" tasks hand-corrected in the Date Only conversion: raised at
+    // 2026-10-04T01:04:37Z — 21:04 on Oct 3 for an Eastern recipient — with the default +1 / +3 days. The former
+    // createdAtUtc.AddDays(n) wrote Oct 5 / Oct 7 (the UTC date); the recipient's dates are Oct 4 / Oct 6.
+    [Fact]
+    public async Task PublishAsync_TaskDueDates_CountFromTheRecipientsLocalToday()
+    {
+        var h = BuildHarness(
+            ruleThreshold: 0.7m,
+            clock: new FakeTimeProvider(DateTimeOffset.Parse("2026-10-04T01:04:37Z", System.Globalization.CultureInfo.InvariantCulture)),
+            recipientTimeZoneCode: 35,
+            recipientZoneName: "Eastern Standard Time");
+
+        await h.Consumer.PublishAsync(Signal(h.CommunicationId, confidence: 0.9));
+
+        var task = h.Creates.Single(e => e.LogicalName == "sprk_event");
+        task.GetAttributeValue<DateTime>("sprk_duedate").Should().Be(new DateTime(2026, 10, 4));
+        task.GetAttributeValue<DateTime>("sprk_finalduedate").Should().Be(new DateTime(2026, 10, 6));
+        task.GetAttributeValue<DateTime>("sprk_duedate").Kind.Should().Be(DateTimeKind.Unspecified,
+            "a Date Only column stores the date as written; a Local kind would be converted to UTC first");
     }
 
     // ── Deny: below-threshold confidence → NO seam call, NO outbox, NO ping, NO appnotification. ──

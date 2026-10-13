@@ -390,7 +390,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         + "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardinginvoice_value,"
         + "_sprk_regardinganalysis_value,_sprk_regardingaccount_value,_sprk_regardingcontact_value,"
         + "_sprk_regardingworkassignment_value,_sprk_regardingbudget_value,"
-        + "sprk_basedate,sprk_duedate,sprk_completeddate,statecode,statuscode,sprk_priority,sprk_source,"
+        // Task 098: all six Date Only columns (calendar dates, read with DataverseDateOnly).
+        + "sprk_basedate,sprk_duedate,sprk_finalduedate,sprk_completeddate,sprk_approveddate,sprk_meetingdate,"
+        + "statecode,statuscode,sprk_priority,sprk_source,"
         + "createdon,modifiedon";
 
     /// <summary>
@@ -635,10 +637,10 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             payload["sprk_EventType_Ref@odata.bind"] = $"/sprk_eventtype_refs({request.EventTypeId.Value})"; // R5 002: nav prop sprk_EventType_Ref + correct collection sprk_eventtype_refs (metadata-verified; sprk_eventtypes does not exist)
 
         if (request.BaseDate.HasValue)
-            payload["sprk_basedate"] = request.BaseDate.Value.ToString("yyyy-MM-dd");
+            payload["sprk_basedate"] = DataverseDateOnly.Format(request.BaseDate.Value);
 
         if (request.DueDate.HasValue)
-            payload["sprk_duedate"] = request.DueDate.Value.ToString("yyyy-MM-dd");
+            payload["sprk_duedate"] = DataverseDateOnly.Format(request.DueDate.Value);
 
         if (request.Priority.HasValue)
             payload["sprk_priority"] = request.Priority.Value;
@@ -712,6 +714,10 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
             payload[$"{stampNavigation}@odata.bind"] = $"/{stamp.EntitySetName}({stamp.RecordId:D})";
         }
+
+        // (v) unified-access-control-r2 task 173 (owner round 81): the Access Permission inherited from the parents.
+        if (request.AccessPermission is { } accessPermission)
+            payload["sprk_accesspermission"] = accessPermission;
     }
 
     private static string? Truncate(string? value, int maxLength) =>
@@ -720,19 +726,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     // ── sprk_event status: the live option set and its statecode pairing have ONE home, EventStatusCode (Models.cs) ──
     // (task 097 and unified-access-control-r2 task 159 fixed the same values independently; merged into one.)
 
-    public async Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
+    public async Task UpdateEventStatusAsync(Guid id, int statusCode, DateOnly? completedDate = null, CancellationToken ct = default)
     {
-
-        var payload = new Dictionary<string, object?>
-        {
-            ["statuscode"] = statusCode
-        };
-
-        // The statecode the live statuscode belongs to (task 159); an unknown value throws (task 097).
-        payload["statecode"] = EventStatusCode.GetStateCode(statusCode);
-
-        if (completedDate.HasValue)
-            payload["sprk_completeddate"] = completedDate.Value.ToString("yyyy-MM-dd");
+        var payload = BuildUpdateEventStatusPayload(statusCode, completedDate);
 
         _logger.LogInformation("Updating event status: {Id} -> {StatusCode}", id, statusCode);
 
@@ -740,6 +736,25 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         response.EnsureSuccessStatusCode();
 
         _logger.LogDebug("Event status updated: {Id}", id);
+    }
+
+    /// <summary>
+    /// The PATCH body for a status change. The statecode the live statuscode belongs to (task 159); an unknown value
+    /// throws (task 097). <c>sprk_completeddate</c> is Date Only (task 098): invariant <c>yyyy-MM-dd</c>, the only shape
+    /// the Web API accepts. Internal for tests.
+    /// </summary>
+    internal static Dictionary<string, object?> BuildUpdateEventStatusPayload(int statusCode, DateOnly? completedDate)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["statuscode"] = statusCode,
+            ["statecode"] = EventStatusCode.GetStateCode(statusCode),
+        };
+
+        if (completedDate.HasValue)
+            payload["sprk_completeddate"] = DataverseDateOnly.Format(completedDate.Value);
+
+        return payload;
     }
 
     /// <summary><c>sprk_eventlog.sprk_eventlogname</c> length (live metadata).</summary>
@@ -1168,12 +1183,55 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 "An impersonated read requires a non-empty caller systemuserid; refusing to issue an app-only query on the access-scoped read path (fail closed).",
                 nameof(callerSystemUserId));
 
+        _logger.LogDebug(
+            "[DATAVERSE-IMPERSONATE] GET {EntitySet} as caller {CallerSystemUserId}", entitySetName, callerSystemUserId);
+
+        return await RetrieveMultipleRowsAsync(entitySetName, odataQuery, callerSystemUserId, ct);
+    }
+
+    /// <summary>
+    /// Runs an OData GET against <paramref name="entitySetName"/> APP-ONLY (the BFF's own identity, no
+    /// <c>MSCRMCallerID</c>), returning the raw rows with FormattedValue annotations — the same row shape as
+    /// <see cref="RetrieveMultipleImpersonatedAsync"/>. Added for the external-plane message read
+    /// (spaarke-SPA-external-access-platform-r3 task 033, FR-04): a contact caller has no <c>systemuser</c> to
+    /// impersonate, and the external plane forbids OBO (ADR-028 / NFR-01).
+    /// <para>
+    /// SECURITY: an app-only read sees every row the application user can read. It is NOT an access-scoped read and
+    /// MUST NOT be used as a fallback for an unresolved impersonated caller. A caller of this method authorizes the
+    /// record first (the external plane checks it against the caller's composed accessible set) and scopes
+    /// <paramref name="odataQuery"/> to that record.
+    /// </para>
+    /// </summary>
+    /// <param name="entitySetName">The OData entity SET name, e.g. <c>sprk_communications</c>.</param>
+    /// <param name="odataQuery">The OData query string WITHOUT a leading <c>?</c>; the caller OData-escapes values.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The rows as attribute-keyed dictionaries (empty when none match).</returns>
+    public async Task<IReadOnlyList<Dictionary<string, JsonElement>>> RetrieveMultipleAppOnlyAsync(
+        string entitySetName,
+        string? odataQuery,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(entitySetName))
+            throw new ArgumentException("Entity set name must be provided.", nameof(entitySetName));
+
+        _logger.LogDebug("[DATAVERSE-APPONLY] GET {EntitySet}", entitySetName);
+
+        return await RetrieveMultipleRowsAsync(entitySetName, odataQuery, impersonateSystemUserId: null, ct);
+    }
+
+    /// <summary>
+    /// The shared GET behind <see cref="RetrieveMultipleImpersonatedAsync"/> and <see cref="RetrieveMultipleAppOnlyAsync"/>:
+    /// impersonated when <paramref name="impersonateSystemUserId"/> is set, app-only when it is null.
+    /// </summary>
+    private async Task<IReadOnlyList<Dictionary<string, JsonElement>>> RetrieveMultipleRowsAsync(
+        string entitySetName,
+        string? odataQuery,
+        Guid? impersonateSystemUserId,
+        CancellationToken ct)
+    {
         var url = string.IsNullOrWhiteSpace(odataQuery)
             ? entitySetName
             : $"{entitySetName}?{odataQuery}";
-
-        _logger.LogDebug(
-            "[DATAVERSE-IMPERSONATE] GET {EntitySet} as caller {CallerSystemUserId}", entitySetName, callerSystemUserId);
 
         // Request FormattedValue annotations so a lookup's display name (e.g. sprk_sentby → the sender's
         // systemuser display name) rides the SAME impersonated row as the lookup value itself. This is the
@@ -1182,7 +1240,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         // sprk_sentbyname column). Annotations are additive extra keys ("{field}@OData.Community.Display.
         // V1.FormattedValue") that non-communication readers of this impersonated seam simply ignore.
         using var request = await CreateAuthenticatedRequestAsync(
-            HttpMethod.Get, url, ct, impersonateSystemUserId: callerSystemUserId);
+            HttpMethod.Get, url, ct, impersonateSystemUserId);
         request.Headers.TryAddWithoutValidation(
             "Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
         var response = await _httpClient.SendAsync(request, ct);
@@ -1613,6 +1671,21 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     public const string AccessCheckDeniedErrorCode = "0x80040220";
 
     /// <summary>
+    /// Dataverse's error code for "the principal does not have ReadAccess right(s)" on the target record — what an
+    /// impersonated <c>RetrievePrincipalAccess</c> answers for a user who has LOST all access to the record (seen live
+    /// 2026-10-07, sync run d03f01eb: a user fully unshared from a secure project). No Read means no Write: an answer about
+    /// the principal's access, not a fault of the request.
+    /// </summary>
+    public const string NoReadAccessErrorCode = "0x80048306";
+
+    /// <summary>
+    /// The 403 error codes that ARE answers about the principal's access ("no rights") — everything else (an impersonation
+    /// fault 0x8004A110, an unrecognised code, an unreadable body) is UNKNOWN to a revoking caller.
+    /// </summary>
+    public static readonly IReadOnlySet<string> AccessDeniedErrorCodes =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { AccessCheckDeniedErrorCode, NoReadAccessErrorCode };
+
+    /// <summary>
     /// <see cref="RetrievePrincipalRightsAsync"/> for a caller that ACTS DESTRUCTIVELY on "no rights" (removing an
     /// access grant) — unified-access-control-r2 task 171, adversarial finding 3. Returns <see langword="null"/>
     /// (UNKNOWN) for every answer that is not about the principal's access.
@@ -1625,8 +1698,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// that would revoke every grant on every pass.</para>
     /// <para><b>The mapping.</b> 2xx → the rights Dataverse answered (an empty string is an authoritative "none").
     /// 404 → <see cref="AccessRights.None"/> (Dataverse's report of a record the principal cannot read). 403 →
-    /// <see cref="AccessRights.None"/> ONLY when the error code is <see cref="AccessCheckDeniedErrorCode"/>; any other
-    /// 403 code, or a 403 whose body cannot be read, is <see langword="null"/>. Any other failure throws, as in
+    /// <see cref="AccessRights.None"/> ONLY when the error code is one of <see cref="AccessDeniedErrorCodes"/>
+    /// (<see cref="AccessCheckDeniedErrorCode"/>, <see cref="NoReadAccessErrorCode"/>); any other 403 code, or a 403 whose
+    /// body cannot be read, is <see langword="null"/>. Any other failure (throttling, a 5xx) throws, as in
     /// <see cref="RetrievePrincipalRightsAsync"/>.</para>
     /// </remarks>
     public async Task<AccessRights?> RetrievePrincipalRightsOrUnknownAsync(
@@ -1643,7 +1717,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
         {
             var code = await TryReadErrorCodeAsync(response, ct).ConfigureAwait(false);
-            if (string.Equals(code, AccessCheckDeniedErrorCode, StringComparison.OrdinalIgnoreCase))
+            if (code is not null && AccessDeniedErrorCodes.Contains(code.Trim()))
                 return AccessRights.None;
 
             _logger.LogWarning(
@@ -2179,12 +2253,14 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 ? etName.GetString() : null,
             StateCode = data.TryGetValue("statecode", out var state) ? state.GetInt32() : 0,
             StatusCode = data.TryGetValue("statuscode", out var status) ? status.GetInt32() : 1,
-            BaseDate = data.TryGetValue("sprk_basedate", out var bd) && bd.ValueKind != JsonValueKind.Null
-                ? DateTime.Parse(bd.GetString()!) : null,
-            DueDate = data.TryGetValue("sprk_duedate", out var dd) && dd.ValueKind != JsonValueKind.Null
-                ? DateTime.Parse(dd.GetString()!) : null,
-            CompletedDate = data.TryGetValue("sprk_completeddate", out var cd) && cd.ValueKind != JsonValueKind.Null
-                ? DateTime.Parse(cd.GetString()!) : null,
+            // Task 098: calendar dates, read without local conversion ("yyyy-MM-dd"; a timestamp from a column not yet
+            // converted reads as its UTC date — the day the conversion keeps). DateTime.Parse moved them to server-local time.
+            BaseDate = DataverseDateOnly.Read(data, "sprk_basedate"),
+            DueDate = DataverseDateOnly.Read(data, "sprk_duedate"),
+            FinalDueDate = DataverseDateOnly.Read(data, "sprk_finalduedate"),
+            CompletedDate = DataverseDateOnly.Read(data, "sprk_completeddate"),
+            ApprovedDate = DataverseDateOnly.Read(data, "sprk_approveddate"),
+            MeetingDate = DataverseDateOnly.Read(data, "sprk_meetingdate"),
             Priority = data.TryGetValue("sprk_priority", out var pri) && pri.ValueKind != JsonValueKind.Null
                 ? pri.GetInt32() : null,
             Source = data.TryGetValue("sprk_source", out var src) && src.ValueKind != JsonValueKind.Null

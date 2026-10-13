@@ -16,7 +16,7 @@
  * Then use authenticatedFetch() from '@spaarke/auth' for all BFF API calls.
  */
 
-import { initAuth } from '@spaarke/auth';
+import { initAuth, isValidTenant } from '@spaarke/auth';
 import type { IAuthConfig } from '@spaarke/auth';
 
 /**
@@ -42,17 +42,14 @@ export async function initializeAuth(
 ): Promise<void> {
   console.info('[authInit] Initializing @spaarke/auth for SemanticSearchControl...');
 
-  // tenantId parameter is intentionally unused now — @spaarke/auth resolves
-  // tenant-specific authority via resolveTenantFromXrm() (reads
-  // Xrm.Utility.getGlobalContext().organizationSettings.tenantId via frame-walk).
-  // Passing an explicit authority bypasses that resolution and was the cause of
-  // the popup regression discovered 2026-05-13. Kept in signature to avoid
-  // touching every caller.
-  void tenantId;
-
+  // Pass the environment's tenant so the sign-in authority is tenant-specific (a B2B guest signed
+  // in against /organizations lands in their home tenant — #1453). The 2026-05-13 popup regression
+  // was a malformed `/undefined` authority, which @spaarke/auth now rejects; isValidTenant() keeps
+  // an invalid value from being passed. When absent, the library's discovery decides (and fails
+  // closed in a Dataverse host).
   const config: IAuthConfig = {
     clientId: clientAppId,
-    // authority intentionally omitted — see comment above
+    ...(isValidTenant(tenantId) ? { tenantId: tenantId.trim() } : {}),
     // CRITICAL: Static redirect URI matching Azure AD app registration
     // Resolved at runtime from Xrm.Utility.getGlobalContext().getClientUrl()
     redirectUri: dataverseUrl,

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="258" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Stamp BFF startup settings: the four keys a stamp's BFF demands at start but no channel writes (204e F5–F8)</title>
+    <phase>Model 1 dedicated-stamp remediation — T186 blocker found by task 204e</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what H4b writes to every customer stamp's BFF; a wrong value stops the BFF from starting.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Startup-validation semantics + the manifest/generator contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits scripts/canonical-secret-catalog/manifest.yaml + generated outputs, which T253 also edits — run after T253 merges.</parallel-reason>
+    <tags>provisioning, provisioning-handler, bff-api, config, testing</tags>
+    <deps>253, 204e</deps>
+  </metadata>
+
+  <prompt>Task 204e's IOptionsDriftTests found BFF options types whose startup validation demands keys that neither the canonical manifest (H4b) nor customer.bicep writes to a stamp. The dev BFF works only because these were set by hand on spaarke-bff-dev (verified 2026-10-09: Graph__Scopes__0, ServiceBus__QueueName, PublicConfig__BffUrl / MsalClientId / TenantId, Onboarding__EnableDevBypass). A T186 stamp would not start.</prompt>
+
+  <goal>Every key a stamp BFF's ValidateOnStart options demand outside Development has a stamp channel (manifest per_env_settings or a secret with a KV reference); IOptionsDriftTests' KnownDrift rows 204e-F5..F8 become Supplied (or Exempt with the gate that is off on every stamp) and the ledger rows are deleted.</goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Onboarding/OnboardingOptions.cs (+ its validator / OnboardingModule)</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/PublicConfigOptions.cs (+ its IValidateOptions)</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/GraphOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/ServiceBusOptions.cs</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml (per_env_settings; PerEnvSourceCatalog) + its generator and generated outputs</file>
+      <file>infrastructure/bicep/customer.bicep</file>
+      <file>tests/Spaarke.ArchTests/IOptionsDriftTests.cs (Census / KnownDrift ledger)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="bff-extensions F.5">Never weaken a validator to make a stamp start; supply the key.</constraint>
+    <constraint source="provisioning.md">Keyless stamps (D13): a demanded secret (Onboarding HMAC key?) goes through the stamp vault as a KV reference — first decide whether a stamp needs that endpoint at all (needed → build, else gate it off with an Exempt row).</constraint>
+    <constraint source="live">No live change; values derive from run context (BFF URL, BFF app id, tenant id) or constants.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">For each of F5..F8 read the validator: which key, demanded when, what value a stamp needs (and where the run context already holds it).</step>
+    <step order="2">Add the manifest entries (per_env_source from the closed catalog, or a new source wired through HandlerRunInputs if none fits); regenerate.</step>
+    <step order="3">Move the IOptionsDriftTests rows to Supplied / Exempt; delete the KnownDrift rows; tests green.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">IOptionsDriftTests has no KnownDrift row for Onboarding, PublicConfig, Graph:Scopes or ServiceBus:QueueName.</criterion>
+    <criterion testable="true">H4b's generated settings for a stamp include each demanded key with a stamp-correct value (unit test on the generated set).</criterion>
+    <criterion testable="true">Solution build 0 errors; ControlPlane tests and ArchTests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note date="2026-10-09">Executed (sub-agent, FULL). No live action. F6: manifest per_env_settings PublicConfig__BffUrl (new
+    PerEnvSourceCatalog source from-h2a-output:bff_url = StampBffUrl.Production(AppServiceName), the derivation H9 now shares),
+    PublicConfig__MsalClientId (from-h3-output:bff_app_client_id), PublicConfig__TenantId (from-intake-parameter:tenant_id).
+    F7: literal Graph__Scopes__0=https://graph.microsoft.com/.default. F8: literal ServiceBus__QueueName=sdap-jobs (pinned to
+    customer.json serviceBusQueues by a test). F5: the H0.5 consent callback is Model 2 only and cannot run on a stamp, so
+    OnboardingModule registers and EndpointMappingExtensions maps it only with Onboarding:Enabled=true (default false; validator
+    unchanged when on); census row Exempt with Gate "Onboarding:Enabled", and IOptionsDriftTests now fails when a stamp channel
+    writes an Exempt row's gate. All four KnownDrift rows removed. Filed ISS-012 (Graph:Scopes read by nothing) and ISS-013
+    (consent callback cannot work as built). Live checks owed at T186: the stamp BFF starts as Production; GET /api/config returns
+    the stamp URL / BFF app id / tenant; /api/onboarding/consent-callback is 404 on the stamp.</note>
+  </notes>
+</task>

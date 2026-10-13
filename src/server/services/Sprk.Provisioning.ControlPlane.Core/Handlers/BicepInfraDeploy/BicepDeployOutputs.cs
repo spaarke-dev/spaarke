@@ -75,6 +75,13 @@ public sealed class BicepDeployOutputs
     /// </summary>
     public required string RedisEndpoint { get; init; }
 
+    /// <summary>
+    /// Customer Azure AI Content Safety endpoint (ARM output <c>contentSafetyEndpoint</c>) — written to
+    /// <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.ContentSafetyEndpoint"/> and set by H4b as the
+    /// BFF's <c>AiSafety__ContentSafety__Endpoint</c> (task 246). Not a secret: the account has local auth disabled.
+    /// </summary>
+    public required string ContentSafetyEndpoint { get; init; }
+
     /// <summary>Whether SignalR was deployed this run (mirrors <see cref="BicepDeployRequest.SignalREnabled"/>; downstream handlers may read to skip SignalR-touching steps when off).</summary>
     public required bool SignalRDeployed { get; init; }
 }

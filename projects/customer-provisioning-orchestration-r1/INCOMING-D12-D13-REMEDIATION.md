@@ -302,7 +302,7 @@ Found during our sweep, **not fixed** because they are yours:
 - [ ] `sprk_tenancymodel` **migrated** (fanned out by `Profile`), not relabelled; H12c key impact handled
 - [ ] `model1-*.bicep` retired across **all seven** surfaces in §4; `bicep-e2e-dry-run.ps1` green; the ARM-artifact workflow and manifest schema updated
 - [ ] `dotnet build src/server/api/Sprk.Bff.Api/` clean
-- [ ] Docs in §6 corrected or explicitly deferred with a reason
+- [x] Docs in §6 corrected or explicitly deferred with a reason — T235 (2026-10-08)
 
 ---
 
@@ -321,10 +321,13 @@ Found during our sweep, **not fixed** because they are yours:
 Do not assume an answer; ask.
 
 1. **Power BI shared F-SKU capacity pool** — `reporting-admin.md` assumed one. Not on D-12's closed
-   two-item sharing exception list. A shared pool would be a **new decision**.
-2. **M365 Copilot agent** — shared vs per-customer, still TBD (`COMPONENT-INVENTORY.md` §11).
+   two-item sharing exception list. A shared pool would be a **new decision**. — **ANSWERED (owner 2026-09-28):** no BI
+   in the MVP; a per-customer F-SKU later, not procured now; no shared pool (`reporting-admin.md` updated by T235).
+2. **M365 Copilot agent** — shared vs per-customer, still TBD (`COMPONENT-INVENTORY.md` §11). — **ANSWERED (owner
+   2026-09-28):** per customer (task T257).
 3. **Redis Standard tier performance** — dedication and the Standard SKU are decided; whether Standard meets
-   the throughput bar is unverified.
+   the throughput bar is unverified. — **SUPERSEDED (owner D12):** stamps run Azure Managed Redis (Entra only, T242);
+   throughput is verified after the first customer (plan §9 Q3).
 
 ---
 

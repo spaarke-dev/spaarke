@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Documents;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using Membership = Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService;
 
@@ -35,7 +36,7 @@ public class OfficeEditAccessServiceTests
     private static readonly Guid ObjectId = Guid.Parse("17100000-0000-4000-8000-000000000004");
 
     private readonly Mock<Membership> _membership =
-        new(Mock.Of<IGraphClientFactory>(), NullLogger<Membership>.Instance) { CallBase = false };
+        new(TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<Membership>.Instance) { CallBase = false };
     private readonly Mock<IGenericEntityService> _entities = new();
 
     public OfficeEditAccessServiceTests()
@@ -48,6 +49,11 @@ public class OfficeEditAccessServiceTests
             });
         _membership.Setup(m => m.ReadAccessAsync(SecureDrive, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Membership.ContainerAccess([], RolesComplete: true, new Dictionary<string, string>()));
+
+        // Task 175 (#1478): a work assignment's or project's Restricted state also comes from what it is filed under. These
+        // records are filed under nothing (the filing read returns no row); an unanswered read would fail closed.
+        _entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
     }
 
     private Sut Build(OwningSecureRecord? secureOwner, AccessRights rights)

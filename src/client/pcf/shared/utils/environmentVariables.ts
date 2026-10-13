@@ -321,6 +321,38 @@ export async function getTenantId(webApi: ComponentFramework.WebApi): Promise<st
   return getEnvironmentVariableOrDefault(webApi, 'sprk_TenantId');
 }
 
+/** The values a PCF signs in with: tenant, MSAL client app and BFF app. */
+export interface SignInIdentity {
+  tenantId: string;
+  clientAppId: string;
+  bffAppId: string;
+}
+
+/**
+ * Resolve a PCF's sign-in identity: the environment's own variables FIRST, a form property only as the
+ * fallback for an environment without the variable (#1453).
+ *
+ * Shipped forms carry static form-property values from the dev environment (the Matter main form binds the dev
+ * tenant), so a form value that won would sign every user of another environment in to the wrong tenant or app
+ * — members as well as B2B guests. Empty strings mean "not configured"; @spaarke/auth then discovers the
+ * tenant itself and fails closed in a Dataverse host.
+ */
+export async function resolveSignInIdentity(
+  webApi: ComponentFramework.WebApi,
+  formValues: Partial<SignInIdentity> = {}
+): Promise<SignInIdentity> {
+  const [tenantId, clientAppId, bffAppId] = await Promise.all([
+    getEnvironmentVariable(webApi, 'sprk_TenantId'),
+    getEnvironmentVariable(webApi, 'sprk_MsalClientId'),
+    getEnvironmentVariable(webApi, 'sprk_BffApiAppId'),
+  ]);
+  return {
+    tenantId: tenantId?.trim() || formValues.tenantId?.trim() || '',
+    clientAppId: clientAppId?.trim() || formValues.clientAppId?.trim() || '',
+    bffAppId: bffAppId?.trim() || formValues.bffAppId?.trim() || '',
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Bulk Loading
 // ─────────────────────────────────────────────────────────────────────────────

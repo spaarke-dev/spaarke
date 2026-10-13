@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="110" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 11 (2) — Quick Save shows a progress dialog, then success with a link to the new document record</title>
+    <phase>6 UAT round 11 (2026-10-07)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.ts` (Word ribbon command) and the notify dialog page, plus tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only, fully specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT11</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs beside 111. 110 owns `word/commands/**`, `shared/taskpane/services/quickSaveHelpers.ts` and their tests ONLY. Do not edit `SaveFlow.tsx`, `App.tsx`, `ci-gated-suites.txt`, TASK-INDEX or current-task.</parallel-reason>
+    <deps>—</deps>
+    <tags>frontend, office-addins, typescript, unit-test</tags>
+  </metadata>
+
+  <prompt>Owner UAT round 11, item 2. Record: `projects/spaarkeai-word-add-in-r1/notes/042-uat-round11-2026-10-07.md`.</prompt>
+
+  <goal>Clicking Quick Save immediately opens the Spaarke dialog showing that it is saving; when the save finishes the same dialog shows success (or the error) and, on success, a link that opens the new (or versioned) `sprk_document` record in Spaarke.</goal>
+
+  <context>
+    <background>
+      - Command: `src/client/office-addins/word/commands/index.ts` `quickSave` (L258-324). `notify()` (L132-145) opens `word/commands-notify.html?message=…&amp;status=…` via `displayDialogAsync` AFTER the save, fire-and-forget; `event.completed()` runs in `finally` right after. The success text comes from `describeQuickSaveSuccess` (`shared/taskpane/services/quickSaveHelpers.ts` L293-322). The saved id is `saved.document.documentId` (L225).
+      - Dialog page: `word/commands/notify.html` (inline script L70-105, no Office.js, auto-closes after 2.2 s success / 8 s error), copied raw by webpack (`webpack.config.js` L335-343).
+      - Record link: reuse `buildOpenRecordUrl(orgUrl, 'sprk_document', id, appName)` / `configuredSpaarkeAppName` from `shared/taskpane/services/openRecordLauncher.ts` (do NOT add another builder). `ORG_URL` unset → no link (say nothing about it), never a broken link.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner item 2">The dialog opens at the START of the save with a visible progress state (spinner/indeterminate + "Saving to Spaarke…"), then shows the result in place. Success includes an "Open in Spaarke" link to the document record and does NOT auto-close (the user closes it); errors keep their current wording and Close button.</constraint>
+    <constraint source="host support">Update the open dialog with `dialog.messageChild` when `DialogApi 1.2` is supported; otherwise close it and reopen the page with the final message (one dialog at a time). The link opens via the parent: the dialog `messageParent`s an open request and the command calls `Office.context.ui.openBrowserWindow` (fall back to `window.open` in the dialog if messageParent is unavailable). The notify page may load office.js from the Microsoft CDN; it must still render from URL params alone (existing behaviour) if Office.js is unavailable.</constraint>
+    <constraint source="function-command lifetime">`event.completed()` is called once, when the dialog is closed by the user (DialogEventReceived) or after a safety cap (e.g. 2 minutes after the result is shown, closing the dialog), and on every early-exit/error path — never left uncalled.</constraint>
+    <constraint source="NFR / security">Text rendered with `textContent` only; the link URL is validated to the configured `ORG_URL` origin before opening; no new dependencies; no BFF change.</constraint>
+    <constraint source="ADR-038">Tests: progress dialog opened before the save request; success message includes the record link built from ORG_URL + id; no link without ORG_URL; messageChild path vs close-and-reopen fallback; the open-link message calls openBrowserWindow with the validated URL and ignores other origins; `event.completed` called exactly once on success, on error, and on cap. Existing `commands.test.ts` / `notify.test.ts` stay green (update assertions that encoded the old fire-and-forget flow).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Quick Save opens the dialog in a progress state before `/api/office/save` is called.</criterion>
+    <criterion testable="true">Success shows the saved name and an "Open in Spaarke" link to `sprk_document/{id}`; clicking it opens the record (openBrowserWindow); the dialog stays until closed.</criterion>
+    <criterion testable="true">Errors show the existing error text with Close; no link.</criterion>
+    <criterion testable="true">`event.completed` is called exactly once in every path.</criterion>
+    <criterion testable="true">Gates: full add-in jest green; lint 0; typecheck 0 production; test-file type errors not increased.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Read the command, notify page, helpers, openRecordLauncher and existing tests.</step>
+    <step>Dialog controller in the command (open progress → update → handle open-link + close → complete).</step>
+    <step>Notify page: progress state, result update via message, link, Office.js optional.</step>
+    <step>Tests; gates; write `projects/spaarkeai-word-add-in-r1/notes/110-quick-save-progress-dialog.md` (what changed, host-support paths, live checks to do).</step>
+  </steps>
+
+  <justification>
+    <existing>Quick Save command + notify dialog (tasks 0xx), openRecordLauncher.</existing>
+    <extension>Yes — the same dialog page and command gain a progress state and a link; the link builder is reused.</extension>
+    <cost-of-doing-nothing>Owner UAT round 11 item 2: no feedback while saving and no way to reach the new record.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/word/commands/index.ts</file>
+    <file role="edit">src/client/office-addins/word/commands/notify.html</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/quickSaveHelpers.ts</file>
+  </relevant-files>
+</task>

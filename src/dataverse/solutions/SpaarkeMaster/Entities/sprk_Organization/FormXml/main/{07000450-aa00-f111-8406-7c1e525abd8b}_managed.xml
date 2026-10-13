@@ -1,0 +1,311 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{07000450-aa00-f111-8406-7c1e525abd8b}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls" shownavigationbar="false">
+      <tabs>
+        <tab verticallayout="true" id="{9d9871a4-d463-4159-ba49-13987a385060}" IsUserDefined="1" labelid="{5dc60400-a12c-4602-a06d-d5e524748be1}" name="General">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="33%">
+              <sections>
+                <section showlabel="false" showbar="false" IsUserDefined="0" id="{f497da70-59d0-43c3-b64b-57b8606d99c8}" labelid="{33371a1e-237e-4998-affd-b927210006f4}" celllabelposition="Top">
+                  <labels>
+                    <label description="General" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{2e6a7f5b-329f-4325-ba0d-7c09a3e2e8f2}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_organization_number" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_organization_number" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{9a4b7eaa-9d45-49d9-b4b8-544109c3bc17}" labelid="{35f22e65-9d19-48c2-9282-11c0c05c2b96}">
+                        <labels>
+                          <label description="Organization Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_organizationname" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="sprk_organizationname" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{9fd01279-2279-481b-83cf-7a10104a7cb2}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_organizationtype" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_organizationtype" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{b119f707-4bf2-42b8-81f1-34d9f1d39315}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="owningbusinessunit" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="owningbusinessunit" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{0e42adff-9274-432e-a2d2-0c9bf8142ab8}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_domain" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_domain" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{304eaeff-7ecf-4cfe-b630-cdd57b449450}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_containerid" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_containerid" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+            <column width="67%">
+              <sections>
+                <section name="General_section_systemaccess" id="d61eb38c-7819-4645-9a7e-41ecc04917ab" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="11" labelwidth="115">
+                  <labels>
+                    <label description="SYSTEM ACCESS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{946d3e0e-21f9-4729-b963-20d5931c3a4e}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                      <cell id="{cbd72c8f-824c-4599-b321-b6901ace0ca0}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_accesspermissiongrant" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_accesspermissiongrant" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{9726840c-a65a-462c-9704-6342c6b3db14}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_standinggrant" classid="{67FAC785-CD58-4F9F-ABB3-4B7DDC6ED5ED}" datafieldname="sprk_standinggrant" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section name="_section_12" id="3fb5e16a-61a0-4a11-ba24-3afcaa429bed" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="MEMBERS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{2f3c77a9-a6b4-4e93-aa51-d8f20b9a676d}" rowspan="4" colspan="1" auto="false" showlabel="false">
+                        <labels>
+                          <label description="Contacts Subgrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="Subgrid_new_1" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>4</RecordsPerPage>
+                            <AutoExpand>Fixed</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>false</EnableChartPicker>
+                            <ChartGridMode>Grid</ChartGridMode>
+                            <RelationshipName>sprk_contactorganization_Organization_sprk_organization</RelationshipName>
+                            <TargetEntityType>sprk_contactorganization</TargetEntityType>
+                            <ViewId>{81E3445E-5096-F111-B8DB-3833C5E5D030}</ViewId>
+                            <ViewIds>{E9C35943-B701-4FCC-A8A0-85F0C48ED350},{8CDA9FB0-4F96-F111-B8DC-7CED8DDC4A05},{81E3445E-5096-F111-B8DB-3833C5E5D030}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+                <section name="section_noaccess" id="{f1e65f73-96ab-883f-b25c-745c751ac5c1}" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="NO ACCESS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{42e47b30-6400-32c1-5ee6-46db9c6f2cf1}" showlabel="true" locklevel="0" colspan="1" rowspan="4" auto="false">
+                        <labels>
+                          <label description="Ethical walls on this organization" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="subgrid_noaccess_walls" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>5</RecordsPerPage>
+                            <AutoExpand>Fixed</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>false</EnableChartPicker>
+                            <ChartGridMode>Grid</ChartGridMode>
+                            <RelationshipName>sprk_sprk_organization_sprk_noaccessentry_objectorganization</RelationshipName>
+                            <TargetEntityType>sprk_noaccessentry</TargetEntityType>
+                            <ViewId>{1487543C-9265-4255-B766-F86C65F9768A}</ViewId>
+                            <ViewIds>{1487543C-9265-4255-B766-F86C65F9768A}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                    <row>
+                      <cell id="{7be40f0e-417b-484a-8273-46f73e11c805}" showlabel="true" locklevel="0" colspan="1" rowspan="4" auto="false">
+                        <labels>
+                          <label description="This organization denied" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="subgrid_noaccess_org_denied" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>5</RecordsPerPage>
+                            <AutoExpand>Fixed</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>false</EnableChartPicker>
+                            <ChartGridMode>Grid</ChartGridMode>
+                            <RelationshipName>sprk_sprk_organization_sprk_noaccessentry_subjectorganization</RelationshipName>
+                            <TargetEntityType>sprk_noaccessentry</TargetEntityType>
+                            <ViewId>{1487543C-9265-4255-B766-F86C65F9768A}</ViewId>
+                            <ViewIds>{1487543C-9265-4255-B766-F86C65F9768A}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+        <tab name="tab_todos_sprk_organization" id="8fc4a584-21c0-4650-91ce-b2660f0576eb" IsUserDefined="0" locklevel="0" showlabel="true" expanded="false" visible="false">
+          <labels>
+            <label description="To Dos" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="tab_todos_section" id="43c80bcd-ce7c-4a48-98b0-df5ca6778cb3" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Left" columns="1" labelwidth="115">
+                  <labels>
+                    <label description="TO DOS" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{7b5b8c96-7bb1-4518-86e8-3c292b57d92b}" rowspan="4" colspan="1" auto="true" showlabel="false" labelid="{83bc6c21-7ba5-4bc2-a0ba-d0de58da888a}">
+                        <labels>
+                          <label description="To Dos Subgrid" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="subgrid_todos" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}">
+                          <parameters>
+                            <RecordsPerPage>30</RecordsPerPage>
+                            <AutoExpand>Auto</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>true</EnableViewPicker>
+                            <EnableChartPicker>false</EnableChartPicker>
+                            <ChartGridMode>Both</ChartGridMode>
+                            <RelationshipName>sprk_sprk_organization_sprk_todo_RegardingOrganization</RelationshipName>
+                            <TargetEntityType>sprk_todo</TargetEntityType>
+                            <ViewId>{DE2C9B75-74EB-40F4-92D8-DEABE0521E33}</ViewId>
+                            <ViewIds>{DE2C9B75-74EB-40F4-92D8-DEABE0521E33}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{c4d26348-119e-4f4f-93ec-fdd51f800971}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{876d210a-fbc7-4c48-bbc5-d8c15cc7de9c}" showlabel="false" labelid="{6f389c08-1b70-4b00-95ad-a20b157bf4fd}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{01553c1a-abff-4e1c-b33b-ebabd5b6a2ee}" showlabel="false" labelid="{db925d04-31f8-4cd5-ac44-9b9833c39fc0}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{b64b49f5-b631-455e-8549-e892ea023b57}" showlabel="false" labelid="{aeb7f755-9178-4fcd-901e-e6ee2705720d}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{030f60bf-57cc-46c7-b1e7-dbef285512a5}" labelid="{d2da6eba-6e01-410d-8b61-d6fe269cfd42}" colspan="1" rowspan="1">
+              <labels>
+                <label description="Owner" languagecode="1033" />
+              </labels>
+              <control id="header_ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+            </cell>
+            <cell id="{5455021e-8864-41d9-8abb-2bec67f9dfee}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+              <control id="header_statecode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statecode" disabled="false" />
+            </cell>
+            <cell id="{ff529e1c-58a6-47e8-8aef-418e4358097a}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+              <control id="header_statuscode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statuscode" disabled="false" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{d0c6838a-aca2-42cf-af39-1ee1ee2cdffe}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{2f3fd017-557b-4492-ae93-af2fff7440dc}" showlabel="false" labelid="{a2c19b87-805a-4913-a22e-d549697b7dfa}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{7cc48074-a047-48e9-b13f-67ba04a71903}" showlabel="false" labelid="{e9950fd9-a847-4951-8995-c6f28797fbdb}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{0ce3a76f-2ef0-4ca4-848e-7a4e2b831395}" showlabel="false" labelid="{e46f6864-d875-417f-97cc-a4290fbf4870}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="1" FallbackForm="true">
+        <Role Id="{627090ff-40a3-4053-8790-584edc5be201}" />
+        <Role Id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+      </DisplayConditions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Organization main form" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

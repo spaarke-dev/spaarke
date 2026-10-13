@@ -16,6 +16,8 @@ import type { IChartDefinition, DrillInteraction } from '../types';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';
 import { logger } from '../utils/logger';
 import { CalendarVisual as CalendarVisualView, type ICalendarEvent, type ICalendarEventRecord } from '@spaarke/visuals';
+// React-free source module (same path #1309 / task 081 uses for VisualHost's due-date cards).
+import { parseDueDate } from '../../../../shared/Spaarke.UI.Components/src/utils/dateLocal';
 
 // Re-export the presentational event type so existing importers
 // (ChartRenderer) keep their `from './CalendarVisual'` path.
@@ -45,12 +47,12 @@ export interface ICalendarVisualProps {
 /**
  * v1.4.24 — Map a fetched Dataverse record to a calendar event for the popover.
  * Generic: tries chartDefinition.sprk_groupbyfield as the date attribute,
- * falls back to sprk_finalduedate / sprk_duedate (both common on sprk_event).
+ * falls back to sprk_duedate (D-63: sprk_finalduedate is informational and never picks the bucket).
  * Event type name + color resolve via any `<alias>.sprk_name` /
  * `<alias>.sprk_eventtypecolor` key so the FetchXML's link-entity alias
  * (e.g. `evtype`, `eventtype`) doesn't have to be standardized.
  */
-function mapRecordToEvent(
+export function mapRecordToEvent(
   record: Record<string, unknown>,
   entityName: string,
   dateField: string | undefined
@@ -59,8 +61,8 @@ function mapRecordToEvent(
   const id = (record[primaryIdAttr] as string) || (record.sprk_eventid as string) || '';
   const name = (record.sprk_eventname as string) || (record[`${entityName}name`] as string) || 'Untitled';
 
-  // Resolve the bucketing date: configured field → finalduedate → duedate.
-  const candidates = [dateField, 'sprk_finalduedate', 'sprk_duedate'].filter((f): f is string => !!f);
+  // Resolve the bucketing date: configured field → sprk_duedate (D-63; never sprk_finalduedate).
+  const candidates = [dateField, 'sprk_duedate'].filter((f): f is string => !!f);
   let dateStr: string | undefined;
   for (const f of candidates) {
     const v = record[f] as string | undefined;
@@ -70,8 +72,10 @@ function mapRecordToEvent(
     }
   }
   if (!dateStr) return null;
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return null;
+  // Task 098: due / final due are calendar dates ("YYYY-MM-DD", Date Only) — bucket on THAT day, not on UTC midnight
+  // (the previous day west of UTC). A configured datetime field still parses as an instant.
+  const date = parseDueDate(dateStr);
+  if (!date) return null;
 
   // Find alias-keyed event-type attrs without hard-coding the link-entity alias.
   let typeName: string | undefined;

@@ -235,7 +235,7 @@ public sealed class InsightsNodesIntegrationTests
         var executors = new INodeExecutor[]
         {
             new LiveFactNode(liveFactScopeFactory.Object, subjectParser, NullLogger<LiveFactNode>.Instance),
-            new IndexRetrieveNode(searchIndexClient.Object, openAiMock.Object, NullLogger<IndexRetrieveNode>.Instance),
+            new IndexRetrieveNode(searchIndexClient.Object, openAiMock.Object, Mock.Of<IServiceScopeFactory>(), NullLogger<IndexRetrieveNode>.Instance),
             new EvidenceSufficiencyNode(NullLogger<EvidenceSufficiencyNode>.Instance),
             new DeclineToFindNode(NullLogger<DeclineToFindNode>.Instance),
             new ReturnInsightArtifactNode(NullLogger<ReturnInsightArtifactNode>.Instance)

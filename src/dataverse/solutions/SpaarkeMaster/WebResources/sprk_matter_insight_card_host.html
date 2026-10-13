@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Matter Health Insight</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: transparent;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    }
+    #spaarke-matter-insight-card-host {
+      width: 100%;
+      min-height: 200px;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+    .placeholder {
+      padding: 12px;
+      border: 1px dashed #c8c6c4;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #605e5c;
+    }
+    .placeholder-title {
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #323130;
+    }
+    .placeholder-row {
+      line-height: 1.4;
+    }
+    .placeholder-note {
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid #edebe9;
+      font-style: italic;
+      color: #797775;
+    }
+  </style>
+</head>
+<body>
+  <!--
+    Matter Health Insight host — iframe-scope mount target for InsightSummaryCard.
+
+    Web resource name: sprk_/html/matter_insight_card_host.html
+    Form section:      tab_report card_section_3 (cell holds this as WebResource control)
+
+    Task 043 deploy strategy (Phase 4):
+      The Power Apps "WebResource" form control renders this HTML inside an iframe.
+      DOM nodes in this document live in the iframe scope; parent-form scripts can NOT
+      reach #spaarke-matter-insight-card-host via window.parent.document.getElementById.
+
+      To keep the mount + render contract simple, ALL mount logic runs INSIDE this
+      iframe (Option a from FormXml patch §4 cross-frame note). The parent form's
+      `insightCardMount.js` library remains registered as an OnLoad handler for
+      telemetry + future fan-out but the actual React mount happens here once the
+      `@spaarke/ai-widgets` IIFE bundle ships (P1 follow-up — Task 044 / r2).
+
+      For Phase 4 staging (this deploy), we render a self-contained placeholder
+      that proves the wire contract is correct — Subject + Topic + Mode + Envelope
+      state — so the demo path works end-to-end without the React bundle.
+
+    When the @spaarke/ai-widgets IIFE bundle ships:
+      1. Add <script src="../scripts/spaarke_ai_widgets_bundle.js"></script> below.
+      2. Replace renderPlaceholder() with a call to
+         window.SpaarkeAiWidgets.mountInsightSummaryCard(host, props).
+      3. Source the subject/envelope from window.parent.Xrm via postMessage or
+         direct frame.parent access (same-origin).
+  -->
+  <div id="spaarke-matter-insight-card-host">
+    <div class="placeholder" data-testid="insight-card-placeholder-iframe">
+      <div class="placeholder-title">Matter Health insight (Phase 4 staging)</div>
+      <div class="placeholder-row" id="row-status">Resolving Matter context...</div>
+      <div class="placeholder-row" id="row-subject"></div>
+      <div class="placeholder-row" id="row-topic">Topic: matter-health</div>
+      <div class="placeholder-row" id="row-mode">Mode: single</div>
+      <div class="placeholder-row" id="row-envelope">Envelope: (reading from parent form)</div>
+      <div class="placeholder-note">
+        @spaarke/ai-widgets IIFE bundle not yet deployed (Task 044 / r2 P1 follow-up).
+        Mount glue + FormXml patch verified wired.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * Iframe-scope bootstrap. Resolves the Matter Guid via the parent form's
+     * Xrm context, parses the stored envelope, and renders contract-verification
+     * facts into the placeholder. No React, no bundle, no cross-frame mount —
+     * pure DOM for staging only.
+     *
+     * Production path (Task 044 / r2): replace this script's body with a call
+     * to `window.SpaarkeAiWidgets.mountInsightSummaryCard(host, props)` once
+     * the bundle is loaded above.
+     */
+    (function () {
+      "use strict";
+      try {
+        var parentWindow = window.parent;
+        if (!parentWindow || parentWindow === window) {
+          var statusEl = document.getElementById("row-status");
+          if (statusEl) { statusEl.textContent = "Status: not embedded — opening matter form directly hides this surface."; }
+          return;
+        }
+        // Resolve Matter Guid via Xrm in parent scope (same-origin).
+        var Xrm = parentWindow.Xrm;
+        var formCtx = null;
+        try {
+          if (Xrm && Xrm.Page && typeof Xrm.Page.data === "object") {
+            formCtx = Xrm.Page;
+          }
+        } catch (xrmErr) {
+          // Xrm.Page deprecated; fall through to alternate resolution below.
+        }
+        var matterGuid = null;
+        try {
+          if (formCtx && formCtx.data && formCtx.data.entity && typeof formCtx.data.entity.getId === "function") {
+            matterGuid = formCtx.data.entity.getId();
+          }
+        } catch (idErr) { /* swallow */ }
+        if (!matterGuid) {
+          var statusEl2 = document.getElementById("row-status");
+          if (statusEl2) { statusEl2.textContent = "Status: Matter Guid unavailable (form may not be saved)."; }
+          return;
+        }
+        // Strip braces if present.
+        if (matterGuid.charAt(0) === "{" && matterGuid.charAt(matterGuid.length - 1) === "}") {
+          matterGuid = matterGuid.substring(1, matterGuid.length - 1);
+        }
+        var subject = "matter:" + matterGuid;
+        var statusEl3 = document.getElementById("row-status");
+        var subjectEl = document.getElementById("row-subject");
+        if (statusEl3) { statusEl3.textContent = "Status: contract wired — Matter context resolved."; }
+        if (subjectEl) { subjectEl.textContent = "Subject: " + subject; }
+
+        // Read envelope from parent's Xrm.WebApi (read-only).
+        var WebApi = parentWindow.Xrm && parentWindow.Xrm.WebApi;
+        if (WebApi && typeof WebApi.retrieveRecord === "function") {
+          WebApi.retrieveRecord("sprk_matter", matterGuid, "?$select=sprk_performancesummary").then(
+            function (rec) {
+              var raw = rec && rec.sprk_performancesummary;
+              var envelopeEl = document.getElementById("row-envelope");
+              if (!envelopeEl) { return; }
+              if (!raw) {
+                envelopeEl.textContent = "Envelope: absent (no stored insight yet)";
+                return;
+              }
+              var parsed = null;
+              try { parsed = JSON.parse(raw); } catch (parseErr) { /* legacy R5 placeholder */ }
+              if (!parsed || typeof parsed !== "object") {
+                envelopeEl.textContent = "Envelope: unparseable (legacy text — will overwrite on first invocation)";
+                return;
+              }
+              var stamp = parsed.generatedAt || "(no generatedAt)";
+              envelopeEl.textContent = "Envelope: present, generatedAt=" + stamp;
+            },
+            function (err) {
+              var envelopeEl2 = document.getElementById("row-envelope");
+              if (envelopeEl2) {
+                envelopeEl2.textContent = "Envelope: read failed (" + (err && err.message ? err.message : "unknown") + ")";
+              }
+            }
+          );
+        }
+      } catch (bootErr) {
+        // Defensive — form load MUST NOT break.
+        var statusElX = document.getElementById("row-status");
+        if (statusElX) { statusElX.textContent = "Status: bootstrap failed — " + (bootErr && bootErr.message ? bootErr.message : String(bootErr)); }
+      }
+    })();
+  </script>
+</body>
+</html>

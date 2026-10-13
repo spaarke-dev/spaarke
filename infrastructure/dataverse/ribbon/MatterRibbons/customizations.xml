@@ -157,6 +157,7 @@
             </EnableRules>
             <DisplayRules>
               <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
+              <DisplayRule Id="sprk.CreatePrivilege.sprk_project.DisplayRule" />
             </DisplayRules>
             <Actions>
               <JavaScriptFunction Library="$webresource:sprk_wizard_commands.js"
@@ -173,6 +174,7 @@
             </EnableRules>
             <DisplayRules>
               <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
+              <DisplayRule Id="sprk.CreatePrivilege.sprk_event.DisplayRule" />
             </DisplayRules>
             <Actions>
               <JavaScriptFunction Library="$webresource:sprk_wizard_commands.js"
@@ -189,6 +191,7 @@
             </EnableRules>
             <DisplayRules>
               <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
+              <DisplayRule Id="sprk.CreatePrivilege.sprk_todo.DisplayRule" />
             </DisplayRules>
             <Actions>
               <JavaScriptFunction Library="$webresource:sprk_wizard_commands.js"
@@ -205,6 +208,7 @@
             </EnableRules>
             <DisplayRules>
               <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
+              <DisplayRule Id="sprk.CreatePrivilege.sprk_document.DisplayRule" />
             </DisplayRules>
             <Actions>
               <JavaScriptFunction Library="$webresource:sprk_wizard_commands.js"
@@ -253,6 +257,7 @@
             </EnableRules>
             <DisplayRules>
               <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
+              <DisplayRule Id="sprk.CreatePrivilege.sprk_analysis.DisplayRule" />
             </DisplayRules>
             <Actions>
               <JavaScriptFunction Library="$webresource:sprk_wizard_commands.js"
@@ -269,6 +274,21 @@
             <!-- Only show wizard buttons on existing (saved) records -->
             <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule">
               <FormStateRule State="Existing" />
+            </DisplayRule>
+            <DisplayRule Id="sprk.CreatePrivilege.sprk_project.DisplayRule">
+              <EntityPrivilegeRule EntityName="sprk_project" PrivilegeType="Create" PrivilegeDepth="Basic" />
+            </DisplayRule>
+            <DisplayRule Id="sprk.CreatePrivilege.sprk_event.DisplayRule">
+              <EntityPrivilegeRule EntityName="sprk_event" PrivilegeType="Create" PrivilegeDepth="Basic" />
+            </DisplayRule>
+            <DisplayRule Id="sprk.CreatePrivilege.sprk_todo.DisplayRule">
+              <EntityPrivilegeRule EntityName="sprk_todo" PrivilegeType="Create" PrivilegeDepth="Basic" />
+            </DisplayRule>
+            <DisplayRule Id="sprk.CreatePrivilege.sprk_document.DisplayRule">
+              <EntityPrivilegeRule EntityName="sprk_document" PrivilegeType="Create" PrivilegeDepth="Basic" />
+            </DisplayRule>
+            <DisplayRule Id="sprk.CreatePrivilege.sprk_analysis.DisplayRule">
+              <EntityPrivilegeRule EntityName="sprk_analysis" PrivilegeType="Create" PrivilegeDepth="Basic" />
             </DisplayRule>
           </DisplayRules>
           <EnableRules>

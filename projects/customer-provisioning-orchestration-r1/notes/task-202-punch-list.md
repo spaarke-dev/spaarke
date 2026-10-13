@@ -237,8 +237,8 @@ Sorted by `blocks-e2e DESC`, then `effort ASC` within each group.
 
 | # | Row | Grep evidence | Verified status |
 |---|---|---|---|
-| B01 | asymmetric-registration ArchTest | No `AsymmetricRegistrationTests` / `UnconditionalConsumerMustHaveUnconditionalDependency` in `tests/` | **OPEN — task 204 scope** |
-| B02 | IOptions inventory-drift ArchTest | No matches for `IOptions inventory drift` in `tests/` | **OPEN — task 204 scope** |
+| B01 | asymmetric-registration ArchTest | No `AsymmetricRegistrationTests` / `UnconditionalConsumerMustHaveUnconditionalDependency` in `tests/` | **✅ applied 2026-10-09 task 204e** — `tests/Spaarke.ArchTests/Adr032/` (static scan + runtime ValidateOnBuild oracle); surfaced 16 confirmed defects, filed 204e-F1..F4 (see "204e EXECUTION RESULTS") |
+| B02 | IOptions inventory-drift ArchTest | No matches for `IOptions inventory drift` in `tests/` | **✅ applied 2026-10-09 task 204e** — `tests/Spaarke.ArchTests/IOptionsDriftTests.cs` (per-PR, not nightly: the full ArchTests suite already blocks every PR); surfaced 4 option types with no stamp deployment channel, filed 204e-F5..F8 |
 | B03 | dispatcher-does-not-exist | `Worker/Dispatch/ProvisioningHandlerDispatcher.cs` + `HandlerRegistrationCompletenessTests` + `ProvisioningDispatchSpineSeamTests` + `DispatchIdempotencyService` + `DispatchModule` + `StateReconcilerService` + `HandlerOutcomeApplier` | **✅ APPLIED (Wave G — dispatcher live)** |
 | B04 | multi-tenant DV routing gap | `DataverseServiceClientImpl.cs:37-39` STILL reads single `Dataverse:ServiceUrl` from config | **✅ applied — Path A — see spec.md §ADR Tensions row (ADR-027 + ADR-028) + design.md §17 Placement Justification B04 bullet; owner Q1 SESSION 11 2026-08-26 BINDING (Model 1 uses ONE shared DV env per shared BFF app-reg per env; single-URL shape correct-by-design); NO code change** (task 204b) |
 | B05 | h4 literal placeholder values | `AzCliKvSecretsWriter` retired (grep confirms zero `interim-placeholder` occurrences); `KvSecretValueResolverTests.cs` for real resolver | **✅ APPLIED (Wave G-6)** |
@@ -251,7 +251,7 @@ Sorted by `blocks-e2e DESC`, then `effort ASC` within each group.
 | B12 | H9 Deploy-BffApi scope refactor | `H9BffDeployHandler.cs` file header explicitly: "RE-SCOPED (task 132): consumes the CI-published artifact... ZERO dotnet-publish build step, ZERO repo checkout, ZERO dotnet SDK dependency at provision time — DeployBffApiScriptRunner and DotnetR3GateVerifier's shell-outs are RETIRED" | **✅ APPLIED (task 132)** |
 | B13 | RecordMatchServiceTests compile | Test file compiles cleanly; uses `new ConfigurationBuilder().Build()` for `IConfiguration` ctor (task 065 signature) | **✅ APPLIED** |
 | B14 | ManagedIdentityCredentialFactory TenantId gap | File exists at `Infrastructure/Auth/ManagedIdentityCredentialFactory.cs`; TenantId-scope-gap behavior requires executor-time inspection | **NEEDS ROW-LEVEL VERIFY (task 204)** |
-| B15 | Tier-1-IOptions deploy checklist | Not found in `.claude/constraints/bff-extensions.md` | **OPEN — task 204 scope** |
+| B15 | Tier-1-IOptions deploy checklist | Not found in `.claude/constraints/bff-extensions.md` | **🟡 text authored 2026-10-09 task 204e — main session applies** (sub-agents cannot write `.claude/`). Section is **F.5**, not F.4 (F.4 is now "Deploy Coordination Across Parallel Projects"). Text is in the 204e report; the optional `scripts/ci/check-ioptions-drift.ps1` was NOT built (the test already runs in the blocking `arch-tests` job) |
 | B16 | H2b reject retired lineage | `H2bAiSearchIndexHandler` + `CanonicalIndexCatalog` exist; retired-lineage reject logic requires executor-time inspection | **NEEDS ROW-LEVEL VERIFY (task 204)** |
 | B17 | appsettings.tokens.md drift | `PLAYBOOK_EMBEDDINGS_INDEX_NAME` still referenced in `src/server/api/Sprk.Bff.Api/appsettings.tokens.md` | **OPEN — task 204 scope** |
 | B18 | EnvVarValuesOptions ClientSecret → KeyVaultSecretRef refactor | Not verified this pass | **NEEDS ROW-LEVEL VERIFY (task 204)** |
@@ -416,6 +416,42 @@ Sub-phase by dependency + E2E-blocking status:
 **Build/test/publish-size**: `dotnet build` 0/0 (Tests project + BFF API). `dotnet test` on `Sprk.Provisioning.ControlPlane.Tests`: 1668 passed / 0 failed / 1 skipped (pre-existing, unrelated). BFF publish-size (compressed zip): 45.07 MB incl. PDBs vs 44.96 MB baseline (2026-08-13) — delta **+0.11 MB**, well under the +5 MB justification threshold and the 60 MB HARD STOP (A39 touches zero BFF-referenced code; the L2 provisioning assembly is not part of the BFF build).
 
 **Not committed** — main session bundles 205c/d/e (+f) per the executor obligation.
+
+---
+
+## 204e EXECUTION RESULTS — 2026-10-09 (B01 + B02 + B15 regression-prevention)
+
+**Task**: 204e | **Rigor**: FULL (test-modifying) | **Branch**: worktree-agent-a4b727fa9efdc4894 | **No BFF production code changed.**
+
+| Row | Status | What |
+|---|---|---|
+| **B01** | `applied` | `tests/Spaarke.ArchTests/Adr032/` — `AsymmetricRegistrationTests` (static scan of every `Add*` registration through the `Program.cs` call graph, `if`/`else` paths, early-return gates; dependency check via reflection or `GetRequiredService<T>`), `GateCombinationConstructibilityTests` (the real BFF booted per feature-gate combination with `ValidateOnBuild`; the "F.1-runtime" fixture that `bff-extensions.md` §F.1 listed as queued), `DiRegistrationScan` (the model). Negative + positive controls for both; mutation-verified by reverting the `e3a15db91` hoist. |
+| **B02** | `applied` | `tests/Spaarke.ArchTests/IOptionsDriftTests.cs` — inventories every BFF `AddOptions<T>()…ValidateOnStart()` chain (paren-aware), derives the keys each type demands (DataAnnotations on a default instance + a reasoned census for custom validators) and requires a stamp channel (manifest `app_settings`/`per_env_settings`, or `customer.bicep`) to write each. Per-PR rather than nightly: `ci-tier1-blocking.yml` already runs the full ArchTests suite on every PR. **No workflow edited.** |
+| **B15** | `text authored` | `.claude/` is main-session-only. Section number is **F.5** (F.4 is taken). Also proposed: replace the stale "Implementation queued … Until that fixture ships" paragraph in §F.1-runtime, and the "Nightly IOptions-inventory-drift ArchTest (planned task 203-followup)" line in `.claude/constraints/provisioning.md`. |
+
+### NEW rows filed by this task (confirmed defects the tests surfaced; each is ledgered in the test that found it, as a ratchet, so CI stays green and the row cannot be forgotten)
+
+| Row | Defect | Evidence |
+|---|---|---|
+| **204e-F1** | Finance job handlers registered outside the gate of what they inject: `InvoiceExtractionJobHandler` (unconditional) needs `IInvoiceAnalysisService`/`TextExtractorService` (DocIntel-only); `AttachmentClassificationJobHandler` gated on `RecordMatchingEnabled` alone; `InvoiceIndexingJobHandler`/`InvoiceSearchService` need `SearchIndexClient` (analysis && docIntel && AiSearchEndpoint). `IJobHandler` enumeration then throws on the first job. | runtime oracle rows DEF-FIN; static ledger |
+| **204e-F2** | `AppOnlyDocumentAnalysisJobHandler`, `EmailAnalysisJobHandler` (unconditional), `ProfileSummaryJobHandler` (DocIntel only) need `IAppOnlyAnalysisService` (analysis && docIntel); `EmbeddingMigrationService` — a hosted service, so a `Host.StartAsync` crash — needs `IKnowledgeDeploymentService`/`IOpenAiClient`. **The BFF cannot start with `DocumentIntelligence:Enabled=false`** (the greenfield stamp default) — the next gate after `e3a15db91`. | DEF-JOBS |
+| **204e-F3** | `FilesIndexIngestDocumentSource`, `ObservationIndexUpserter`, `ObservationEmitterNodeExecutor`, `PrecedentProjectionSync` (all `SearchIndexClient`), `SessionSummarizationService` (`IChatClient`) registered unconditionally, no Null peer. | DEF-INS |
+| **204e-F4** | With DocIntel and Analysis on but `DocumentIntelligence:AiSearchEndpoint` empty, `SearchIndexClient`/`IKnowledgeDeploymentService`/`IEmbeddingCache` are not registered while ~35 services on the wider gate inject them (`AddRagServices` gives only 3 services a Null peer). | DEF-RAG |
+| **204e-F5** | `Onboarding:HmacSigningKey` is required outside Development/Testing (Tier-1 fail-fast) and no manifest entry, Bicep setting or script writes it. | `IOptionsDriftTests.Census` |
+| **204e-F6** | `PublicConfig:BffUrl` / `MsalClientId` / `TenantId` required in Production/Staging/Demo/QA (task 087 FR-36 validator); nothing writes them for a stamp (values exist elsewhere: `AzureAd__ClientId`, `AzureAd__TenantId`, the site hostname). | same |
+| **204e-F7** | `Graph:Scopes` (`[Required]` + `MinLength`, empty default) — only `Configure-ProductionAppSettings.ps1` writes `Graph__Scopes__0`; no stamp channel. | same |
+| **204e-F8** | `ServiceBus:QueueName` (`[Required]`, empty default) — `customer.bicep` creates the queues but never tells the BFF which; only the L2 control-plane apps set `ServiceBus__QueueName`. | same |
+
+**F5-F8 status — closed by task 258 (2026-10-09).** F6/F7/F8 are supplied by manifest `per_env_settings` (H4b, both slots):
+`PublicConfig__BffUrl` (new source `from-h2a-output:bff_url` — `StampBffUrl`, the URL H9 records), `PublicConfig__MsalClientId`
+(`from-h3-output:bff_app_client_id`), `PublicConfig__TenantId` (`from-intake-parameter:tenant_id`), literals `Graph__Scopes__0`
+and `ServiceBus__QueueName=sdap-jobs`. F5: the H0.5 consent callback is Model 2 only and cannot run on a customer stamp, so the
+BFF now registers and maps it only with `Onboarding:Enabled=true` (default false, set by no stamp channel); the census row is
+`Exempt` with that gate, and `IOptionsDriftTests` now fails if a stamp channel ever writes an Exempt row's gate.
+
+**F5-F8 caveat**: channels are the manifest and `customer.bicep`. `appsettings.template.json` is not one (the BFF csproj sets `CopyToPublishDirectory="Never"`). Confirm on a fresh stamp before treating F5-F8 as live failures; if some other path writes them, add it to the channel parser rather than the ledger.
+
+**Pre-existing, not touched**: `dotnet build Spaarke.sln` reports 4 `CA2024` warnings in `tests/integration/Spe.Integration.Tests/AnalysisEndpointsIntegrationTests.cs` (0 errors).
 
 ---
 

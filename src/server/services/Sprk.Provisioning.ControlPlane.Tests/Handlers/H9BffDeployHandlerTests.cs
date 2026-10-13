@@ -44,9 +44,7 @@
 //   AC-2e  buildId ABSENT (now optional, task 132 DS-4 §5 item 1) → resolves
 //          from manifest.BuildId; deploy proceeds + idempotency key uses the
 //          RESOLVED buildId, not a run parameter.
-//   AC-3   Spaarkedev1 hardcode detected in Deploy-Release.ps1 → QuarantineRequired
-//          + Spaarkedev1HardcodeDetected (POML criterion 5 Gap 2 assertion);
-//          manifest verifier + downstream collaborators NEVER called.
+//   AC-3   (retired 2026-10-09 with the Deploy-Release.ps1 scan — H9 never runs that script.)
 //   AC-4   Manifest Rejected (missing/red gate, buildId mismatch) → Resumable
 //          + ArtifactManifestRejected; downloader/kudu/swapper NEVER called.
 //   AC-5   Manifest verifier throws → Resumable + ManifestVerifierInfraFault.
@@ -291,42 +289,6 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         downloader.CallCount.Should().Be(1);
         kudu.CallCount.Should().Be(1);
         swapper.CallCount.Should().Be(1);
-    }
-
-    // ---------- AC-3 Gap 2 spaarkedev1 hardcode detected ----------
-
-    [Fact]
-    public async Task AC3_Spaarkedev1HardcodeInDeployReleaseScript_FailsQuarantine_NoDeploy()
-    {
-        var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-3");
-        var seams = FreshGreenSeams();
-
-        // Write a fixture Deploy-Release.ps1 containing the regressed literal.
-        var scriptPath = Path.Combine(Path.GetTempPath(), $"h9-test-deploy-release-{Guid.NewGuid():N}.ps1");
-        File.WriteAllText(scriptPath, "# a regressed deploy script\n$env = 'spaarkedev1'\n");
-
-        try
-        {
-            var handler = BuildHandler(repo, seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer,
-                configureOptions: o => o.DeployReleaseScriptPath = scriptPath);
-
-            var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-            var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-            failure.Class.Should().Be(FailureClass.QuarantineRequired);
-            failure.RejectionCode.Should().Be(BffDeployRejectionCodes.Spaarkedev1HardcodeDetected);
-            failure.Diagnostic.Should().Contain("spaarkedev1");
-            repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
-
-            seams.Verifier.CallCount.Should().Be(0, "spaarkedev1 pre-flight blocks the manifest verifier + everything downstream");
-            seams.Downloader.CallCount.Should().Be(0);
-            seams.Swapper.CallCount.Should().Be(0);
-        }
-        finally
-        {
-            if (File.Exists(scriptPath)) { try { File.Delete(scriptPath); } catch { } }
-        }
     }
 
     // ---------- AC-4 manifest rejected ----------
@@ -886,9 +848,6 @@ public sealed class H9BffDeployHandlerTests : IDisposable
     {
         var options = new BffDeployOptions
         {
-            // Point every filesystem-touching option at a path that intentionally
-            // does not exist so no test accidentally reads the real repo tree.
-            DeployReleaseScriptPath = Path.Combine(Path.GetTempPath(), "h9-test-nonexistent-deploy-release.ps1"),
             BaselinePublishSizeBytes = 44_960_000L,
             PublishSizeDeltaThresholdBytes = 5L * 1024L * 1024L,
             AbsolutePublishSizeCeilingBytes = 60L * 1024L * 1024L,

@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Models.Ai;
 /// </summary>
 /// <remarks>
 /// This model maps to the "spaarke-files-index" in Azure AI Search.
-/// Supports 3 deployment models: Shared (filtered by tenantId), Dedicated (per-customer index), CustomerOwned.
+/// Supports 2 deployment models: Shared (filtered by tenantId) and Dedicated (per-customer index).
 /// Vector dimensions: 1536 (text-embedding-3-small) and 3072 (text-embedding-3-large) during migration.
 /// </remarks>
 public class KnowledgeDocument
@@ -60,7 +60,7 @@ public class KnowledgeDocument
     public string? DeploymentId { get; set; }
 
     /// <summary>
-    /// Deployment model type: Shared, Dedicated, or CustomerOwned. Default "Shared" preserves
+    /// Deployment model type: Shared or Dedicated. Default "Shared" preserves
     /// existing customer-corpus behavior; session-files writers null this out explicitly to
     /// suppress serialization per the same pattern as <see cref="SessionId"/>.
     /// </summary>
@@ -274,9 +274,4 @@ public static class KnowledgeDeploymentModel
     /// Dedicated index per customer. For high-volume or isolation requirements.
     /// </summary>
     public const string Dedicated = "Dedicated";
-
-    /// <summary>
-    /// Customer's own Azure subscription. Cross-tenant auth required.
-    /// </summary>
-    public const string CustomerOwned = "CustomerOwned";
 }

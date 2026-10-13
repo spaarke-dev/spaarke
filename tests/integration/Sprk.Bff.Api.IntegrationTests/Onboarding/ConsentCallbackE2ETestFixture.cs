@@ -85,6 +85,7 @@ public sealed class ConsentCallbackE2ETestFixture : WebApplicationFactory<Progra
             var settings = new Dictionary<string, string?>
             {
                 // -------- Onboarding (task 042) --------
+                ["Onboarding:Enabled"] = "true",   // task 258: the module and route are off unless enabled
                 ["Onboarding:HmacSigningKey"] = ConsentCallbackE2EConstants.HmacSigningKey,
                 ["Onboarding:QueueName"] = "sprk-provisioning-jobs",
                 ["Onboarding:SignatureHeaderName"] = ConsentCallbackE2EConstants.SignatureHeaderName,

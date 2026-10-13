@@ -9,13 +9,21 @@
  * callbacks and IWizardStepConfig arrays.
  */
 import type * as React from 'react';
+import type { SprkModalDismiss, SprkModalNav } from '../SprkModal/SprkModal.types';
+import type { SprkModalSize } from '../SprkModal/sizes';
 
 // ---------------------------------------------------------------------------
 // Step status
 // ---------------------------------------------------------------------------
 
-/** Visual status of a wizard step in the sidebar stepper. */
-export type WizardStepStatus = 'pending' | 'active' | 'completed';
+/**
+ * Visual status of a wizard step in the sidebar stepper.
+ *
+ * `'skipped'` (ontology task 056; opt-in via `showSkippedSteps`, D-69): the user left the step with
+ * **Skip** — the stepper shows it without a tick. Without the opt-in, Skip marks the step `'completed'`. A skipped step keeps that status while the user moves elsewhere; it becomes `'completed'` only if
+ * the user returns to it and leaves with Next.
+ */
+export type WizardStepStatus = 'pending' | 'active' | 'completed' | 'skipped';
 
 // ---------------------------------------------------------------------------
 // Step descriptor (runtime state)
@@ -48,8 +56,15 @@ export interface IWizardShellStep {
  */
 export type WizardShellAction =
   | { type: 'NEXT_STEP' }
+  /** Advance like NEXT_STEP, but mark the step being left `'skipped'` (no tick). */
+  | { type: 'SKIP_STEP' }
   | { type: 'PREV_STEP' }
-  | { type: 'GO_TO_STEP'; stepIndex: number }
+  | {
+      type: 'GO_TO_STEP';
+      stepIndex: number;
+      /** When `true`, forget every `'skipped'` mark (used when the wizard is re-opened). */
+      clearSkipped?: boolean;
+    }
   | {
       type: 'ADD_DYNAMIC_STEP';
       /**
@@ -211,6 +226,43 @@ export interface IWizardSuccessConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Footer override (ontology task 056)
+// ---------------------------------------------------------------------------
+
+/**
+ * What a {@link IWizardShellProps.footer} override can read and do. The navigation callbacks are the
+ * shell's own (Back = the standard Back; Next = advance without the `canAdvance` check; Close = `onClose`),
+ * so an override can rebuild "Close · Back · Next open item" without reaching into the reducer.
+ */
+export interface IWizardFooterContext {
+  /** `id` of the step being shown (undefined only when there are no steps). */
+  currentStepId: string | undefined;
+  isFirstStep: boolean;
+  isLastStep: boolean;
+  /** `true` while `onFinish` is pending. */
+  isFinishing: boolean;
+  /** The current step's `canAdvance()` result. */
+  canAdvance: boolean;
+  /** Go to the previous step (no-op on the first step). */
+  goBack(): void;
+  /** Go to the next step (no-op on the last step). */
+  goNext(): void;
+  /** Call `onClose`. */
+  close(): void;
+}
+
+/**
+ * Footer slots returned by a {@link IWizardShellProps.footer} override. A slot you supply replaces that
+ * side of the standard footer; a slot you leave `undefined` keeps the standard content for that side.
+ */
+export interface IWizardFooterSlots {
+  /** Left side — replaces Cancel + `footerLeftExtra`. */
+  start?: React.ReactNode;
+  /** Right side — replaces the spinner, per-step actions and Skip · Back · Next/Finish. */
+  end?: React.ReactNode;
+}
+
+// ---------------------------------------------------------------------------
 // Shell props
 // ---------------------------------------------------------------------------
 
@@ -224,26 +276,77 @@ export interface IWizardShellProps {
   /** Whether the wizard dialog is currently open (visible). */
   open: boolean;
   /**
-   * When `true`, the shell renders as a full-page layout without the Fluent
-   * `<Dialog>` overlay wrapper. Use this when the wizard is already hosted
-   * inside a Dataverse dialog (e.g., a Code Page opened via `navigateTo`).
-   * Defaults to `false`.
+   * When `true`, the shell renders as a full-page layout with no modal envelope. Use it for workspace
+   * tabs, full pages, and pages hosted under platform chrome (a Code Page opened via `navigateTo` —
+   * pair with `hideTitle`). When `false` (default) the wizard renders inside `SprkModal` (ADR-050 as
+   * amended 2026-10-07: `WizardShell` is the wizard preset). Defaults to `false`.
    */
   embedded?: boolean;
-  /** Title displayed in the wizard's custom title bar. */
+  /** Title: the `SprkModal` header title (modal), or the custom title bar (embedded). */
   title: string;
   /**
    * When `true`, hides the wizard's custom title bar. Use this when the wizard
    * is hosted inside a Dataverse dialog that already provides its own chrome
    * (title bar + close button via `navigateTo` target: 2).
+   * **Embedded mode only** — the modal header is `SprkModal`'s and always shows.
    * Defaults to `false`.
    */
   hideTitle?: boolean;
   /**
-   * Accessible label for the dialog surface. Falls back to {@link title}
-   * if not provided.
+   * Accessible label for the embedded root. Falls back to {@link title} if not provided.
+   * **Embedded mode only** — in modal mode the dialog is named by its header title
+   * (`SprkModal`'s `aria-labelledby`).
    */
   ariaLabel?: string;
+  /**
+   * Named modal size (modal mode only). Default `'wizard'` (62vw × min(74vh, 760px)).
+   * @since ontology task 056
+   */
+  size?: SprkModalSize;
+  /**
+   * Dismiss semantics (modal mode only). Default `'explicit'`: Escape and the backdrop do NOT close
+   * the wizard; × and Cancel do (ADR-050 as amended 2026-10-07).
+   * @since ontology task 056
+   */
+  dismiss?: SprkModalDismiss;
+  /**
+   * The `--sprk-ui-scale` factor (modal mode only), forwarded to `SprkModal`. Pass the same value the
+   * host passes to `scaleTheme`. Default 1.
+   * @since ontology task 056
+   */
+  uiScale?: number;
+  /**
+   * Browse navigation ("‹ N of M ›") in the modal header, rendered by `SprkModal`'s own nav group
+   * (modal mode only). Put a discard check in `nav.onBeforeNavigate`.
+   * @since ontology task 056
+   */
+  nav?: SprkModalNav;
+  /**
+   * Content rendered at the top of the content area, above the step content (and the success screen),
+   * on every step — e.g. the status bar of an already-decided item. Both modes.
+   * @since ontology task 056
+   */
+  statusBar?: React.ReactNode;
+  /**
+   * Footer override. Called on every render while a step is shown (not on the success screen); return
+   * slots to replace either side of the standard footer, or `null` / `undefined` to keep the standard
+   * footer. Both modes.
+   * @since ontology task 056
+   */
+  footer?: (context: IWizardFooterContext) => IWizardFooterSlots | null | undefined;
+  /**
+   * When `true`, the wizard stays open when `onFinish` resolves with nothing (the default closes it by
+   * calling `onClose`). A returned success config still shows the success screen.
+   * @since ontology task 056
+   */
+  stayOpenOnFinish?: boolean;
+  /**
+   * Opt-in (D-69). When `true`, a step left with **Skip** is marked `'skipped'` and the stepper shows an
+   * empty dashed ring instead of a tick. Default `false`: Skip ticks the step like Next does (the
+   * behaviour every existing wizard relies on). Both modes.
+   * @since ontology task 056
+   */
+  showSkippedSteps?: boolean;
   /**
    * Ordered array of step configurations. The shell builds its initial
    * step list from these configs. Additional steps can be added at runtime
@@ -258,7 +361,8 @@ export interface IWizardShellProps {
    *
    * Return an {@link IWizardSuccessConfig} to display a success screen,
    * or return `void` / `undefined` to close the dialog without a success
-   * screen (the shell will call {@link onClose} automatically).
+   * screen (the shell will call {@link onClose} automatically, unless
+   * {@link stayOpenOnFinish} is set).
    */
   onFinish: () => Promise<IWizardSuccessConfig | void>;
   /**
@@ -276,44 +380,6 @@ export interface IWizardShellProps {
    * Use for additional actions like "Delete" that apply to the whole wizard.
    */
   footerLeftExtra?: React.ReactNode;
-  /**
-   * Optional override for the dialog surface `max-width`. Defaults to the
-   * named `wizard` size from `SprkModal/sizes` (`SIZE_SPEC.wizard.widthVw`
-   * = `'62vw'`) as of task 080 (spec FR-17) — previously the ad-hoc
-   * `'95vw'` literal (v1.1.63).
-   *
-   * Pass an explicit pixel value (e.g. `'1280px'`) to match a sibling
-   * host dialog like the SemanticSearchControl FilePreviewDialog so the
-   * wizard footprint mirrors the preview surface when stacked, or a
-   * named-size value (e.g. FindSimilarDialog's `xl` override) sourced
-   * from `SIZE_SPEC` so it can't drift from the canonical scale.
-   *
-   * Applied as an inline style on `DialogSurface` so Fluent v9's
-   * makeStyles cascade cannot override it (same pattern as
-   * SendEmailDialog `maxWidth` since v1.1.52).
-   *
-   * @since v1.1.63 (SemanticSearchControl UAT polish round — wizard
-   *   sizing to match FilePreviewDialog footprint); default swapped to
-   *   the named `wizard` size at task 080 (spec FR-17, 2026-08-02).
-   */
-  maxWidth?: string;
-  /**
-   * Optional override for the dialog surface `height` (and
-   * `min-height`). Defaults to the named `wizard` size from
-   * `SprkModal/sizes` (`min(74vh, 760px)`, `SIZE_SPEC.wizard`) as of
-   * task 080 (spec FR-17) — previously the ad-hoc `'70vh'` literal
-   * (v1.1.63).
-   *
-   * Pass a viewport-relative value (e.g. `'85vh'`) to give the wizard
-   * a tall presence matching a sibling host dialog. Applied to both
-   * `height` and `minHeight` on the inline `style` of `DialogSurface`
-   * so Fluent v9's content-sizing cannot collapse the surface below
-   * the requested size.
-   *
-   * @since v1.1.63; default swapped to the named `wizard` size at
-   *   task 080 (spec FR-17, 2026-08-02).
-   */
-  height?: string;
   /**
    * Optional step id to open the wizard at. When the id matches one of the
    * step configs, that step becomes 'active' and all earlier steps are marked

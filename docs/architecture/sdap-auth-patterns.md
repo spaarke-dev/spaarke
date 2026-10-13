@@ -106,7 +106,7 @@ Authorization is enforced at the endpoint level via endpoint filters (ADR-008) �
 
 1. **GraphClientFactory.ForApp** returns a cached `Lazy<GraphServiceClient>` singleton
 2. The singleton uses **`DefaultAzureCredential`** (managed identity) when `Graph__ManagedIdentity__Enabled=true` — canonical per ADR-028. `ClientSecretCredential` is the local-dev fallback only.
-3. In Azure environments, the App Service's system-assigned MI must have appropriate Graph application permissions granted (see [`docs/guides/auth-deployment-setup.md`](../guides/auth-deployment-setup.md) §5). For mailbox-scoped operations (`Mail.*`), Exchange `ApplicationAccessPolicy` must scope the MI to allowed mailboxes (§7).
+3. In Azure environments, the BFF's user-assigned managed identity (`Graph:ManagedIdentity:ClientId`) must have appropriate Graph application permissions granted (see [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §7.7). For mailbox-scoped operations (`Mail.*`), Exchange `ApplicationAccessPolicy` must scope the MI to allowed mailboxes (§7).
 4. Scope: `https://graph.microsoft.com/.default` via `AzureIdentityAuthenticationProvider`
 5. Uses beta endpoint (`https://graph.microsoft.com/beta`) for SPE admin operations
 
@@ -246,6 +246,10 @@ Every Spaarke-internal browser surface routes through one library: **`@spaarke/a
 - Always increment the `@spaarke/auth` `package.json` version to make drift detectable
 - Maintain the [consumer rebuild tracker](../../projects/auth-sso-and-email-wizard-2026-05/CONSUMER-REBUILD-STATUS.md) until propagation is complete
 
+**Classic form scripts and ribbon commands** (framework-free JS that cannot `import`) consume the library through the web resource `sprk_/scripts/bff_auth.js` (`Spaarke.BffAuth.getToken` / `.authenticatedFetch`). Since #1655 that file is a build output, not hand-written: `npm run build:webresource` in `src/client/shared/Spaarke.Auth` bundles the library and `@azure/msal-browser` (v3, the PCFs' major) from `src/webresource/bffAuth.ts` into both committed copies (`src/solutions/webresources/sprk_bff_auth.js` and the SpaarkeMaster copy); `npm run check:webresource` fails when they drift. It is one more consumer to rebuild and redeploy when the library changes. It runs silent-only (no popup), on the PCFs' client id (`sprk_MsalClientId`), so form scripts and PCFs share one MSAL cache. `authenticatedFetch` attaches the token only to a URL on the BFF's origin (anything else resolves `null`, unsent), and `Spaarke.BffAuth.normalizeBaseUrl` is the one place a script turns `sprk_BffApiBaseUrl` (which holds `https://host/api`) into a base for `/api/...` routes.
+
+**Signed-in user match (#1656, every `@spaarke/auth` consumer)**: MSAL's `localStorage` cache outlives a Dataverse sign-out, so on a shared workstation another user's account can still be cached. Inside a Dataverse host the library reads `systemusers({userSettings.userId})?$select=azureactivedirectoryobjectid` once per page (session cookie, cached for the tab) and uses only the cached account whose `oid` matches, and accepts only a token with that `oid`; if the id cannot be read it uses no cached account (no-hint `ssoSilent`). Outside a Dataverse host the account choice is unchanged.
+
 **Future work**: Convert `@spaarke/auth` to a runtime-loaded Dataverse web resource (`sprk_spaarke_auth.js`) so a single library deploy updates all consumers. Requires versioned API contract and consumer migration. Not scheduled.
 
 ---
@@ -358,7 +362,7 @@ Authenticated browser calls from `*.crm.dynamics.com` to the BFF (`api://{BFF-Ap
 
 - [Spaarke SSO Binding](../../.claude/patterns/auth/spaarke-sso-binding.md) — **Canonical reference** for MSAL invariants (INV-1..INV-8) + v2 token acquisition model
 - [ADR-028: Spaarke Auth Architecture](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — **Canonical v2 ADR** (function-based contract, MI for outbound, HMAC webhooks, named API keys)
-- [auth-deployment-setup.md](../guides/auth-deployment-setup.md) — Operator runbook for new-environment setup (10 sections incl. §7 Exchange ApplicationAccessPolicy)
+- [SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) — new-environment setup: auth §6.5, §7.3, §7.7; Exchange mailbox access §4.2.1, §7.9 (`auth-deployment-setup.md` is a retired stub)
 - [Token Caching](../../.claude/patterns/auth/token-caching.md) — Client localStorage + server Redis
 - [OBO Flow](../../.claude/patterns/auth/obo-flow.md) — GraphClientFactory code pointers
 - [Dataverse OBO](../../.claude/patterns/auth/dataverse-obo.md) — Dataverse-specific OBO

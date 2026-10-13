@@ -351,7 +351,7 @@ This section enumerates every BFF surface that currently consumes the membership
 
 | Consumer | File | Status | Notes |
 |---|---|---|---|
-| `LookupUserMembershipNodeExecutor` | `Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs:70` | **Shipped — production wired** | Playbook node executor for `ActionType=52` (added task 040). Singleton-with-Scoped DI pattern via `IServiceScopeFactory`. Binds `{ids[], byRole, count, continuationToken, cacheExpiresAt}` to the node's `OutputVariable` for Handlebars consumption (e.g., `{{joinIds myMatters.ids}}`). |
+| `LookupUserMembershipNodeExecutor` | `Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs:70` | **Shipped — production wired** | Playbook node executor for `ActionType=52` (added task 040). Singleton-with-Scoped DI pattern via `IServiceScopeFactory`. Binds `{ids[], byRole, count, continuationToken, cacheExpiresAt}` to the node's `OutputVariable` for Handlebars consumption (e.g., `<condition attribute="…" operator="in">{{fetchInGuids myMatters.ids}}</condition>` in a downstream FetchXML — corrected 2026-10-08, ISS-018 #1452; `joinIds` is not valid there). |
 | `GET /api/users/me/memberships/{entityType}` | `Api/Membership/MembershipEndpoints.cs:102` | **Shipped — production wired** | Single user-facing HTTP endpoint. Auth: `RequireAuthorization()` default JWT (line 93). |
 | `DailyBriefingCollector` (`POST /api/ai/daily-briefing/render` + `/email`, High Priority) | `Services/Ai/Narrators/DailyBriefingCollector.cs` | **People-targeting surface (task 152)** | Resolves events, matters, projects, documents and to-dos with `MembershipResolveOptions.People`; reads every returned row as the caller through `IImpersonatedCommunicationQuery` (chunked at 50 ids); failed reads are named in `failedChannels` / `highPriorityFailedEntityTypes`; all channels failing throws. Holds no app-only Dataverse client. |
 | `BriefingService.GetTopPriorityMatterAsync` (`GET /api/workspace/briefing`) | `Services/Workspace/BriefingService.cs` | **Shipped (Wave 28 / GitHub #229); people-targeting surface since task 152** | Replaces the prior STUB that returned hardcoded mock matter data. Resolves AAD `oid` → `systemuserid` (the `systemuser.azureactivedirectoryobjectid` cross-reference, 10-min Redis cache under `membership:briefing-currentuser:`), then takes the matters FOR the user from `PortfolioService.ReadMattersForSystemUserAsync` (below) — candidates from `MembershipResolveOptions.People`, read to completion (`PeopleTargetedSet`), detail rows + overdue-task counts read as the caller. Deterministic heuristic: max overdue tasks; tie-break = highest utilization; final tie-break = matter name. **Fail closed (task 152):** a failed people resolution, a people set larger than the resolver's 5,000-row ceiling, or a failed caller-context read sets `topPriorityMatterUnavailable` — "could not be determined", distinct from "no matters" (`null` TopMatter). A non-Guid `oid` or an unprovisioned user short-circuits to `null` without I/O. (Task 152 also fixed the original detail query, which named four columns that do not exist on `sprk_matter` and always failed.) Unit tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/BriefingServiceTests.cs`. |
@@ -361,7 +361,16 @@ This section enumerates every BFF surface that currently consumes the membership
 
 ### Migrated playbooks (consume `IMembershipResolverService` indirectly via the `LookupUserMembership` node)
 
-All three notification playbooks were migrated in R3 Waves 9-10 (tasks 050-052) from the broken `sprk_matterteammember` FetchXML pattern (A1 / D5 root cause) to the new `LookupUserMembership` node + `{{joinIds}}` Handlebars helper.
+All three notification playbooks were migrated in R3 Waves 9-10 (tasks 050-052) from the broken `sprk_matterteammember` FetchXML pattern (A1 / D5 root cause) to the new `LookupUserMembership` node + a Handlebars id-list helper in the downstream FetchXML.
+
+> **Corrected 2026-10-08, ISS-018 #1452.** The R3 migration used `operator="in" value="{{joinIds myMatters.ids}}"`.
+> Dataverse ignores the `value` attribute on a FetchXML list operator (values come only from `<value>` children), so
+> every one of these queries had an `in` with zero values and failed ("The value passed for ConditionOperator.In is
+> empty") — for real id lists as well as empty ones; all seven notification playbooks failed in dev. They now use
+> `<condition … operator="in">{{fetchInGuids myMatters.ids}}</condition>`, which writes one `<value>` per distinct GUID
+> and, for an empty / unresolved list or any non-GUID element, the single impossible match
+> `<value>00000000-0000-0000-0000-000000000000</value>` (valid, selects nothing). `FetchXmlShapeValidator` enforces the
+> shape in the `QueryDataverse` executor, deploy lint C and the repo regression test.
 
 | Playbook | File | Migration task | Verified |
 |---|---|---|---|
@@ -375,7 +384,17 @@ All three notification playbooks were migrated in R3 Waves 9-10 (tasks 050-052) 
 Activity Summary, Tasks Due Soon, Tasks Overdue, New Work Assignments) are redeployed through
 `scripts/Deploy-Playbook.ps1` as a recorded manual gate (`projects/unified-access-control-r2/notes/task-152-people-targeting.md`).
 
-Integration coverage: `tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks/MigratedPlaybookTests.cs` + `MigratedPlaybookFixture.cs` (task 053).
+Coverage (corrected 2026-10-08, ISS-018 #1452 — the earlier citation of `MigratedPlaybookTests.cs` + `MigratedPlaybookFixture.cs`
+was wrong: the tests file never existed, and the fixture was an orphan whose Dataverse simulator split the comma list
+itself, so it could not catch the defect):
+
+- `tests/integration/regression/Ai/Issue1452_NotificationPlaybookFetchXmlShapeTests.cs` — renders every repo playbook and
+  runs `FetchXmlShapeValidator` on the authored template and the rendered query.
+- `tests/unit/domain/Ai/FetchXmlShapeValidatorTests.cs` — the shared shape check.
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TemplateEngineTests.cs` — the `fetchInGuids` cases (distinct/sorted ids,
+  empty / unresolved / non-GUID → impossible match).
+- `tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks/NotificationPlaybookFetchXmlLiveTests.cs` — opt-in live test
+  that executes the rendered queries against a real Dataverse environment.
 
 ### Consumers of `IMembershipEventPublisher` (Phase 2 publish path)
 
@@ -620,7 +639,8 @@ All paths relative to `src/server/api/Sprk.Bff.Api/` unless noted. Every line ci
 |---|---|
 | **Confusing `AssociationResolver` (PCF) with Membership resolution (BFF)** | See Naming-Collision Register above. Different surfaces, different concepts, both stable. |
 | **Re-deriving membership in ad-hoc FetchXML** | This is the R2-UAT root cause (A1 / D5). Always go through `IMembershipResolverService`. (Historical: Daily Briefing's `BriefingService.GetTopPriorityMatterAsync` STUB was the last known offender; closed Wave 28 / 2026-06-22 — see Confirmed Consumers table.) |
-| **Joining through `sprk_matterteammember` or other non-existent entity** | The R2-broken `notification-new-documents.json` playbook was migrated in R3 task 050 to use `LookupUserMembership` node + `joinIds` Handlebars helper. Same for `notification-new-emails.json` (task 051) and `notification-new-events.json` (task 052). |
+| **Joining through `sprk_matterteammember` or other non-existent entity** | The R2-broken `notification-new-documents.json` playbook was migrated in R3 task 050 to use `LookupUserMembership` node + a downstream FetchXML id list. Same for `notification-new-emails.json` (task 051) and `notification-new-events.json` (task 052). |
+| **Writing a FetchXML id list as `operator="in" value="{{joinIds …}}"`** | Dataverse ignores `value` on a list operator; the query fails for every list (ISS-018 #1452). Use `<condition … operator="in">{{fetchInGuids path.ids}}</condition>`; an `in` with zero `<value>` children is an error, not "zero rows". (Added 2026-10-08.) |
 | **Assuming Phase 1A FetchXml scales forever** | Monitor AC-1A.5 p95. Phase 2 junction-write path + recon + invalidation already shipped in R3; the read-path swap (resolver queries junction table instead of FetchXml) is the R4 escape hatch when sustained p95 > 500ms. |
 | **Creating new `PlatformAdmin` policy** | Forbidden (Q6). Reuse existing `SystemAdmin` policy at `AuthorizationModule.cs:241`. |
 | **`includeRelated` chains > 1 hop** | Reject with 400 before any Dataverse query (Q3). Pre-validated at `MembershipResolverService.cs:142-159`. |

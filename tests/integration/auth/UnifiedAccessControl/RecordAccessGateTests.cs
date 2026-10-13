@@ -17,9 +17,9 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// <para><b>What these tests are protecting.</b> The Manage Access affordance in the
 /// <c>TrackingFieldTrio</c> PCF gates on this route's answer, and it treats ANYTHING other than
 /// <c>200 + canManageAccess: true</c> as a denial. So the properties that matter are not only "a caller
-/// with Write gets a yes" but the whole shape of the no: a caller without Write, a caller with every right
-/// except Write, a caller whose rights cannot be established, and a request naming no resolvable record
-/// must each fail to produce that exact shape.</para>
+/// with Write and Share gets a yes" but the whole shape of the no: a caller without Write, a caller with every
+/// right except Write, a caller with Write but no Share (task 179), a caller whose rights cannot be established,
+/// and a request naming no resolvable record must each fail to produce that exact shape.</para>
 ///
 /// <para><b>Why every negative has a positive twin.</b> This route's honest answer when nothing works is
 /// 403, and offline everything fails — so a lone 403 assertion would pass equally against a route that
@@ -43,8 +43,17 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
     /// <summary>Dataverse's own wire spelling for a caller who can read but not write.</summary>
     private const string ReadOnly = "ReadAccess";
 
-    /// <summary>A caller who can write — and therefore may delegate (owner decision B-14).</summary>
-    private const string ReadWrite = "ReadAccess,WriteAccess";
+    /// <summary>
+    /// A caller who can write AND share — and therefore may delegate (owner decision B-14, plus the Share privilege since
+    /// owner round 89, task 179).
+    /// </summary>
+    private const string Delegator = "ReadAccess,WriteAccess,ShareAccess";
+
+    /// <summary>
+    /// Task 179: Write on the record, and nothing from Dataverse saying Share — the Spaarke role that edits records but
+    /// does not manage access.
+    /// </summary>
+    private const string WriteWithoutShare = "ReadAccess,WriteAccess";
 
     /// <summary>
     /// Everything EXCEPT Write. Guards against the gate being weakened to "has any rights at all", which
@@ -58,11 +67,11 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
     public RecordAccessGateTests(DelegationRuleTestFixture fixture) => _fixture = fixture;
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // The pair: Write yes / Write no
+    // The pairs: Write and Share yes / Write no / Share no
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The positive. A caller holding Write gets the one shape the client accepts — and the answer names
+    /// The positive. A caller holding Write and Share gets the one shape the client accepts — and the answer names
     /// the record it is about, which is what lets the client discard an answer that arrives after its form
     /// has rebound to a different record.
     /// </summary>
@@ -70,10 +79,10 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
     [InlineData("project")]
     [InlineData("matter")]
     [InlineData("workassignment")]
-    public async Task GetCanManageAccess_ForCallerWithWriteOnTarget_AnswersYesForThatRecord(string recordType)
+    public async Task GetCanManageAccess_ForCallerWithWriteAndShareOnTarget_AnswersYesForThatRecord(string recordType)
     {
         var recordId = Guid.NewGuid();
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
 
         var response = await client.GetAsync($"{GatePath}?recordType={recordType}&recordId={recordId}");
 
@@ -116,6 +125,42 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyWriteRequired);
+    }
+
+    /// <summary>
+    /// Task 179 (owner round 89), the negative twin of the positive above, differing only by <c>ShareAccess</c>: Write on
+    /// the record without the Share privilege no longer opens Manage Access. The route's own answer is the filter's, so
+    /// TrackingFieldTrio, the Access flyout and the ribbon hide the affordance with no client rule of their own. The
+    /// named test the seeding proof turns red when the Share check is removed (task notes).
+    /// </summary>
+    [Theory]
+    [InlineData("project")]
+    [InlineData("matter")]
+    [InlineData("workassignment")]
+    public async Task GetCanManageAccess_ForCallerWithWriteButNoShare_IsDenied(string recordType)
+    {
+        using var client = _fixture.CreateClientWithRights(WriteWithoutShare);
+
+        var response = await client.GetAsync($"{GatePath}?recordType={recordType}&recordId={Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyShareRequired);
+    }
+
+    /// <summary>
+    /// Task 179 acceptance criterion 2: an unevaluable Share answer denies. Dataverse's rights string carries Write and a
+    /// right this BFF cannot read as Share (a misspelt or unknown name, the shape of a garbled or changed answer); the
+    /// mapper reads unknown names as nothing, so Share is not established and the gate refuses rather than guessing.
+    /// </summary>
+    [Fact]
+    public async Task GetCanManageAccess_WhenShareCannotBeReadFromTheAnswer_IsDenied()
+    {
+        using var client = _fixture.CreateClientWithRights("ReadAccess,WriteAccess,ShareAccessUnknown");
+
+        var response = await client.GetAsync($"{GatePath}?recordType=matter&recordId={Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyShareRequired);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -184,7 +229,7 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
     [InlineData("?recordType=notarecordtype&recordId=8C6A5F35-3C55-4A0E-9E0E-7B1D2C3F4A5B")]
     public async Task GetCanManageAccess_WithNoResolvableRecord_IsDeniedByAuthorization(string queryString)
     {
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
 
         var response = await client.GetAsync($"{GatePath}{queryString}");
 
@@ -275,7 +320,7 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
     {
         var recordId = Guid.NewGuid();
         var otherTeam = Guid.NewGuid();
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
         SecureOwnerTeamsAre(SecureOwnerTeam);
         OwnerReadAnswers(recordId, owner switch
         {
@@ -323,7 +368,7 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
     public async Task GetCanManageAccess_WithIncludeOwner_ATeamOwnerReadWithoutItsBusinessUnit_IsNotPlaced()
     {
         var recordId = Guid.NewGuid();
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
         SecureOwnerTeamsAre(SecureOwnerTeam);
         OwnerReadAnswers(recordId, new RecordAccessGateEndpoint.OwnerRow { _owningteam_value = Guid.NewGuid() });
 
@@ -348,7 +393,7 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
     public async Task GetCanManageAccess_WithIncludeOwner_WhenTheOwnerCannotBeTold_SaysUnknown(string shape)
     {
         var recordId = Guid.NewGuid();
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
         switch (shape)
         {
             case "owner-read-fails":
@@ -380,7 +425,7 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
     public async Task GetCanManageAccess_WithoutIncludeOwner_ReadsNoOwner()
     {
         var recordId = Guid.NewGuid();
-        using var client = _fixture.CreateClientWithRights(ReadWrite);
+        using var client = _fixture.CreateClientWithRights(Delegator);
 
         var response = await client.GetAsync($"{GatePath}?recordType=workassignment&recordId={recordId}");
 
@@ -390,6 +435,53 @@ public class RecordAccessGateTests : IClassFixture<DelegationRuleTestFixture>
         _fixture.DataverseClient.Verify(c => c.QueryAsync<RecordAccessGateEndpoint.OwnerRow>(
             It.IsAny<string>(), It.Is<string?>(f => f != null && f.Contains(recordId.ToString())), It.IsAny<string?>(),
             It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Task 175 (owner round 84): a 200 for a work assignment filed under a matter names that DIRECT parent in
+    /// <c>followsParents</c> (the locked state — distinct from "no permission", which is the filter's 403); a parentless one
+    /// answers an empty list; one whose filing cannot be read answers <c>parentUnverifiable</c>; a matter never has parents.
+    /// </summary>
+    [Fact]
+    public async Task GetCanManageAccess_NamesTheParentsAChildFollows_AndSaysWhenThatCannotBeRead()
+    {
+        var (matter, child, parentless, unreadable) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var world = Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard();
+        world.Add("sprk_matter", matter, ("sprk_issecure", false), ("sprk_mattername", "Falcon"));
+        world.Add("sprk_workassignment", child, ("sprk_regardingmatter", new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter)));
+        world.Add("sprk_workassignment", parentless);
+        world.Add("sprk_workassignment", unreadable, ("sprk_regardingmatter", new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter)));
+        world.FailingRowReadsOf("sprk_workassignment", unreadable);
+        _fixture.FilingWorld = world;
+        using var client = _fixture.CreateClientWithRights(Delegator);
+
+        async Task<JsonElement> GateOf(string type, Guid id)
+        {
+            var response = await client.GetAsync($"{GatePath}?recordType={type}&recordId={id}");
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            return document.RootElement.Clone();
+        }
+
+        var locked = await GateOf("workassignment", child);
+        var parent = locked.GetProperty("followsParents").EnumerateArray().Single();
+        parent.GetProperty("recordType").GetString().Should().Be("matter");
+        parent.GetProperty("recordId").GetGuid().Should().Be(matter);
+        parent.GetProperty("name").GetString().Should().Be("Falcon");
+        locked.GetProperty("parentUnverifiable").GetBoolean().Should().BeFalse();
+        locked.GetProperty("floorSecure").GetBoolean().Should().BeFalse("round 87: the matter is not secure");
+        locked.GetProperty("floorAccessPermission").GetString().Should().Be("standard");
+
+        var parentlessGate = await GateOf("workassignment", parentless);
+        parentlessGate.GetProperty("followsParents").EnumerateArray().Should().BeEmpty();
+        parentlessGate.GetProperty("floorSecure").ValueKind.Should().Be(JsonValueKind.Null, "no parent, no floor");
+
+        var unknown = await GateOf("workassignment", unreadable);
+        unknown.GetProperty("followsParents").EnumerateArray().Should().BeEmpty();
+        unknown.GetProperty("parentUnverifiable").GetBoolean().Should().BeTrue("never 'no parent' on a guess");
+        unknown.GetProperty("floorAccessPermission").ValueKind.Should().Be(JsonValueKind.Null);
+
+        (await GateOf("matter", matter)).GetProperty("followsParents").EnumerateArray().Should().BeEmpty();
     }
 
     /// <summary>A caller without Write gets the filter's 403 even when asking for the owner — and no owner read is made.</summary>

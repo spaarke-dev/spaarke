@@ -102,7 +102,7 @@ public sealed class SemanticScopeProviderSeamTests
             aiSearchOptions,
             Mock.Of<ILogger<RagService>>());
 
-        return new SemanticScopeProvider(ragService, Mock.Of<ILogger<SemanticScopeProvider>>());
+        return new SemanticScopeProvider(ragService, PermitAllRetrievalAccessTrim.Instance, Mock.Of<ILogger<SemanticScopeProvider>>());
     }
 
     private static ClaimsPrincipal BuildPrincipal(string oid = "test-oid") =>

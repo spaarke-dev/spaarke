@@ -288,7 +288,7 @@ All async work runs through Azure Service Bus with a single `ServiceBusJobProces
 
 ### Authentication & Authorization
 
-> **Canonical**: [ADR-028 Spaarke Auth Architecture (v2)](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) + [`docs/guides/auth-deployment-setup.md`](../guides/auth-deployment-setup.md) (operator runbook with §7 Exchange ApplicationAccessPolicy). Client surfaces use `useAuth()` + `authenticatedFetch` from `@spaarke/auth`. Server outbound (Graph + Dataverse app-only) uses `DefaultAzureCredential` when `Graph__ManagedIdentity__Enabled=true`.
+> **Canonical**: [ADR-028 Spaarke Auth Architecture (v2)](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) + [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) (operator runbook: auth §6.5/§7.3/§7.7, Exchange mailbox access §7.9). Client surfaces use `useAuth()` + `authenticatedFetch` from `@spaarke/auth`. Server outbound (Graph + Dataverse app-only) uses `DefaultAzureCredential` when `Graph__ManagedIdentity__Enabled=true`.
 
 | Concern | Implementation | Reference |
 |---------|---------------|-----------|

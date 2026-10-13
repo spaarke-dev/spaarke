@@ -56,20 +56,39 @@ public record EventDto
     /// </summary>
     public string? RegardingRecordTypeName { get; init; }
 
-    /// <summary>
-    /// Base date of the event (sprk_basedate).
-    /// </summary>
-    public DateTime? BaseDate { get; init; }
+    // Task 098: the six sprk_event date columns are calendar dates (Dataverse Behavior DateOnly). DateOnly serialises as
+    // "yyyy-MM-dd" — no time, no zone — so every client shows the day the user picked (parse with parseDueDate, never
+    // new Date("yyyy-MM-dd"), which is UTC midnight). docs/data-model/sprk_event-date-columns.md.
 
     /// <summary>
-    /// Due date of the event (sprk_duedate).
+    /// Base date of the event (sprk_basedate), <c>yyyy-MM-dd</c>.
     /// </summary>
-    public DateTime? DueDate { get; init; }
+    public DateOnly? BaseDate { get; init; }
 
     /// <summary>
-    /// Completion date of the event (sprk_completeddate).
+    /// Due date of the event (sprk_duedate), <c>yyyy-MM-dd</c>.
     /// </summary>
-    public DateTime? CompletedDate { get; init; }
+    public DateOnly? DueDate { get; init; }
+
+    /// <summary>
+    /// Final due date of the event (sprk_finalduedate), <c>yyyy-MM-dd</c>.
+    /// </summary>
+    public DateOnly? FinalDueDate { get; init; }
+
+    /// <summary>
+    /// Completion date of the event (sprk_completeddate), <c>yyyy-MM-dd</c> — the completing user's local date.
+    /// </summary>
+    public DateOnly? CompletedDate { get; init; }
+
+    /// <summary>
+    /// Approval date of the event (sprk_approveddate), <c>yyyy-MM-dd</c>.
+    /// </summary>
+    public DateOnly? ApprovedDate { get; init; }
+
+    /// <summary>
+    /// Meeting date of the event (sprk_meetingdate), <c>yyyy-MM-dd</c>.
+    /// </summary>
+    public DateOnly? MeetingDate { get; init; }
 
     /// <summary>
     /// Event status: Active (0), Inactive (1).

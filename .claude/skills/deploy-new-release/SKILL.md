@@ -5,13 +5,13 @@ techStack: [powershell, azure, dataverse, pac-cli]
 appliesTo: ["scripts/Deploy-Release.ps1", "config/environments.json", "deploy new release", "production release", "deploy release"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-05-16
+last-reviewed: 2026-10-11
 ---
 
 # Deploy New Release
 
 > **Category**: Operations
-> **Last Reviewed**: 2026-05-16
+> **Last Reviewed**: 2026-10-11 (mandatory `-CustomerId`, per-environment coverage, route master→dev to `/master-deploy`)
 > **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A — **leave-alone**: cleanest critical-rules structure in batch; BFF URL gotcha well-surfaced)
 > **Exemplar rationale**: Interactive UX patterns change frequently; the BFF URL host-only rule is the stable contract (recurring production issue prevented).
 > **Procedure**: [`docs/procedures/production-release.md`](../../../docs/procedures/production-release.md)
@@ -215,7 +215,7 @@ DEPLOYMENT PLAN
   Phases:
     Phase 1: Build all client components
     Phase 2: Deploy BFF API (per environment)
-    Phase 3: Import Dataverse solutions (per environment)
+    Phase 3: Import SpaarkeMaster — the CI-published package, typed per environment (none on dev)
     Phase 4: Deploy web resources (per environment)
     Phase 5: Validate deployment (per environment)
     Phase 6: Tag release v1.1.0
@@ -242,29 +242,47 @@ Call `Deploy-Release.ps1` with the operator's selections.
 
 #### Build the Command
 
+`-CustomerId` is **mandatory** (the script fails before any side effect without it). It selects the Phase 4 (web resources) target from the `sprk_dataverseenvironment` registry, independently of `-EnvironmentUrl`. Resolve it before building the command:
+
+- A customer environment: the row's `sprk_customerid` (pattern `^[a-z][a-z0-9]{2,7}$`).
+- A platform row (no `sprk_customerid`): a value equal to its `sprk_name` or `sprk_envaccountdomain` (case-insensitive). **Dev:** `-CustomerId dev` matches the row named `Dev` → `spaarkedev1` (verified 2026-10-11).
+- **Demo cannot be resolved today**: its row is named `Demo 1` (the space fails the pattern) and its domain contains dots. Phase 4 for Demo fails until the registry row gets a valid id — tracked in #1670; do not work around it by editing the script.
+
 ```powershell
 # Single environment
 .\scripts\Deploy-Release.ps1 `
     -EnvironmentUrl "dev" `
-    -Version "v1.1.0"
-
-# Multiple environments
-.\scripts\Deploy-Release.ps1 `
-    -EnvironmentUrl "dev", "demo" `
+    -CustomerId "dev" `
     -Version "v1.1.0"
 
 # With skipped phases
 .\scripts\Deploy-Release.ps1 `
-    -EnvironmentUrl "demo" `
+    -EnvironmentUrl "dev" `
+    -CustomerId "dev" `
     -Version "v1.1.0" `
     -SkipPhase "Build"
 
-# Preview mode (WhatIf)
+# Preview mode (WhatIf) — skips the registry lookup, so it does NOT prove -CustomerId resolves
 .\scripts\Deploy-Release.ps1 `
-    -EnvironmentUrl "demo" `
+    -EnvironmentUrl "dev" `
+    -CustomerId "dev" `
     -Version "v1.1.0" `
     -WhatIf
 ```
+
+One run deploys web resources to **one** customer environment (the `-CustomerId` target), even when `-EnvironmentUrl` lists several; run once per environment.
+
+#### What a release run covers (and what it does not)
+
+| Phase | Dev (`solutionPackageType: none`) | Other environments |
+|---|---|---|
+| 1 Build | `Build-AllClientComponents.ps1` | same |
+| 2 BFF API | `Deploy-BffApi.ps1` | same |
+| 3 Solutions | **skipped** — dev is the authoring environment | SpaarkeMaster import (PCF controls, ribbons, forms, the packaged web-resource copies) |
+| 4 Web resources | `Deploy-AllWebResources.ps1`: SpeAdmin, the `Deploy-WizardCodePages.ps1` set, EventsPage, ribbon icons — **only** | same |
+| 6 Tag | creates **and pushes** a git tag | same |
+
+So on dev a release run does **not** deploy `sprk_spaarkeai`, DailyBriefing, SmartTodo, NavigatorPane, the Invoices/KPI/Communications pages, Notepad, the conversation page, the webpack code pages (DocumentRelationshipViewer, SemanticSearch, PlaybookBuilder), classic JS web resources, or PCF controls — and it pushes a release tag. To bring **everything on master** to dev, use `/master-deploy` instead (see the Decision Tree).
 
 #### Show the Exact Command Before Running
 
@@ -274,7 +292,8 @@ Always show the operator the exact PowerShell command that will be executed:
 Executing:
 
   pwsh -File scripts/Deploy-Release.ps1 \
-    -EnvironmentUrl "dev","demo" \
+    -EnvironmentUrl "dev" \
+    -CustomerId "dev" \
     -Version "v1.1.0"
 
 Starting deployment...
@@ -298,8 +317,8 @@ If `Deploy-Release.ps1` reports a failure:
 |-------------|-------------------|
 | Phase 1 (Build) | No rollback needed — nothing was deployed. Fix the build error and re-run. |
 | Phase 2 (BFF API) | If `-UseSlotDeploy` was used, the script auto-rolls back. Otherwise: `az webapp deployment slot swap` to swap back. |
-| Phase 3 (Solutions) | Re-import previous solution version from last git tag. See `docs/procedures/production-release.md` Rollback section. |
-| Phase 4 (Web Resources) | Re-deploy from previous tag: `git checkout <tag> -- src/solutions/*/dist/` then re-run web resource scripts. |
+| Phase 3 (Solutions) | SpaarkeMaster is never downgraded — roll forward (fix in dev, higher version, export, CI publish, re-run). A **refused** import (type switch / downgrade) changed nothing. See `docs/procedures/production-release.md` "Dataverse Solution Rollback". |
+| Phase 4 (Web Resources) | `dist/` is not committed, so rebuild from the previous tag in a separate worktree (`git worktree add --detach <path> <tag>`), then re-run the web resource scripts from there. Faster: before deploying, download each target's current content (`webresourceset?$select=name,content`) as a restore point and re-upload it. |
 | Phase 5 (Validation) | Validation failure means something is misconfigured. Check the validation output for specifics. Do NOT tag the release. |
 
 ---
@@ -343,7 +362,7 @@ DEPLOYMENT COMPLETED WITH FAILURES
     1. Review the error output above
     2. Fix the issue in the Demo environment
     3. Re-run deployment for Demo only:
-       .\scripts\Deploy-Release.ps1 -EnvironmentUrl demo -Version v1.1.0 -SkipBuild
+       .\scripts\Deploy-Release.ps1 -EnvironmentUrl demo -CustomerId <demo-id> -Version v1.1.0 -SkipBuild
     4. Once all environments pass, manually tag:
        git tag -a v1.1.0 -m "Release v1.1.0"
        git push origin v1.1.0
@@ -362,6 +381,9 @@ Is this a full production release to existing environments?
 │   └── YES → See "Emergency Hotfix Procedure" in production-release.md
 ├── Is this a single-component deploy (just API, just solutions)?
 │   └── YES → Use the component-specific skill (bff-deploy, dataverse-deploy, etc.)
+├── Bring EVERYTHING on master to dev (after several PRs merged)?
+│   └── YES → Use /master-deploy (covers every code page, JS web resource and the BFF,
+│             with a clobber check; a release run on dev covers only part — see above)
 └── Is this a dev iteration deploy?
     └── YES → Use the component-specific deploy script directly
 ```
@@ -373,32 +395,34 @@ Is this a full production release to existing environments?
 | Parameter | Type | Default | Notes |
 |-----------|------|---------|-------|
 | `-EnvironmentUrl` | string[] | (required) | Environment names or Dataverse URLs |
+| `-CustomerId` | string | **(required)** | Phase 4 target via the `sprk_dataverseenvironment` registry; `^[a-z][a-z0-9]{2,7}$`. Dev = `dev`. See Step 5 |
+| `-AdminEnvironmentUrl` | string | `$env:SPAARKE_ADMIN_DATAVERSE_URL`, else the registry's platform-admin entry, else the first non-template entry (dev) | Where the registry lives |
 | `-Version` | string | auto-suggested | `v{major}.{minor}.{patch}` format |
 | `-SkipPhase` | string[] | none | `Build`, `BffApi`, `Solutions`, `WebResources`, `Validation` |
 | `-SkipBuild` | switch | $false | Shortcut for `-SkipPhase Build` |
 | `-StopOnFailure` | bool | $true | Stop remaining environments on failure |
-| `-ClientSecret` | string | (none — uses Managed Identity by default per [ADR-028](../../adr/ADR-028-spaarke-auth-architecture.md)) | Service principal secret for Dataverse — **only required when MI is not configured** for the target environment (local dev fallback). On Azure-hosted environments with `Graph__ManagedIdentity__Enabled=true`, the BFF MI is the Dataverse Application User. See [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) §6. |
+| `-ClientSecret` | string | (none) | **Ignored since T218f (2026-10-08)** — prints a warning. Phase 3 imports SpaarkeMaster with the operator's own az/pac sign-in; no service principal secret is used anywhere in the release. Kept so older invocations do not break. |
 | `-WhatIf` | switch | $false | Preview without executing |
 
 ---
 
 ## Environment Registry Format
 
-Environments are defined in `config/environments.json`:
+Environments are defined in `config/environments.json` (read it at runtime; this excerpt shows the shape and the dev values as of 2026-10-11):
 
 ```json
 {
   "environments": {
     "dev": {
+      "solutionPackageType": "none",
       "displayName": "Development",
       "dataverseUrl": "https://spaarkedev1.crm.dynamics.com",
-      "bffApiUrl": "https://spe-api-dev-67e2xz.azurewebsites.net",
-      "appServiceName": "spe-api-dev-67e2xz",
+      "bffApiUrl": "https://spaarke-bff-dev.azurewebsites.net",
+      "appServiceName": "spaarke-bff-dev",
       "appServiceSlot": "staging",
-      "resourceGroup": "spe-infrastructure-westus2",
+      "resourceGroup": "rg-spaarke-dev",
       "keyVaultName": "spaarke-spekvcert",
-      "tenantId": "a221a95e-...",
-      "servicePrincipal": { "clientId": "..." }
+      "tenantId": "a221a95e-..."
     }
   }
 }
@@ -415,9 +439,11 @@ Environments are defined in `config/environments.json`:
 | Pre-flight: Azure CLI not authenticated | Session expired | Run `az login` and retry |
 | Pre-flight: PAC CLI not authenticated | No auth profile | Run `pac auth create --environment <url>` |
 | Pre-flight: BFF URL ends with `/api` | Misconfigured registry | Edit `config/environments.json` to remove `/api` suffix |
-| Build fails | Missing dependencies or compilation error | Check build output; run `npm ci` in affected directory |
+| Build fails | Missing dependencies or compilation error | Check build output; run `npm install --legacy-peer-deps --no-audit --no-fund` in the affected directory (not `npm ci` — most lock files are stale) |
+| `Cannot validate argument on parameter 'CustomerId'` (pattern) / prompt or error for missing mandatory parameter `CustomerId` | `-CustomerId` omitted or fails `^[a-z][a-z0-9]{2,7}$` | Pass the registry id (dev = `dev`); see Step 5 |
+| `Registry lookup found NO sprk_dataverseenvironment row` | No registry row matches the id (Demo today) | Fix the registry row (give it a valid `sprk_customerid`); never hard-code a target in the script |
 | BFF deploy fails | App Service not found or auth issue | Verify `appServiceName` in environments.json matches Azure |
-| Solution import fails | Missing dependency or auth | Check import order; verify service principal has permissions |
+| SpaarkeMaster import refused or fails | Type switch / downgrade refused; no published package; no access | The message names the refusal. "no solutions.SpaarkeMaster entry" = nothing published yet (run `publish-dataverse-solutions-manifest.yml`); a refusal = fix `solutionPackageType` or publish a higher version; access = Storage Blob Data Reader on `sprkcpartifacts{env}` and pac signed in to the target (your own identity — no service principal) |
 | Web resource deploy fails | Auth token expired or wrong URL | Re-run `az login`; verify `dataverseUrl` |
 | Validation fails | Environment variables misconfigured | Check 7 required Dataverse env vars (see production-release.md Phase 5) |
 | Tag creation fails | Tag already exists | Delete existing tag: `git tag -d <tag>; git push origin :refs/tags/<tag>` |
@@ -433,6 +459,7 @@ Environments are defined in `config/environments.json`:
 | `dataverse-deploy` | Deploying only Dataverse solutions or PCF controls |
 | `azure-deploy` | Azure infrastructure changes (Bicep), App Settings, Key Vault |
 | `code-page-deploy` | Deploying a single code page web resource |
+| `master-deploy` | Bringing everything on master to dev in one pass |
 | `power-page-deploy` | Deploying the external SPA web resource |
 
 ---

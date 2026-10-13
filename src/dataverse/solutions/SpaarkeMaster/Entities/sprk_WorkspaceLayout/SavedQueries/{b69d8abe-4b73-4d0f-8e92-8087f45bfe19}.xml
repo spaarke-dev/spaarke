@@ -1,0 +1,45 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{b69d8abe-4b73-4d0f-8e92-8087f45bfe19}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_workspacelayoutid">
+          <cell name="sprk_sortorder" width="100" />
+          <cell name="sprk_name" width="300" />
+          <cell name="sprk_layouttemplateid" width="151" />
+          <cell name="sprk_isdefault" width="100" />
+          <cell name="sprk_issystem" width="100" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_workspacelayout">
+          <attribute name="sprk_workspacelayoutid" />
+          <attribute name="sprk_name" />
+          <attribute name="createdon" />
+          <order attribute="sprk_name" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+          <attribute name="sprk_isdefault" />
+          <attribute name="sprk_issystem" />
+          <attribute name="sprk_layouttemplateid" />
+          <attribute name="sprk_sortorder" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Active Workspace Layouts" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

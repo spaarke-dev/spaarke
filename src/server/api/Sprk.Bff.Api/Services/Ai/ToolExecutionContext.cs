@@ -58,6 +58,14 @@ public record ToolExecutionContext : ToolInvocationContextBase
     public required DocumentContext Document { get; init; }
 
     /// <summary>
+    /// The Entra object id (<c>oid</c>) of the signed-in user this execution runs for: the run principal of an HTTP
+    /// playbook run (<c>PlaybookRunContext.StartedByOid</c>) or the caller of an HTTP analysis. Null for app-only and
+    /// scheduled runs. Document retrieval is trimmed to what this user can read, and returns nothing when it is null
+    /// (unified-access-control-r2 task 176, #1511).
+    /// </summary>
+    public string? CallerObjectId { get; init; }
+
+    /// <summary>
     /// Previously extracted results from other tools in this analysis session.
     /// Allows tools to build on each other's output.
     /// </summary>

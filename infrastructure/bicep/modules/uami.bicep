@@ -21,7 +21,7 @@
 //   - H4 handler: PATCH `keyVaultReferenceIdentity` uses `resourceId`.
 //   - H10 handler: registers the Dataverse App User with `clientId` as the
 //               application ID; grants Graph app-roles onto this UAMI's SP
-//               (from `GraphAppRoles.cs`, T3 parity).
+//               (from `GraphAppRoles.cs`, T3 parity — task 261: FileStorageContainer.Selected only; H10 removes the rest).
 //   - Task 011 #3b (BFF shared-lib ClientSecret -> MI migration): unblocked
 //               once this identity outlives App Service instances.
 //

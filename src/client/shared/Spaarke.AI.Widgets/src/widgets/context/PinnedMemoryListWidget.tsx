@@ -56,7 +56,7 @@ import {
   PinRegular,
   SearchRegular,
 } from '@fluentui/react-icons';
-import { buildBffApiUrl } from '@spaarke/auth';
+import { buildBffApiUrl, isApiError, isAuthFailure, problemOf } from '@spaarke/auth';
 
 import type { ContextWidgetProps } from '../../types/widget-types';
 import { useAiSession } from '../../providers/useAiSession';
@@ -350,6 +350,21 @@ async function extractError(response: Response): Promise<string> {
   return `Request failed (${response.status}).`;
 }
 
+/**
+ * {@link extractError} for a failure `authenticatedFetch` THREW — it never returns a non-OK Response, so
+ * the server's ProblemDetails (e.g. the title/content length cap) arrives as `ApiError.problemDetails`.
+ * An expired sign-in gets its own sentence, since "try again" cannot succeed. `null` for a network
+ * failure: the caller keeps its generic sentence for that.
+ */
+function thrownRequestError(err: unknown): string | null {
+  if (isAuthFailure(err)) return 'Your sign-in has expired. Refresh the page and sign in again.';
+  if (!isApiError(err)) return null;
+  const problem = problemOf(err);
+  if (problem && typeof problem.detail === 'string' && problem.detail.length > 0) return problem.detail;
+  if (problem && typeof problem.title === 'string' && problem.title.length > 0) return problem.title;
+  return `Request failed (${err.status}).`;
+}
+
 // ---------------------------------------------------------------------------
 // PinnedMemoryListWidget
 // ---------------------------------------------------------------------------
@@ -406,7 +421,7 @@ const PinnedMemoryListWidget: React.FC<PinnedMemoryListWidgetProps> = ({
       console.warn('[PinnedMemoryListWidget] Load failed:', (err as Error)?.name ?? 'Error');
       setLoad({
         isLoading: false,
-        error: 'Could not load pinned memory. Please try again.',
+        error: thrownRequestError(err) ?? 'Could not load pinned memory. Please try again.',
       });
     }
   }, [authenticatedFetch, bffBaseUrl, matterScope]);
@@ -465,7 +480,7 @@ const PinnedMemoryListWidget: React.FC<PinnedMemoryListWidgetProps> = ({
         setDialogServerError(null);
       } catch (err) {
         console.warn('[PinnedMemoryListWidget] Save failed:', (err as Error)?.name ?? 'Error');
-        setDialogServerError('Could not save the pin. Please try again.');
+        setDialogServerError(thrownRequestError(err) ?? 'Could not save the pin. Please try again.');
         setDialogIsSubmitting(false);
       }
     },
@@ -502,7 +517,7 @@ const PinnedMemoryListWidget: React.FC<PinnedMemoryListWidgetProps> = ({
     } catch (err) {
       console.warn('[PinnedMemoryListWidget] Delete failed:', (err as Error)?.name ?? 'Error');
       setDeleteState({ kind: 'idle' });
-      setLoad(prev => ({ ...prev, error: 'Could not delete the pin. Please try again.' }));
+      setLoad(prev => ({ ...prev, error: thrownRequestError(err) ?? 'Could not delete the pin. Please try again.' }));
     }
   }, [authenticatedFetch, bffBaseUrl, deleteState]);
 

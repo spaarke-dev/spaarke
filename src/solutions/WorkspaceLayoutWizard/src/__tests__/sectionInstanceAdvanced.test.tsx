@@ -107,57 +107,46 @@ function renderArrangeStep(overrides?: {
   return { onSectionInstancesChange };
 }
 
+/**
+ * Since the 2026-07-03 R2 UAT rework (708f18bb75, 803c77ace1) the per-section
+ * Advanced controls are no longer an Accordion under each slot: each placed
+ * section gets a gear button (`advanced-trigger-<slotKey>`) in the row header
+ * that opens a Popover. The configId (Grid Configuration) picker was removed
+ * (R2-followup-1 section 2.4); the popover holds Row height + label + page size +
+ * available views. Tests open the popover via the trigger.
+ */
+function openAdvancedPopover(): void {
+  fireEvent.click(screen.getByTestId('advanced-trigger-row-1:0'));
+}
+
 // ---------------------------------------------------------------------------
-// (a) Advanced accordion renders under each placed section + expands
+// (a) Advanced popover renders under each placed section + expands
 // ---------------------------------------------------------------------------
 
 describe('ArrangeStep Advanced accordion — FR-03 UI (task 013)', () => {
-  it('renderFilledSlot_AdvancedAccordionRendered_ContainsFourControls', () => {
+  it('renderFilledSlot_AdvancedPopoverTriggerRendered_OpensWithCurrentControls', () => {
     renderArrangeStep();
 
-    // The accordion wrapper exists.
-    const accordion = screen.getByTestId(/^advanced-accordion-/);
-    expect(accordion).toBeInTheDocument();
+    // Closed by default: controls are not in the DOM until the gear is clicked.
+    const trigger = screen.getByTestId('advanced-trigger-row-1:0');
+    expect(trigger).toHaveAttribute('aria-label', 'Advanced settings for Communications');
+    expect(screen.queryByTestId(/^advanced-label-input-/)).not.toBeInTheDocument();
 
-    // Expand the accordion by clicking its header.
-    const header = within(accordion).getByRole('button');
-    fireEvent.click(header);
+    openAdvancedPopover();
 
-    // Four controls expected inside the panel.
-    expect(screen.getByTestId(/^advanced-configid-dropdown-/)).toBeInTheDocument();
+    expect(screen.getByTestId(/^row-height-dropdown-popover-/)).toBeInTheDocument();
     expect(screen.getByTestId(/^advanced-label-input-/)).toBeInTheDocument();
     expect(screen.getByTestId(/^advanced-pagesize-spinbutton-/)).toBeInTheDocument();
-    // DEF-003 (spaarke-dataset-grid-framework-r2): availableViews Input replaced
-    // by Combobox multiselect wired to BFF savedqueries. Testid changed.
+    // DEF-003: availableViews is a Combobox multiselect wired to BFF savedqueries.
     expect(screen.getByTestId(/^advanced-views-combobox-/)).toBeInTheDocument();
+    // The configId picker was removed (R2-followup-1 section 2.4); it must not come back unnoticed.
+    expect(screen.queryByTestId(/^advanced-configid-dropdown-/)).not.toBeInTheDocument();
   });
 
-  // -------------------------------------------------------------------------
-  // (b) configId dropdown renders + "None (use default)" option is present
-  //
-  // NOTE — currently placeholder-stubbed to `[{ key: '', label: 'None (use
-  // default)' }]`. Once the picker is wired to a real Dataverse query (BFF
-  // endpoint OR Xrm.WebApi shim), extend this test to assert the entity-
-  // filtered options.
-  // -------------------------------------------------------------------------
-
-  it('configIdDropdown_OpensWithNoneOption_PlaceholderStubbedForNow', () => {
-    // DEF-002 (spaarke-dataset-grid-framework-r2): configId picker now hydrates
-    // real records via BFF. With authenticatedFetch stubbed to return `[]`, the
-    // effective option list is `[None (use default)]` only — same shape as the
-    // pre-DEF-002 placeholder. The test still validates the None entry is
-    // present as the default fallback option.
-    renderArrangeStep();
-
-    const header = screen.getByTestId(/^advanced-accordion-/).querySelector('button');
-    if (header) fireEvent.click(header);
-
-    const dropdown = screen.getByTestId(/^advanced-configid-dropdown-/);
-    fireEvent.click(dropdown);
-    // Fluent v9 Dropdown renders the selected value in the button AND in the
-    // listbox option — getAllByText correctly matches both instances.
-    expect(screen.getAllByText('None (use default)').length).toBeGreaterThanOrEqual(1);
-  });
+  // (b) The former `configIdDropdown_OpensWithNoneOption_PlaceholderStubbedForNow`
+  // test was deleted (ADR-038): the configId dropdown no longer exists in the
+  // product (removed 2026-07-03, R2-followup-1 section 2.4), so there is no
+  // behaviour left to protect; the negative assertion above guards its absence.
 
   // -------------------------------------------------------------------------
   // (c) Setting label + pageSize produces a SectionInstance in the emitted map
@@ -166,8 +155,7 @@ describe('ArrangeStep Advanced accordion — FR-03 UI (task 013)', () => {
   it('setLabelOverride_EmitsSectionInstanceMapWithLabel', () => {
     const { onSectionInstancesChange } = renderArrangeStep();
 
-    const header = screen.getByTestId(/^advanced-accordion-/).querySelector('button');
-    if (header) fireEvent.click(header);
+    openAdvancedPopover();
 
     const labelInput = screen.getByTestId(/^advanced-label-input-/);
     fireEvent.change(labelInput, { target: { value: 'Email' } });
@@ -183,12 +171,13 @@ describe('ArrangeStep Advanced accordion — FR-03 UI (task 013)', () => {
   it('setPageSizeOverride_EmitsSectionInstanceMapWithPageSize', () => {
     const { onSectionInstancesChange } = renderArrangeStep();
 
-    const header = screen.getByTestId(/^advanced-accordion-/).querySelector('button');
-    if (header) fireEvent.click(header);
+    openAdvancedPopover();
 
     const spin = screen.getByTestId(/^advanced-pagesize-spinbutton-/);
-    // SpinButton onChange fires with a numeric `value`.
+    // Fluent v9 SpinButton only fires onChange (numeric `value`) when the typed
+    // text is committed (blur / Enter), not on each keystroke-level change event.
     fireEvent.change(spin, { target: { value: '100' } });
+    fireEvent.blur(spin);
 
     expect(onSectionInstancesChange).toHaveBeenCalled();
     const lastCall = onSectionInstancesChange.mock.calls[onSectionInstancesChange.mock.calls.length - 1];
@@ -209,8 +198,7 @@ describe('ArrangeStep Advanced accordion — FR-03 UI (task 013)', () => {
     ]);
     const { onSectionInstancesChange } = renderArrangeStep({ sectionInstances: initial });
 
-    const header = screen.getByTestId(/^advanced-accordion-/).querySelector('button');
-    if (header) fireEvent.click(header);
+    openAdvancedPopover();
 
     const labelInput = screen.getByTestId(/^advanced-label-input-/);
     fireEvent.change(labelInput, { target: { value: '' } });
@@ -227,11 +215,12 @@ describe('ArrangeStep Advanced accordion — FR-03 UI (task 013)', () => {
   // (e) Dark mode structural test — no console errors under dark theme
   // -------------------------------------------------------------------------
 
-  it('renderUnderDarkTheme_NoConsoleErrors_AccordionVisible', () => {
+  it('renderUnderDarkTheme_NoConsoleErrors_PopoverVisible', () => {
     const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     try {
       renderArrangeStep({ theme: webDarkTheme });
-      expect(screen.getByTestId(/^advanced-accordion-/)).toBeInTheDocument();
+      openAdvancedPopover();
+      expect(screen.getByTestId(/^advanced-label-input-/)).toBeInTheDocument();
       expect(consoleErrorSpy).not.toHaveBeenCalled();
     } finally {
       consoleErrorSpy.mockRestore();

@@ -580,7 +580,9 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.run-markdown != 'false' }}
     continue-on-error: true
-    timeout-minutes: 2
+    # 5, not 2 (2026-10-09): checkout of the ~23.6k-file tree + the 604-file scan takes ~2m15s, so a 2-minute budget
+    # killed the job during its report step and the check read CANCELLED on many PRs (e.g. #1502, #1495, #1496).
+    timeout-minutes: 5
     outputs:
       result: ${{ steps.report.outputs.result }}
     steps:
@@ -600,12 +602,23 @@ jobs:
           }
           & pwsh -File $script
 
+      # Paths named in agent instruction files (CLAUDE.md, .claude/rules|constraints|patterns|adr, skills)
+      # must exist. Ratcheted: scripts/quality/instruction-paths.baseline.txt lists the known ones; only a
+      # NEW missing path fails. Root CLAUDE.md §16 "Enforcement ladder".
+      - name: Check paths named in instruction files
+        id: instrpaths
+        continue-on-error: true
+        shell: pwsh
+        run: ./scripts/quality/Test-InstructionPaths.ps1
+
       - name: Report result
         id: report
         if: always()
         shell: pwsh
         run: |
-          if ("${{ steps.mdcheck.outputs.skipped }}" -eq "true") {
+          if ("${{ steps.instrpaths.outcome }}" -eq "failure") {
+            "result=fail (instruction paths)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } elseif ("${{ steps.mdcheck.outputs.skipped }}" -eq "true") {
             "result=skip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } elseif ("${{ steps.mdcheck.outcome }}" -eq "success") {
             "result=pass" | Out-File -FilePath $env:GITHUB_OUTPUT -Append

@@ -1,0 +1,49 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{bc0687c4-3401-f111-8407-7c1e520aa4df}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_recordtypename" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_recordtype_refid">
+          <cell name="sprk_recordtypecode" width="145" />
+          <cell name="sprk_recordtypename" width="300" />
+          <cell name="sprk_recorddisplayname" width="165" />
+          <cell name="sprk_recordlogicalname" width="164" />
+          <cell name="sprk_regardingfield" width="131" />
+          <cell name="sprk_recorddisplaynamefield" width="187" />
+          <cell name="sprk_regardingrecordnumberfield" width="224" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_recordtype_ref">
+          <attribute name="sprk_recordtype_refid" />
+          <attribute name="sprk_recordtypename" />
+          <attribute name="createdon" />
+          <order attribute="sprk_recordtypename" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+          <attribute name="sprk_recorddisplayname" />
+          <attribute name="sprk_recordlogicalname" />
+          <attribute name="sprk_regardingfield" />
+          <attribute name="sprk_recordtypecode" />
+          <attribute name="sprk_recorddisplaynamefield" />
+          <attribute name="sprk_regardingrecordnumberfield" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="All Record Types" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

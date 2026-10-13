@@ -1,0 +1,45 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{7690f9d7-9cb1-4837-ac76-d0705e9e1b75}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_eventname" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_eventid">
+          <cell name="sprk_eventname" width="300" />
+          <cell name="sprk_regardingrecordurl" width="174" />
+          <cell name="sprk_regardingrecordname" width="180" />
+          <cell name="sprk_regardingrecordid" width="158" />
+          <cell name="sprk_regardingrecordtype" width="174" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_event">
+          <attribute name="sprk_eventid" />
+          <attribute name="sprk_eventname" />
+          <attribute name="createdon" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+          <attribute name="sprk_regardingrecordname" />
+          <attribute name="sprk_regardingrecordid" />
+          <attribute name="sprk_regardingrecordtype" />
+          <attribute name="sprk_regardingrecordurl" />
+          <order attribute="createdon" descending="true" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="All Active Events" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

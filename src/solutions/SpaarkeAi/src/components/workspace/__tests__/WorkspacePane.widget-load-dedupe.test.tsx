@@ -63,11 +63,7 @@ jest.mock('@spaarke/ai-widgets', () => {
     ...actual,
     useAiSession: () => ({
       isAuthenticated: true,
-      authenticatedFetch: jest.fn().mockResolvedValue({
-        ok: false,
-        status: 404,
-        json: async () => ({}),
-      } as Partial<Response> as Response),
+      authenticatedFetch: jest.fn().mockRejectedValue(httpError(404)),
       getAccessToken: jest.fn().mockResolvedValue('test-token'),
       bffBaseUrl: 'https://test-bff.example.com',
       tenantId: 'test-tenant',
@@ -130,6 +126,7 @@ jest.mock('@spaarke/ui-components', () => {
 
 // Import AFTER mocks so module resolution picks them up.
 import { WorkspacePane } from '../WorkspacePane';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -1,9 +1,9 @@
 // -----------------------------------------------------------------------------
 // IntegrationWiringOptions.cs
 //
-// Bound options for the H14 post-deploy integration wiring handler + its 3
-// DAG-parallel sub-handler collaborators (H14a Exchange, H14b Graph webhooks,
-// H14c Dataverse webhooks). Loaded from the "IntegrationWiring" configuration
+// Bound options for the H14 post-deploy integration wiring handler + its H14a
+// Exchange sub-handler collaborators (H14b/H14c and their options removed,
+// ISS-019). Loaded from the "IntegrationWiring" configuration
 // section by Program.cs — runtime-configurable so the linux-x64 App Service
 // publish layout can be honored without recompiling.
 //
@@ -18,12 +18,9 @@
 // Validate() bounds-checking ONLY this new field, wired via
 // IntegrationWiringModule's AddOptions&lt;T&gt;().Bind().Validate().ValidateOnStart()
 // (parity with task 153's RuntimeReferencesOptions / task 151's
-// AppConfigSeedOptions precedent). Deliberately does NOT retroactively
-// validate the pre-existing H14a/b/c fields (then ExchangePolicyDescriptionPrefix,
-// GraphRequestTimeout, DataverseRequestTimeout, ServiceEndpoint*) — those
-// belong to H14a/H14b/H14c, which this task's constraint explicitly leaves
-// UNCHANGED; widening the boot-time gate to fields this task doesn't own
-// would be unreviewed scope creep, not a KV-reader swap.
+// AppConfigSeedOptions precedent). (The H14b/H14c-only fields GraphRequestTimeout,
+// GraphSubscriptionExpirationMinutes, DataverseRequestTimeout and ServiceEndpoint*
+// were removed with those handlers, ISS-019.)
 //
 // TASK 161 (Wave G-6): added 5 sidecar-client fields for the new
 // ExchangePolicySidecarClient collaborator (replaced the pwsh shell-out applier,
@@ -57,7 +54,7 @@
 namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 
 /// <summary>
-/// Bound options for <see cref="H14IntegrationWiringHandler"/> + its 3
+/// Bound options for <see cref="H14IntegrationWiringHandler"/> + its
 /// sub-handler collaborators. Configuration key: <c>IntegrationWiring</c>.
 /// </summary>
 public sealed class IntegrationWiringOptions
@@ -81,67 +78,6 @@ public sealed class IntegrationWiringOptions
     /// </summary>
     public string ExchangeAssignmentNamePrefix { get; set; } = "Spaarke";
 
-    // ---------- H14b Graph webhooks ----------
-
-    /// <summary>
-    /// Timeout for a single Microsoft Graph REST call (list/create/patch
-    /// subscription). Defaults to 30 seconds — parity with
-    /// <see cref="DataverseAppUserGraphParity.H10DataverseAppUserGraphParityOptions"/>-style
-    /// Graph collaborators elsewhere in L2.
-    /// </summary>
-    public TimeSpan GraphRequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
-
-    /// <summary>
-    /// Subscription lifetime requested on Graph webhook create/renew, in
-    /// minutes. Defaults to 4230 minutes (~2.94 days) — the Microsoft Graph
-    /// documented maximum for most resource types as of the last verified
-    /// check (2026-08). Subscription RENEWAL (a recurring background task
-    /// that re-PATCHes <c>expirationDateTime</c> before it lapses) is
-    /// explicitly OUT OF SCOPE for H14 (a provisioning-time handler, not a
-    /// background service) — tracked as r2 follow-on work.
-    /// </summary>
-    public int GraphSubscriptionExpirationMinutes { get; set; } = 4230;
-
-    // ---------- H14c Dataverse service-endpoint webhooks ----------
-
-    /// <summary>
-    /// Timeout for a single Dataverse Web API call (list/create/patch
-    /// serviceendpoint). Defaults to 30 seconds — parity with
-    /// <see cref="DataverseAppUserGraphParity.H10DataverseAppUserGraphParityOptions"/>.
-    /// </summary>
-    public TimeSpan DataverseRequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
-
-    /// <summary>
-    /// Dataverse <c>serviceendpoint.contract</c> option-set value to use when
-    /// creating the webhook-shaped service endpoint. Exposed as a
-    /// configuration knob (rather than a hardcoded magic number) because the
-    /// exact numeric value is environment/SDK-version sensitive and this
-    /// path is NOT exercised by the CI unit suite (real Dataverse Web API
-    /// call — parity with every other H-series live-REST collaborator).
-    /// Default 8 matches the Microsoft Dataverse SDK's documented
-    /// <c>ServiceEndpoint.Contract</c> "WebHook" enum member as of the last
-    /// verified check (2026-08) — RECONFIRM against the target environment's
-    /// <c>serviceendpoint</c> entity metadata before a production customer
-    /// stamp (H0 preflight / operator runbook item).
-    /// </summary>
-    public int ServiceEndpointContractValue { get; set; } = 8;
-
-    /// <summary>
-    /// Dataverse <c>serviceendpoint.messageformat</c> option-set value.
-    /// Default 2 (JSON) per Microsoft Dataverse SDK documentation as of the
-    /// last verified check (2026-08). Same RECONFIRM caveat as
-    /// <see cref="ServiceEndpointContractValue"/>.
-    /// </summary>
-    public int ServiceEndpointMessageFormatValue { get; set; } = 2;
-
-    /// <summary>
-    /// Dataverse <c>serviceendpoint.authtype</c> option-set value. Default 5
-    /// ("None" — the HMAC signing key travels as a custom header the
-    /// receiving BFF endpoint verifies, not via the serviceendpoint's own
-    /// SAS-key auth path) per the same RECONFIRM caveat.
-    /// </summary>
-    public int ServiceEndpointAuthTypeValue { get; set; } = 5;
-
     // ---------- KV reader (task 160, SecretClientKvReader) ----------
 
     /// <summary>
@@ -149,8 +85,7 @@ public sealed class IntegrationWiringOptions
     /// <c>SecretClient.GetSecretAsync</c> call issued by
     /// <see cref="SecretClientKvReader"/> (task 160, Wave G-6 — SDK port
     /// replacing <see cref="AzCliKvSecretReader"/>'s `az keyvault secret
-    /// show` shell-out). Defaults to 30 seconds — parity with
-    /// <see cref="GraphRequestTimeout"/> / <see cref="DataverseRequestTimeout"/>.
+    /// show` shell-out). Defaults to 30 seconds.
     /// </summary>
     public TimeSpan KvReadTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -224,19 +159,14 @@ public sealed class IntegrationWiringOptions
     /// registration (task 160, NFR-05 parity with
     /// <c>RuntimeReferencesOptions.Validate</c> / <c>AppConfigSeedOptions.Validate</c>).
     /// Throws <see cref="InvalidOperationException"/> on an invalid value so
-    /// a misconfigured Worker fails fast at boot rather than on H14b/H14c/H14a's
+    /// a misconfigured Worker fails fast at boot rather than on H14a's
     /// first dispatch.
     ///
     /// Scoped to: <see cref="KvReadTimeout"/> (task 160) + the four bounded
     /// sidecar fields (task 161: <see cref="SidecarBaseUrl"/> absolute-URI,
     /// <see cref="SidecarRequestTimeout"/> + <see cref="SidecarTransientRetryDelay"/>
     /// numeric bounds, and the delay-must-fit-under-timeout invariant).
-    /// Deliberately does NOT retroactively validate the pre-existing
-    /// H14a/b/c fields (Graph* /
-    /// Dataverse* / ServiceEndpoint*) — same rationale as task 160's
-    /// file-header note (widening the boot-time gate to fields this wave's
-    /// tasks don't own would be unreviewed scope creep). Also
-    /// deliberately leaves <see cref="SidecarSharedSecretVaultName"/> /
+    /// Deliberately leaves <see cref="SidecarSharedSecretVaultName"/> /
     /// <see cref="SidecarSharedSecretSubscriptionId"/> /
     /// <see cref="SidecarSharedSecretName"/> unvalidated at boot — empty
     /// values are legitimate in CI/dev where H14a is never dispatched; the

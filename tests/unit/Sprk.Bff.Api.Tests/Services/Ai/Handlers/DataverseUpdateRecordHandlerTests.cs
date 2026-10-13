@@ -156,13 +156,45 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
             [("sprk_regardingevent", "sprk_event", Event), ("sprk_regardingmatter", "sprk_matter", MatterA)],
             pairId: Event.ToString());
 
-    private void SetupEventMetadata() =>
+    private void SetupEventMetadata()
+    {
         _dataverse
             .Setup(d => d.GetAsync(
                 It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_event')?$select=EntitySetName")),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(
                 """{ "EntitySetName": "sprk_events", "PrimaryIdAttribute": "sprk_eventid" }""")));
+
+        // The event as the caller reads it before an update that sets its pair (the pair rule: a pair id moved onto a
+        // regarding lookup the row keeps names a record already bound — here the invoice).
+        _dataverse
+            .Setup(d => d.GetAsync($"sprk_events({Event:D})", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""
+                {
+                  "sprk_eventid": "{{Event:D}}",
+                  "sprk_regardingrecordid": "{{Communication:D}}",
+                  "_sprk_regardingcommunication_value": "{{Communication:D}}",
+                  "_sprk_regardinginvoice_value": "{{Invoice:D}}",
+                  "_sprk_regardingmatter_value": "{{MatterA:D}}"
+                }
+                """)));
+
+        // The record the untyped pair is moved onto (the invoice lookup the row keeps) costs AppendTo AS THE CALLER, asked
+        // before anything is read about it app-only.
+        _dataverse
+            .Setup(d => d.GetAsync(
+                It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_invoice')?$select=EntitySetName")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "EntitySetName": "sprk_invoices" }""")));
+        _dataverse
+            .Setup(d => d.GetAsync("WhoAmI()", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""{ "UserId": "{{Guid.NewGuid():D}}" }""")));
+        _dataverse
+            .Setup(d => d.GetAsync(
+                It.Is<string>(p => p.Contains("RetrievePrincipalAccess") && p.Contains("sprk_invoices") && p.Contains(Invoice.ToString("D"))),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "AccessRights": "ReadAccess, AppendToAccess" }""")));
+    }
 
     private static string MoveThePairToTheInvoice() => $$$"""
         {"tablename":"sprk_event","recordId":"{{{Event:D}}}","item":{"sprk_regardingrecordid":"{{{Invoice:D}}}"}}
@@ -305,7 +337,7 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
     public async Task ExecuteChatAsync_UsersUpdateRefused_RestampsNothing()
     {
         SeedEventWithTwoSources();
-        NSubstitute.SubstituteExtensions.ClearReceivedCalls(_world.Service);
+        Mock.Get(_world.Service).Invocations.Clear();
         SetupEventMetadata();
         _dataverse
             .Setup(d => d.PatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -317,7 +349,7 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(DataverseUserClientErrorCodes.AccessDenied);
-        NSubstitute.SubstituteExtensions.ReceivedCalls(_world.Service).Should().BeEmpty("the re-stamp runs only after the caller's own update succeeded");
+        Mock.Get(_world.Service).Invocations.Should().BeEmpty("the re-stamp runs only after the caller's own update succeeded");
         _world.Lookup("sprk_todo", TodoUnderEvent, "sprk_regardingmatter").Should().Be(MatterA);
     }
 
@@ -335,7 +367,7 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildUpdateTool(), CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        NSubstitute.SubstituteExtensions.ReceivedCalls(_world.Service).Should().BeEmpty("a write that cannot move a stamp costs nothing");
+        Mock.Get(_world.Service).Invocations.Should().BeEmpty("a write that cannot move a stamp costs nothing");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

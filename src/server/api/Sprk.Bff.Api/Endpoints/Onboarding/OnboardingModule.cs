@@ -23,6 +23,13 @@ namespace Sprk.Bff.Api.Endpoints.Onboarding;
 /// </para>
 ///
 /// <para>
+/// Gate (task 258): everything above applies only when <c>Onboarding:Enabled</c>
+/// is true (<see cref="OnboardingOptions.Enabled"/>, default false). No customer
+/// stamp enables it — the Model 2 consent callback cannot be served by a stamp —
+/// so a stamp neither maps the anonymous route nor needs the signing key.
+/// </para>
+///
+/// <para>
 /// Placement Justification (CLAUDE.md §10): the Onboarding folder is a
 /// NEW top-level Endpoints/ folder (per ADR-010 endpoint organization).
 /// Additions strictly bounded per spec.md ADR-010 row: single endpoint +
@@ -47,6 +54,14 @@ public static class OnboardingModule
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(environment);
+
+        // Task 258: off unless Onboarding:Enabled — no customer stamp can serve the Model 2 consent
+        // callback (see OnboardingOptions.Enabled). Off: nothing registered, the route is not mapped
+        // (EndpointMappingExtensions checks IsEnabled too), and the signing key is demanded by nobody.
+        if (!IsEnabled(configuration))
+        {
+            return services;
+        }
 
         services
             .AddOptions<OnboardingOptions>()
@@ -78,5 +93,15 @@ public static class OnboardingModule
         services.AddSingleton<IProvisioningEnqueuer, ServiceBusProvisioningEnqueuer>();
 
         return services;
+    }
+
+    /// <summary>
+    /// True when <c>Onboarding:Enabled</c> is set — the one gate for both the registrations above and the
+    /// route mapping (<c>EndpointMappingExtensions</c>), so the two cannot disagree.
+    /// </summary>
+    public static bool IsEnabled(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        return configuration.GetValue<bool>(OnboardingOptions.EnabledConfigKey);
     }
 }

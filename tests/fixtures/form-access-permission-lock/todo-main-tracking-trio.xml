@@ -1,0 +1,45 @@
+<form>
+  <tabs>
+    <tab name="general" id="{11111111-0000-0000-0000-000000000001}" IsUserDefined="0" visible="true">
+      <labels><label description="General" languagecode="1033" /></labels>
+      <columns>
+        <column width="100%">
+          <sections>
+            <section name="tracking" id="{11111111-0000-0000-0000-000000000002}" IsUserDefined="0" showlabel="false" columns="1">
+              <labels><label description="Tracking" languagecode="1033" /></labels>
+              <rows>
+                <row>
+                  <cell id="{11111111-0000-0000-0000-000000000003}" showlabel="false">
+                    <labels><label description="Monitor" languagecode="1033" /></labels>
+                    <control id="sprk_monitor" classid="{67FAC785-CD58-4F9F-ABB3-4B7DDC6ED5ED}" datafieldname="sprk_monitor" uniqueid="{11111111-0000-0000-0000-000000000004}" />
+                  </cell>
+                </row>
+              </rows>
+            </section>
+          </sections>
+        </column>
+      </columns>
+    </tab>
+  </tabs>
+  <controlDescriptions>
+    <controlDescription forControl="{11111111-0000-0000-0000-000000000004}">
+      <customControl formFactor="0" name="sprk_Spaarke.Controls.TrackingFieldTrio">
+        <parameters>
+          <monitor type="TwoOptions">sprk_monitor</monitor>
+          <accessPermission type="OptionSet">sprk_accesspermission</accessPermission>
+          <title type="SingleLine.Text" static="true">TRACKING</title>
+        </parameters>
+      </customControl>
+    </controlDescription>
+  </controlDescriptions>
+  <events>
+    <event name="onload" application="false" active="false">
+      <Handlers>
+        <Handler functionName="Spaarke.SmartTodo.RegardingPreSave.onLoad" libraryName="sprk_todo_regarding_presave" handlerUniqueId="{11111111-0000-0000-0000-000000000005}" enabled="true" parameters="" passExecutionContext="true" />
+      </Handlers>
+    </event>
+  </events>
+  <formLibraries>
+    <Library name="sprk_todo_regarding_presave" libraryUniqueId="{11111111-0000-0000-0000-000000000006}" />
+  </formLibraries>
+</form>

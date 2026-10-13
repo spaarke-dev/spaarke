@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
@@ -336,8 +337,41 @@ public sealed class EmailDraftToolHandler : IToolHandler
             // filed against an invoice would otherwise carry no matter stamp and be invisible to everyone
             // whose access comes from that matter.
             IReadOnlyList<Sprk.Bff.Api.Services.Dataverse.CoreAncestorStamp> ancestorStamps = [];
+            int? inheritedAccessPermission = null;
+            Guid? caller = null;
             if (args.RegardingTable is not null && args.RegardingRecordId is { } ancestorTargetId)
             {
+                // AS THE CALLER first: AppendTo on the regarding record — the right filing the draft under it costs — BEFORE
+                // its ancestry is derived. The derivation reads that record app-only, so its own answers ("could not be
+                // resolved" for a missing record, a stamp for an existing one) would otherwise tell a caller who may not
+                // file under it that it exists. A missing record, one they cannot see and one they may not append to are
+                // the same denial.
+                var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
+                if (me.Failure is { } whoAmIFailure)
+                {
+                    return LogOutcome(context, args, MapClientError(tool, whoAmIFailure, startedAt), stopwatch);
+                }
+
+                caller = me.SystemUserId;
+                var regardingAccess = await OwnedChildWrite.CheckCallerMayAppendToRecordAsync(
+                    _dataverse, me.SystemUserId, args.RegardingTable, ancestorTargetId, cancellationToken).ConfigureAwait(false);
+                if (regardingAccess.ClientFailure is { } accessFailure)
+                {
+                    return LogOutcome(context, args, MapClientError(tool, accessFailure, startedAt), stopwatch);
+                }
+
+                if (regardingAccess.Invalid is { } regardingInvalid)
+                {
+                    return LogOutcome(context, args,
+                        Error(tool, regardingInvalid, ToolErrorCodes.ValidationFailed, startedAt), stopwatch);
+                }
+
+                if (regardingAccess.Denied is { } regardingDenied)
+                {
+                    return LogOutcome(context, args,
+                        Error(tool, regardingDenied, DataverseUserClientErrorCodes.AccessDenied, startedAt), stopwatch);
+                }
+
                 var ancestors = await _coreAncestors
                     .DeriveForHostAsync(CommunicationTable, args.RegardingTable, ancestorTargetId, cancellationToken)
                     .ConfigureAwait(false);
@@ -354,6 +388,8 @@ public sealed class EmailDraftToolHandler : IToolHandler
                 }
 
                 ancestorStamps = ancestors.Stamps;
+                // Task 173 (owner round 81): the Access Permission the draft takes from what it is filed under.
+                inheritedAccessPermission = ancestors.InheritedAccessPermission;
             }
 
             // Task 146 r2 (S1 / G5): a draft FILED under a project, matter or work assignment — its regarding, or the
@@ -362,18 +398,23 @@ public sealed class EmailDraftToolHandler : IToolHandler
             Guid? sender = null;
             if (IsFiledUnderAnOwnershipParent(args, ancestorStamps))
             {
-                var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
-                if (me.Failure is { } whoAmIFailure)
+                if (caller is null)
                 {
-                    return LogOutcome(context, args, MapClientError(tool, whoAmIFailure, startedAt), stopwatch);
+                    var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
+                    if (me.Failure is { } whoAmIFailure)
+                    {
+                        return LogOutcome(context, args, MapClientError(tool, whoAmIFailure, startedAt), stopwatch);
+                    }
+
+                    caller = me.SystemUserId;
                 }
 
-                sender = me.SystemUserId;
+                sender = caller;
             }
 
             // Build the record ITEM server-side (Communication-service column contract).
             // DRAFT-ONLY: statuscode/statecode are pinned constants — never model-supplied.
-            var item = BuildCommunicationItem(args, context, ancestorStamps, sender);
+            var item = BuildCommunicationItem(args, context, ancestorStamps, sender, inheritedAccessPermission);
 
             // Reuse the task-009 write mapper: metadata-driven lookup navigation-property
             // resolution for the regarding association, OData-annotation smuggling blocked.
@@ -408,6 +449,11 @@ public sealed class EmailDraftToolHandler : IToolHandler
                 if (owned.Denied is { } denied)
                 {
                     return LogOutcome(context, args, Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt), stopwatch);
+                }
+
+                if (owned.Invalid is { } invalid)
+                {
+                    return LogOutcome(context, args, Error(tool, invalid, ToolErrorCodes.ValidationFailed, startedAt), stopwatch);
                 }
 
                 if (owned.CreatedId is not { } ownedId)
@@ -925,7 +971,8 @@ public sealed class EmailDraftToolHandler : IToolHandler
         EmailDraftArgs args,
         ChatInvocationContext context,
         IReadOnlyList<Sprk.Bff.Api.Services.Dataverse.CoreAncestorStamp> ancestorStamps,
-        Guid? sender = null)
+        Guid? sender = null,
+        int? accessPermission = null)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -984,6 +1031,13 @@ public sealed class EmailDraftToolHandler : IToolHandler
                     writer.WriteString("relatedTable", stamp.EntityType);
                     writer.WriteString("recordId", stamp.RecordId.ToString("D"));
                     writer.WriteEndObject();
+                }
+
+                // Task 173 (owner round 81): written only when the regarding gives one — a parentless draft keeps the
+                // column's default (its own value).
+                if (accessPermission is { } level)
+                {
+                    writer.WriteNumber("sprk_accesspermission", level);
                 }
             }
 

@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
@@ -179,7 +180,7 @@ public class SpeRevokeMatcherTests
         public Mock<SpeContainerMembershipService> Build(SpeContainerMembershipResult result)
         {
             var mock = new Mock<SpeContainerMembershipService>(
-                Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
+                TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
 
             mock.Setup(s => s.RevokeMembershipAsync(
                     It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -821,7 +822,7 @@ public class SpeRevokeMatcherTests
         public Mock<SpeContainerMembershipService> Build()
         {
             var mock = new Mock<SpeContainerMembershipService>(
-                Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
+                TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
 
             mock.Setup(s => s.RevokeMembershipAsync(
                     It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -1224,7 +1225,7 @@ public class SpeRevokeMatcherTests
         var factory = new Mock<IGraphClientFactory>();
         factory.Setup(f => f.ForApp()).Throws(failure);
         return new SpeContainerMembershipService(
-            factory.Object, NullLogger<SpeContainerMembershipService>.Instance);
+            TestSpeOwnership.AllowAll(factory.Object), NullLogger<SpeContainerMembershipService>.Instance);
     }
 
     /// <summary>

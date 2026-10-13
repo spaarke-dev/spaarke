@@ -496,6 +496,15 @@ if ($nodesMissingActionCode.Count -gt 0) {
 }
 Write-Host "  Lint B  : ✅ all dispatchable nodes have actionCode wiring (DeliverComposite nodes exempt)" -ForegroundColor Green
 
+# ===========================================================================
+# Lint C: FetchXML list shape + canvas stubs (ISS-018, #1452, owner decision D-77)
+# ===========================================================================
+# Runs the BFF's own FetchXmlShapeValidator (compiled from source with Add-Type) on every fetchXml in the
+# definition: `operator="in" value="{{joinIds …}}"` is refused (Dataverse ignores the value attribute of a list
+# operator and the query fails for every user); a canvas-stub node config is refused.
+. (Join-Path $PSScriptRoot 'common\Assert-PlaybookFetchXmlShape.ps1')
+Assert-PlaybookFetchXmlShape -Definition $definition -Source $DefinitionFile
+
 $playbookName = $definition.playbook.name
 $playbookDescription = if ($definition.playbook.description) { $definition.playbook.description } else { '' }
 $playbookIsPublic = if ($null -ne $definition.playbook.isPublic) { $definition.playbook.isPublic } else { $true }

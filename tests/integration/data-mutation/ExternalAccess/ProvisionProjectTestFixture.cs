@@ -190,6 +190,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// </summary>
     public Dictionary<Guid, (bool? IsDisabled, bool IsApplicationUser)> SystemUsers { get; } = new();
 
+    /// <summary>Task 114: users whose <c>sprk_isexternal</c> reads true (every other listed user reads blank).</summary>
+    public HashSet<Guid> ExternalUsers { get; } = new();
+
+    /// <summary>Task 114: records whose <c>sprk_accesspermission</c> reads Restricted (100000002).</summary>
+    public HashSet<Guid> RestrictedRecords { get; } = new();
+
     /// <summary>When false, a systemuser read by id throws (task 133: an unreadable createdby).</summary>
     public bool SystemUserByIdReadSucceeds { get; set; } = true;
 
@@ -319,6 +325,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     /// <summary>When false, the delegation probe reports Read only — the caller lacks Write (task 144).</summary>
     public bool CallerHoldsWrite { get; set; } = true;
+
+    /// <summary>
+    /// Task 179 (owner round 89): when false, the probe reports no Share — a role that grants Write but not the table's
+    /// Share privilege. True by default, because a caller who manages access (Make Secure, Remove Secure) now holds both.
+    /// </summary>
+    public bool CallerHoldsShare { get; set; } = true;
 
     /// <summary>
     /// When true, the caller's rights include Delete on every record, WHOEVER owns it — a Full Access holder, or an
@@ -475,6 +487,30 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// real behaviour for an unrecognised <c>@odata.bind</c> property.
     /// </summary>
     public bool OwnershipPatchIsApplied { get; set; } = true;
+
+    /// <summary>
+    /// Task 175 fix round 2 (K2): what the column metadata says about <c>sprk_accessinheritance</c>'s field security (both
+    /// tables). False: the cascade trusts no access record.
+    /// </summary>
+    public bool AccessRecordColumnSecured { get; set; } = true;
+
+    /// <summary>
+    /// Task 175 fix round 2 (F1): whether the BFF application user holds READ on <c>sprk_accessinheritance</c> through a field
+    /// security profile (the platform answer the cascade asks before writing over an EMPTY read). Also false whenever the
+    /// child world hides the column (an FLS read loss).
+    /// </summary>
+    public bool AccessRecordReadableByProfile { get; set; } = true;
+
+    /// <summary>Task 175 fix round 3 (F-a): the tables the BFF's profile grants Read on (when <see cref="AccessRecordReadableByProfile"/>).</summary>
+    public HashSet<string> AccessRecordReadTables { get; } = new(StringComparer.OrdinalIgnoreCase) { "sprk_workassignment", "sprk_project" };
+
+    private static readonly Guid BffWriterProfileId = Guid.Parse("0000b175-0000-0000-0000-0000000f1e1d");
+
+    /// <summary>Task 175 fix round 2: the BFF application user holds the System Administrator role.</summary>
+    public bool BffIsSystemAdministrator { get; set; }
+
+    /// <summary>The BFF application user's systemuserid in this fixture.</summary>
+    public static readonly Guid BffApplicationUserId = Guid.Parse("0000b175-0000-0000-0000-00000000bff1");
 
     // ── Task 133 c1 (owner round 10 item 4): the rows an owner move of a root cascades to ──
 
@@ -674,6 +710,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         ContainerClearSucceeds = true;
         CreatorPersonReadFailsWith = null;
         OwnershipPatchIsApplied = true;
+        AccessRecordColumnSecured = true;
+        AccessRecordReadableByProfile = true;
+        AccessRecordReadTables.Clear();
+        AccessRecordReadTables.Add("sprk_workassignment");
+        AccessRecordReadTables.Add("sprk_project");
+        BffIsSystemAdministrator = false;
         OwnershipPatchTimesOutAfterApplying = false;
         _updateSequence = 0;
         Grants.Clear();
@@ -691,6 +733,8 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         OwnerReadBackFails = false;
         SystemUsers.Clear();
         SystemUsers[CallerSystemUserId] = (false, false);
+        ExternalUsers.Clear();
+        RestrictedRecords.Clear();
         SystemUserByIdReadSucceeds = true;
         SystemUserReadFailsFor = null;
         SystemUserReadFailsWith = null;
@@ -717,6 +761,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         Queries.Clear();
         CallerSystemUserIdResolves = true;
         CallerHoldsWrite = true;
+        CallerHoldsShare = true;
         CallerHoldsDelete = false;
         CallerDeletesWhatTheyOwn = false;
         FullAccessProbeThrows = false;
@@ -1226,6 +1271,31 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
 
         var payload = new List<Dictionary<string, object?>>();
 
+        // Task 175 fix round 2: the access record's trust checks (K2 column metadata; F1 the BFF's own read of it).
+        if (entitySet.StartsWith("EntityDefinitions(", StringComparison.Ordinal) && entitySet.EndsWith("/Attributes", StringComparison.Ordinal))
+            return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["IsSecured"] = AccessRecordColumnSecured } });
+        if (entitySet == "systemusers" && filter is not null && filter.Contains("EqualUserId", StringComparison.Ordinal))
+            return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["systemuserid"] = BffApplicationUserId } });
+        if (entitySet == $"systemusers({BffApplicationUserId})/systemuserroles_association")
+        {
+            return JsonSerializer.Serialize(BffIsSystemAdministrator
+                ? new[] { new Dictionary<string, object?> { ["roleid"] = Guid.Parse("0000b175-0000-0000-0000-0000000005a1") } }
+                : Array.Empty<Dictionary<string, object?>>());
+        }
+        if (entitySet == $"systemusers({BffApplicationUserId})/systemuserprofiles_association")
+            return JsonSerializer.Serialize(new[] { new Dictionary<string, object?> { ["fieldsecurityprofileid"] = BffWriterProfileId } });
+        if (entitySet == "fieldpermissions")
+        {
+            // Honours the filter (fix round 3): the column, Read, and the BFF's own profile must all be asked for.
+            var asked = filter is not null
+                        && filter.Contains("attributelogicalname eq 'sprk_accessinheritance'", StringComparison.Ordinal)
+                        && filter.Contains("canread eq 4", StringComparison.Ordinal)
+                        && filter.Contains($"_fieldsecurityprofileid_value eq {BffWriterProfileId}", StringComparison.OrdinalIgnoreCase);
+            return JsonSerializer.Serialize(asked && AccessRecordReadableByProfile && !ChildWorld.HidesAccessRecords
+                ? AccessRecordReadTables.Select(t => new Dictionary<string, object?> { ["entityname"] = t }).ToArray()
+                : Array.Empty<Dictionary<string, object?>>());
+        }
+
         switch (entitySet)
         {
             case ProjectEntitySet:
@@ -1288,6 +1358,9 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                         [nameColumn] = displayName,
                         ["sprk_issecure"] = SecureFlagReadsEmpty ? null : seeded.IsSecure
                     };
+
+                    if (RestrictedRecords.Contains(seeded.Id))
+                        row["sprk_accesspermission"] = 100000002;
 
                     if (seeded.LegacySecurityBuId is { } legacy)
                         row["_sprk_securitybu_value"] = legacy;
@@ -1474,7 +1547,8 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                     {
                         ["systemuserid"] = userId,
                         ["isdisabled"] = isDisabled,
-                        ["applicationid"] = isApplicationUser ? Guid.Parse("a0000000-0000-0000-0000-0000000000a9") : null
+                        ["applicationid"] = isApplicationUser ? Guid.Parse("a0000000-0000-0000-0000-0000000000a9") : null,
+                        ["sprk_isexternal"] = ExternalUsers.Contains(userId) ? true : null
                     });
                 }
                 break;
@@ -1576,7 +1650,8 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     }
 
     /// <summary>
-    /// The delegation probe: Write unless <see cref="CallerHoldsWrite"/> is off, and a record of every record it was
+    /// The delegation probe: Write unless <see cref="CallerHoldsWrite"/> is off, Share unless <see cref="CallerHoldsShare"/>
+    /// is off (task 179), and a record of every record it was
     /// asked about — so a test can prove the filter authorized the SAME record the handler re-owned (task 144).
     /// </summary>
     private sealed class RecordingCallerRecordAccessProbe : CallerRecordAccessProbe
@@ -1603,6 +1678,8 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             var rights = _fixture.CallerHoldsWrite
                 ? AccessRights.Read | AccessRights.Write
                 : AccessRights.Read;
+            if (_fixture.CallerHoldsShare)
+                rights |= AccessRights.Share;
 
             // Delete by a role (whoever owns the record), or by ownership (only while the caller owns it — read now).
             var deletes = _fixture.CallerHoldsDelete

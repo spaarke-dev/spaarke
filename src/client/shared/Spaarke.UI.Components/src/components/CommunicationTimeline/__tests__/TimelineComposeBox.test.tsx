@@ -13,6 +13,8 @@ import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-com
 import { TimelineComposeBox } from '../subcomponents/TimelineComposeBox';
 import type { ITimelineSendPayload } from '../subcomponents/TimelineComposeBox';
 import type { ILookupItem } from '../../../types/LookupTypes';
+import { sendCommunication } from '../../../services/communicationApi';
+import { apiErrorFor } from '../../../__tests__/helpers/authenticatedFetchDouble';
 
 function renderBox(
   overrides?: Partial<React.ComponentProps<typeof TimelineComposeBox>>,
@@ -132,6 +134,31 @@ describe('TimelineComposeBox — resolved vs free-text recipients feed onSend (F
     const payload = onSend.mock.calls[0][0] as ITimelineSendPayload;
     expect(payload.cc).toEqual(['cc-person@example.com']);
     expect(payload.bcc).toBeUndefined();
+  });
+});
+
+describe('TimelineComposeBox — a refused send shows the server sentence', () => {
+  it('shows the ProblemDetails detail when the send is refused (authenticatedFetch THROWS ApiError)', async () => {
+    // The production chain: the host's onSend calls sendCommunication through @spaarke/auth's
+    // authenticatedFetch, which throws ApiError for a non-2xx; sendCommunication turns it into a
+    // SendCommunicationError whose `detail` is what the user should read.
+    const authenticatedFetch = jest
+      .fn()
+      .mockRejectedValue(apiErrorFor(422, { title: 'Refused', status: 422, detail: 'This conversation is closed.' }));
+    const onSend = (p: ITimelineSendPayload) =>
+      sendCommunication({ to: p.to, subject: p.subject, body: p.body }, { authenticatedFetch }).then(() => undefined);
+    renderBox({ onSend });
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'To' }), { target: { value: 'alice@example.com' } });
+    fireEvent.blur(screen.getByRole('textbox', { name: 'To' }));
+    fireEvent.change(screen.getByPlaceholderText('Subject'), { target: { value: 'Status update' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to plain text' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message body' }), { target: { value: 'FYI.' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText('This conversation is closed.')).toBeInTheDocument();
+    expect(screen.queryByText(/sendCommunication failed/)).not.toBeInTheDocument();
   });
 });
 

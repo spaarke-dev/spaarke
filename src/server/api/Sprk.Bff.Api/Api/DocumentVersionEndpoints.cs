@@ -175,9 +175,24 @@ public static class DocumentVersionEndpoints
 
             try
             {
+                // F4 (task 171 attach-fix PR): Graph refuses the CURRENT version's content through the versions API (400
+                // "You cannot get the content of the current version"), and a fresh file lists ONLY its current version —
+                // so opening it from the versions list was a 500. Decide "current" from the versions list (its newest
+                // entry, the same reading Compose uses) BEFORE calling Graph, and serve the current bytes through the same
+                // app-only download /content uses: the same gate and pointer check already ran, so these are bytes the
+                // caller may already read. A current version can only ever become a PRIOR one, never the reverse, so a
+                // version that was prior at this check is still downloadable below.
+                var currentVersionId = await GraphCallScope.Run(
+                    () => speFileStore.GetCurrentVersionIdAsync(driveId, itemId, ct),
+                    "versions.current");
+                var isCurrent = currentVersionId is not null
+                    && string.Equals(currentVersionId, versionId.Trim(), StringComparison.Ordinal);
+
                 var stream = await GraphCallScope.Run(
-                    () => speFileStore.DownloadFileVersionAsync(driveId, itemId, versionId, ct),
-                    "versions.download");
+                    () => isCurrent
+                        ? speFileStore.DownloadFileAsync(driveId, itemId, ct)
+                        : speFileStore.DownloadFileVersionAsync(driveId, itemId, versionId, ct),
+                    isCurrent ? "versions.download.current" : "versions.download");
 
                 return stream == null
                     ? TypedResults.NotFound()

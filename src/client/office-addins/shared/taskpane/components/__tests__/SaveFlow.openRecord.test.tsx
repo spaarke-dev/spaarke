@@ -3,8 +3,10 @@
  * seam, the Document-record affordance, capability gating (NFR-10), and the focus/visibility
  * return-path re-read (Spike-2 §d).
  *
- * Task 088 (UAT-7): the Document-record affordance is now the footer's "Open Document" button (left of
- * Save) — formerly a subtle "Open document record" link in the Profile section. Same launcher, same gate.
+ * Task 088 (UAT-7): the Document-record affordance was the footer's "Open Document" button (left of
+ * Save) — formerly a subtle "Open document record" link in the Profile section. Task 111 (owner UAT round 11
+ * item 6): for a document already in Spaarke the green box's "View Document" is that affordance and the footer
+ * button is gone. Same launcher, same gate.
  *
  * Kept in a SEPARATE file from `SaveFlow.test.tsx` (which pre-dates task 027 and already carries
  * unrelated typecheck errors in its fixtures — the 2026-09-09 "consciously accepted" test-file
@@ -150,7 +152,8 @@ describe('SaveFlow — task 027 / FR-10 open-record wiring', () => {
       );
 
       expect(screen.getByRole('button', { name: /open.*gamma merger/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Open Document' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'View Document' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Open Document' })).not.toBeInTheDocument();
     });
   });
 
@@ -197,7 +200,7 @@ describe('SaveFlow — task 027 / FR-10 open-record wiring', () => {
         </TestWrapper>
       );
 
-      await user.click(screen.getByRole('button', { name: 'Open Document' }));
+      await user.click(screen.getByRole('button', { name: 'View Document' }));
 
       expect(mockOpenRecord).toHaveBeenCalledTimes(1);
       expect(mockOpenRecord).toHaveBeenCalledWith({
@@ -251,7 +254,7 @@ describe('SaveFlow — task 027 / FR-10 open-record wiring', () => {
         </TestWrapper>
       );
 
-      await user.click(screen.getByRole('button', { name: 'Open Document' }));
+      await user.click(screen.getByRole('button', { name: 'View Document' }));
 
       act(() => {
         window.dispatchEvent(new Event('focus'));

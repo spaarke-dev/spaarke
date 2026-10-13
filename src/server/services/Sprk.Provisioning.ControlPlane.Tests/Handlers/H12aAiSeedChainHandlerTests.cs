@@ -33,7 +33,7 @@
 //   T9  Idempotency key format determinism: same customerId + manifestHash
 //       produce same key.
 //   T10 Manifest hash determinism: same bytes = same SHA-256 hex (verified
-//       against FileSeedManifestReader.ComputeSha256Hex directly).
+//       against EmbeddedSeedManifestReader.ComputeSha256Hex directly).
 //   T11 Manifest hash change forces re-seed: different bytes = different
 //       hash = different key = existing CompletedPhase does NOT match.
 //   T12 Runner throws (infrastructure fault): Failure(QuarantineRequired,
@@ -284,13 +284,45 @@ public sealed class H12aAiSeedChainHandlerTests
         var bytes2 = System.Text.Encoding.UTF8.GetBytes("schemaVersion: 1\nartifacts: []\n");
         var bytes3 = System.Text.Encoding.UTF8.GetBytes("schemaVersion: 2\nartifacts: []\n");
 
-        var h1 = FileSeedManifestReader.ComputeSha256Hex(bytes1);
-        var h2 = FileSeedManifestReader.ComputeSha256Hex(bytes2);
-        var h3 = FileSeedManifestReader.ComputeSha256Hex(bytes3);
+        var h1 = EmbeddedSeedManifestReader.ComputeSha256Hex(bytes1);
+        var h2 = EmbeddedSeedManifestReader.ComputeSha256Hex(bytes2);
+        var h3 = EmbeddedSeedManifestReader.ComputeSha256Hex(bytes3);
 
         h1.Should().Be(h2, "identical bytes must hash identically");
         h1.Should().NotBe(h3, "different content must produce different hash");
         h1.Should().MatchRegex("^[0-9a-f]{64}$", "lowercase-hex SHA-256 is 64 chars");
+    }
+
+    // ---------- T10b the production reader serves the manifest built into the assembly (task 253, G38) ----------
+
+    [Fact]
+    public async Task EmbeddedSeedManifestReader_ServesTheBuiltInManifest_HashEqualsTheSourceFile()
+    {
+        // The Worker publish has no scripts/ folder: the reader takes no path and reads the embedded resource. Its
+        // hash equals the source file's, so H12a/H12b idempotency keys did not change with the move.
+        var reader = new EmbeddedSeedManifestReader(
+            Microsoft.Extensions.Options.Options.Create(new AiSeedChainOptions()),
+            NullLogger<EmbeddedSeedManifestReader>.Instance);
+
+        var result = await reader.ReadAsync(CancellationToken.None);
+
+        var success = result.Should().BeOfType<SeedManifestReadResult.Success>().Subject;
+        success.RetiredArtifactViolation.Should().BeNull("the shipped manifest declares no retired artifact");
+        var sourceFile = LocateRepoFile(Path.Combine("scripts", "seed-data", "manifest.yaml"));
+        success.ContentHash.Should().Be(EmbeddedSeedManifestReader.ComputeSha256Hex(File.ReadAllBytes(sourceFile)));
+    }
+
+    private static string LocateRepoFile(string relativePath)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, relativePath);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+        throw new FileNotFoundException($"Could not locate {relativePath} by walking up from {AppContext.BaseDirectory}.");
     }
 
     // ---------- T11 manifest hash change forces re-seed ----------

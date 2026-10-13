@@ -840,6 +840,10 @@ public class ChatContextAuthorizationContractTests
             builder.Services.AddSingleton(new Mock<IConversationHistorySanitizer>(MockBehavior.Loose).Object);
             builder.Services.AddSingleton(new CrossMatterSafetyTelemetry());
             builder.Services.AddSingleton(new AiTelemetry());
+            // Task 254: the stamp's optional spend limit — no limit configured (the default), as on most stamps.
+            builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Metering.IAiSpendLedger, Sprk.Bff.Api.Services.Ai.Metering.InMemoryAiSpendLedger>();
+            builder.Services.AddSingleton(TimeProvider.System);
+            builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimit>();
             builder.Services.AddSingleton(new Mock<ISessionRestoreService>(MockBehavior.Loose).Object);
             builder.Services.AddSingleton(new Mock<ISessionTraceReader>(MockBehavior.Loose).Object);
             builder.Services.AddSingleton((AssistantSuggestionService)RuntimeHelpers.GetUninitializedObject(typeof(AssistantSuggestionService)));

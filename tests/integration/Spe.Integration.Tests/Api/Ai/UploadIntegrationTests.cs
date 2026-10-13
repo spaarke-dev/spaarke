@@ -587,7 +587,8 @@ public class UploadTestFixture : IntegrationTestFixture
             {
                 ["SpeAdmin:KeyVaultUri"] = "https://test-keyvault.vault.azure.net/",
                 ["KeyVaultUri"] = "https://test-keyvault.vault.azure.net/",
-                ["SharePointEmbedded:StagingContainerId"] = "test-spe-container-001",
+                // Chat persistence writes to the stamp default container (task 227f retired the staging key).
+                ["EmailProcessing:DefaultContainerId"] = "test-spe-container-001",
             });
         });
 

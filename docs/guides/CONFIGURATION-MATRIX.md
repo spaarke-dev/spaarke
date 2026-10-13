@@ -77,7 +77,6 @@
 | `AllowedHosts` | (root) | `*` | appsettings | Host filtering |
 | `TENANT_ID` | (root) | -- | Env Var / appsettings | Azure AD Tenant ID |
 | `API_APP_ID` | (root) | -- | Env Var / appsettings | BFF API app registration client ID |
-| `DEFAULT_CT_ID` | (root) | -- | Env Var / appsettings | Default SPE container type ID |
 
 ### Azure AD / Authentication (`AzureAd`)
 
@@ -202,7 +201,7 @@ Options class: `AnalysisOptions` (`Configuration/AnalysisOptions.cs`)
 | `Analysis:PromptFlowKey` | -- | -- | Key Vault | Prompt Flow API key |
 | `Analysis:ExecuteFlowName` | `analysis-execute` | string | appsettings | Execute flow deployment name |
 | `Analysis:ContinueFlowName` | `analysis-continue` | string | appsettings | Continue flow deployment name |
-| `Analysis:DefaultRagModel` | `Shared` | Shared/Dedicated/CustomerOwned | appsettings | Default RAG deployment model |
+| `Analysis:DefaultRagModel` | `Shared` | Shared/Dedicated | appsettings | Default RAG deployment model. `CustomerOwned` was removed (task 230b) — any other value fails at startup |
 | `Analysis:SharedIndexName` | `spaarke-knowledge-index-v2` | string | appsettings | Shared RAG index name |
 | `Analysis:TenantFilterField` | `customerId` | string | appsettings | Tenant isolation field |
 | `Analysis:MaxKnowledgeResults` | `5` | 1-20 | appsettings | Knowledge results per query |
@@ -250,7 +249,8 @@ Options class: `EmailProcessingOptions` (`Configuration/EmailProcessingOptions.c
 | Setting | Default | Location | Description |
 |---------|---------|----------|-------------|
 | `Email:Enabled` | `true` | Env Var | Master switch |
-| `Email:DefaultContainerId` | -- | Env Var | SPE container ID for email docs |
+| `EmailProcessing:DefaultContainerId` | -- | App setting (stamps: H4b, from H8's container — T227c) | SPE container ID for email docs (`Email:DefaultContainerId` was never read) |
+| `SharePointEmbedded:OwnedContainerIds` | -- | App setting (operator; dev/demo only) | Comma-separated SPE containers this environment owns that predate the ownership marker (T227d). App-only SPE calls on any container that is neither configured nor marked `spaarkeCustomerId` = `Customer:Id` are refused (404 `spe_container_not_owned`). Stamps never set it. |
 | `Email:ProcessInbound` | `true` | appsettings | Process received emails |
 | `Email:ProcessOutbound` | `true` | appsettings | Process sent emails |
 | `Email:MaxAttachmentSizeMB` | `25` | appsettings | Max per-attachment size |
