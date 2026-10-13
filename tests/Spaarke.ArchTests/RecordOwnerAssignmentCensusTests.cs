@@ -481,8 +481,9 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("SecureChildReconciler.cs", "ReownOrdinaryRowAsync", 1, OwnerWriteKind.OrdinaryReown,
             "UAC task 183 (owner round 96, D-135 item 2): an ORDINARY sprk_decisionrecord or sprk_signal re-owned to the ordinary " +
             "team ontology task 148's job names (the To Do's assignee's team) — refused when the row's owner, its business unit " +
-            "or the team is in the Secure Record business unit, or the row is user-owned; through the pass's own write, evict " +
-            "and read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record."),
+            "or the team is in the Secure Record business unit, or the row is user-owned. The write is a conditional Web API PATCH " +
+            "(If-Match on the guard read's versionnumber; a 412 is Conflict, a 404 NotFound) that shares the pass's evict and " +
+            "read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record."),
         new OwnerWriteEntry("RecordCreationService.cs", "CreateMatterAsync", 1, OwnerWriteKind.Root,
             "Office quick-create of a MATTER (a root) — owned by the resolver's team for the acting user (task 080)."),
         new OwnerWriteEntry("RecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
