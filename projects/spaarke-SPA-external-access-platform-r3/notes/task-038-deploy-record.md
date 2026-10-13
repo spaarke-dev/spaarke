@@ -1,6 +1,6 @@
 # Task 038: R3 BFF deploy to dev (spaarke-bff-dev): plan and record
 
-> Status: **PLAN, awaiting owner approval** (2026-10-12). Nothing below has run against Azure yet.
+> Status: **Phase A done 2026-10-13; phase B HELD** (A5: dev runs another project's unmerged build). Phases A+B owner-approved 2026-10-13.
 > Owner said "ok" to dev dispatch on 2026-10-12, on condition that each command and its rollback are shown first.
 
 ## What gets deployed
@@ -72,4 +72,14 @@ Delta **+0.100 MB** (under the +5 MB trigger; total far under 55/60 MB). `dotnet
 
 ## Record
 
-(filled in after each phase runs)
+### Phase A, 2026-10-13 ~03:48 UTC (owner-approved "approve 038 A+B")
+
+| # | Result |
+|---|---|
+| A1 | Subscription "Spaarke Devlopment Environment", tenant `a221a95e...` |
+| A2 | `spaarke-bff-dev` Running, `DOTNETCORE\|10.0` |
+| A3 | `Ciam__Audience` `4a4d5126...`; `Ciam__TenantId` `7052feba...` differs from `AzureAd__TenantId` `a221a95e...`; customer tenant ids `a221a95e...`, `bc3aa7f4...`; `IdentityLink__Reconciliation__WritesEnabled` true; `ExternalAccess__PortalUrl`, `Customer__Id`, `Communication__DefaultMailbox` set; 2 approved senders (one default). Both partner flags MISSING = off (code: `ExternalAccessOptions.cs:28,40`, absent is false; only empty or non-boolean fails startup) |
+| A4 | Staging slot has no `Communication__*` settings. Not used by this direct deploy; a future swap to staging would need them first |
+| A5 | Kudu records no author (3 OneDeploy entries, latest 2026-10-13 00:59 UTC). The live DLL's version is `1.0.0+f9cc25f73`: **`work/spaarkeai-word-add-in-r1` task 129, NOT on master** (11 commits ahead of master; 11 files / +1620 lines in `src/server`; no open PR). **STOP condition met: deploying R3 overwrites that project's unmerged live build. Phase B held for owner decision** |
+| A6 | Rollback package `deploy/rollback/spaarke-bff-dev-wwwroot-20261013T034808Z.zip` (50.6 MB), expanded to `deploy/rollback/wwwroot-20261013T034808Z/` (222 files, 144.3 MB) |
+| A7 | `/healthz` 200, `/healthz/dataverse` 200 |
