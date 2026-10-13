@@ -1308,17 +1308,24 @@ public sealed class DecisionCommitServiceTests
     private static readonly Guid AssigneeUser = Guid.Parse("c0430000-0000-4000-8000-000000000091");
     private static readonly Guid OtherUser = Guid.Parse("c0430000-0000-4000-8000-000000000092");
     private static readonly Guid FilingMatter = Guid.Parse("c0430000-0000-4000-8000-000000000093");
+    private static readonly Guid FilingDocument = Guid.Parse("c0430000-0000-4000-8000-000000000096");
+    private static readonly Guid FilingServiceRequest = Guid.Parse("c0430000-0000-4000-8000-000000000095");
 
     /// <summary>The REAL resolver over: a personal To Do (user-owned, filed under nothing unless <paramref name="filed"/>) in the
     /// CHILD unit, so its own answer is ChildTeam; two users in the GENERAL unit (GeneralTeam). A no-core Signal about the To Do, whose
     /// Assigned To is <see cref="AssigneeContact"/> when <paramref name="assigned"/>. Which users link to that contact is per test.</summary>
-    private static Rig PersonalToDoRig(bool assigned = true, bool filed = false)
+    private static Rig PersonalToDoRig(bool assigned = true, bool filed = false, bool filedUnderServiceRequest = false, bool filedUnderDocument = false, bool assigneeHasBusinessUnit = true)
     {
-        var regarding = filed ? new Dictionary<string, object> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", FilingMatter) } : null;
+        var regarding = filed ? new Dictionary<string, object> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", FilingMatter) }
+            : filedUnderServiceRequest ? new Dictionary<string, object> { ["sprk_regardingservicerequest"] = new EntityReference("sprk_servicerequest", FilingServiceRequest) }
+            : filedUnderDocument ? new Dictionary<string, object> { ["sprk_regardingdocument"] = new EntityReference("sprk_document", FilingDocument) }
+            : null;
         var directory = Tests.TestInfrastructure.OwnershipDirectory.Standard()
-            .WithUser(AssigneeUser, Guid.NewGuid(), Tests.TestInfrastructure.OwnershipDirectory.GeneralBu)
+            .WithUser(AssigneeUser, Guid.NewGuid(), assigneeHasBusinessUnit ? Tests.TestInfrastructure.OwnershipDirectory.GeneralBu : Guid.Empty)
             .WithUser(OtherUser, Guid.NewGuid(), Tests.TestInfrastructure.OwnershipDirectory.GeneralBu)
             .WithOrdinaryRoot("sprk_matter", FilingMatter)
+            .WithOrdinaryRoot("sprk_servicerequest", FilingServiceRequest)
+            .WithRecord("sprk_document", FilingDocument, Tests.TestInfrastructure.OwnershipDirectory.ChildBu)
             .WithRecord("sprk_todo", ItemTodo, Tests.TestInfrastructure.OwnershipDirectory.ChildBu, extra: regarding);
         var rig = new Rig { RealResolver = directory.Resolver() };
         rig.AddSignal(DoSignal, DecisionLane.Do, null, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
@@ -1332,8 +1339,9 @@ public sealed class DecisionCommitServiceTests
         return rig;
     }
 
-    private static AssignedLinkCandidate LinkedTo(Guid user, bool disabled = false) =>
-        new(user, AssigneeContact, Guid.NewGuid(), IsDisabled: disabled, AccessMode: 0, ApplicationId: null, IsExternal: false);
+    private static AssignedLinkCandidate LinkedTo(
+        Guid user, bool disabled = false, Guid? applicationId = null, int accessMode = 0, bool external = false) =>
+        new(user, AssigneeContact, Guid.NewGuid(), IsDisabled: disabled, AccessMode: accessMode, ApplicationId: applicationId, IsExternal: external);
 
     [Fact]
     public async Task D134_APersonalToDo_WhoseAssignedToIsOneEnabledUserInAnotherUnit_IsOwnedByThatUnitsTeam()
@@ -1360,15 +1368,25 @@ public sealed class DecisionCommitServiceTests
     [InlineData("two-systemusers")]
     [InlineData("disabled-only")]
     [InlineData("todo-filed")]
+    [InlineData("todo-filed-under-service-request")]
+    [InlineData("todo-filed-under-non-core-parent")]
+    [InlineData("application-user-only")]
+    [InlineData("non-interactive-only")]
+    [InlineData("external-flagged-only")]
     public async Task D134_NoSingleEnabledAssignee_FallsBackToTheTodosOwnTeam(string fallback)
     {
-        var rig = PersonalToDoRig(assigned: fallback != "no-assigned-to", filed: fallback == "todo-filed");
+        var rig = PersonalToDoRig(assigned: fallback != "no-assigned-to", filed: fallback == "todo-filed",
+            filedUnderServiceRequest: fallback == "todo-filed-under-service-request",
+            filedUnderDocument: fallback == "todo-filed-under-non-core-parent");   // owner-confirmed K2: only a To Do filed under NOTHING is personal
         rig.Links.UsersByLink[AssigneeContact] = fallback switch
         {
             "no-systemuser" => [],
             "two-systemusers" => [LinkedTo(AssigneeUser), LinkedTo(OtherUser)],
             "disabled-only" => [LinkedTo(AssigneeUser, disabled: true)],
-            _ => [LinkedTo(AssigneeUser)],   // a To Do with no Assigned To, or one filed under a matter, never reaches its user
+            "application-user-only" => [LinkedTo(AssigneeUser, applicationId: Guid.NewGuid())],
+            "non-interactive-only" => [LinkedTo(AssigneeUser, accessMode: 4)],
+            "external-flagged-only" => [LinkedTo(AssigneeUser, external: true)],
+            _ => [LinkedTo(AssigneeUser)],   // a To Do with no Assigned To, or one filed under a matter or a service request, never reaches its user
         };
 
         var result = await rig.CommitAsync(MarkComplete(), DoSignal);
@@ -1377,6 +1395,67 @@ public sealed class DecisionCommitServiceTests
         rig.Record.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.ChildTeam,
             "no single enabled user: the parents' answer (the To Do's own unit's team, or for a filed To Do its matter's) stands");
         rig.OwnerAsks.Should().ContainSingle("the assignee's team is never asked for");
+    }
+
+    [Fact]
+    public async Task D134_APersonAndAnApplicationUserLinkedToTheSameContact_IsThePerson()
+    {
+        var rig = PersonalToDoRig();
+        rig.Links.UsersByLink[AssigneeContact] = [LinkedTo(AssigneeUser), LinkedTo(OtherUser, applicationId: Guid.NewGuid())];
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Record.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.GeneralTeam,
+            "an application user never counts toward \"exactly one\": the person is the assignee");
+        rig.OwnerAsks[1].CallerSystemUserId.Should().Be(AssigneeUser);
+    }
+
+    [Fact]
+    public async Task D134_TheAssigneesTeamRefused_AssigneeWithNoBusinessUnit_Is422_AndNothingIsWritten()
+    {
+        var rig = PersonalToDoRig(assigneeHasBusinessUnit: false);
+        rig.Links.UsersByLink[AssigneeContact] = [LinkedTo(AssigneeUser)];
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused, result.Detail);
+        rig.OwnerAsks.Should().HaveCount(2, "the parents' answer was ordinary; the ForUserTeam question is the one refused");
+        rig.Writes.Should().BeEmpty("refused before the first write");
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+        rig.Status(DoSignal).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task D134_AResolverFaultOnTheAssigneesTeam_Is503_AndNothingIsWritten()
+    {
+        var rig = PersonalToDoRig();
+        rig.Links.UsersByLink[AssigneeContact] = [LinkedTo(AssigneeUser)];
+        rig.RealResolver = new FaultsOnUserTeamQuestion(rig.RealResolver!);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, "a resolver fault is not a refusal");
+        result.ReasonCode.Should().Be(DecisionCommitReasons.ItemOwnerUnsupported);
+        rig.OwnerAsks.Should().HaveCount(2);
+        rig.Writes.Should().BeEmpty();
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+        rig.Status(DoSignal).Should().Be(Open);
+    }
+
+    /// <summary>The real resolver, except that the ForUserTeam question (no parents) throws instead of answering.</summary>
+    private sealed class FaultsOnUserTeamQuestion(IRecordOwnershipResolver inner) : IRecordOwnershipResolver
+    {
+        public Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct) =>
+            context.Parents.Count == 0 ? throw new TimeoutException("no answer") : inner.ResolveOwningTeamAsync(context, ct);
+
+        public Task<RecordOwnerResolution> ResolveOwnerAsync(RecordOwnershipContext context, CancellationToken ct) =>
+            context.Parents.Count == 0 ? throw new TimeoutException("no answer") : inner.ResolveOwnerAsync(context, ct);
+
+        public Task<RecordOwnerResolution> ReparentAsync(RecordReparent request, Func<CancellationToken, Task> applyChange, CancellationToken ct) =>
+            inner.ReparentAsync(request, applyChange, ct);
     }
 
     [Theory]

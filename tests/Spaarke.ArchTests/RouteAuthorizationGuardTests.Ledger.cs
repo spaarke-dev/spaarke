@@ -1606,15 +1606,15 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("POST /api/v1/signals/{signalId:guid}/decision", "CommitDecisionAsync", "IDataverseUserClient",
             new[] { "DecisionCommitService.CommitAsync", "SignalCoreRecordAccess.AuthorizeAsync" },
             "Ontology task 043: the handler calls DecisionCommitService.CommitAsync (DecisionCommitEndpoints.cs:56), whose first I/O is "
-            + "SignalCoreRecordAccess.AuthorizeAsync for every Signal in the review (DecisionCommitService.cs:430) -- the Signal and "
+            + "SignalCoreRecordAccess.AuthorizeAsync for every Signal in the review (DecisionCommitService.cs:434) -- the Signal and "
             + "its core record (or, no-core, its subject row) read AS THE CALLER through IDataverseUserClient; anything but Allowed returns before the review-id "
-            + "ledger, any app-only read or any write (uniform 404 at :435-436, caller_unresolved 403 at :431-432, 503 at :433-434). Before any "
+            + "ledger, any app-only read or any write (uniform 404 at :439-440, caller_unresolved 403 at :435-436, 503 at :437-438). Before any "
             + "write or close it also asks, as the caller through CallerRecordAccessProbe, Write on each Signal's subject and "
-            + "AppendTo on the core record (FR-51; :852, :1258), also before a stored-record repeat closes anything and again "
-            + "before a replay repairs a close (:667, :693), and every executor's own preflight. The Decision Record's owning team is the "
+            + "AppendTo on the core record (FR-51; :856, :1275), also before a stored-record repeat closes anything and again "
+            + "before a replay repairs a close (:671, :697), and every executor's own preflight. The Decision Record's owning team is the "
             + "ownership resolver's answer for EVERY parent the record sits under (the core, if any, and the subject of each Signal it "
-            + "resolves, secure-if-any; D-129, uac-r2 F1), taken as returned and asked only AFTER that check (:936), so the answer never shows "
-            + "whether a row exists (a refusal is 422, a resolver fault 503: :938-949)."),
+            + "resolves, secure-if-any; D-129, uac-r2 F1), taken as returned and asked only AFTER that check (:950), so the answer never shows "
+            + "whether a row exists (a refusal is 422, a resolver fault 503: :952-965)."),
         new HandlerDecision("GET /api/v1/signals/{signalId:guid}/suppression", "GetSuppressionAsync", "IDataverseUserClient",
             new[] { "SignalCoreRecordAccess.AuthorizeAsync" },
             "Ontology task 034: the handler's first act is SignalCoreRecordAccess.AuthorizeAsync (DecisionPlanEndpoints.cs:70), "

@@ -1,5 +1,6 @@
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -39,8 +40,14 @@ internal static class PersonalToDoAssignee
 {
     internal const string Table = "sprk_todo";
 
-    /// <summary>The To Do's filing lookups (uac-r2's lineage entry for <c>sprk_todo</c>): any value set means it is filed.</summary>
-    internal static readonly IReadOnlyList<string> FilingColumns = SecureChildLineage.Children[Table].Lookups.Keys.ToArray();
+    /// <summary>The To Do's filing lookups: uac-r2's lineage entry for <c>sprk_todo</c> UNION the four core-ancestor lookups
+    /// (<see cref="CoreAncestorResolver.CoreAncestorLookups"/>). The lineage row omits <c>sprk_regardingservicerequest</c>, and a
+    /// To Do filed under a service request is filed — its service request's team owns it, never the assignee's. Any value set
+    /// means it is filed.</summary>
+    internal static readonly IReadOnlyList<string> FilingColumns = SecureChildLineage.Children[Table].Lookups.Keys
+        .Concat(CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
 
     private static readonly string[] Columns = [AssignedToDefaults.AssignedToAttribute, .. FilingColumns];
 
@@ -70,8 +77,8 @@ internal static class PersonalToDoAssignee
             : null;
     }
 
-    /// <summary>The ONE enabled systemuser whose <c>sprk_primarycontact</c> is <paramref name="contactId"/>; <c>null</c> when there
-    /// is none, several, or only disabled ones. A fault propagates.</summary>
+    /// <summary>The ONE eligible (enabled, interactive, non-application) systemuser whose <c>sprk_primarycontact</c> is
+    /// <paramref name="contactId"/>; <c>null</c> when there is none, several, or only ineligible ones. A fault propagates.</summary>
     internal static async Task<Guid?> SingleEnabledUserAsync(AssignedAccessStore links, Guid contactId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(links);
@@ -79,8 +86,14 @@ internal static class PersonalToDoAssignee
             return null;
 
         var candidates = await links.ReadLinkCandidatesAsync(contactId, boundOid: null, ct).ConfigureAwait(false);
+        // Only a person who can be shared with counts (the ONE rule AssignedAccessMaterializer applies, InternalShareEndpoints
+        // .ClassifyEligibility): an application user, a non-interactive account, an external-flagged one or a disabled one never
+        // counts toward "exactly one". rootIsRestricted is null (not read here), which ClassifyEligibility documents as fail
+        // closed: an external-flagged user is refused. (false would admit one, as it does for a share on an ordinary record.)
         var enabled = candidates
-            .Where(c => c.PrimaryContactId == contactId && c.IsDisabled == false)
+            .Where(c => c.PrimaryContactId == contactId
+                && InternalShareEndpoints.ClassifyEligibility(c.IsDisabled, c.AccessMode, c.ApplicationId, c.IsExternal, rootIsRestricted: null)
+                    == InternalShareEndpoints.ShareEligibility.Eligible)
             .Select(c => c.SystemUserId)
             .Distinct()
             .ToList();
