@@ -71,13 +71,20 @@ New Dataverse schema (**owner approval needed**, in the solution):
 
 A9 home contacts are looked up by plane = WorkforceHome **and** `sprk_externaltenantid` = `tid` **and** `sprk_externalobjectid` = `oid`. The key mirror `sprk_externalobjectidkey` stays the `oid`. Its alternate key keeps one contact per `oid`, which is stricter than (`tid`, `oid`) and safe because Entra oids are GUIDs.
 
-**Email binding to an existing contact (E11 analogue) — recommendation, owner decides (Q1):**
-- Microsoft says never to authorize on `email`/`upn`, and `xms_edov` does not certify Entra work-account email (§9).
-- A home token therefore **never** binds an existing contact by email alone.
-- An existing unbound contact with the token's email is bound only when it carries a **current workforce invite marker**: `sprk_externalinvitedon` inside the 30-day window. This reuses #1801's `DecideIntent` rule with plane WorkforceHome. Legal sets the marker when it invites that person as a workforce contact.
-  - **Residual risk:** a customer directory admin could set a user's `mail` to an invited employee's address. That admin can already reset that employee's own account, so this adds no capability.
-- An active contact with the same email but **no** marker → registration is refused with **`registration_contact_exists`**. The user is told to ask Legal for an invite, and the contact is flagged `EmailAmbiguous` for an operator. No duplicate is created.
-- When UAC task 185's invite-code proof lands, it replaces the marker for this plane too.
+**Registering to an existing contact (owner, 2026-10-13: no Legal step; this is common; the form confirms the email):**
+- The profile form shows the sign-in email read-only. When an existing contact matches it, the form says so ("We found your existing record") and the user **confirms** that the email is theirs. Registration then **binds that contact** instead of creating one: no duplicate, and its grants carry over.
+- **Why the email can be trusted here:**
+  - Only **domain-verified** emails reach the BFF: `removeUnverifiedEmailClaim` = true on the multitenant apps (§9) removes an `email` whose domain the user's directory has not verified.
+  - Only listed customer directories are accepted (§2).
+  - So a token can only claim an address in **that customer's own verified domains**: one of its own employees, whose account the customer's admin already controls.
+  - Never authorizing on email (Microsoft) still holds in the sense that matters: the email selects which existing record to bind **once**, at registration, behind those two gates. Afterwards identity is (`tid`, `oid`).
+  - A token without `email` never binds by email. `preferred_username` is not used for binding.
+- **Bindable:** exactly one active contact with that `emailaddress1`, not bound to any identity, not linked to a systemuser (E10), and not a CIAM partner (plane External).
+- **Not bindable:**
+  - several matches, or a match that is bound, linked or a partner → **`registration_contact_conflict`**; the contact is flagged `EmailAmbiguous` for an operator, nothing is created or bound;
+  - no match → create (§6).
+- **Live check (task 074):** the token carries `email` for a Dewey Cheatham member, and does not for an address in an unverified domain.
+- **Dataverse duplicate detection:** Web API creates do not run duplicate-detection rules unless the request opts in (`MSCRM.SuppressDuplicateDetection: false`), so it never blocks a registration. Binding an existing contact is what keeps duplicates from being created in the first place. Task 047 checks dev's active contact duplicate rules and records them.
 
 ## 5. Stored link for licensed users
 
@@ -94,11 +101,11 @@ A9 home contacts are looked up by plane = WorkforceHome **and** `sprk_externalte
   - `tid` = the Spaarke tenant;
   - `acct` = 1;
   - `idp` home tenant = the home token's `tid` (`TryParseHomeTenant`);
-  - `iat` within 10 minutes;
+  - **not expired**. Both tokens must be within their own Entra lifetime (60–90 minutes). That is the longest window possible, since access tokens cannot be older. The SPA gets both within seconds, so the user waits for nothing. (Owner asked for 24 hours; an access token cannot last that long, so its own lifetime is used, with no shorter extra limit.)
   - its `oid` → an **enabled** systemuser.
 - **Defense in depth:** the guest token's home UPN (from the `#EXT#` UPN or `email`) must equal the home token's `preferred_username`, case-insensitively. This is a necessary extra condition that can only refuse; it never grants on its own.
 - **Outcome:** the link is written once. An existing different link is a collision; the BFF denies it and never re-points it. Audit logs record the systemuser id and the hashed home ids.
-- **Residual risk (K):** someone holding a stolen guest token less than 10 minutes old *and* a home token from the same customer directory with the same UPN. In practice that is the same person.
+- **Residual risk (K):** someone holding a stolen, unexpired guest token *and* a home token from the same customer directory with the same UPN. In practice that is the same person.
 
 **How the SPA gets the guest token without a "core user" button** (owner: none):
 1. After a home sign-in, `/me` returns 403 `registration_required`.
@@ -121,8 +128,8 @@ Fallback: if the registration POST sees that the token email matches an **enable
   Email comes from the token only; a body email never binds (closed DTO). A token with no `email` and no `preferred_username` → `registration_email_missing`.
 - **Order:**
   1. resolution steps 1–3 (§3), so an already-linked or already-bound caller gets 200 and nothing is created;
-  2. the email checks (§4 marker bind, `registration_contact_exists`, §5 `licensed_user_link_required`);
-  3. the create.
+  2. the email checks: §5 `licensed_user_link_required` first, then the §4 bind of an existing contact (only when the body carries `confirmExistingRecord: true`) or `registration_contact_conflict`;
+  3. otherwise the create.
 - **Create:** app-only, in one POST:
   - contact with `firstname`, `lastname`, `department`, `emailaddress1` (from the token);
   - `sprk_externalobjectid`, `sprk_externalobjectidkey`, `sprk_externaltenantid`, plane WorkforceHome;
@@ -151,7 +158,9 @@ Fallback: if the registration POST sees that the token email matches an **enable
 - **`AuthGuard`:**
   - `registration_required` → the silent link attempt (§5) → otherwise the **profile form**: first name, last name and department prefilled; email read-only; Fluent v9. This replaces the 056 join page and its `VITE_REGISTRATION_SERVICE_URL` hand-off.
   - `licensed_user_link_required` → the interactive link.
-  - `registration_contact_exists` → a message to contact Legal.
+  - an existing-record match → the form says "We found your existing record" and asks the user to confirm the email, then binds it;
+  - `registration_contact_conflict` → a message that an administrator must resolve the record.
+- **Landing page wording:** the link reads "Spaarke employee? Sign in with your work account" (`RealmChooser.tsx:76`). Under A9 it becomes "Work for {customer}? Sign in with your company account", and "Spaarke employee" goes.
 - **Teams:** unchanged (A8 NAA with the single-tenant client). Teams for workforce contacts is **deferred** (DEF item).
 - **`assertTenantPinnedWorkforceAuthority`** (`msal-config.ts:80-100`): kept for the A8 client. A new assert allows `organizations` and `login.microsoftonline.com/{GUID}` **only** for the multitenant client id.
 
@@ -208,9 +217,25 @@ Other task changes:
 - **040:** the A8 client stays for Teams and the link acquisition.
 - **DEF:** Teams for workforce contacts.
 
-## 11. Owner questions
+## 11. Owner decisions (2026-10-13)
 
-1. **Existing contact with the same email (§4):** bind only with a current workforce invite marker; otherwise refuse with `registration_contact_exists` and flag it for an operator. Recommended. The alternative is to always create a new contact and flag the duplicate; grants on the old contact are then not visible.
-2. **Schema (§4, §5):** approve the four additions (one option value, three columns, one alternate key).
-3. **Link proof (§5):** approve the dual-token proof with the UPN consistency check and the 10-minute freshness window.
-4. **Dev setup (§8):** the steps are approved one by one when task 059 runs; each shows its commands and rollback first.
+1. **Existing contact with the same email:** no Legal step. The form shows the email; the user confirms it; the existing contact is bound (no duplicate). This is safe because only domain-verified emails from listed customer directories reach the BFF (§4).
+2. **Schema (§4, §5):** approved: one option value, three columns, one alternate key.
+3. **Link proof (§5):** "both sign-ins" are the licensed user's company account and their Spaarke guest account. Freshness = each token's own lifetime (the longest possible; 24 hours is not available for access tokens). The UPN consistency check stays.
+4. **Dev setup (§8):** approved step by step in task 059, with commands and rollback shown first.
+
+## 12. Teams for workforce contacts: what adding it would take (owner asked, 2026-10-13)
+
+- **Backend: nothing.** A Teams sign-in under A9 yields the same home token (customer `tid`, `acct` = 0), so §2–§6 apply unchanged.
+- **SPA (one task):**
+  - The Teams strategy uses the multitenant client through NAA (`createNestablePublicClientApplication`), with authority = the Teams context's `tid`, which Teams provides, so there is no discovery step.
+  - Registration and linking are as in the browser. The silent link inside Teams uses NAA against the Spaarke tenant, which is undocumented; fall back to the popup.
+- **App registration:** add the `brk-multihub://{SPA origin}` redirect to the multitenant client (one line; dev in task 059, provisioning for production).
+- **Teams package:** `deploy-teams-app.yml` / task 043 already builds it; the manifest gains the client and domain. Each customer's Teams admin approves the app once. That approval is needed for any Teams use anyway.
+- **Live test:** task 071 (desktop, web, mobile). Microsoft documents multitenant NAA as generally available in Teams. **Teams mobile specifics are unverified**, so that is the main risk.
+- **One decision it forces:**
+  - A9 currently keeps **licensed users** in Teams on A8: NAA with the Spaarke-tenant authority, a cross-tenant guest token that is **undocumented**.
+  - Two Teams paths cannot coexist, because the app does not know the user type before sign-in.
+  - Adding Teams for workforce contacts therefore means moving **licensed users in Teams** to the multitenant client plus the stored link as well. That needs a one-line A9 change ("Teams uses the multitenant client for both populations"), and it is the **documented** path.
+  - The Office add-ins are unaffected.
+- **Size:** about two tasks (SPA Teams strategy, manifest and registration) plus the existing live check. No backend work. A small widening, not a large one, provided the Teams mobile check passes.
