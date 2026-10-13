@@ -1549,3 +1549,12 @@ The decisions follow provisioning's review of #1801, findings F1 and F2.
 - **Daily Briefing:**
   - The **to-do channel filters `owninguser = caller`** (`DailyBriefingCollector.cs:1027`), so team-owned to-dos vanish. The peer was told.
   - Matters, projects and events come through the membership resolver's `owningteam` term. A BU default team contains the whole BU, so these would surface for everyone in the BU.
+
+## Round 98 (2026-10-13): OWNER: task 185 invite-code design
+
+The full record is in `notes/185-invite-code-design.md` §11.
+- **The hash:** salted SHA-256.
+- **The grant leg:** option (c). Granting access to an unbound contact that has an email sends the invite, with the code, automatically, so a contact that was granted but never invited is still matched on first sign-in, from that email. A grant alone, with no code, never binds.
+- **The plaintext code:** fixed in 185's scope with a "system mail" send option (no AI enrichment, the link removed from the stored body, no Sent Items).
+- **Q5–Q9:** accepted as recommended.
+- **The owner's question** "is the plaintext copy really a threat?" was answered: low risk. Using it needs a compromised stamp that can create CIAM accounts AND a co-operating reader inside the customer. Also, invite emails were going through AI triage like any other email.

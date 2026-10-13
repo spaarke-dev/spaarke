@@ -3,7 +3,7 @@
   <metadata>
     <title>Invite-code proof for E11: binding a CIAM sign-in by email requires the single-use code from this environment's own invite email, which closes account squatting</title>
     <phase>Session 28 — UAC (owner round 97, 2026-10-13)</phase>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Identity binding and cross-customer tenant isolation, plus a new secret-bearing column and an External SPA sign-in change.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -49,6 +49,12 @@
 - (b) the grant leg stops being a bind leg at all, and only invites bind.
 Either way, a typed-in contact with a grant can no longer be bound by an unproven account.
 
+(3b) OWNER ROUND 98 (BINDING, supersedes (3)): option (c), "granting sends the invite". The grant leg stops being a bind leg. Every grant flow that grants access to an UNBOUND contact with an email sends the invite (code included) automatically. Bound contacts are unchanged. Details: notes/185-invite-code-design.md section 11.
+
+(3c) OWNER ROUND 98: a "system mail" send option in CommunicationService, set by RegistrationEmailService on both invite sends: skip AI enrichment, store the body with the invite link removed, and do not save to Sent Items. Coordinate with the email-communication project.
+
+(3d) PROVISIONING R2: a design precondition that spaarkeextid sign-in stays email + password only. The ExistingAccount email adds the "Forgot password" guidance.
+
 (4) NEW-ACCOUNT PATH. When the BFF creates the CIAM account and binds its oid in the same request, it needs no code. Keep that path unchanged.
 
 (5) WORKFORCE PLANE. Unchanged. It is under the separate Model 1 discussion.
@@ -69,7 +75,9 @@ Either way, a typed-in contact with a grant can no longer be bound by an unprove
     <criterion>A wrong code, an expired code (more than 30 days) and a code from a superseded invite are each denied.</criterion>
     <criterion>The hash column cannot be read by the Readers profile, and only the BFF can write it (the script's -Verify passes on dev).</criterion>
     <criterion>The grant-only leg follows the owner's choice from the design note, and a typed-in contact with a grant cannot be bound by an unproven account.</criterion>
-    <criterion>The new-account path and the workforce plane are unchanged, and the task 141 and 184 tests are unchanged apart from seeds.</criterion>
+    <criterion>The new-account path and the workforce plane are unchanged. The task 141 tests are unchanged apart from seeds. The task 184 tests are unchanged apart from seeds, except the grant-leg tests listed in the design note section 6, whose expectation changes the owner accepted in round 98.</criterion>
+    <criterion>Each grant flow sends the invite to an unbound contact that has an email, and sends no invite to an unbound contact without an email or to a bound contact.</criterion>
+    <criterion>Invite sends skip enrichment, persist no invite link, and are not saved to Sent Items. Other sends are unchanged.</criterion>
     <criterion>Mutation proofs: dropping the code check, a non-constant-time comparison (review only), not consuming the code, and ignoring the window each fail a test.</criterion>
     <criterion>BFF build 0 errors, full ArchTests green, and External SPA build:prod green. Provisioning reviews the PR, and this task is their T240d production gate.</criterion>
   </acceptance-criteria>

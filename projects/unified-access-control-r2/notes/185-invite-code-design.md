@@ -441,3 +441,29 @@ All tests follow ADR-038: the in-memory store (`InMemoryContactIdentityStore`, w
 8. **Q8, the AC wording "External SPA build:prod".** The SPA has no such script. Recommended: read it as `npm run build` (`vite build`, production mode) plus `npm test`.
 9. **Q9, the SPA shows the server's `contact_not_invited` detail** (the "open the invitation link in this browser" guidance) in the denied state. Recommended: **yes**, a small change in `WorkspaceHomePage` / `BffAccessState`.
 10. **Q10, coordination with SPA-r3** (for the main session). The overlapping files are listed in §4.3. Recommended: 185's BFF PR goes first, because it is the T240d gate and R3 has agreed to build on #1801 and its follow-ups. R3 rebases onto it, and UAC reviews R3's `ContactIdentityBinder` change. 185's SPA edits to `main.tsx` and `bff-client.ts` are a few lines each; whichever PR lands second resolves them.
+
+## 11. Owner decisions (round 98, 2026-10-13): BINDING, these supersede §10's recommendations where they differ
+
+- **Q1, the hash:** salted SHA-256 (§2), as recommended. No Key Vault secret.
+- **Q2/Q3, the grant leg: option (c), "granting sends the invite".**
+  - The owner's intent: a contact that is manually granted access but never invited must still be matched by email on first sign-in.
+  - Only an invite creates a CIAM account in this environment. An account made anywhere else (another customer's invite, or a squat) can't be told apart. So: when access is granted to an **unbound contact that has an email**, the grant flows send the invite automatically, with the same code. That covers `/grant`, `/invite-and-grant` (already invites), the internal-share grant, and task 140's contact grants (`GrantExternalAccessEndpoint`, `InternalShareEndpoints`, `InviteAndGrantExternalUserEndpoint`, `GrantAccessNotifier`).
+  - The result is a new CIAM account (onboarding email) or ExistingAccount (the existing-account email), each carrying the code. First sign-in from that email binds through the marker leg.
+  - E11's grant leg itself stops being a bind leg, as in §6 (b): a grant with no code never binds.
+  - A contact that is already bound is unchanged: it gets the existing "you were given access" notification and no invite.
+  - The §6 tests change their expectations, as listed there (accepted). Add tests for each grant flow: an unbound contact with an email gets an invite, an unbound contact without an email gets none, and a bound contact gets none.
+- **Q4, the plaintext copies: a small fix in 185's scope.** Add a "system mail" (secret-bearing) send option to `CommunicationService`, set by `RegistrationEmailService` on both invite sends:
+  - (i) **skip `CommunicationEnrichmentService.EnrichAsync`**. The code confirms the gap provisioning raised as R1: outbound sends are enriched direction-symmetrically, `CommunicationService.cs` ~745, so today the invite body and its link reach the LLM, triage summaries and proposals;
+  - (ii) persist the body with the invite link removed (or no body);
+  - (iii) `SaveToSentItems = false`.
+  - The email-communication project owns those files, so coordinate with it. This is a named part of provisioning's T240d gate.
+- **Provisioning R2, adopted as a design precondition (§4.2/§5).** The ExistingAccount bind is safe only while the `spaarkeextid` sign-in method stays **email + password only**: email-OTP *sign-in* must never be enabled. Provisioning owns that tenant setting (T240d §7 step 4) and the live check that SSPR revokes the earlier refresh tokens.
+  - The ExistingAccount email tells the person: "If you don't recognise this account or its password, use **Forgot password** on the sign-in page."
+- **Q5–Q9: accepted as recommended.**
+  - Q5: the new-account bind also clears the hash.
+  - Q6: keep the 500, with the message "retry the invite".
+  - Q7: 256-bit codes.
+  - Q8: `npm run build` plus `npm test`.
+  - Q9: the SPA shows the server's deny detail.
+- **The live gate** needs a real CIAM sign-in, so it goes on the owner checklist.
+- **Q10: 185's BFF PR lands first.** SPA-r3 agreed on 2026-10-13 and rebases onto it. Keep E11's bypass for non-CIAM planes as it is (`ContactIdentityBinder` :725-728), at R3's request.
