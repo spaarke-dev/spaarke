@@ -71,6 +71,7 @@ public static class InviteAndGrantExternalUserEndpoint
         ContactIdentityBinder binder,
         IConfiguration configuration,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
+        GrantAccessNotifier accessNotifier,
         HttpContext httpContext,
         ILogger<Program> logger,
         TimeProvider timeProvider,
@@ -353,9 +354,24 @@ public static class InviteAndGrantExternalUserEndpoint
         await assignedAccess.MarkGrantAdoptedAsync(
             grantRoot.Type, grantRoot.Id, contactId, null, accessRecordId, CancellationToken.None);
 
+        // Task 036 (FR-07), review F1: a contact that was ALREADY onboarded gets no CIAM onboarding email on this route, so
+        // the grant email is its only notice — sent when the grant GAVE it access (never a same-level re-grant, an
+        // expiry-only change or a lower level). A contact onboarded by THIS request is emailed by the CIAM onboarding path
+        // already: exactly one email per invite, so no grant email for it. The grantee here is always a Contact (an
+        // organization grant is /grant's). Best effort, after the write: a failure is reported, never undoes the grant.
+        var notificationFailed = false;
+        if (string.Equals(onboardStatus, InviteExternalUserEndpoint.AlreadyProvisionedStatus, StringComparison.Ordinal)
+            && grantOutcome.AccessGained)
+        {
+            notificationFailed = await accessNotifier.NotifyContactGrantAsync(
+                grantRoot.Type, grantRoot.Id, contactId, grantOutcome.GrantedLevel, httpContext.User)
+                == GrantNotificationOutcome.Failed;
+        }
+
         return TypedResults.Ok(new InviteAndGrantResponse(
             contactId, onboardStatus, accessRecordId, portalUrl,
             GrantedAccessLevel: grantOutcome.GrantedLevel,
-            Narrowed: grantOutcome.Narrowed));
+            Narrowed: grantOutcome.Narrowed,
+            NotificationFailed: notificationFailed));
     }
 }

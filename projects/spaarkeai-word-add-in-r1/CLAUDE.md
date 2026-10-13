@@ -289,6 +289,15 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - **Office on the web has no `openBrowserWindow`**: anything that opens Spaarke must fall back to `window.open` from the click (task 120).
 - **Diagnostics view** (task 113) is on the dev site via `ADDIN_DIAGNOSTICS_ENABLED: "true"` in `deploy-office-addins.yml` — remove it once provisioning's guest tests are done.
 
+### Guest sign-in, PCFs and telemetry — owner decisions 2026-10-08/09 (tasks 121-127)
+- **Dataverse-hosted surfaces sign in against the ENVIRONMENT's tenant, never `/organizations`** (#1453, task 122): `@spaarke/auth` fails closed (`AuthError('tenant_unresolved')`) in a Dataverse host. Tenant precedence is defined once in `Spaarke.Auth/src/tenant.ts`.
+- **PCF sign-in identity: environment variables FIRST, form properties only as a fallback** (`resolveSignInIdentity`, task 123): shipped forms carry static DEV values (the Matter main form binds the dev tenant + App Insights key).
+- **Every BFF-calling PCF declares `external-service-usage enabled="true"`** (owner 2026-10-09), with SemanticSearchControl's domains.
+- **Browser telemetry gets its App Insights connection string from `GET /api/config/client`** (task 127, #1537) — never from a form property or a build-time `VITE_*` key. Remaining old paths: #1551.
+- **A save that reconciles to an existing UNFILED communication files it to the picked record** (owner 2026-10-09, task 121), through the resolver's filing write; never move a filed one; never fail the save.
+- **Base roles are alternatives, not stacked** (owner 2026-10-09): a user holds Spaarke Core User OR Basic User — "Core User without Basic User" is normal.
+- **PCF deploys** (owner 2026-10-09): the new version must be strictly greater than dev's in ALL locations (an un-incremented version imports but does not load) and is re-checked in `customcontrol.version` after import. Deploy from a fresh short-path worktree of master; first compare dev's version/`modifiedon` with master's last change so another session's unmerged deploy is held, not overwritten. Use `/pcf-deploy`.
+
 ### Git, PRs, CI
 - **`gh pr merge` is refused until `Router` reports** (2026-10-07): a watcher that merges on "no failures" can fire early; use `gh pr merge N --auto --merge` and watch the PR state + the deploy run for the exact merge SHA.
 - **Long bash commands with several heredocs mis-parse** ("unexpected EOF while looking for matching `'`") — write multi-file text with the Write tool and run a small Python script for edits (2026-10-07/08).
@@ -303,6 +312,9 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - **Handoffs never pin the HEAD SHA** (2026-09-19): it self-invalidates on the commit that writes it. Use `git log -1`; cite only landmark/merge commits.
 - **Never touch other sessions' measurement worktrees**: `C:/tmp/bffsize/{m,b}`, `C:\wt097`, `C:\wt097r` (2026-10-04 / 2026-10-06). Our own short-path worktrees are `C:\code_files\wtNNNx`, removed after use.
 - **Before a commit, check untracked files** — no blind `git add -A` (2026-09-21).
+- **GitHub GraphQL rate limit is shared across sessions** (2026-10-09): `gh pr create` / `gh pr merge --auto` fail with "API rate limit already exceeded". Fallback: create the PR with REST (`gh api repos/spaarke-dev/spaarke/pulls -X POST …`) and merge with REST (`gh api …/pulls/N/merge -X PUT -f merge_method=merge`) only after `Router` passes on the HEAD sha. Don't push new commits to a branch whose REST-merge watcher is pending.
+- **This worktree has a stray `src/client/shared/Spaarke.UI.Components/node_modules`** (a second React) that makes 7 office-addins jest suites fail locally with "reading 'useContext'" — move it aside for the run and restore it; CI is unaffected (2026-10-09).
+- **Dataverse MCP `read_query` shows datetimes in local time (EDT)**, not UTC (2026-10-09).
 - **Overlap with another branch: compare by function, not by line numbers** (2026-10-04).
 - **`jq` is not installed** — use `gh … --jq`; `gh --jq` accepts no `--arg` (2026-10-06). In PowerShell, `R` is the `Invoke-History` alias — never name a helper function `R`.
 - **Shell traps** (2026-09-19):
@@ -335,6 +347,8 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
   - Linux cold start is 90–120 s — a `/healthz` timeout after a passing hash check is not a reason to redeploy.
   - Probe an authed route → 401 (404 = incomplete package).
 - **A failed Kudu upload can leave the app STOPPED** after the script's recovery (2026-09-19): check state after every deploy and start it if not `Running`.
+- **`pac solution import` exits 0 when the import fails** (2026-10-10, #1591), so `Import-SolutionScoped.ps1` can report "Imported and scoped-published" and publish the OLD bundle. After every import, read back `solutions.version` (must equal the ZIP's) or the newest `importjob.progress` (must be 100). `customcontrols.version` does NOT move under the scoped publish (no PublishXml element for it); the served bundle is the published `cc_<ns>.<ctrl>/bundle.js`, so compare its content with the build and have the owner check the footer.
+- **A PCF manifest `*-key` attribute must not contain an apostrophe** (Dataverse XSD; ArchTest `PcfManifestKeyAttributeGuardTests` since #1597). In a fresh worktree VisualHost also needs `npm install` in `src/client/shared/Spaarke.Visuals`.
 - **M365 Admin Center refuses a non-greater manifest/package version** ("Please update the version number") (2026-09-19): bump before any re-upload; never ask for a same-version re-upload.
 
 ### Dataverse / platform facts (measured — do not re-derive)

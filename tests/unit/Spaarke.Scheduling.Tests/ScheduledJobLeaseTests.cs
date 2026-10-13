@@ -473,8 +473,7 @@ public class ScheduledJobLeaseTests
 
     private static ScheduledJobHostOptions Options(bool runScheduledJobs = true) => new()
     {
-        // Refresh only at start — a refresh landing on a due instant pushes the job to its next occurrence
-        // (see ScheduledJobHostTests.VirtualClockOptions).
+        // Refresh only at start — keeps refresh noise out of the lease tests (see ScheduledJobHostTests.VirtualClockOptions).
         RefreshInterval = TimeSpan.FromHours(1),
         ShutdownDrainTimeout = TimeSpan.FromSeconds(2),
         MaxLoopSleep = Step,

@@ -1,5 +1,5 @@
 export * from './types';
-export { useSseStream, parseSseEvent, parsePaneEvent, readSseStream } from './useSseStream';
+export { useSseStream, parseSseEvent, parsePaneEvent, readSseStream, describeStreamError } from './useSseStream';
 export type { ReadSseStreamOptions } from './useSseStream';
 export * from './useAiSummary';
 // task 045 (FR-P3-06, NFR-08): the useLinearRunProgress HOOK was deleted (dead

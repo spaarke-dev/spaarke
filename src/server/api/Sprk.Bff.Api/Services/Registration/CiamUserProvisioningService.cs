@@ -18,9 +18,11 @@ namespace Sprk.Bff.Api.Services.Registration;
 /// rather than forking a divergent path. It is also the testable seam for the CIAM user payload
 /// (see <see cref="BuildCiamUser"/>).</para>
 ///
-/// ADR-010: concrete singleton (no interface).
+/// ADR-010: concrete singleton (no interface). Not sealed only so <see cref="CreateCiamUserAsync"/> is a test seam
+/// (task 036 review: the invite-and-grant tests run the "newly provisioned" path without a live CIAM tenant); no
+/// production type derives from it.
 /// </summary>
-public sealed class CiamUserProvisioningService
+public class CiamUserProvisioningService
 {
     private readonly CiamGraphClientFactory _ciamGraphClientFactory;
     private readonly PasswordGenerator _passwordGenerator;
@@ -54,7 +56,7 @@ public sealed class CiamUserProvisioningService
     /// (required for local accounts per the CIAM provisioning spec). The temp password is delivered
     /// out-of-band via SSPR "Forgot password" — it is never returned to the caller or logged.
     /// </summary>
-    public async Task<string> CreateCiamUserAsync(
+    public virtual async Task<string> CreateCiamUserAsync(
         string email,
         string? firstName,
         string? lastName,

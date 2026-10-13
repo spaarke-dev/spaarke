@@ -103,6 +103,8 @@ When env vars are absent the tests **skip via early return** (no failure, no fal
 
 The two `LiveMode_*` tests currently `Assert.Fail` after the env-var gate. Their implementation is the activation deliverable:
 
+> **2026-10-12 note:** the `LiveMode_PublisherToServiceBusToHandler_E2E` and `LiveMode_RedisPubSubInvalidationE2E` placeholder tests were removed on 2026-10-12 (PR #1760, test-diet); the live E2E is to be authored fresh from the steps below.
+
 #### `LiveMode_PublisherToServiceBusToHandler_E2E`
 
 1. Boot a `WebApplicationFactory<Program>` instance wired to the LIVE `MembershipEventPublisher` + `MembershipJunctionUpdaterHost` (NOT the in-memory peers).

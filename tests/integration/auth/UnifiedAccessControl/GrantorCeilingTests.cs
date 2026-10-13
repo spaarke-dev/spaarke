@@ -779,7 +779,7 @@ public class GrantorCeilingTests
     private Task<IResult> Grant(GrantAccessRequest request, AccessRights? callerRights) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
             request, _dataverse, _participations, DenyList(), new FixedRightsProbe(callerRights),
-            AssignedAccessTestDoubles.InertMaterializer(),
+            AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(),
             Context(), NullLogger<Program>.Instance, new FixedClock(Today),
             CancellationToken.None);
 
@@ -792,7 +792,7 @@ public class GrantorCeilingTests
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             request, _dataverse, _participations, DenyList(), new FixedRightsProbe(callerRights),
             ciamProvisioner: null!, emailService: null!, IdentityBindingTestKit.Binder(_identities),
-            PortalConfig(), AssignedAccessTestDoubles.InertMaterializer(), Context(),
+            PortalConfig(), AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(), Context(),
             NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None);
 
     /// <param name="noAccessCheck">The write-time No Access check; the real one over the seam reader when null.</param>

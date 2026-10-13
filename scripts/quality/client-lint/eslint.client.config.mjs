@@ -1,0 +1,310 @@
+/**
+ * Shared, type-aware ESLint 9 flat config for the Spaarke client packages.
+ *
+ * ONE toolchain (this directory's package.json) lints every covered package against that package's
+ * own tsconfig. Packages do NOT get their own ESLint setups.
+ *
+ * Rules, all at `error`, scoped to non-test `src/**`: `@typescript-eslint/no-unnecessary-condition` (NUC, P2 of
+ * the client error-handling cleanup), which flags a dead `if (!res.ok)` after `AuthenticatedFetchFn` (resolves to
+ * `OkResponse`: `ok: true`, 2xx); and the catch policy (P5, `CATCH` below). Existing violations are recorded in
+ * `eslint-suppressions.json` (ESLint bulk suppressions); only NEW ones fail.
+ *
+ * Run through `scripts/quality/client-lint/client-lint.mjs`, not directly. cwd must be the repo root.
+ *
+ * Type resolution: each package's tsconfig maps `@spaarke/*` to a sibling `dist/` that CI would have to
+ * build first. This config instead generates (into `.generated/`, gitignored) a lint tsconfig per
+ * package that `extends` the package's own tsconfig and re-points every `@spaarke/*` at sibling SOURCE,
+ * so no package needs building. Third-party types still come from each package's own node_modules
+ * (`client-lint.mjs install`).
+ */
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import tseslint from "typescript-eslint";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+export const REPO_ROOT = path.resolve(HERE, "..", "..", "..");
+const GENERATED = path.join(HERE, ".generated");
+
+/** Covered packages. `id` is the `--package` filter value. */
+export const PACKAGES = [
+  { id: "ui-components", dir: "src/client/shared/Spaarke.UI.Components" },
+  { id: "ai-widgets", dir: "src/client/shared/Spaarke.AI.Widgets" },
+  { id: "compose-components", dir: "src/client/shared/Spaarke.Compose.Components" },
+  { id: "communication-components", dir: "src/client/shared/Spaarke.Communication.Components" },
+  { id: "document-operations", dir: "src/client/shared/Spaarke.DocumentOperations" },
+  { id: "daily-briefing-components", dir: "src/client/shared/Spaarke.DailyBriefing.Components" },
+  { id: "spaarkeai", dir: "src/solutions/SpaarkeAi" },
+  { id: "legal-workspace-app", dir: "src/solutions/LegalWorkspace" },
+  { id: "reporting", dir: "src/solutions/Reporting" },
+  { id: "semantic-search", dir: "src/client/code-pages/SemanticSearch" },
+];
+
+/** Packages whose source is only read for types (siblings that the covered ones import). Installed, not linted. */
+export const TYPE_ONLY_PACKAGES = [
+  "src/client/shared/Spaarke.Auth",
+];
+
+const SHARED_ROOT = path.join(REPO_ROOT, "src/client/shared");
+
+const rel = (from, to) => path.relative(from, to).split(path.sep).join("/");
+
+function stripJsonc(text) {
+  // Remove // and /* */ comments outside strings, and trailing commas.
+  let out = "";
+  let inStr = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const n = text[i + 1];
+    if (inStr) {
+      out += c;
+      if (c === "\\") out += text[++i];
+      else if (c === '"') inStr = false;
+    } else if (c === '"') {
+      inStr = true;
+      out += c;
+    } else if (c === "/" && n === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      out += "\n";
+    } else if (c === "/" && n === "*") {
+      i += 2;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i++;
+    } else out += c;
+  }
+  return out.replace(/,(\s*[}\]])/g, "$1");
+}
+
+/** `@spaarke/<name>` -> sibling source, for every shared package that has one. */
+function spaarkePaths() {
+  const map = {};
+  for (const d of fs.readdirSync(SHARED_ROOT)) {
+    const pj = path.join(SHARED_ROOT, d, "package.json");
+    const entry = path.join(SHARED_ROOT, d, "src/index.ts");
+    if (!fs.existsSync(pj) || !fs.existsSync(entry)) continue;
+    const name = JSON.parse(fs.readFileSync(pj, "utf8")).name;
+    if (!name?.startsWith("@spaarke/")) continue;
+    map[name] = [rel(REPO_ROOT, entry)];
+    map[`${name}/*`] = [rel(REPO_ROOT, path.join(SHARED_ROOT, d, "src")) + "/*"];
+  }
+  return map;
+}
+
+function writeIfChanged(file, content) {
+  if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === content) return;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content);
+}
+
+/**
+ * Generate `.generated/<id>.tsconfig.json`: extends the package tsconfig, same include/exclude, but with
+ * `@spaarke/*` re-pointed at source. Non-@spaarke path entries of the package (`@fluentui/...` pinned to
+ * the package's own node_modules, `@/*`) are kept and re-based onto the repo root.
+ */
+function generateTsconfig(pkg, extraSources = []) {
+  const pkgDir = path.join(REPO_ROOT, pkg.dir);
+  const base = path.join(pkgDir, "tsconfig.json");
+  const raw = JSON.parse(stripJsonc(fs.readFileSync(base, "utf8")));
+  const ownPaths = raw.compilerOptions?.paths ?? {};
+  const ownBase = path.resolve(pkgDir, raw.compilerOptions?.baseUrl ?? ".");
+  const paths = {};
+  for (const [k, v] of Object.entries(ownPaths)) {
+    if (k.startsWith("@spaarke/")) continue;
+    paths[k] = v.map((p) => rel(REPO_ROOT, path.resolve(ownBase, p)));
+  }
+  Object.assign(paths, spaarkePaths());
+  const out = path.join(GENERATED, `${pkg.id}.tsconfig.json`);
+  const here = path.dirname(out);
+  const cfg = {
+    extends: rel(here, base),
+    compilerOptions: {
+      baseUrl: rel(here, REPO_ROOT),
+      paths,
+      noEmit: true,
+      composite: false,
+      declaration: false,
+      declarationMap: false,
+      emitDeclarationOnly: false,
+      incremental: false,
+      rootDir: rel(here, REPO_ROOT),
+      allowImportingTsExtensions: true,
+      skipLibCheck: true,
+      // Default @types discovery walks up from .generated/, missing the package's own @types/node, @types/jest, ...
+      ...(raw.compilerOptions?.typeRoots ? {} : { typeRoots: [rel(here, path.join(pkgDir, "node_modules", "@types"))] }),
+    },
+    include: [rel(here, path.join(pkgDir, "src")) + "/**/*", ...extraSources],
+    exclude: [
+      rel(here, path.join(pkgDir, "node_modules")),
+      rel(here, path.join(pkgDir, "dist")),
+    ],
+  };
+  writeIfChanged(out, JSON.stringify(cfg, null, 2) + "\n");
+  return out;
+}
+
+/** Test, mock, harness, declaration and story files: not linted (tests are out of scope for P2). */
+export const IGNORES = [
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/.generated/**",
+  "**/*.d.ts",
+  "**/*.test.{ts,tsx}",
+  "**/*.spec.{ts,tsx}",
+  "**/__tests__/**",
+  "**/__mocks__/**",
+  "**/__testEnvironments__/**",
+  "**/__test-harness__/**",
+  "**/test/**",
+  "**/tests/**",
+  "**/*.stories.{ts,tsx}",
+];
+
+const NUC = {
+  // `while (true)` SSE/stream reader loops are legitimate; only literal constants are allowed.
+  "@typescript-eslint/no-unnecessary-condition": ["error", { allowConstantLoopConditions: "only-allowed-literals" }],
+};
+
+/**
+ * Catch policy (P5): a `catch` must handle the error, surface it, or rethrow. Flagged: an empty / comment-only
+ * catch, and a catch whose ONLY statement is a console call or a bare telemetry/log call (log-only still swallows
+ * the failure from the user). Deliberate swallows are allowed with a REASONED disable:
+ *   // eslint-disable-next-line no-restricted-syntax -- <why swallowing is correct here>
+ * (a disable without ` -- reason` fails `spaarke-client/catch-disable-needs-reason`; the generic
+ * `eslint-comments/require-description` was measured at 282 new suppressions, so a local rule scoped to this rule is used).
+ * Telemetry helpers that exist in the covered packages (verified): `logTelemetryError` (SpaarkeAi),
+ * `reportClientError` (UI.Components), `trackException` (LegalWorkspace), and `logger.*` / `this.logger.*`
+ * (`logError`, `logWarn`, `error`, `warn`).
+ */
+const CATCH_MESSAGE =
+  "Do not swallow errors in catch: handle it, surface it to the user, or rethrow. " +
+  "If swallowing is deliberate, add `// eslint-disable-next-line no-restricted-syntax -- <reason>` directly above " +
+  "the reported line (the `} catch {` line for an empty catch, otherwise the lone statement's line).";
+const ONLY_STMT = "CatchClause > BlockStatement[body.length=1] > ExpressionStatement > CallExpression";
+const TELEMETRY_FNS = "/^(logTelemetryError|reportClientError|trackException)$/";
+const LOGGER_METHODS = "/^(logError|logWarn|error|warn)$/";
+/** Reports `eslint-disable*` directives that name `no-restricted-syntax` without ` -- <non-empty reason>`. */
+const SPAARKE_CLIENT = {
+  rules: {
+    "catch-disable-needs-reason": {
+      meta: {
+        type: "problem",
+        schema: [],
+        messages: {
+          noReason: "Disabling `no-restricted-syntax` needs a reason: `// eslint-disable-next-line no-restricted-syntax -- <why>`.",
+          bare: "A disable directive with no rule list silences every rule, including the catch policy. Name the rule(s) and, for `no-restricted-syntax`, give a reason.",
+        },
+      },
+      create(context) {
+        const DIRECTIVE = /^\s*eslint-disable(?:-next-line|-line)?(?=\s|$)([\s\S]*)$/;
+        return {
+          Program() {
+            for (const c of context.sourceCode.getAllComments()) {
+              const m = DIRECTIVE.exec(c.value);
+              if (!m) continue;
+              const sep = m[1].search(/\s--(?:\s|$)/);
+              const names = (sep >= 0 ? m[1].slice(0, sep) : m[1]).split(",").map((n) => n.trim()).filter(Boolean);
+              // An empty rule list means "every rule", which would silence the catch policy undetected.
+              if (names.length === 0) {
+                context.report({ loc: c.loc, messageId: "bare" });
+                continue;
+              }
+              if (!names.includes("no-restricted-syntax")) continue;
+              const reason = sep >= 0 ? m[1].slice(sep).replace(/^\s--/, "").trim() : "";
+              if (!reason) context.report({ loc: c.loc, messageId: "noReason" });
+            }
+          },
+        };
+      },
+    },
+  },
+};
+
+const CATCH = {
+  "spaarke-client/catch-disable-needs-reason": "error",
+  "no-restricted-syntax": [
+    "error",
+    { selector: "CatchClause > BlockStatement[body.length=0]", message: `Empty catch. ${CATCH_MESSAGE}` },
+    { selector: `${ONLY_STMT}[callee.object.name="console"]`, message: `Console-only catch. ${CATCH_MESSAGE}` },
+    { selector: `${ONLY_STMT}[callee.name=${TELEMETRY_FNS}]`, message: `Telemetry-only catch. ${CATCH_MESSAGE}` },
+    {
+      selector: `${ONLY_STMT}[callee.object.name="logger"][callee.property.name=${LOGGER_METHODS}]`,
+      message: `Logger-only catch. ${CATCH_MESSAGE}`,
+    },
+    {
+      selector: `${ONLY_STMT}[callee.object.property.name="logger"][callee.property.name=${LOGGER_METHODS}]`,
+      message: `Logger-only catch. ${CATCH_MESSAGE}`,
+    },
+  ],
+};
+const RULES = { ...NUC, ...CATCH };
+
+/**
+ * Existing source carries `// eslint-disable-next-line react-hooks/exhaustive-deps`-style directives for rules this
+ * toolchain deliberately does not run. ESLint 9 reports a directive naming an unknown rule as an error, so each
+ * such namespace is registered with a no-op rule set (every rule name resolves, none ever reports).
+ */
+const noopRule = { meta: { schema: false }, create: () => ({}) };
+const noopPlugin = { rules: new Proxy({}, { get: () => noopRule, has: () => true }) };
+const DIRECTIVE_NAMESPACES = ["react-hooks", "react", "jsx-a11y", "import", "react-refresh", "jest", "testing-library"];
+const PLUGINS = {
+  "@typescript-eslint": tseslint.plugin,
+  "spaarke-client": SPAARKE_CLIENT,
+  ...Object.fromEntries(DIRECTIVE_NAMESPACES.map((n) => [n, noopPlugin])),
+};
+
+function packageBlock(pkg) {
+  return {
+    name: `client-lint/${pkg.id}`,
+    files: [`${pkg.dir}/src/**/*.{ts,tsx}`],
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: { project: [generateTsconfig(pkg)], tsconfigRootDir: REPO_ROOT },
+    },
+    plugins: PLUGINS,
+    linterOptions: { reportUnusedDisableDirectives: "off" },
+    rules: RULES,
+  };
+}
+
+/** Production config: all covered packages. */
+export default [{ ignores: IGNORES }, ...PACKAGES.map(packageBlock)];
+
+/** Control config: the committed must-fire / must-not-fire fixtures (no suppressions, no ignores of tests). */
+export function controlsConfig() {
+  const controlsDir = "scripts/quality/client-lint/controls";
+  const tsconfig = path.join(GENERATED, "controls.tsconfig.json");
+  const here = path.dirname(tsconfig);
+  writeIfChanged(
+    tsconfig,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: "ES2020",
+          module: "ESNext",
+          moduleResolution: "bundler",
+          lib: ["ES2020", "DOM"],
+          strict: true,
+          noEmit: true,
+          skipLibCheck: true,
+          baseUrl: rel(here, REPO_ROOT),
+          paths: spaarkePaths(),
+        },
+        include: [rel(here, path.join(REPO_ROOT, controlsDir)) + "/**/*.ts"],
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+  return [
+    {
+      files: [`${controlsDir}/**/*.ts`],
+      languageOptions: {
+        parser: tseslint.parser,
+        parserOptions: { project: [tsconfig], tsconfigRootDir: REPO_ROOT },
+      },
+      plugins: PLUGINS,
+      linterOptions: { reportUnusedDisableDirectives: "off" },
+      rules: RULES,
+    },
+  ];
+}

@@ -1025,10 +1025,14 @@ Spaarke.EventSidePaneForm = Spaarke.EventSidePaneForm || {};
         entityId: entityId
       };
 
+      // `record` OOB size (85%x85%) - record-modal-selection.md invariant
+      // (spec FR-11/FR-18, task 090); was 80%x80%. Plain Dataverse web
+      // resource (no bundler) - cannot import oobModalSizes.ts; keep this
+      // literal in sync manually.
       var navigationOptions = {
         target: 2, // Modal dialog
-        width: { value: 80, unit: "%" },
-        height: { value: 80, unit: "%" },
+        width: { value: 85, unit: "%" },
+        height: { value: 85, unit: "%" },
         position: 1 // Center
       };
 

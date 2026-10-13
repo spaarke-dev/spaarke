@@ -38,6 +38,13 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
 {
     private static readonly Guid Root = Guid.Parse("96300000-0000-0000-0000-000000000105");
 
+    /// <summary>The creator every external create stamps (R3 task 030, FR-25) — a contact principal.</summary>
+    private static readonly CallerPrincipal Creator = new()
+    {
+        Plane = CallerPrincipalPlane.CiamContact, ContactId = Guid.Parse("96300000-0000-0000-0000-0000000000c0"),
+        ProjectAccess = new[] { CallerProjectAccess.FromLevel(Root, ExternalAccessLevel.ViewOnly) },
+    };
+
     private readonly FakeDataverse _dataverse = new();
     private readonly CapturingLogger _logger = new();
     private readonly ExternalDataService _sut;
@@ -81,10 +88,16 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
                     });
                     break;
                 case "todos":
-                    _dataverse.Add("sprk_todos", new JsonObject { ["sprk_todoid"] = id, ["sprk_name"] = $"To-do {i}" });
+                    _dataverse.Add("sprk_todos", new JsonObject
+                    {
+                        ["sprk_todoid"] = id, ["sprk_name"] = $"To-do {i}", ["_sprk_regardingproject_value"] = Root.ToString(),
+                    });
                     break;
                 case "events":
-                    _dataverse.Add("sprk_events", new JsonObject { ["sprk_eventid"] = id, ["sprk_eventname"] = $"Event {i}" });
+                    _dataverse.Add("sprk_events", new JsonObject
+                    {
+                        ["sprk_eventid"] = id, ["sprk_eventname"] = $"Event {i}", ["_sprk_regardingproject_value"] = Root.ToString(),
+                    });
                     break;
                 case "contacts":
                     _dataverse.Add("sprk_externalrecordaccesses", new JsonObject { ["_sprk_contact_value"] = id });
@@ -99,13 +112,13 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         switch (read)
         {
             case "documents":
-                var docs = await _sut.GetDocumentsAsync(Root);
+                var docs = await _sut.GetDocumentsAsync(ExternalDataService.DocumentParentKind.Project, Root, Creator);
                 return (docs.Value.Select(d => d.SprkDocumentid).ToList(), docs.Truncated);
             case "todos":
-                var todos = await _sut.GetTodosAsync(ExternalDataService.TodoRootKind.Project, Root);
+                var todos = await _sut.GetTodosAsync(ExternalDataService.TodoRootKind.Project, Root, Creator);
                 return (todos.Value.Select(t => t.SprkTodoid).ToList(), todos.Truncated);
             case "events":
-                var events = await _sut.GetEventsAsync(Root);
+                var events = await _sut.GetEventsAsync(ExternalDataService.TodoRootKind.Project, Root, Creator);
                 return (events.Value.Select(e => e.SprkEventid).ToList(), events.Truncated);
             case "contacts":
                 var contacts = await _sut.GetContactsAsync(Root);
@@ -348,7 +361,7 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         await _sut.CreateTodoAsync(
             ExternalDataService.TodoRootKind.Project, Root,
             new Sprk.Bff.Api.Api.ExternalAccess.Dtos.CreateExternalTodoRequest { SprkName = "Review" },
-            owningTeamId: Guid.Parse("70000000-0000-0000-0000-000000000105"), callerContactId: null);
+            owningTeamId: Guid.Parse("70000000-0000-0000-0000-000000000105"), callerContactId: null, creator: Creator);
 
         var body = _dataverse.Posted("sprk_todos").Should().ContainSingle().Subject;
         body["sprk_RegardingRecordType@odata.bind"]!.GetValue<string>()
@@ -374,7 +387,7 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         var create = () => _sut.CreateTodoAsync(
             ExternalDataService.TodoRootKind.Project, Root,
             new Sprk.Bff.Api.Api.ExternalAccess.Dtos.CreateExternalTodoRequest { SprkName = "Review" },
-            owningTeamId: Guid.Parse("70000000-0000-0000-0000-000000000105"), callerContactId: null);
+            owningTeamId: Guid.Parse("70000000-0000-0000-0000-000000000105"), callerContactId: null, creator: Creator);
 
         var refused = await create.Should().ThrowAsync<Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException>();
         refused.Which.StatusCode.Should().Be(503);
@@ -408,7 +421,7 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         await _sut.CreateTodoAsync(
             ExternalDataService.TodoRootKind.Project, Root,
             new Sprk.Bff.Api.Api.ExternalAccess.Dtos.CreateExternalTodoRequest { SprkName = "Review" },
-            owningTeamId: Guid.Parse("70000000-0000-0000-0000-000000000105"), callerContactId: null);
+            owningTeamId: Guid.Parse("70000000-0000-0000-0000-000000000105"), callerContactId: null, creator: Creator);
 
         _dataverse.Posted("sprk_todos").Should().ContainSingle().Which["sprk_RegardingRecordType@odata.bind"]!
             .GetValue<string>().Should().Be($"/sprk_recordtype_refs({active})");
@@ -439,7 +452,7 @@ public sealed class Issue963_ExternalDataPagingTests : IDisposable
         await _sut.CreateTodoAsync(
             ExternalDataService.TodoRootKind.Project, Root,
             new Sprk.Bff.Api.Api.ExternalAccess.Dtos.CreateExternalTodoRequest { SprkName = "Review" },
-            owningTeamId: Guid.Parse("70000000-0000-0000-0000-000000000105"), callerContactId: null);
+            owningTeamId: Guid.Parse("70000000-0000-0000-0000-000000000105"), callerContactId: null, creator: Creator);
 
         _dataverse.Posted("sprk_todos").Should().ContainSingle().Which.ContainsKey("sprk_RegardingRecordType@odata.bind")
             .Should().BeFalse();

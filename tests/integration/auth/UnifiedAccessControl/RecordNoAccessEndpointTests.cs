@@ -96,7 +96,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
     public async Task WriteCaller_ADirectEntryAndAWallOverAReferencedOrganization_ReturnsExactlyThoseTwo_EachWithItsPath()
     {
         var (direct, wall) = DirectEntryAndOrganizationWall();
-        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(Project, Record);
 
@@ -131,6 +131,27 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
 
         entries.SelectMany(e => e.EnumerateObject().Select(p => p.Name)).Should()
             .NotContain(new[] { "reason", "sprk_reason" }, "an entry's Reason is never returned (task 143 / O2)");
+    }
+
+    /// <summary>
+    /// Task 179 (owner round 89): the entries are Manage Access's list, so they follow the delegation rule. A caller with
+    /// Write but no Share gets the signals and no entries; the twin of the test above, differing only by Share.
+    /// </summary>
+    [Fact]
+    public async Task WriteCallerWithoutShare_GetsTheSignals_ButNoEntries()
+    {
+        DirectEntryAndOrganizationWall();
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+
+        var response = await _fixture.CreateAuthenticatedClient().GetAsync(Route(Project, Record));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var text = await response.Content.ReadAsStringAsync();
+        var body = await BodyOf(response);
+        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.Applies);
+        body.GetProperty("entriesState").GetString().Should().Be(NoAccessEntriesState.NotShown);
+        body.GetProperty("entries").ValueKind.Should().Be(JsonValueKind.Null);
+        text.Should().NotContain(WalledUser.ToString()).And.NotContain(WalledContact.ToString());
     }
 
     // ── (e) Read tier: the signals only ───────────────────────────────────────────────────────────────────────────
@@ -177,7 +198,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
     public async Task AWallOverAnOrganizationTheRecordDoesNotReference_IsAbsent_AndDoesNotApply()
     {
         H.Store.AddEntry(subjectContact: WalledContact, objectOrganization: OtherOrg, modifiedBy: Author);
-        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(Project, Record);
 
@@ -192,7 +213,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
     public async Task AnInactiveEntry_IsNotCounted_AndNotListed()
     {
         H.Store.AddEntry(subjectUser: WalledUser, objectRecord: (Project, Record), modifiedBy: Author, stateCode: 1);
-        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(Project, Record);
 
@@ -206,7 +227,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
         // The covering query found it active; by the time it is read, it is not (the store double returns the row as stored).
         var entry = H.Store.AddEntry(subjectUser: WalledUser, objectRecord: (Project, Record), modifiedBy: Author);
         _fixture.AfterCoveringQuery = () => H.Store.Entries[entry] = H.Store.Entries[entry] with { StateCode = 1 };
-        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(Project, Record);
 
@@ -219,7 +240,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
     {
         var malformed = H.Store.AddEntry(subjectUser: WalledUser, subjectContact: WalledContact,
             objectRecord: (Project, Record), modifiedBy: Author);
-        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(Project, Record);
 
@@ -241,7 +262,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
     {
         H.Participations.Flags[Record] = new RootRecordFlags(IsSecure: false, IsRestricted: false);
         var entry = H.Store.AddEntry(subjectUser: WalledUser, objectRecord: (Project, Record), modifiedBy: Author);
-        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(Project, Record);
 
@@ -271,7 +292,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
     {
         H.Participations.Flags[Record] = RootRecordFlags.Unreadable;
         H.Store.AddEntry(subjectUser: WalledUser, objectRecord: (Project, Record), modifiedBy: Author);
-        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(Project, Record);
 
@@ -360,7 +381,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
     {
         SecureMatterWithAFiledWorkAssignment();
         var onMatter = H.Store.AddEntry(subjectUser: WalledUser, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
-        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(WorkAssignment, FiledWorkAssignment);
 
@@ -373,6 +394,33 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
         row.GetProperty("coveredRecordId").GetGuid().Should().Be(SecureMatter);
     }
 
+    /// <summary>
+    /// #1616 fix round (F-C): the same work assignment with a pair naming ANOTHER, ordinary matter that no typed lookup
+    /// repeats — the pair names nothing it is filed under, so the secure matter's entry still covers it (never "unknown" on
+    /// every read, which left the enforcer unable to act on it).
+    /// </summary>
+    [Fact]
+    public async Task AnEntryOnTheSecureMatter_StillCoversAWorkAssignmentWhosePairNamesAnotherMatter()
+    {
+        SecureMatterWithAFiledWorkAssignment();
+        var otherMatter = Guid.Parse("16161616-0000-4000-8000-0000000000e1");
+        var matterType = Guid.Parse("16161616-0000-4000-8000-0000000000e2");
+        H.ChildWorld
+            .Add("sprk_recordtype_ref", matterType, ("sprk_recordlogicalname", Matter))
+            .Add(Matter, otherMatter, ("sprk_issecure", false));
+        H.ChildWorld.Set(WorkAssignment, FiledWorkAssignment, "sprk_regardingrecordid", otherMatter.ToString("D"));
+        H.ChildWorld.Set(WorkAssignment, FiledWorkAssignment, "sprk_regardingrecordtype",
+            new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", matterType));
+        var onMatter = H.Store.AddEntry(subjectUser: WalledUser, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
+        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write | AccessRights.Share);
+
+        var body = await GetOk(WorkAssignment, FiledWorkAssignment);
+
+        body.GetProperty("noAccess").GetString().Should().Be(AccessSignalState.Applies);
+        body.GetProperty("entries").EnumerateArray().Should().ContainSingle()
+            .Which.GetProperty("entryId").GetGuid().Should().Be(onMatter);
+    }
+
     [Fact]
     public async Task AWriteCaller_SeesAnOrganizationWallOverWhatTheSecureParentReferences_WithItsShape()
     {
@@ -383,7 +431,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
         {
             Display = new NoAccessEntryDisplay("Contact walled from Other Org", "Walled Contact", "Other Org", null, null),
         };
-        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(WorkAssignment, FiledWorkAssignment);
 
@@ -407,7 +455,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
         SecureMatterWithAFiledWorkAssignment();
         H.Participations.Flags[FiledWorkAssignment] = new RootRecordFlags(IsSecure: false, IsRestricted: false);
         H.Store.AddEntry(subjectUser: WalledUser, objectRecord: (Matter, SecureMatter), modifiedBy: Author);
-        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(WorkAssignment, FiledWorkAssignment);
 
@@ -429,7 +477,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
         H.Participations.RecordOrganizations[SecureMatter] = new[] { OtherOrg };
         H.Participations.RecordOrganizations[FiledWorkAssignment] = new[] { OtherOrg };
         var wall = H.Store.AddEntry(subjectUser: WalledUser, objectOrganization: OtherOrg, modifiedBy: Author);
-        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(WorkAssignment, FiledWorkAssignment);
 
@@ -458,7 +506,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
         H.Participations.Flags[FiledWorkAssignment] = new RootRecordFlags(IsSecure: false, IsRestricted: false);
         H.Participations.RecordOrganizations[FiledWorkAssignment] = new[] { OtherOrg };
         H.Store.AddEntry(subjectUser: WalledUser, objectOrganization: OtherOrg, modifiedBy: Author);
-        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(WorkAssignment, FiledWorkAssignment);
 
@@ -474,7 +522,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
     {
         SecureMatterWithAFiledWorkAssignment();
         H.ChildWorld.FailingRowReadsOf(WorkAssignment, FiledWorkAssignment);
-        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_workassignments", FiledWorkAssignment, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(WorkAssignment, FiledWorkAssignment);
 
@@ -489,7 +537,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
     public async Task UnreadableReferencedOrganizations_IsUnknown_NeverDoesNotApply_AndTheEntriesUnavailable()
     {
         H.Participations.UnreadableReferencedOrganizations[Record] = true;
-        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(Project, Record);
 
@@ -527,7 +575,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
     {
         DirectEntryAndOrganizationWall();
         H.Store.FailEntryRead = true;
-        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(Project, Record);
 
@@ -579,7 +627,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
             H.Store.AddEntry(subjectUser: Guid.NewGuid(), objectRecord: (Project, Record), modifiedBy: Author);
         }
 
-        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var body = await GetOk(Project, Record);
 
@@ -652,7 +700,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
     public async Task ARequestWithNoBearerToken_IsDenied_NeverAnsweredAppOnly()
     {
         DirectEntryAndOrganizationWall();
-        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write | AccessRights.Share);
         var client = _fixture.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", "not-a-bearer-token");
 
@@ -667,7 +715,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
     [Fact]
     public async Task TheProbeThrowing_IsTheUniform404()
     {
-        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write);
+        CallerHolds("sprk_projects", Record, AccessRights.Read | AccessRights.Write | AccessRights.Share);
         _fixture.ProbeThrows = true;
 
         var response = await _fixture.CreateAuthenticatedClient().GetAsync(Route(Project, Record));
@@ -697,7 +745,7 @@ public class RecordNoAccessEndpointTests : IClassFixture<RecordNoAccessTestFixtu
         var context = new DefaultHttpContext();
         context.Items[Sprk.Bff.Api.Api.Filters.RecordRouteAccessAuthorizationFilter.AuthorizedRightsItemKey] =
             new Sprk.Bff.Api.Api.Filters.RecordRouteAccessAuthorizationFilter.AuthorizedRouteRecord(
-                "sprk_projects", Guid.NewGuid(), AccessRights.Read | AccessRights.Write);
+                "sprk_projects", Guid.NewGuid(), AccessRights.Read | AccessRights.Write | AccessRights.Share);
 
         var result = await RecordNoAccessEndpoint.HandleAsync(Project, "sprk_projects", Record, H.Enforcer, H.Store,
             H.Participations, context, NullLogger.Instance, CancellationToken.None);

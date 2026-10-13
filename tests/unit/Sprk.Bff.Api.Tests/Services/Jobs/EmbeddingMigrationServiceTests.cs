@@ -86,7 +86,10 @@ public class EmbeddingMigrationServiceTests
 
         // Act
         await service.StartAsync(cts.Token);
-        await Task.Delay(100); // Give it a moment to check enabled flag
+
+        // Await the actual execute task: a disabled migration returns straight away. A service that ignored
+        // Enabled=false would sit in its 15 s startup delay, so the 5 s bound makes that fail.
+        await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(5));
         await service.StopAsync(cts.Token);
 
         // Assert

@@ -528,6 +528,15 @@ internal static class AssignedAccessTestDoubles
             IsExternal = false,
         };
 
+        /// <summary>
+        /// Task 181: the caller's systemuser by Entra oid — what <c>ResolveGrantedBySystemUserIdAsync</c> reads to tell the
+        /// granter apart. Empty by default (no caller resolves, as before).
+        /// </summary>
+        public ConcurrentDictionary<Guid, Guid> SystemUserIdsByOid { get; } = new();
+
+        /// <summary>Task 181: a root record's display name, answered to the grant notification's app-only read by id.</summary>
+        public ConcurrentDictionary<Guid, string> RootNames { get; } = new();
+
         public List<(string Set, string Payload)> Creates { get; } = new();
         public List<(string Set, Guid Id, string Payload)> Updates { get; } = new();
         public bool FailQueries { get; set; }
@@ -601,7 +610,12 @@ internal static class AssignedAccessTestDoubles
             object rows = entitySetName switch
             {
                 GrantSet => MatchGrants(filter),
-                // The share routes read a user by id; sprk_grantedby resolution reads by oid (no match here).
+                // The share routes read a user by id; sprk_grantedby resolution reads by oid (task 181: SystemUserIdsByOid).
+                "systemusers" when filter is not null && filter.StartsWith("azureactivedirectoryobjectid eq ", StringComparison.Ordinal) =>
+                    SystemUserIdsByOid
+                        .Where(kv => filter.Contains(kv.Key.ToString(), StringComparison.OrdinalIgnoreCase))
+                        .Select(kv => new Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow { Id = kv.Value })
+                        .ToList(),
                 "systemusers" => SystemUsers.Values
                     .Where(u => filter is not null && filter.Contains($"systemuserid eq {u.Id}", StringComparison.OrdinalIgnoreCase))
                     .ToList(),
@@ -618,6 +632,14 @@ internal static class AssignedAccessTestDoubles
         public override Task<T?> RetrieveAsync<T>(string entitySetName, Guid id, string? select = null,
             CancellationToken cancellationToken = default) where T : default
         {
+            // Task 181: the grant notification reads a root's display name by id, selecting that one column.
+            if (entitySetName is "sprk_projects" or "sprk_matters" or "sprk_workassignments")
+            {
+                return Task.FromResult(RootNames.TryGetValue(id, out var name) && select is not null
+                    ? JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(new Dictionary<string, object?> { [select] = name }))
+                    : default);
+            }
+
             lock (_gate)
             {
                 var row = _rows.FirstOrDefault(r => r.Id == id);
@@ -776,6 +798,58 @@ internal static class AssignedAccessTestDoubles
         return Options.Create(options);
     }
 
+    /// <summary>
+    /// Task 036: the portal-notification email seam, recording each send instead of reaching the shared mailbox. The
+    /// communication pipeline is never built (the production type only stores it).
+    /// </summary>
+    internal sealed class RecordingEmailService : Sprk.Bff.Api.Services.Registration.RegistrationEmailService
+    {
+        public RecordingEmailService()
+            : base(
+                null!,
+                Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.CommunicationOptions { DefaultMailbox = "mailbox-central@spaarke.com" }),
+                NullLogger<Sprk.Bff.Api.Services.Registration.RegistrationEmailService>.Instance)
+        {
+        }
+
+        public List<(string To, string Subject, string LinkUrl)> Sent { get; } = new();
+
+        /// <summary>Task 036 review: the CIAM onboarding emails sent (a contact onboarded by an invite), recorded, never sent.</summary>
+        public List<string> Onboarding { get; } = new();
+
+        /// <summary>Task 036 review: the message body of each portal email sent, parallel to <see cref="Sent"/>.</summary>
+        public List<string> Messages { get; } = new();
+
+        /// <summary>When true, a send waits on its cancellation token and never completes by itself (a hung mailbox).</summary>
+        public bool HangUntilCancelled { get; set; }
+
+        /// <summary>When set, every send throws this (the shared mailbox refusing or failing).</summary>
+        public Exception? Failure { get; set; }
+
+        public override Task SendCiamOnboardingEmailAsync(
+            string recipientEmail, string firstName, string portalUrl, CancellationToken cancellationToken = default)
+        {
+            lock (Onboarding)
+                Onboarding.Add(recipientEmail);
+            return Task.CompletedTask;
+        }
+
+        public override async Task SendPortalNotificationEmailAsync(
+            string recipientEmail, string subject, string headline, string message, string linkUrl, string linkText,
+            string correlationId, CancellationToken cancellationToken = default)
+        {
+            if (HangUntilCancelled)
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            if (Failure is { } failure)
+                throw failure;
+            lock (Sent)
+            {
+                Sent.Add((recipientEmail, subject, linkUrl));
+                Messages.Add(message);
+            }
+        }
+    }
+
     /// <summary>Everything one materializer needs, wired, with the production materializer between the doubles.</summary>
     internal sealed class Harness
     {
@@ -847,6 +921,49 @@ internal static class AssignedAccessTestDoubles
         public AssignedAccessMaterializer Materializer => new(
             Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, SharesOverride ?? Shares,
             Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Scopes);
+
+        /// <summary>Task 181: every <c>appnotification</c> the grant notifier wrote through task 100's NotificationService.</summary>
+        public ConcurrentQueue<Microsoft.Xrm.Sdk.Entity> SentNotifications { get; } = new();
+
+        /// <summary>Task 181: when set, every notification write throws this (Dataverse refusing the create).</summary>
+        public Exception? NotificationWriteFailure { get; set; }
+
+        /// <summary>
+        /// Task 181: the PRODUCTION grant notifier over this harness's grant table (names, the caller's oid), identity
+        /// store and ledger store (who a contact represents) and No Access guard; the PRODUCTION NotificationService over
+        /// an entity seam that records each write.
+        /// </summary>
+        public Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier Notifier
+        {
+            get
+            {
+                var entities = new Moq.Mock<Spaarke.Dataverse.IGenericEntityService>();
+                entities
+                    .Setup(e => e.CreateAsync(Moq.It.IsAny<Microsoft.Xrm.Sdk.Entity>(), Moq.It.IsAny<CancellationToken>()))
+                    .Returns((Microsoft.Xrm.Sdk.Entity entity, CancellationToken _) =>
+                    {
+                        if (NotificationWriteFailure is { } failure)
+                            throw failure;
+                        SentNotifications.Enqueue(entity);
+                        return Task.FromResult(Guid.NewGuid());
+                    });
+                var settings = new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://external.test" })
+                    .Build();
+                return new Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier(
+                    new Sprk.Bff.Api.Services.NotificationService(entities.Object, NullLogger<Sprk.Bff.Api.Services.NotificationService>.Instance),
+                    Grants, Identities, Store, Guard, Participations,
+                    Emails,
+                    new Sprk.Bff.Api.Configuration.CustomerIdentity(
+                        Options.Create(new Sprk.Bff.Api.Configuration.CustomerOptions { Id = "acme" }), settings,
+                        NullLogger<Sprk.Bff.Api.Configuration.CustomerIdentity>.Instance),
+                    settings,
+                    NullLogger<Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier>.Instance);
+            }
+        }
+
+        /// <summary>Task 036: every portal email the notifier sent (external-contact grants), recorded, never sent.</summary>
+        public RecordingEmailService Emails { get; } = new();
 
         /// <summary>
         /// Task 114: the PRODUCTION Restricted remover over this harness's flags, share table, system users
@@ -927,6 +1044,12 @@ internal static class AssignedAccessTestDoubles
     /// nothing to mark, so they are no-ops (and never throw).
     /// </summary>
     internal static AssignedAccessMaterializer InertMaterializer() => new Harness().Materializer;
+
+    /// <summary>
+    /// Task 181: a grant notifier over an EMPTY world, for handler tests that are not about the notification: no contact
+    /// represents anyone, and a share's notification is written to an entity seam nobody reads. It never throws.
+    /// </summary>
+    internal static Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier InertNotifier() => new Harness().Notifier;
 
     /// <summary>
     /// Task 158 r1c-v2 (round 39 item 2): an <see cref="Spaarke.Dataverse.IGenericEntityService"/> that finds no row — the No

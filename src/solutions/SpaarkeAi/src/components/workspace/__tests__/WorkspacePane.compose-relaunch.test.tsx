@@ -77,11 +77,7 @@ const authenticatedFetchMock = jest.fn(
         json: async () => ({}),
       } as Partial<Response> as Response;
     }
-    return {
-      ok: false,
-      status: 404,
-      json: async () => ({}),
-    } as Partial<Response> as Response;
+    throw httpError(404);
   },
 );
 
@@ -183,6 +179,7 @@ jest.mock('@spaarke/ui-components', () => {
 
 // Import AFTER mocks so module resolution picks them up.
 import { WorkspacePane } from '../WorkspacePane';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 // ---------------------------------------------------------------------------
 // Helpers

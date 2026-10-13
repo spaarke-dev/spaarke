@@ -140,7 +140,7 @@
          string from the BFF at runtime. Kept optional so forms that still bind a value stay valid. -->
     <property name="appInsightsKey"
               display-name-key="App Insights Key (ignored)"
-              description-key="Deprecated and ignored: browser telemetry uses this environment's App Insights connection string from the BFF at runtime. Leave empty."
+              description-key="Deprecated and ignored: browser telemetry uses the App Insights connection string of this environment, from the BFF, at runtime. Leave empty."
               of-type="SingleLine.Text"
               usage="input"
               required="false" />

@@ -811,11 +811,42 @@ the list of a running stamp, start a new run (upgrade) with the new list — nev
 hand (H13 T7 fails a stamp whose slots differ from its run). Never `AzureAd__TenantId`, never `TenantRouting:Tenants[]`.
 
 🔴 **Model 1 is the case that makes this a separate setting.** In Model 1 the per-customer BFF app registration
-lives in **Spaarke's** tenant (D-13), so `AzureAd:TenantId` is Spaarke's tenant while the customer's employees
-sign in with the **customer's** `tid`. Keying the member test on `AzureAd:TenantId` would refuse every Model-1
-Type-2 employee **and** auto-bind Spaarke's own staff into the customer's environment. Set the CUSTOMER's tenant
-here. In Model 2 the registration lives in the customer's tenant and the two values coincide — list it anyway;
-nothing is inferred.
+lives in **Spaarke's** tenant (D-13), so `AzureAd:TenantId` is Spaarke's tenant. Keying the member test on
+`AzureAd:TenantId` would refuse every Model-1 Type-2 employee **and** auto-bind Spaarke's own staff into the
+customer's environment. Set the CUSTOMER's tenant here. In Model 2 the registration lives in the customer's tenant
+and the two values coincide — list it anyway; nothing is inferred.
+
+##### Model 1: why a customer has a "home tenant" at all (read this before asking again)
+
+> Recorded 2026-10-11 at the owner's request (`spaarke-SPA-external-access-platform-r3`), verified against
+> `WorkforceIdentityOptions.cs` `WorkforceMembershipTest.Evaluate` / `IsRegisteredGuest`.
+
+Model 1 puts **Spaarke's side** (the stamp, its BFF app registration, its Dataverse environment) in Spaarke's
+tenant. It does **not** move the customer's people. A customer's employees keep their own company work accounts
+in **their company's own Entra tenant** — the customer's **home tenant** (e.g. Contoso's tenant). They reach the
+stamp as **B2B guests in Spaarke's tenant**, authenticating at home.
+
+| Where the home tenant appears | What it is |
+|---|---|
+| The guest's token from the stamp (Spaarke-pinned authority, ADR-028 A8; proven live 2026-10-08) | `tid` = **Spaarke's** tenant, `acct = 1` (guest), `idp` = `https://sts.windows.net/{home tenant id}/` |
+| `WorkforceIdentity__CustomerTenantIds__N` (this setting) | The customer's home tenant id(s): "whose employees count as this customer's workforce" |
+| The Spaarke registry, next to `sprk_securitygroupid` (R3 task 060 for current customers; provisioning intake for new ones) | The same list per customer key, read by the shared workforce self-registration service |
+
+It is checked in two places:
+
+1. **Every request to the customer's BFF** (`WorkforceMembershipTest`). A Model 1 guest is a member only when
+   `acct = 1` **and** `tid` = the stamp tenant **and** the home tenant parsed from `idp` ∈ `CustomerTenantIds`
+   (R3 FR-15). A guest from any other home tenant is denied (`sdap.access.deny.workforce_tenant_not_customer`).
+   A direct member of the listed tenant (`tid` ∈ list, `acct = 0`) is the Model 2 / dev path.
+2. **Workforce self-registration** (R3 FR-14, task 060). The person signs in at home first; the service admits them
+   only if that home `tid` ∈ the customer's list **and** `acct = 0` (a member there, not someone else's guest),
+   and only then invites them into Spaarke's tenant and the customer's `sprk-{customerId}-users` group.
+
+**Without the list**, anyone with any Microsoft work account could register as that customer's staff, and a guest
+from another company invited for an unrelated reason would be bound into the customer's environment.
+
+**Not to be confused with:** `AzureAd:TenantId` (the stamp's own tenant = Spaarke's on Model 1), the CIAM tenant
+(partners with no company Entra account; never valid here — startup refuses it), or `TenantRouting:Tenants[]`.
 
 Outside a provisioning run (Spaarke's own environments — dev), the same setting by hand, on BOTH slots:
 
@@ -827,7 +858,8 @@ az webapp config appsettings set --resource-group <rg> --name <app-service-name>
 ```
 
 **The member test also needs the `acct` claim** (§7.3): a member is a user token (`CallerIdentity`, never an
-app-only token) whose `tid` is listed here AND whose `acct` claim is `0`. A token with no `acct` claim fails
+app-only token) whose `tid` is listed here AND whose `acct` claim is `0` — or, on Model 1, the registered-guest
+branch above (`acct = 1`, `tid` = stamp tenant, `idp` home tenant listed here). A token with no `acct` claim fails
 closed (`sdap.access.deny.workforce_acct_claim_missing`) — membership is never inferred from an email domain or
 a `#EXT#` UPN.
 
@@ -1088,7 +1120,7 @@ it once by hand:
 ```
 
 Both are idempotent and keep every other optional claim. Optional claims on the resource registration apply to
-every access token issued FOR it — Teams SSO included (`webApplicationInfo.id` is this registration) — see
+every access token issued FOR it — including the workforce tokens the External Access SPA and Teams tab acquire (the single-tenant Spaarke client, NAA then MSAL popup, scope `user_impersonation`; the Teams manifest declares no `webApplicationInfo` and there is no Teams-SSO path, ADR-028 A8) — see
 Microsoft's [optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference).
 Without it every Type-2 first sign-in is denied `sdap.access.deny.workforce_acct_claim_missing` (fail closed).
 

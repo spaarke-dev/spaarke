@@ -267,7 +267,7 @@ Compress-Archive -Path "$PublishPath\*" -DestinationPath $ZipPath -Force
 $zipSize = (Get-Item $ZipPath).Length / 1MB
 Write-Host "  Package created: $([math]::Round($zipSize, 2)) MB" -ForegroundColor Green
 
-# Validate zip size per deployment constraints (~60 MB expected)
+# Validate zip size per deployment constraints (~37 MB expected on net10, 2026-10-12)
 if ($zipSize -gt 100) {
     Write-Host "  WARNING: Package is larger than expected ($([math]::Round($zipSize, 2)) MB > 100 MB)" -ForegroundColor Yellow
     Write-Host "  This may indicate stale publish artifacts. Consider a clean build." -ForegroundColor Yellow

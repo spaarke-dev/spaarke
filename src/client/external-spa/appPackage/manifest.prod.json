@@ -1,0 +1,36 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.29/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.29",
+  "version": "1.0.0",
+  "id": "${{TEAMS_APP_ID}}",
+  "developer": {
+    "name": "Spaarke",
+    "websiteUrl": "https://spaarke.com",
+    "privacyUrl": "https://spaarke.com/privacy",
+    "termsOfUseUrl": "https://spaarke.com/terms"
+  },
+  "name": {
+    "short": "Spaarke",
+    "full": "Spaarke Legal Department Service Portal"
+  },
+  "description": {
+    "short": "Your legal department service portal — assigned work, requests, and more",
+    "full": "Spaarke's Legal Department Service Portal brings your entitled workspace modules into Teams: assigned projects and documents, request submission (NDA, policies and procedures), and status tracking. Sign in with your organization account to see only the modules and records you're entitled to, and download files securely — the same portal shell available standalone, now inside Teams."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#4F6BED",
+  "staticTabs": [
+    {
+      "entityId": "spaarkeCollaborationHome",
+      "name": "Spaarke",
+      "contentUrl": "https://external.spaarke.com",
+      "websiteUrl": "https://external.spaarke.com",
+      "scopes": ["personal"]
+    }
+  ],
+  "permissions": ["identity"],
+  "validDomains": ["external.spaarke.com", "teams.microsoft.com", "*.cloud.microsoft"]
+}

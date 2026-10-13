@@ -17,7 +17,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// retained-original baseline resolved at save (<see cref="ComposeService.ResolveSaveBaselineAsync"/>)
 /// therefore lacks them. When the user edits (or accepts a redline on) such a paragraph,
 /// <c>collectEditedParagraphs</c> emits its minted paraId, and
-/// <see cref="ComposeParagraphRedlineSynthesizer"/> → <see cref="ComposeParaIdSpliceMap"/> cannot locate
+/// the (since-retired) paraId splice cannot locate
 /// it (the baseline paragraph physically carries no id) → <c>ComposeRedlineException</c>, the whole save
 /// aborted. Uploaded docs are worse still: they get NO server pre-parse, so ALL their editor ids are
 /// client-minted and absent from the baseline.
@@ -28,7 +28,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// text). This stamper walks the baseline's paragraphs in the SAME document order and, for each id-LESS
 /// paragraph, stamps the client's paraId IFF the baseline paragraph's text matches the snapshot text for
 /// that position (folded + whitespace-normalized — <see cref="ComposeTextFold.Normalize"/>). After this
-/// the baseline physically carries every id the editor uses, so the synthesizer + E2 anchoring resolve
+/// the baseline physically carries every id the editor uses, so `ComposeShadowPatchEngine.Resolve` + E2 anchoring resolve
 /// cleanly and the SAVED document is self-consistent for future round-trips.
 /// </para>
 /// <para>
@@ -107,7 +107,7 @@ public sealed class ComposeBaselineParaIdStamper
                 return baseline.ToArray();
             }
 
-            // Same recursive, document-ordered walk ParaIdPreParser + ComposeParaIdSpliceMap use.
+            // Same recursive, document-ordered walk ParaIdPreParser uses.
             var paragraphs = body.Descendants<Paragraph>().ToList();
 
             // Count gate: the client's map is one entry per editor paragraph in document order. If the

@@ -34,7 +34,8 @@
  * @see ADR-012 — Shared Component Library (context-agnostic services)
  */
 
-import { cleanGuid, ChildRecordWriteError } from '@spaarke/ui-components';
+import type { AuthenticatedFetchFn } from '@spaarke/auth';
+import { cleanGuid } from '@spaarke/ui-components';
 import type { AssociationResult, EntityTypeOption } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
@@ -88,7 +89,7 @@ function _isDocumentAssociationEntityType(value: string): value is DocumentAssoc
 
 /**
  * How the document is re-filed: one call to `PUT /api/v1/documents/{id}` carrying the lookup. Rejects with the server's
- * message (a {@link ChildRecordWriteError}).
+ * message (the `ApiError` the BFF fetch throws).
  */
 export type DocumentRefile = (documentId: string, body: Record<string, string>) => Promise<void>;
 
@@ -97,26 +98,18 @@ export type DocumentRefile = (documentId: string, body: Record<string, string>) 
  * be `''` when the fetch resolves relative `/api` paths.
  */
 export function bffDocumentRefile(
-  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
+  authenticatedFetch: AuthenticatedFetchFn,
   bffBaseUrl: string
 ): DocumentRefile {
   return async (documentId, body) => {
     const url = `${(bffBaseUrl ?? '').replace(/\/+$/, '')}/api/v1/documents/${encodeURIComponent(documentId)}`;
-    const response = await authenticatedFetch(url, {
+    // `authenticatedFetch` THROWS an `ApiError` (message = the server's ProblemDetails detail/title) for a non-2xx, so a
+    // refusal rejects here and `associateDocumentToParent`'s catch surfaces that message.
+    await authenticatedFetch(url, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!response.ok) {
-      let detail: string | undefined;
-      try {
-        const problem = (await response.json()) as { detail?: unknown; title?: unknown };
-        detail = typeof problem.detail === 'string' ? problem.detail : typeof problem.title === 'string' ? problem.title : undefined;
-      } catch {
-        /* not ProblemDetails */
-      }
-      throw new ChildRecordWriteError(detail ?? `The document was not filed (HTTP ${response.status}).`, response.status);
-    }
   };
 }
 

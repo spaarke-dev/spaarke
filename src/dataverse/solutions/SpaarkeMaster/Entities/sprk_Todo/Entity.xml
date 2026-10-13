@@ -605,6 +605,44 @@
             <Description description="Set on transition to Completed" languagecode="1033" />
           </Descriptions>
         </attribute>
+        <attribute PhysicalName="sprk_CreatedByContact">
+          <Type>lookup</Type>
+          <Name>sprk_createdbycontact</Name>
+          <LogicalName>sprk_createdbycontact</LogicalName>
+          <RequiredLevel>none</RequiredLevel>
+          <DisplayMask>ValidForAdvancedFind|ValidForForm|ValidForGrid</DisplayMask>
+          <ValidForUpdateApi>1</ValidForUpdateApi>
+          <ValidForReadApi>1</ValidForReadApi>
+          <ValidForCreateApi>1</ValidForCreateApi>
+          <IsCustomField>1</IsCustomField>
+          <IsAuditEnabled>0</IsAuditEnabled>
+          <IsSecured>1</IsSecured>
+          <IntroducedVersion>1.1.0.0</IntroducedVersion>
+          <IsCustomizable>1</IsCustomizable>
+          <IsRenameable>1</IsRenameable>
+          <CanModifySearchSettings>1</CanModifySearchSettings>
+          <CanModifyRequirementLevelSettings>1</CanModifyRequirementLevelSettings>
+          <CanModifyAdditionalSettings>1</CanModifyAdditionalSettings>
+          <SourceType>0</SourceType>
+          <IsGlobalFilterEnabled>0</IsGlobalFilterEnabled>
+          <IsSortableEnabled>0</IsSortableEnabled>
+          <CanModifyGlobalFilterSettings>1</CanModifyGlobalFilterSettings>
+          <CanModifyIsSortableSettings>1</CanModifyIsSortableSettings>
+          <IsDataSourceSecret>0</IsDataSourceSecret>
+          <AutoNumberFormat></AutoNumberFormat>
+          <IsSearchable>0</IsSearchable>
+          <IsFilterable>0</IsFilterable>
+          <IsRetrievable>0</IsRetrievable>
+          <IsLocalizable>0</IsLocalizable>
+          <LookupStyle>single</LookupStyle>
+          <LookupTypes />
+          <displaynames>
+            <displayname description="Created By (Contact)" languagecode="1033" />
+          </displaynames>
+          <Descriptions>
+            <Description description="The CONTACT who created this record from the external SPA. Stamped by the BFF only (field-secured), from the resolved contact principal and never from client input; createdby is the BFF application user for a record the BFF creates app-only. The delete-own check reads this column for a contact caller (sprk_createdbyperson for a systemuser caller). spaarke-SPA-external-access-platform-r3 task 020, FR-25." languagecode="1033" />
+          </Descriptions>
+        </attribute>
         <attribute PhysicalName="sprk_CreatedByPerson">
           <Type>lookup</Type>
           <Name>sprk_createdbyperson</Name>

@@ -41,6 +41,7 @@ import {
   isEntitledToWidgetId,
 } from '../registry/widgetRegistry';
 import { PlaceholderWidgetBody } from '../registry/PlaceholderWidgetBody';
+import { BffAccessState, accessFailureOf, type BffAccessFailure } from '../components/auth/BffAccessState';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0 },
@@ -76,9 +77,11 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
   const { widgetTabs, activeTabId, selectTab, openTab, closeTab } = useWorkspaceTabs();
 
   // /me entitlements — live BFF call (task 073) to GET /api/v1/external/me/entitlements, with a
-  // plane-derived fallback on failure (see me-client.ts). `teamsHost` seeds the fallback plane.
+  // plane-derived fallback on a non-auth failure (see me-client.ts). `teamsHost` seeds the fallback plane.
+  // A 401 / 403 is NOT defaulted: it renders the sign-in / denied state (task 042, FR-18).
   const [me, setMe] = React.useState<MeEntitlementsResponse | null>(null);
   const [meError, setMeError] = React.useState<string | null>(null);
+  const [meAccessFailure, setMeAccessFailure] = React.useState<BffAccessFailure | null>(null);
   React.useEffect(() => {
     let cancelled = false;
     fetchMeEntitlements(teamsHost)
@@ -86,7 +89,10 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
         if (!cancelled) setMe(res);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setMeError(err instanceof Error ? err.message : 'Unable to load your access.');
+        if (cancelled) return;
+        const failure = accessFailureOf(err);
+        if (failure) setMeAccessFailure(failure);
+        else setMeError(err instanceof Error ? err.message : 'Unable to load your access.');
       });
     return () => {
       cancelled = true;
@@ -170,6 +176,18 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
     },
     [s.widgetFallback]
   );
+
+  if (meAccessFailure) {
+    return (
+      <div className={s.statusRoot}>
+        <BffAccessState
+          failure={meAccessFailure}
+          teamsHost={teamsHost}
+          deniedMessage="You do not have access to this workspace. If you believe this is an error, please contact your Spaarke administrator."
+        />
+      </div>
+    );
+  }
 
   if (meError) {
     return (

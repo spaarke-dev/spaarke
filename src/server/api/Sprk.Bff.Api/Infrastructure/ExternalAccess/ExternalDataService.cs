@@ -142,7 +142,17 @@ public class ExternalDataService
         [JsonPropertyName("sprk_documenttype")] public string? SprkDocumenttype { get; set; }
         [JsonPropertyName("sprk_filesummary")] public string? SprkSummary { get; set; }
         [JsonPropertyName("_sprk_project_value")] public string? SprkProjectidValue { get; set; }
+        // Fix round for task 039: the other root links, read so the list can withhold a document also filed to a root the
+        // caller cannot read (ExternalMultiRootRule). The typed column and its related twin, per root, are the roots in
+        // DocumentLinkFields (the one declaration; pinned by test). Never mapped onto the wire DTO.
+        [JsonPropertyName("_sprk_relatedproject_value")] public string? SprkRelatedprojectValue { get; set; }
+        [JsonPropertyName("_sprk_matter_value")] public string? SprkMatterValue { get; set; }
+        [JsonPropertyName("_sprk_relatedmatter_value")] public string? SprkRelatedmatterValue { get; set; }
+        [JsonPropertyName("_sprk_workassignment_value")] public string? SprkWorkassignmentValue { get; set; }
+        [JsonPropertyName("_sprk_relatedworkassignment_value")] public string? SprkRelatedworkassignmentValue { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
+        [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
+        [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
     }
 
     /// <summary>
@@ -167,6 +177,8 @@ public class ExternalDataService
         [JsonPropertyName("sprk_regardingrecordid")] public string? SprkRegardingrecordid { get; set; }
         [JsonPropertyName("sprk_regardingrecordname")] public string? SprkRegardingrecordname { get; set; }
         [JsonPropertyName("sprk_regardingrecordurl")] public string? SprkRegardingrecordurl { get; set; }
+        [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
+        [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
     }
 
     // Task 097: sprk_event has NO sprk_name / sprk_status columns (live: HTTP 400 "Could not find a property named
@@ -193,6 +205,12 @@ public class ExternalDataService
         [JsonPropertyName(EventStatusColumn)] public int? SprkStatus { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName("_sprk_regardingproject_value")] public string? SprkRegardingprojectValue { get; set; }
+        // Task 039: the other two root lookups, read so a list can withhold an event also filed to a record the caller
+        // cannot read (see ReadableEvents). Never mapped onto the wire DTO.
+        [JsonPropertyName("_sprk_regardingmatter_value")] public string? SprkRegardingmatterValue { get; set; }
+        [JsonPropertyName("_sprk_regardingworkassignment_value")] public string? SprkRegardingworkassignmentValue { get; set; }
+        [JsonPropertyName(CreatedByPersonValueAttribute)] public string? CreatedByPersonValue { get; set; }
+        [JsonPropertyName(CreatedByContactValueAttribute)] public string? CreatedByContactValue { get; set; }
     }
 
     private sealed class ContactRow
@@ -236,16 +254,26 @@ public class ExternalDataService
     // Constructor
     // ---------------------------------------------------------------------------
 
+    /// <summary>
+    /// Task 039 section 12 (option B, effective status): the app-only reader the ONE filing walk
+    /// (<see cref="EffectiveRootFlags.ReadAncestryAsync"/>) reads through, so <see cref="GetNonSecureRootsAsync"/> answers a
+    /// root's EFFECTIVE secure status. Registered unconditionally (GraphModule), so the typed-client factory supplies it. A
+    /// null reader (a test double that passes none) makes every work assignment or project read as secure (fail closed).
+    /// </summary>
+    private readonly IGenericEntityService? _filing;
+
     public ExternalDataService(
         HttpClient httpClient,
         IConfiguration configuration,
         TokenCredential credential,
-        ILogger<ExternalDataService> logger)
+        ILogger<ExternalDataService> logger,
+        IGenericEntityService? filing = null)
     {
         _httpClient = httpClient;
         _configuration = configuration;
         _credential = credential;
         _logger = logger;
+        _filing = filing;
     }
 
     // ---------------------------------------------------------------------------
@@ -304,29 +332,232 @@ public class ExternalDataService
     // Document queries
     // ---------------------------------------------------------------------------
 
-    /// <summary>Retrieves all documents belonging to the specified project.</summary>
+    // ---------------------------------------------------------------------------
+    // Document parents (spaarke-SPA-external-access-platform-r3 task 031, FR-24)
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// The record types an external caller can list, download and upload documents on (FR-24). Each is a
+    /// <c>sprk_document</c> parent through its own lookup (<see cref="DocumentParentBinding"/>).
+    /// </summary>
+    /// <remarks>
+    /// <b>Invoice</b> (owner decision 2026-10-11, task 031 option A "inherit"): an invoice is not a root in the caller's
+    /// accessible set, so its documents take the caller's rights on the invoice's PARENT records — the union over its
+    /// <c>sprk_matter</c> and <c>sprk_project</c> (<see cref="GetInvoiceParentsAsync"/>; the endpoint's rights arm), the
+    /// same "any accessible parent" rule the invoices module and the message routes apply.
+    /// </remarks>
+    public enum DocumentParentKind
+    {
+        Project = 1,
+        Matter = 2,
+        WorkAssignment = 3,
+        ServiceRequest = 4,
+        Invoice = 5,
+    }
+
+    /// <summary>
+    /// Everything the Web API path needs to read or write a document against one parent: the parent entity, its entity
+    /// set, the <c>sprk_document</c> navigation property that binds it, and the lookup attribute (whose <c>_..._value</c>
+    /// form filters and scopes).
+    /// </summary>
+    /// <remarks>
+    /// Names from the solution source (<c>Entities/sprk_Document/Entity.xml</c>, <c>Other/Relationships/*.xml</c>;
+    /// task 031). The navigation property differs in case from the attribute, and the service-request lookup is
+    /// <c>sprk_relatedservicerequest</c>, not <c>sprk_servicerequest</c>.
+    /// </remarks>
+    internal sealed record DocumentParentBinding(
+        DocumentParentKind Kind,
+        string EntityLogicalName,
+        string EntitySet,
+        string NavigationProperty,
+        string LookupAttribute)
+    {
+        /// <summary>The <c>_..._value</c> form used in <c>$filter</c> and <c>$select</c>.</summary>
+        public string LookupValueAttribute => $"_{LookupAttribute}_value";
+
+        /// <summary>The full <c>@odata.bind</c> key, e.g. <c>sprk_Project@odata.bind</c>.</summary>
+        public string BindKey => $"{NavigationProperty}@odata.bind";
+    }
+
+    private static readonly IReadOnlyDictionary<DocumentParentKind, DocumentParentBinding> DocumentParents =
+        new Dictionary<DocumentParentKind, DocumentParentBinding>
+        {
+            [DocumentParentKind.Project] = new(
+                DocumentParentKind.Project, "sprk_project", "sprk_projects", "sprk_Project", "sprk_project"),
+            [DocumentParentKind.Matter] = new(
+                DocumentParentKind.Matter, "sprk_matter", "sprk_matters", "sprk_Matter", "sprk_matter"),
+            [DocumentParentKind.WorkAssignment] = new(
+                DocumentParentKind.WorkAssignment, "sprk_workassignment", "sprk_workassignments",
+                "sprk_WorkAssignment", "sprk_workassignment"),
+            [DocumentParentKind.ServiceRequest] = new(
+                DocumentParentKind.ServiceRequest, "sprk_servicerequest", "sprk_servicerequests",
+                "sprk_RelatedServiceRequest", "sprk_relatedservicerequest"),
+            // Task 031 owner decision 2026-10-11 (option A): sprk_document.sprk_invoice (Entity.xml:3452), navigation
+            // property sprk_Invoice (Other/Relationships/sprk_Invoice.xml, sprk_invoice_sprk_document).
+            [DocumentParentKind.Invoice] = new(
+                DocumentParentKind.Invoice, "sprk_invoice", "sprk_invoices", "sprk_Invoice", "sprk_invoice"),
+        };
+
+    /// <summary>The binding for a document parent kind. Throws for a value outside the table: a programming error.</summary>
+    internal static DocumentParentBinding GetDocumentParentBinding(DocumentParentKind kind) =>
+        DocumentParents.TryGetValue(kind, out var binding)
+            ? binding
+            : throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a document parent kind.");
+
+    /// <summary>Retrieves the documents linked to the specified parent record through that parent's lookup, minus any also filed to a root the caller cannot read.</summary>
     /// <remarks>
     /// Task 105: followed page by page up to <see cref="MaxCollectionRows"/> (it was a single <c>$top=200</c> read, so
     /// a project's 201st document was silently missing); a cut-short list says
     /// <see cref="ExternalCollectionResponse{T}.Truncated"/>. The primary key breaks <c>createdon</c> ties so pages
-    /// never overlap.
+    /// never overlap. Task 031 generalized it from project to every <see cref="DocumentParentKind"/>; the project query
+    /// is unchanged.
+    /// <para>Fix round for task 039: a document carries typed links to a project, a matter and a work assignment (and a
+    /// related twin of each), so one filed to a secure matter AND to a project the caller can read used to list on the
+    /// project route (name and AI summary). It is now listed only if the caller holds Read on every SECURE root it carries
+    /// (<see cref="ExternalMultiRootRule"/>, owner decision 2026-10-12, option B); the secure flags of the linked roots the
+    /// caller cannot read are read once for the whole list. The caller has ALREADY been authorized for
+    /// <paramref name="parentId"/>.</para>
     /// </remarks>
-    public virtual async Task<ExternalCollectionResponse<ExternalDocumentDto>> GetDocumentsAsync(Guid projectId, CancellationToken ct = default)
+    public virtual async Task<ExternalCollectionResponse<ExternalDocumentDto>> GetDocumentsAsync(
+        DocumentParentKind parentKind, Guid parentId, CallerPrincipal caller, CancellationToken ct = default)
     {
-        var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,createdon";
-        var filter = Uri.EscapeDataString($"_sprk_project_value eq {projectId}");
-        var url = $"{GetApiUrl()}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc,sprk_documentid asc";
+        ArgumentNullException.ThrowIfNull(caller);
+        var url = BuildDocumentListUrl(GetApiUrl(), parentKind, parentId);
 
         var read = await GetCollectionAsync<DocumentRow>(url, ct);
+        var links = read.Rows.Select(DocumentLinksOf).ToList();
+        var flags = await ReadSecureRootFlagsAsync(caller, links.Select(l => l.Links), ct);
+        var readable = read.Rows.Where((_, i) => links[i].SecureRootsReadableBy(caller, flags)).ToList();
+        if (readable.Count != read.Rows.Count)
+        {
+            _logger.LogInformation(
+                "[EXT-DATA] documents: {Withheld} of {Total} document(s) of {ParentKind} {ParentId} withheld - also filed to a secure record the caller cannot read",
+                read.Rows.Count - readable.Count, read.Rows.Count, parentKind, parentId);
+        }
+
         return new ExternalCollectionResponse<ExternalDocumentDto>
         {
-            Value = read.Rows.Select(MapDocument).ToList(),
-            Truncated = read.Truncated,
+            Value = readable.Select(MapDocument).ToList(),
+            Truncated = read.Truncated || FlagReadCutListShort(flags, read.Rows.Count - readable.Count),
         };
     }
 
     /// <summary>
-    /// Creates a <c>sprk_document</c> row for a file already uploaded to SPE, linked to the project.
+    /// Review of 039 option B (K2): a list that withheld rows while the secure-flag read was INCOMPLETE (a failed chunk, a
+    /// walk that could not decide, the lookup bound) may be missing rows only because of that, so it says
+    /// <see cref="ExternalCollectionResponse{T}.Truncated"/>. A complete read that withheld a genuinely secure row does not.
+    /// </summary>
+    private static bool FlagReadCutListShort(SecureRootFlags flags, int withheld) => withheld > 0 && !flags.IsComplete;
+
+    private static DocumentRootLinks DocumentLinksOf(DocumentRow row) =>
+        new(
+            row.SprkProjectidValue, row.SprkRelatedprojectValue,
+            row.SprkMatterValue, row.SprkRelatedmatterValue,
+            row.SprkWorkassignmentValue, row.SprkRelatedworkassignmentValue);
+
+    /// <summary>
+    /// The six root links of a <c>sprk_document</c> (a typed lookup and its related twin, per root: project, matter, work
+    /// assignment) as raw <c>_..._value</c> strings, and the one place the multi-root rule is applied to them
+    /// (<see cref="ExternalMultiRootRule"/>). Shared by the document LIST (<see cref="GetDocumentsAsync"/>) and every
+    /// single-document route (download, versions), so one document is not readable on one path and hidden on another.
+    /// </summary>
+    /// <remarks>
+    /// The columns are the root subset of <see cref="DocumentLinkFields"/> (pinned by test). A value that is null or blank
+    /// is "not filed to this root"; a value that is not a GUID reads as unreadable (fail closed).
+    /// </remarks>
+    public readonly record struct DocumentRootLinks(
+        string? Project, string? RelatedProject,
+        string? Matter, string? RelatedMatter,
+        string? WorkAssignment, string? RelatedWorkAssignment)
+    {
+        /// <summary>The <c>_..._value</c> select columns of the six links, in the order of this record's members.</summary>
+        internal static readonly IReadOnlyList<string> SelectColumns = new[]
+        {
+            "_sprk_project_value", "_sprk_relatedproject_value",
+            "_sprk_matter_value", "_sprk_relatedmatter_value",
+            "_sprk_workassignment_value", "_sprk_relatedworkassignment_value",
+        };
+
+        /// <summary>The six links as multi-root rule input.</summary>
+        public (ExternalGrantRootType Root, string? LookupValue)[] Links => new[]
+        {
+            (ExternalGrantRootType.Project, Project),
+            (ExternalGrantRootType.Project, RelatedProject),
+            (ExternalGrantRootType.Matter, Matter),
+            (ExternalGrantRootType.Matter, RelatedMatter),
+            (ExternalGrantRootType.WorkAssignment, WorkAssignment),
+            (ExternalGrantRootType.WorkAssignment, RelatedWorkAssignment),
+        };
+
+        /// <summary>
+        /// Whether <paramref name="caller"/> holds Read on every SECURE root this document is filed to; <paramref name="flags"/>
+        /// are the secure flags read for the request (<see cref="ReadSecureRootFlagsAsync"/>).
+        /// </summary>
+        public bool SecureRootsReadableBy(CallerPrincipal caller, SecureRootFlags flags) =>
+            ExternalMultiRootRule.SecureRootsReadable(caller, flags, Links);
+
+        /// <summary>The links a single-row read returned. A present value that is not a JSON string reads as malformed.</summary>
+        internal static DocumentRootLinks From(IReadOnlyDictionary<string, JsonElement> row) => new(
+            Raw(row, SelectColumns[0]), Raw(row, SelectColumns[1]),
+            Raw(row, SelectColumns[2]), Raw(row, SelectColumns[3]),
+            Raw(row, SelectColumns[4]), Raw(row, SelectColumns[5]));
+
+        private static string? Raw(IReadOnlyDictionary<string, JsonElement> row, string column)
+        {
+            if (!row.TryGetValue(column, out var value)) return null;
+            return value.ValueKind switch
+            {
+                JsonValueKind.Null or JsonValueKind.Undefined => null,
+                JsonValueKind.String => value.GetString(),
+                _ => "malformed", // not a GUID: the multi-root rule withholds it (fail closed)
+            };
+        }
+    }
+
+    /// <summary>
+    /// What the single-document routes decide on: the document's parent through the ROUTE's lookup, its display name, and
+    /// every root link it carries (<see cref="DocumentRootLinks"/>). Deconstructs to <c>(ParentId, DocumentName)</c>.
+    /// </summary>
+    public sealed record DocumentScopeRead(Guid? ParentId, string? DocumentName, DocumentRootLinks Roots)
+    {
+        /// <summary>The document does not exist, or could not be read.</summary>
+        public static readonly DocumentScopeRead Absent = new(null, null, default);
+
+        public void Deconstruct(out Guid? parentId, out string? documentName)
+        {
+            parentId = ParentId;
+            documentName = DocumentName;
+        }
+
+        /// <summary>Whether the document is under <paramref name="routeParentId"/> through the route's lookup.</summary>
+        public bool IsUnder(Guid routeParentId) => ParentId is { } parent && parent == routeParentId;
+
+        /// <summary>
+        /// Whether the document is under <paramref name="routeParentId"/> through the route's lookup AND the caller holds
+        /// Read on every SECURE root it is filed to (<paramref name="flags"/>: the request's secure-flag read). False answers
+        /// the route's one "not part of this record" response.
+        /// </summary>
+        public bool IsReadableUnder(Guid routeParentId, CallerPrincipal caller, SecureRootFlags flags) =>
+            IsUnder(routeParentId) && Roots.SecureRootsReadableBy(caller, flags);
+    }
+
+    /// <summary>The document list URL for one parent. Pure, so a test can read the filter (task 031).</summary>
+    internal static string BuildDocumentListUrl(string apiUrl, DocumentParentKind parentKind, Guid parentId)
+    {
+        var binding = GetDocumentParentBinding(parentKind);
+        // Task 032 (FR-26, review 031 K2): both creator stamps, so the SPA can offer Delete only on the caller's own rows.
+        // Fix round for task 039: every root link (typed + related twin), so a document also filed to a root the caller
+        // cannot read can be withheld (ExternalMultiRootRule).
+        var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,"
+                     + "_sprk_relatedproject_value,_sprk_matter_value,_sprk_relatedmatter_value,"
+                     + "_sprk_workassignment_value,_sprk_relatedworkassignment_value,createdon,"
+                     + CreatorStampSelect;
+        var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {parentId}");
+        return $"{apiUrl}/sprk_documents?$filter={filter}&$select={select}&$orderby=createdon desc,sprk_documentid asc";
+    }
+
+    /// <summary>
+    /// Creates a <c>sprk_document</c> row for a file already uploaded to SPE, linked to its parent record.
     /// </summary>
     /// <remarks>
     /// <para>Called ONLY after the bytes are in SPE — the pointers in <paramref name="pointers"/> are
@@ -340,15 +571,17 @@ public class ExternalDataService
     /// the display name; <c>sprk_filename</c> / <c>sprk_filesize</c> / <c>sprk_graphitemid</c> /
     /// <c>sprk_filepath</c> carry the file identity.</para>
     ///
-    /// <para><c>sprk_Project@odata.bind</c> uses the PascalCase navigation property, the same
-    /// case-sensitive form the event and to-do creates use. The read side of this service filters
-    /// documents on <c>_sprk_project_value</c>, so this is the lookup that makes an uploaded document
-    /// visible in the SPA's own list.</para>
+    /// <para>The parent bind (<c>sprk_Project@odata.bind</c>, <c>sprk_Matter@odata.bind</c>, ...) uses the PascalCase
+    /// navigation property from <see cref="DocumentParentBinding"/>, the same case-sensitive form the event and to-do
+    /// creates use. The read side of this service filters documents on the same lookup, so this is the bind that makes
+    /// an uploaded document visible in the SPA's own list (task 031).</para>
     /// </remarks>
     public virtual async Task<ExternalDocumentDto> CreateDocumentAsync(
-        Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId, CancellationToken ct = default)
+        DocumentParentKind parentKind, Guid parentId, ExternalUploadedFilePointers pointers, Guid owningTeamId,
+        CallerPrincipal creator, CancellationToken ct = default)
     {
-        var body = BuildDocumentCreatePayload(projectId, pointers, owningTeamId);
+        var body = BuildDocumentCreatePayload(parentKind, parentId, pointers, owningTeamId);
+        StampCreator(body, creator); // FR-25 (task 030)
 
         var token = await GetAppOnlyTokenAsync(ct);
 
@@ -369,8 +602,8 @@ public class ExternalDataService
         {
             var errorBody = await response.Content.ReadAsStringAsync(ct);
             _logger.LogWarning(
-                "[EXT-DATA] Create document failed for project {ProjectId}: {Status} — {Body}",
-                projectId, response.StatusCode, errorBody);
+                "[EXT-DATA] Create document failed for {ParentKind} {ParentId}: {Status} — {Body}",
+                parentKind, parentId, response.StatusCode, errorBody);
             throw new InvalidOperationException($"Failed to create document: {response.StatusCode}");
         }
 
@@ -382,8 +615,8 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// The COMPLETE create payload for an external upload's <c>sprk_document</c>: the file identity, the project
-    /// bind, and the OWNER (unified-access-control-r2 task 146).
+    /// The COMPLETE create payload for an external upload's <c>sprk_document</c>: the file identity, the parent
+    /// bind (task 031: any <see cref="DocumentParentKind"/>), and the OWNER (unified-access-control-r2 task 146).
     /// </summary>
     /// <remarks>
     /// <para><b>The owner is passed in, and its absence refuses</b> (the <c>OfficeDocumentPersistence</c> pattern,
@@ -395,10 +628,11 @@ public class ExternalDataService
     /// <para>Pure so a test can read the payload; <see cref="CreateDocumentAsync"/> is a substitution seam.</para>
     /// </remarks>
     internal static Dictionary<string, object?> BuildDocumentCreatePayload(
-        Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId)
+        DocumentParentKind parentKind, Guid parentId, ExternalUploadedFilePointers pointers, Guid owningTeamId)
     {
-        if (projectId == Guid.Empty)
-            throw new ArgumentException("Project id must be a non-empty GUID.", nameof(projectId));
+        var parent = GetDocumentParentBinding(parentKind);
+        if (parentId == Guid.Empty)
+            throw new ArgumentException("Parent id must be a non-empty GUID.", nameof(parentId));
         ArgumentNullException.ThrowIfNull(pointers);
         RequireOwner(owningTeamId, "sprk_document");
 
@@ -409,7 +643,7 @@ public class ExternalDataService
             ["sprk_graphitemid"] = pointers.ItemId,
             [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = pointers.ItemId, // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
             ["sprk_graphdriveid"] = pointers.DriveId,
-            ["sprk_Project@odata.bind"] = $"/sprk_projects({projectId})",
+            [parent.BindKey] = $"/{parent.EntitySet}({parentId})",
             [OwnerBindKey] = $"/teams({owningTeamId})",
         };
 
@@ -436,24 +670,632 @@ public class ExternalDataService
                 + "IRecordOwnershipResolver from the record it is filed to; refusing to create it app-owned (task 146).");
     }
 
-    /// <summary>
-    /// Returns the document's parent project id and display name — used by the external download
-    /// endpoint (task 027) for document→project authorization scoping BEFORE any SPE pointer
-    /// resolution or Graph content read. App-only Dataverse read; returns (null, null) when the
-    /// document does not exist. Does NOT expose any Graph pointer (driveId/itemId).
-    /// </summary>
-    public virtual async Task<(Guid? ProjectId, string? DocumentName)> GetDocumentProjectAndNameAsync(
-        Guid documentId, CancellationToken ct = default)
+    // ---------------------------------------------------------------------------
+    // FR-25 creator stamp (spaarke-SPA-external-access-platform-r3 task 030)
+    // ---------------------------------------------------------------------------
+
+    /// <summary>The <c>sprk_createdbyperson</c> (→ systemuser) bind key: the internal plane's column (task 146 c1-r1),
+    /// spelled once in <see cref="RecordCreatorPersonColumn"/>.</summary>
+    internal const string CreatedByPersonBindKey = RecordCreatorPersonColumn.NavigationProperty + "@odata.bind";
+
+    /// <summary>The <c>sprk_createdbycontact</c> (→ contact) bind key. Navigation property <c>sprk_CreatedByContact</c>, as the
+    /// task 020 schema source declares it (<c>Other/Relationships/Contact.xml</c>, <c>sprk_contact_*_createdbycontact</c>).</summary>
+    internal const string CreatedByContactBindKey = "sprk_CreatedByContact@odata.bind";
+
+    /// <summary>Columns that name who created or requested a row. The server alone writes them (FR-11, FR-25).</summary>
+    private static readonly string[] CreatorColumns =
     {
-        var select = "sprk_documentname,_sprk_project_value";
-        var url = $"{GetApiUrl()}/sprk_documents({documentId})?$select={select}";
+        RecordCreatorPersonColumn.LogicalName, "sprk_createdbycontact", "sprk_requestedby", "createdby", "createdonbehalfby",
+    };
 
-        var row = await GetSingleAsync<DocumentRow>(url, ct);
-        if (row is null) return (null, null);
+    /// <summary>
+    /// THE creator stamp for every create on <c>/api/v1/external/**</c> (FR-25; closes auth record L-5 for the external
+    /// plane). Writes exactly one of <c>sprk_createdbyperson</c> (a systemuser principal) or <c>sprk_createdbycontact</c> (a
+    /// contact principal: a workforce contact or a CIAM partner) onto <paramref name="body"/>, from the RESOLVED principal.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The kind decides, not the plane.</b> A principal carrying <see cref="CallerPrincipal.SystemUserId"/> is a
+    /// systemuser, even when it also carries a linked contact (task 141's user↔contact link) — the same rule as
+    /// <see cref="CallerPrincipal.IsContactPrincipal"/>. Every create is app-only, so Dataverse <c>createdby</c> is the
+    /// BFF application user; this stamp is the only record of who created the row, and the delete-own check (FR-26,
+    /// task 032) reads it.</para>
+    /// <para><b>Client input never lands.</b> Any key in the payload that names a creator column (any casing, its
+    /// <c>@odata.bind</c> or <c>_x_value</c> form) is removed before the stamp is written. The request DTOs are closed, so
+    /// nothing should be there; this keeps it so if a DTO or builder ever passes fields through.</para>
+    /// <para><b>Fails closed.</b> A principal that is neither kind (or carries an empty systemuser id) throws before
+    /// anything is posted: the surface never writes an unattributed row.</para>
+    /// <para>Sender stamps on message send (task 034) and the service-request requester (task 035) call this too.</para>
+    /// </remarks>
+    internal static void StampCreator(IDictionary<string, object?> body, CallerPrincipal creator)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        ArgumentNullException.ThrowIfNull(creator);
 
-        var projectId = Guid.TryParse(row.SprkProjectidValue, out var pid) ? pid : (Guid?)null;
-        return (projectId, row.SprkName);
+        // Decide first, so a refusal leaves the payload untouched.
+        EnsureCanStampCreator(creator);
+        Guid? systemUserId = creator.SystemUserId;
+        Guid? contactId = systemUserId is null ? creator.ContactId : null;
+
+        foreach (var key in body.Keys.Where(NamesCreatorColumn).ToList())
+            body.Remove(key);
+
+        if (systemUserId is { } person)
+            RecordCreatorPersonColumn.BindIfKnown(body, person);
+        else
+            body[CreatedByContactBindKey] = $"/contacts({contactId!.Value:D})";
     }
+
+    /// <summary>The <c>sprk_createdbycontact</c> (→ contact) lookup's logical name: what an SDK create payload sets.</summary>
+    internal const string CreatedByContactColumn = "sprk_createdbycontact";
+
+    /// <summary>
+    /// <see cref="StampCreator(IDictionary{string, object?}, CallerPrincipal)"/> for an SDK create payload — the external
+    /// message post (task 034, FR-11) creates its <c>sprk_communication</c> through <c>CommunicationService</c>'s SDK
+    /// writer. The same decision, the same strip of every creator column already on the row, and exactly one stamp:
+    /// <c>sprk_createdbyperson</c> (a systemuser principal) or <c>sprk_createdbycontact</c> (a contact principal).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The principal is not attributable; the row is left untouched.</exception>
+    internal static void StampCreator(Microsoft.Xrm.Sdk.Entity row, CallerPrincipal creator)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(creator);
+
+        // Decide first, so a refusal leaves the row untouched.
+        EnsureCanStampCreator(creator);
+        Guid? systemUserId = creator.SystemUserId;
+        Guid? contactId = systemUserId is null ? creator.ContactId : null;
+
+        foreach (var key in row.Attributes.Keys.Where(NamesCreatorColumn).ToList())
+            row.Attributes.Remove(key);
+
+        if (systemUserId is { } person)
+            Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Stamp(row, person);
+        else
+            row[CreatedByContactColumn] = new Microsoft.Xrm.Sdk.EntityReference("contact", contactId!.Value);
+    }
+
+    /// <summary>Whether <paramref name="creator"/> is attributable: a systemuser (non-empty id) or a contact principal.
+    /// The one rule <see cref="StampCreator"/> enforces; routes call it to refuse an unattributable caller BEFORE any
+    /// side effect (the upload route's SPE write) rather than after.</summary>
+    internal static bool CanStampCreator(CallerPrincipal creator)
+    {
+        ArgumentNullException.ThrowIfNull(creator);
+        return creator.SystemUserId is { } su ? su != Guid.Empty : creator.IsContactPrincipal;
+    }
+
+    /// <summary>Throws (the <see cref="StampCreator"/> refusal) when <paramref name="creator"/> is not attributable.
+    /// Called at the top of each create seam so the decision precedes every token, lookup and request.</summary>
+    internal static void EnsureCanStampCreator(CallerPrincipal creator)
+    {
+        ArgumentNullException.ThrowIfNull(creator);
+        if (creator.SystemUserId == Guid.Empty)
+            throw new InvalidOperationException(
+                "The caller principal carries an empty systemuser id; refusing to create an unattributed row (FR-25).");
+        if (!CanStampCreator(creator))
+            throw new InvalidOperationException(
+                "The caller principal resolves to neither a systemuser nor a contact; refusing to create an unattributed "
+                + "row (FR-25).");
+    }
+
+    /// <summary>Whether <paramref name="key"/> names a creator column (<see cref="CreatorColumns"/>): the logical name, its
+    /// <c>_x_value</c> read form, or any <c>x@…</c> annotation such as <c>@odata.bind</c>. Case-insensitive.</summary>
+    internal static bool NamesCreatorColumn(string? key)
+    {
+        var trimmed = key?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+            return false;
+
+        foreach (var column in CreatorColumns)
+        {
+            if (string.Equals(trimmed, column, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(trimmed, $"_{column}_value", StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith(column + "@", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns the document's parent id THROUGH THE LOOKUP OF <paramref name="parentKind"/>, its display name, and every
+    /// root link it carries. The external download and versions endpoints use it (task 027; generalized by task 031) for
+    /// document→parent authorization scoping BEFORE any SPE pointer resolution or Graph content read.
+    /// </summary>
+    /// <remarks>
+    /// <para>App-only Dataverse read. Returns <see cref="DocumentScopeRead.Absent"/> when the document does not exist or
+    /// cannot be read, and a null parent when it is not linked through that lookup. Does NOT expose any Graph pointer
+    /// (driveId/itemId).</para>
+    /// <para>Fix round for task 039: the select also reads the six root links (<see cref="DocumentRootLinks"/>), so a
+    /// route can apply the multi-root rule (<see cref="ExternalMultiRootRule"/>) to ONE document as the list does to many.
+    /// Without it a reader of project P who knew the id of a document filed to P AND to a secure matter M downloaded it
+    /// through P's route.</para>
+    /// </remarks>
+    public virtual async Task<DocumentScopeRead> GetDocumentParentAndNameAsync(
+        DocumentParentKind parentKind, Guid documentId, CancellationToken ct = default)
+    {
+        var binding = GetDocumentParentBinding(parentKind);
+        var columns = new[] { "sprk_documentname", binding.LookupValueAttribute }
+            .Concat(DocumentRootLinks.SelectColumns)
+            .Distinct(StringComparer.Ordinal);
+        var url = $"{GetApiUrl()}/sprk_documents({documentId})?$select={string.Join(",", columns)}";
+
+        var row = await GetSingleAsync<Dictionary<string, JsonElement>>(url, ct);
+        if (row is null) return DocumentScopeRead.Absent;
+
+        var name = row.TryGetValue("sprk_documentname", out var n) && n.ValueKind == JsonValueKind.String
+            ? n.GetString()
+            : null;
+        return new DocumentScopeRead(GuidValue(row, binding.LookupValueAttribute), name, DocumentRootLinks.From(row));
+    }
+
+    /// <summary>
+    /// The requester (<c>sprk_requestedby</c>, a contact) of a service request. Null when the request does not exist
+    /// (a genuine 404) or names no requester. App-only Dataverse read.
+    /// </summary>
+    /// <remarks>
+    /// Task 031 (FR-24): a service request's document rights come from the submitter scope (the requester is the
+    /// caller), so this is the one fact that decision needs. A read that FAILS (non-404 status, transport error, token
+    /// failure) throws <see cref="DataverseUnavailableException"/> rather than returning null: "could not tell" must not
+    /// be reported as "no such request", or a throttle would 403 the real requester.
+    /// </remarks>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    public virtual async Task<Guid?> GetServiceRequestRequesterAsync(Guid serviceRequestId, CancellationToken ct = default)
+    {
+        var url = $"{GetApiUrl()}/sprk_servicerequests({serviceRequestId})?$select=_sprk_requestedby_value";
+
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
+        return row is null ? null : GuidValue(row, "_sprk_requestedby_value");
+    }
+
+    /// <summary>
+    /// Whether a service request is still open. <c>sprk_servicerequest</c> has exactly two states (live describe,
+    /// 2026-10-12): <c>statecode</c> Active (0) / Inactive (1), with <c>statuscode</c> Active (1) / Inactive (2). There is
+    /// no separate "resolved" status, so Inactive IS closed. <see cref="Unknown"/> is the zero value on purpose: a default,
+    /// an absent row and any other value fail closed (owner decision 2026-10-12).
+    /// </summary>
+    public enum ServiceRequestOpenState
+    {
+        /// <summary>Not readable as Active or Inactive (absent row, null, or a value outside 0 / 1). Treated as closed.</summary>
+        Unknown = 0,
+
+        /// <summary><c>statecode</c> = 0.</summary>
+        Open = 1,
+
+        /// <summary><c>statecode</c> = 1 (inactive / resolved).</summary>
+        Closed = 2,
+    }
+
+    /// <summary>The Dataverse <c>statecode</c> → <see cref="ServiceRequestOpenState"/> rule. Pure; anything but 0 or 1 is Unknown.</summary>
+    internal static ServiceRequestOpenState ServiceRequestStateFor(int? statecode) => statecode switch
+    {
+        0 => ServiceRequestOpenState.Open,
+        1 => ServiceRequestOpenState.Closed,
+        _ => ServiceRequestOpenState.Unknown,
+    };
+
+    /// <summary>A service request's requester and open / closed state, from ONE row read.</summary>
+    /// <param name="RequesterId"><c>sprk_requestedby</c>; null when the request names no requester.</param>
+    /// <param name="State"><c>statecode</c> as a <see cref="ServiceRequestOpenState"/>; <see cref="ServiceRequestOpenState.Unknown"/> when not a readable 0 / 1.</param>
+    public readonly record struct ServiceRequestRead(Guid? RequesterId, ServiceRequestOpenState State);
+
+    /// <summary>
+    /// The requester and the open / closed state (<c>statecode</c>) of a service request in ONE app-only read, for the
+    /// delete route, which needs both (the requester gate first, then the state). Null when the request does not exist
+    /// (a genuine 404); a state that is not a readable 0 / 1 is <see cref="ServiceRequestOpenState.Unknown"/>; a read that
+    /// FAILS throws, so the caller answers 503 and nothing is deleted (same rule as <see cref="GetServiceRequestRequesterAsync"/>).
+    /// </summary>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    public virtual async Task<ServiceRequestRead?> GetServiceRequestRequesterAndStateAsync(
+        Guid serviceRequestId, CancellationToken ct = default)
+    {
+        var url = $"{GetApiUrl()}/sprk_servicerequests({serviceRequestId})?$select=_sprk_requestedby_value,statecode";
+
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
+        if (row is null) return null;
+
+        var state = row.TryGetValue("statecode", out var stateElement)
+                    && stateElement.ValueKind == JsonValueKind.Number
+                    && stateElement.TryGetInt32(out var code)
+            ? ServiceRequestStateFor(code)
+            : ServiceRequestOpenState.Unknown;
+        return new ServiceRequestRead(GuidValue(row, "_sprk_requestedby_value"), state);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Legal Front Door intake (spaarke-SPA-external-access-platform-r3 task 035, FR-05 / FR-06)
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// The <c>sprk_servicerequest.sprk_requesttype</c> options (local choice, task 020; <c>Entity.xml</c> optionset
+    /// <c>sprk_servicerequest_sprk_requesttype</c>): one per intake wizard. Any other value is refused.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<int, string> ServiceRequestTypes = new Dictionary<int, string>
+    {
+        [100000000] = "NDA Assessment",
+        [100000001] = "Invention Submission",
+        [100000002] = "Policy Question",
+        [100000003] = "Trademark Search",
+    };
+
+    /// <summary><c>sprk_servicerequest.sprk_direction</c> = Inbound (<c>Entity.xml</c> optionset
+    /// <c>sprk_servicerequest_sprk_direction</c>: Inbound 100000000, Outbound 100000001). An intake is always inbound.</summary>
+    internal const int ServiceRequestDirectionInbound = 100000000;
+
+    /// <summary>The <c>sprk_requestedby</c> (→ contact) bind key. Navigation property <c>sprk_RequestedBy</c>
+    /// (<c>Other/Relationships/Contact.xml</c>, relationship <c>sprk_servicerequest_RequestedBy_contact</c>).</summary>
+    internal const string RequestedByBindKey = "sprk_RequestedBy@odata.bind";
+
+    /// <summary>The standard <c>contact.department</c> column (String, 100): the requester's department.</summary>
+    internal const string ContactDepartmentColumn = "department";
+
+    /// <summary>
+    /// The department on the requester's contact record, trimmed; null when the contact has none, is blank there, or does
+    /// not exist. App-only Dataverse read, the same way as the other external reads (no OBO).
+    /// </summary>
+    /// <remarks>
+    /// Owner decision 2026-10-12: the wizard does not ask for the requester's department; the submit route stores the
+    /// contact's value as the system key <c>requesterDepartment</c>. The principal carries no contact attributes and the
+    /// ownership resolver's contact read selects only the owning business unit and team, so there is no existing contact
+    /// read to widen; this is the one added read, made after validation so a rejected submission costs nothing. A read that
+    /// FAILS throws <see cref="DataverseUnavailableException"/> rather than returning null: "could not read" must not be
+    /// stored as "no department".
+    /// </remarks>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    public virtual async Task<string?> GetContactDepartmentAsync(Guid contactId, CancellationToken ct = default)
+    {
+        if (contactId == Guid.Empty)
+            throw new ArgumentException("A contact id is required.", nameof(contactId));
+
+        var url = $"{GetApiUrl()}/contacts({contactId:D})?$select={ContactDepartmentColumn}";
+
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
+        return row is not null
+               && row.TryGetValue(ContactDepartmentColumn, out var value)
+               && value.ValueKind == JsonValueKind.String
+               && value.GetString()?.Trim() is { Length: > 0 } department
+            ? department
+            : null;
+    }
+
+    /// <summary>
+    /// The COMPLETE create payload for an intake-submitted <c>sprk_servicerequest</c>: the six columns the intake writes —
+    /// the five of the request itself and the OWNER (task 035, owner decision 2026-10-11). Pure so a test can read it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The requester is the resolved caller's contact</b>, passed in by the route from the principal — never from
+    /// the request (FR-25 / constraint "requester from the resolved principal"). The row carries no creator stamp:
+    /// <c>sprk_servicerequest</c> has neither <c>sprk_createdbyperson</c> nor <c>sprk_createdbycontact</c>; the requester
+    /// is its attribution and the Service Requests module's scope (<c>sprk_requestedby</c>).</para>
+    /// <para><b>The owner is passed in, and its absence refuses</b> (<see cref="RequireOwner"/>, the same rule as the
+    /// document, event and to-do creates). Owner decision 2026-10-11: an intake request is owned by the DEFAULT owner team
+    /// of the business unit that owns the requester's contact, so users whose role has business-unit-level access can see
+    /// it. The route resolves that team through <c>IRecordOwnershipResolver</c> (target = the requester's
+    /// <c>contact</c>) BEFORE this builder runs and refuses the submission when it cannot — I-6 "refuse when unresolved"
+    /// (<c>DATAVERSE-WRITE-PATH-ARCHITECTURE.md</c>). This create is app-only, so without <c>ownerid</c> Dataverse would make
+    /// the BFF application user the owner, in the root business unit.</para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">An empty requester, a blank name, or blank intake data.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A request type outside <see cref="ServiceRequestTypes"/>.</exception>
+    /// <exception cref="InvalidOperationException">An empty owning team (<see cref="RequireOwner"/>).</exception>
+    internal static Dictionary<string, object?> BuildServiceRequestCreatePayload(
+        Guid requesterContactId, Guid owningTeamId, int requestType, string name, string intakeDataJson)
+    {
+        if (requesterContactId == Guid.Empty)
+            throw new ArgumentException("A service request needs the requester's contact id.", nameof(requesterContactId));
+        if (!ServiceRequestTypes.ContainsKey(requestType))
+            throw new ArgumentOutOfRangeException(nameof(requestType), requestType, "Not a sprk_requesttype option.");
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("sprk_name is required.", nameof(name));
+        if (string.IsNullOrWhiteSpace(intakeDataJson))
+            throw new ArgumentException("sprk_intakedata is required.", nameof(intakeDataJson));
+        RequireOwner(owningTeamId, "sprk_servicerequest");
+
+        return new Dictionary<string, object?>
+        {
+            ["sprk_name"] = name,
+            ["sprk_requesttype"] = requestType,
+            ["sprk_intakedata"] = intakeDataJson,
+            ["sprk_direction"] = ServiceRequestDirectionInbound,
+            [RequestedByBindKey] = $"/contacts({requesterContactId:D})",
+            [OwnerBindKey] = $"/teams({owningTeamId})",
+        };
+    }
+
+    /// <summary>
+    /// Creates one <c>sprk_servicerequest</c> from a Legal Front Door submission, app-only (no OBO), and returns its id.
+    /// The payload is <see cref="BuildServiceRequestCreatePayload"/>'s. A non-success response throws:
+    /// <see cref="DataverseUnavailableException"/> for a transport failure, an HttpClient timeout, a 429 or a 5xx (nothing was
+    /// created; retry), <see cref="InvalidOperationException"/> for any other failure.
+    /// </summary>
+    // `virtual` per ADR-038 §4 (substitution seam): the intake route tests record the payload and assert that a refused
+    // submission never reached Dataverse.
+    public virtual async Task<Guid> CreateServiceRequestAsync(
+        Guid requesterContactId, Guid owningTeamId, int requestType, string name, string intakeDataJson,
+        CancellationToken ct = default)
+    {
+        var body = BuildServiceRequestCreatePayload(requesterContactId, owningTeamId, requestType, name, intakeDataJson);
+
+        var token = await GetAppOnlyTokenAsync(ct);
+
+        // Echo only the id: sprk_intakedata is field-secured and the caller already holds the answers.
+        var url = $"{GetApiUrl()}/sprk_servicerequests?$select=sprk_servicerequestid";
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        httpRequest.Headers.Add("OData-MaxVersion", "4.0");
+        httpRequest.Headers.Add("OData-Version", "4.0");
+        httpRequest.Headers.Add("Prefer", "return=representation");
+        httpRequest.Content = new StringContent(
+            JsonSerializer.Serialize(body),
+            Encoding.UTF8,
+            "application/json");
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await _httpClient.SendAsync(httpRequest, ct);
+        }
+        catch (HttpRequestException ex)
+        {
+            // Transport failure: nothing was created. The caller reports a retryable 503 (task 035 review F2).
+            throw new DataverseUnavailableException("Dataverse could not be reached to create the service request.", ex);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            // The HttpClient timeout, not the caller walking away.
+            throw new DataverseUnavailableException("Dataverse timed out creating the service request.", ex);
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogWarning(
+                "[EXT-DATA] Create service request (type {RequestType}) failed for contact {ContactId}: {Status} — {Body}",
+                requestType, requesterContactId, response.StatusCode, errorBody);
+
+            // 429 and 5xx are Dataverse being unavailable or throttling: retryable, so a 503 upstream. Anything else
+            // (a 4xx the payload earned) stays a plain failure and a 500.
+            if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500)
+                throw new DataverseUnavailableException($"Dataverse answered {(int)response.StatusCode} creating the service request.");
+
+            throw new InvalidOperationException($"Failed to create service request: {response.StatusCode}");
+        }
+
+        var row = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(ct);
+        return row is not null && GuidValue(row, "sprk_servicerequestid") is { } id
+            ? id
+            : throw new InvalidOperationException("Dataverse returned no service request id after create");
+    }
+
+    /// <summary>
+    /// The parent records of an invoice (<c>sprk_matter</c>, <c>sprk_project</c>), or null when the invoice does not exist
+    /// (a genuine 404). App-only Dataverse read.
+    /// </summary>
+    /// <remarks>
+    /// Task 031, owner decision 2026-10-11 (option A): an invoice's document rights are inherited from these parents, so
+    /// this is the one fact that decision needs. A read that FAILS throws <see cref="DataverseUnavailableException"/>,
+    /// never null — the same rule as <see cref="GetServiceRequestRequesterAsync"/>.
+    /// </remarks>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    public virtual async Task<(Guid? MatterId, Guid? ProjectId)?> GetInvoiceParentsAsync(
+        Guid invoiceId, CancellationToken ct = default)
+    {
+        var url = $"{GetApiUrl()}/sprk_invoices({invoiceId})?$select=_sprk_matter_value,_sprk_project_value";
+
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct);
+        return row is null ? null : (GuidValue(row, "_sprk_matter_value"), GuidValue(row, "_sprk_project_value"));
+    }
+
+    // ---------------------------------------------------------------------------
+    // In-portal notification feed (spaarke-SPA-external-access-platform-r3 task 037, FR-08)
+    //
+    // The feed is DERIVED from existing rows (owner 2026-10-08: no new table). These three reads supply its grant items,
+    // the caller's own service requests (whose messages it reports) and the record titles. None of them decides access:
+    // the feed endpoint gates every item against the caller principal's accessible set itself.
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// One grant row the feed reports: the row id, its single root and when it was granted. <see cref="RenewedOn"/> is the
+    /// row's <c>modifiedon</c> when the row was changed after it was created (by more than <see cref="RenewalMinGap"/>),
+    /// else null. See <see cref="EventOn"/> and the renewal remarks on <see cref="GetRecentGrantsAsync"/>.
+    /// </summary>
+    public sealed record RecentGrant(
+        Guid GrantId, ExternalGrantRootType RootType, Guid RootId, DateTimeOffset GrantedOn, DateTimeOffset? RenewedOn = null)
+    {
+        /// <summary>When the feed item happened: the renewal time when there is one, else the grant time.</summary>
+        public DateTimeOffset EventOn => RenewedOn is { } renewed && renewed > GrantedOn ? renewed : GrantedOn;
+    }
+
+    /// <summary>
+    /// How long after <c>createdon</c> a change to a grant row is still part of creating it (a take-over stamp, the
+    /// Assigned-To adopt, a same-request follow-up write), so it is not announced as a renewal. A change later than this is
+    /// treated as a renewal (owner decision 2026-10-12; <c>modifiedon</c> is the only renewal timestamp that exists).
+    /// </summary>
+    internal static readonly TimeSpan RenewalMinGap = TimeSpan.FromMinutes(2);
+
+    /// <summary>The recent-grants read: the rows, and whether it was cut short or failed (never silent).</summary>
+    public sealed record RecentGrantsRead(IReadOnlyList<RecentGrant> Grants, bool Truncated);
+
+    /// <summary>One service request the caller requested: its id, name and requester.</summary>
+    public sealed record RequestedServiceRequest(Guid Id, string? Name, Guid RequestedBy);
+
+    /// <summary>The caller's service requests, and whether the read was cut short or failed.</summary>
+    public sealed record RequestedServiceRequestsRead(IReadOnlyList<RequestedServiceRequest> Requests, bool Truncated);
+
+    /// <summary>
+    /// Record titles by id. <see cref="Complete"/> is true only when every chunk was read in full, so an id missing from
+    /// <see cref="Names"/> then means the record was deleted. The read has no <c>statecode</c> filter, so a deactivated
+    /// record is still returned (and kept); only a deleted one is dropped.
+    /// </summary>
+    public sealed record RecordNamesRead(IReadOnlyDictionary<Guid, string?> Names, bool Complete);
+
+    /// <summary>
+    /// The ACTIVE, unexpired grant rows naming <paramref name="contactId"/> as the grantee whose <c>sprk_granteddate</c>
+    /// is on or after <paramref name="since"/>, app-only. Organization grants (no contact) are not included. A row whose
+    /// root is not exactly one of project / matter / work assignment (e.g. its root was deleted, which empties the lookup)
+    /// is skipped. <see cref="RecentGrant.GrantedOn"/> is the row's <c>createdon</c> — <c>sprk_granteddate</c> is written
+    /// once, on create, as a date only — or that date at 00:00 UTC when <c>createdon</c> is unreadable.
+    /// </summary>
+    /// <remarks>Carries the enforcement paths' <see cref="ExternalParticipationService.ExpiryPredicate"/>, so a lapsed grant
+    /// is never announced. A failed read is returned empty and flagged truncated (the collection read's honesty rule).
+    /// <para><b>Renewals (owner decision 2026-10-12).</b> A grant renewed or restored IN PLACE (a lapsed one re-granted, a
+    /// level raised, an expiry extended) keeps its row, its <c>createdon</c> and its <c>sprk_granteddate</c> (written once,
+    /// on create), and the table has no renewed-on or expiry-changed-on column (live describe 2026-10-12). The only
+    /// timestamp that moves is <c>modifiedon</c>, so when <paramref name="modifiedSince"/> is given the read also returns a
+    /// row modified at or after it, and <see cref="RecentGrant.RenewedOn"/> carries <c>modifiedon</c> when it is later than
+    /// <c>createdon</c> by more than <see cref="RenewalMinGap"/>. <b>Known false positive:</b> <c>modifiedon</c> also moves
+    /// on a shortened expiry, a lowered level, a take-over stamp or an edit in the model-driven app; none can be told from
+    /// a renewal with existing columns. The row must still be active and unexpired, so a lapsed grant is never announced.</para></remarks>
+    public virtual async Task<RecentGrantsRead> GetRecentGrantsAsync(
+        Guid contactId, DateOnly since, DateOnly today, CancellationToken ct = default,
+        DateTimeOffset? modifiedSince = null)
+    {
+        if (contactId == Guid.Empty)
+            return new RecentGrantsRead(Array.Empty<RecentGrant>(), false);
+
+        var window = modifiedSince is { } modified
+            ? $"(sprk_granteddate ge {since:yyyy-MM-dd} or modifiedon ge {modified.UtcDateTime:yyyy-MM-ddTHH:mm:ssZ})"
+            : $"sprk_granteddate ge {since:yyyy-MM-dd}";
+        var filter = Uri.EscapeDataString(
+            $"_sprk_contact_value eq {contactId} and statecode eq 0 and {window} and "
+            + ExternalParticipationService.ExpiryPredicate(today));
+        // When renewals are asked for, order by modifiedon: a renewed row keeps its old createdon, so a cap on the feed
+        // would otherwise cut the renewals (the newest activity) and keep the oldest. modifiedon is >= createdon, so a new
+        // grant still sorts by its creation.
+        var orderBy = modifiedSince is null
+            ? "createdon desc,sprk_externalrecordaccessid desc"
+            : "modifiedon desc,sprk_externalrecordaccessid desc";
+        var url = $"{GetApiUrl()}/sprk_externalrecordaccesses?$filter={filter}" +
+                  "&$select=sprk_externalrecordaccessid,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value," +
+                  $"sprk_granteddate,createdon,modifiedon&$orderby={orderBy}";
+
+        var read = await GetCollectionAsync<Dictionary<string, JsonElement>>(url, ct);
+        var grants = new List<RecentGrant>();
+        foreach (var row in read.Rows)
+        {
+            if (GuidValue(row, "sprk_externalrecordaccessid") is not { } grantId)
+                continue;
+
+            var roots = new List<(ExternalGrantRootType Type, Guid Id)>();
+            if (GuidValue(row, "_sprk_project_value") is { } project) roots.Add((ExternalGrantRootType.Project, project));
+            if (GuidValue(row, "_sprk_matter_value") is { } matter) roots.Add((ExternalGrantRootType.Matter, matter));
+            if (GuidValue(row, "_sprk_workassignment_value") is { } wa) roots.Add((ExternalGrantRootType.WorkAssignment, wa));
+            if (roots.Count != 1)
+                continue;
+
+            if (GrantedOnValue(row) is not { } grantedOn)
+                continue;
+
+            grants.Add(new RecentGrant(grantId, roots[0].Type, roots[0].Id, grantedOn, RenewedOnValue(row)));
+        }
+
+        return new RecentGrantsRead(grants, read.Truncated);
+    }
+
+    /// <summary>
+    /// <c>modifiedon</c> when BOTH it and <c>createdon</c> read and the row was changed more than <see cref="RenewalMinGap"/>
+    /// after it was created; else null. Needs a real <c>createdon</c> (the date fallback would make every row look renewed).
+    /// </summary>
+    private static DateTimeOffset? RenewedOnValue(IReadOnlyDictionary<string, JsonElement> row)
+    {
+        if (row.TryGetValue("createdon", out var created) && created.ValueKind == JsonValueKind.String
+            && created.TryGetDateTimeOffset(out var createdOn)
+            && row.TryGetValue("modifiedon", out var modified) && modified.ValueKind == JsonValueKind.String
+            && modified.TryGetDateTimeOffset(out var modifiedOn)
+            && modifiedOn - createdOn > RenewalMinGap)
+            return modifiedOn;
+
+        return null;
+    }
+
+    /// <summary><c>createdon</c>, else <c>sprk_granteddate</c> (either wire shape) at 00:00 UTC; null when neither reads.</summary>
+    private static DateTimeOffset? GrantedOnValue(IReadOnlyDictionary<string, JsonElement> row)
+    {
+        if (row.TryGetValue("createdon", out var created) && created.ValueKind == JsonValueKind.String
+            && created.TryGetDateTimeOffset(out var createdOn))
+            return createdOn;
+
+        if (row.TryGetValue("sprk_granteddate", out var granted) && granted.ValueKind == JsonValueKind.String
+            && granted.GetString() is { Length: >= 10 } text
+            && DateOnly.TryParseExact(text[..10], "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var date))
+            return new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+
+        return null;
+    }
+
+    /// <summary>
+    /// The service requests whose <c>sprk_requestedby</c> is one of <paramref name="requesterIds"/>, app-only — the
+    /// rows the Service Requests module would scope to the caller. The caller re-applies the module's own predicate.
+    /// </summary>
+    public virtual async Task<RequestedServiceRequestsRead> GetServiceRequestsRequestedByAsync(
+        IReadOnlyCollection<Guid> requesterIds, CancellationToken ct = default)
+    {
+        var ids = requesterIds.Where(id => id != Guid.Empty).Distinct().Select(id => id.ToString("D")).ToList();
+        if (ids.Count == 0)
+            return new RequestedServiceRequestsRead(Array.Empty<RequestedServiceRequest>(), false);
+
+        var read = await GetByIdsAsync<Dictionary<string, JsonElement>>(
+            "sprk_servicerequests", "_sprk_requestedby_value", ids,
+            "sprk_servicerequestid,sprk_name,_sprk_requestedby_value", "createdon desc", ct);
+
+        var requests = read.Rows
+            .Where(r => GuidValue(r, "sprk_servicerequestid") is not null && GuidValue(r, "_sprk_requestedby_value") is not null)
+            .Select(r => new RequestedServiceRequest(
+                GuidValue(r, "sprk_servicerequestid")!.Value,
+                r.TryGetValue("sprk_name", out var name) && name.ValueKind == JsonValueKind.String ? name.GetString() : null,
+                GuidValue(r, "_sprk_requestedby_value")!.Value))
+            .ToList();
+
+        return new RequestedServiceRequestsRead(requests, read.Truncated);
+    }
+
+    /// <summary>
+    /// The display names of the given project / matter / work-assignment records (their primary name columns, the same
+    /// ones the to-do regarding stamp reads), app-only and chunked. An entity outside those three yields an empty,
+    /// incomplete answer.
+    /// </summary>
+    public virtual async Task<RecordNamesRead> GetRecordNamesAsync(
+        string entityLogicalName, IReadOnlyCollection<Guid> ids, CancellationToken ct = default)
+    {
+        var binding = RootBindings.Values.FirstOrDefault(
+            b => string.Equals(b.EntityLogicalName, entityLogicalName, StringComparison.OrdinalIgnoreCase));
+        var idList = ids.Where(id => id != Guid.Empty).Distinct().Select(id => id.ToString("D")).ToList();
+        if (binding is null)
+            return new RecordNamesRead(new Dictionary<Guid, string?>(), Complete: idList.Count == 0);
+        if (idList.Count == 0)
+            return new RecordNamesRead(new Dictionary<Guid, string?>(), Complete: true);
+
+        var idColumn = binding.EntityLogicalName + "id";
+        var read = await GetByIdsAsync<Dictionary<string, JsonElement>>(
+            binding.EntitySet, idColumn, idList, $"{idColumn},{binding.DisplayNameAttribute}", $"{idColumn} asc", ct);
+
+        var names = new Dictionary<Guid, string?>();
+        foreach (var row in read.Rows)
+        {
+            if (GuidValue(row, idColumn) is { } id)
+            {
+                names[id] = row.TryGetValue(binding.DisplayNameAttribute, out var value) && value.ValueKind == JsonValueKind.String
+                    ? value.GetString()
+                    : null;
+            }
+        }
+
+        return new RecordNamesRead(names, Complete: !read.Truncated);
+    }
+
+    /// <summary>An app-only Dataverse read could not be completed (not a 404): the caller reports it as a 503.</summary>
+    public sealed class DataverseUnavailableException : Exception
+    {
+        public DataverseUnavailableException(string message, Exception? inner = null) : base(message, inner) { }
+    }
+
+    /// <summary>A GUID-valued column of a dictionary row, or null when it is absent, null or not a GUID.</summary>
+    private static Guid? GuidValue(IReadOnlyDictionary<string, JsonElement> row, string column) =>
+        row.TryGetValue(column, out var value)
+        && value.ValueKind == JsonValueKind.String
+        && Guid.TryParse(value.GetString(), out var id)
+            ? id
+            : null;
 
     // ---------------------------------------------------------------------------
     // To Do queries and mutations (smart-todo-decoupling-r3 FR-29)
@@ -562,7 +1404,7 @@ public class ExternalDataService
     /// Returns the to-do's regarding-ROOT (project, matter, or work assignment), its id, and its
     /// display name — used by the external PATCH endpoint (task 009 / FR-08 / finding A-7) to scope
     /// a to-do write to the caller's accessible root set BEFORE any mutation. App-only Dataverse
-    /// read. Deliberately mirrors <see cref="GetDocumentProjectAndNameAsync"/> (task 027), which
+    /// read. Deliberately mirrors <see cref="GetDocumentParentAndNameAsync"/> (task 027), which
     /// solves the same child-record-to-root authorization problem for documents.
     /// </summary>
     /// <remarks>
@@ -654,16 +1496,34 @@ public class ExternalDataService
     /// task-017 trap; <see cref="BuildTodoListUrl"/> is tested directly for exactly that reason.
     /// </remarks>
     public virtual async Task<ExternalCollectionResponse<ExternalTodoDto>> GetTodosAsync(
-        TodoRootKind rootKind, Guid rootId, CancellationToken ct = default)
+        TodoRootKind rootKind, Guid rootId, CallerPrincipal caller, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(caller);
         var url = BuildTodoListUrl(GetApiUrl(), rootKind, rootId);
 
         // Task 105: paged to the cap, and a cut-short list says so (see GetDocumentsAsync).
         var read = await GetCollectionAsync<TodoRow>(url, ct);
+
+        // Fix round for task 039: a to-do under an invoice of secure matter M and project P is stamped with BOTH roots, so
+        // the project route used to list M's to-do to a reader of P alone. Listed only if the caller holds Read on every
+        // SECURE root the to-do carries (ExternalMultiRootRule, owner option B); a single-root to-do lists exactly as before.
+        var stamps = read.Rows
+            .Select(r => ExternalMultiRootRule.Stamps(
+                r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue))
+            .ToList();
+        var flags = await ReadSecureRootFlagsAsync(caller, stamps, ct);
+        var readable = read.Rows.Where((_, i) => ExternalMultiRootRule.SecureRootsReadable(caller, flags, stamps[i])).ToList();
+        if (readable.Count != read.Rows.Count)
+        {
+            _logger.LogInformation(
+                "[EXT-DATA] todos: {Withheld} of {Total} to-do(s) regarding {RootKind} {RootId} withheld - also filed to a secure record the caller cannot read",
+                read.Rows.Count - readable.Count, read.Rows.Count, rootKind, rootId);
+        }
+
         return new ExternalCollectionResponse<ExternalTodoDto>
         {
-            Value = read.Rows.Select(MapTodo).ToList(),
-            Truncated = read.Truncated,
+            Value = readable.Select(MapTodo).ToList(),
+            Truncated = read.Truncated || FlagReadCutListShort(flags, read.Rows.Count - readable.Count),
         };
     }
 
@@ -692,7 +1552,8 @@ public class ExternalDataService
                      "sprk_todocolumn,sprk_todopinned,statecode,statuscode,createdon," +
                      "_sprk_regardingproject_value,_sprk_regardingmatter_value," +
                      "_sprk_regardingworkassignment_value," +
-                     "sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordurl";
+                     "sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordurl," +
+                     CreatorStampSelect; // task 032 (FR-26): the SPA offers Delete only on the caller's own to-dos
         var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
 
         // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
@@ -700,29 +1561,187 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// Retrieves all <c>sprk_event</c> records whose regarding-project equals the supplied project id.
+    /// Retrieves the <c>sprk_event</c> records regarding one accessible root (project, matter or work assignment), minus
+    /// any also filed to a root the <paramref name="caller"/> cannot read.
     /// </summary>
     /// <remarks>
-    /// CALENDAR events, not to-dos. <c>sprk_event</c> has no <c>sprk_projectid</c> attribute — its
-    /// project lookup is <c>sprk_regardingproject</c> (metadata-verified, smart-todo-r5 task 002),
-    /// so the filter uses <c>_sprk_regardingproject_value</c>.
-    ///
-    /// The legacy <c>sprk_todoflag</c> attribute is deliberately NOT selected. smart-todo-decoupling-r3
-    /// FR-29 retired the event-as-todo model; to-dos live on <c>sprk_todo</c> and are served by
-    /// <see cref="GetTodosAsync"/>. Reintroducing that flag here would resurrect the model FR-29 removed.
+    /// <para>CALENDAR events, not to-dos. The filter column comes from <see cref="TodoRootBinding"/>, the table the
+    /// to-do list and the delete-own check already share, so the three reads cannot name different columns for the
+    /// same root. <c>sprk_event</c> carries the same three lookups as <c>sprk_todo</c> (<c>sprk_regardingproject</c>,
+    /// <c>sprk_regardingmatter</c>, <c>sprk_regardingworkassignment</c>; live metadata, unified-access-control-r2 task
+    /// 159 notes section 0.2).</para>
+    /// <para>The legacy <c>sprk_todoflag</c> attribute is deliberately NOT selected. smart-todo-decoupling-r3 FR-29
+    /// retired the event-as-todo model; to-dos live on <c>sprk_todo</c> and are served by <see cref="GetTodosAsync"/>.</para>
+    /// <para><b>Task 039 (FR-03) generalized this from project-only.</b> The caller has ALREADY been authorized for
+    /// <paramref name="rootId"/> (Read, from <c>RightsForRoot</c>); <paramref name="caller"/> is here only for the
+    /// second half of the rule, <see cref="ReadableEvents"/>.</para>
     /// </remarks>
-    public virtual async Task<ExternalCollectionResponse<ExternalEventDto>> GetEventsAsync(Guid projectId, CancellationToken ct = default)
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="rootKind"/> is <c>None</c> or <c>Ambiguous</c>:
+    /// deny states, not roots.</exception>
+    // `virtual` per ADR-038 section 4 (substitution seam): the endpoint tests assert WHICH root was asked for and that a
+    // denied list never reached Dataverse. BuildEventsQuery is tested directly for the $filter this seam would hide.
+    public virtual async Task<ExternalCollectionResponse<ExternalEventDto>> GetEventsAsync(
+        TodoRootKind rootKind, Guid rootId, CallerPrincipal caller, CancellationToken ct = default)
     {
-        var url = $"{GetApiUrl()}/{BuildEventsQuery(projectId)}";
+        ArgumentNullException.ThrowIfNull(caller);
+        var url = $"{GetApiUrl()}/{BuildEventsQuery(rootKind, rootId)}";
 
         // Task 105: paged to the cap, and a cut-short list says so (see GetDocumentsAsync).
         var read = await GetCollectionAsync<EventRow>(url, ct);
+        var (readable, flags) = await ReadableEventsAsync(read.Rows, caller, ct);
+        if (readable.Count != read.Rows.Count)
+        {
+            _logger.LogInformation(
+                "[EXT-DATA] events: {Withheld} of {Total} event(s) regarding {RootKind} {RootId} withheld - also filed to a secure record the caller cannot read",
+                read.Rows.Count - readable.Count, read.Rows.Count, rootKind, rootId);
+        }
+
         return new ExternalCollectionResponse<ExternalEventDto>
         {
-            Value = read.Rows.Select(MapEvent).ToList(),
-            Truncated = read.Truncated,
+            Value = readable.Select(MapEvent).ToList(),
+            Truncated = read.Truncated || FlagReadCutListShort(flags, read.Rows.Count - readable.Count),
         };
     }
+
+    /// <summary>
+    /// The events of <paramref name="rows"/> the caller may see: an event is listed only if the caller holds Read on every
+    /// SECURE root it is filed to (<c>sprk_regardingproject</c>, <c>sprk_regardingmatter</c>,
+    /// <c>sprk_regardingworkassignment</c>); owner decision 2026-10-12, option B.
+    /// </summary>
+    /// <remarks>
+    /// <para>Without it an event filed to a secure matter AND to a project the caller can read is returned by the project
+    /// route to a caller who holds nothing on the matter: the matter's isolation (its rights come only from a direct grant)
+    /// would be bypassed by a second lookup. A row naming no other root is unaffected, so every single-parent event lists
+    /// exactly as before. The rule itself (fail-closed) is <see cref="ExternalMultiRootRule"/>, shared with the to-do,
+    /// document, message and feed lists. The delete-own rule (<c>AuthorizeDeleteOwnAsync</c>) stays "Read on EVERY parent"
+    /// (FR-26).</para>
+    /// </remarks>
+    private async Task<(List<EventRow> Rows, SecureRootFlags Flags)> ReadableEventsAsync(
+        IReadOnlyList<EventRow> rows, CallerPrincipal caller, CancellationToken ct)
+    {
+        var stamps = rows
+            .Select(r => ExternalMultiRootRule.Stamps(
+                r.SprkRegardingprojectValue, r.SprkRegardingmatterValue, r.SprkRegardingworkassignmentValue))
+            .ToList();
+        var flags = await ReadSecureRootFlagsAsync(caller, stamps, ct);
+        return (rows.Where((_, i) => ExternalMultiRootRule.SecureRootsReadable(caller, flags, stamps[i])).ToList(), flags);
+    }
+
+    /// <summary>
+    /// The secure flags the multi-root rule needs for a set of rows (<see cref="ExternalMultiRootRule.ReadFlagsAsync"/> over
+    /// <see cref="GetNonSecureRootsAsync"/>): one app-only read for the distinct linked roots the caller cannot read, none
+    /// when there are none. Fails closed (see the rule).
+    /// </summary>
+    public Task<SecureRootFlags> ReadSecureRootFlagsAsync(
+        CallerPrincipal caller,
+        IEnumerable<IEnumerable<(ExternalGrantRootType Root, string? LookupValue)>> rowRoots,
+        CancellationToken ct = default) =>
+        ExternalMultiRootRule.ReadFlagsAsync(GetNonSecureRootsAsync, caller, rowRoots, _logger, ct);
+
+    /// <summary>
+    /// Of <paramref name="roots"/>, the ones whose EFFECTIVE secure status, read APP-ONLY, is not secure (owner decision
+    /// 2026-10-12, option B: only a SECURE linked root the caller cannot read withholds a row; main-session decision: secure
+    /// means effectively secure, task 174's rule).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Own flag.</b> One query per root entity per <see cref="IdFilterChunkSize"/> ids
+    /// (<see cref="GetByIdsAsync{TRow}"/>, an <c>or</c> filter on the ids), selecting only the id and <c>sprk_issecure</c>. All
+    /// three roots carry the column (live metadata, <c>SecureRecordRoot</c>).</para>
+    /// <para><b>Effective flag.</b> A work assignment or project whose own flag is <c>false</c> is still secure when anything it
+    /// is filed under is effectively secure (a child whose own flag has not caught up). Those ids, per table, go through the
+    /// ONE filing walk (<see cref="EffectiveRootFlags.ReadAncestryAsync"/>, batched level by level and bounded by
+    /// <see cref="SecureRootInheritance.MaxFilingDepth"/>) and its fold (<see cref="EffectiveRootFlags.Fold(IReadOnlyDictionary{Guid, RootRecordFlags}, IReadOnlyDictionary{Guid, SecureParentsAnswer}?)"/>).
+    /// A matter files under nothing; its own flag is its effective flag (no walk).</para>
+    /// <para><b>Fail closed.</b> Only an explicit JSON <c>false</c> on a returned row whose id was asked for, and then an
+    /// ancestry the walk decided with no secure ancestor, opens a root. A failed chunk, a record not returned (missing, or
+    /// invisible to the app identity), an absent or null <c>sprk_issecure</c> (a masked field-secured value reads empty), any
+    /// non-boolean value, an ancestor read that faults or is missing or empty, a chain past the bound and a missing filing
+    /// reader all leave the root out of the answer, so it counts as secure. A named filing parent the walk is not given back
+    /// is Unknown too (<c>absentParentIsUnknown</c>, the read path's opt-in; the write-time walk is unchanged). No cache: a
+    /// staff change to the flag applies on the next request.</para>
+    /// <para><b>Complete.</b> The answer says whether the read COMPLETED (<see cref="NonSecureRootsRead.Complete"/>): every
+    /// flag chunk succeeded, every asked root came back with a row and a boolean flag, and every walk decided. When it did not, a root may count as secure only because it could not be
+    /// read; the document, event and to-do lists that withheld a row then set <c>Truncated</c>.</para>
+    /// <para><c>virtual</c> per ADR-038 section 4 (substitution seam); the tests drive the real read over a fake Web API.</para>
+    /// </remarks>
+    public virtual async Task<NonSecureRootsRead> GetNonSecureRootsAsync(
+        IReadOnlyCollection<(ExternalGrantRootType Root, Guid Id)> roots, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(roots);
+        var notSecure = new HashSet<(ExternalGrantRootType Root, Guid Id)>();
+        var complete = true;
+        foreach (var group in roots.Where(r => r.Id != Guid.Empty).Distinct().GroupBy(r => r.Root))
+        {
+            var idColumn = ExternalGrantRoot.LogicalNameFor(group.Key) + "id";
+            var asked = group.Select(r => r.Id).ToHashSet();
+            var read = await GetByIdsAsync<Dictionary<string, JsonElement>>(
+                ExternalGrantRoot.BindFor(group.Key).EntitySet, idColumn,
+                asked.Select(id => id.ToString("D")).ToList(),
+                $"{idColumn},{SecureFlagColumn}", $"{idColumn} asc", ct);
+
+            var ownOpen = new HashSet<Guid>();
+            var resolved = new HashSet<Guid>(); // asked ids that came back with a row AND a boolean flag
+            foreach (var row in read.Rows)
+            {
+                if (GuidValue(row, idColumn) is { } id && asked.Contains(id)
+                    && row.TryGetValue(SecureFlagColumn, out var flag)
+                    && flag.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                {
+                    resolved.Add(id);
+                    if (flag.ValueKind == JsonValueKind.False)
+                    {
+                        ownOpen.Add(id);
+                    }
+                }
+            }
+
+            // F4: a chunk can succeed and still leave an asked root unresolved (no row: missing or invisible to the app
+            // identity; no sprk_issecure: field security; a non-boolean value). It still counts as secure, but the rows it
+            // withholds must say Truncated, so the read is not complete.
+            if (resolved.Count < asked.Count)
+            {
+                complete = false;
+            }
+
+            if (read.Outcome != CollectionReadOutcome.Complete)
+            {
+                _logger.LogWarning(
+                    "[EXT-DATA] secure-flag read for {Count} {Root} id(s) was incomplete ({Outcome}); the unread ones count as secure.",
+                    asked.Count, group.Key, read.Outcome);
+                complete = false;
+            }
+
+            if (ownOpen.Count == 0)
+            {
+                continue;
+            }
+
+            // Effective status (task 174's rule): the ONE filing walk, batched for the own-open ids of this table; null for a
+            // matter (files under nothing). The fold makes an id with no decided ancestry secure. Owner policy (review of
+            // 039 option B): a named filing parent the walk cannot find is Unknown, not "files under nothing"
+            // (absentParentIsUnknown), so it folds to secure on this read path; the write-time walk keeps its default.
+            var ancestry = await EffectiveRootFlags.ReadAncestryAsync(
+                _filing, _logger, ExternalGrantRoot.LogicalNameFor(group.Key), ownOpen, ct, absentParentIsUnknown: true);
+            var effective = EffectiveRootFlags.Fold(ownOpen.ToDictionary(id => id, _ => RootRecordFlags.None), ancestry);
+            foreach (var (id, flags) in effective)
+            {
+                if (flags.IsUnreadable)
+                {
+                    complete = false; // a walk fault, an unreadable or missing ancestor, an empty ancestor flag, past the bound
+                }
+
+                if (!flags.IsSecure)
+                {
+                    notSecure.Add((group.Key, id));
+                }
+            }
+        }
+
+        return new NonSecureRootsRead(notSecure, complete);
+    }
+
+    /// <summary>The root records' secure flag (all three roots carry it).</summary>
+    private const string SecureFlagColumn = "sprk_issecure";
 
     /// <summary>
     /// Creates a new <c>sprk_event</c> record associated with the supplied project via
@@ -736,9 +1755,11 @@ public class ExternalDataService
     // `virtual` per ADR-038 §4 (substitution seam), added by task 146 so the endpoint tests can assert the owner the
     // route resolved reached the create — and that a refused owner never reached Dataverse at all.
     public virtual async Task<ExternalEventDto> CreateEventAsync(
-        Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CancellationToken ct = default)
+        Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CallerPrincipal creator,
+        CancellationToken ct = default)
     {
         var body = BuildEventCreatePayload(projectId, request, owningTeamId);
+        StampCreator(body, creator); // FR-25 (task 030)
 
         var token = await GetAppOnlyTokenAsync(ct);
 
@@ -771,16 +1792,28 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// The relative <c>sprk_events</c> query <see cref="GetEventsAsync"/> sends (task 097: live column names).
-    /// Internal for tests.
+    /// The relative <c>sprk_events</c> query <see cref="GetEventsAsync"/> sends (task 097: live column names; task 039: any
+    /// accessible root). Internal for tests.
     /// </summary>
-    internal static string BuildEventsQuery(Guid projectId)
+    internal static string BuildEventsQuery(TodoRootKind rootKind, Guid rootId)
     {
-        var select = $"sprk_eventid,{EventNameColumn},sprk_duedate,{EventStatusColumn},createdon,_sprk_regardingproject_value";
-        var filter = Uri.EscapeDataString($"_sprk_regardingproject_value eq {projectId}");
+        var binding = TryGetRootBinding(rootKind)
+            ?? throw new ArgumentOutOfRangeException(nameof(rootKind), rootKind,
+                "Events can only be listed for a project, matter or work assignment. None/Ambiguous are deny states - a "
+                + "caller reaching here with one has skipped its authorization gate.");
+
+        // Task 032 (FR-26): both creator stamps, so the SPA offers Delete only on the caller's own events.
+        // Task 039: all three root lookups, so a row also filed to a root the caller cannot read can be withheld.
+        var select = $"sprk_eventid,{EventNameColumn},sprk_duedate,{EventStatusColumn},createdon,"
+                     + "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value,"
+                     + CreatorStampSelect;
+        var filter = Uri.EscapeDataString($"{binding.LookupValueAttribute} eq {rootId}");
         // Task 105: no $top (it suppresses @odata.nextLink); the primary key breaks due-date ties so pages never overlap.
         return $"sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc,sprk_eventid asc";
     }
+
+    /// <summary>The project form of <see cref="BuildEventsQuery(TodoRootKind, Guid)"/> (the shipped query, plus the two extra lookups).</summary>
+    internal static string BuildEventsQuery(Guid projectId) => BuildEventsQuery(TodoRootKind.Project, projectId);
 
     /// <summary>
     /// The COMPLETE create payload for an external calendar event: the caller's fields, the project bind, and the
@@ -856,10 +1889,13 @@ public class ExternalDataService
         CreateExternalTodoRequest request,
         Guid owningTeamId,
         Guid? callerContactId,
+        CallerPrincipal creator,
         CancellationToken ct = default)
     {
         if (rootId == Guid.Empty)
             throw new ArgumentException("Root id must be a non-empty GUID.", nameof(rootId));
+        ArgumentNullException.ThrowIfNull(creator);
+        EnsureCanStampCreator(creator); // FR-25: decide the stamp kind before any token / lookup / request
 
         var binding = TryGetRootBinding(rootKind)
             ?? throw new ArgumentOutOfRangeException(nameof(rootKind), rootKind,
@@ -889,6 +1925,7 @@ public class ExternalDataService
         // this one request — never in a follow-up PATCH.
         var body = BuildTodoCreatePayload(
             request, binding, rootId, rootDisplayName, recordTypeRef?.Id, owningTeamId, callerContactId);
+        StampCreator(body, creator); // FR-25 (task 030)
         if (!body.ContainsKey(AssignedToBindKey))
         {
             _logger.LogWarning(
@@ -1146,6 +2183,371 @@ public class ExternalDataService
             _logger.LogWarning("[EXT-DATA] Update to-do failed for to-do {TodoId}: {Status} — {Body}",
                 todoId, response.StatusCode, errorBody);
             throw new InvalidOperationException($"Failed to update to-do: {response.StatusCode}");
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Delete-own (spaarke-SPA-external-access-platform-r3 task 032, FR-26)
+    //
+    // An external caller may hard-delete a document, to-do or event it CREATED (the task-030 stamp), while it still
+    // holds Read on the record's parent. The endpoint (ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync) composes
+    // the two halves; this service supplies the facts (GetDeleteTargetAsync), the stamp rule (IsCreatedByCaller) and the
+    // app-only row delete for to-dos and events (DeleteRecordAsync). A document is deleted through
+    // DocumentCheckoutService so its SPE file goes too. A service request (owner decision 2026-10-11, option A) is
+    // deleted by its REQUESTER only, and only while NO row is related to it (HasRelatedRecordsAsync).
+    // ---------------------------------------------------------------------------
+
+    /// <summary>The record types an external caller can delete-own (FR-26).</summary>
+    public enum DeletableKind
+    {
+        Document = 1,
+        Todo = 2,
+        Event = 3,
+
+        /// <summary>
+        /// A service request the caller REQUESTED (owner decision 2026-10-11, option A + recall). Its "creator" fact is the
+        /// requester (<c>sprk_requestedby</c>), decided by the requester scope, not by <see cref="GetDeleteTargetAsync"/>;
+        /// it is refused when ANY related row exists (<see cref="HasRelatedRecordsAsync"/>).
+        /// </summary>
+        ServiceRequest = 4,
+    }
+
+    /// <summary>One parent lookup of a deletable row: the parent type and the row's <c>_..._value</c> attribute for it.</summary>
+    internal sealed record DeletableParentLookup(DocumentParentKind Parent, string LookupValueAttribute);
+
+    /// <summary>
+    /// What the delete-own read needs for one deletable type: its entity set and the parent lookups the external plane
+    /// authorizes it through.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Documents</b> use the task-031 parent lookups (<see cref="DocumentParents"/>), the same ones the
+    /// external list, download and upload routes scope by — including <c>sprk_invoice</c> since the owner's option A
+    /// (2026-10-11), whose Read is inherited from the invoice's parents.</para>
+    /// <para><b>To-dos and events</b> use the three root lookups of <see cref="RootBindings"/>
+    /// (<c>sprk_regardingproject</c> / <c>sprk_regardingmatter</c> / <c>sprk_regardingworkassignment</c>; the same column
+    /// names on <c>sprk_event</c>, solution source <c>Entities/sprk_Event/Entity.xml</c>), the roots
+    /// <see cref="GetTodoRootAsync"/> scopes a to-do by. <see cref="DocumentParentKind"/> names the parent type because it
+    /// already names all four record types a child can be filed to on this plane.</para>
+    /// </remarks>
+    internal sealed record DeletableBinding(
+        DeletableKind Kind, string EntityLogicalName, string EntitySet, IReadOnlyList<DeletableParentLookup> Parents);
+
+    /// <summary>The <c>sprk_createdbyperson</c> (→ systemuser) read form: the task-030 stamp of a systemuser creator.</summary>
+    internal const string CreatedByPersonValueAttribute = "_" + RecordCreatorPersonColumn.LogicalName + "_value";
+
+    /// <summary>The <c>sprk_createdbycontact</c> (→ contact) read form: the task-030 stamp of a contact creator.</summary>
+    internal const string CreatedByContactValueAttribute = "_" + CreatedByContactColumn + "_value";
+
+    /// <summary>Both creator stamps in <c>$select</c> form: every external document, to-do and event read returns them
+    /// (task 032, review 031 K2) so the SPA can offer Delete only on the caller's own rows (task 054). Requires task 020's
+    /// <c>sprk_createdbycontact</c> in the environment: without it Dataverse answers 400 and the list is flagged
+    /// truncated (deploy order, task 038).</summary>
+    internal const string CreatorStampSelect = CreatedByPersonValueAttribute + "," + CreatedByContactValueAttribute;
+
+    private static DocumentParentKind ParentKindOf(TodoRootKind kind) => kind switch
+    {
+        TodoRootKind.Project => DocumentParentKind.Project,
+        TodoRootKind.Matter => DocumentParentKind.Matter,
+        TodoRootKind.WorkAssignment => DocumentParentKind.WorkAssignment,
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a root kind."),
+    };
+
+    private static readonly IReadOnlyList<DeletableParentLookup> RootParentLookups =
+        RootBindings.Values.Select(b => new DeletableParentLookup(ParentKindOf(b.Kind), b.LookupValueAttribute)).ToList();
+
+    private static readonly IReadOnlyDictionary<DeletableKind, DeletableBinding> Deletables =
+        new Dictionary<DeletableKind, DeletableBinding>
+        {
+            // Fix round for task 039: plus the related twin of each root (sprk_relatedproject / _relatedmatter /
+            // _relatedworkassignment), the same six root links the list, download and versions apply the multi-root rule
+            // to. The delete itself stays Read on EVERY parent (FR-26), not the secure-roots rule.
+            [DeletableKind.Document] = new(DeletableKind.Document, "sprk_document", "sprk_documents",
+                DocumentParents.Values.Select(b => new DeletableParentLookup(b.Kind, b.LookupValueAttribute))
+                    .Concat(new[]
+                    {
+                        new DeletableParentLookup(DocumentParentKind.Project, "_sprk_relatedproject_value"),
+                        new DeletableParentLookup(DocumentParentKind.Matter, "_sprk_relatedmatter_value"),
+                        new DeletableParentLookup(DocumentParentKind.WorkAssignment, "_sprk_relatedworkassignment_value"),
+                    })
+                    .ToList()),
+            [DeletableKind.Todo] = new(DeletableKind.Todo, "sprk_todo", "sprk_todos", RootParentLookups),
+            [DeletableKind.Event] = new(DeletableKind.Event, "sprk_event", "sprk_events", RootParentLookups),
+            // No parent and no creator stamp: the requester scope decides (ExternalProjectDataEndpoints.DeleteOwnServiceRequest).
+            [DeletableKind.ServiceRequest] = new(DeletableKind.ServiceRequest, "sprk_servicerequest", "sprk_servicerequests",
+                Array.Empty<DeletableParentLookup>()),
+        };
+
+    /// <summary>The binding for a deletable kind. Throws for a value outside the table: a programming error.</summary>
+    internal static DeletableBinding GetDeletableBinding(DeletableKind kind) =>
+        Deletables.TryGetValue(kind, out var binding)
+            ? binding
+            : throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a deletable kind.");
+
+    /// <summary>A parent the row is filed to through one of its lookups.</summary>
+    public readonly record struct DeleteTargetParent(DocumentParentKind Kind, Guid Id);
+
+    /// <summary>
+    /// The facts the delete-own check decides on: the row's two creator stamps (null when absent) and every parent its
+    /// lookups name (empty when none is set).
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="HasUnreadableParentLink"/> (fix round for task 039): a parent lookup carried a value that is not a
+    /// GUID. The delete is refused (fail closed): the row names a parent the caller's rights cannot be checked against.
+    /// </remarks>
+    public sealed record DeleteTarget(
+        Guid? CreatedByPerson, Guid? CreatedByContact, IReadOnlyList<DeleteTargetParent> Parents,
+        bool HasUnreadableParentLink = false);
+
+    /// <summary>
+    /// Reads a deletable row's creator stamps and parent lookups, app-only (FR-26). Null when the row does not exist
+    /// (a genuine 404), so absent and someone else's deny the same way.
+    /// </summary>
+    /// <remarks>
+    /// A read that FAILS (non-404 status, transport error, token failure) throws <see cref="DataverseUnavailableException"/>:
+    /// "could not tell" is never reported as "not yours" (the task-031 review rule for the requester read). Until task
+    /// 020's <c>sprk_createdbycontact</c> column exists in the environment, Dataverse answers 400 to this read, so every
+    /// delete there is a 503: fail closed.
+    /// </remarks>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    public virtual async Task<DeleteTarget?> GetDeleteTargetAsync(DeletableKind kind, Guid id, CancellationToken ct = default)
+    {
+        if (kind == DeletableKind.ServiceRequest)
+            throw new ArgumentOutOfRangeException(nameof(kind), kind,
+                "A service request is authorized through its requester (GetServiceRequestRequesterAsync), not the creator stamps.");
+
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(
+            BuildDeleteTargetUrl(GetApiUrl(), kind, id), ct);
+        return row is null ? null : ParseDeleteTarget(kind, row);
+    }
+
+    /// <summary>The single-row read <see cref="GetDeleteTargetAsync"/> sends: both stamps and every parent lookup. Pure.</summary>
+    internal static string BuildDeleteTargetUrl(string apiUrl, DeletableKind kind, Guid id)
+    {
+        var binding = GetDeletableBinding(kind);
+        var columns = new[] { CreatedByPersonValueAttribute, CreatedByContactValueAttribute }
+            .Concat(binding.Parents.Select(p => p.LookupValueAttribute));
+        return $"{apiUrl}/{binding.EntitySet}({id})?$select={string.Join(",", columns)}";
+    }
+
+    /// <summary>The <see cref="DeleteTarget"/> a row's columns describe. Pure.</summary>
+    internal static DeleteTarget ParseDeleteTarget(DeletableKind kind, IReadOnlyDictionary<string, JsonElement> row)
+    {
+        var parents = new List<DeleteTargetParent>();
+        var unreadable = false;
+        foreach (var lookup in GetDeletableBinding(kind).Parents)
+        {
+            if (GuidValue(row, lookup.LookupValueAttribute) is { } parentId)
+                parents.Add(new DeleteTargetParent(lookup.Parent, parentId));
+            else if (row.TryGetValue(lookup.LookupValueAttribute, out var raw)
+                     && raw.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+                     && !(raw.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(raw.GetString())))
+                unreadable = true; // present, but not a GUID
+        }
+
+        return new DeleteTarget(
+            GuidValue(row, CreatedByPersonValueAttribute),
+            GuidValue(row, CreatedByContactValueAttribute),
+            parents,
+            unreadable);
+    }
+
+    /// <summary>
+    /// THE stamp half of the delete-own check (FR-26): did <paramref name="caller"/> create this row?
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Owner decision 2026-10-11, option (b) widened</b> (<c>notes/decisions.md</c>):</para>
+    /// <list type="bullet">
+    /// <item>a CONTACT principal matches <c>sprk_createdbycontact</c> = its contact;</item>
+    /// <item>a SYSTEMUSER principal matches <c>sprk_createdbyperson</c> = its systemuser, OR <c>sprk_createdbycontact</c>
+    /// = its linked contact (<see cref="CallerPrincipal.ContactId"/>, resolved by the server from the user↔contact link,
+    /// never from the request) — the same person who created the row before a licence was added.</item>
+    /// </list>
+    /// <para>The principal KIND decides, as it does for the stamp (<see cref="StampCreator(IDictionary{string, object?}, CallerPrincipal)"/>):
+    /// a contact principal never matches a person stamp, and a systemuser matches a contact stamp only through its own
+    /// linked contact. A row with neither stamp (created before task 030, or by staff in the model-driven app) matches
+    /// nobody. An empty id never matches.</para>
+    /// </remarks>
+    internal static bool IsCreatedByCaller(DeleteTarget target, CallerPrincipal caller)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(caller);
+
+        if (caller.SystemUserId is { } systemUserId)
+        {
+            if (systemUserId == Guid.Empty)
+                return false;
+            if (target.CreatedByPerson == systemUserId)
+                return true;
+            return caller.ContactId != Guid.Empty && target.CreatedByContact == caller.ContactId;
+        }
+
+        return caller.IsContactPrincipal && target.CreatedByContact == caller.ContactId;
+    }
+
+    /// <summary>
+    /// Hard-deletes a to-do or event row, app-only (FR-26). <see langword="true"/> when deleted, <see langword="false"/>
+    /// when the row was already gone (404). The caller has authorized the delete first
+    /// (<c>ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync</c>).
+    /// </summary>
+    /// <remarks>
+    /// A document is refused here: it is deleted through <c>DocumentCheckoutService</c>, so its SPE file goes with it.
+    /// <c>virtual</c> per ADR-038 §4 (substitution seam): a deny test must be able to assert no delete was sent.
+    /// </remarks>
+    /// <exception cref="DataverseUnavailableException">Dataverse refused or could not complete the delete.</exception>
+    public virtual async Task<bool> DeleteRecordAsync(DeletableKind kind, Guid id, CancellationToken ct = default)
+    {
+        if (kind == DeletableKind.Document)
+            throw new ArgumentOutOfRangeException(nameof(kind), kind,
+                "A document is deleted through DocumentCheckoutService, so its SPE file is deleted too.");
+
+        var binding = GetDeletableBinding(kind);
+        var url = $"{GetApiUrl()}/{binding.EntitySet}({id})";
+
+        try
+        {
+            var token = await GetAppOnlyTokenAsync(ct);
+            using var request = new HttpRequestMessage(HttpMethod.Delete, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("OData-MaxVersion", "4.0");
+            request.Headers.Add("OData-Version", "4.0");
+
+            using var response = await _httpClient.SendAsync(request, ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                return false;
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning("[EXT-DATA] Delete {Entity} {Id} failed: {Status} — {Body}",
+                    binding.EntityLogicalName, id, response.StatusCode, errorBody);
+                throw new DataverseUnavailableException($"Dataverse answered {(int)response.StatusCode} to the delete.");
+            }
+
+            return true;
+        }
+        catch (DataverseUnavailableException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[EXT-DATA] Error deleting {Entity} {Id}", binding.EntityLogicalName, id);
+            throw new DataverseUnavailableException("Dataverse could not complete the delete.", ex);
+        }
+    }
+
+    /// <summary>
+    /// One 1:N relationship from <c>sprk_servicerequest</c>: the child entity, its entity set and the lookup that points at
+    /// the request.
+    /// </summary>
+    internal sealed record ServiceRequestRelation(string EntityLogicalName, string EntitySet, string LookupAttribute);
+
+    /// <summary>
+    /// EVERY 1:N relationship from <c>sprk_servicerequest</c> (solution source
+    /// <c>src/dataverse/solutions/SpaarkeMaster/Other/Relationships/sprk_ServiceRequest.xml</c>, 8 relationships, all
+    /// <c>CascadeDelete=RemoveLink</c>): deleting the request would orphan every row listed here, so ANY row (active or not)
+    /// blocks the delete. A relationship added to the solution must be added here; the pinned test
+    /// <c>TheRelationshipList_IsExactlyTheSolutionsOneToManyRelationships</c> reads the solution XML and fails until it is.
+    /// </summary>
+    internal static readonly IReadOnlyList<ServiceRequestRelation> ServiceRequestRelations = new ServiceRequestRelation[]
+    {
+        new("sprk_analysis", "sprk_analysises", "sprk_regardingservicerequest"),
+        new("sprk_communication", "sprk_communications", "sprk_regardingservicerequest"),
+        new("sprk_communicationthread", "sprk_communicationthreads", "sprk_regardingservicerequest"),
+        new("sprk_document", "sprk_documents", "sprk_relatedservicerequest"),
+        new("sprk_event", "sprk_events", "sprk_regardingservicerequest"),
+        new("sprk_memo", "sprk_memos", "sprk_regardingservicerequest"),
+        new("sprk_signal", "sprk_signals", "sprk_regardingservicerequest"),
+        new("sprk_todo", "sprk_todos", "sprk_regardingservicerequest"),
+    };
+
+    /// <summary>The one-row existence probe for one relationship: no <c>statecode</c> filter, so inactive rows count. Pure.</summary>
+    internal static string BuildRelatedRowProbeUrl(string apiUrl, ServiceRequestRelation relation, Guid serviceRequestId)
+    {
+        var value = $"_{relation.LookupAttribute}_value";
+        return $"{apiUrl}/{relation.EntitySet}?$select={value}&$filter={value} eq {serviceRequestId}&$top=1";
+    }
+
+    /// <summary>
+    /// Whether ANY row is related to the service request, across every 1:N relationship (<see cref="ServiceRequestRelations"/>),
+    /// active or inactive, app-only (owner decision 2026-10-11, option A: a request with activity is not deletable).
+    /// </summary>
+    /// <remarks>
+    /// All eight probes run; a probe that FAILS (non-success status of any kind, transport error, token failure) makes the
+    /// whole answer unknown and throws <see cref="DataverseUnavailableException"/>, even when another probe found a row:
+    /// "could not tell" is never reported as "none". Nothing is deleted on an exception (the caller answers 503).
+    /// <c>virtual</c> per ADR-038 §4 (substitution seam).
+    /// </remarks>
+    /// <exception cref="DataverseUnavailableException">A relationship could not be read.</exception>
+    public virtual async Task<bool> HasRelatedRecordsAsync(Guid serviceRequestId, CancellationToken ct = default)
+    {
+        try
+        {
+            var apiUrl = GetApiUrl();
+            var probes = ServiceRequestRelations
+                .Select(r => AnyRowAsync(BuildRelatedRowProbeUrl(apiUrl, r, serviceRequestId), ct))
+                .ToArray();
+            var found = await Task.WhenAll(probes);
+            return found.Any(f => f);
+        }
+        catch (DataverseUnavailableException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[EXT-DATA] Error probing the rows related to service request {Id}", serviceRequestId);
+            throw new DataverseUnavailableException("Dataverse could not be read.", ex);
+        }
+    }
+
+    /// <summary>A one-row collection probe: true when the page holds a row. Any non-success (a 404 included: an unknown
+    /// entity set is a broken check, not "no rows") throws <see cref="DataverseUnavailableException"/>.</summary>
+    private async Task<bool> AnyRowAsync(string url, CancellationToken ct)
+    {
+        try
+        {
+            var token = await GetAppOnlyTokenAsync(ct);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("OData-MaxVersion", "4.0");
+            request.Headers.Add("OData-Version", "4.0");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await _httpClient.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[EXT-DATA] Related-row probe failed: {Status} — {Url}", response.StatusCode, url);
+                throw new DataverseUnavailableException($"Dataverse answered {(int)response.StatusCode}.");
+            }
+
+            var page = await response.Content.ReadFromJsonAsync<ODataResult<Dictionary<string, JsonElement>>>(ct)
+                ?? throw new DataverseUnavailableException("Dataverse returned an empty body.");
+            // A 200 with no "value" array is not "no rows": it is a body this check cannot read (fail closed).
+            if (page.Value is null)
+                throw new DataverseUnavailableException("Dataverse returned a body with no value array.");
+            return page.Value.Count > 0;
+        }
+        catch (DataverseUnavailableException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[EXT-DATA] Error probing related rows: {Url}", url);
+            throw new DataverseUnavailableException("Dataverse could not be read.", ex);
         }
     }
 
@@ -1430,7 +2832,8 @@ public class ExternalDataService
     /// <para><b>A first-page failure</b> is truncated too: logged, and returned EMPTY AND FLAGGED, never as an empty list
     /// (before task 105 it was an unflagged empty list, so a Dataverse fault read as "nothing here"). The display lists
     /// surface the flag; the one create-payload reader (<see cref="ResolveRecordTypeRefAsync"/>) fails its request on
-    /// it. No reader makes an access decision from this method.</para>
+    /// it. The one access decision made from it is the secure-flag read (<see cref="GetNonSecureRootsAsync"/>), and only in
+    /// the closing direction: a row it did not read leaves its root counted as secure.</para>
     /// <para><b>A <c>nextLink</c> is used unchanged</b> and with the same <c>Prefer</c> value (Microsoft Learn, "Page
     /// results"), and only when it points at this service's own Web API base: the bearer token is never sent to another
     /// host. One that does not is treated as a failed later page.</para>
@@ -1562,6 +2965,49 @@ public class ExternalDataService
         }
     }
 
+    /// <summary>
+    /// <see cref="GetSingleAsync{TRow}"/> for a caller that must tell "not there" from "could not read": a 404 is
+    /// <c>default</c>; any other non-success, transport error or token failure throws
+    /// <see cref="DataverseUnavailableException"/>. A cancelled caller still sees <see cref="OperationCanceledException"/>.
+    /// </summary>
+    private async Task<TRow?> GetSingleOrThrowAsync<TRow>(string url, CancellationToken ct)
+    {
+        try
+        {
+            var token = await GetAppOnlyTokenAsync(ct);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("OData-MaxVersion", "4.0");
+            request.Headers.Add("OData-Version", "4.0");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await _httpClient.SendAsync(request, ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                return default;
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[EXT-DATA] GET single failed: {Status} — {Url}", response.StatusCode, url);
+                throw new DataverseUnavailableException($"Dataverse answered {(int)response.StatusCode}.");
+            }
+
+            return await response.Content.ReadFromJsonAsync<TRow>(ct);
+        }
+        catch (DataverseUnavailableException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[EXT-DATA] Error fetching single record: {Url}", url);
+            throw new DataverseUnavailableException("Dataverse could not be read.", ex);
+        }
+    }
+
     private async Task<string> GetAppOnlyTokenAsync(CancellationToken ct)
     {
         if (_currentToken != null && _currentToken.Value.ExpiresOn > DateTimeOffset.UtcNow.Add(TokenRefreshBuffer))
@@ -1643,6 +3089,8 @@ public class ExternalDataService
         SprkSummary = r.SprkSummary,
         SprkProjectidValue = r.SprkProjectidValue,
         Createdon = r.Createdon,
+        SprkCreatedbypersonValue = r.CreatedByPersonValue,
+        SprkCreatedbycontactValue = r.CreatedByContactValue,
     };
 
     private static ExternalTodoDto MapTodo(TodoRow r) => new()
@@ -1662,6 +3110,8 @@ public class ExternalDataService
         SprkRegardingrecordid = r.SprkRegardingrecordid,
         SprkRegardingrecordname = r.SprkRegardingrecordname,
         SprkRegardingrecordurl = r.SprkRegardingrecordurl,
+        SprkCreatedbypersonValue = r.CreatedByPersonValue,
+        SprkCreatedbycontactValue = r.CreatedByContactValue,
     };
 
     private static ExternalEventDto MapEvent(EventRow r) => new()
@@ -1674,6 +3124,8 @@ public class ExternalDataService
         SprkStatus = r.SprkStatus,
         Createdon = r.Createdon,
         SprkRegardingprojectValue = r.SprkRegardingprojectValue,
+        SprkCreatedbypersonValue = r.CreatedByPersonValue,
+        SprkCreatedbycontactValue = r.CreatedByContactValue,
     };
 
     private static ExternalContactDto MapContact(ContactRow r) => new()

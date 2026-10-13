@@ -47,7 +47,12 @@ $icons = @(
     @{ Name = "sprk_ThemeAuto16.svg"; DisplayName = "Theme Auto Icon 16x16" }
 )
 
-$iconBasePath = "C:\code_files\spaarke\src\client\assets\icons"
+# Canonical icon folder, resolved relative to the repo root (this script lives in scripts/).
+$iconBasePath = Join-Path $PSScriptRoot "..\src\client\assets\icons"
+if (-not (Test-Path $iconBasePath)) {
+    Write-Host "Error: icon folder not found: $iconBasePath" -ForegroundColor Red
+    exit 1
+}
 $deployedIds = @()
 
 Write-Host "[3/3] Deploying icons..."

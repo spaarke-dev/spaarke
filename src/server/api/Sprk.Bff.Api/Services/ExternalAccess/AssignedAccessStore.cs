@@ -334,7 +334,17 @@ public sealed record AssignedLinkCandidate(
     bool? IsDisabled,
     int? AccessMode,
     Guid? ApplicationId,
-    bool? IsExternal);
+    bool? IsExternal)
+{
+    /// <summary>
+    /// Whether this user is represented by <paramref name="contactId"/> (task 141 §2/§5): their link
+    /// (<c>sprk_primarycontact</c>) names it, or they have NO link and the contact's binding carries their oid. A user
+    /// linked to ANOTHER contact is not this contact's, whatever the oid says. Shared by the Assigned-To materializer and
+    /// the task-181 grant notification.
+    /// </summary>
+    public bool Represents(Guid contactId, Guid? boundOid)
+        => PrimaryContactId == contactId || (PrimaryContactId is null && boundOid is { } b && Oid == b);
+}
 
 /// <summary>A root a reconciliation scan found, and when it last changed.</summary>
 public readonly record struct AssignedRootRef(ExternalGrantRootType RootType, Guid RootId, DateTimeOffset? ModifiedOn);

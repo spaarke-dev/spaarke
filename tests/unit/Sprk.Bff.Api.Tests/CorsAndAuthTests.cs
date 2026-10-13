@@ -9,7 +9,12 @@ namespace Sprk.Bff.Api.Tests;
 public class CorsAndAuthTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly HttpClient _client;
-    public CorsAndAuthTests(CustomWebAppFactory f) => _client = f.CreateClient();
+    private readonly CustomWebAppFactory _factory;
+    public CorsAndAuthTests(CustomWebAppFactory f)
+    {
+        _factory = f;
+        _client = f.CreateClient();
+    }
 
     [Fact]
     public async Task Cors_Preflight_AllowsConfiguredOrigin()
@@ -34,12 +39,15 @@ public class CorsAndAuthTests : IClassFixture<CustomWebAppFactory>
     //
     // Route ABSENCE for all five retired routes is asserted by
     // tests/integration/regression/OboDriveKeyedRouteRetirementTests.cs.
-    [Fact(Skip = "Requires fully mocked Graph/Dataverse services - OBO endpoint returns 500 without Graph client")]
+    [Fact]
     public async Task Obo_Endpoints_RequireBearer()
     {
         using var body = new ByteArrayContent(new byte[] { 1, 2, 3 });
         var res = await _client.PutAsync("/api/obo/me/files/probe.txt", body);
+        // A bare 401 challenge (no problem+json body): the auth layer rejects the request before the
+        // handler runs, so no Graph client is needed. The FallbackPolicy answers 401 for an unmapped
+        // route too, so the endpoint table is what proves this route still exists.
         res.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        res.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        EndpointTable.AssertMapped(_factory, "PUT", "/api/obo/me/files/probe.txt");
     }
 }

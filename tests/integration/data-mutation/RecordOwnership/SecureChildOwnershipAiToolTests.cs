@@ -734,20 +734,27 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
+                // A project's only filing is the ADR-024 pair (it has no typed filing column).
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             ["sprk_workassignment"] = new[]
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"),
                 ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
                 ("sprk_assignedlawfirm1", "sprk_organization", "sprk_AssignedLawFirm1"),
+                // #1616 fix round: the Create Work Assignment wizard also files under an invoice or an event.
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
+                ("sprk_regardingevent", "sprk_event", "sprk_RegardingEvent"),
             },
             ["sprk_communication"] = new[]
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_sentby", "systemuser", "sprk_SentBy"),
+                ("sprk_regardinginvoice", "sprk_invoice", "sprk_RegardingInvoice"),
             },
             ["sprk_document"] = new[]
             {
@@ -802,6 +809,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
+                // A person the event is assigned to — not a column the pair's readers match the pair against.
+                ("sprk_assignedto", "contact", "sprk_AssignedTo"),
             },
             // Task 147 r1 E2 (the secure-record ribbon's "New Budget"): sprk_Matter_Budget_1n, live 2026-10-04.
             ["sprk_budget"] = new[]
@@ -831,6 +841,15 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         /// <summary>Task 147 r1: records that do not exist — RetrievePrincipalAccess on one fails (404).</summary>
         public HashSet<Guid> Missing { get; } = new();
 
+        /// <summary>
+        /// Per TABLE (entity set, id): a record the caller may not append to, where another table's record with the same id
+        /// is untouched — a contact whose id was chosen equal to a matter's (a client may choose a new row's id).
+        /// </summary>
+        public HashSet<(string EntitySet, Guid Id)> NoAppendToIn { get; } = new();
+
+        /// <summary>Per TABLE (entity set, id): a record that does not exist, where another table's same id may.</summary>
+        public HashSet<(string EntitySet, Guid Id)> MissingIn { get; } = new();
+
         /// <summary>Records the caller holds Full Access on (Delete as well) — F3's question (task 146 c1).</summary>
         public HashSet<Guid> FullAccessOn { get; } = new();
         public HashSet<string> SecuredColumns { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -845,6 +864,15 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
         /// <summary>Task 147 r1: the owning team a row read as the caller reports (<c>_owningteam_value</c>).</summary>
         public Dictionary<Guid, Guid> OwningTeamOf { get; } = new();
+
+        /// <summary>The ADR-024 record-type catalog as the caller reads it: a <c>sprk_recordtype_ref</c> row → the table it names.</summary>
+        public Dictionary<Guid, string> RecordTypes { get; } = new();
+
+        /// <summary>A catalog kept elsewhere (a fixture's own Dataverse), asked for a row <see cref="RecordTypes"/> lacks.</summary>
+        public Func<Guid, string?>? RecordTypeOf { get; set; }
+
+        /// <summary>Further columns a row read as the caller reports (e.g. its pair: <c>sprk_regardingrecordid</c>).</summary>
+        public Dictionary<Guid, Dictionary<string, object?>> RowValues { get; } = new();
         public int PatchStatus { get; set; } = 204;
         public List<(string Path, string Body)> Posts { get; } = new();
         public List<(string Path, string Body)> Patches { get; } = new();
@@ -899,6 +927,28 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             return EntitySets.FirstOrDefault(kv => kv.Value == set).Key;
         }
 
+        /// <summary>
+        /// #1616: field-level security on the caller's own PATCH — a body that sets a <see cref="SecuredColumns"/> column (by its
+        /// logical name, or a lookup's navigation property, which is its schema name) is refused 403, nothing written, as
+        /// Dataverse refuses a user without Update on the column's field security profile.
+        /// </summary>
+        private DataverseUserResponse? RefuseSecuredColumn(string jsonBody)
+        {
+            using var document = JsonDocument.Parse(jsonBody);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                var at = property.Name.IndexOf('@', StringComparison.Ordinal);
+                var column = (at >= 0 ? property.Name[..at] : property.Name).ToLowerInvariant();
+                if (SecuredColumns.Contains(column))
+                {
+                    return DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied,
+                        $"0x8004f50b The user does not have update permissions to the {column} field.");
+                }
+            }
+
+            return null;
+        }
+
         /// <summary>Dataverse's answer to a body naming an undeclared property: 400, nothing written.</summary>
         private DataverseUserResponse? RefuseUndeclared(string path, string jsonBody)
         {
@@ -938,9 +988,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                     return DataverseUserResponse.Fail(400, DataverseUserClientErrorCodes.BadRequest,
                         $"0x80040800 The 'RetrievePrincipalAccess' method does not support entities of type '{targetTable}'.");
                 }
-                if (Missing.Contains(id))
+                var targetSet = match.Groups["set"].Value;
+                if (Missing.Contains(id) || MissingIn.Contains((targetSet, id)))
                     return DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Does not exist.");
-                var rights = NoAppendTo.Contains(id) ? "ReadAccess,WriteAccess" : "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
+                var rights = NoAppendTo.Contains(id) || NoAppendToIn.Contains((targetSet, id))
+                    ? "ReadAccess,WriteAccess"
+                    : "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
                 return Ok(new { AccessRights = FullAccessOn.Contains(id) ? rights + ",DeleteAccess" : rights });
             }
 
@@ -1012,6 +1065,14 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             var rowBody = new Dictionary<string, object?> { ["id"] = rowId };
             if (OwningTeamOf.TryGetValue(rowId, out var owningTeam))
                 rowBody["_owningteam_value"] = owningTeam.ToString("D");
+            if (path.StartsWith("sprk_recordtype_refs(", StringComparison.Ordinal)
+                && (RecordTypes.TryGetValue(rowId, out var recordTypeTable) ? recordTypeTable : RecordTypeOf?.Invoke(rowId)) is { } named)
+                rowBody["sprk_recordlogicalname"] = named;
+            if (RowValues.TryGetValue(rowId, out var values))
+            {
+                foreach (var (column, value) in values)
+                    rowBody[column] = value;
+            }
             return Ok(rowBody);
         }
 
@@ -1033,6 +1094,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 return Task.FromResult(DataverseUserResponse.Fail(PatchStatus, DataverseUserClientErrorCodes.AccessDenied, "Denied."));
             if (RefuseUndeclared(relativePath, jsonBody) is { } refused)
                 return Task.FromResult(refused);
+            if (RefuseSecuredColumn(jsonBody) is { } secured)
+                return Task.FromResult(secured);
 
             Patches.Add((relativePath, jsonBody));
             return Task.FromResult(DataverseUserResponse.Ok(204, null));

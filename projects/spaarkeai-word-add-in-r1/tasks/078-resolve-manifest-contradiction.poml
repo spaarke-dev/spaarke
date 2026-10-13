@@ -4,7 +4,7 @@
     <title>FR-05 requires a unified JSON manifest; what Word actually runs is the XML one — and task 011 was closed without verifying either</title>
     <phase>5 Remediation — spec integrity</phase>
     <gate>startable</gate>
-    <status>completed-with-escalation</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches the add-in manifest and the deploy path. Tags include deploy. An error here breaks installation for every user.</rigor-reason>
     <model-tier>opus</model-tier>

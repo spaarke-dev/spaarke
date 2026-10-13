@@ -31,6 +31,9 @@ if (typeof (globalThis as { ResizeObserver?: unknown }).ResizeObserver === 'unde
 // ── Fetch boundary ──────────────────────────────────────────────────────────
 const authenticatedFetchMock = jest.fn();
 jest.mock('@spaarke/auth', () => ({
+  // The REAL error class (pure, no MSAL): ComposeWorkspace branches on `err instanceof ApiError`, so the
+  // thrown failures in this suite must be instances of the class the component imports.
+  ApiError: jest.requireActual('@spaarke/auth').ApiError,
   authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...args),
   useAuth: () => ({
     isAuthenticated: true,
@@ -111,6 +114,7 @@ jest.mock('./ComposeEditor', () => {
 
 // eslint-disable-next-line import/first
 import { ComposeWorkspace } from './ComposeWorkspace';
+import { httpError } from '../__tests__/helpers/httpError';
 
 function renderStoredDoc() {
   return render(
@@ -144,7 +148,7 @@ function stubStoredDocumentLoad(): void {
         }),
       });
     }
-    return Promise.resolve({ ok: false, status: 404, json: async () => [] });
+    return Promise.reject(httpError(404));
   });
 }
 

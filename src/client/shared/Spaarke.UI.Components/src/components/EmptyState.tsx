@@ -134,6 +134,11 @@ export interface EmptyStateProps {
   className?: string;
   /** Extra class merged onto the heading `Text` (last, so it wins). */
   headingClassName?: string;
+  /**
+   * Element the heading renders as. Omit for the historical `<span>`; a page that is the whole screen passes `'h1'` so
+   * assistive tech and the browser tab outline have a real heading.
+   */
+  headingAs?: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
   /** Extra class merged onto the description `Text` (last, so it wins) — e.g. a different max-width. */
   descriptionClassName?: string;
 }
@@ -152,6 +157,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   size = 'default',
   className,
   headingClassName,
+  headingAs,
   descriptionClassName,
 }) => {
   const styles = useStyles();
@@ -171,6 +177,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
         </div>
       )}
       <Text
+        {...(headingAs ? { as: headingAs } : {})}
         size={compact ? 400 : 500}
         className={mergeClasses(
           styles.heading,

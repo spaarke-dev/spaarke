@@ -171,7 +171,7 @@ const authenticatedFetchMock = jest.fn(async (url: string) => {
     const session = sessionFromUrl(url);
     return { ok: true, status: 200, json: async () => ledger.get(session) ?? [] } as unknown as Response;
   }
-  return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
+  throw httpError(404);
 });
 
 const captured: {
@@ -264,6 +264,7 @@ import { ConversationPane } from '../ConversationPane';
 // dispatching the review — this harness clicks the real `<ConsumerChips>` button (rendered inside
 // the stubbed SprkChat's `transcriptFooterSlot`).
 import { LOCAL_CHIP } from '../localActionChips';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 const workspaceEvents: WorkspacePaneEvent[] = [];
 const registerActiveDocumentRef: { current: ComposeActiveDocumentRegistration | null } = { current: null };

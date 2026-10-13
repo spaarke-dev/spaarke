@@ -6,6 +6,7 @@
 import { renderHook } from "@testing-library/react";
 import { act } from "react";
 import { useReviewedDocumentAnalysis } from "../useReviewedDocumentAnalysis";
+import { httpError } from "../../../__tests__/helpers/httpError";
 
 describe("useReviewedDocumentAnalysis", () => {
   const bffBaseUrl = "https://bff.example.com";
@@ -50,9 +51,8 @@ describe("useReviewedDocumentAnalysis", () => {
   });
 
   it("does NOT throw when promote returns 400 (already bound / no anchor)", async () => {
-    const authenticatedFetch = jest
-      .fn()
-      .mockResolvedValue({ ok: false, status: 400, json: async () => ({ detail: "already bound" }) });
+    // authenticatedFetch THROWS ApiError(400) for a non-2xx; it never resolves { ok: false }.
+    const authenticatedFetch = jest.fn().mockRejectedValue(httpError(400, { title: "Bad Request", detail: "already bound" }));
     const { result } = renderHook(() => useReviewedDocumentAnalysis({ bffBaseUrl, authenticatedFetch }));
 
     await act(async () => {

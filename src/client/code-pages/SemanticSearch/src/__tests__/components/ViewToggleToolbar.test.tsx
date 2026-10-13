@@ -1,67 +1,29 @@
 /**
  * Unit tests for ViewToggleToolbar component
  *
+ * The toolbar is a 4-way icon-only view switcher (Grid | Network | Treemap | Timeline) rendered as a
+ * Fluent v9 TabList. Saved-search selection and the cluster-by dropdown no longer live here
+ * (saved searches: SavedSearchSelector inside SearchFilterPane; see SavedSearchSelector.test.tsx).
+ *
  * Covers:
- *   - Grid/Graph toggle button rendering and checked state
- *   - View mode toggle callbacks
- *   - Cluster-by dropdown visibility (only in graph mode)
- *   - Cluster-by option selection callback
- *   - SavedSearchSelector integration (rendered as child)
+ *   - one tab per view mode, reachable by its aria-label
+ *   - the selected tab mirrors the `viewMode` prop
+ *   - selecting a tab reports the matching ViewMode through `onViewModeChange`
  */
 
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { ViewToggleToolbar, type ViewToggleToolbarProps } from '../../components/ViewToggleToolbar';
-import type { SavedSearch, SearchFilters } from '../../types';
-
-// ---------------------------------------------------------------------------
-// Mock icons
-// ---------------------------------------------------------------------------
-
-jest.mock('@fluentui/react-icons', () => ({
-  GridRegular: () => <span data-testid="icon-graph" />,
-  TextBulletListSquareRegular: () => <span data-testid="icon-grid" />,
-  ChevronDownRegular: () => <span data-testid="icon-chevron-down" />,
-  SaveRegular: () => <span data-testid="icon-save" />,
-  StarRegular: () => <span data-testid="icon-star" />,
-}));
+import type { ViewMode } from '../../types';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const DEFAULT_FILTERS: SearchFilters = {
-  documentTypes: [],
-  fileTypes: [],
-  matterTypes: [],
-  dateRange: { from: null, to: null },
-  threshold: 50,
-  searchMode: 'rrf',
-};
-
-const MOCK_SAVED_SEARCH: SavedSearch = {
-  id: 'saved-1',
-  name: 'My Search',
-  searchDomain: 'documents',
-  query: 'test',
-  filters: DEFAULT_FILTERS,
-  viewMode: 'grid',
-  columns: ['name'],
-  sortColumn: 'name',
-  sortDirection: 'asc',
-};
-
 const DEFAULT_PROPS: ViewToggleToolbarProps = {
   viewMode: 'grid',
   onViewModeChange: jest.fn(),
-  clusterBy: 'MatterType',
-  onClusterByChange: jest.fn(),
-  savedSearches: [],
-  currentSearchName: null,
-  onSelectSavedSearch: jest.fn(),
-  onSaveCurrentSearch: jest.fn(),
-  isSavedSearchesLoading: false,
 };
 
 function renderToolbar(props: Partial<ViewToggleToolbarProps> = {}) {
@@ -72,6 +34,16 @@ function renderToolbar(props: Partial<ViewToggleToolbarProps> = {}) {
   );
 }
 
+/** mode → the tab's accessible name (the tabs are icon-only, so aria-label is the contract). */
+const TAB_LABELS: Record<ViewMode, string> = {
+  grid: 'Switch to grid view',
+  map: 'Switch to network graph view',
+  treemap: 'Switch to treemap view',
+  timeline: 'Switch to timeline view',
+};
+
+const ALL_MODES = Object.keys(TAB_LABELS) as ViewMode[];
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -81,100 +53,53 @@ describe('ViewToggleToolbar', () => {
     jest.clearAllMocks();
   });
 
-  // ---- Rendering ----
-
-  it('renders Grid and Graph toggle buttons', () => {
+  it('renders exactly one tab per view mode', () => {
     renderToolbar();
 
-    expect(screen.getByText('Grid')).toBeInTheDocument();
-    expect(screen.getByText('Graph')).toBeInTheDocument();
+    expect(screen.getAllByRole('tab')).toHaveLength(ALL_MODES.length);
+    ALL_MODES.forEach(mode => {
+      expect(screen.getByRole('tab', { name: TAB_LABELS[mode] })).toBeInTheDocument();
+    });
   });
 
-  it('renders Grid button with primary appearance when in grid mode', () => {
-    renderToolbar({ viewMode: 'grid' });
+  it.each(ALL_MODES)('marks only the %s tab as selected when viewMode is %s', mode => {
+    renderToolbar({ viewMode: mode });
 
-    const gridButton = screen.getByText('Grid').closest('button');
-    // Fluent ToggleButton sets aria-pressed when checked
-    expect(gridButton).toHaveAttribute('aria-pressed', 'true');
+    ALL_MODES.forEach(other => {
+      expect(screen.getByRole('tab', { name: TAB_LABELS[other] })).toHaveAttribute(
+        'aria-selected',
+        other === mode ? 'true' : 'false'
+      );
+    });
   });
 
-  it('renders Graph button with primary appearance when in graph mode', () => {
-    renderToolbar({ viewMode: 'graph' });
+  it.each(ALL_MODES.filter(mode => mode !== 'grid'))(
+    "calls onViewModeChange with '%s' when that tab is clicked from grid mode",
+    mode => {
+      const onViewModeChange = jest.fn();
+      renderToolbar({ viewMode: 'grid', onViewModeChange });
 
-    const graphButton = screen.getByText('Graph').closest('button');
-    expect(graphButton).toHaveAttribute('aria-pressed', 'true');
-  });
+      fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS[mode] }));
 
-  // ---- View Mode Toggle ----
+      expect(onViewModeChange).toHaveBeenCalledTimes(1);
+      expect(onViewModeChange).toHaveBeenCalledWith(mode);
+    }
+  );
 
-  it("calls onViewModeChange with 'grid' when Grid button is clicked", () => {
+  it("calls onViewModeChange with 'grid' when the Grid tab is clicked from another mode", () => {
     const onViewModeChange = jest.fn();
-    renderToolbar({ onViewModeChange, viewMode: 'graph' });
+    renderToolbar({ viewMode: 'timeline', onViewModeChange });
 
-    fireEvent.click(screen.getByText('Grid'));
+    fireEvent.click(screen.getByRole('tab', { name: TAB_LABELS.grid }));
 
     expect(onViewModeChange).toHaveBeenCalledTimes(1);
     expect(onViewModeChange).toHaveBeenCalledWith('grid');
   });
 
-  it("calls onViewModeChange with 'graph' when Graph button is clicked", () => {
+  it('does not call onViewModeChange on render', () => {
     const onViewModeChange = jest.fn();
-    renderToolbar({ onViewModeChange, viewMode: 'grid' });
+    renderToolbar({ onViewModeChange });
 
-    fireEvent.click(screen.getByText('Graph'));
-
-    expect(onViewModeChange).toHaveBeenCalledTimes(1);
-    expect(onViewModeChange).toHaveBeenCalledWith('graph');
-  });
-
-  // ---- Cluster-by Dropdown Visibility ----
-
-  it('does NOT show cluster-by dropdown in grid mode', () => {
-    renderToolbar({ viewMode: 'grid' });
-
-    expect(screen.queryByText('Matter Type')).not.toBeInTheDocument();
-  });
-
-  it('shows cluster-by dropdown in graph mode', () => {
-    renderToolbar({ viewMode: 'graph' });
-
-    // The default clusterBy is "MatterType", which displays as "Matter Type"
-    expect(screen.getByText('Matter Type')).toBeInTheDocument();
-  });
-
-  it('displays the selected cluster-by label in graph mode', () => {
-    renderToolbar({ viewMode: 'graph', clusterBy: 'DocumentType' });
-
-    expect(screen.getByText('Document Type')).toBeInTheDocument();
-  });
-
-  it('displays all cluster-by options when dropdown is opened in graph mode', () => {
-    renderToolbar({ viewMode: 'graph', clusterBy: 'MatterType' });
-
-    // Click to open the dropdown
-    const dropdownTrigger = screen.getByText('Matter Type').closest('button');
-    if (dropdownTrigger) {
-      fireEvent.click(dropdownTrigger);
-    }
-
-    // All five options should appear in the listbox
-    const expectedLabels = ['Matter Type', 'Practice Area', 'Document Type', 'Organization', 'Person/Contact'];
-    expectedLabels.forEach(label => {
-      expect(screen.getAllByText(label).length).toBeGreaterThanOrEqual(1);
-    });
-  });
-
-  // ---- Saved Search Selector Integration ----
-
-  it("renders SavedSearchSelector with 'Saved Searches' default text", () => {
-    renderToolbar({ currentSearchName: null });
-
-    expect(screen.getByText('Saved Searches')).toBeInTheDocument();
-  });
-
-  it('renders SavedSearchSelector with current search name', () => {
-    renderToolbar({ currentSearchName: 'My Custom Search' });
-
-    expect(screen.getByText('My Custom Search')).toBeInTheDocument();
+    expect(onViewModeChange).not.toHaveBeenCalled();
   });
 });

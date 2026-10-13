@@ -54,8 +54,10 @@ import type { IWebApi } from "../types/xrm";
  * `@spaarke/daily-briefing-components/src/types/notifications.ts`. We
  * intentionally inline the constant rather than import to keep
  * LegalWorkspace's dependency graph stable (no new NPM dependencies per
- * R4 task 043 constraints). Schema contract under test in
- * `Spaarke.DailyBriefing.Components/test/autoPopupPreferenceContract.test.ts`.
+ * R4 task 043 constraints). Canonical value asserted in
+ * `Spaarke.DailyBriefing.Components/test/autoPopupPreferenceContract.test.ts`;
+ * this hook's use of it (the query it issues) is asserted in
+ * `src/solutions/SpaarkeAi/src/components/shell/__tests__/dailyDigestAutoPopup.parity.test.tsx`.
  *
  * sprk_preferencetype option set values:
  *   100000000 = TodoKanbanThresholds
@@ -99,8 +101,10 @@ export interface IUseDailyDigestAutoPopupOptions {
  * Mirrors the merge-with-defaults semantics in the canonical
  * `mergeWithDefaults` helper at
  * `@spaarke/daily-briefing-components/src/services/preferencesService.ts:155`.
- * Schema parity is asserted in
- * `Spaarke.DailyBriefing.Components/test/autoPopupPreferenceContract.test.ts`.
+ * Parity (this function vs `fetchDigestPreferences`, for every input shape) is
+ * asserted against the real exports in
+ * `src/solutions/SpaarkeAi/src/components/shell/__tests__/dailyDigestAutoPopup.parity.test.tsx`
+ * (LegalWorkspace has no Jest setup; the Console's Jest config can import it).
  */
 export function parseAutoPopupFromPreferenceJson(rawValue: string | undefined | null): boolean {
   if (!rawValue) return true;

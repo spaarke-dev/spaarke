@@ -104,7 +104,7 @@ public class SecureRootInheritanceIfMatchTests : IClassFixture<ProvisionProjectT
                 | AccessRights.Share),
             scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(), SecureChildShareWorld.NobodyWalled(),
             scope.ServiceProvider.GetRequiredService<SecureRootInheritance>(),
-            new AssignedAccessTestDoubles.Harness(Ledger).Materializer,
+            new AssignedAccessTestDoubles.Harness(Ledger).Materializer, AssignedAccessTestDoubles.InertNotifier(),
             Caller(), NullLogger<Program>.Instance, CancellationToken.None);
     }
 

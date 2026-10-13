@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Button, FluentProvider, makeStyles, tokens, Text, webDarkTheme } from '@fluentui/react-components';
 import type { Theme } from '@fluentui/react-components';
 import { useMsal } from '@azure/msal-react';
+import { InteractionStatus } from '@azure/msal-browser';
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
   resolveCodePageTheme,
@@ -10,15 +11,21 @@ import {
 } from '@spaarke/ui-components/utils/themeStorage';
 import { DataGridExternalHostProvider } from '@spaarke/ui-components/components/DataGrid/DataGridExternalHost';
 import { APP_VERSION } from './config';
+import { isDevMockEnabled } from './dev-mock';
 import { clearStoredRealm } from './auth/realm';
+import { clearActiveBackend } from './auth/backend-selection';
+import { accountsForActivePlane } from './auth/msal-auth';
 import { AppHeader } from './components/AppHeader';
 import { AuthGuard } from './components/AuthGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { NotificationBell } from './components/shell/NotificationBell';
+import { RecordOpenerProvider } from './components/detail/RecordOpener';
+import { RecordDeepLink } from './components/detail/RecordDeepLink';
 import { WorkspaceHomePage } from './pages/WorkspaceHomePage';
 import { ProjectPage } from './pages/ProjectPage';
-import { PlaybookLibraryPage } from './pages/PlaybookLibraryPage';
 import { DocumentUploadPage } from './pages/DocumentUploadPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { TeamsHostProvider } from './components/auth/TeamsHostContext';
 import type { PortalUser } from './types';
 
 const useStyles = makeStyles({
@@ -124,6 +131,7 @@ const AppShell: React.FC<{
   const styles = useStyles();
   const navigate = useNavigate();
   const location = useLocation();
+  const { inProgress } = useMsal();
 
   return (
     <div className={styles.root}>
@@ -135,16 +143,20 @@ const AppShell: React.FC<{
         teamsHost={teamsHost}
         // The tall welcome band only reads on the workspace landing.
         showWelcomeBand={location.pathname === '/'}
+        // Only for a signed-in user with no MSAL interaction running: the bell reads the BFF as soon as it mounts, which
+        // must neither precede sign-in nor compete with a redirect or token renewal that is still in progress.
+        bell={portalUser && inProgress === InteractionStatus.None ? <NotificationBell /> : null}
       />
 
       <main className={styles.content}>
         <AuthGuard teamsHost={teamsHost}>
           <ErrorBoundary>
+            {/* Opens the record a `?record={type}:{id}` link names, once signed in (task 055, FR-07). */}
+            <RecordDeepLink teamsHost={teamsHost} />
             <Routes>
               <Route path="/" element={<WorkspaceHomePage teamsHost={teamsHost} />} />
               <Route path="/project/:id" element={<ProjectPage />} />
-              <Route path="/playbooks/:entityType/:entityId" element={<PlaybookLibraryPage />} />
-              <Route path="/upload" element={<DocumentUploadPage />} />
+              <Route path="/upload" element={<DocumentUploadPage teamsHost={teamsHost} />} />
               <Route
                 path="/settings"
                 element={<SettingsPage isDark={isDark} onToggleDark={onToggleDark} portalUser={portalUser} />}
@@ -189,16 +201,15 @@ export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) =>
   const [theme, setTheme] = React.useState<Theme>(resolveCodePageTheme);
 
   const { accounts, instance } = useMsal();
-  const portalUser =
-    import.meta.env.VITE_DEV_MOCK === 'true'
-      ? {
-          userName: 'jane.smith@externalfirm.com',
-          firstName: 'Jane',
-          lastName: 'Smith',
-          displayName: 'Jane Smith (Mock)',
-          tenantId: 'mock',
-        }
-      : accountToPortalUser(accounts[0]);
+  const portalUser = isDevMockEnabled()
+    ? {
+        userName: 'jane.smith@externalfirm.com',
+        firstName: 'Jane',
+        lastName: 'Smith',
+        displayName: 'Jane Smith (Mock)',
+        tenantId: 'mock',
+      }
+    : accountToPortalUser(accountsForActivePlane(accounts)[0]);
 
   const isDark = theme === webDarkTheme;
 
@@ -223,24 +234,31 @@ export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) =>
   // organization / Partner" chooser and the user can switch planes; no-op for Teams (no stored realm)
   // and for dev mock mode (no live MSAL instance to log out of).
   const handleSignOut = React.useCallback(() => {
-    if (import.meta.env.VITE_DEV_MOCK === 'true') return;
+    if (isDevMockEnabled()) return;
     clearStoredRealm();
+    // The tab's active customer key goes with the realm, so the next sign-in re-selects the customer (task 041).
+    clearActiveBackend();
     void instance.logoutRedirect();
   }, [instance]);
 
   return (
     <DataGridExternalHostProvider>
-      <FluentProvider theme={theme} style={{ height: '100%' }}>
-        <BrowserRouter>
-          <AppShell
-            isDark={isDark}
-            onToggleDark={handleToggleDark}
-            portalUser={portalUser}
-            teamsHost={teamsHost}
-            onSignOut={handleSignOut}
-          />
-        </BrowserRouter>
-      </FluentProvider>
+      <TeamsHostProvider teamsHost={teamsHost}>
+        <FluentProvider theme={theme} style={{ height: '100%' }}>
+          <BrowserRouter>
+            {/* One record opener for the shell: the notification bell and a `?record=` deep link open the same detail view. */}
+            <RecordOpenerProvider>
+              <AppShell
+                isDark={isDark}
+                onToggleDark={handleToggleDark}
+                portalUser={portalUser}
+                teamsHost={teamsHost}
+                onSignOut={handleSignOut}
+              />
+            </RecordOpenerProvider>
+          </BrowserRouter>
+        </FluentProvider>
+      </TeamsHostProvider>
     </DataGridExternalHostProvider>
   );
 };

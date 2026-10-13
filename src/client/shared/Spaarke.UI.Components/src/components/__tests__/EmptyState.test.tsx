@@ -78,6 +78,16 @@ describe('EmptyState', () => {
     expect(screen.getByText('H').className).not.toContain('caller-d');
   });
 
+  it('headingAs renders the heading as that element; omitted keeps the historical span (other consumers unchanged)', () => {
+    const { unmount } = renderInTheme(<EmptyState heading="Plain" />);
+    expect(screen.getByText('Plain').tagName).toBe('SPAN');
+    expect(screen.queryByRole('heading')).toBeNull();
+    unmount();
+
+    renderInTheme(<EmptyState heading="Page title" headingAs="h1" />);
+    expect(screen.getByRole('heading', { level: 1, name: 'Page title' })).toBeTruthy();
+  });
+
   it('renders in the dark theme (ADR-021 — tokens only, no hard-coded colours)', () => {
     renderInTheme(<EmptyState size="compact" heading="Dark" description="mode" />, webDarkTheme);
     expect(screen.getByRole('status')).toHaveTextContent('Dark');

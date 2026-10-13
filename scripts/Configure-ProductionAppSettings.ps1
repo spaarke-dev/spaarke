@@ -130,6 +130,11 @@ $settings = @(
 
     # --- Communication ---
     "Communication__DefaultMailbox=$(KVRef 'Communication-DefaultMailbox')",
+    # The system sender must ALSO be an approved sender or every grant/registration email is rejected InvalidSender;
+    # CommunicationOptionsValidator fails the host's start otherwise (same mailbox as DefaultMailbox).
+    "Communication__ApprovedSenders__0__Email=$(KVRef 'Communication-DefaultMailbox')",
+    "Communication__ApprovedSenders__0__IsDefault=true",
+    "Communication__ApprovedSenders__0__DisplayName=Spaarke Central",
     "Communication__ArchiveContainerId=$(KVRef 'SPE-CommunicationArchiveContainerId')",
     "Communication__WebhookNotificationUrl=$(KVRef 'Communication-WebhookUrl')",
     "Communication__WebhookClientState=$(KVRef 'communication-webhook-secret')",

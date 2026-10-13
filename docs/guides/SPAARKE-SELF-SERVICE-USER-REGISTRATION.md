@@ -110,7 +110,7 @@ Before the registration system can operate, the following must be in place:
 | **Entra ID security group** | "Spaarke Demo Users" group for Conditional Access MFA exclusion (created by `Setup-EntraInfrastructure.ps1`) |
 | **Conditional Access policy** | Excludes "Spaarke Demo Users" group from MFA requirements |
 | **Graph API Application permissions** | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Directory.ReadWrite.All` on BFF app registration, with admin consent granted |
-| **Exchange Application Access Policy** | Grants the BFF app registration permission to send email from `demo@demo.spaarke.com` shared mailbox |
+| **Exchange Application Access Policy** | Grants the BFF app registration permission to send email from the `Communication:DefaultMailbox` shared mailbox |
 | **BFF API deployed** | With `DemoProvisioning` configuration section populated |
 | **`demo.spaarke.com` domain** | Configured in Entra ID as a verified domain |
 
@@ -472,7 +472,7 @@ To add a second (or subsequent) demo environment, no code changes are required:
 
 ## Email Templates
 
-The system sends 4 email types via the existing Spaarke Communication Service (`POST /api/communications/send`, SharedMailbox mode from `demo@demo.spaarke.com`).
+The system sends 4 email types via the existing Spaarke Communication Service (`POST /api/communications/send`, SharedMailbox mode from the configured `Communication:DefaultMailbox`).
 
 | Template | File | Trigger | Subject |
 |----------|------|---------|---------|
@@ -497,7 +497,7 @@ To modify a template:
 
 ### Email Sender Configuration
 
-- **From address**: `demo@demo.spaarke.com` (hardcoded in `RegistrationEmailService`)
+- **From address**: the `Communication:DefaultMailbox` setting (Spaarke template value `mailbox-central@spaarke.com`; it must also be listed in `Communication:ApprovedSenders`). Required outside Development/Testing; it was the hardcoded `demo@demo.spaarke.com` before 2026-10-11.
 - **Send mode**: `SharedMailbox` via CommunicationService
 - **Requirement**: The BFF API app registration must have an Exchange Application Access Policy granting send-as permission for the shared mailbox
 
@@ -553,7 +553,7 @@ Run `Setup-EntraInfrastructure.ps1` to add permissions and grant consent, or che
 
 ### "INVALID_SENDER" or email send failures
 
-**Cause**: The Exchange Application Access Policy does not grant the BFF app registration send-as permission for the `demo@demo.spaarke.com` shared mailbox.
+**Cause**: The Exchange Application Access Policy does not grant the BFF app registration send-as permission for the `Communication:DefaultMailbox` shared mailbox.
 
 **Fix**: Create or update the Exchange Application Access Policy:
 

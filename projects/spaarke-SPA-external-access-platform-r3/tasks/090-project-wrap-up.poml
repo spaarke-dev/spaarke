@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Project wrap-up (gates, test-diet, close-out)</title>
+    <phase>Wrap-up</phase>
+    <gate>after all other tasks (073 may remain blocked — record it)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Mandatory wrap-up: code-review + adr-check over all project code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Procedural close-out</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>final serial task; may touch .claude/ when promoting lessons</parallel-reason>
+    <deps>all</deps>
+    <tags>wrap-up, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project: run the final quality gates, fix every F-class finding, run /test-diet and /repo-cleanup, update README/plan, record lessons, and promote durable rules.</prompt>
+  <role>SPAARKE platform developer. Project lead. Follow ADRs strictly.</role>
+  <goal>No F-class finding remains; README and plan show Complete (or Complete-except-073 with the blocker named); lessons are in notes/lessons-learned.md; durable rules are promoted; ADR-028 and the auth architecture doc reflect what shipped.</goal>
+
+  <context>
+    <background>task-create Step 3.7. The auth architecture doc (docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md, from spaarke-auth-system-of-record-r1) §5.3/§5.8/§8.2 needs updating once R3's decisions are in code — coordinate with that project.</background>
+    <relevant-files>
+      <file role="modify">projects/spaarke-SPA-external-access-platform-r3/README.md</file>
+      <file role="modify">projects/spaarke-SPA-external-access-platform-r3/plan.md</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r3/notes/lessons-learned.md</file>
+      <file role="modify">projects/INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Fix every F-class finding before closing (root CLAUDE.md §8.5); known limits are listed with their class.</constraint>
+    <constraint source="project">Editing .claude/ (FAILURE-MODES, patterns, constraints) is main-session-only and, for ADRs/constraints, owner-approved.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project close-out</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Run /code-review and /adr-check over the project's changes; classify and fix findings.</step>
+    <step order="2">Run /test-diet for the project's tests; act on its report.</step>
+    <step order="3">Run /repo-cleanup projects/spaarke-SPA-external-access-platform-r3.</step>
+    <step order="4">Update README (status, graduation checkboxes, changelog) and plan (status).</step>
+    <step order="5">Write notes/lessons-learned.md; promote durable lessons to .claude/FAILURE-MODES.md or the owning constraint.</step>
+    <step order="6">Coordinate the auth architecture doc update (§5.3/§5.8/§8.2) with spaarke-auth-system-of-record-r1; update projects/INDEX.md.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="8">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-090-notes.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/README.md</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">code-review and adr-check report no open F-class finding.</criterion>
+    <criterion testable="true">/test-diet and /repo-cleanup have run and their actions are done.</criterion>
+    <criterion testable="true">README graduation criteria are checked (or each unchecked one names its blocker).</criterion>
+    <criterion testable="true">Lessons are recorded and durable ones promoted.</criterion>
+    <criterion testable="true">projects/INDEX.md shows the project's final status.</criterion>
+  </acceptance-criteria>
+
+  <notes>Mandatory final task.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

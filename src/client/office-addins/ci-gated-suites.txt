@@ -28,7 +28,7 @@
 #
 # HOW TO PROMOTE A SUITE INTO THE GATE (the ratchet)
 # --------------------------------------------------
-# When the nightly Client Tests (Jest) baseline shows one of the 10 green,
+# When the nightly Client Tests baseline shows one of the 10 green,
 # add its path here in the same PR that fixed it. The list only grows. The
 # end state is every suite in this package listed here, at which point this
 # file can be replaced by a plain full-suite run.

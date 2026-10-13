@@ -184,7 +184,7 @@ public sealed class Def14_ComposeSaveLockedDocumentTests : IClassFixture<Def14Co
     }
 
     [Fact]
-    public async Task CreateOnSaveDocument_WhenSpeCreatePreconditionFailed_Returns412WithActionableCopy_NotOpaque500()
+    public async Task CreateOnSaveDocument_WhenSpeCreatePreconditionFailed_Returns409WithActionableCopy_NotOpaque500()
     {
         // FR-08 (task 051/054): the create-on-save counterpart to the 423 test above — extends the DEF-14
         // proof to the NEGATIVE case task 051's own acceptance criteria names explicitly: "a genuinely

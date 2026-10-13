@@ -55,6 +55,7 @@ export class MultiFileUploadService {
 
     const errors: UploadFilesResult['errors'] = [];
     const uploadedFiles: SpeFileMetadata[] = [];
+    const uploads: UploadFilesResult['uploads'] = [];
 
     // Upload all files in parallel
     const uploadResults = await Promise.allSettled(
@@ -115,8 +116,9 @@ export class MultiFileUploadService {
         continue;
       }
 
-      // Store SPE metadata
+      // Store SPE metadata, and which input file it came from (the stored name can differ on a rename)
       uploadedFiles.push(metadata);
+      uploads.push({ sourceFileName: file.name, metadata });
 
       // Report progress: complete
       onProgress?.({
@@ -133,6 +135,7 @@ export class MultiFileUploadService {
       successCount: uploadedFiles.length,
       failureCount: errors.length,
       uploadedFiles,
+      uploads,
       errors,
     };
 

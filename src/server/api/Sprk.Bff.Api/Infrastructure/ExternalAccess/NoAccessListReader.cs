@@ -359,8 +359,8 @@ public class NoAccessListReader : INoAccessListReader
         TokenCredential credential,
         ILogger<NoAccessListReader> logger)
     {
-        // No ArgumentNullException guards — matching ExternalParticipationService's and
-        // ModuleEntitlementResolver's exact constructor shape (the established style of every
+        // No ArgumentNullException guards — matching ExternalParticipationService's
+        // exact constructor shape (the established style of every
         // OTHER typed-HttpClient reader in this module). Deliberate, not an oversight: it is what
         // lets a test double (this task's FakeNoAccessListReader, mirroring
         // FakeParticipationService/ThrowingFlagParticipationService) pass `configuration: null!` /

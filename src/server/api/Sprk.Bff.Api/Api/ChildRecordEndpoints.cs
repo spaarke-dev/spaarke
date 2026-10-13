@@ -209,6 +209,7 @@ public static class ChildRecordEndpoints
             return owned switch
             {
                 { ClientFailure: { } failure } => CallerFailure(failure, entity),
+                { Invalid: { } pairInvalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode, pairInvalid),
                 { ParentUnavailable: true } => ParentNotFound(entity),
                 { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
                 { OwnerRefusal: { } refusal } => ProblemDetailsHelper.RecordOwnerRefused(refusal, Noun(entity), httpContext.TraceIdentifier),
@@ -340,6 +341,7 @@ public static class ChildRecordEndpoints
             return outcome switch
             {
                 { ClientFailure: { } failure } => CallerFailure(failure, entity),
+                { Invalid: { } pairInvalid } => Problem(StatusCodes.Status400BadRequest, InvalidPayloadCode, pairInvalid),
                 { ParentUnavailable: true } => ParentNotFound(entity),
                 { Denied: { } denied } => Problem(StatusCodes.Status403Forbidden, DeniedCode, denied),
                 { Forbidden: { } forbidden } => ProblemDetailsHelper.RecordOwnerRefused(forbidden, Noun(entity), httpContext.TraceIdentifier),
@@ -367,7 +369,8 @@ public static class ChildRecordEndpoints
             // After the re-file, inline (task 147; round 36): the row's own mirror (moved under a secure record → shared with
             // its sharees now; moved OUT → its mirror goes now, only from a row that WAS isolated — its owning team, read as
             // the caller before the write, rides along on `row`), then task 148's pass over everything filed under it when
-            // it moved under, out of or between secure records. One implementation for every re-file writer.
+            // it moved under, out of or between secure records. One implementation for every re-file writer (it also lets a
+            // re-filed communication's thread follow the filing — spaarkeai-word-add-in-r1 task 129).
             await children.AfterRefileAsync(
                 entity, id,
                 async () => GetString(row.Body, "_owningteam_value") is { } before && Guid.TryParse(before, out var beforeTeam)

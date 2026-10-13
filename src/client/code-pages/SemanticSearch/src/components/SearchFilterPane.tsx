@@ -100,8 +100,6 @@ export interface SearchFilterPaneProps {
   currentSearchName: string | null;
   /** Called when a saved search is selected */
   onSelectSavedSearch: (search: SavedSearch) => void;
-  /** Called when user saves current search */
-  onSaveCurrentSearch: () => void;
   /** Whether saved searches are loading */
   isSavedSearchesLoading: boolean;
   /**
@@ -234,7 +232,6 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
   savedSearches,
   currentSearchName,
   onSelectSavedSearch,
-  onSaveCurrentSearch,
   isSavedSearchesLoading,
   onCancel,
 }) => {
@@ -367,7 +364,6 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
           savedSearches={savedSearches}
           currentSearchName={currentSearchName}
           onSelectSavedSearch={onSelectSavedSearch}
-          onSaveCurrentSearch={onSaveCurrentSearch}
           isLoading={isSavedSearchesLoading}
         />
       </div>

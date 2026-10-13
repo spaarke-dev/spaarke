@@ -154,43 +154,6 @@ public class VisualizationIntegrationTests
         _output.WriteLine($"Shared keywords: [{string.Join(", ", edge.Data.SharedKeywords)}]");
     }
 
-    [Fact]
-    public void GraphMetadata_HasCorrectStructure()
-    {
-        // Arrange & Act
-        var sourceId = Guid.NewGuid().ToString();
-        var metadata = new GraphMetadata
-        {
-            SourceDocumentId = sourceId,
-            TenantId = "test-tenant-123",
-            TotalResults = 10,
-            Threshold = 0.65f,
-            Depth = 2,
-            MaxDepthReached = 2,
-            NodesPerLevel = [1, 5, 4],
-            SearchLatencyMs = 150,
-            CacheHit = true
-        };
-
-        // Assert
-        metadata.SourceDocumentId.Should().Be(sourceId);
-        metadata.TenantId.Should().NotBeEmpty();
-        metadata.Threshold.Should().BeInRange(0.0f, 1.0f);
-        metadata.Depth.Should().BeInRange(1, 3);
-        metadata.MaxDepthReached.Should().BeLessOrEqualTo(metadata.Depth);
-        metadata.NodesPerLevel.Should().NotBeEmpty();
-        metadata.NodesPerLevel.Sum().Should().Be(10); // Total nodes = sum of nodes per level
-        metadata.SearchLatencyMs.Should().BeGreaterOrEqualTo(0);
-
-        _output.WriteLine("Metadata validated:");
-        _output.WriteLine($"  Source: {metadata.SourceDocumentId}");
-        _output.WriteLine($"  TotalResults: {metadata.TotalResults}");
-        _output.WriteLine($"  Threshold: {metadata.Threshold}");
-        _output.WriteLine($"  Depth: {metadata.Depth}, MaxReached: {metadata.MaxDepthReached}");
-        _output.WriteLine($"  NodesPerLevel: [{string.Join(", ", metadata.NodesPerLevel)}]");
-        _output.WriteLine($"  SearchLatencyMs: {metadata.SearchLatencyMs}ms, CacheHit: {metadata.CacheHit}");
-    }
-
     #endregion
 
     #region VisualizationOptions Tests

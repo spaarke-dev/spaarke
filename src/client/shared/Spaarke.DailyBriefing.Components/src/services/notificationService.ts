@@ -589,4 +589,3 @@ export async function extendBriefingTtl(
 // `markAllNotificationsRead` that briefly mirrored `markBriefingChecked` /
 // `markAllBriefingsChecked` (added by task 020) have been removed now that
 // `useBriefingActions.ts` (task 030) imports the canonical names directly.
-// The smoke test `DailyBriefingApp.smoke.test.tsx` is rewired by task 031.

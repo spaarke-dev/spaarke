@@ -13,6 +13,8 @@ import * as React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { TrackingFieldTrio } from '../TrackingFieldTrio';
+import { throwingAuthenticatedFetch } from '../../../__tests__/helpers/authenticatedFetchDouble';
+import type { AuthenticatedFetchFn, OkResponse } from '../../../utils/fetchTypes';
 import type { ITrackingFieldTrioProps, IAccessPermissionOption } from '../types';
 import {
   parseAccessStatusResponse,
@@ -111,7 +113,7 @@ describe('readAccessStatus (task 153, the PCF host read — evaluateGrantGate ru
         if (body instanceof Error) throw body;
         return body;
       },
-    }) as unknown as Response;
+    }) as unknown as OkResponse;
 
   beforeEach(() => {
     jest.spyOn(console, 'info').mockImplementation(() => {});
@@ -130,9 +132,9 @@ describe('readAccessStatus (task 153, the PCF host read — evaluateGrantGate ru
   });
 
   it.each([
-    ['the uniform 404', async () => res({ title: 'Not Found' }, 404)],
-    ['a 403', async () => res({}, 403)],
-    ['a 500', async () => res({}, 500)],
+    ['the uniform 404', async () => res({ title: 'Not Found', status: 404 }, 404)],
+    ['a 403', async () => res({ status: 403 }, 403)],
+    ['a 500', async () => res({ status: 500 }, 500)],
     ['an unparseable body', async () => res(new Error('bad json'))],
     [
       'an answer about another record',
@@ -144,10 +146,10 @@ describe('readAccessStatus (task 153, the PCF host read — evaluateGrantGate ru
         throw new Error('not initialized');
       },
     ],
-    ['no response at all', async () => undefined as unknown as Response],
   ])('%s → unavailable, never doesNotApply', async (_label, impl) => {
+    // Production shape: the PCF injects `@spaarke/auth`'s authenticatedFetch, which THROWS for a non-2xx.
     const status = await readAccessStatus(
-      jest.fn(impl) as unknown as (u: string) => Promise<Response>,
+      throwingAuthenticatedFetch(impl) as unknown as AuthenticatedFetchFn,
       'matter',
       RECORD_ID
     );
@@ -163,7 +165,7 @@ describe('readAccessStatus — a hung request (hardening)', () => {
     let signal: AbortSignal | undefined;
     const fetchFn = jest.fn((_url: string, init?: RequestInit) => {
       signal = init?.signal ?? undefined;
-      return new Promise<Response>(() => {});
+      return new Promise<OkResponse>(() => {});
     });
     const status = await readAccessStatus(fetchFn, 'matter', RECORD_ID, 20);
     expect(status).toEqual(ACCESS_STATUS_UNAVAILABLE);

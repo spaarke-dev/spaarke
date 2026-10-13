@@ -37,7 +37,7 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
   if (method === 'GET' && url.includes('/by-analysis/')) {
     // No bound session — falls through to the document-only Compose surface, which is what
     // this contract test exercises. Mirrors the sibling analysis-entry test's 404 convention.
-    return { ok: false, status: 404, json: async () => ({}) } as Partial<Response> as Response;
+    throw httpError(404);
   }
   if (method === 'GET' && url.includes('/tabs')) {
     return { ok: true, status: 200, json: async () => ({ tabs: [], activeTabId: null }) } as Partial<Response> as Response;
@@ -45,7 +45,7 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
   if (method === 'PATCH' && url.includes('/tabs')) {
     return { ok: true, status: 204, json: async () => ({}) } as Partial<Response> as Response;
   }
-  return { ok: false, status: 404, json: async () => ({}) } as Partial<Response> as Response;
+  throw httpError(404);
 });
 
 jest.mock('@spaarke/ai-widgets', () => {
@@ -141,6 +141,7 @@ jest.mock('@spaarke/ui-components', () => {
 
 // eslint-disable-next-line import/first
 import { WorkspacePane } from '../WorkspacePane';
+import { httpError } from '../../../__tests__/helpers/httpError';
 
 interface WorkspaceWidgetLoadEvent {
   type: string;

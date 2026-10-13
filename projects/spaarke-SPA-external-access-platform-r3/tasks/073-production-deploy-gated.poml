@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="spaarke-SPA-external-access-platform-r3">
+  <metadata>
+    <title>Production deploy to external.spaarke.com (A4) — gated</title>
+    <phase>7 Deploy and verify</phase>
+    <gate>BLOCKED until T240c directory, T240d CIAM-on-stamps, DNS for external.spaarke.com and owner go</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Production deployment (tags deploy)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runbook deployment</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>production go-live, owner-gated</parallel-reason>
+    <deps>072</deps>
+    <tags>deploy, ci-cd</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>When the owner gives go and the dependencies are live, deploy the production SPA and publish the production Teams package.</prompt>
+  <role>SPAARKE platform developer. Release engineer. Follow ADRs strictly.</role>
+  <goal>external.spaarke.com serves the production build with the production directory client; the production Teams package is handed to the owner for publishing; a production smoke test passes against one provisioned customer stamp.</goal>
+
+  <context>
+    <background>Design A4; spec Dependencies: T240c (production routing), T240d (partners on stamps, production CIAM SPA client), H3 pre-authorization of the workforce client on every stamp, DNS by the owner, per-customer shared mailbox (#1562) for C3 emails.</background>
+    <relevant-files>
+      <file role="canonical-reference">.github/workflows/deploy-external-spa.yml</file>
+      <file role="new-artifact">projects/spaarke-SPA-external-access-platform-r3/notes/task-073-prod-deploy-record.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Owner go and a stated rollback before deploying; production values only from the prod GitHub environment.</constraint>
+    <constraint source="project">Do not start while any dependency in the gate is missing; record which ones are live.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>production deployment</topic>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r3/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r3/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load the knowledge files, read the relevant files listed above, declare rigor and model tier per task-execute Step 0.5.</step>
+    <step order="1">Check each gate dependency and record evidence.</step>
+    <step order="2">Get owner go; state the rollback.</step>
+    <step order="3">Run the workflows with environment prod; hand the Teams package to the owner.</step>
+    <step order="4">Smoke test against one provisioned stamp (workforce browser + Teams, partner browser).</step>
+    <step order="5">Record results.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task's status cell to `✅ [done]` and this POML's &lt;status&gt; to completed; run `pwsh scripts/check-task-status-drift.ps1`.</step>
+    <step order="7">Record deviations, decisions and measurements in projects/spaarke-SPA-external-access-platform-r3/notes/task-073-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any gate dependency is missing, STOP and report which; leave the task blocked.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r3/notes/task-073-prod-deploy-record.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every gate dependency is recorded as live with evidence before deploying.</criterion>
+    <criterion testable="true">external.spaarke.com serves the production build.</criterion>
+    <criterion testable="true">The production smoke test passes for the three personas against one stamp.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-20 go-live; owner 2026-10-09: R3 delivers build + package, go-live gated.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

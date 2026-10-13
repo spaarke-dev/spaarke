@@ -268,6 +268,18 @@ export function requestFailedMessage(what: string, status: number, responseBody:
 }
 
 /**
+ * The user-facing text of a terminal SSE `error` event: its message, plus the ADR-019 correlation id when the server
+ * sent one so the user can quote it to support. The server's message is already safe (no exception text).
+ */
+export function describeStreamError(
+  chunk: { error?: string; correlationId?: string },
+  fallback = 'Unknown error'
+): string {
+  const message = chunk.error?.trim() || fallback;
+  return chunk.correlationId ? `${message} (Reference: ${chunk.correlationId})` : message;
+}
+
+/**
  * Options for {@link readSseStream}.
  */
 export interface ReadSseStreamOptions {

@@ -127,7 +127,7 @@ export interface ITrackingFieldTrioProps {
    * `false`, so an unanswered access question is a denial. The host's job is
    * to pass the server's answer — see `TrackingFieldTrio`'s PCF `index.ts`
    * `evaluateGrantGate()`, which asks `GET /api/v1/external-access/
-   * can-manage-access` (Write on THIS record, evaluated as the caller over
+   * can-manage-access` (Write and Share on THIS record, evaluated as the caller over
    * OBO) and passes `false` on every path that does not produce that answer.
    *
    * A disabled icon is genuinely disabled — native Fluent `disabled`, with no

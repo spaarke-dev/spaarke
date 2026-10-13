@@ -14,8 +14,12 @@
  * See docs/guides/PCF-DEPLOYMENT-GUIDE.md and .claude/skills/pcf-deploy/SKILL.md
  * for the update workflow.
  *
+ * 1.0.22 (2026-10-10) - redeploy from master, no change to this control's behaviour: picks up
+ *   what merged since 1.0.21 (the RecordHeader refactor #843, the build baseline repair #1123 and the
+ *   shared-library updates). Dev was still serving the August build.
+ *
  * 1.0.21 (2026-08-25) — RS-1 hotfix: the $select named a Matter-specific summary
  * column deleted in the 2026-08-25 standardization, so Dataverse 400'd and the
  * whole header failed to load. Now reads the shared RECORDSUMMARY_FIELD.
  */
-export const CONTROL_VERSION = '1.0.21';
+export const CONTROL_VERSION = '1.0.22';

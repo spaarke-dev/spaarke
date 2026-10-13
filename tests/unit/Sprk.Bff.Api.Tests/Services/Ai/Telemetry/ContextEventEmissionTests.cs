@@ -1,8 +1,11 @@
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Sprk.Bff.Api.Services.Ai.Telemetry;
 using Xunit;
 
@@ -134,8 +137,6 @@ public class ContextEventEmissionTests
         var captured = CaptureMeterEvents(() =>
         {
             emitter.ToolCallStarted("DocSearch", decisionId, sessionId, "t1");
-            // Simulate work
-            System.Threading.Thread.Sleep(2);
             emitter.ToolCallCompleted("DocSearch", decisionId, sessionId, "t1",
                 outcome: "ok", durationMs: 5);
         });
@@ -300,25 +301,30 @@ public class ContextEventEmissionTests
     }
 
     [Fact]
-    public void TimingContract_CompletedDurationIsPositive()
+    public async Task ToolCallCompleted_ForwardsCallerSuppliedDurationToSseRelay()
     {
-        // Captures the spec line: "Timing assertion: started before invocation, completed
-        // after, durationMs > 0". We model this here as the call-site contract: the
-        // duration value passed by callers is non-negative; the structured-log line
-        // includes durationMs. Wiring sites compute durationMs via Stopwatch.ElapsedMilliseconds
-        // which is monotonically non-decreasing.
-        var emitter = NewEmitter();
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        emitter.ToolCallStarted("X", System.Guid.NewGuid(), sessionId: null, tenantId: null);
-        System.Threading.Thread.Sleep(2);
-        sw.Stop();
-        // Verify that wrapping the emission in a Stopwatch yields a non-negative result.
-        sw.ElapsedMilliseconds.Should().BeGreaterOrEqualTo(0L);
+        // The emitter has no injectable clock: durationMs is measured by the call site and
+        // handed in. The observable contract is that the value is forwarded unchanged to the
+        // SSE side-channel (what ExecutionTraceWidget renders), with the matching event type
+        // and correlation id — and is not clamped, defaulted or replaced by the emitter.
+        var received = new TaskCompletionSource<ContextSseEventDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var relay = new Mock<IContextSseRelay>();
+        relay.Setup(r => r.Writer).Returns((Func<ContextSseEventDto, CancellationToken, Task>)((_, _) => Task.CompletedTask));
+        relay.Setup(r => r.TryWriteAsync(It.IsAny<ContextSseEventDto>(), It.IsAny<CancellationToken>()))
+            .Callback<ContextSseEventDto, CancellationToken>((dto, _) => received.TrySetResult(dto))
+            .Returns(Task.CompletedTask);
 
-        // And the API accepts that value without throwing or constraining it.
-        var captured = CaptureMeterEvents(() =>
-            emitter.ToolCallCompleted("X", System.Guid.NewGuid(),
-                sessionId: null, tenantId: null, outcome: "ok", durationMs: sw.ElapsedMilliseconds));
-        captured.Should().ContainKey(ContextEventEmitter.ToolCallCompletedCounter);
+        var services = new ServiceCollection().AddSingleton(relay.Object).BuildServiceProvider();
+        var accessor = new HttpContextAccessor { HttpContext = new DefaultHttpContext { RequestServices = services } };
+        var emitter = new ContextEventEmitter(NullLogger<ContextEventEmitter>.Instance, accessor);
+        var decisionId = System.Guid.NewGuid();
+
+        emitter.ToolCallCompleted("SearchDocuments", decisionId, sessionId: null, tenantId: "t1",
+            outcome: "ok", durationMs: 1234L);
+
+        var dto = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        dto.ContextEventType.Should().Be("tool_call_completed");
+        dto.ContextDecisionId.Should().Be(decisionId.ToString("N"));
+        dto.ContextDurationMs.Should().Be(1234L);
     }
 }

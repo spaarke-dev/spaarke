@@ -316,7 +316,7 @@ public class SemanticDocumentChunkerTests
     // Token count constraint tests
     // -------------------------------------------------------------------------
 
-    [Fact(Skip = "SemanticDocumentChunker token limit logic changed - chunk size assertion outdated")]
+    [Fact]
     public void ChunkDocument_ForKnowledgeIndex_AllChunksWithinTokenLimit()
     {
         var chunker = CreateChunker();
@@ -334,17 +334,19 @@ public class SemanticDocumentChunkerTests
 
         var chunks = chunker.ChunkDocument(result, opts);
 
-        chunks.Should().NotBeEmpty();
+        chunks.Should().HaveCountGreaterThan(1);
 
-        // Every chunk (except possibly the last) should be at or below the limit.
-        // The last chunk may be smaller.  Non-last chunks should not significantly
-        // exceed the limit.
+        // The chunker appends whole paragraphs and flushes only once the buffer REACHES MaxTokens
+        // (the carried overlap counts toward that buffer). So a non-last chunk is at least
+        // MaxTokens (less one for trimming) and overshoots by at most one paragraph plus its separator.
+        var largestParagraphTokens = paragraphs.Max(p => SemanticDocumentChunker.TokenCount(p.Item1));
         foreach (var chunk in chunks.Take(chunks.Count - 1))
         {
-            // We allow a small margin for the section prefix and paragraph-end overflow.
+            chunk.TokenCount.Should().BeGreaterOrEqualTo(opts.MaxTokens - 1,
+                $"chunk {chunk.ChunkIndex} was flushed before reaching MaxTokens");
             chunk.TokenCount.Should().BeLessOrEqualTo(
-                opts.MaxTokens + opts.OverlapTokens + 50,
-                $"chunk {chunk.ChunkIndex} has {chunk.TokenCount} tokens, expected <= {opts.MaxTokens + opts.OverlapTokens + 50}");
+                opts.MaxTokens + largestParagraphTokens + 1,
+                $"chunk {chunk.ChunkIndex} has {chunk.TokenCount} tokens, more than one paragraph past MaxTokens");
         }
     }
 

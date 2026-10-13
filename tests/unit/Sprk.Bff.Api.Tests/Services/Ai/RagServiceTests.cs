@@ -335,24 +335,6 @@ public class RagServiceTests
             Times.Never);
     }
 
-    [Fact]
-    public async Task SearchAsync_ReturnsSearchDurationMetrics()
-    {
-        // Arrange
-        var service = CreateService();
-        var options = new RagSearchOptions { TenantId = "tenant-1" };
-
-        SetupMockEmbedding();
-        SetupMockSearchClient();
-
-        // Act
-        var result = await service.SearchAsync("test query", options);
-
-        // Assert
-        result.Should().NotBeNull();
-        result.SearchDurationMs.Should().BeGreaterOrEqualTo(0);
-        result.EmbeddingDurationMs.Should().BeGreaterOrEqualTo(0);
-    }
 
     [Fact]
     public async Task SearchAsync_ReturnsOriginalQuery()

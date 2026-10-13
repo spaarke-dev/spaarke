@@ -2063,6 +2063,28 @@ public partial class RouteAuthorizationGuardTests
             + string.Join(", ", added) + "\n  removed: " + string.Join(", ", removed));
     }
 
+    /// <summary>
+    /// Task 035 review F2: <c>IsEntitledAsync</c> is a Tier-1 MODULE entitlement, in <see cref="CallerContextSeams"/> whose
+    /// contract is per-resource decisions. It decides nothing about a record, so a decision crediting a route that names one
+    /// (a <c>{...}</c> segment) with it is a false credit.
+    /// </summary>
+    private static IEnumerable<string> ModuleSeamOnRecordRouteViolations(IEnumerable<HandlerDecision> decisions) =>
+        decisions
+            .Where(d => d.Seam == "IsEntitledAsync" && d.Route.Contains('{'))
+            .Select(d => $"{d.Route}: IsEntitledAsync is a module-level entitlement and decides nothing about a record — a "
+                + "route with a {parameter} segment needs a per-record seam (IsRecordAccessible, a filter, ...)");
+
+    [Fact(DisplayName = "Task 035 review: a module-entitlement seam cannot credit a route that names a record")]
+    public void ModuleEntitlementSeam_CannotCreditARecordRoute()
+    {
+        var onRecord = new HandlerDecision("GET /api/v1/external/{root}/{id:guid}/thing", "Handle", "IsEntitledAsync", Array.Empty<string>(), "x");
+        var onModule = new HandlerDecision("POST /api/v1/external/servicerequests", "Handle", "IsEntitledAsync", Array.Empty<string>(), "x");
+        var otherSeam = new HandlerDecision("GET /api/v1/external/{root}/{id:guid}/thing", "Handle", "IsRecordAccessible", Array.Empty<string>(), "x");
+
+        Assert.Single(ModuleSeamOnRecordRouteViolations(new[] { onRecord }));
+        Assert.Empty(ModuleSeamOnRecordRouteViolations(new[] { onModule, otherSeam }));
+    }
+
     [Fact(DisplayName = "Task 167: every HandlerDecision is verified in source and none is redundant")]
     public void EveryHandlerDecisionIsVerified()
     {
@@ -2096,6 +2118,8 @@ public partial class RouteAuthorizationGuardTests
         {
             violations.Add($"{dup.Key}: declared {dup.Count()} times");
         }
+
+        violations.AddRange(ModuleSeamOnRecordRouteViolations(HandlerDecisions));
 
         foreach (var (seam, entry) in CallerContextSeams)
         {

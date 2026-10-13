@@ -1526,8 +1526,14 @@ public class PlaybookOrchestrationServiceTests
         // Assert
         var failedEvent = events.FirstOrDefault(e => e.Type == PlaybookEventType.RunFailed);
         failedEvent.Should().NotBeNull();
-        failedEvent!.Error.Should().Contain("Test exception");
-        failedEvent.Done.Should().BeTrue();
+        failedEvent!.Done.Should().BeTrue();
+
+        // ADR-019: the event goes to the caller's SSE stream - fixed text, stable code and the trace id; the exception
+        // text stays in the server log.
+        failedEvent.Error.Should().Be(PlaybookStreamEvent.RunFailedMessage);
+        failedEvent.Error.Should().NotContain("Test exception");
+        failedEvent.ErrorCode.Should().Be(PlaybookStreamEvent.RunFailedErrorCode);
+        failedEvent.CorrelationId.Should().Be(_mockHttpContext.TraceIdentifier);
     }
 
     [Fact]
@@ -1561,6 +1567,212 @@ public class PlaybookOrchestrationServiceTests
         };
 
         await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    /// <summary>
+    /// An upstream timeout surfaces as a <see cref="TaskCanceledException"/> while the caller's token is NOT cancelled.
+    /// That is a failure: it must end the run as RunFailed (safe text), never RunCancelled - the Analysis bridge drops
+    /// RunCancelled, which used to turn a timeout into a "[DONE]" + completion notification.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_UpstreamTimeoutWithCallerTokenNotCancelled_YieldsRunFailed_NotRunCancelled()
+    {
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        ArrangeSingleNode(playbookId, actionId, out var executor);
+        executor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout"));
+
+        var events = new List<PlaybookStreamEvent>();
+        await foreach (var evt in _service.ExecuteAsync(CreateRequest(playbookId), _mockHttpContext, CancellationToken.None))
+        {
+            events.Add(evt);
+        }
+
+        events.Should().NotContain(e => e.Type == PlaybookEventType.RunCancelled,
+            "the caller did not cancel: a timeout is a failure");
+        var failed = events.Should().ContainSingle(e => e.Type == PlaybookEventType.RunFailed).Subject;
+        failed.Error.Should().Be(PlaybookStreamEvent.RunFailedMessage);
+        failed.ErrorCode.Should().Be(PlaybookStreamEvent.RunFailedErrorCode);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CallerCancelsDuringANode_MarksTheRunCancelled_NotFailed()
+    {
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        ArrangeSingleNode(playbookId, actionId, out var executor);
+        using var cts = new CancellationTokenSource();
+        var runId = Guid.Empty;
+        executor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .Returns(async (NodeExecutionContext ctx, CancellationToken ct) =>
+            {
+                runId = ctx.RunId; // the caller's enumeration may end before it has read any event
+                await cts.CancelAsync();
+                ct.ThrowIfCancellationRequested();
+                return NodeOutput.Ok(Guid.NewGuid(), "x", new { });
+            });
+
+        try
+        {
+            await foreach (var _ in _service.ExecuteAsync(CreateRequest(playbookId), _mockHttpContext, cts.Token))
+            {
+                // drain until the caller's own token ends the enumeration
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The caller's own token ends the enumeration; the run's recorded state is what is asserted.
+        }
+
+        runId.Should().NotBeEmpty();
+        var detail = await WaitForRunToSettleAsync(runId);
+        detail!.State.Should().Be(PlaybookRunState.Cancelled.ToString());
+        detail.ErrorMessage.Should().BeNull();
+    }
+
+    /// <summary>
+    /// The Stop button is a SEPARATE request (POST /runs/{id}/cancel -> CancelAsync -> the run context's own token), not the
+    /// SSE request token. A node blocked on its token throws OperationCanceledException while the caller's token is NOT
+    /// cancelled; that is still a user cancel, so the stream ends with RunCancelled and the run is Cancelled, not Failed.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteAsync_StopViaCancelAsync_EndsRunCancelled_NotFailed()
+    {
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        ArrangeSingleNode(playbookId, actionId, out var executor);
+        var nodeStarted = new TaskCompletionSource<Guid>(TaskCreationOptions.RunContinuationsAsynchronously);
+        executor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .Returns(async (NodeExecutionContext ctx, CancellationToken ct) =>
+            {
+                nodeStarted.TrySetResult(ctx.RunId);
+                await Task.Delay(Timeout.Infinite, ct); // blocks until the run context's token is cancelled
+                return NodeOutput.Ok(Guid.NewGuid(), "x", new { });
+            });
+
+        var events = new List<PlaybookStreamEvent>();
+        var drain = Task.Run(async () =>
+        {
+            await foreach (var evt in _service.ExecuteAsync(CreateRequest(playbookId), _mockHttpContext, CancellationToken.None))
+            {
+                events.Add(evt);
+            }
+        });
+
+        var runId = await nodeStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        (await _service.CancelAsync(runId, CancellationToken.None)).Should().BeTrue();
+        await drain.WaitAsync(TimeSpan.FromSeconds(10));
+
+        events.Should().NotContain(e => e.Type == PlaybookEventType.RunFailed, "a Stop is not a failure");
+        events.Should().ContainSingle(e => e.Type == PlaybookEventType.RunCancelled);
+        var detail = await WaitForRunToSettleAsync(runId);
+        detail!.State.Should().Be(PlaybookRunState.Cancelled.ToString());
+        detail.ErrorMessage.Should().BeNull();
+    }
+
+    /// <summary>
+    /// <c>ValidateAsync</c> returns its errors in the 200 body of the validate route, so an exception message (which can
+    /// echo <c>client_secret=...</c>) must be redacted before it is placed in the result.
+    /// </summary>
+    [Fact]
+    public async Task ValidateAsync_DependencyThrowsWithSecret_ResultTextIsRedacted()
+    {
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var node = CreateNode("Test Node", actionId);
+        _nodeServiceMock.Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync([node]);
+        _scopeResolverMock.Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Upstream rejected the request: client_secret=SUPERSECRET"));
+
+        var result = await _service.ValidateAsync(playbookId, CancellationToken.None);
+
+        result.IsValid.Should().BeFalse();
+        var text = string.Join(" ", result.Errors);
+        text.Should().NotContain("SUPERSECRET", "a credential value must never reach the validate response body");
+        text.Should().Contain("client_secret=[redacted]");
+    }
+
+    /// <summary>
+    /// An exception message can carry a credential (a rejected token request echoes <c>client_secret=...</c>). Wherever
+    /// a failure's text is stored or streamed - NodeFailed, RunFailed, the run detail the GET routes return - the secret
+    /// value must not appear.
+    /// </summary>
+    [Theory]
+    [InlineData("node-output-error")]
+    [InlineData("node-throws")]
+    [InlineData("legacy-error-chunk")]
+    public async Task ExecuteAsync_FailureTextCarryingASecret_NeverReachesTheEventsOrTheRunDetail(string scenario)
+    {
+        const string leaky = "Upstream rejected the request: client_secret=SUPERSECRET";
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        switch (scenario)
+        {
+            case "legacy-error-chunk":
+                _nodeServiceMock.Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+                SetupLegacyOrchestratorWithError(leaky);
+                break;
+            case "node-output-error":
+                ArrangeSingleNode(playbookId, actionId, out var failingExecutor);
+                failingExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync((NodeExecutionContext ctx, CancellationToken _) =>
+                        NodeOutput.Error(ctx.Node.Id, ctx.Node.OutputVariable, leaky));
+                break;
+            default:
+                ArrangeSingleNode(playbookId, actionId, out var throwingExecutor);
+                throwingExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new InvalidOperationException(leaky));
+                break;
+        }
+
+        var events = new List<PlaybookStreamEvent>();
+        await foreach (var evt in _service.ExecuteAsync(CreateRequest(playbookId), _mockHttpContext, CancellationToken.None))
+        {
+            events.Add(evt);
+        }
+
+        events.Should().Contain(e => e.Type == PlaybookEventType.RunFailed);
+        var detail = await _service.GetRunDetailAsync(events[0].RunId, CancellationToken.None);
+        detail.Should().NotBeNull();
+        detail!.ErrorMessage.Should().NotBeNullOrEmpty();
+
+        var wire = System.Text.Json.JsonSerializer.Serialize(events)
+            + System.Text.Json.JsonSerializer.Serialize(detail);
+        wire.Should().NotContain("SUPERSECRET", "a credential value must never reach a stream event or run detail");
+        wire.Should().Contain("client_secret=[redacted]", "the secret NAME stays, so the failure is still diagnosable");
+    }
+
+    private PlaybookNodeDto ArrangeSingleNode(Guid playbookId, Guid actionId, out Mock<INodeExecutor> executor)
+    {
+        var node = CreateNode("Test Node", actionId);
+        _nodeServiceMock.Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync([node]);
+        _scopeResolverMock.Setup(x => x.ResolveNodeScopesAsync(node.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateEmptyScopes());
+        _scopeResolverMock.Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateAction(actionId));
+        executor = new Mock<INodeExecutor>();
+        executor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>())).Returns(NodeValidationResult.Success());
+        _executorRegistryMock.Setup(x => x.GetExecutor(ExecutorType.AiAnalysis)).Returns(executor.Object);
+        return node;
+    }
+
+    /// <summary>The run's background task finishes after the caller's enumeration ends on cancellation: poll briefly.</summary>
+    private async Task<PlaybookRunDetail?> WaitForRunToSettleAsync(Guid runId)
+    {
+        PlaybookRunDetail? detail = null;
+        for (var i = 0; i < 100; i++)
+        {
+            detail = await _service.GetRunDetailAsync(runId, CancellationToken.None);
+            if (detail is not null && detail.State != PlaybookRunState.Running.ToString())
+            {
+                return detail;
+            }
+
+            await Task.Delay(20);
+        }
+
+        return detail;
     }
 
     #endregion
