@@ -12,13 +12,14 @@
 |---|---|
 | **Task** | Orchestrating ontology lanes. Child-record contract tasks 140–146 (D-131..D-133) are planned; 140 is live on dev. |
 | **Blocker** | Owner answers Q23, Q24, Q25, Q26, Q27 (below). |
-| **Next Action** | #1746 MERGED `376eca286` (2026-10-13; office-scope cap rerun green). Task 141 RUNNING (opus agent, `C:\wts-141`, branch `task/ontology-141-regarding-builder`; live dev seam run held for Q7; #1111 body text comes back in its report). When 141 reports → adversarial review + uac-r2 review of commit 1 → fix → merge. Then 142/143; 147 can start. |
+| **Next Action** | 2026-10-13: #1746 `376eca286`, #1797 `4053387fe`, #1807 (147) `236cace5c` MERGED. D-136 narrow writer profile LIVE on spaarkedev1. #1805 (141) uac-r2 CLEAN, merge script pinned `c2ccfc0f4` (workflow-only base merge). Task 142 RUNNING (opus, `C:\wts-142`, branched from 141's head; opens its PR after #1805 merges). Then 143 (after 142; shared DecisionCommitService regions) → 144 → 145 → 146; 148 after 142+143. The ontology branch carries master's split office-scope CI job (13acdd5c7) minus master-only check:webresource (8a8fef96f). After #1805 merges: tick the #1111 body's task-141 precondition (text in the 141 agent report / notes/task-141). |
 
 ## Lanes (worktrees `C:\wts-NNN`; all branch from `origin/docs/ontology-platform-design`)
 
 | Lane | PR | State | Next |
 |---|---|---|---|
-| **141** regarding builder | (draft PR to come) | Running (opus). | uac-r2 reviews commit 1 alone; one adversarial review; then merge. |
+| **141** regarding builder | #1805 | uac-r2 CLEAN; merging on green (pinned `c2ccfc0f4`). Follow-ups #1806, #1813, #1818. | Tick #1111 precondition. |
+| **142** DR writer contract | (draft after #1805) | Running (opus). | Two adversarial passes (security) + uac-r2. |
 | **#1659** filing trigger | #1747, head `cc6b10cf5` | UAC APPROVED. | Merge when Q25 is answered. |
 
 Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-design` (`gh pr ready` first). The Office-scope CI job hits its 20-min cap (F-49, #1718); merge on log evidence with a PR comment.
