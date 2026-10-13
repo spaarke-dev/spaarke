@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-12 (Option B merged; 052/053 done; by context-handoff)
+> **Last Updated**: 2026-10-13 (R3 merged to master via PR #1795)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | None active. Next: 038 BFF deploy to dev (owner said "ok"; show the exact commands + rollback before running anything) |
-| **Step** | Merged and pushed: Option B multi-root rule with EFFECTIVE secure status + review fixes (merge `8b962fc3e`, ledger cites `df112adb0`); 052 NDA + Policy wizards (`267947544`, fixes `05f9698a3`); 053 Invention + Trademark wizards (`c5784c910`, fixes `7a8914a50`). Verified: build 0/0, filtered unit 3313, arch 941, SPA 993 |
-| **Status** | Worktree clean, branch in sync with origin. Locked leftover folders to delete by hand: `C:\code_files\spaarke\.claude\worktrees\agent-af842f88050a4b5b9`, `...\agent-ae8f4415f1670de13` (both unregistered, branches deleted), `C:\wt039bz` |
-| **Next Action** | 038 (deploy + live probes) -> 070 needs 043 owner inputs; grid views task after owner answers question 1 |
+| **Task** | None active. Next: 038 BFF deploy to dev, awaiting owner approval of phases A+B in `notes/task-038-deploy-record.md` (phase C probes need a separate approval) |
+| **Step** | PR #1795 merged to master 2026-10-13T03:35Z (merge `ba1242b5a`): master merged into R3 first (5 conflicts resolved, absent-intermediate read-path fix, message-send test seam), ADR-028 R3 amendment renumbered A8 + sweep. Verified pre-merge: arch 969, filtered unit 4771, SPA 993. After merge, pushed `78e7b16d6` (A8 clarification: CIAM plane requests the per-customer CIAM API app `ciamBffAppId`; owner-approved) - NOT yet on master, rides the next PR |
+| **Status** | Worktree clean, in sync with origin; 7 commits behind master (merge master before the 038 deploy). Main checkout `C:\code_files\spaarke` NOT synced: `pull --ff-only` refused (another session's 4 modified BFF files + untracked `tests/Spaarke.ArchTests/WebResourceMirrorParity.baseline.txt`); left untouched. Locked leftover folders to delete by hand: `C:\code_files\spaarke\.claude\worktrees\agent-af842f88050a4b5b9`, `...\agent-ae8f4415f1670de13`, `C:\wt039bz` |
+| **Next Action** | Merge origin/master into R3, then 038 (deploy + live probes) after approval -> 070 needs 043 owner inputs; grid views task after owner answers question 1 |
 
 ### Critical Context
 - **Parallel pattern:** BFF tasks run in isolated worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-*` (`git reset --hard <R3 sha>` first), commit there, main session merges `--no-ff`; after a merge re-verify ledger line cites (the guard only checks format). SPA tasks run in this worktree, uncommitted; the main session commits by explicit path. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
@@ -35,10 +35,11 @@ Option B; no delete after close; invoice upload = invoice rights only; team-acce
 Messages and feed give no "incomplete" signal; `Truncated` may over-report; a project pair naming a deleted matter stays secure permanently; `IGenericEntityService` filing seam is DI-supplied (drop = over-hide, not leak).
 
 ## Next actions (in order)
-1. 038 BFF deploy to dev + live probes (show commands + rollback first).
+1. 038 BFF deploy to dev + live probes (show commands + rollback first; re-merge master first).
 2. Grid views task once question 1 is answered (replaces 002's fixed columns).
 3. 070/071/072 after 038 and 043 owner inputs; 040 step 5 after 071.
-4. Before the BFF PR: `/conflict-check` + actionlint.
+4. Next PR to master carries `78e7b16d6` (A8 clarification); run `/conflict-check` + actionlint before it.
+5. Before the SPA deploy: `user_impersonation` scope on the CIAM API app (task 041 Entra step).
 
 ## Dependencies tracked elsewhere
 - ISS-001 (#1623), ISS-002 (#1633), ISS-003 (#1636), ISS-004, ISS-005 (#1673).
