@@ -1,7 +1,6 @@
-# DRAFT: ADR-028 Amendment A9: workforce contacts sign in with their home directory
+# ADR-028 Amendment A9: draft record (APPLIED 2026-10-13)
 
-> Status: **DRAFT for owner approval** (2026-10-13). Nothing in `.claude/adr/` has changed. On approval, the main session inserts the concise text below after A8 in `.claude/adr/ADR-028-spaarke-auth-architecture.md`, updates the cross-reference notes listed under "Edits elsewhere in ADR-028", the `.claude/adr/INDEX.md` row and `.claude/constraints/auth.md:66`.
-> Numbering checked 2026-10-13: master carries A1-A8; no branch drafts an A9.
+> Status: **Applied.** The owner approved A9 on 2026-10-13 ("yes approve A9") and assigned R3 end-to-end ownership ("yes r3 end to end"). The authoritative text is now in `.claude/adr/ADR-028-spaarke-auth-architecture.md` (Amendment A9). The draft below is kept as the record. Where it differs from the ADR, the ADR wins. The Status line changed: R3 now owns the SPA client, BFF token acceptance, registration and stored link, and UAC-r2 owns only the baseline role's access application.
 
 ---
 
