@@ -45,7 +45,8 @@ public class ContactGrantGuardTests
         (@"\bProvisionAsync\s*\(", "CIAM onboarding (InviteExternalUserEndpoint.ProvisionAsync)"),
         (@"\bCreateCiamUserAsync\s*\(", "creating a CIAM account"),
         (@"\bCreateContactForOidAsync\s*\(", "creating a contact"),
-        (@"\bBindOidAsync\s*\(|\bBindInvitedContactAsync\s*\(", "binding a sign-in to a contact"),
+        (@"\bBindOidAsync\s*\(|\bBindOidAndConsumeInviteAsync\s*\(|\bBindInvitedContactAsync\s*\(",
+            "binding a sign-in to a contact"),
         (@"sprk_contactorganization", "reading or writing an organization membership row directly"),
         (@"\bCreateAsync\s*\(\s*""contacts""", "creating a contact through the Dataverse client"),
     };

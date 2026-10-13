@@ -22,13 +22,13 @@ namespace Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 /// CIAM account; one that left auditing on would keep consumed hashes in audit rows. Read as text (no PowerShell host, no
 /// network); the parser is exercised on seeded snippets, so a regression in the guard reddens too. Mirrors
 /// <see cref="ExternalInviteMarkerSchemaAgreementTests"/>.</para>
-/// <para><b>The column name.</b> Slice A (schema) lands before the BFF code that names the column, so the expected name is
-/// pinned here from the design (§3); the slice that adds the BFF constant points <see cref="ExpectedColumn"/> at it.</para>
+/// <para><b>The column name</b> is the BFF's own constant (<see cref="ContactBindingDecision.ExternalInviteCodeHashColumn"/>,
+/// slice B2), so the script and the code that reads, writes and clears the column cannot drift apart.</para>
 /// </remarks>
 [Trait("Category", "Security")]
 public class ExternalInviteCodeHashSchemaAgreementTests
 {
-    private const string ExpectedColumn = "sprk_externalinvitecodehash";
+    private const string ExpectedColumn = ContactBindingDecision.ExternalInviteCodeHashColumn;
     private const int ExpectedMaxLength = 100;
     private const string ReaderProfile = "Spaarke BFF-Managed Field Readers";
     private const string WriterProfile = "Spaarke BFF-Managed Field Writers";

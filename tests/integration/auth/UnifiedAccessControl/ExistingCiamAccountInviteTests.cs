@@ -94,6 +94,22 @@ public class ExistingCiamAccountInviteTests
             Request(), _h.Grants, _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities), PortalUrl,
             NullLogger<Program>.Instance, resolution: null, CancellationToken.None);
 
+    /// <summary>
+    /// Task 185 slice B2: the code the invite email carries. The invite stored the hash of a fresh code; the endpoint does
+    /// not put that code into the email until slice D, so the test stands in for the email: it checks the invite stored a
+    /// well-formed hash, then stores the hash of a code it holds (exactly what an invite writes) and returns that code.
+    /// Slice D reads the code from the captured email instead.
+    /// </summary>
+    private string InviteEmailCode(Guid contact)
+    {
+        var stored = _h.Identities.Contacts[contact].InviteCodeHash;
+        stored.Should().NotBeNull("the invite writes the code's hash with the marker")
+            .And.HaveLength(InviteCode.StoredValueLength);
+        var (code, storedValue) = InviteCode.Create(contact);
+        _h.Identities.Contacts[contact].InviteCodeHash = storedValue;
+        return code;
+    }
+
     private static HttpContext Context() => new DefaultHttpContext
     {
         TraceIdentifier = "trace-184",
@@ -103,7 +119,7 @@ public class ExistingCiamAccountInviteTests
 
     // ── The ExistingAccount branch ──────────────────────────────────────────────────────────────────────────
 
-    [Fact(Skip = "185-B2: store carries the code hash")]
+    [Fact]
     public async Task InviteAndGrant_OfAPersonWithACiamAccount_SucceedsAsExistingAccount_PendingContact_SignInEmailOnly()
     {
         var contact = UnboundContact();
@@ -120,10 +136,11 @@ public class ExistingCiamAccountInviteTests
         _h.Emails.Sent.Should().BeEmpty("one email per invite: the sign-in email is this person's notice");
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
 
-        // The first CIAM sign-in binds the pending contact (E11, under the intent gate).
+        // The first CIAM sign-in binds the pending contact (E11, under the intent gate; task 185: with the email's code).
+        var code = InviteEmailCode(contact);
         var existingOid = Guid.NewGuid();
         var signIn = await IdentityBindingTestKit.Binder(_h.Identities)
-            .ResolveCiamCallerAsync(existingOid.ToString(), Email, CancellationToken.None);
+            .ResolveCiamCallerAsync(existingOid.ToString(), Email, code, CancellationToken.None);
         signIn.ContactId.Should().Be(contact);
         _h.Identities.Contacts[contact].Oid.Should().Be(existingOid.ToString("D"));
     }
@@ -185,6 +202,31 @@ public class ExistingCiamAccountInviteTests
         _h.Emails.Onboarding.Should().ContainSingle();
     }
 
+    /// <summary>
+    /// Task 185 (owner Q5, design §7): the new-account path is unchanged — same request, no code presented, same status —
+    /// except that its bind PATCH also clears the now-inert code hash, in the same write as the oid. Nothing is left on a
+    /// bound contact for a later unbind to reopen.
+    /// </summary>
+    [Fact]
+    public async Task ANewAccountInvite_ClearsTheCodeHashInItsOwnBindPatch()
+    {
+        var contact = UnboundContact();
+        string? hashAtCreate = null;
+        _ciam.OnCreate = () => hashAtCreate = _h.Identities.Contacts[contact].InviteCodeHash;
+
+        var outcome = await Invite();
+
+        outcome.Status.Should().Be("Provisioned");
+        hashAtCreate.Should().NotBeNull("the marker write carried the hash, before the CIAM account");
+        var oid = _ciam.Created.Single().Oid;
+        _h.Identities.Writes.Where(w => w.RowId == contact).Select(w => w.Op)
+            .Should().Equal("invite-marker", "bind");
+        _h.Identities.Writes.Single(w => w.Op == "bind").Detail
+            .Should().Be($"{oid:D}|{IdentityPlaneMarker.External}|invite-code-hash=null");
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().BeNull();
+        _h.Identities.Contacts[contact].InvitedOn.Should().NotBeNull("the marker is never cleared");
+    }
+
     /// <summary>The retryable 503 of an invite whose contact needed the marker and did not get it (fix round 1, F4-2).</summary>
     private static void ShouldBeMarkerNotWritten(IResult result)
     {
@@ -212,11 +254,20 @@ public class ExistingCiamAccountInviteTests
     /// column). In that window the NORMAL new-account path needs no marker — the CIAM create and the oid bind happen in
     /// the same request — so it still succeeds.
     /// </summary>
-    [Fact]
-    public async Task BeforeTheSchema_ANewAccountInvite_StillSucceeds_ItsOidIsBoundInTheSameRequest()
+    [Theory]
+    [InlineData("marker-column")]
+    [InlineData("hash-column")] // task 185: the marker column is there, the hash column is not (either one missing)
+    public async Task BeforeTheSchema_ANewAccountInvite_StillSucceeds_ItsOidIsBoundInTheSameRequest(string missing)
     {
         var contact = UnboundContact();
-        _h.Identities.InviteMarkerStatus = LookupStatus.ColumnMissing;
+        if (missing == "marker-column")
+        {
+            _h.Identities.InviteMarkerStatus = LookupStatus.ColumnMissing;
+        }
+        else
+        {
+            _h.Identities.InviteCodeHashColumnMissing = true;
+        }
 
         var body = (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
 
@@ -224,6 +275,8 @@ public class ExistingCiamAccountInviteTests
         _ciam.Created.Should().ContainSingle();
         _h.Identities.Contacts[contact].InvitedOn.Should().BeNull();
         _h.Identities.Contacts[contact].Oid.Should().Be(_ciam.Created.Single().Oid.ToString("D"));
+        _h.Identities.Writes.Single(w => w.Op == "bind").Detail.Should().NotContain("invite-code-hash",
+            "task 185: with the columns missing the bind payload is exactly the plain bind");
         _h.Emails.Onboarding.Should().ContainSingle();
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
     }
@@ -284,9 +337,15 @@ public class ExistingCiamAccountInviteTests
         _h.Identities.Contacts[contact].Oid.Should().BeNull();
     }
 
-    /// <summary>With the marker landed, a failed oid write keeps today's 500, and the first sign-in repairs the binding.</summary>
-    [Fact(Skip = "185-B2: store carries the code hash")]
-    public async Task AFailedOidWrite_WithTheMarker_KeepsThe500_AndTheFirstSignInRepairsIt()
+    /// <summary>
+    /// With the marker landed, a failed oid write keeps today's 500. Task 185 (owner Q6, design §6): no email was sent, so
+    /// nobody holds a code and the first sign-in is denied <c>contact_not_invited</c>; a RETRIED invite answers
+    /// ExistingAccount (the CIAM account exists) with a NEW code, and that code repairs the binding. Before 185 this test was
+    /// <c>AFailedOidWrite_WithTheMarker_KeepsThe500_AndTheFirstSignInRepairsIt</c>. The 500's message ("The first CIAM
+    /// sign-in repairs the binding") changes to "retry the invite" in slice D.
+    /// </summary>
+    [Fact]
+    public async Task AFailedOidWrite_WithTheMarker_KeepsThe500_AndARetriedInviteWithANewCodeRepairsIt()
     {
         var contact = UnboundContact();
         _h.Identities.FailBind = true;
@@ -295,11 +354,25 @@ public class ExistingCiamAccountInviteTests
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
         _h.Identities.Contacts[contact].InvitedOn.Should().NotBeNull();
+        _h.Emails.Onboarding.Should().BeEmpty("no email was sent, so no code is in anyone's hands");
         _h.Identities.FailBind = false;
         var created = _ciam.Created.Single().Oid;
+        var firstHash = _h.Identities.Contacts[contact].InviteCodeHash;
+
+        var withoutCode = await IdentityBindingTestKit.Binder(_h.Identities)
+            .ResolveCiamCallerAsync(created.ToString(), Email, inviteCode: null, CancellationToken.None);
+        withoutCode.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited, "the first sign-in no longer repairs it");
+
+        // The retry: the CIAM account now exists, so the invite answers ExistingAccount and sends a new code.
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+        (await Invite()).Status.Should().Be(InviteExternalUserEndpoint.ExistingAccountStatus);
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().NotBe(firstHash, "the retried invite carries a new code");
+        _h.Emails.ExistingAccount.Should().ContainSingle();
+
         var signIn = await IdentityBindingTestKit.Binder(_h.Identities)
-            .ResolveCiamCallerAsync(created.ToString(), Email, CancellationToken.None);
+            .ResolveCiamCallerAsync(created.ToString(), Email, InviteEmailCode(contact), CancellationToken.None);
         signIn.ContactId.Should().Be(contact);
+        _h.Identities.Contacts[contact].Oid.Should().Be(created.ToString("D"));
     }
 
     [Fact]
@@ -313,10 +386,13 @@ public class ExistingCiamAccountInviteTests
             clock, NullLogger<ContactIdentityBinder>.Instance);
 
         await Invite(binder);
+        var firstHash = _h.Identities.Contacts[contact].InviteCodeHash;
         clock.Advance(TimeSpan.FromDays(3));
         await Invite(binder);
 
         _h.Identities.Contacts[contact].InvitedOn.Should().Be(IdentityBindingTestKit.Now.AddDays(3));
+        // Task 185: the re-invite replaced the code's hash in the same write (the earlier code is superseded).
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().NotBeNull().And.NotBe(firstHash);
     }
 
     // ── Doubles ─────────────────────────────────────────────────────────────────────────────────────────────

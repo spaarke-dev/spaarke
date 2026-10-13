@@ -296,15 +296,17 @@ public class ContactBindingDecisionTests
 
     // ── E11 intent gate (task 184, owner round 96): the CIAM plane binds only on THIS environment's intent ─────
 
+    // Task 185 slice B2: the lookup carries no grant at all (option (c)): the store no longer reads one, so a grant can
+    // neither bind nor deny. Pinned by TheIntentLookup_CarriesNoGrant; the binder-level twins seed a grant and show it
+    // changes nothing (CiamContactBindingTests.AGrantHere_ChangesNoE11Outcome).
     private static BindIntentLookup Intent(
-        bool grant = false, DateTimeOffset? invitedOn = null, LookupStatus grantStatus = LookupStatus.Read,
-        LookupStatus inviteStatus = LookupStatus.Read, Guid? contact = null, DateTimeOffset? asOf = null,
-        string? hash = null)
-        => new(contact ?? ContactA, grantStatus, grant, inviteStatus, invitedOn) { AsOf = asOf ?? Now, InviteCodeHash = hash };
+        DateTimeOffset? invitedOn = null, LookupStatus inviteStatus = LookupStatus.Read, Guid? contact = null,
+        DateTimeOffset? asOf = null, string? hash = null)
+        => new(contact ?? ContactA, inviteStatus, invitedOn) { AsOf = asOf ?? Now, InviteCodeHash = hash };
 
     /// <summary>ContactA's current invite: a marker at <paramref name="invitedOn"/> (default now) and its stored hash.</summary>
-    private static BindIntentLookup Invited(DateTimeOffset? invitedOn = null, bool grant = false)
-        => Intent(grant: grant, invitedOn: invitedOn ?? Now, hash: InviteA.StoredValue);
+    private static BindIntentLookup Invited(DateTimeOffset? invitedOn = null)
+        => Intent(invitedOn: invitedOn ?? Now, hash: InviteA.StoredValue);
 
     private static BindingDecision CiamE11(BindIntentLookup? intent, string? code = null)
         => ContactBindingDecision.Decide(Ciam(code: code), NoRows, ContactLookup.Of(Unbound(ContactA)), ReferenceLookup.Of(),
@@ -349,24 +351,37 @@ public class ContactBindingDecisionTests
 
     /// <summary>
     /// Task 185 (owner round 98, option (c); design §6): a grant no longer binds, so it does not extend a code past its
-    /// marker's 30 days. Before 185 this test was <c>..._WithAnActiveGrant_BindsThroughTheGrant</c>.
+    /// marker's 30 days. Before 185 this test was <c>..._WithAnActiveGrant_BindsThroughTheGrant</c>. Slice B2 removed the
+    /// grant from the lookup, so the grant half lives in the binder-level twin (a seeded grant, the same marker).
     /// </summary>
     [Fact]
-    public void E11_Ciam_AnExpiredMarker_WithAnActiveGrant_AndTheRightCode_IsDenied_AGrantDoesNotExtendACode()
-        => CiamE11(Invited(Now.AddDays(-90), grant: true), InviteA.Code)
+    public void E11_Ciam_AnExpiredMarker_AndTheRightCode_IsDenied_AGrantCannotExtendACode()
+        => CiamE11(Invited(Now.AddDays(-90)), InviteA.Code)
             .DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
 
     /// <summary>Task 185 (design §6): before 185 this was <c>..._WithAnActiveGrant_StillBindsThroughTheGrant</c>.</summary>
     [Fact]
-    public void E11_Ciam_AFarFutureMarker_WithAnActiveGrant_AndTheRightCode_IsDenied()
-        => CiamE11(Invited(Now.AddYears(5), grant: true), InviteA.Code)
+    public void E11_Ciam_AFarFutureMarker_AndTheRightCode_IsDenied()
+        => CiamE11(Invited(Now.AddYears(5)), InviteA.Code)
             .DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
+
+    /// <summary>
+    /// Task 185 slice B2 (option (c)): the intent lookup has no grant member at all, so no grant fact can reach the
+    /// decision — neither as evidence nor as a fault. A grant field put back would have to delete this test.
+    /// </summary>
+    [Fact]
+    public void TheIntentLookup_CarriesNoGrant()
+        => typeof(BindIntentLookup)
+            .GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic
+                | System.Reflection.BindingFlags.Instance)
+            .Select(p => p.Name)
+            .Should().NotContain(n => n.Contains("Grant", StringComparison.OrdinalIgnoreCase));
 
     [Fact]
     public void E11_Ciam_ALookupWithNoDecisionTime_CountsNoMarker()
         // Fail closed: a caller that forgets to stamp AsOf sees every marker as far-future, never as current, even with the
         // right code.
-        => CiamE11(new BindIntentLookup(ContactA, LookupStatus.Read, false, LookupStatus.Read, Now)
+        => CiamE11(new BindIntentLookup(ContactA, LookupStatus.Read, Now)
                 { InviteCodeHash = InviteA.StoredValue }, InviteA.Code)
             .DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
 
@@ -383,14 +398,16 @@ public class ContactBindingDecisionTests
 
     /// <summary>
     /// Task 185 (owner round 98, option (c); design §6): a grant with no invite is no bind evidence, with or without a code.
-    /// Before 185 this test was <c>E11_Ciam_AnActiveGrantHere_Binds</c>.
+    /// Before 185 this test was <c>E11_Ciam_AnActiveGrantHere_Binds</c>. Slice B2: the grant is no longer in the lookup
+    /// (<see cref="TheIntentLookup_CarriesNoGrant"/>); the binder-level twin seeds one
+    /// (<c>CiamContactBindingTests.AnUnboundContactWithOnlyAnActiveGrantHere_IsDeniedNotInvited_AndNothingIsWritten</c>).
     /// </summary>
     [Fact]
-    public void E11_Ciam_AnActiveGrantHere_WithNoMarker_IsDeniedNotInvited()
+    public void E11_Ciam_NoMarker_IsDeniedNotInvited_WithOrWithoutACode()
     {
-        CiamE11(Intent(grant: true)).Should()
+        CiamE11(Intent()).Should()
             .Be(new BindingDecision(BindingAction.Deny, DenyCode: ContactBindingDecision.DenyContactNotInvited));
-        CiamE11(Intent(grant: true, hash: InviteA.StoredValue), InviteA.Code).DenyCode
+        CiamE11(Intent(hash: InviteA.StoredValue), InviteA.Code).DenyCode
             .Should().Be(ContactBindingDecision.DenyContactNotInvited, "a code without a current marker never binds");
     }
 
@@ -497,14 +514,14 @@ public class ContactBindingDecisionTests
     }
 
     /// <summary>
-    /// A marker read that faulted never binds, even with the right code and a grant. Task 185 (design §6): the grant-fault
-    /// rows were removed with the grant leg (no grant is consulted); the marker-fault case stays.
+    /// A marker read that faulted never binds, even with the right code. Task 185 (design §6): the grant-fault rows were
+    /// removed with the grant leg (no grant is read); the marker-fault case stays.
     /// </summary>
     [Fact]
-    public void E11_Ciam_AFaultedIntentRead_NeverBinds_EvenWhenTheOtherLegShowsIntent()
+    public void E11_Ciam_AFaultedIntentRead_NeverBinds_EvenWithTheRightCode()
     {
         // MUTATION (treat a fault as intent): this test fails.
-        var decision = CiamE11(Intent(grant: true, invitedOn: Now, inviteStatus: LookupStatus.Failed,
+        var decision = CiamE11(Intent(invitedOn: Now, inviteStatus: LookupStatus.Failed,
             hash: InviteA.StoredValue), InviteA.Code);
 
         decision.Action.Should().Be(BindingAction.Deny);
@@ -512,13 +529,13 @@ public class ContactBindingDecisionTests
     }
 
     /// <summary>
-    /// A marker column not provisioned yet is no invite evidence, and (task 185, design §6) no grant decides instead.
-    /// Before 185 this test was <c>..._AndTheGrantLegStillDecides</c>.
+    /// A marker (or hash) column not provisioned yet is no invite evidence, and (task 185, design §6) no grant decides
+    /// instead. Before 185 this test was <c>..._AndTheGrantLegStillDecides</c>.
     /// </summary>
     [Fact]
-    public void E11_Ciam_AMarkerColumnNotProvisionedYet_IsNoInviteEvidence_EvenWithAGrant()
+    public void E11_Ciam_AMarkerColumnNotProvisionedYet_IsNoInviteEvidence()
     {
-        CiamE11(Intent(grant: true, inviteStatus: LookupStatus.ColumnMissing), InviteA.Code).DenyCode
+        CiamE11(Intent(invitedOn: Now, inviteStatus: LookupStatus.ColumnMissing, hash: InviteA.StoredValue), InviteA.Code).DenyCode
             .Should().Be(ContactBindingDecision.DenyContactNotInvited);
         CiamE11(Intent(inviteStatus: LookupStatus.ColumnMissing)).DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited);
     }

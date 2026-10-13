@@ -478,8 +478,10 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
                 type: "https://tools.ietf.org/html/rfc7235#section-3.1"));
         }
 
+        // Task 185: the invite code is not read from the request yet (slice C adds the X-Spaarke-Invite-Code header), so
+        // no code is presented and E11's marker leg denies contact_not_invited.
         var binding = await _binder
-            .ResolveCiamCallerAsync(oid, email, httpContext.RequestAborted)
+            .ResolveCiamCallerAsync(oid, email, inviteCode: null, httpContext.RequestAborted)
             .ConfigureAwait(false);
 
         if (!binding.IsResolved)

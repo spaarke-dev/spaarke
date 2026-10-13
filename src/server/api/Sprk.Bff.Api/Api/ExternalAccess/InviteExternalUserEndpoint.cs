@@ -317,7 +317,8 @@ public static class InviteExternalUserEndpoint
 
         // Persist the oid (D format) + plane External, conditional on the row version read with it. If the bind
         // does not land, the CIAM first-login email bind repairs it (the one case that path is kept for).
-        var bind = await binder.BindInvitedContactAsync(contactId, etag, ciamOid, ct);
+        // Task 185 (owner Q5): when the marker and its code hash landed, the same bind PATCH clears the now-inert hash.
+        var bind = await binder.BindInvitedContactAsync(contactId, etag, ciamOid, consumeInviteCode: markerLanded, ct);
         if (bind.Status != StoreWriteStatus.Written && !markerLanded)
         {
             // Task 184 — the repair path needs the marker: without it the first sign-in finds no intent (unless a grant

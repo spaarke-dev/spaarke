@@ -294,8 +294,9 @@ public sealed record ReferenceLookup(LookupStatus Status, IReadOnlyList<SystemUs
 
 /// <summary>
 /// Task 184 (owner round 96) — whether THIS environment intends an unbound contact to be email-bound on the CIAM plane.
-/// Two facts, each read in its own query (<c>IContactIdentityStore.FindBindIntentAsync</c>), raw, interpreted by the
-/// decision (<see cref="ContactBindingDecision.Decide"/>, E11).
+/// The pending-invite marker and its stored invite-code hash, read together in the marker's own query
+/// (<c>IContactIdentityStore.FindBindIntentAsync</c>), raw, interpreted by the decision
+/// (<see cref="ContactBindingDecision.Decide"/>, E11). Task 185 (option (c)): no grant is read; a grant is no bind evidence.
 /// </summary>
 /// <remarks>
 /// Why it exists: any CIAM user can obtain a token for any customer's audience (the SPA client is pre-authorized for
@@ -304,24 +305,14 @@ public sealed record ReferenceLookup(LookupStatus Status, IReadOnlyList<SystemUs
 /// only evidence; a grant alone is not.
 /// </remarks>
 /// <param name="ContactId">The contact the facts were read for; a lookup for any other contact is never used.</param>
-/// <param name="GrantStatus">
-/// How the grant read ended. Task 185 (owner round 98, option (c)): a grant is no longer bind evidence, so the decision
-/// does not consult this. It goes with the store's grant read (slice B2).
-/// </param>
-/// <param name="HasActiveGrant">
-/// At least one ACTIVE, UNEXPIRED contact-level <c>sprk_externalrecordaccess</c> row names the contact. Task 185: NOT
-/// consulted by the decision; a grant alone never binds (the grant flows send the invite instead). Removed in slice B2.
-/// </param>
 /// <param name="InviteStatus">
-/// How the marker read ended. <see cref="LookupStatus.ColumnMissing"/> is "no invite evidence", NOT a fault (a BFF deployed
-/// before the column denies <c>contact_not_invited</c>). A <see cref="LookupStatus.Failed"/> read denies
+/// How the marker read ended. <see cref="LookupStatus.ColumnMissing"/> (the marker or the hash column is not provisioned)
+/// is "no invite evidence", NOT a fault (a BFF deployed before the columns denies <c>contact_not_invited</c>). A <see cref="LookupStatus.Failed"/> read denies
 /// <c>contact_lookup_failed</c>.
 /// </param>
 /// <param name="InvitedOn"><c>contact.sprk_externalinvitedon</c> — when the BFF's invite flow last invited the contact.</param>
 public sealed record BindIntentLookup(
     Guid ContactId,
-    LookupStatus GrantStatus,
-    bool HasActiveGrant,
     LookupStatus InviteStatus,
     DateTimeOffset? InvitedOn)
 {
@@ -340,9 +331,9 @@ public sealed record BindIntentLookup(
     /// </summary>
     internal string? InviteCodeHash { get; init; }
 
-    /// <summary>Both reads failed.</summary>
+    /// <summary>The marker read failed.</summary>
     public static BindIntentLookup Failed(Guid contactId) =>
-        new(contactId, LookupStatus.Failed, false, LookupStatus.Failed, null);
+        new(contactId, LookupStatus.Failed, null);
 }
 
 /// <summary>The facts of one binding request, as the calling plane establishes them.</summary>
@@ -1268,6 +1259,15 @@ public static class ContactBindingDecision
     /// It is NOT a binding and never touches <see cref="IdentityPlaneColumn"/>: "plane marker with no oid" stays Unreadable.
     /// </summary>
     public const string ExternalInvitedOnColumn = "sprk_externalinvitedon";
+
+    /// <summary>
+    /// <c>contact.sprk_externalinvitecodehash</c> — task 185: the stored value of the current invite's code
+    /// (<see cref="InviteCode"/>'s <c>v1.</c> salted SHA-256, never the code). Written in the SAME request as
+    /// <see cref="ExternalInvitedOnColumn"/> (a re-invite replaces both), cleared in the SAME request as the oid bind that
+    /// consumes it. FIELD-SECURED with no Reader access (<c>scripts/Set-ExternalInviteCodeHashSchema.ps1</c>). Read only in
+    /// the marker's own query, never in <c>ContactSelect</c>. Never logged.
+    /// </summary>
+    public const string ExternalInviteCodeHashColumn = "sprk_externalinvitecodehash";
 
     private static BindingDecision? DecideOnOid(ContactLookup oidLookup)
     {
