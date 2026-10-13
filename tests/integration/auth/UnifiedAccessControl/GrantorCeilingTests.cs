@@ -784,17 +784,23 @@ public class GrantorCeilingTests
             CancellationToken.None);
 
     /// <remarks>
-    /// The CIAM provisioner and the email service are passed as null: every positive case here onboards an EXISTING
-    /// contact that already has an oid (idempotent — neither is touched), and every refusal must stop before
-    /// onboarding. A call into either would fault and show up as a 500, not as the asserted outcome.
+    /// The email service is passed as null: every positive case here onboards an EXISTING contact that already has an oid
+    /// (idempotent — it is not touched), and every refusal must stop before onboarding. A call into it would fault and show
+    /// up as a 500, not as the asserted outcome. The CIAM provisioner is a configured recording double (task 185 slice F: the
+    /// handler validates the CIAM configuration first), and no case may create an account through it.
     /// </remarks>
-    private Task<IResult> InviteAndGrant(InviteExternalUserRequest request, AccessRights? callerRights) =>
-        InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
+    private async Task<IResult> InviteAndGrant(InviteExternalUserRequest request, AccessRights? callerRights)
+    {
+        var ciam = new AssignedAccessTestDoubles.RecordingCiamProvisioner();
+        var result = await InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             request, _dataverse, _participations, DenyList(), new FixedRightsProbe(callerRights),
-            ciamProvisioner: null!, emailService: null!, IdentityBindingTestKit.Binder(_identities),
+            ciam, emailService: null!, IdentityBindingTestKit.Binder(_identities),
             PortalConfig(), Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer("acme"),
             AssignedAccessTestDoubles.InertMaterializer(), AssignedAccessTestDoubles.InertNotifier(), Context(),
             NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None);
+        ciam.Attempts.Should().BeEmpty("no case here creates a CIAM account");
+        return result;
+    }
 
     /// <param name="noAccessCheck">The write-time No Access check; the real one over the seam reader when null.</param>
     private Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> Core(
