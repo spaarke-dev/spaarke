@@ -507,6 +507,7 @@
     <RolePrivilege name="prvReadsprk_ReportCard" level="Deep" />
     <RolePrivilege name="prvReadsprk_ReportingEntity" level="Global" />
     <RolePrivilege name="prvReadsprk_ReportingView" level="Global" />
+    <RolePrivilege name="prvReadsprk_ServiceRequest" level="Basic" />
     <RolePrivilege name="prvReadsprk_Signal" level="Basic" />
     <RolePrivilege name="prvReadsprk_SPEAuditLog" level="Deep" />
     <RolePrivilege name="prvReadsprk_SPEContainerTypeConfig" level="Deep" />
