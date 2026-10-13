@@ -57,6 +57,19 @@ The cost is one admin consent per customer and Microsoft publisher verification 
 - the caller-identity binding for home-directory members in `ContactIdentityBinder.cs` (`tid`+`oid` to contact, and the stored link to `systemuser`);
 - a new registration endpoint and its service.
 
+**UAC's conditions (UAC reply 2026-10-13, accepted by R3):**
+- **`ContactIdentityBinder.cs`:** R3 builds on top of UAC **PR #1801** (task 184) **after it merges**, not alongside it.
+  - #1801 changes `ContactIdentityBinder.DecideUnlinkedAsync`, `ContactBindingDecision.cs` and `ContactIdentityStore.cs`, plus E11 bind-intent, `AsOf` stamping and `contact.sprk_externalinvitedon`. UAC task 185 adds an invite-code proof to the same E11 code later.
+  - R3's (`tid`, `oid`) path is a **new branch**. It does not reshape E10/E11.
+- **Task 141 invariants stay binding** (E10 collisions, oid-first resolution, never clear or re-point a link). The stored link home (`tid`, `oid`) → `systemuserid` is a **new link type in its own field or store**, not in `sprk_externalobjectid` or the plane columns. That keeps "plane marker without oid = Unreadable" true. UAC reviews it as a gate.
+- **No email:** word-add-in's review findings (a), (b), (d) and (e) on its shelved `wip/t126-workforce-customer` scheme apply to R3's token acceptance; (c) is superseded by keying on (`tid`, `oid`).
+- **No unguarded systemuser lookup:** the oid → systemuser lookup in `MembershipEndpoints.cs` (~:436) must not run for home-directory tokens.
+- **Baseline role:** UAC's draft recommends the BFF apply the Workforce role's privileges as a **ceiling**, with record scope from grants and participation, rather than assigning the role directly. On dev the role has Deep Read on matters, projects, documents and invoices, and **no `sprk_servicerequest` privilege** (relevant to R3's intake 403).
+- `WorkforceIdentityOptions.cs`, `WorkforcePrincipalResolver.cs` and a new registration endpoint and service: no conflict with in-flight UAC work.
+- **Status:** UAC is waiting for its owner to confirm A9 to it directly before it applies its items 1–4. Its design draft `projects/unified-access-control-r2/notes/186-model1-workforce-design.md` is uncommitted and is shared after that confirmation.
+
+**Confirmations received:** word-add-in-r1, 2026-10-13 (commit `3235e5452`; no code change; live check: Outlook on the web verified 2026-10-08, desktop Word not yet).
+
 ### spaarkeai-word-add-in-r1
 
 **What the add-in project must change:** nothing in code.
