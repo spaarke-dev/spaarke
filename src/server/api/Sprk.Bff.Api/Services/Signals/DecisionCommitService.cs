@@ -208,6 +208,11 @@ public static class DecisionCommitReasons
     public const string DismissalDetailRequired = "ontology.decision.dismissal_detail_required";
     public const string DismissalWithActions = "ontology.decision.dismissal_with_actions";
     public const string AlsoResolveNotAllowed = "ontology.decision.also_resolve_not_allowed";
+
+    /// <summary>Task 142 fix round 2 (K3): the secure families of the review's items could not be read (a fault or a short answer).
+    /// Unavailable (503), never a "not allowed" reason: a retry may succeed. A family that WAS read and differs stays
+    /// <see cref="AlsoResolveNotAllowed"/> (a refusal).</summary>
+    public const string SecureFamilyUnavailable = "ontology.decision.secure_family_unavailable";
     public const string SignalNotOpen = "ontology.decision.signal_not_open";
     public const string SignalUnreadable = "ontology.decision.signal_unreadable";
     public const string CoreUnsupported = "ontology.decision.core_unsupported";
@@ -1118,7 +1123,7 @@ public sealed class DecisionCommitService
         }
 
         if (families is null || families.Count != rows.Count)
-            return Unavailable(reviewId, DecisionCommitReasons.AlsoResolveNotAllowed, "Whether these items sit under the same secure records could not be checked; nothing was done. Try again shortly.");
+            return Unavailable(reviewId, DecisionCommitReasons.SecureFamilyUnavailable, "Whether these items sit under the same secure records could not be checked; nothing was done. Try again shortly.");
 
         if (families.Any(f => f.IsUndetermined) || families.Distinct().Count() > 1)
         {

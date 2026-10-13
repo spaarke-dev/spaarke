@@ -61,6 +61,10 @@ public sealed class DecisionRecordWriterTests
         public Dictionary<(string Table, Guid Id), Entity> Rows { get; } = new();
         public Exception? RowReadFault { get; set; }
 
+        /// <summary>Fix round 2 (K4): how many times the core-ancestor resolver's column-probe delegate was called (a read the
+        /// <c>Entities</c> mock does not see).</summary>
+        public int ProbeCalls;
+
         /// <summary>Task 142: the record-type catalog the shared regarding builder types the pair from (spaarkedev1's rows).</summary>
         public Tests.TestInfrastructure.RecordTypeCatalogStub RecordTypes { get; } = new(Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1);
 
@@ -89,10 +93,14 @@ public sealed class DecisionRecordWriterTests
             // The probe says every stamp column and every intermediate's root column exists (a document subject's links included).
             var coreAncestors = new CoreAncestorResolver(
                 Entities.Object,
-                (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
-                    CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute)
-                        .Concat(CoreAncestorResolver.IntermediateRootColumns.Values.SelectMany(c => c.Select(x => x.Column))),
-                    StringComparer.OrdinalIgnoreCase)),
+                (_, _) =>
+                {
+                    Interlocked.Increment(ref ProbeCalls);
+                    return Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
+                        CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute)
+                            .Concat(CoreAncestorResolver.IntermediateRootColumns.Values.SelectMany(c => c.Select(x => x.Column))),
+                        StringComparer.OrdinalIgnoreCase));
+                },
                 NullLogger<CoreAncestorResolver>.Instance);
             Writer = new DecisionRecordWriter(client, realResolver ?? Ownership.Object, coreAncestors, RecordTypes, new FakeTimeProvider(Now), Log);
         }
@@ -1160,12 +1168,15 @@ public sealed class DecisionRecordWriterTests
         };
         var request = Request(core: Core("sprk_matter", MatterId), subject: new DecisionRecordRef("sprk_communication", CommunicationId));
         var owner = await h.Writer.ResolveOwnerAsync(request);
+        Volatile.Read(ref h.ProbeCalls).Should().BeGreaterThan(0, "control: step 1f does probe, so a zero below is the handed path's, not a dead counter");
         h.Entities.Invocations.Clear();
+        Volatile.Write(ref h.ProbeCalls, 0);
         h.RowReadFault = new TimeoutException("a read after the sends");
 
         await h.Writer.WriteAsync(request, owner, CancellationToken.None);
 
         h.Entities.Invocations.Should().BeEmpty("the step-1f filing is applied, not re-read");
+        Volatile.Read(ref h.ProbeCalls).Should().Be(0, "the column probe is a read too: the handed filing is applied with none");
         h.RecordTypes.Queried.Should().ContainSingle();
         h.OwnerAsks.Should().ContainSingle();
         h.Row.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(CommunicationId);
@@ -1173,17 +1184,63 @@ public sealed class DecisionRecordWriterTests
     }
 
     [Fact]
-    public async Task A142_AnOwnerResolvedForOtherParents_IsAskedAgain_NeverReused()
+    public async Task A142_AHandedFilingWhoseOwnerAnswersForOtherParents_IsRefused_NeverReadAgain()
     {
+        // Fix round 2 (K1): the route's contract is that a handed filing answers the request; the writer must not quietly re-ask the
+        // owner (a Dataverse read after the sends began). It fails closed, at Error, with no read and no write.
         var h = new Harness(Secure());
         var request = Request(core: Core("sprk_matter", MatterId));
         var stale = await h.Writer.ResolveOwnerAsync(request);
+        h.OwnerAsks.Should().ContainSingle();
+        h.Entities.Invocations.Clear();
+        Volatile.Write(ref h.ProbeCalls, 0);
+        var queried = h.RecordTypes.Queried.Count;
+
+        var act = () => h.Writer.WriteAsync(request with { SignalSubjects = [new DecisionRecordRef("sprk_todo", TodoId)] }, stale, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.FilingFailed);
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().ContainSingle("the owner is not asked again");
+        h.Entities.Invocations.Should().BeEmpty();
+        Volatile.Read(ref h.ProbeCalls).Should().Be(0);
+        h.RecordTypes.Queried.Count.Should().Be(queried, "no catalog re-read either");
+        h.Log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("does not answer the request"));
+    }
+
+    [Fact]
+    public async Task A142_AHandedFilingForAnotherSubject_IsRefused_NeverFiledAgain()
+    {
+        var h = new Harness(Secure());
+        var first = Request(core: Core("sprk_matter", MatterId), subject: new DecisionRecordRef("sprk_communication", CommunicationId));
+        var handed = await h.Writer.ResolveOwnerAsync(first);
+        h.Entities.Invocations.Clear();
+        Volatile.Write(ref h.ProbeCalls, 0);
+
+        var other = Request(core: Core("sprk_matter", MatterId), subject: new DecisionRecordRef("sprk_communication", Guid.NewGuid()));
+        var act = () => h.Writer.WriteAsync(other, handed, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.FilingFailed);
+        h.Created.Should().BeEmpty();
+        h.Entities.Invocations.Should().BeEmpty();
+        Volatile.Read(ref h.ProbeCalls).Should().Be(0);
+        h.Log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("does not answer the request"));
+    }
+
+    [Fact]
+    public async Task A142_AnOwnerHandedWithNoFiling_ForOtherParents_IsStillAskedAgain_ForNonRouteCallers()
+    {
+        // The no-handed-filing path (a caller that is not the commit route) keeps its behaviour.
+        var h = new Harness(Secure());
+        var request = Request(core: Core("sprk_matter", MatterId));
+        var parentsOfAnotherQuestion = DecisionRecordWriter.OwnershipContextOf(request, []).Parents;
+        var stale = new DecisionRecordOwner(Secure(), parentsOfAnotherQuestion, null);
 
         await h.Writer.WriteAsync(request with { SignalSubjects = [new DecisionRecordRef("sprk_todo", TodoId)] }, stale, CancellationToken.None);
 
-        h.OwnerAsks.Should().HaveCount(2);
-        h.OwnerAsks[1].Parents.Should().Contain(Parent("sprk_todo", TodoId));
+        h.OwnerAsks.Should().HaveCount(1);
+        h.OwnerAsks[0].Parents.Should().Contain(Parent("sprk_todo", TodoId));
         h.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("asking again"));
+        h.Created.Should().ContainSingle();
     }
 
     [Fact]
@@ -1202,10 +1259,24 @@ public sealed class DecisionRecordWriterTests
         h.OwnerAsks.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task A142_WhenTheSubjectsCoresCannotBeRead_ItFailsClosed_AndNothingIsWritten()
+    [Theory]
+    [InlineData("timeout")]
+    [InlineData("access-denied")]
+    [InlineData("throttle")]
+    public async Task A142_WhenTheSubjectsCoresCannotBeRead_ItFailsClosed_AndNothingIsWritten(string fault)
     {
-        var h = new Harness { RowReadFault = new TimeoutException("no answer") };
+        // Fix round 2 (F3, uac-r2): only "does not exist" (0x80040217) is a permanent data condition. An access-denied (0x80040220)
+        // or throttle (0x80072322) Dataverse fault is transient for this subject: FilingFailed (503), never the permanent
+        // SubjectUnfileable (422), which would tell the user a retry cannot help.
+        Exception read = fault switch
+        {
+            "access-denied" => new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040220) }, "SecLib::AccessCheckEx failed"),
+            "throttle" => new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = unchecked((int)0x80072322) }, "Number of requests exceeded the limit"),
+            _ => new TimeoutException("no answer"),
+        };
+        var h = new Harness { RowReadFault = read };
         var request = Request(noCore: true, subject: new DecisionRecordRef("sprk_todo", TodoId));
 
         (await h.Writer.Invoking(w => w.WriteAsync(request)).Should().ThrowAsync<DecisionRecordRefusedException>())

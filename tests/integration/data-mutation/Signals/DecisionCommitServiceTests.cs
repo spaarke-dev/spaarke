@@ -898,7 +898,7 @@ public sealed class DecisionCommitServiceTests
         var result = await rig.CommitAsync(PathBReview(also: [Second]));
 
         result.Status.Should().Be(DecisionCommitStatus.Unavailable);
-        result.ReasonCode.Should().Be(DecisionCommitReasons.AlsoResolveNotAllowed);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.SecureFamilyUnavailable);
         AssertNothingWritten(rig, "a fault is not an answer");
     }
 
@@ -999,6 +999,27 @@ public sealed class DecisionCommitServiceTests
         var result = await rig.CommitAsync(MarkComplete(), DoSignal);
 
         result.Status.Should().Be(DecisionCommitStatus.Unavailable, result.Detail);
+        rig.Writes.Should().BeEmpty();
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A142_AnAccessDeniedFaultOnTheSubjectsCoreRead_IsUnavailable_NotARefusal_AndNothingIsWritten()
+    {
+        // Fix round 2 (F3, uac-r2): only "does not exist" (0x80040217) is permanent (422). An access-denied fault (0x80040220) on the
+        // subject's core read is a fault a retry may clear: Unavailable (503), with nothing written.
+        var rig = new Rig
+        {
+            TodoFilingReadFault = new FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040220) }, "SecLib::AccessCheckEx failed"),
+        };
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, result.Detail);
+        result.Detail.Should().NotContain(DecisionRecordRefusalReason.SubjectUnfileable);
         rig.Writes.Should().BeEmpty();
         rig.Records.Should().BeEmpty();
         rig.SignalUpdates.Should().BeEmpty();

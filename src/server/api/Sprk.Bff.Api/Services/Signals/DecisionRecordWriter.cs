@@ -529,7 +529,10 @@ public sealed class DecisionRecordWriter
     /// by the resolver's answer over every parent (<see cref="OwnershipContextOf"/>), applied with <c>ApplyTo</c> (ownerid and, for the
     /// deciding user, <c>sprk_createdbyperson</c>). With <paramref name="handed"/> (the route's step-1f answer) for the same subject, its
     /// filing is applied as computed then, with NO Dataverse read: the route resolves at 1f so that a read fault refuses before any send
-    /// (task 043). Its owner is used only when it answered for exactly these parents and assignee; otherwise the owner is asked again.
+    /// (task 043). A handed filing that does not answer the request (another subject, or an owner answer for other parents or another
+    /// assignee) is REFUSED (<see cref="DecisionRecordRefusalReason.FilingFailed"/>), never re-read: that would be a Dataverse read after
+    /// the sends. With no handed filing (a non-route caller) the owner is used only when it answered for exactly these parents and
+    /// assignee; otherwise it is asked again.
     /// </summary>
     private async Task<(Entity Record, DecisionRecordOwner Owner)> FiledAndOwnedAsync(
         DecisionRecordRequest request, DecisionRecordOwner? handed, CancellationToken ct)
@@ -538,8 +541,15 @@ public sealed class DecisionRecordWriter
         var entity = new Entity(Table);
 
         DecisionRecordFiling filing;
-        if (handed?.Filing is { } computed && computed.Subject == subject)
+        if (handed?.Filing is { } computed)
         {
+            // The route's contract (fix round 2, K1): a filing handed in at step 1f is for THIS subject, applied with no read. If it is
+            // not, re-filing would read Dataverse after the sends began, so it refuses (fail closed) instead of silently re-reading.
+            if (computed.Subject != subject)
+            {
+                throw HandedFilingDoesNotAnswer(request, "the handed filing is for a different subject");
+            }
+
             foreach (var (column, value) in computed.Columns)
             {
                 entity[column] = value;
@@ -565,6 +575,13 @@ public sealed class DecisionRecordWriter
         }
         else
         {
+            if (handed?.Filing is not null)
+            {
+                // Same contract as above: a handed filing whose owner answer is for other parents (or another assignee) cannot be
+                // re-asked after the sends; the route never takes this path, so reaching it is a bug and fails closed.
+                throw HandedFilingDoesNotAnswer(request, "the handed owner answer is for other parents or another assignee");
+            }
+
             if (handed is not null)
             {
                 _logger.LogWarning(
@@ -622,6 +639,18 @@ public sealed class DecisionRecordWriter
         }
 
         return stamp.Stamps;
+    }
+
+    /// <summary>Fix round 2 (K1): a handed filing that does not answer the request. Logged at Error (a caller bug, not a data
+    /// condition); the refusal names no record and nothing has been read or written for it.</summary>
+    private DecisionRecordRefusedException HandedFilingDoesNotAnswer(DecisionRecordRequest request, string why)
+    {
+        _logger.LogError(
+            "Decision Record writer for review {ReviewId} was handed a filing that does not answer the request ({Why}); refusing without re-reading (fail closed).",
+            request.ReviewId, why);
+        return new DecisionRecordRefusedException(
+            DecisionRecordRefusalReason.FilingFailed,
+            "The Decision Record's handed-in filing does not match the request, and it is not re-read once the commit has begun; nothing was written.");
     }
 
     private static DecisionRecordRefusedException FilingFailed(DecisionRecordRef subject, string? detail, Exception? inner = null) =>

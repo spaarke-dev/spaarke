@@ -114,3 +114,56 @@ A mutation run inside the Pester session wrote the schema script's content into 
 `Documents\PowerShell\Modules\Pester\6.2.0\Pester.ScriptScope.ps1` (Pester's dot-sourced wrapper shadows `$p`). Repaired by
 `Save-Module Pester -RequiredVersion 6.2.0` to the scratchpad and copying the clean file back (hash identical, E81800AD…). Later
 mutations ran in a separate `pwsh -NoProfile -File` process with distinct variable names.
+
+## Fix round 2 (uac-r2 and our re-check of PR #1824)
+
+**F3 (uac-r2): non-not-found faults are never permanent.** `CoreAncestorResolver.IsRecordNotFound` is the only thing that makes a
+failed core read `IsPermanent` (-> `SubjectUnfileable`, 422). Nothing pinned that other Dataverse faults stay transient; widening
+it to "any Dataverse fault" kept all 396 targeted tests green. Pinned now: the writer test
+`A142_WhenTheSubjectsCoresCannotBeRead_ItFailsClosed_AndNothingIsWritten` is a Theory over a timeout, an access-denied fault
+(`0x80040220`) and a throttle fault (`0x80072322`); each gives `FilingFailed` from `WriteAsync` and `ResolveOwnerAsync`, nothing
+written. Route-level: `A142_AnAccessDeniedFaultOnTheSubjectsCoreRead_IsUnavailable_NotARefusal_AndNothingIsWritten` gives
+Unavailable (503), not Refused (422), no writes. Mutation (any `FaultException<OrganizationServiceFault>` counts as not-found):
+3 of the 9 targeted tests fail (access-denied and throttle in the writer, the route case); restored.
+
+**K3 (uac-r2): the 503 no longer reuses a "not allowed" reason.** `SecureWallsRefusalAsync` returned Unavailable with
+`AlsoResolveNotAllowed` when the secure families could not be read (a fault or a short answer). No existing reason fits
+(`signal_unreadable` is about one item's row), so there is a new `DecisionCommitReasons.SecureFamilyUnavailable =
+"ontology.decision.secure_family_unavailable"`, declared beside `AlsoResolveNotAllowed`. HTTP status and behaviour are unchanged
+(Unavailable, nothing written). A family that WAS read and is undetermined or different stays a Refused
+`also_resolve_not_allowed`. Test updated: `A142_AlsoResolve_WhenTheSecureFamiliesCannotBeRead_IsUnavailable_AndNothingIsWritten`
+(fails on the old reason). Client check: grep of `src/solutions` and `src/client` (excluding node_modules, dist, bin, obj) for
+`also_resolve_not_allowed`, `AlsoResolveNotAllowed`, `secure_family_unavailable` and `ontology.decision.` finds nothing; no
+client switches on this reason, so there is no consumer to update.
+
+**K1 (ours): the step-5 handed-filing guard.** `FiledAndOwnedAsync` re-filed (`FileUnderSubjectAsync`: catalog, stamp reads and
+the column probe) when a handed filing was for another subject, and re-asked the owner resolver when the handed owner did not
+`Answers(...)` the request: Dataverse reads after the sends. The route never takes either path today. Now, when a handed filing
+exists and does not answer the request, the writer refuses with `FilingFailed` (fail closed, no read, nothing written) and logs
+at Error (`HandedFilingDoesNotAnswer`). The no-handed-filing path (an owner handed with no filing, or none) is unchanged and
+still asks again with the Warning. Tests: `A142_AHandedFilingWhoseOwnerAnswersForOtherParents_IsRefused_NeverReadAgain` (replaces
+`..._IsAskedAgain_NeverReused`, which pinned the old re-ask on a handed filing), `A142_AHandedFilingForAnotherSubject_IsRefused_NeverFiledAgain`,
+and `A142_AnOwnerHandedWithNoFiling_ForOtherParents_IsStillAskedAgain_ForNonRouteCallers`. With the writer reverted to the
+previous commit, the first two fail.
+
+**K4 (ours): the "no read" test counts probe calls too.** The harness's column-probe delegate now counts its calls
+(`Harness.ProbeCalls`). `A142_AHandedOwner_CarriesItsFiling_AndTheWriteAppliesItWithNoRead` asserts a control (the probe ran at
+step 1f, count > 0) and then 0 on the handed write. The two guard tests assert 0 as well.
+
+### Noted, not fixed (the main session files these as an issue)
+
+- **uac-r2 K1:** a stale filing between step 1f and step 5. If the subject is re-filed (its core or lineage changes) while the
+  sends run, the record is written with the filing computed at 1f. The owner and stamps were consistent with each other at 1f, so
+  it fails neither closed nor open in the sense of the wall, but the record can sit under a parent the subject has since left.
+- **uac-r2 K2:** `CoreAncestorResolver.StampAsync` derives inherited access before the typed `sprk_matter` is set on the row.
+- **Our K4 (a fourth copy):** the "not-found anywhere in the exception chain" loop (`for (e = ex; e is not null; e = e.InnerException)`
+  around `RecordContainerResolver.IsRecordNotFound`) exists in three private copies before this task and this task adds the
+  fourth: `DecisionCommitService.IsNotFound`, `PersonalToDoAssignee.IsNotFound`, and `CoreAncestorResolver.IsRecordNotFound`
+  (task 142's own). It should become one chain-walking helper next to `RecordContainerResolver.IsRecordNotFound`. The same
+  applies to `IsDataverseAccessDenied`, copied between `SignalWriter` and `DecisionRecordWriter` (noted in its comment).
+
+### Verification (fix round 2)
+
+- Targeted filter `DecisionRecord|DecisionCommit|CoreAncestor|RecordOwnership|SecureChild|Signal`: 2170 passed, 0 failed.
+- ArchTests `DecisionRecordContextImmutability`: 4 passed; all ArchTests: 973 passed, 0 failed.
+- No Pester, no live Dataverse.
