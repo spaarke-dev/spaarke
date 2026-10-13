@@ -1401,17 +1401,21 @@ The owner asked for research on the practical and technical limits of access tea
 - **Q23, decided** (recorded by ontology as D-134). "The owner should be the Assigned To contact's team." A decision record on a personal (no-core) To Do is owned by the business-unit default team of the To Do's Assigned To. The path is contact → its systemuser → that user's business unit → its default team, the resolver's existing user → BU → team path.
   - Before this decision: the To Do's own owning team, that is, the creator's.
   - Shipped in ontology #1665 or a follow-up. If it needs a change to `RecordOwnershipResolver`, that is UAC's file: ontology sends the shape first.
-  - **Edge cases, still open with the owner (my proposed defaults):**
-    1. no Assigned To, or one without a systemuser → the To Do's own team;
-    2. a later filing under a core follows the normal re-file rule, and an Assigned To change alone does not re-own;
-    3. the Signal on a personal To Do follows the same rule (ontology 143);
-    4. the To Do's own owner is unchanged.
-- **Q27, open.** The owner asked whether `sprk_createdbyperson` should be a user lookup, given that OOB `createdby` already exists.
-  - Answer given: it IS a systemuser lookup. `createdby` cannot serve, because the BFF creates these rows app-only, so `createdby` is the BFF application user and `createdonbehalfby` is empty (verified live 2026-10-01). That is why rounds 7 and 13 introduced the column.
-  - Options put to the owner:
-    - (A, recommended, matching ontology) add the column to `sprk_budgetrevision`, `sprk_decisionrecord` and `sprk_signal`; job-raised Signals leave it empty;
-    - (B) add it to budget revision only, with a decided exemption for DR (the decider is already in `sprk_assignedtointernal`) and Signal (mostly job-raised).
-  - Issues: #1777, #1783.
+  - **Edge cases, owner answers (2026-10-12):**
+    - items 1, 5 and 6 (no Assigned To, no systemuser, several systemusers, or a disabled user) → the To Do's own team;
+    - item 2: **follow the assignee**. When Assigned To changes, the existing DRs and Signals are re-owned to the new assignee's team. A later core filing still follows the re-file rule. This needs a reconciler, because Assigned To can change from the client; ontology maps the shape first.
+    - item 3: the Signal follows the same rule;
+    - item 4: the To Do's own owner is unchanged.
+  - **Item 7 is binding, not a choice:** any secure parent wins (SRO or Refused), per F1/C9.
+  - Resolver surface: `RecordOwnershipContext.ForUserTeam(Guid)`, added by ontology and reviewed by UAC. The assignee lookup goes through `systemuser.sprk_primarycontact`, filtered to `isdisabled = false`, and must return exactly one user.
+- **Q27, decided:** the owner created `sprk_createdbyperson` on `sprk_budgetrevision`, `sprk_decisionrecord` and `sprk_signal` on spaarkedev1 (#1777, #1783).
+  - Read-only verify on 2026-10-12, with the scratch copy of `Set-ChildRecordCreatorPersonSchema.ps1 -Verify`:
+    - **OK:** lookup → systemuser, nav `sprk_CreatedByPerson`, cascade NoCascade/RemoveLink.
+    - **Different but harmless:** the relationship names are `sprk_{table}_CreatedByPerson_systemuser`.
+  - **Gaps:**
+    - the columns are NOT field-secured, and the BFF-Managed Readers/Writers grants are missing;
+    - the columns are not in SpaarkeCore.
+  - Put to the owner whether UAC may apply the field security and solution membership on dev.
 
 ## C7 research
 
