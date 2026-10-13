@@ -68,6 +68,21 @@ A live sign-in as the Dewey Cheatham account on the external SPA's workforce rea
 - **Review spin-off.** External-access-r3's `WorkforceCallerClaims.TokenEmail` did not read the mapped `upn` claim. Fixed in #1799 (closes #1798).
 - **Still open for 126:** the external-flag script rule above, and UAC-r2's answer about it.
 
+## Update 2026-10-13 (later): the owner chose option A for workforce contacts, recorded as ADR-028 A9
+
+The owner re-examined the guest-versus-company-account question. The research is in `.claude/agent-memory/researcher/b2b-guest-vs-multitenant-home-authority-2026-10-13.md` and SPA-r3's `notes/2026-10-13-option-a-identity-and-licensing-research.md`. The owner then approved **ADR-028 A9** (PR #1810).
+
+**Who signs in how:**
+- **Workforce contacts** sign in to the browser SPA only, with their company account through a multitenant Spaarke SPA client. They are not guests. The BFF accepts their tokens only when the `tid` is on the list for that customer's backend and `acct` = 0, and keys them on (`tid`, `oid`).
+- **Licensed core users** stay on A8's B2B guests. A stored home-to-guest link resolves them in the SPA.
+- **Partners** stay on CIAM.
+
+**Ownership:** SPA-r3 owns this end to end. UAC-r2 owns the baseline role, and provisioning owns app registrations and consent.
+
+**For this project:** no code change. The add-in serves licensed core users only, on A8's sign-in. The shelved scheme stays shelved; SPA-r3 owns the BFF side. Its review findings above went to UAC and SPA-r3 as input.
+
+**Live-test item for us:** a licensed guest signs in to the add-in from their own home Office, desktop and Word. Outlook on the web was verified on 2026-10-08.
+
 ## Q4 (owner)
 
 Events with event type = Task carry documents and files. Spaarke does not use the out-of-box Dataverse task activity.
