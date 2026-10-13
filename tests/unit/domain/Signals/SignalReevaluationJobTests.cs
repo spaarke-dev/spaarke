@@ -1933,6 +1933,7 @@ public partial class SignalReevaluationJobTests
                     Logger<OntologyWriterDataverseClient>());
             Writer = new SignalWriter(writerClient, Sysadmin,
                 new Ownership.CoreAncestorResolver(Sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1),
                 Ownership, Clock, Logger<SignalWriter>());
             var schema = new RuleBodySchemaValidator();
             var validator = new PolicyVersionValidator(schema, new PredicateCompiler(schema, Clock), Logger<PolicyVersionValidator>());

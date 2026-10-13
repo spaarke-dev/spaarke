@@ -618,6 +618,7 @@ public class SignalSuppressionTests
         var s = new Store();
         var signal = s.Open(MatterId, Guid.NewGuid());
         var before = s.Queries;
+        var todoSubject = Guid.NewGuid();
         var entities = new Mock<IGenericEntityService>();
         entities.Setup(e => e.GetEntitySetNameAsync("sprk_todo", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_todos");
         var users = new Mock<IDataverseUserClient>();
@@ -626,8 +627,9 @@ public class SignalSuppressionTests
             {
                 ["sprk_lane"] = (int)DecisionLane.Do,
                 ["_sprk_policyversion_value"] = Guid.NewGuid(),
-                ["sprk_regardingrecordtype"] = "sprk_todo",
-                ["sprk_regardingrecordid"] = Guid.NewGuid().ToString(),
+                // Task 141: the subject is the typed lookup that carries the pair id (the pair type is a lookup, not read).
+                ["_sprk_regardingtodo_value"] = todoSubject.ToString(),
+                ["sprk_regardingrecordid"] = todoSubject.ToString(),
             }));
         users.Setup(u => u.GetAsync(It.Is<string>(p => p.StartsWith("sprk_todos(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Fail(500, DataverseUserClientErrorCodes.ServiceError));

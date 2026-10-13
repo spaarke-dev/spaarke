@@ -4,7 +4,7 @@
     <title>Child-record contract: generalise TodoRegardingBuilder over table; SignalWriter writes the regarding pair + subject lookup through it (D-133)</title>
     <phase>4c Standard child-record contract (D-131)</phase>
     <gate>blocked: 140 done (✅); #1665 and #1746 merged into docs/ontology-platform-design (both touch SignalWriter or its readers; #1747 and #1756 do not). PRIORITY: start the moment both merge — this task removes the pair-type deploy hazard (see the schema-agreement guard criterion).</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Refactor of a shared BFF builder used by To Do and Event plus the Signal writer.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -67,7 +67,13 @@
     </files>
   </knowledge>
 
-  <notes>Created 2026-10-12 (D-131..D-133). Review: one adversarial review + uac-r2 review of commit 1.</notes>
+  <notes>Created 2026-10-12 (D-131..D-133). Review: one adversarial review + uac-r2 review of commit 1.
+2026-10-13 (sub-agent, C:\wts-141): implemented in two commits (commit 1 = builder generalisation only, for uac-r2); draft PR
+into docs/ontology-platform-design. Detail, readers changed, test counts, mutations, publish-size delta and section 11 answers:
+notes/task-141-regarding-builder.md. Deviations: (1) live seam run NOT executed, pending owner Q7 (exact command in the notes);
+(2) dev has 0 sprk_signal rows, so the dedupe-key criterion is met against the pre-141 keys of the dev seed subjects (test
+WriteAsync_DedupeKey_IsThePreLookupKey_AndAnExistingRowWithItIsReconciled_D132); (3) #1111 body text returned to the main
+session, not edited. Guard: SignalPairTypeSchemaAgreementTests (Enforced-by recorded in notes/140-schema-delta.md section 8).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

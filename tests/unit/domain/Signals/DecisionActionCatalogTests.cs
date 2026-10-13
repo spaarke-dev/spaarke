@@ -748,9 +748,12 @@ public class DecisionActionCatalogTests
             ["sprk_lane"] = (int)lane,
             ["_sprk_policyversion_value"] = VersionId,
         };
-        if (subjectType is not null)
+        // Task 141: the subject is the typed subject lookup that carries the pair id. A table a Signal has no lookup for (a forged
+        // or unknown pointer) cannot be expressed on the row at all, so it is simply absent.
+        if (subjectType is not null && subjectId is { } subjectRow
+            && SignalWriter.RegardingLookupByEntity.TryGetValue(subjectType, out var subjectLookup))
         {
-            row["sprk_regardingrecordtype"] = subjectType;
+            row[$"_{subjectLookup}_value"] = subjectRow.ToString();
         }
 
         if (subjectId is { } subject)

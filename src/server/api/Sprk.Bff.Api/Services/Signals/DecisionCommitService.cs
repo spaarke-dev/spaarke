@@ -280,11 +280,14 @@ public sealed class DecisionCommitService
     /// <summary>The state of a Signal the commit did not close or link.</summary>
     private const string Unchanged = "Unchanged";
 
+    // Task 141: the subject is read from the subject lookup that carries the pair id (SignalWriter.SubjectEntityOf), never from
+    // sprk_regardingrecordtype (a lookup to sprk_recordtype_ref since task 140), so the subject lookups are read instead of it.
     private static readonly string[] SignalColumns =
     [
         "sprk_lane", "sprk_policy", "sprk_policyversion", "sprk_corerecordtype", "sprk_corerecordid", "sprk_signalstatus",
-        "sprk_resolutiontype", "sprk_resolvedon", "sprk_regardingrecordtype", "sprk_regardingrecordid", "sprk_matter",
+        "sprk_resolutiontype", "sprk_resolvedon", "sprk_regardingrecordid", "sprk_matter",
         "sprk_factsnapshot", "sprk_privilegeflagged", "sprk_dedupekey", "sprk_decisionrecord", "versionnumber",
+        .. SignalWriter.RegardingLookupByEntity.Values,
     ];
 
     private static readonly JsonSerializerOptions HashJson = new() { WriteIndented = false };
@@ -1371,7 +1374,7 @@ public sealed class DecisionCommitService
             e.GetAttributeValue<OptionSetValue>("sprk_signalstatus")?.Value,
             e.GetAttributeValue<OptionSetValue>("sprk_resolutiontype")?.Value,
             resolvedOn,
-            e.GetAttributeValue<string>("sprk_regardingrecordtype")?.Trim().ToLowerInvariant(),
+            subjectId is { } pairId ? SignalWriter.SubjectEntityOf(pairId, lookup => e.GetAttributeValue<EntityReference>(lookup)?.Id) : null,
             subjectId,
             e.GetAttributeValue<EntityReference>("sprk_matter")?.Id,
             e.GetAttributeValue<string>("sprk_factsnapshot"),
@@ -1408,7 +1411,7 @@ public sealed class DecisionCommitService
     /// reason is echoed: F4-b).</summary>
     private const string ItemOwnerUnsupportedDetail = "The item's decision cannot be filed under an owning team, so it cannot be recorded; nothing was done.";
 
-    /// <summary>A no-core Signal's subject record (<c>sprk_regardingrecordtype</c> / <c>sprk_regardingrecordid</c>), server-written;
+    /// <summary>A no-core Signal's subject record (the subject lookup that carries the pair id <c>sprk_regardingrecordid</c>, task 141), server-written;
     /// null when it names none. D-39 / D-129: the Decision Record's owner is uac-r2's answer for THIS record as the parent, resolved
     /// by <see cref="DecisionRecordWriter.ResolveOwnerAsync"/> only after FR-51 (F4-a).</summary>
     private static DecisionRecordRef? SubjectOf(SignalRow signal) =>
