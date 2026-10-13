@@ -56,6 +56,11 @@ on:
         description: 'Optional substring filter — run only packages whose path contains this'
         required: false
         type: string
+      dry_run_alerts:
+        description: 'Quality alert: print what would be posted instead of opening/updating/closing the issue'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -461,3 +466,89 @@ jobs:
           name: client-test-baseline
           path: all.tsv
           retention-days: 90
+
+  # --------------------------------------------------------------------------
+  # Job 4 — alert
+  # The baseline above is advisory by design (nothing here gates a PR), but an
+  # advisory result that nobody sees is the false-green this project exists to
+  # remove. So the nightly outcome is surfaced as ONE quality alert, assigned to
+  # the owner: open while any package is red, closed by the first all-green run.
+  # See .github/actions/quality-alert and docs/procedures/ci-cd-workflow.md
+  # "Quality alerts". This job is not a gate either: the action never fails it.
+  # --------------------------------------------------------------------------
+  alert:
+    name: Quality alert (client-tests)
+    needs: [discover, test, summarize]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout (local action only)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions
+
+      - name: Download combined baseline
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: client-test-baseline
+          path: baseline
+
+      - name: Decide status
+        id: decide
+        shell: bash
+        env:
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+          SUMMARIZE_RESULT: ${{ needs.summarize.result }}
+          DISCOVERED: ${{ needs.discover.outputs.count }}
+        run: |
+          set -euo pipefail
+          status=ok
+          summary=""
+
+          if [ "$DISCOVER_RESULT" != "success" ]; then
+            status=failing
+            summary+="- The package discovery job finished **${DISCOVER_RESULT}**: no client package was tested."$'\n'
+          elif [ "$SUMMARIZE_RESULT" != "success" ] || [ ! -s baseline/all.tsv ]; then
+            status=failing
+            summary+="- The baseline was not produced (summary job: **${SUMMARIZE_RESULT}**). Treat every client package as unverified tonight."$'\n'
+          else
+            reported="$(wc -l < baseline/all.tsv | tr -d ' ')"
+            bad="$(awk -F'\t' '$2 != "pass"' baseline/all.tsv | sort)"
+            if [ -n "$bad" ]; then
+              status=failing
+              count="$(printf '%s\n' "$bad" | wc -l | tr -d ' ')"
+              summary+="${count} of ${DISCOVERED} client package(s) are not passing (\`fail\`, \`install-failed\` or \`deps-build-failed\`):"$'\n\n'
+              summary+="$(printf '%s\n' "$bad" | awk -F'\t' '{ printf "- `%s`: %s\n", $1, $2 }')"$'\n'
+            fi
+            if [ "$reported" != "$DISCOVERED" ]; then
+              status=failing
+              summary+=$'\n'"- Incomplete baseline: ${DISCOVERED} package(s) discovered but only ${reported} reported (legs cancelled or lost to an infrastructure failure)."$'\n'
+            fi
+          fi
+
+          if [ "$status" = "failing" ]; then
+            summary+=$'\n'"Known: #1788–#1793 track the six known real failures; a package listed above that is not covered by those issues is new."$'\n'
+          else
+            summary="All ${DISCOVERED} client packages passed."
+          fi
+
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          delimiter="ALERT_SUMMARY_EOF_$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+          {
+            echo "summary<<${delimiter}"
+            printf '%s\n' "$summary"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Raise or clear the alert
+        uses: ./.github/actions/quality-alert
+        with:
+          check: client-tests
+          status: ${{ steps.decide.outputs.status }}
+          summary: ${{ steps.decide.outputs.summary }}
+          dry-run: ${{ inputs.dry_run_alerts == true && 'true' || 'false' }}
