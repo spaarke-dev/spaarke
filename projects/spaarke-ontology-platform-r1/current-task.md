@@ -12,17 +12,15 @@
 |---|---|
 | **Task** | Orchestrating ontology lanes. Child-record contract tasks 140–146 (D-131..D-133) are planned; 140 is live on dev. |
 | **Blocker** | Owner answers Q23, Q24, Q25, Q26, Q27 (below). |
-| **Next Action** | Background work running: #1746 fix round 2 (opus agent `a33783db5c83ec2e7`), merge scripts for #1763 (`bl281qdi7`) and #1756 (`b13jn7oxs`, head `5c020d2ac`). When #1746 round 2 reports → send the head to uac-r2 + a scoped re-check (fix diff only) → merge. When UAC 182's PR arrives (branch `uac/182-ontology-lineage-census`, targets this branch) → review → merge. Then task 141 (after #1665, #1746, #1747 and 182 are merged). |
+| **Next Action** | #1756 MERGED `b6d997b74`; #1763 MERGED `d0775ff1d`. Running: #1780 merge script (`bs7wb48lp`, pinned `e4f147828`); #1746 fix round 3 (sonnet). When round 3 reports → merge the base into #1746 → send uac-r2 the 3 diffs → merge. Then task 141 once #1665 + #1747 merge (Q23, Q25). |
 
 ## Lanes (worktrees `C:\wts-NNN`; all branch from `origin/docs/ontology-platform-design`)
 
 | Lane | PR | State | Next |
 |---|---|---|---|
 | **043** D-129/D-130 ownership, D-35 read | #1665, head `85f430366` | Our pass + fix round done. **UAC verdict APPROVE, held only for Q23.** N1 (two-wall refusal) scoped to task 142: PR-body note + #1778. K-a identity cache ~2 min; K-b no-core pair not cross-checked (FR-51); K-c writer AppendTo on contact → task 146 live gate. **Before merge:** merge the base (with #1780), rewrite the DR Pending reason in `RecordOwnerAssignmentCensusTests.cs` ~:246 (uac-r2 C2; PR comment posted), and fix the `DecisionCommitFollowUpsTests.cs:54` / `DecisionCommitServiceTests.cs:216` constructor args if #1746 merged first. | Merge when Q23 is answered (and Q26 for dev use). |
-| **025b** threshold values | #1756, head `5c020d2ac` | Re-check F3 boundary Theory added (`ThresholdRuleTests.ThresholdHolds_AppliesEachOperatorAtTheBoundary`; gt→ge and lt→le mutations each fail one row). Counted status = Reviewed only. | Merge script running. A one-line change if Q24 adds ToReview. |
-| **#1661** secure suppression | #1746, head `63e7a569d` | Fix round 2 (opus) running: our F1 ×3 + F3, uac-r2 N1 (cross-wall stamp survives NeedsWork), N2 (placing hits with a null owner; the cheap fix is preferred), N3 (issue); the run result shows the skipped policy id + count. | Send the head to uac-r2 → scoped re-check → merge. |
+| **#1661** secure suppression | #1746, head `c21e82e73` (round 2 fixes `14297d25a`, plus a base merge with #1763) | Round 2 re-checks (ours + uac-r2): every claim holds. One finding, F-T1: the job test never reaches the hit-placement fault. K8 is accepted. Fix round 3 (sonnet) is running: F-T1; the K9 cross-wall lost-lower analysis (fix it if anything reads the stale stamp that night); PR-body notes K-a, K8, K9, K10. | Merge the base (now with #1756 `b6d997b74`, plus #1780 once merged) → send uac-r2 all 3 diffs in one pass (F-T1 fix, `c21e82e73`, the 2nd base merge) → merge. |
 | **#1659** filing trigger | #1747, head `cc6b10cf5` | UAC APPROVED. | Merge when Q25 is answered. |
-| **140** schema delta | #1763, head `0916bddc0` | Live on dev. Review fixes done. | Merge script running. |
 
 Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-design` (`gh pr ready` first). The Office-scope CI job hits its 20-min cap (F-49, #1718); merge on log evidence with a PR comment.
 **Merge order:** whichever of #1665/#1746 merges second fixes `DecisionCommitFollowUpsTests.cs:54` and `DecisionCommitServiceTests.cs:216` (the constructor takes `IConfiguration` + `IServiceScopeFactory`).
@@ -36,7 +34,7 @@ Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-d
 
 ## Waiting / owner
 
-- **Q23 (blocks #1665 merge and task 143): personal To Do Signals/DRs.** A (recommended): a new resolver outcome follows the subject's owner when the subject is user-owned and unfiled (uac-r2 design `RecordOwnershipContext.DerivedFrom(target)` at `RecordOwnershipResolver.cs:1511-1536`; UAC file → owner sign-off). B: BU team (uac-r2 advises against). C: no Signals on personal To Dos. Today the DR lands in the To Do's own BU default team.
+- **Q23 → D-134 (relayed by uac-r2, 2026-10-12; confirm here):** a DR on a personal To Do is owned by the Assigned To contact's user's BU default team. Edge cases 1–4 (D-134) await the owner. A code-mapper is mapping the change (contact → systemuser → resolver user path); then a #1665 follow-up commit, plus task 143 parity.
 - **Q26 (blocks #1665 on dev):** assign Spaarke Basic User (or a minimal role) to the **Dev 1 and Test 1** BU default teams only; the Secure Record team stays roleless. #1776. Facts: `C:\wts-043\...\notes\043-bu-team-read-check.md`.
 - **Q27 (blocks tasks 142 and 143 flipping to Routed):** `sprk_createdbyperson` (lookup → systemuser) is missing on three tables:
   - `sprk_budgetrevision` (#1777);
