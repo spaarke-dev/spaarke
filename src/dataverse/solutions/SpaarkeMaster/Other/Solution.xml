@@ -716,10 +716,6 @@
         <Dependent type="60" displayName="Invoice main form" parentDisplayName="Invoice" id="{93aa1c69-0406-f111-8406-7c1e525abd8b}" />
       </MissingDependency>
       <MissingDependency>
-        <Required type="300" schemaName="cat_elevationpage_28669" displayName="Elevation Page" solution="CreatorKitReferencesMDA (1.0.20221205.3)" />
-        <Dependent type="AppElement" displayName="sprk_sprk_MatterManagement_canvasappid_cat_elevationpage_28669" id.uniquename="sprk_sprk_MatterManagement_canvasappid_cat_elevationpage_28669" />
-      </MissingDependency>
-      <MissingDependency>
         <Required type="50" schemaName=":RibbonDiffXml" displayName=":RibbonDiffXml" parentSchemaName="ribboncustomization" parentDisplayName="Application Ribbons" solution="msdynce_AppCommonPatch201904 (9.0.26094.10001)">
           <package appName="msdynce_AppCommon" version="9.0.26094.10001">msdynce_AppCommonAnchor (9.0.26094.10001)</package>
         </Required>

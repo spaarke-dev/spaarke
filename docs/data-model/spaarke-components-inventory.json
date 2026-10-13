@@ -4,12 +4,12 @@
     "publisher": "Spaarke",
     "publisherId": "6aeef721-ba73-f011-b4cb-6045bdd6a665",
     "publisherPrefix": "sprk",
-    "timestamp": "2026-10-13T14:34:41Z",
+    "timestamp": "2026-10-13T16:31:34Z",
     "totalSolutions": 74,
     "includedSolutions": 70,
     "excludedSolutions": 4,
-    "totalComponents": 2876,
-    "distinctComponents": 1890,
+    "totalComponents": 2875,
+    "distinctComponents": 1889,
     "excludePatterns": "Test$|Temp|SCRATCH|MasterTest|TestSpaarke"
   },
   "solutions": [
@@ -541,7 +541,7 @@
     },
     {
       "typeName": "ComponentType_10072",
-      "count": 4
+      "count": 3
     },
     {
       "typeName": "ComponentType_10075",
@@ -3729,13 +3729,6 @@
       "ObjectId": "42ac24db-9454-f111-a825-7c1e520aa4df",
       "RootBehavior": 0,
       "InSolutions": "SpaarkeCore"
-    },
-    {
-      "ComponentType": 10072,
-      "ComponentTypeName": "ComponentType_10072",
-      "ObjectId": "f5a0a0b3-98c5-f111-a05a-7c1e520a989f",
-      "RootBehavior": 0,
-      "InSolutions": "SpaarkeMaster"
     },
     {
       "ComponentType": 10075,

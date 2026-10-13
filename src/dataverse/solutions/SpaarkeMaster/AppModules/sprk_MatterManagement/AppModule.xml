@@ -165,15 +165,6 @@
   <LocalizedNames>
     <LocalizedName description="Matter Management" languagecode="1033" />
   </LocalizedNames>
-  <appelements>
-    <appelement uniquename="sprk_sprk_MatterManagement_canvasappid_cat_elevationpage_28669">
-      <canvasappid>
-        <name>cat_elevationpage_28669</name>
-      </canvasappid>
-      <iscustomizable>1</iscustomizable>
-      <name>sprk_sprk_MatterManagement_canvasappid_cat_elevationpage_28669</name>
-    </appelement>
-  </appelements>
   <appsettings>
     <appsetting settingdefinitionid.uniquename="AllowNotificationsEarlyAccess">
       <iscustomizable>1</iscustomizable>
