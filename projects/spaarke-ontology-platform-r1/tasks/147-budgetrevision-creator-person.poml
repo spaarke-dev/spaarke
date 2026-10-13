@@ -4,7 +4,7 @@
     <title>Budget revision records its requester: ReviseBudgetExecutor stamps sprk_createdbyperson; drop the UAC 182 census exemption (#1777)</title>
     <phase>4c Standard child-record contract (D-131)</phase>
     <gate>blocked: #1780 (UAC 182) merged</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags include bff-api; modifies a .cs write path and an ArchTest census.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -704,6 +704,34 @@
       </FieldPermission>
     </FieldPermissions>
   </FieldSecurityProfile>
+  <FieldSecurityProfile name="Spaarke Ontology Writer Field Writers" description="Read/Create/Update on sprk_createdbyperson for sprk_budgetrevision, sprk_decisionrecord and sprk_signal ONLY. Members: the ontology writer application user (# mi-ontology-writer) ONLY; membership is per environment and is set by scripts/Set-ChildRecordCreatorPersonSchema.ps1, not by this solution. ontology-platform-r1 D-136 (task 147)." fieldsecurityprofileid="{b710d90c-0f27-4d6a-a146-2769c8aa921f}">
+    <FieldPermissions>
+      <FieldPermission>
+        <EntityName>sprk_budgetrevision</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_decisionrecord</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+      <FieldPermission>
+        <EntityName>sprk_signal</EntityName>
+        <AttributeName>sprk_createdbyperson</AttributeName>
+        <CanRead>4</CanRead>
+        <CanUpdate>4</CanUpdate>
+        <CanCreate>4</CanCreate>
+        <CanReadUnmasked>0</CanReadUnmasked>
+      </FieldPermission>
+    </FieldPermissions>
+  </FieldSecurityProfile>
   <FieldSecurityProfile name="Standing Grant Administrators" description="Grants Create/Read/Update on contact.sprk_standinggrant (the FR-12 subject-level standing-access policy flag). Membership in this profile is the sole authorization mechanism for setting standing grants -- add only grant-privileged systemusers/teams. Created by teams-app-r1 task 050." fieldsecurityprofileid="{f4be217b-b38f-f111-b8db-7ced8ddc4a05}">
     <FieldPermissions>
       <FieldPermission>

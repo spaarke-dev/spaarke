@@ -1146,16 +1146,14 @@ public sealed class SecureChildShareSynchronizer
     internal static async Task<(Guid? TeamId, string? Refusal)> ResolveSecureOwnerTeamAsync(
         IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
     {
-        var buQuery = new QueryExpression("businessunit") { ColumnSet = new ColumnSet("businessunitid"), TopCount = 2, NoLock = true };
-        buQuery.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.BusinessUnitName(configuration));
-        var businessUnits = (await dataverse.RetrieveMultipleAsync(buQuery, ct).ConfigureAwait(false)).Entities;
-        if (businessUnits.Count > 1)
+        var secureBu = await ResolveSecureBusinessUnitAsync(dataverse, configuration, ct).ConfigureAwait(false);
+        if (secureBu.Ambiguous)
             return (null, "more than one business unit carries the Secure Record name");
-        if (businessUnits.Count == 0 || businessUnits[0].Id == Guid.Empty)
+        if (secureBu.Id is not { } secureBuId)
             return (null, null);
 
         var teamQuery = new QueryExpression("team") { ColumnSet = new ColumnSet("teamid"), TopCount = 2, NoLock = true };
-        teamQuery.Criteria.AddCondition("businessunitid", ConditionOperator.Equal, businessUnits[0].Id);
+        teamQuery.Criteria.AddCondition("businessunitid", ConditionOperator.Equal, secureBuId);
         teamQuery.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.OwnerTeamName(configuration));
         teamQuery.Criteria.AddCondition("teamtype", ConditionOperator.Equal, OwnerTeamType);
         teamQuery.Criteria.AddCondition("isdefault", ConditionOperator.Equal, false);
@@ -1163,6 +1161,25 @@ public sealed class SecureChildShareSynchronizer
         if (teams.Count > 1)
             return (null, "more than one Secure Record owner team carries the configured name");
         return teams.Count == 0 || teams[0].Id == Guid.Empty ? (null, null) : (teams[0].Id, null);
+    }
+
+    /// <summary>
+    /// WHICH business unit is the Secure Record BU, by id: the one named by <c>SecureRecord:BusinessUnitName</c>, read with
+    /// TOP 2 — <c>RecordOwnershipResolver.ResolveSecureBusinessUnitAsync</c>'s rule. Two matches are <c>Ambiguous</c> (the
+    /// caller refuses); none means this environment has no Secure Record BU, so no business unit is it. A Dataverse fault
+    /// propagates. Step 1 of <see cref="ResolveSecureOwnerTeamAsync"/>, and on its own the guard of
+    /// <see cref="SecureChildReconciler.ReownOrdinaryRowAsync"/> (UAC task 183), which refuses a row or a team in that
+    /// business unit — ANY team there, so the guard holds once each secure family has its own owner team (task 178).
+    /// </summary>
+    internal static async Task<(Guid? Id, bool Ambiguous)> ResolveSecureBusinessUnitAsync(
+        IGenericEntityService dataverse, IConfiguration configuration, CancellationToken ct)
+    {
+        var buQuery = new QueryExpression("businessunit") { ColumnSet = new ColumnSet("businessunitid"), TopCount = 2, NoLock = true };
+        buQuery.Criteria.AddCondition("name", ConditionOperator.Equal, SecureRecordOwnerTeam.BusinessUnitName(configuration));
+        var businessUnits = (await dataverse.RetrieveMultipleAsync(buQuery, ct).ConfigureAwait(false)).Entities;
+        if (businessUnits.Count > 1)
+            return (null, true);
+        return businessUnits.Count == 0 || businessUnits[0].Id == Guid.Empty ? (null, false) : (businessUnits[0].Id, false);
     }
 
     /// <summary>
