@@ -95,11 +95,14 @@ public sealed class DecisionRecordWriterTests
         IReadOnlyList<Guid>? signals = null,
         IReadOnlyDictionary<string, object?>? facts = null,
         DecisionRecordRef? subject = null,
-        Guid? decider = null) =>
+        Guid? decider = null,
+        Guid? assignee = null,
+        IReadOnlyList<DecisionRecordRef>? signalSubjects = null) =>
         new(Review, PolicyVersion, noCore ? null : core ?? Core("sprk_matter", MatterId), noCore ? subject ?? new DecisionRecordRef("sprk_todo", TodoId) : subject,
             User, null, steps ?? [Taken("mark-complete")], followOns ?? [], "tier-1", signals ?? [SignalA],
             facts ?? new Dictionary<string, object?> { ["variance"] = 12.5m, ["period"] = "2026-09" },
-            "Partner", "approved offline", reason, denied, privilege, DeciderContactId: decider);
+            "Partner", "approved offline", reason, denied, privilege, DeciderContactId: decider, SignalSubjects: signalSubjects,
+            AssigneeSystemUserId: assignee);
 
     private static int Option(Entity e, string column) => e.GetAttributeValue<OptionSetValue>(column).Value;
 
@@ -582,25 +585,80 @@ public sealed class DecisionRecordWriterTests
         refused.Created.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task NoCoreItem_PersonalToDo_GetsTheRealResolversAnswer_D130_NothingOverridden()
-    {
-        // D-130: the REAL resolver is the ownership rule; the writer adds no special case. A personal To Do (user-owned: an owning
-        // business unit, no owning team, regarding nothing) is the parent. OBSERVED answer: the default owner team of the
-        // To Do's own owning business unit (ChildBu here, which is the unit its user owner sits in), Owned and not secure.
-        // The caller is deliberately in ANOTHER unit (GeneralBu): the answer is the To Do's unit, not the acting user's, because
-        // a parent is named (the acting user's unit is only the no-parent fallback, which ForParents does not reach).
-        var directory = Tests.TestInfrastructure.OwnershipDirectory.Standard()
-            .WithRecord("sprk_todo", TodoId, Tests.TestInfrastructure.OwnershipDirectory.ChildBu);
-        var h = new Harness(realResolver: directory.Resolver());
+    // ── D-134: a personal To Do's Decision Record is its Assigned To user's business-unit team's ────────────────────────────────
 
-        var result = await h.Writer.WriteAsync(Request(noCore: true, subject: new DecisionRecordRef("sprk_todo", TodoId)));
+    private static readonly Guid AssigneeUser = Guid.Parse("d1340000-0000-4000-8000-000000000001");
+    private static readonly Guid AssigneeOid = Guid.Parse("d1340000-0000-4000-8000-000000000002");
+
+    /// <summary>A personal To Do (user-owned, filed under nothing) in the CHILD unit, and its Assigned To user in the GENERAL unit.</summary>
+    private static Tests.TestInfrastructure.OwnershipDirectory PersonalToDoWorld() =>
+        Tests.TestInfrastructure.OwnershipDirectory.Standard()
+            .WithUser(AssigneeUser, AssigneeOid, Tests.TestInfrastructure.OwnershipDirectory.GeneralBu)
+            .WithRecord("sprk_todo", TodoId, Tests.TestInfrastructure.OwnershipDirectory.ChildBu);
+
+    [Fact]
+    public async Task NoCoreItem_PersonalToDo_IsOwnedByItsAssignedToUsersBusinessUnitTeam_D134()
+    {
+        // D-130 left this to the REAL resolver with the To Do as the parent: the To Do's own unit's team (ChildTeam). D-134 replaces
+        // that answer: the To Do's Assigned To user sits in ANOTHER unit (GeneralBu), and the record is that unit's default team's,
+        // still the real resolver's answer (asked for the user's team, never a writer-picked owner).
+        var h = new Harness(realResolver: PersonalToDoWorld().Resolver());
+
+        var result = await h.Writer.WriteAsync(Request(noCore: true, subject: new DecisionRecordRef("sprk_todo", TodoId), assignee: AssigneeUser));
 
         var owner = h.Row.GetAttributeValue<EntityReference>("ownerid");
         owner.LogicalName.Should().Be("team");
-        owner.Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.ChildTeam, "the default owner team of the To Do's own business unit");
+        owner.Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.GeneralTeam, "the default owner team of the Assigned To user's business unit");
         h.Row.Contains("owningbusinessunit").Should().BeFalse("no owning business unit is set by the writer");
         result.SecureOwnerTeamId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task NoCoreItem_PersonalToDo_WithASignalUnderASecureSubject_IsTheSecureTeams_NotTheAssignees_D134Item7()
+    {
+        // Item 7 (binding, F1/C9): the parents are resolved FIRST. One of the record's Signals is about a To Do filed under a SECURE
+        // project, so the parents' answer is the Secure Record Owners team, and it stands: the assignee rule is never reached.
+        var secureProject = Guid.NewGuid();
+        var secureTodo = Guid.NewGuid();
+        var directory = PersonalToDoWorld()
+            .WithSecureRoot("sprk_project", secureProject)
+            .WithRecord("sprk_todo", secureTodo, Tests.TestInfrastructure.OwnershipDirectory.GeneralBu,
+                extra: new() { ["sprk_regardingproject"] = new EntityReference("sprk_project", secureProject) });
+        var h = new Harness(realResolver: directory.Resolver());
+
+        var result = await h.Writer.WriteAsync(Request(noCore: true, subject: new DecisionRecordRef("sprk_todo", TodoId), assignee: AssigneeUser,
+            signalSubjects: [new DecisionRecordRef("sprk_todo", TodoId), new DecisionRecordRef("sprk_todo", secureTodo)]));
+
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam,
+            "a secure parent wins; the Assigned To user's team (GeneralTeam) must not be used");
+        result.SecureOwnerTeamId.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task CoredRecord_ToDoFiledUnderAnOrdinaryMatter_IsTheMattersTeam_TheAssigneeIgnored_D134()
+    {
+        // A core filing always takes precedence: a cored record never uses the assignee rule, even when handed one.
+        var matter = Guid.NewGuid();
+        var filedTodo = Guid.NewGuid();
+        var directory = PersonalToDoWorld()
+            .WithOrdinaryRoot("sprk_matter", matter)
+            .WithRecord("sprk_todo", filedTodo, Tests.TestInfrastructure.OwnershipDirectory.GeneralBu,
+                extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matter) });
+        var h = new Harness(realResolver: directory.Resolver());
+
+        await h.Writer.WriteAsync(Request(core: Core("sprk_matter", matter), assignee: AssigneeUser,
+            signalSubjects: [new DecisionRecordRef("sprk_todo", filedTodo)]));
+
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.ChildTeam,
+            "the matter's business-unit team, not the Assigned To user's (GeneralTeam)");
+    }
+
+    [Fact]
+    public void ForUserTeam_RefusesAnEmptyUserId()
+    {
+        var act = () => RecordOwnershipContext.ForUserTeam(Guid.Empty);
+
+        act.Should().Throw<ArgumentException>().Which.ParamName.Should().Be("systemUserId");
     }
 
     [Fact]

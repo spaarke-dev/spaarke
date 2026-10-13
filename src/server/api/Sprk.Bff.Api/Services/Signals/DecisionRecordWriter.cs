@@ -75,6 +75,9 @@ public sealed record DecisionRecordFollowOn(string ActionCode, string Entity, Gu
 /// <param name="SignalSubjects">The subject record of EVERY Signal the review resolves (primary and also-resolve), read app-only from
 /// the Signals. They are ownership parents beside the core record (uac-r2 F1): a Signal whose subject sits under a secure record
 /// makes the Decision Record the Secure Record Owners team's even when its core is an ordinary matter.</param>
+/// <param name="AssigneeSystemUserId">D-134: for a no-core review of a PERSONAL To Do, the one enabled systemuser its Assigned To
+/// names (<see cref="PersonalToDoAssignee"/>); null for no single user. Used ONLY when there is no core and every parent's answer is
+/// ordinary (item 7: a secure parent wins): the record is then that user's business-unit team's.</param>
 public sealed record DecisionRecordRequest(
     Guid ReviewId,
     Guid PolicyVersionId,
@@ -95,7 +98,8 @@ public sealed record DecisionRecordRequest(
     IReadOnlyList<string>? UnnamedNextSteps = null,
     string? ReviewHash = null,
     Guid? DeciderContactId = null,
-    IReadOnlyList<DecisionRecordRef>? SignalSubjects = null);
+    IReadOnlyList<DecisionRecordRef>? SignalSubjects = null,
+    Guid? AssigneeSystemUserId = null);
 
 /// <summary>The result of <see cref="DecisionRecordWriter.WriteAsync(DecisionRecordRequest, CancellationToken)"/>.</summary>
 /// <param name="RecordId">The new <c>sprk_decisionrecord</c> id: the caller sets it on every resolved Signal.</param>
@@ -169,6 +173,8 @@ public sealed class DecisionRecordRefusedException : Exception
 /// team the resolver picks for the core's, or with no core the subject's, business unit). A refusal writes nothing and throws
 /// <see cref="DecisionRecordRefusedException"/>; the writer never picks an owner, never keeps its own, and never sets
 /// <c>owningbusinessunit</c>. The decider, an individual, is <c>sprk_assignedtointernal</c> (a contact), never <c>ownerid</c>.
+/// D-134: a no-core review of a PERSONAL To Do whose parents are all ordinary is owned by its Assigned To user's business-unit
+/// team instead (<see cref="DecisionRecordRequest.AssigneeSystemUserId"/>), still the resolver's answer; a secure parent wins.
 /// The typed lineage lookup (<c>sprk_matter</c>, <c>sprk_project</c>,
 /// <c>sprk_workassignment</c>) is read from uac-r2's <see cref="SecureChildLineage"/> entry for this table, not branched per
 /// type; a service request has none and is recorded in the generic columns only.</para>
@@ -261,7 +267,7 @@ public sealed class DecisionRecordWriter
             // from the owner); a refusal writes nothing; KeepCreator is not requested, so an Unchanged answer cannot occur and is
             // refused if it ever does. The commit route resolves the owner BEFORE its first write and hands it in (task 043), so an
             // owner refusal refuses the whole decision with nothing written.
-            var owner = resolvedOwner ?? await ResolveOwnerCoreAsync(OwnershipContextOf(request), requireTeam: true, ct).ConfigureAwait(false);
+            var owner = resolvedOwner ?? await ResolveRequestOwnerAsync(request, ct).ConfigureAwait(false);
             if (!owner.IsOwned)
             {
                 throw new DecisionRecordRefusedException(
@@ -331,7 +337,7 @@ public sealed class DecisionRecordWriter
 
         try
         {
-            return await ResolveOwnerCoreAsync(OwnershipContextOf(request), requireTeam: true, ct).ConfigureAwait(false);
+            return await ResolveRequestOwnerAsync(request, ct).ConfigureAwait(false);
         }
         catch (DecisionRecordRefusedException ex)
         {
@@ -344,11 +350,27 @@ public sealed class DecisionRecordWriter
     }
 
     /// <summary>
+    /// The review's owner, in D-134's order. FIRST every parent (<see cref="OwnershipContextOf"/>): a refusal refuses and a secure
+    /// answer stands (item 7, binding: a secure parent wins). Only when that answer is ordinary AND the review has no core (a core
+    /// filing always takes precedence) AND a personal To Do's Assigned To named one enabled user, the owner is that user's
+    /// business-unit team (<see cref="RecordOwnershipContext.ForUserTeam"/>), with the same refusals. Otherwise the parents' answer.
+    /// </summary>
+    private async Task<RecordOwnerResolution> ResolveRequestOwnerAsync(DecisionRecordRequest request, CancellationToken ct)
+    {
+        var owner = await ResolveOwnerCoreAsync(OwnershipContextOf(request), requireTeam: true, ct).ConfigureAwait(false);
+        if (owner.IsSecureOwner || request.Core is not null || request.AssigneeSystemUserId is not { } assignee || assignee == Guid.Empty)
+            return owner;
+
+        return await ResolveOwnerCoreAsync(RecordOwnershipContext.ForUserTeam(assignee), requireTeam: true, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// The ownership question for a review (D-39 / D-129, uac-r2 F1): EVERY parent the record sits under, as one list: the core
     /// record first (it decides an ordinary record's business unit), then the item's subject (a no-core review's only parent) and
     /// the subject of every Signal the record resolves, primary and also-resolve. The resolver reads them all (secure-if-any) and
     /// the list is not bounded or truncated here; the route caps the Signals it resolves (25), so nothing is dropped. A user-owned
-    /// subject (a personal To Do) is the resolver's call, never a writer-picked owner. A parent whose table is not an ownership
+    /// subject (a personal To Do) is the resolver's call, never a writer-picked owner (D-134's assignee is applied after this answer,
+    /// by <see cref="ResolveRequestOwnerAsync"/>, and only when it is ordinary). A parent whose table is not an ownership
     /// parent is ignored by the resolver itself (<see cref="RecordOwnershipContext.ForParents"/>), as for every other writer.
     /// </summary>
     internal static RecordOwnershipContext OwnershipContextOf(DecisionRecordRequest request)

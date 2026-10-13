@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.ExternalAccess;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Telemetry;
 
@@ -296,6 +297,7 @@ public sealed class DecisionCommitService
     private readonly IGenericEntityService _entities;
     private readonly CallerRecordAccessProbe _probe;
     private readonly IIdentityNormalizationService _identity;
+    private readonly AssignedAccessStore _links;
     private readonly ITenantCache _ledger;
     private readonly DecisionCommitFollowUps _followUps;
     private readonly IScheduledJobLease _lease;
@@ -312,6 +314,7 @@ public sealed class DecisionCommitService
         IGenericEntityService entities,
         CallerRecordAccessProbe probe,
         IIdentityNormalizationService identity,
+        AssignedAccessStore links,
         ITenantCache ledger,
         DecisionCommitFollowUps followUps,
         IScheduledJobLease lease,
@@ -327,6 +330,7 @@ public sealed class DecisionCommitService
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
+        _links = links ?? throw new ArgumentNullException(nameof(links));
         _ledger = ledger ?? throw new ArgumentNullException(nameof(ledger));
         _followUps = followUps ?? throw new ArgumentNullException(nameof(followUps));
         _lease = lease ?? throw new ArgumentNullException(nameof(lease));
@@ -933,10 +937,20 @@ public sealed class DecisionCommitService
         // sits under (the core, if any, and the subject of every Signal it resolves: secure-if-any, uac-r2 F1; D-129), taken as
         // returned; and (F4-b) a refusal is 422 (a fixed text for a no-core item) while a fault of the resolver is 503.
         var noCore = p.RecordCore is null;
+
+        // D-134: a no-core review of a PERSONAL To Do is owned by its Assigned To user's business-unit team when every parent is
+        // ordinary. The user is read here, app-only and after FR-51, through the one shared helper; no single user keeps the
+        // parents' answer. A read FAULT is not "no user": it is held until the parents' answer is known (item 7: a secure parent
+        // wins, so a fault there decides nothing), and otherwise answers Unavailable before any write.
+        Guid? assignee = null;
+        var assigneeUnreadable = false;
+        if (noCore && SubjectOf(p.Primary) is { } item && string.Equals(item.Entity, PersonalToDoAssignee.Table, StringComparison.OrdinalIgnoreCase))
+            (assignee, assigneeUnreadable) = await PersonalToDoAssigneeAsync(item.Id, ct).ConfigureAwait(false);
+
         RecordOwnerResolution? recordOwner;
         try
         {
-            recordOwner = await _records.ResolveOwnerAsync(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p), executed: null, hash, deciderContact), ct).ConfigureAwait(false);
+            recordOwner = await _records.ResolveOwnerAsync(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p), executed: null, hash, deciderContact, assignee), ct).ConfigureAwait(false);
         }
         catch (DecisionRecordRefusedException ex) when (ex.Reason == DecisionRecordRefusalReason.OwnerResolutionFailed)
         {
@@ -950,6 +964,9 @@ public sealed class DecisionCommitService
                 ? Refused(reviewId, DecisionCommitReasons.ItemOwnerUnsupported, ItemOwnerUnsupportedDetail)
                 : Refused(reviewId, DecisionCommitReasons.RecordRefused, $"This decision cannot be recorded ({ex.Reason}); nothing was done.");
         }
+
+        if (assigneeUnreadable && recordOwner is not { IsSecureOwner: true })
+            return Unavailable(reviewId, DecisionCommitReasons.ItemOwnerUnsupported, "The item's owner could not be checked; nothing was done.");
 
         // ---- (2)(3)(4) The writes, in D-17 order ----------------------------------------------------------------------------
         // From the first write on, the request's cancellation no longer applies: a client that disconnects after a send must
@@ -1008,7 +1025,7 @@ public sealed class DecisionCommitService
         {
             try
             {
-                var written = await _records.WriteAsync(RecordRequest(review, p, confirmedBy, now, steps, followOns, executed, hash, deciderContact), recordOwner, writeCt).ConfigureAwait(false);
+                var written = await _records.WriteAsync(RecordRequest(review, p, confirmedBy, now, steps, followOns, executed, hash, deciderContact, assignee), recordOwner, writeCt).ConfigureAwait(false);
                 recordId = written.RecordId;
                 recordClass = written.RecordClass.ToString();
             }
@@ -1428,6 +1445,21 @@ public sealed class DecisionCommitService
         }
     }
 
+    /// <summary>D-134: a personal To Do's Assigned To user, through <see cref="PersonalToDoAssignee"/> (null: no single enabled user).
+    /// <c>Unreadable</c> is true when a read FAULTED: whether a user exists is unknown, so the caller must not fall back.</summary>
+    private async Task<(Guid? User, bool Unreadable)> PersonalToDoAssigneeAsync(Guid todoId, CancellationToken ct)
+    {
+        try
+        {
+            return (await PersonalToDoAssignee.ResolveAsync(_entities, _links, todoId, ct).ConfigureAwait(false), false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Decision commit: the personal To Do's Assigned To user could not be read ({ExceptionType}).", ex.GetType().Name);
+            return (null, true);
+        }
+    }
+
     /// <summary>A by-id read that failed because the row does not exist (<c>0x80040217</c> anywhere in the chain).</summary>
     private static bool IsNotFound(Exception ex)
     {
@@ -1577,7 +1609,7 @@ public sealed class DecisionCommitService
     private static DecisionRecordRequest RecordRequest(
         DecisionReview review, Prepared p, Guid confirmedBy, DateTimeOffset now,
         IReadOnlyList<DecisionRecordStep> steps, IReadOnlyList<DecisionRecordFollowOn> followOns, IReadOnlyList<DecisionCommitStep>? executed,
-        string reviewHash, Guid? deciderContact) =>
+        string reviewHash, Guid? deciderContact, Guid? assignee = null) =>
         new(review.ReviewId,
             p.Primary.PolicyVersionId!.Value,
             p.RecordCore,
@@ -1604,7 +1636,9 @@ public sealed class DecisionCommitService
             DeciderContactId: deciderContact,
             // uac-r2 F1: the record's owner is asked about EVERY Signal it resolves (primary and also-resolve), not just the core, so a
             // Signal whose subject sits under a secure record makes the record secure-owned even under an ordinary matter.
-            SignalSubjects: p.Resolved.Select(SubjectOf).OfType<DecisionRecordRef>().Distinct().ToList());
+            SignalSubjects: p.Resolved.Select(SubjectOf).OfType<DecisionRecordRef>().Distinct().ToList(),
+            // D-134: a personal To Do's Assigned To user (no-core only; the writer applies it only when every parent is ordinary).
+            AssigneeSystemUserId: assignee);
 
     /// <summary>What the data said at decision time: each covered Signal's own server-written fact snapshot, by Signal id.</summary>
     internal static IReadOnlyDictionary<string, object?> FactValues(IEnumerable<SignalRow> rows)

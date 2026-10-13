@@ -23,9 +23,11 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.ExternalAccess;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
+using Sprk.Bff.Api.Tests.AccessControl;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
@@ -136,6 +138,15 @@ public sealed class DecisionCommitServiceTests
 
         public Mock<IIdentityNormalizationService> Identity { get; } = new();
 
+        /// <summary>D-134: the systemusers each contact is the primary contact of (uac-r2's link-candidate read, in memory).</summary>
+        public AssignedAccessTestDoubles.FakeAssignedAccessStore Links { get; } = new();
+
+        /// <summary>D-134: the To Do rows the app-only Assigned To read answers (an unscripted id reads as a To Do with no Assigned To).</summary>
+        public Dictionary<Guid, Entity> TodoRows { get; } = new();
+
+        /// <summary>D-134: a fault of the app-only To Do read.</summary>
+        public Exception? TodoReadFault { get; set; }
+
         /// <summary>Subject rows the CALLER cannot read (the sprk_todos entity set), and a fault answer for any subject read.</summary>
         public HashSet<Guid> CallerCannotReadSubject { get; } = new();
 
@@ -162,6 +173,10 @@ public sealed class DecisionCommitServiceTests
                     new Entity("sprk_policyversion", id) { ["sprk_decisionplan"] = id == DoVersion ? DoPlan : id == ReminderVersion ? ReminderPlan : PathBPlan });
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => new EntityCollection(ExistingRecords.ToList()));
+            Entities.Setup(e => e.RetrieveAsync("sprk_todo", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .Returns((string _, Guid id, string[] _, CancellationToken _) => TodoReadFault is { } fault
+                    ? Task.FromException<Entity>(fault)
+                    : Task.FromResult(TodoRows.TryGetValue(id, out var row) ? row : new Entity("sprk_todo", id)));
 
             Identity.Setup(i => i.ResolveAsync(Caller, It.IsAny<CancellationToken>()))
                 .Returns((Guid id, CancellationToken _) =>
@@ -352,7 +367,7 @@ public sealed class DecisionCommitServiceTests
 
             var records = new DecisionRecordWriter(WriterClient(), resolver, Clock, NullLogger<DecisionRecordWriter>.Instance);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(Executors.Values), records, WriterClient(),
-                Entities.Object, Probe.Object, Identity.Object, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
+                Entities.Object, Probe.Object, Identity.Object, Links, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
         }
 
         public Task StampPlanRead(Guid signal, DateTimeOffset at) => PlanReads.StampAtAsync(Tenant, CallerOid.ToString("D"), signal, at, CancellationToken.None);
@@ -1046,8 +1061,8 @@ public sealed class DecisionCommitServiceTests
         rig.Record.Contains("owningbusinessunit").Should().BeFalse("it derives from ownerid; the route never sets it");
         rig.Executors["mark-complete"].Requests.Single().Subject.Should().Be(new DecisionRecordRef("sprk_todo", ItemTodo));
         rig.Resolution(DoSignal).Should().Be(SignalWriter.ResolutionActed);
-        rig.Entities.Verify(e => e.RetrieveAsync("sprk_todo", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
-            "the item's ownerid is never read: nothing uses an owner as a person");
+        rig.Entities.Verify(e => e.RetrieveAsync("sprk_todo", It.IsAny<Guid>(), It.Is<string[]>(c => c.Contains("ownerid")), It.IsAny<CancellationToken>()), Times.Never,
+            "the item's ownerid is never read: nothing uses an owner as a person (D-134 reads its Assigned To, not its owner)");
     }
 
     [Fact]
@@ -1285,6 +1300,123 @@ public sealed class DecisionCommitServiceTests
         rig.Writes.Should().BeEmpty();
         rig.SignalUpdates.Should().BeEmpty();
         rig.OwnerAsks.Single().Parents.Select(p => p.RecordId).Should().Contain([Matter, SubjectOrdinary, SubjectUnderSecure]);
+    }
+
+    // ── D-134: a personal To Do's record is owned by its Assigned To user's business-unit team ────────────────────────────────
+
+    private static readonly Guid AssigneeContact = Guid.Parse("c0430000-0000-4000-8000-000000000090");
+    private static readonly Guid AssigneeUser = Guid.Parse("c0430000-0000-4000-8000-000000000091");
+    private static readonly Guid OtherUser = Guid.Parse("c0430000-0000-4000-8000-000000000092");
+    private static readonly Guid FilingMatter = Guid.Parse("c0430000-0000-4000-8000-000000000093");
+
+    /// <summary>The REAL resolver over: a personal To Do (user-owned, filed under nothing unless <paramref name="filed"/>) in the
+    /// CHILD unit, so its own answer is ChildTeam; two users in the GENERAL unit (GeneralTeam). A no-core Signal about the To Do, whose
+    /// Assigned To is <see cref="AssigneeContact"/> when <paramref name="assigned"/>. Which users link to that contact is per test.</summary>
+    private static Rig PersonalToDoRig(bool assigned = true, bool filed = false)
+    {
+        var regarding = filed ? new Dictionary<string, object> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", FilingMatter) } : null;
+        var directory = Tests.TestInfrastructure.OwnershipDirectory.Standard()
+            .WithUser(AssigneeUser, Guid.NewGuid(), Tests.TestInfrastructure.OwnershipDirectory.GeneralBu)
+            .WithUser(OtherUser, Guid.NewGuid(), Tests.TestInfrastructure.OwnershipDirectory.GeneralBu)
+            .WithOrdinaryRoot("sprk_matter", FilingMatter)
+            .WithRecord("sprk_todo", ItemTodo, Tests.TestInfrastructure.OwnershipDirectory.ChildBu, extra: regarding);
+        var rig = new Rig { RealResolver = directory.Resolver() };
+        rig.AddSignal(DoSignal, DecisionLane.Do, null, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+
+        var todo = new Entity("sprk_todo", ItemTodo);
+        if (assigned)
+            todo["sprk_assignedto"] = new EntityReference("contact", AssigneeContact);
+        foreach (var (column, value) in regarding ?? new())
+            todo[column] = value;
+        rig.TodoRows[ItemTodo] = todo;
+        return rig;
+    }
+
+    private static AssignedLinkCandidate LinkedTo(Guid user, bool disabled = false) =>
+        new(user, AssigneeContact, Guid.NewGuid(), IsDisabled: disabled, AccessMode: 0, ApplicationId: null, IsExternal: false);
+
+    [Fact]
+    public async Task D134_APersonalToDo_WhoseAssignedToIsOneEnabledUserInAnotherUnit_IsOwnedByThatUnitsTeam()
+    {
+        var rig = PersonalToDoRig();
+        rig.Links.UsersByLink[AssigneeContact] = [LinkedTo(AssigneeUser)];
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        var owner = rig.Record.GetAttributeValue<EntityReference>("ownerid");
+        owner.LogicalName.Should().Be("team");
+        owner.Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.GeneralTeam, "the Assigned To user's business-unit team, not the To Do's own (ChildTeam)");
+        rig.OwnerAsks.Should().HaveCount(2);
+        rig.OwnerAsks[0].Parents.Should().Equal([new RecordOwnershipParent("sprk_todo", ItemTodo)], "the parents are resolved first (item 7)");
+        rig.OwnerAsks[1].Parents.Should().BeEmpty();
+        rig.OwnerAsks[1].CallerSystemUserId.Should().Be(AssigneeUser, "then the assignee's team, through ForUserTeam");
+        rig.Record.GetAttributeValue<EntityReference>("sprk_assignedtointernal").Id.Should().Be(CallerContactId, "the decider is unchanged");
+    }
+
+    [Theory]
+    [InlineData("no-assigned-to")]
+    [InlineData("no-systemuser")]
+    [InlineData("two-systemusers")]
+    [InlineData("disabled-only")]
+    [InlineData("todo-filed")]
+    public async Task D134_NoSingleEnabledAssignee_FallsBackToTheTodosOwnTeam(string fallback)
+    {
+        var rig = PersonalToDoRig(assigned: fallback != "no-assigned-to", filed: fallback == "todo-filed");
+        rig.Links.UsersByLink[AssigneeContact] = fallback switch
+        {
+            "no-systemuser" => [],
+            "two-systemusers" => [LinkedTo(AssigneeUser), LinkedTo(OtherUser)],
+            "disabled-only" => [LinkedTo(AssigneeUser, disabled: true)],
+            _ => [LinkedTo(AssigneeUser)],   // a To Do with no Assigned To, or one filed under a matter, never reaches its user
+        };
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Record.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.ChildTeam,
+            "no single enabled user: the parents' answer (the To Do's own unit's team, or for a filed To Do its matter's) stands");
+        rig.OwnerAsks.Should().ContainSingle("the assignee's team is never asked for");
+    }
+
+    [Theory]
+    [InlineData("todo")]
+    [InlineData("systemuser")]
+    public async Task D134_AFaultReadingTheAssignee_Is503_AndNothingIsWritten(string read)
+    {
+        var rig = PersonalToDoRig();
+        rig.Links.UsersByLink[AssigneeContact] = [LinkedTo(AssigneeUser)];
+        if (read == "todo")
+            rig.TodoReadFault = new TimeoutException("no answer");
+        else
+            rig.Links.FailLinkRead = true;
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, "a fault is not \"no single user\": the owner is unknown");
+        result.ReasonCode.Should().Be(DecisionCommitReasons.ItemOwnerUnsupported);
+        rig.Writes.Should().BeEmpty("refused before the first write");
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
+        rig.Status(DoSignal).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task D134_AnAssigneeReadFault_DecidesNothingWhenAParentIsSecure_TheSecureAnswerStands_Item7()
+    {
+        var project = Guid.Parse("c0430000-0000-4000-8000-000000000094");
+        var directory = Tests.TestInfrastructure.OwnershipDirectory.Standard()
+            .WithSecureRoot("sprk_project", project)
+            .WithRecord("sprk_todo", ItemTodo, Tests.TestInfrastructure.OwnershipDirectory.GeneralBu,
+                extra: new() { ["sprk_regardingproject"] = new EntityReference("sprk_project", project) });
+        var rig = new Rig { RealResolver = directory.Resolver() };
+        rig.AddSignal(DoSignal, DecisionLane.Do, null, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        rig.TodoReadFault = new TimeoutException("no answer");
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Record.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
     }
 
     // ── D-129: the deciding individual is the caller's linked contact, never an owner ────────────────────────────────────
