@@ -478,10 +478,11 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
                 type: "https://tools.ietf.org/html/rfc7235#section-3.1"));
         }
 
-        // Task 185: the invite code is not read from the request yet (slice C adds the X-Spaarke-Invite-Code header), so
-        // no code is presented and E11's marker leg denies contact_not_invited.
+        // Task 185: the invite code the SPA carries from the invite link (design §4.1 step 5). Read only here, on the CIAM
+        // plane; the workforce strategy never sees it. A bound caller resolves by oid and the code is not consulted. The
+        // code is never logged and never echoed back.
         var binding = await _binder
-            .ResolveCiamCallerAsync(oid, email, inviteCode: null, httpContext.RequestAborted)
+            .ResolveCiamCallerAsync(oid, email, ReadInviteCode(httpContext.Request), httpContext.RequestAborted)
             .ConfigureAwait(false);
 
         if (!binding.IsResolved)
@@ -542,6 +543,27 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
     }
 
     /// <summary>
+    /// Task 185: the request header that carries the invite code from the SPA (design §4.1). Listed in the CORS allow-list
+    /// (<c>CorsModule</c>).
+    /// </summary>
+    internal const string InviteCodeHeader = "X-Spaarke-Invite-Code";
+
+    /// <summary>
+    /// The invite code the request presents, or null when it presents none. Exactly one header value that is
+    /// <see cref="InviteCode.IsWellFormed"/> counts; anything else (absent, repeated, malformed) is "no code".
+    /// </summary>
+    internal static string? ReadInviteCode(HttpRequest request)
+    {
+        if (!request.Headers.TryGetValue(InviteCodeHeader, out var values) || values.Count != 1)
+        {
+            return null;
+        }
+
+        var code = values[0]?.Trim();
+        return InviteCode.IsWellFormed(code) ? code : null;
+    }
+
+    /// <summary>
     /// The ProblemDetails detail for a CIAM deny. States only what the decision established (FR-B03) — and
     /// says so plainly where the fix is an administrator's, so a refused external user is not left guessing.
     /// </summary>
@@ -564,8 +586,10 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
             "Another contact holds the identity key for this sign-in, so it cannot be bound. An administrator has been "
             + "alerted through an identity-collision flag.",
         ContactBindingDecision.DenyContactNotInvited =>
-            "This sign-in has not been invited to this workspace. External users are added by invitation; ask the person "
-            + "who works with you here to invite you.",
+            // Task 185 (design §4.1 step 6, §4.2): never says whether a code was missing or wrong.
+            "This sign-in has not been invited to this workspace, or the invitation link was not used. Open the invitation "
+            + "link from your email in this browser and sign in again. If it has expired, ask the person who works with you "
+            + "here to invite you again.",
         _ => "Access could not be resolved for this sign-in. Please try again.",
     };
 }
