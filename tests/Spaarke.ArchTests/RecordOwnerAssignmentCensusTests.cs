@@ -387,6 +387,15 @@ public class RecordOwnerAssignmentCensusTests
         Restore,
 
         /// <summary>
+        /// UAC task 183 (owner round 96, D-135): re-owns an ORDINARY Decision Record or Signal to the ordinary team its caller
+        /// names (ontology task 148's follow-the-assignee job) — never into or out of the Secure Record business unit, which
+        /// stays the secure pass's. Asserted (<see cref="EveryOrdinaryReownWriteSitsBehindItsGuards"/>): before its owner write
+        /// the member checks the table against its two-table set, resolves the Secure Record business unit, and returns
+        /// <c>RefusedSecure</c>.
+        /// </summary>
+        OrdinaryReown,
+
+        /// <summary>
         /// Task 182: a write the contract forbids, listed only until the named ontology task removes it. Used only by
         /// <see cref="BusinessUnitWrites"/> (a direct <c>owningbusinessunit</c> write is never anything else).
         /// </summary>
@@ -469,6 +478,12 @@ public class RecordOwnerAssignmentCensusTests
             "out of isolation whose mirrored shares could not all be removed (back on the Secure team, so no later pass reads " +
             "it as never isolated), or a row the pass pulled into isolation whose support then left (back on its ordinary " +
             "owner); read back."),
+        new OwnerWriteEntry("SecureChildReconciler.cs", "ReownOrdinaryRowAsync", 1, OwnerWriteKind.OrdinaryReown,
+            "UAC task 183 (owner round 96, D-135 item 2): an ORDINARY sprk_decisionrecord or sprk_signal re-owned to the ordinary " +
+            "team ontology task 148's job names (the To Do's assignee's team) — refused when the row's owner, its business unit " +
+            "or the team is in the Secure Record business unit, or the row is user-owned. The write is a conditional Web API PATCH " +
+            "(If-Match on the guard read's versionnumber; a 412 is Conflict, a 404 NotFound) that shares the pass's evict and " +
+            "read-back (WriteOwnerAndReadBackAsync). No identity gains Write on a Decision Record."),
         new OwnerWriteEntry("RecordCreationService.cs", "CreateMatterAsync", 1, OwnerWriteKind.Root,
             "Office quick-create of a MATTER (a root) — owned by the resolver's team for the acting user (task 080)."),
         new OwnerWriteEntry("RecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
@@ -559,6 +574,57 @@ public class RecordOwnerAssignmentCensusTests
             "The owner-write census does not match the source (unified-access-control-r2 task 146 r2). A child's owner is "
             + "IRecordOwnershipResolver's answer — no writer computes a team itself. Route the new write through the resolver "
             + "(or classify it with its reason), then list it:\n" + string.Join("\n", problems));
+    }
+
+    // UAC task 183: an OrdinaryReown owner write is not a resolver answer — its team is the caller's — so it is allowed only
+    // behind its own guards, in this order, before the write: the two-table check, the Secure Record business unit resolved,
+    // and a RefusedSecure return. Removing any of them from the member fails here (and the behaviour tests fail too).
+    private static readonly string[] OrdinaryReownGuards =
+        { "OrdinaryReownTables.Contains(", "ResolveSecureBusinessUnitAsync(", "OrdinaryRowReownOutcome.RefusedSecure" };
+
+    [Fact(DisplayName = "Task 183: an OrdinaryReown owner write sits behind the table check and the Secure Record business-unit guard")]
+    public void EveryOrdinaryReownWriteSitsBehindItsGuards()
+    {
+        var files = ServerFiles();
+        var globalKeys = GlobalOwnerKeys(files);
+        var problems = OwnerWrites
+            .Where(e => e.Kind == OwnerWriteKind.OrdinaryReown)
+            .Select(e => CodeOf(files, e.FileName) is { } code && MethodBody(code, e.Member) is { } body
+                ? OrdinaryReownGuardsComeFirst(body, globalKeys) ? null : $"{e.FileName}.{e.Member}: a guard is missing or after the owner write"
+                : $"{e.FileName}.{e.Member}: not found")
+            .Where(p => p is not null)
+            .ToList();
+        Assert.True(problems.Count == 0,
+            "OrdinaryReown owner writes without their guards (task 183):" + Environment.NewLine + string.Join(Environment.NewLine, problems));
+
+        // Negative control: the seeded member loses one guard at a time.
+        const string write = "fields[\"ownerid\"] = new EntityReference(\"team\", teamId);";
+        var guarded = "{ if (!OrdinaryReownTables.Contains(name)) throw new ArgumentException(); "
+                      + "var bu = await SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync(d, c, ct); "
+                      + "if (bu.Id == x) return Result(OrdinaryRowReownOutcome.RefusedSecure); " + write + " }";
+        Assert.True(OrdinaryReownGuardsComeFirst(guarded));
+        foreach (var guard in OrdinaryReownGuards)
+            Assert.False(OrdinaryReownGuardsComeFirst(guarded.Replace(guard, "Other(")), $"without {guard}");
+        Assert.False(OrdinaryReownGuardsComeFirst("{ " + write + " " + guarded[1..]), "a write before the guards");
+    }
+
+    /// <summary>True when every <see cref="OrdinaryReownGuards"/> appears, in order, before the member's first owner write.</summary>
+    private static bool OrdinaryReownGuardsComeFirst(string memberBody, IReadOnlySet<string>? globalKeys = null)
+    {
+        var writes = OwnerWritesIn(memberBody, globalKeys ?? new HashSet<string>()).Select(w => w.Index).ToList();
+        if (writes.Count == 0)
+            return false;
+
+        var at = 0;
+        foreach (var guard in OrdinaryReownGuards)
+        {
+            var index = memberBody.IndexOf(guard, at, StringComparison.Ordinal);
+            if (index < 0 || index > writes.Min())
+                return false;
+            at = index + guard.Length;
+        }
+
+        return true;
     }
 
     /// <summary>The scan of one written key against its census list: unlisted members, changed counts, stale entries.</summary>
