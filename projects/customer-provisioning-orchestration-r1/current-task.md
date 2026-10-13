@@ -10,12 +10,12 @@
 |-------|-------|
 | **Task** | T186 (first live E2E via `/provision-environment`, mock customer homed in Dewey Cheatham, stamp in the DEMO subscription) and the T240d build (option 2), in parallel with reviews of UAC task 185 |
 | **Status** | No agents running. The dev control plane is current with master. |
-| **Next Action** | (1) Owner: revoke Graph `Mail.Read` from `sprk-controlplane-dev-uami`? (2) T186 via `/provision-environment` (needs a SpaarkeMaster export carrying `sprk_externalinvitedon` first; see Remaining). (3) T240d build. |
+| **Next Action** | (1) Merge PR #1823 (SpaarkeMaster 1.2.2.0 source), then run `publish-dataverse-solutions-manifest.yml` from master: `publish: false`, then `publish: true`. (2) T186 via `/provision-environment`, intake `solutionPackageType = managed` (D34). (3) T240d build. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` = master + this checkpoint |
 
 ## 🔔 Waiting on the owner
 
-1. **L2 UAMI mail grants** (principal 38f7693f-…). The owner approved revoking `Mail.Read` 2026-10-13, but the UAMI never held it. It holds `Mail.ReadWrite`, `Mail.Send` and `MailboxSettings.Read` (tenant-wide, granted 2026-08-21), and no L2 code calls Graph mail. Recommend revoking all three; this needs the owner's OK, because it is a different grant from the one approved.
+1. ~~L2 UAMI mail grants~~: decided 2026-10-13 (D33): keep for now.
 2. **ISS-026** publisher verification (ADR-028 A9): an owner/business action before the first production customer.
 3. **UAC task 185** (invite code) is with the owner. Our review (2026-10-13): R1 secret-bearing send option, as a T240d production prerequisite; R2 `spaarkeextid` stays email + password. See t240d design §7 step 4 and §10.
 

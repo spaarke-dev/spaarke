@@ -48,3 +48,15 @@ The ADR text is ADR-028 A9 (master once PR #1810 merges). The same decision reac
 - H11's B2B invites stay for licensed users.
 - The `requestedAccessTokenVersion = 2` change alters the workforce token format for existing callers. Identity.Web
   accepts both formats; it is tested with the H3 change.
+
+## Update 2026-10-13 (SPA-r3, owner-approved; R3 commit `63b7c575b`): Teams for workforce contacts is in scope
+
+The Teams host signs everyone in through the shared multitenant SPA client, with NAA and the Teams context `tid`
+(R3 `notes/a9-bff-design.md` §2, §4, §8, §12; R3 does dev in its task 059).
+
+| # | Item | Provisioning work |
+|---|---|---|
+| 5 | The shared multitenant SPA client needs the redirect `brk-multihub://{SPA origin}` (SPA platform), next to the browser redirect | An operator one-time step on the platform app (not per stamp): add it with the production SPA origin. Dev is R3 task 059 |
+| 6 | `authenticationBehaviors.removeUnverifiedEmailClaim = true` on the multitenant SPA client and on every stamp BFF app. R3's registration binds an existing contact by the token `email` | H3 sets it on the BFF app (get-before-set, read back), and the operator one-time step sets it on the SPA client. `authenticationBehaviors` is, as far as we know, a Graph **beta** property: confirm on Learn when H3 is built, and pin a test on the payload. H13 should verify it on the stamp's BFF app |
+| 7 | Each customer's Teams admin approves the Spaarke Teams app once | A customer onboarding step and manual gate, never an agent write. The run hand-off report lists it next to the admin-consent URL |
+
