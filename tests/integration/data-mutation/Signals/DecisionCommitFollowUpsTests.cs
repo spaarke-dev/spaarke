@@ -1,5 +1,7 @@
 using Azure.Messaging.ServiceBus;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -9,6 +11,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -51,7 +54,13 @@ public sealed class DecisionCommitFollowUpsTests
     {
         var writer = new OntologyWriterDataverseClient(() => new Mock<IOrganizationServiceAsync2>().Object,
             NullLogger<OntologyWriterDataverseClient>.Instance);
+        // #1661: uac-r2's real synchronizer, scoped as in ExternalAccessModule; its walk reads the same mocked Dataverse.
+        var configuration = new ConfigurationBuilder().Build();
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new SecureChildShareSynchronizer(_entities.Object, null!, null!, configuration, NullLogger<SecureChildShareSynchronizer>.Instance));
+        var scopes = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
         var suppression = new SignalSuppressionService(_entities.Object, writer, new FakeTimeProvider(DateTimeOffset.UtcNow),
+            configuration, scopes,
             NullLogger<SignalSuppressionService>.Instance);
         return new DecisionCommitFollowUps(_trigger.Object, suppression, _entities.Object, NullLogger<DecisionCommitFollowUps>.Instance);
     }
@@ -122,10 +131,15 @@ public sealed class DecisionCommitFollowUpsTests
     public async Task SuppressionOverSignalsTheCallerCannotRead_ReachesTheCallerAsNothing_NoStatusNoCount()
     {
         // uac-r2 on 034: ApplyAsync counts every Signal of the (policy, core) grain app-only, Secure-team rows included. Here the
-        // grain holds three dismissed Signals owned by a Secure team (enough to suppress) that this caller cannot read.
+        // grain holds three dismissed team-owned Signals (enough to suppress) that this caller cannot read. This test is about
+        // non-disclosure to the caller, not the wall: it deliberately runs with no Secure team (the wall and the undetermined 503
+        // are covered in SignalSuppressionTests).
         var now = DateTime.UtcNow;
         _entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => new EntityCollection(Enumerable.Range(0, 3).Select(_ => new Entity("sprk_signal", Guid.NewGuid())
+            // #1661: the Secure-team lookup (businessunit / team) is not a Signal read - it answers none, so this environment has no
+            // Secure Record owner team and the partition (SignalSuppressionService.PartitionsAsync) is ordinary; only Signal reads return the grain.
+            .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName != "sprk_signal" ? new EntityCollection()
+                : new EntityCollection(Enumerable.Range(0, 3).Select(_ => new Entity("sprk_signal", Guid.NewGuid())
             {
                 ["sprk_signalstatus"] = new OptionSetValue(SignalWriter.SignalStatusResolved),
                 ["sprk_resolutiontype"] = new OptionSetValue(SignalWriter.ResolutionDismissed),

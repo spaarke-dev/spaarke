@@ -5,6 +5,7 @@ using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -234,7 +235,8 @@ public sealed class DecisionCommitServiceTests
             var jobs = new Mock<JobSubmissionService>(MockBehavior.Loose, Options.Create(new ServiceBusOptions { QueueName = "test" }),
                 NullLogger<JobSubmissionService>.Instance, new Mock<ServiceBusClient>().Object);
             var trigger = new SignalEvaluationTrigger(jobs.Object, NullLogger<SignalEvaluationTrigger>.Instance);
-            var suppression = new SignalSuppressionService(Entities.Object, WriterClient(), Clock, NullLogger<SignalSuppressionService>.Instance);
+            var suppression = new SignalSuppressionService(Entities.Object, WriterClient(), Clock, new ConfigurationBuilder().Build(),
+                new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), NullLogger<SignalSuppressionService>.Instance);
             FollowUps = new Mock<DecisionCommitFollowUps>(trigger, suppression, Entities.Object, NullLogger<DecisionCommitFollowUps>.Instance)
             { CallBase = false };
             FollowUps.Setup(f => f.AfterRecordedAsync(It.IsAny<Guid?>(), It.IsAny<IReadOnlyList<DecisionCommitStep>>(),
