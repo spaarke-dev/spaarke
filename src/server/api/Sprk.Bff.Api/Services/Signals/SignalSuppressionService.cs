@@ -266,9 +266,10 @@ public sealed class SignalSuppressionService
     /// <summary>A hit's Signal row as <see cref="SignalWriter"/> would write it: the subject's regarding lookup, and <c>sprk_matter</c>
     /// when the core record is a matter (no owner yet: the writer's resolver decides it from the same truth, so the subject's owner stands
     /// in for it).</summary>
-    private static PartitionItem ItemOf(SignalHit hit)
+    private static PartitionItem ItemOf(string policyCode, SignalHit hit)
     {
-        var row = new Entity("sprk_signal", Guid.NewGuid());
+        // partition probe, never created; id is the hit's identity (182 census: not a create site)
+        var row = new Entity("sprk_signal", ProbeId(policyCode, hit));
         if (SignalWriter.RegardingLookupByEntity.TryGetValue(hit.SubjectEntity, out var column))
         {
             row[column] = new EntityReference(hit.SubjectEntity, hit.SubjectId);
@@ -276,6 +277,30 @@ public sealed class SignalSuppressionService
 
         if (hit.Core is { Entity: "sprk_matter" } core) row["sprk_matter"] = new EntityReference("sprk_matter", core.Id);
         return new PartitionItem(row, null, hit.SubjectEntity, hit.SubjectId, OwnerFromSubject: true);
+    }
+
+    /// <summary>Fixed namespace of <see cref="ProbeId"/> (random v4 Guid, generated once; never change it: ids derive from it).</summary>
+    private static readonly Guid ProbeNamespace = new("5c1f6a52-3b0e-4f0b-9d2a-7e4a1c8b6d30");
+
+    /// <summary>
+    /// The probe row's id: a name-based (RFC 4122 version 5, SHA-1) Guid over <see cref="ProbeNamespace"/> and the hit's dedupe key
+    /// (<see cref="SignalWriter.BuildDedupeKey"/>, episode 0: a probe belongs to no episode, only to the policy and subject). The walk de-duplicates
+    /// rows by (table, id) (<see cref="SecureChildShareSynchronizer.SecureRootsAboveAsync"/>), so every hit needs an id of its own,
+    /// and the same hit gets the same id on every call.
+    /// </summary>
+    internal static Guid ProbeId(string policyCode, SignalHit hit)
+    {
+        var name = SignalWriter.BuildDedupeKey(
+            policyCode, hit.SubjectEntity, hit.SubjectId.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant(), 0);
+        var nameBytes = System.Text.Encoding.UTF8.GetBytes(name);
+        var input = new byte[16 + nameBytes.Length];
+        ProbeNamespace.TryWriteBytes(input, bigEndian: true, out _);
+        nameBytes.CopyTo(input, 16);
+        var hash = System.Security.Cryptography.SHA1.HashData(input);
+        var id = hash.AsSpan(0, 16).ToArray();
+        id[6] = (byte)((id[6] & 0x0F) | 0x50); // version 5
+        id[8] = (byte)((id[8] & 0x3F) | 0x80); // RFC 4122 variant
+        return new Guid(id, bigEndian: true);
     }
 
     /// <summary>
@@ -395,7 +420,7 @@ public sealed class SignalSuppressionService
         SuppressionPartition[] partitions;
         try
         {
-            partitions = await PartitionsAsync(hits.Select(ItemOf).ToList(), ct).ConfigureAwait(false);
+            partitions = await PartitionsAsync(hits.Select(h => ItemOf(policyCode, h)).ToList(), ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

@@ -1018,6 +1018,40 @@ public class SignalSuppressionTests
     }
 
     [Fact]
+    public void Census182_TheProbeId_IsThePolicyAndSubjectsIdentity_DistinctPerHit_StablePerHit_AndVersion5()
+    {
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var first = SignalSuppressionService.ProbeId(Code, Hit(MatterId, a));
+
+        first.Should().Be(SignalSuppressionService.ProbeId(Code, Hit(MatterId, a)), "the same hit has the same probe id on every call");
+        first.Should().NotBe(SignalSuppressionService.ProbeId(Code, Hit(MatterId, b)), "two hits (two subjects) must not collapse in the walk's (table, id) de-duplication");
+        first.Should().NotBe(SignalSuppressionService.ProbeId("OTHER-POLICY", Hit(MatterId, a)), "the same subject under another policy is another hit");
+        first.Should().NotBe(Guid.Empty);
+        first.ToString("D")[14].Should().Be('5', "a name-based (RFC 4122 version 5) Guid");
+    }
+
+    [Fact]
+    public async Task Census182_ASecureHit_IsStillPlacedUnderItsRoot_WhenAnOrdinaryHitComesFirst()
+    {
+        // The walk de-duplicates rows by (table, id): if every probe shared one id, the secure hit's probe (whose only root is its
+        // core matter) would be dropped behind the ordinary one, and the whole set would be read as "no secure root anywhere".
+        var s = new Store();
+        var secureMatter = Guid.NewGuid();
+        s.SecureMatter(secureMatter);
+        var ordinary = Guid.NewGuid();
+        s.Subject(ordinary);
+        var underSecureMatter = Guid.NewGuid();
+        s.Subject(underSecureMatter);
+
+        var partitions = await s.Service.PartitionsOfHitsAsync(Code, [Hit(MatterId, ordinary), Hit(secureMatter, underSecureMatter)], default);
+
+        partitions.Should().NotBeNull();
+        partitions![("sprk_communication", ordinary)].Should().Be(SuppressionPartition.Ordinary);
+        partitions[("sprk_communication", underSecureMatter)].Should().Be(SuppressionPartition.Secure([("sprk_matter", secureMatter)]));
+    }
+
+    [Fact]
     public async Task R2_AStampLeftByAMoveIntoASecureFamily_IsWithdrawnNightly_AndTheRouteShowsNoDate()
     {
         var s = new Store();
@@ -1466,6 +1500,9 @@ public class SignalSuppressionTests
             Others.Add(Root("sprk_project", ProjectA, secure: true));
             Others.Add(Root("sprk_project", ProjectB, secure: true));
         }
+
+        /// <summary>A secure matter (owned by the Secure team, flagged secure): a hit whose core record is this matter sits under it.</summary>
+        public void SecureMatter(Guid id) => Others.Add(Root("sprk_matter", id, secure: true));
 
         private static Entity Root(string table, Guid id, bool secure)
         {
