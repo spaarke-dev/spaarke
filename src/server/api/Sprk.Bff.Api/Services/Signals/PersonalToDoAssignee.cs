@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.ExternalAccess;
+using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Services.Signals;
 
@@ -40,16 +41,23 @@ internal static class PersonalToDoAssignee
 {
     internal const string Table = "sprk_todo";
 
-    /// <summary>The To Do's filing lookups: uac-r2's lineage entry for <c>sprk_todo</c> UNION the four core-ancestor lookups
-    /// (<see cref="CoreAncestorResolver.CoreAncestorLookups"/>). The lineage row omits <c>sprk_regardingservicerequest</c>, and a
-    /// To Do filed under a service request is filed — its service request's team owns it, never the assignee's. Any value set
-    /// means it is filed.</summary>
-    internal static readonly IReadOnlyList<string> FilingColumns = SecureChildLineage.Children[Table].Lookups.Keys
+    /// <summary>The To Do's filing lookups. "Filed" is any regarding at all (owner K2: only a To Do filed under NOTHING is
+    /// personal): every lookup in <see cref="TodoRegardingBuilder.AllRegardingLookups"/> — the single list both clients write,
+    /// identity parents (<c>sprk_regardingorganization</c>, <c>sprk_regardingcontact</c>) included — UNION uac-r2's lineage entry
+    /// for <c>sprk_todo</c> and the four core-ancestor lookups (<see cref="CoreAncestorResolver.CoreAncestorLookups"/>), which
+    /// carry the columns that list lacks (<c>sprk_regardingagreement</c>, <c>sprk_regardingreportcard</c>,
+    /// <c>sprk_regardingservicerequest</c>). Any value set means it is filed.</summary>
+    internal static readonly IReadOnlyList<string> FilingColumns = TodoRegardingBuilder.AllRegardingLookups
+        .Concat(SecureChildLineage.Children[Table].Lookups.Keys)
         .Concat(CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute))
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToArray();
 
-    private static readonly string[] Columns = [AssignedToDefaults.AssignedToAttribute, .. FilingColumns];
+    /// <summary>The ADR-024 polymorphic pair: a To Do whose pair names a record is filed even with no typed lookup set.</summary>
+    private static readonly string[] PairColumns =
+        [TodoRegardingBuilder.FieldRegardingRecordType, TodoRegardingBuilder.FieldRegardingRecordId];
+
+    private static readonly string[] Columns = [AssignedToDefaults.AssignedToAttribute, .. FilingColumns, .. PairColumns];
 
     /// <summary>Reads the To Do app-only and answers its Assigned To's one enabled systemuser; <c>null</c> for no single user.</summary>
     /// <exception cref="Exception">A Dataverse fault (other than the row not existing) propagates.</exception>
@@ -69,13 +77,18 @@ internal static class PersonalToDoAssignee
             return null;
         }
 
-        if (todo is null || FilingColumns.Any(c => todo.GetAttributeValue<EntityReference>(c) is { } r && r.Id != Guid.Empty))
+        if (todo is null || IsFiled(todo))
             return null;
 
         return todo.GetAttributeValue<EntityReference>(AssignedToDefaults.AssignedToAttribute) is { } assignedTo && assignedTo.Id != Guid.Empty
             ? await SingleEnabledUserAsync(links, assignedTo.Id, ct).ConfigureAwait(false)
             : null;
     }
+
+    /// <summary>True when the To Do is filed under anything: a regarding lookup is set, or the ADR-024 pair names a record.</summary>
+    private static bool IsFiled(Entity todo) =>
+        FilingColumns.Any(c => todo.GetAttributeValue<EntityReference>(c) is { } r && r.Id != Guid.Empty)
+        || PairColumns.Any(c => todo.Contains(c) && todo[c] is { } v && !string.IsNullOrWhiteSpace(v.ToString()));
 
     /// <summary>The ONE eligible (enabled, interactive, non-application) systemuser whose <c>sprk_primarycontact</c> is
     /// <paramref name="contactId"/>; <c>null</c> when there is none, several, or only ineligible ones. A fault propagates.</summary>

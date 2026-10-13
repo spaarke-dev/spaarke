@@ -1314,12 +1314,13 @@ public sealed class DecisionCommitServiceTests
     /// <summary>The REAL resolver over: a personal To Do (user-owned, filed under nothing unless <paramref name="filed"/>) in the
     /// CHILD unit, so its own answer is ChildTeam; two users in the GENERAL unit (GeneralTeam). A no-core Signal about the To Do, whose
     /// Assigned To is <see cref="AssigneeContact"/> when <paramref name="assigned"/>. Which users link to that contact is per test.</summary>
-    private static Rig PersonalToDoRig(bool assigned = true, bool filed = false, bool filedUnderServiceRequest = false, bool filedUnderDocument = false, bool assigneeHasBusinessUnit = true)
+    private static Rig PersonalToDoRig(bool assigned = true, bool filed = false, bool filedUnderServiceRequest = false, bool filedUnderDocument = false, bool assigneeHasBusinessUnit = true,
+        Dictionary<string, object>? regardingOverride = null)
     {
         var regarding = filed ? new Dictionary<string, object> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", FilingMatter) }
             : filedUnderServiceRequest ? new Dictionary<string, object> { ["sprk_regardingservicerequest"] = new EntityReference("sprk_servicerequest", FilingServiceRequest) }
             : filedUnderDocument ? new Dictionary<string, object> { ["sprk_regardingdocument"] = new EntityReference("sprk_document", FilingDocument) }
-            : null;
+            : regardingOverride;
         var directory = Tests.TestInfrastructure.OwnershipDirectory.Standard()
             .WithUser(AssigneeUser, Guid.NewGuid(), assigneeHasBusinessUnit ? Tests.TestInfrastructure.OwnershipDirectory.GeneralBu : Guid.Empty)
             .WithUser(OtherUser, Guid.NewGuid(), Tests.TestInfrastructure.OwnershipDirectory.GeneralBu)
@@ -1370,6 +1371,9 @@ public sealed class DecisionCommitServiceTests
     [InlineData("todo-filed")]
     [InlineData("todo-filed-under-service-request")]
     [InlineData("todo-filed-under-non-core-parent")]
+    [InlineData("todo-regarding-organization")]
+    [InlineData("todo-regarding-contact")]
+    [InlineData("todo-pair-only")]
     [InlineData("application-user-only")]
     [InlineData("non-interactive-only")]
     [InlineData("external-flagged-only")]
@@ -1377,7 +1381,15 @@ public sealed class DecisionCommitServiceTests
     {
         var rig = PersonalToDoRig(assigned: fallback != "no-assigned-to", filed: fallback == "todo-filed",
             filedUnderServiceRequest: fallback == "todo-filed-under-service-request",
-            filedUnderDocument: fallback == "todo-filed-under-non-core-parent");   // owner-confirmed K2: only a To Do filed under NOTHING is personal
+            filedUnderDocument: fallback == "todo-filed-under-non-core-parent",
+            regardingOverride: fallback switch
+            {
+                // identity parents (not lineage) and the ADR-024 pair alone: all FILED, so the assignee never wins
+                "todo-regarding-organization" => new() { ["sprk_regardingorganization"] = new EntityReference("sprk_organization", Guid.NewGuid()) },
+                "todo-regarding-contact" => new() { ["sprk_regardingcontact"] = new EntityReference("contact", Guid.NewGuid()) },
+                "todo-pair-only" => new() { ["sprk_regardingrecordtype"] = "sprk_document", ["sprk_regardingrecordid"] = FilingDocument.ToString() },
+                _ => null,
+            });   // owner-confirmed K2: only a To Do filed under NOTHING is personal
         rig.Links.UsersByLink[AssigneeContact] = fallback switch
         {
             "no-systemuser" => [],
