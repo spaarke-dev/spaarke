@@ -149,7 +149,7 @@ customer invites them, so the **invitation link** carries the customer:
 | `Ciam__Instance` | literal `https://spaarkeextid.ciamlogin.com/` (platform value, one for all stamps) |
 | `Ciam__TenantId` | literal `7052feba-bfc4-43e0-b09e-65014b429131` (platform) |
 | `Ciam__Domain` | literal `spaarkeextid.onmicrosoft.com` (the issuer for local-account identities) |
-| `Ciam__Audience` | `from-h3-output:bff_app_client_id` (the customer's own BFF app) |
+| `Ciam__Audience` | ~~`from-h3-output:bff_app_client_id`~~ → the H3c output `ciam_api_app_id` (option 2, S1 2026-10-12) |
 | `Ciam__GraphProvisioner__ClientId` | `from-h3-output:bff_app_client_id` |
 | `ExternalAccess__PortalUrl` | `https://external.spaarke.com/?customer=` + `from-intake-parameter:customer_id` (needs a composed source, or the value is built in H4b) |
 
@@ -162,7 +162,9 @@ If the platform values move later, they belong in L2 options, not intake.
 **New H-step, H3c "CIAM service principal"** (after H3, before H4b). L2 acts in `spaarkeextid` through its own
 cross-tenant app (see §7):
 - create or get the BFF app's service principal there;
-- create or get its Graph `User.Create` app-role assignment.
+- create or get its Graph `User.Create` app-role assignment;
+- (option 2, S1 2026-10-12) create or get the customer's CIAM API app `sprk-{customerId}-ciam-api` and its service
+  principal (shape in §10), read back until visible before PATCHing; output `ciam_api_app_id`.
 
 Re-runs are idempotent: match by `appId`, and by principal plus role.
 
@@ -267,10 +269,20 @@ ARM and Graph scopes; the browser consent works). Test ran in a throwaway ACI as
 
 ## 10. Recommendation
 
-**Each customer's own BFF app registration (D-13) also serves as that customer's CIAM audience and its CIAM Graph
-provisioner.**
-- **Audience.** Its service principal is provisioned into `spaarkeextid`, and the stamp sets
-  `Ciam:Audience = Ciam:GraphProvisioner:ClientId = {bffAppId}`.
+> **Revised after S1 (2026-10-12): option 2.** The audience is a per-customer CIAM API app in `spaarkeextid`; the BFF app
+> stays the keyless CIAM Graph provisioner. The bullets below are updated; "Alternatives rejected" is kept as written then.
+
+**Each customer gets a CIAM API app registered in `spaarkeextid` as its CIAM audience; the customer's own BFF app
+registration (D-13) is its keyless CIAM Graph provisioner.**
+- **Audience.** H3c creates (get-before-set, keyless via MI-FIC as L2's own CIAM app, §7 step 1, which already needs
+  `Application.ReadWrite.All` in `spaarkeextid` for the BFF app's service principal) the app `sprk-{customerId}-ciam-api`:
+  `requestedAccessTokenVersion=2`, scope `user_impersonation`, `identifierUris=api://{appId}`, the CIAM SPA client in
+  `preAuthorizedApplications`, plus its service principal; with read-back-until-visible and retry (S1 build findings).
+  The stamp sets `Ciam:Audience = {ciamApiAppId}` and `Ciam:GraphProvisioner:ClientId = {bffAppId}`; H4b writes both and
+  the registry records `ciamApiAppId`.
+- **Directory contract (agreed with R3 2026-10-12).** The T240c directory entry per customer carries `bffAppId`
+  (workforce scope) and `ciamBffAppId` = the CIAM API app id (the field name R3's SPA already reads,
+  `external-spa/src/auth/backend-selection.ts`).
 - **Credential.** The stamp signs in to the CIAM tenant with the MI-FIC it already has, as Graph `User.Create`. It holds
   no certificate or secret.
 - **Routing.** Contacts reach the right stamp through an invitation link that carries only the customer key. The SPA
