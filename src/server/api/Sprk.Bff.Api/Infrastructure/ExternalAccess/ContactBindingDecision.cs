@@ -532,6 +532,13 @@ public static class ContactBindingDecision
     public const string InviteContactLookupFailed = "sdap.access.invite.contact_lookup_failed";
 
     /// <summary>
+    /// Task 184 — the invite needed the pending-invite marker (<see cref="ExternalInvitedOnColumn"/>) as the contact's ONLY
+    /// evidence of this environment's intent, and the marker did not land (the column is not provisioned yet, or the write
+    /// failed). Retryable (503): nothing was reported as invited and no email was sent.
+    /// </summary>
+    public const string InviteMarkerNotWritten = "sdap.access.invite.invite_marker_not_written";
+
+    /// <summary>
     /// Reads a contact's binding as Unbound / Bound / Unreadable from its raw column values.
     /// </summary>
     /// <remarks>

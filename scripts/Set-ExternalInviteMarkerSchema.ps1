@@ -44,9 +44,16 @@
                      field-permission rows travel with them); a profile missing from one is added by -Apply.
       (e) PUBLISH    contact.
 
-    ⚠️ DEPLOY ORDER. A BFF carrying task 184 WRITES this column on every invite. Before this script runs the BFF logs an
-    error and invites without the marker (the pre-184 behaviour: E11 then binds only on an active grant). Apply this script —
-    and see -Verify exit 0 — before relying on "ExistingAccount" invites of a person with no grant yet.
+    ⚠️ DEPLOY ORDER. A BFF carrying task 184 WRITES this column on every invite.
+      - DEVELOPMENT: run this script (-Apply, then -Verify exit 0) BEFORE deploying that BFF.
+      - CUSTOMER STAMPS get the column only through the SpaarkeMaster import, and scripts/Deploy-Release.ps1 runs Phase 2
+        (the BFF) before Phase 3 (the SpaarkeMaster import). Until Phase 3 completes, the BFF logs an error per invite
+        and:
+          * a NEW-account invite still succeeds (its CIAM create and oid bind happen in the same request; it needs no
+            marker);
+          * an invite of a person who ALREADY has a CIAM account ("ExistingAccount"), and an invite whose oid write
+            failed, answer a retryable 503 sdap.access.invite.invite_marker_not_written and send NO email — the marker
+            is those contacts' only evidence. Retry after the import.
 
     ⚠️ RELEASE. Stamps receive the column and its profile permissions only through a SpaarkeMaster version bump and release
     export after -Apply has run in the development environment.

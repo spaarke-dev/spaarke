@@ -439,6 +439,9 @@ public sealed class ContactIdentityBinder
             + "correct it before the contact can be invited.",
         ContactBindingDecision.InviteContactLookupFailed =>
             "The contact for this email could not be looked up. Nothing was created; try again.",
+        ContactBindingDecision.InviteMarkerNotWritten =>
+            "The invite could not be recorded on the contact, so the person could not sign in from it. No email was "
+            + "sent; try again. If this environment is still receiving its schema update, try again after it completes.",
         _ => null,
     };
 

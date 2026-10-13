@@ -185,32 +185,121 @@ public class ExistingCiamAccountInviteTests
         _h.Emails.Onboarding.Should().ContainSingle();
     }
 
+    /// <summary>The retryable 503 of an invite whose contact needed the marker and did not get it (fix round 1, F4-2).</summary>
+    private static void ShouldBeMarkerNotWritten(IResult result)
+    {
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable, "retryable — never a 200, never a generic 500");
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ContactBindingDecision.InviteMarkerNotWritten);
+    }
+
     [Fact]
-    public async Task AMarkerThatCannotBeWritten_StopsTheInvite_BeforeAnyCiamAccount()
+    public async Task AMarkerThatCannotBeWritten_StopsTheInvite_BeforeAnyCiamAccount_WithARetryable503()
     {
         var contact = UnboundContact();
         _h.Identities.MarkerWriteFailure = StoreWriteStatus.Failed;
 
-        var result = await InviteAndGrant();
+        ShouldBeMarkerNotWritten(await InviteAndGrant());
 
-        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
         _ciam.Created.Should().BeEmpty("no CIAM account without the invite's own evidence");
+        _h.Emails.Onboarding.Should().BeEmpty();
+        _h.Emails.ExistingAccount.Should().BeEmpty();
         _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Customer stamps run Deploy-Release Phase 2 (the BFF) before Phase 3 (the SpaarkeMaster import that brings the
+    /// column). In that window the NORMAL new-account path needs no marker — the CIAM create and the oid bind happen in
+    /// the same request — so it still succeeds.
+    /// </summary>
     [Fact]
-    public async Task BeforeTheSchema_TheInviteProceedsWithoutTheMarker()
+    public async Task BeforeTheSchema_ANewAccountInvite_StillSucceeds_ItsOidIsBoundInTheSameRequest()
     {
-        // A BFF deployed before scripts/Set-ExternalInviteMarkerSchema.ps1: the pre-184 behaviour, logged as an error.
         var contact = UnboundContact();
         _h.Identities.InviteMarkerStatus = LookupStatus.ColumnMissing;
 
-        var outcome = await Invite();
+        var body = (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
 
-        outcome.Status.Should().Be("Provisioned");
+        body.OnboardStatus.Should().Be("Provisioned");
         _ciam.Created.Should().ContainSingle();
         _h.Identities.Contacts[contact].InvitedOn.Should().BeNull();
-        _h.Identities.Contacts[contact].Oid.Should().NotBeNull();
+        _h.Identities.Contacts[contact].Oid.Should().Be(_ciam.Created.Single().Oid.ToString("D"));
+        _h.Emails.Onboarding.Should().ContainSingle();
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// The same window, ExistingAccount: the marker is the contact's only evidence, so an invite without it is not a
+    /// success — a 200 would leave a contact no sign-in can bind, even after the column arrives. 503, no email, no grant.
+    /// MUTATION PROOF: going back to "log and report ExistingAccount" fails this test and the /invite one below.
+    /// </summary>
+    [Fact]
+    public async Task BeforeTheSchema_InviteAndGrant_OfAPersonWithACiamAccount_Is503_NoEmail_NoGrant()
+    {
+        var contact = UnboundContact();
+        _h.Identities.InviteMarkerStatus = LookupStatus.ColumnMissing;
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        ShouldBeMarkerNotWritten(await InviteAndGrant());
+
+        _h.Emails.ExistingAccount.Should().BeEmpty("nothing to sign in to yet: the first sign-in would be refused");
+        _h.Emails.Onboarding.Should().BeEmpty();
+        _h.Emails.Sent.Should().BeEmpty();
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty();
+        _h.Identities.Contacts[contact].Oid.Should().BeNull("nothing new is bound");
+    }
+
+    [Fact]
+    public async Task BeforeTheSchema_Invite_OfAPersonWithACiamAccount_IsAFailure_NotExistingAccount()
+    {
+        var contact = UnboundContact();
+        _h.Identities.InviteMarkerStatus = LookupStatus.ColumnMissing;
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        var outcome = await Invite();
+
+        outcome.Status.Should().NotBe(InviteExternalUserEndpoint.ExistingAccountStatus);
+        outcome.Failure.Should().NotBeNull();
+        outcome.Failure!.ReasonCode.Should().Be(ContactBindingDecision.InviteMarkerNotWritten);
+        _h.Emails.ExistingAccount.Should().BeEmpty();
+        _h.Identities.Contacts[contact].Oid.Should().BeNull();
+    }
+
+    /// <summary>
+    /// The oid-write-failed repair path relies on the marker too (the first sign-in email-binds the contact). With no
+    /// marker and the bind failed, there is no evidence and no grant follows: 503, no email, no grant.
+    /// </summary>
+    [Fact]
+    public async Task BeforeTheSchema_AFailedOidWrite_Is503_NoEmail_NoGrant()
+    {
+        var contact = UnboundContact();
+        _h.Identities.InviteMarkerStatus = LookupStatus.ColumnMissing;
+        _h.Identities.FailBind = true;
+
+        ShouldBeMarkerNotWritten(await InviteAndGrant());
+
+        _h.Emails.Onboarding.Should().BeEmpty();
+        _h.Emails.ExistingAccount.Should().BeEmpty();
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty();
+        _h.Identities.Contacts[contact].Oid.Should().BeNull();
+    }
+
+    /// <summary>With the marker landed, a failed oid write keeps today's 500, and the first sign-in repairs the binding.</summary>
+    [Fact]
+    public async Task AFailedOidWrite_WithTheMarker_KeepsThe500_AndTheFirstSignInRepairsIt()
+    {
+        var contact = UnboundContact();
+        _h.Identities.FailBind = true;
+
+        var result = await InviteAndGrant();
+
+        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        _h.Identities.Contacts[contact].InvitedOn.Should().NotBeNull();
+        _h.Identities.FailBind = false;
+        var created = _ciam.Created.Single().Oid;
+        var signIn = await IdentityBindingTestKit.Binder(_h.Identities)
+            .ResolveCiamCallerAsync(created.ToString(), Email, CancellationToken.None);
+        signIn.ContactId.Should().Be(contact);
     }
 
     [Fact]
