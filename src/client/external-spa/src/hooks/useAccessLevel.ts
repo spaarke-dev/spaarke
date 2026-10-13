@@ -35,7 +35,7 @@ import { useExternalContext } from './useExternalContext';
  * Accepted strings: "ViewOnly", "Collaborate", "FullAccess".
  * All unrecognised values fall back to ViewOnly (fail-safe).
  */
-function mapAccessLevelString(label: string | undefined | null): AccessLevel {
+export function mapAccessLevelString(label: string | undefined | null): AccessLevel {
   switch (label) {
     case 'Collaborate':
       return AccessLevel.Collaborate;

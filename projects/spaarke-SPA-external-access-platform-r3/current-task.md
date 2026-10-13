@@ -1,6 +1,6 @@
 # Current Task State - spaarke-SPA-external-access-platform-r3
 
-> **Last Updated**: 2026-10-10 (by context-handoff)
+> **Last Updated**: 2026-10-12 (Option B merged; 052/053 done; by context-handoff)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,59 +9,38 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Project setup: spec done → run `/project-pipeline` (owner-directed sequence) |
-| **Step** | Owner sequence: 1 `/merge-to-master` (done — PR #1604, auto-merge on) · 2 commit + push (done) · 3 `/compact` · 4 `/project-pipeline` |
-| **Status** | waiting for owner `/compact`, then run `/project-pipeline` |
-| **Next Action** | After compaction: confirm PR #1604 merged (`gh pr view 1604 --json state`); if a check failed, fix it on this branch first. Then invoke `/project-pipeline projects/spaarke-SPA-external-access-platform-r3` |
-
-### Files Modified This Session
-All committed and pushed on `work/spaarke-SPA-external-access-platform-r3`. Master was merged in at `bf79e279f`, cleanly; the BFF build is green (SDK 10.0.101).
-- `spec.md` — C1–C9, FR-01–FR-26, NFR-01–07, ADR tensions, owner clarifications (source for the pipeline).
-- `design.md` — auth hold lifted (§4.6 items 6–8); C7 self-registration and C8 auth alignment added.
-- `notes/r3-auth-path.md` — the definitive SPA/Teams auth path and owner decisions.
-- `notes/coordination/2026-10-09-to-provisioning-t240d-review.md` — R3's review of T240d (provisioning accepted R1–R5).
+| **Task** | None active. Next: 038 BFF deploy to dev (owner said "ok"; show the exact commands + rollback before running anything) |
+| **Step** | Merged and pushed: Option B multi-root rule with EFFECTIVE secure status + review fixes (merge `8b962fc3e`, ledger cites `df112adb0`); 052 NDA + Policy wizards (`267947544`, fixes `05f9698a3`); 053 Invention + Trademark wizards (`c5784c910`, fixes `7a8914a50`). Verified: build 0/0, filtered unit 3313, arch 941, SPA 993 |
+| **Status** | Worktree clean, branch in sync with origin. Locked leftover folders to delete by hand: `C:\code_files\spaarke\.claude\worktrees\agent-af842f88050a4b5b9`, `...\agent-ae8f4415f1670de13` (both unregistered, branches deleted), `C:\wt039bz` |
+| **Next Action** | 038 (deploy + live probes) -> 070 needs 043 owner inputs; grid views task after owner answers question 1 |
 
 ### Critical Context
-- The auth path is decided and grounded in `spaarke-auth-system-of-record-r1`.
-- Spec decisions the pipeline must keep:
-  - `user_impersonation` everywhere;
-  - single-tenant Spaarke workforce client, Spaarke-tenant authority, NAA + popup, no `webApplicationInfo`;
-  - run-time backend selection on both planes;
-  - workforce contacts self-register via a join link; contact created on first sign-in via the member-test branch;
-  - modules by user type;
-  - creator stamps `sprk_createdbyperson` / `sprk_createdbycontact`, with delete-own in the SPA;
-  - partner service requests behind a switch (default off);
-  - R3 owns FR-22 (Ciam audience forms) and FR-23 (default-scheme CIAM guard).
+- **Parallel pattern:** BFF tasks run in isolated worktrees under `C:\code_files\spaarke\.claude\worktrees\agent-*` (`git reset --hard <R3 sha>` first), commit there, main session merges `--no-ff`; after a merge re-verify ledger line cites (the guard only checks format). SPA tasks run in this worktree, uncommitted; the main session commits by explicit path. Agents never edit TASK-INDEX, this file, POML status or `.claude/`.
+- **Review policy:** auth/security/tenant-isolation changes get two fable passes; other FULL tasks one. Fix rounds sonnet; a fix that changes approach gets a scoped re-check. Max 4 agents.
+- **Bookkeeping edits:** python via PowerShell here-strings (sed breaks on the status emoji). Check with `pwsh -NoProfile -File scripts/check-task-status-drift.ps1`.
+- **Do not run the full BFF unit suite under load**; use filtered runs. Bash is very slow on this machine: prefer PowerShell, Grep, Read.
 
----
+## Owner answers 2026-10-12 (recorded in project CLAUDE.md §3)
+Option B; no delete after close; invoice upload = invoice rights only; team-access and renewal bell items wanted; contact owned by the customer's primary BU; intake (department from contact, Invention partners behind a flag, incidents simple, fixed lists, NDA review + issue); grid views from Dataverse views; 060 shared service OK if Model 1 allows; dev dispatch "ok"; 060 tenant-wide group permission approved if it cannot be scoped. Deferred: DEF-001 #1736 NDA generation, DEF-002 #1737 incident alerting.
 
-## Active Task
+## Open owner questions
+1. **Grid views:** (a) "assigned resolver" = the shared membership resolver? (b) views per entity = External Active / My / Inactive? (c) log the internal "My" views (`ownerid eq-userid`) as an issue?
+2. **Bell items:** team access A (none) / B (snapshot diff in cache); renewals A (accept modifiedon noise) / B (`sprk_renewedon` column).
+3. **ISS-005:** option A, `ExternalAccess:CustomerBusinessUnitId` written by provisioning H4b from H10's BU id.
+4. **060:** approve (1) the D-12 clarification, (2) the ADR-028 A8 carve-out for the `/organizations` registration client, (3) 60-day log retention. Analysis: `notes/task-060-model1-shared-service-analysis.md`.
+5. **052:** Service Requests as a partner default tab (opens first) or library-only? Accept no intake idempotency key as a known limit?
+6. **053:** optional "classes, if you know them" field on Trademark (design §4 deliberately omits classes)?
 
-`/project-pipeline` for R3 (not started). The pipeline creates README / PLAN / CLAUDE.md / tasks from `spec.md`.
+## Option B known limits (notes/task-039-notes.md §12.11)
+Messages and feed give no "incomplete" signal; `Truncated` may over-report; a project pair naming a deleted matter stays secure permanently; `IGenericEntityService` filing seam is DI-supplied (drop = over-hide, not leak).
 
-## Next Actions
-
-1. Verify PR #1604 is MERGED (docs only). If CI failed, fix it and push.
-2. `/project-pipeline projects/spaarke-SPA-external-access-platform-r3`.
-3. Then, in the auth worktree (`C:\code_files\spaarke-wt-spaarke-auth-system-of-record-r1`), start the **remediation phase** for the unowned issues (owner: "whatever is most efficient"):
-   - broken buttons and orphans: #1556–#1559;
-   - env-var defaults: #1573;
-   - BFF hardening: #1574, #1577;
-   - dev cleanup: #1578;
-   - hygiene: #1579.
-
-## Open Owner Questions / Blockers
-
-- **Registration service host (spec Unresolved Q1).** It co-hosts with the T240c directory, but who builds the directory is undecided: the owner says provisioning builds no new components. If unresolved, FR-14 goes to R4 with a written path.
-- **Teams broker pre-authorization:** decided by the FR-21 live check.
+## Next actions (in order)
+1. 038 BFF deploy to dev + live probes (show commands + rollback first).
+2. Grid views task once question 1 is answered (replaces 002's fixed columns).
+3. 070/071/072 after 038 and 043 owner inputs; 040 step 5 after 071.
+4. Before the BFF PR: `/conflict-check` + actionlint.
 
 ## Dependencies tracked elsewhere
-
-- **Provisioning:**
-  - T240c directory;
-  - T240d (spike S1 running; production CIAM SPA client created after S1);
-  - H3 pre-authorization of the new workforce client;
-  - PRQ-C-14 (landed, PR #1589);
-  - a per-customer shared mailbox (#1562, owner-approved).
-- **UAC-r2:** A5 (#1567).
-- **Issues R3 carries:** #1563, #1566, #1568.
+- ISS-001 (#1623), ISS-002 (#1633), ISS-003 (#1636), ISS-004, ISS-005 (#1673).
+- Copilot agent still uses `access_as_user` on `1e40baad`.
+- Operator: `mailbox-central@spaarke.com` + Exchange RBAC scoping for the stamp UAMI (H14a); BFF app user needs `prvDelete` on `sprk_servicerequest` (verify live).

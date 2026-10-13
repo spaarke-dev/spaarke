@@ -14,8 +14,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// The group-level <c>CallerPrincipalAuthorizationFilter</c> (task 025) has already authenticated the
 /// caller on EITHER plane (CIAM external contact or workforce user) and stored the resolved
 /// <see cref="CallerPrincipal"/> on <c>HttpContext.Items</c>. Principal-agnostic at the route level; the
-/// resolver applies the Option-B per-plane term (workforce App-Role → <c>sprk_approlemodulemap</c>; CIAM
-/// blanket outside-counsel set).
+/// resolver applies the A8 default-by-principal-kind rule (server-resolved kind: workforce →
+/// <c>legal-front-door</c> + <c>policy-library</c>; CIAM → <c>assigned-work</c>, plus <c>legal-front-door</c>
+/// when <c>ExternalAccess:PartnerServiceRequestsEnabled</c> is on); <c>sprk_approlemodulemap</c> rows are extras.
 ///
 /// ADR-001: Minimal API. ADR-008: group filter (no global middleware). ADR-009: the resolver caches the
 /// App-Role→module DATA, never an authorization decision. NFR-06: entitlement is UX-honest data, never
@@ -54,6 +55,14 @@ public static class MeEntitlementsEndpoint
             "[EXT-ENTITLE] Caller {ContactId} ({Plane}) entitled to {Count} module(s). TraceId={TraceId}",
             caller.ContactId, plane, entitlements.Count, httpContext.TraceIdentifier);
 
-        return Results.Ok(new MeEntitlementsResponse(displayName ?? string.Empty, caller.Email, plane, entitlements));
+        // Per-type availability for the Legal Front Door tiles (owner decision 2026-10-12): the same rule the submit route
+        // enforces, and only for a caller entitled to the module.
+        IReadOnlyList<int> intakeTypes = entitlements.Contains(
+                ModuleEntitlementResolver.LegalFrontDoorModule, StringComparer.OrdinalIgnoreCase)
+            ? resolver.IntakeRequestTypesFor(caller)
+            : Array.Empty<int>();
+
+        return Results.Ok(new MeEntitlementsResponse(
+            displayName ?? string.Empty, caller.Email, plane, entitlements, intakeTypes));
     }
 }

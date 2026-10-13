@@ -558,8 +558,12 @@
   <EntityRelationship Name="sprk_contact_ContactType_sprk_contacttype_ref" />
   <EntityRelationship Name="sprk_contact_Organization_sprk_organization" />
   <EntityRelationship Name="sprk_contact_sprk_assignedaccess_subjectcontact" />
+  <EntityRelationship Name="sprk_contact_sprk_communication_createdbycontact" />
+  <EntityRelationship Name="sprk_contact_sprk_document_createdbycontact" />
+  <EntityRelationship Name="sprk_contact_sprk_event_createdbycontact" />
   <EntityRelationship Name="sprk_contact_sprk_externalrecordaccess_grantedbycontact" />
   <EntityRelationship Name="sprk_contact_sprk_noaccessentry_subjectcontact" />
+  <EntityRelationship Name="sprk_contact_sprk_todo_createdbycontact" />
   <EntityRelationship Name="sprk_contact_sprk_todo_RegardingContact" />
   <EntityRelationship Name="sprk_Contact_Timekeeper_1n" />
   <EntityRelationship Name="sprk_contactorganization_Contact_contact" />

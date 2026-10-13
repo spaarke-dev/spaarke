@@ -156,6 +156,80 @@ public class CallerPrincipalTests
             "/me never emits the level string \"None\"");
     }
 
+    // ── GET /me systemUserId (task 054) ───────────────────────────────────────────────────────────
+    //
+    // The SPA decides whether to show Delete by comparing a row's sprk_createdbyperson stamp with /me; the
+    // server's IsCreatedByCaller stays the authority. These pin the field through the real handler.
+
+    [Fact]
+    public void Me_SystemUserCaller_ReturnsItsOwnSystemUserId_AndTheExistingMembersUnchanged()
+    {
+        var projectId = Guid.NewGuid();
+        var caller = Workforce(projectId);
+
+        var response = CallMe(caller);
+
+        response.SystemUserId.Should().Be(caller.SystemUserId);
+        response.SystemUserId.Should().NotBe(Guid.Empty);
+        response.ContactId.Should().Be(caller.ContactId);
+        response.Email.Should().Be("staff@contoso.com");
+        response.Projects.Should().Equal(new ProjectAccessEntry(projectId, "Collaborate"));
+    }
+
+    [Fact]
+    public void Me_WorkforceContactOnlyCaller_HasNullSystemUserId()
+    {
+        var caller = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = Guid.NewGuid(),
+            SystemUserId = null,
+            Email = "anchor@contoso.com",
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        };
+
+        CallMe(caller).SystemUserId.Should().BeNull();
+    }
+
+    [Fact]
+    public void Me_CiamCaller_HasNullSystemUserId_AndTheExistingMembersUnchanged()
+    {
+        var projectId = Guid.NewGuid();
+        var caller = Ciam(CallerProjectAccess.FromLevel(projectId, ExternalAccessLevel.ViewOnly));
+
+        var response = CallMe(caller);
+
+        response.SystemUserId.Should().BeNull();
+        response.ContactId.Should().Be(caller.ContactId);
+        response.Email.Should().Be("external@test.com");
+        response.Projects.Should().Equal(new ProjectAccessEntry(projectId, "ViewOnly"));
+    }
+
+    [Fact]
+    public void Me_EmptySystemUserId_IsNeverEmitted()
+    {
+        var caller = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = Guid.NewGuid(),
+            SystemUserId = Guid.Empty,
+            ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        };
+
+        CallMe(caller).SystemUserId.Should().BeNull("an empty id never matches a stamp, so it is not surfaced");
+    }
+
+    [Fact]
+    public void Me_SerializesSystemUserIdAsCamelCase()
+    {
+        var caller = Workforce(Guid.NewGuid());
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            CallMe(caller), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+
+        json.Should().Contain($"\"systemUserId\":\"{caller.SystemUserId}\"");
+    }
+
     // ── Defence in depth (task 136 · defect C2): the views require Read on their own ─────────────────
 
     [Fact]

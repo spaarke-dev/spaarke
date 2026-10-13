@@ -124,7 +124,11 @@ describe('each list view says when its list was cut short', () => {
 
 describe('a truncated flag from an earlier read never sits beside a later read error', () => {
   const reloadable: Array<[string, (projectId: string) => React.ReactElement, RegExp]> = [
-    ['to-dos', id => <SmartTodo projectId={id} accessLevel={AccessLevel.ViewOnly} />, /network down/],
+    [
+      'to-dos',
+      id => <SmartTodo projectId={id} accessLevel={AccessLevel.ViewOnly} />,
+      /Tasks could not be loaded just now/,
+    ],
     ['contacts', id => <ContactsOrganizations projectId={id} />, /Could not load contacts/],
   ];
 

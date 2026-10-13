@@ -65,11 +65,13 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     private const string DocumentEntity = "sprk_document";
     private const string ProjectEntity = "sprk_project";
 
-    /// <summary>The production sprk_document allow-list (ExternalAccessModule, task 134 derivation).</summary>
+    /// <summary>The production sprk_document allow-list (ExternalAccessModule, task 134 derivation, plus task 032's two
+    /// creator stamps).</summary>
     private static readonly IReadOnlySet<string> DocumentColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
         "sprk_project", "sprk_matter", "sprk_workassignment",
+        "sprk_createdbyperson", "sprk_createdbycontact",
     };
 
     /// <summary>The live outside-counsel Documents grid FetchXML (sprk_gridconfiguration 3af4102c, 2026-09-30).</summary>
@@ -189,10 +191,17 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         return row;
     }
 
+    /// <summary>
+    /// The secure-flag read (owner option B, r3 task 039): these column-guard tests decide nothing on the multi-root rule, so
+    /// it answers "none known not secure" (every unreadable root counts as secure, the fail-closed default).
+    /// </summary>
+    private static readonly NonSecureRootReader NoFlags = (_, _) =>
+        Task.FromResult(new NonSecureRootsRead(new HashSet<(ExternalGrantRootType Root, Guid Id)>()));
+
     private static Task<IResult> Fetch(ExternalModuleRegistry registry, CallerPrincipal principal, string fetchXml, FetchDouble dataverse) =>
         ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
             new FetchRequestDto(DocumentEntity, fetchXml, PagingCookie: null),
-            principal, registry, new FetchXmlEntityExtractor(), dataverse.Execute,
+            principal, registry, new FetchXmlEntityExtractor(), dataverse.Execute, NoFlags,
             NullLogger.Instance, CancellationToken.None);
 
     private static void ShouldBeProblem(IResult result, int status, string errorCode)
@@ -737,6 +746,10 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         {
             "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
             "sprk_project", "sprk_matter", "sprk_workassignment",
+            // spaarke-SPA-external-access-platform-r3 task 032 (FR-26, review 031 K2): the two task-030 creator stamps,
+            // NOT grid-derived. The SPA reads them to offer Delete only on the caller's own documents; they name a
+            // systemuser or contact id and nothing else (notes/task-032-notes.md).
+            "sprk_createdbyperson", "sprk_createdbycontact",
         },
         ["sprk_invoice"] = new[]
         {
@@ -753,6 +766,10 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         {
             "sprk_servicerequestid", "sprk_servicerequestnumber", "sprk_name", "statuscode", "createdon",
             "sprk_requestedby",
+            // spaarke-SPA-external-access-platform-r3, owner decision 2026-10-12: NOT grid-derived. The SPA reads the open /
+            // closed flag to hide Delete on a closed request (the delete route enforces it again). Appears on both sides of
+            // the task 134 shrink comparison, so it drops nothing.
+            "statecode",
         },
         ["sprk_gridconfiguration"] = new[] { "sprk_gridconfigurationid", "sprk_name", "sprk_configjson" },
     };
@@ -769,6 +786,8 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
             "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "statecode",
             "modifiedon", "createdon", "ownerid", "sprk_practicearea", "sprk_projecttype_ref",
         },
+        // Task 134's document list was the task-157 derivation (no rule-(b) column); task 032's two creator stamps are a
+        // later, deliberate addition, so they appear on both sides of the shrink comparison and drop nothing.
         ["sprk_document"] = LiveDerivedAllowLists["sprk_document"],
         ["sprk_invoice"] = new[]
         {
@@ -887,7 +906,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         var control = new FetchDouble();
         var allowed = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
             new FetchRequestDto(entity, gridFetch, PagingCookie: null), GrantedEverywhere(id), registry,
-            new FetchXmlEntityExtractor(), control.Execute, NullLogger.Instance, CancellationToken.None);
+            new FetchXmlEntityExtractor(), control.Execute, NoFlags, NullLogger.Instance, CancellationToken.None);
         allowed.Should().BeOfType<Ok<FetchResponseDto>>();
         control.Calls.Should().Be(1);
 
@@ -897,7 +916,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
 
         var result = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
             new FetchRequestDto(entity, withColumn, PagingCookie: null), GrantedEverywhere(id), registry,
-            new FetchXmlEntityExtractor(), dataverse.Execute, NullLogger.Instance, CancellationToken.None);
+            new FetchXmlEntityExtractor(), dataverse.Execute, NoFlags, NullLogger.Instance, CancellationToken.None);
 
         ShouldBeProblem(result, StatusCodes.Status400BadRequest, ExternalModuleDataEndpoints.ErrorFetchXmlColumnNotPermitted);
         dataverse.Calls.Should().Be(0);

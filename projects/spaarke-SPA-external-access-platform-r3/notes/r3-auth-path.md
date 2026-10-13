@@ -57,7 +57,7 @@ The production CIAM SPA client (redirect `https://external.spaarke.com`) is crea
 
 | # | Change | Why R3 needs it | Owner | Issue |
 |---|---|---|---|---|
-| D1 | **Self-registration service** (§5 decision 2): verify the home tenant is on the customer's allow-list, invite the B2B guest, add the guest to `sprk-{customerId}-users`, create or bind the contact with the **guest** `oid`. A pre-bound guest already resolves (`ContactIdentityBinder.ResolveWorkforceCallerAsync`: "everyone else resolves only through an existing oid binding"), so the member-test change becomes optional | Licence-free customer staff (U3) | owner to assign (shared directory service T240c is the natural home for the invite step; the stamp BFF writes the contact) | #1563 |
+| D1 | **Self-registration service** (§5 decision 2): verify the home tenant is on the customer's allow-list, invite the B2B guest, add the guest to `sprk-{customerId}-users`, create or bind the contact with the **guest** `oid`. *(Superseded 2026-10-09 by spec FR-15: the stamp creates the contact on first sign-in through the member-test branch, which is required, not optional.)* | Licence-free customer staff (U3) | owner to assign (shared directory service T240c is the natural home for the invite step; the stamp BFF writes the contact) | #1563 |
 | D2 | **Default modules by user type** (§5 decision 3, option b): change `ModuleEntitlementResolver` so a workforce caller (systemuser or workforce contact) gets `legal-front-door` + `policy-library`, and a CIAM partner keeps `assigned-work`. The app-role map stays only for optional extras. No Entra app roles and no per-user setup | Workforce users otherwise see no gated modules | R3 (small BFF change on the external surface) | #1568 |
 | D3 | T240c directory (workforce lookup + CIAM lookup) | Run-time server selection in production | provisioning | — (task 240c) |
 | D4 | T240d: per-customer CIAM audience, keyless provisioner, default-scheme CIAM-token guard | Partner plane on stamps | provisioning (+ R3 for the audience forms and the guard, if the owner agrees) | — (task 240d) |
@@ -71,7 +71,7 @@ The production CIAM SPA client (redirect `https://external.spaarke.com`) is crea
    1. The customer shares a join link: `https://external.spaarke.com/join?customer={key}`.
    2. The employee signs in with their **own company account** in their home tenant. This step needs a small registration-only client that reads nothing but their profile.
    3. Spaarke checks that their company tenant is on that customer's allowed list (the existing `CustomerTenantIds` setting, which provisioning already writes) and that they are a **member** of it (`acct = 0`, not someone else's guest).
-   4. Spaarke invites them as a guest (Graph invitations, no email), adds them to `sprk-{customerId}-users`, and creates their contact in the customer's Dataverse, bound to the guest `oid`.
+   4. Spaarke invites them as a guest (Graph invitations, no email), adds them to `sprk-{customerId}-users`, and creates their contact in the customer's Dataverse, bound to the guest `oid`. *(Superseded by spec FR-15: the contact is created by the stamp on first sign-in, via the member-test branch.)*
    5. The SPA then signs them in normally against Spaarke's tenant.
 
    Open sub-decisions:

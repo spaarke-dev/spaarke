@@ -78,14 +78,14 @@ public static class MembershipEndpoints
     internal const string CurrentUserCacheResource = "membership-currentuser";
 
     /// <summary>Cache schema version per ADR-009.</summary>
-    private const int CurrentUserCacheVersion = 1;
+    internal const int CurrentUserCacheVersion = 1;
 
     /// <summary>TTL for AAD-oid → systemuserid cache entries (10 min; the identity-normalization
     /// cache it used to match is 2 min since task 132 — see the file header) — a freshly disabled user
     /// continues to look like an authenticated systemuser for at most 10 min,
     /// at which point the next request will re-resolve and surface the row's
     /// absence as 401.</summary>
-    private static readonly TimeSpan CurrentUserCacheTtl = TimeSpan.FromMinutes(10);
+    internal static readonly TimeSpan CurrentUserCacheTtl = TimeSpan.FromMinutes(10);
 
     /// <summary>
     /// Registers the membership endpoint group on the supplied

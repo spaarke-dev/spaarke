@@ -43,6 +43,12 @@ public static class AuthorizationModule
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        // FR-23 (task 010 review fix): refuse to start when the CIAM tenant IS the workforce tenant. The
+        // default-scheme CIAM guard below rejects every token whose tid equals Ciam:TenantId, so identical
+        // values would turn it into a whole-stamp 401 outage for every workforce token. Fail at registration
+        // (deterministic startup refusal), not on the first request.
+        ThrowIfCiamTenantEqualsWorkforceTenant(configuration);
+
         // Azure AD JWT Bearer Token Validation (workforce tenant — sets the DEFAULT scheme)
         var authenticationBuilder = services
             .AddAuthentication(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme);
@@ -63,7 +69,12 @@ public static class AuthorizationModule
             var ciamTenantId = ciam["TenantId"];
             // External ID v2 authority: https://{subdomain}.ciamlogin.com/{tenantId}/v2.0
             options.Authority = $"{instance}/{ciamTenantId}/v2.0";
-            options.Audience = ciam["Audience"];
+            // FR-22 (external-access-platform-r3 task 010): the per-customer audience is accepted in BOTH
+            // forms — the bare app id (v2 access tokens) and api://{appId} (v1 / identifier-URI tokens) —
+            // derived from the ONE configured Ciam:Audience. Set as ValidAudiences rather than
+            // options.Audience so the framework does not collapse it back to a single value. Empty
+            // Ciam:Audience yields an empty list, so no audience is accepted (today's behaviour, not widened).
+            options.TokenValidationParameters.ValidAudiences = BuildCiamValidAudiences(ciam["Audience"]);
             options.TokenValidationParameters.ValidateIssuer = true;
             options.TokenValidationParameters.ValidateAudience = true;
             options.TokenValidationParameters.ValidateLifetime = true;
@@ -163,6 +174,85 @@ public static class AuthorizationModule
                         catch { /* token unreadable — skip logging */ }
                     }
                     if (existingOnFailed != null) await existingOnFailed(context);
+                };
+            });
+
+        // FR-23 (external-access-platform-r3 task 010 · auth review R1): the DEFAULT (workforce) scheme
+        // rejects every CIAM token — iss containing ciamlogin.com, or tid equal to Ciam:TenantId — the same
+        // rule CallerPrincipalResolver.DeterminePlane uses to classify the CIAM plane. It runs after the
+        // library's own validation and does not depend on whether that validation would also have rejected
+        // the token (spec FR-23: no reliance on library issuer defaults). The tid rule also covers a token the
+        // CIAM tenant issues through login.microsoftonline.com. Ciam:TenantId is read from configuration.
+        // A third rule — the tenant path segment of iss equals Ciam:TenantId — is a strict superset that also
+        // catches a tid-less token and CIAM custom URL domains (relies on Ciam:TenantId being set).
+        //
+        // Deliberately a SEPARATE PostConfigure, NOT inside the delegate above: that delegate is guarded by
+        // a process-wide once-flag (_jwtPostConfigureApplied), so any later JwtBearerOptions instance would
+        // be built WITHOUT it. A security guard must apply to every instance of the default scheme.
+        //
+        // Effect on the shared ExternalCollaboration policy (Ciam + default): a CIAM token still
+        // authenticates there through the Ciam scheme; only the default scheme's attempt fails.
+        services.PostConfigure<JwtBearerOptions>(
+            JwtBearerDefaults.AuthenticationScheme,
+            options =>
+            {
+                var ciamTenantId = configuration["Ciam:TenantId"];
+                options.Events ??= new JwtBearerEvents();
+                var existingOnTokenValidated = options.Events.OnTokenValidated;
+                options.Events.OnTokenValidated = async context =>
+                {
+                    // Both the validated token and the principal are read, so neither claim mapping nor
+                    // the token-handler type can hide the issuer or tenant from the guard.
+                    string? rawTenantId = null;
+                    if (context.SecurityToken is Microsoft.IdentityModel.JsonWebTokens.JsonWebToken jwt &&
+                        jwt.TryGetPayloadValue<string>("tid", out var tid))
+                    {
+                        rawTenantId = tid;
+                    }
+
+                    var tokenIssuer = context.SecurityToken?.Issuer;
+                    var principalIssuer = context.Principal?.FindFirst("iss")?.Value;
+                    var resolvedTenantId = TenantResolution.ResolveTenantId(context.Principal);
+
+                    string? denyReason = null;
+                    if (IsCiamIssuer(tokenIssuer) || IsCiamIssuer(principalIssuer))
+                    {
+                        denyReason = "issuer is a ciamlogin.com authority";
+                    }
+                    else if (IsCiamTenant(resolvedTenantId, ciamTenantId) ||
+                             IsCiamTenant(rawTenantId, ciamTenantId))
+                    {
+                        denyReason = "tid equals Ciam:TenantId";
+                    }
+                    else if (IsCiamIssuerTenant(tokenIssuer, ciamTenantId) ||
+                             IsCiamIssuerTenant(principalIssuer, ciamTenantId))
+                    {
+                        // Tenant path segment of iss == Ciam:TenantId — catches a tid-less token issued via
+                        // login.microsoftonline.com/{ciamTid}/v2.0 and CIAM custom URL domains.
+                        denyReason = "issuer tenant equals Ciam:TenantId";
+                    }
+
+                    if (denyReason is not null)
+                    {
+                        // Issuer HOST and tid are logged as structured properties (neither is a secret).
+                        // The token and headers are never logged.
+                        var issuerHost = Uri.TryCreate(tokenIssuer ?? principalIssuer, UriKind.Absolute, out var issuerUri)
+                            ? issuerUri.Host
+                            : null;
+                        var loggedTid = rawTenantId ?? resolvedTenantId;
+                        if (loggedTid is { Length: > 64 }) loggedTid = loggedTid[..64];
+                        context.HttpContext.RequestServices.GetService<ILoggerFactory>()?
+                            .CreateLogger("WorkforceSchemeCiamGuard")
+                            .LogWarning(
+                                "[AUTH] sdap.auth.deny.ciam_token_on_workforce_scheme: a CIAM token was presented to the default (workforce) scheme and was rejected ({Reason}). IssuerHost={IssuerHost} Tid={Tid}",
+                                denyReason,
+                                issuerHost,
+                                loggedTid);
+                        context.Fail("CIAM tokens are not accepted by the workforce scheme.");
+                        return;
+                    }
+
+                    if (existingOnTokenValidated != null) await existingOnTokenValidated(context);
                 };
             });
 
@@ -385,6 +475,98 @@ public static class AuthorizationModule
 
         return services;
     }
+
+    private const string ApiUriPrefix = "api://";
+
+    /// <summary>
+    /// FR-23 startup refusal: throws when <c>Ciam:TenantId</c> and <c>AzureAd:TenantId</c> both parse as GUIDs
+    /// and are equal (compared as <see cref="Guid"/>, so case / format / padding do not matter). Unset, blank,
+    /// placeholder (<c>#{…}#</c>) or any non-GUID value on either side never triggers it. The message names
+    /// both keys and no value.
+    /// </summary>
+    internal static void ThrowIfCiamTenantEqualsWorkforceTenant(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        if (Guid.TryParse(configuration["Ciam:TenantId"]?.Trim(), out var ciam) &&
+            Guid.TryParse(configuration["AzureAd:TenantId"]?.Trim(), out var workforce) &&
+            ciam == workforce)
+        {
+            throw new InvalidOperationException(
+                "Ciam:TenantId must not equal AzureAd:TenantId. The default (workforce) scheme rejects every token " +
+                "whose tid is the CIAM tenant, so identical values would reject every workforce token. " +
+                "Set Ciam:TenantId to the External ID (CIAM) tenant, not the workforce tenant.");
+        }
+    }
+
+    /// <summary>
+    /// FR-23: true when the first path segment of the issuer URL (<c>https://host/{tid}/v2.0</c>,
+    /// <c>https://sts.windows.net/{tid}/</c>) is a GUID equal to <c>Ciam:TenantId</c>. Covers a CIAM-tenant token
+    /// with no <c>tid</c> claim issued through login.microsoftonline.com, and CIAM custom URL domains. A custom
+    /// CIAM URL domain relies on <c>Ciam:TenantId</c> being set (provisioning H4b always sets it); always false
+    /// when it is unset or not a GUID.
+    /// </summary>
+    internal static bool IsCiamIssuerTenant(string? issuer, string? ciamTenantId)
+    {
+        if (!Guid.TryParse(ciamTenantId?.Trim(), out var ciam) ||
+            string.IsNullOrWhiteSpace(issuer) ||
+            !Uri.TryCreate(issuer, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var segment = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        return Guid.TryParse(segment, out var issuerTenant) && issuerTenant == ciam;
+    }
+
+    /// <summary>
+    /// FR-22: the audiences the <c>Ciam</c> scheme accepts, derived from the one configured
+    /// <c>Ciam:Audience</c> — the value itself plus its other form (<c>{appId}</c> ⇄ <c>api://{appId}</c>).
+    /// </summary>
+    /// <remarks>
+    /// The other form is derived only when the app-id part is a GUID: a bare app id is always a GUID, so a
+    /// non-GUID identifier URI (or an unreplaced deployment placeholder) gets no derived form and keeps
+    /// today's single-audience behaviour rather than widening to a value no token legitimately carries.
+    /// Empty or whitespace configuration returns an empty list — no audience is accepted (fail closed).
+    /// </remarks>
+    internal static IReadOnlyList<string> BuildCiamValidAudiences(string? configuredAudience)
+    {
+        if (string.IsNullOrWhiteSpace(configuredAudience))
+        {
+            return Array.Empty<string>();
+        }
+
+        var audience = configuredAudience.Trim();
+        if (audience.StartsWith(ApiUriPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var appId = audience[ApiUriPrefix.Length..];
+            return Guid.TryParseExact(appId, "D", out _)
+                ? new[] { audience, appId }
+                : new[] { audience };
+        }
+
+        return Guid.TryParseExact(audience, "D", out _)
+            ? new[] { audience, ApiUriPrefix + audience }
+            : new[] { audience };
+    }
+
+    /// <summary>
+    /// FR-23: true when the issuer is a CIAM (<c>*.ciamlogin.com</c>) authority — the issuer half of
+    /// <c>CallerPrincipalResolver.DeterminePlane</c>.
+    /// </summary>
+    internal static bool IsCiamIssuer(string? issuer)
+        => !string.IsNullOrEmpty(issuer) &&
+           issuer.Contains("ciamlogin.com", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// FR-23: true when <paramref name="tenantId"/> equals the configured <c>Ciam:TenantId</c> — the tenant
+    /// half of <c>CallerPrincipalResolver.DeterminePlane</c>. Always false when <c>Ciam:TenantId</c> is unset,
+    /// so an unconfigured CIAM tenant never matches an absent or blank <c>tid</c>.
+    /// </summary>
+    internal static bool IsCiamTenant(string? tenantId, string? ciamTenantId)
+        => !string.IsNullOrWhiteSpace(ciamTenantId) &&
+           !string.IsNullOrWhiteSpace(tenantId) &&
+           string.Equals(tenantId.Trim(), ciamTenantId.Trim(), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The authorization <b>FallbackPolicy</b>: an authenticated user (owner round 14 item 2,

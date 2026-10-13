@@ -616,13 +616,19 @@ One job (`build_and_deploy`) builds `@spaarke/auth` from source first (its `dist
 
 **Triggers**: `workflow_dispatch` only
 
-`build_and_package` builds the `external-spa` Teams-tab surface as a fail-fast sanity gate (the manifest's `contentUrl` points at that already-deployed bundle), validates `appPackage/manifest.json` + icon assets, zips them into `appPackage.zip`, and uploads it as a build artifact; `deploy` republishes it as the longer-retention `teams-app-package` artifact. "Deploy" here means publishing the artifact — org-catalog submission is a manual tenant-admin action; no programmatic deploy endpoint exists for a Teams org-catalog app.
+**Inputs**: `environment` = `dev` (default) | `prod`. The first step of every job rejects any other value (a REST/`gh` dispatch can pass one the UI would refuse), and a workflow-level `concurrency` group `deploy-teams-app-{environment}` (`cancel-in-progress: false`) queues a second run for the same environment instead of overlapping it.
+
+`build_and_package` runs in the GitHub environment `external-spa-dev` / `external-spa-prod`. It builds the `external-spa` Teams-tab surface as a fail-fast sanity gate (reading the same `VITE_*` environment variables as `deploy-external-spa.yml`), stages the manifest as `appPackage/build/stage/manifest.json` — `dev` copies `appPackage/manifest.json` byte for byte; `prod` renders `appPackage/manifest.prod.json` with the id taken from the environment variable `TEAMS_APP_ID` (must be a GUID, not the all-zero placeholder) — validates the **staged** file (required fields, no `webApplicationInfo` per ADR-028 A8, no unrendered `${{` placeholder) and the icon assets, zips `manifest.json` + `color.png` + `outline.png` into `appPackage.zip`, and uploads it as a build artifact. `deploy` republishes it as the longer-retention artifact. **Artifact names**: `dev` → `teams-app-package-build` / `teams-app-package`; `prod` → `teams-app-package-prod-build` / `teams-app-package-prod`. "Deploy" here means publishing the artifact — org-catalog submission is a manual tenant-admin action; no programmatic deploy endpoint exists for a Teams org-catalog app (the prod package is built only until go-live, task 073).
+
+**Variables** (GitHub environment variables, not secrets, set per environment): `VITE_BFF_API_URL`, `VITE_BACKENDS` (optional), `VITE_MSAL_AUTHORITY`, `VITE_MSAL_CLIENT_ID`, `VITE_MSAL_TENANT_ID`, `VITE_MSAL_BFF_SCOPE`, `VITE_TEAMS_MSAL_CLIENT_ID`, `VITE_TEAMS_MSAL_TENANT_ID`, `VITE_TEAMS_MSAL_BFF_SCOPE`, and `TEAMS_APP_ID` (prod). The owner-supplied list with the dev values is in `projects/spaarke-SPA-external-access-platform-r3/notes/task-043-notes.md` section 3; no environment-specific value is written in the workflow.
 
 #### `deploy-external-spa.yml` — Deploy External SPA (Static Web App)
 
 **Triggers**: `workflow_dispatch` only (manual-only until a later phase adds a push/path trigger)
 
-One job builds the external Secure Project Workspace SPA (Vite production build with hardcoded non-secret CIAM/MSAL identifiers as build-time env vars), stages `staticwebapp.config.json` into the build output, and deploys to Azure Static Web Apps. **Secrets**: `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV`.
+**Inputs**: `environment` = `dev` (default) | `prod`. The job runs in the GitHub environment `external-spa-dev` / `external-spa-prod` (put required reviewers on `external-spa-prod`; the prod run is a deliberate human act). The first step rejects any value other than `dev`/`prod`, and a workflow-level `concurrency` group `deploy-external-spa-{environment}` (`cancel-in-progress: false`) queues overlapping runs for the same environment.
+
+One job validates the environment's variables (a fail-closed preflight before the build: required values present; GUID, `api://{guid}/user_impersonation`, https and JSON-list formats; the authority must be an https URL whose path is one tenant GUID segment), builds the external Secure Project Workspace SPA (Vite production build; every `VITE_*` value is read from the environment's `vars.*` — nothing environment-specific is committed), stages `staticwebapp.config.json` into the build output, and deploys to Azure Static Web Apps: `dev` → `swa-spaarke-external-spa-dev`, `prod` → `swa-spaarke-external-spa-prod`. **Secrets**: `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV` (dev), `AZURE_SWA_TOKEN_EXTERNAL_SPA_PROD` (prod, an `external-spa-prod` environment secret; no fall-back to the dev token). **Variables**: see the task-043 notes section 3 (same list as `deploy-teams-app.yml`, minus `TEAMS_APP_ID`).
 
 ### Provisioning Artifact Publishers
 
@@ -1058,7 +1064,7 @@ stages until task 249, 2026-10-02 retired them.)*
 | Workflow | Secret |
 |---|---|
 | `deploy-office-addins.yml` | `AZURE_STATIC_WEB_APPS_API_TOKEN` |
-| `deploy-external-spa.yml` | `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV` |
+| `deploy-external-spa.yml` | `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV` (dev), `AZURE_SWA_TOKEN_EXTERNAL_SPA_PROD` (prod) |
 
 ### Provisioning Artifact Publishers
 

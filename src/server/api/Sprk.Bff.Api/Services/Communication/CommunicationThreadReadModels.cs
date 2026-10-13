@@ -47,6 +47,11 @@ public sealed record ThreadAttachmentRef(
 /// decision 2026-07-16), NOT by this flag — so surfacing it on a row the caller is already permitted to read cannot
 /// imply access anyone lacks. Defaults to <c>false</c> when unset.
 /// </param>
+/// <param name="CreatedByContactId">
+/// <c>_sprk_createdbycontact_value</c> (spaarke-SPA-external-access-platform-r3 task 034): the contact who authored an
+/// external-plane post; null for every other row. Server-side only (<c>JsonIgnore</c>, so the internal thread wire
+/// contract is unchanged) — the external endpoint turns it into a boolean <c>isMine</c> and never exposes the id.
+/// </param>
 public sealed record ThreadMessageDto(
     Guid MessageId,
     string? Body,
@@ -64,7 +69,8 @@ public sealed record ThreadMessageDto(
     int Privilege,
     bool IsInternalOnly,
     bool IsPrivate,
-    IReadOnlyList<ThreadAttachmentRef> Attachments);
+    IReadOnlyList<ThreadAttachmentRef> Attachments,
+    [property: System.Text.Json.Serialization.JsonIgnore] Guid? CreatedByContactId = null);
 
 /// <summary>
 /// Thread-read endpoint result: the access-filtered, ordered message list for a thread (task 050 / FR-11).
@@ -116,6 +122,45 @@ public sealed record RegardingReadResult(
     IReadOnlyList<ThreadReadResult> Threads,
     int ThreadCount,
     int MessageCount);
+
+/// <summary>
+/// The app-only by-regarding read for the external plane (spaarke-SPA-external-access-platform-r3 task 033 / FR-04):
+/// the record's access-filtered messages, oldest→newest, and whether the read stopped at its row bound with more rows
+/// remaining (<see cref="Truncated"/>). Attachments are never loaded on this path (empty on every message).
+/// </summary>
+public sealed record AppOnlyRegardingReadResult(
+    IReadOnlyList<ThreadMessageDto> Messages,
+    bool Truncated);
+
+/// <summary>
+/// The app-only RECENT read across many records for the external notification feed
+/// (<c>CommunicationThreadReadService.ReadRecentForRecordsAppOnlyAsync</c>, spaarke-SPA-external-access-platform-r3 task
+/// 037 / FR-08): the visible messages, newest first, each with the record it was matched to. <see cref="Truncated"/> is
+/// true when a bound (records scanned, or messages per read) cut the answer.
+/// </summary>
+public sealed record AppOnlyRecentReadResult(
+    IReadOnlyList<RecentRecordMessage> Messages,
+    bool Truncated);
+
+/// <summary>One recent message and the accessible record (entity logical name + id) it was matched to.</summary>
+public sealed record RecentRecordMessage(ThreadMessageDto Message, string EntityType, Guid RecordId);
+
+/// <summary>
+/// The core-root stamp lookups (<c>_sprk_regardingproject_value</c>, <c>_sprk_regardingmatter_value</c>,
+/// <c>_sprk_regardingworkassignment_value</c>) a communication row carries, raw as Dataverse returned them (null or blank
+/// when the row is not filed to that root). The external reads hand these to the caller's multi-root rule so a message also
+/// filed to a root the caller cannot read is withheld (fix round for r3 task 039).
+/// </summary>
+public sealed record MessageRootLookups(string? Project, string? Matter, string? WorkAssignment);
+
+/// <summary>
+/// The caller's multi-root rule for one external message read (r3 task 039; owner decision 2026-10-12, option B). The read
+/// service calls it ONCE with the stamps of every candidate row, so a rule that needs I/O (the secure flags of the linked
+/// roots the caller cannot read) reads them in one batch, and gets back the per-row predicate. A row the predicate refuses
+/// is withheld.
+/// </summary>
+public delegate Task<Func<MessageRootLookups, bool>> MessageRootsFilter(
+    IReadOnlyCollection<MessageRootLookups> candidates, CancellationToken ct);
 
 /// <summary>
 /// One thread summary row for the left-pane thread list (R3 task 003 / FR-16). Minimal by construction — the list

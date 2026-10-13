@@ -1,13 +1,27 @@
 /**
- * DocumentLibrary component — Document management for the Project page Documents tab.
+ * DocumentLibrary component — Document management for the Project page Documents tab AND the record detail view
+ * (task 054: project, matter, work assignment, service request, invoice - the task 031 routes).
  *
- * Displays project documents in a Fluent UI v9 DataGrid. Shows pre-computed AI
+ * ROOT (task 054). `root` + `recordId` pick the task 031 routes (`/api/v1/external/{projects|matters|workassignments|
+ * servicerequests}/{id}/documents[/...]`); a service request's documents are reachable ONLY through its own route. The
+ * existing `projectId` prop is the project shorthand and behaves exactly as before.
+ *
+ * RIGHTS (task 054). Upload needs Create and download needs Read on the record. A host that knows better passes
+ * `canUpload` / `canDownload`; otherwise download follows `accessLevel` (Collaborate / Full Access), and Upload follows
+ * the BFF's `canCreate` on the record's document list (a matter, work assignment or service request) or `accessLevel`
+ * (a project). This is only what is SHOWN: the server decides, and a refused upload shows its 403 as an error.
+ *
+ * DELETE-OWN (task 054, FR-26). With a `caller` identity, a row the caller created (creator stamp = the signed-in
+ * principal) shows Delete, which asks first (shared ConfirmModal). 204 removes the row; a 403 / 409 / 503 / 500 shows a
+ * message and the row stays. Without `caller` there is no Delete.
+ *
+ * Displays the record's documents in a Fluent UI v9 DataGrid. Shows pre-computed AI
  * summaries from the sprk_document.sprk_summary field (Document Profile pipeline).
  * Upload and download are restricted by access level — View Only users (100000000)
  * cannot upload or download. Collaborate (100000001) and Full Access (100000002)
  * users have full upload and download capabilities.
  *
- * Version history is fetched via BFF API: GET /api/v1/external/documents/{id}/versions
+ * Version history is fetched via BFF API: GET /api/v1/external/{root}/{id}/documents/{documentId}/versions
  *
  * ADR-021: All styles use Fluent v9 design tokens exclusively. No hard-coded colors.
  * ADR-022: React 18 functional component (createRoot is in main.tsx).
@@ -44,6 +58,7 @@ import {
 import {
   ArrowDownloadRegular,
   ArrowUploadRegular,
+  DeleteRegular,
   HistoryRegular,
   DocumentRegular,
   DismissRegular,
@@ -52,9 +67,20 @@ import {
 import { FileUploadZone, UploadedFileList } from '@spaarke/ui-components/components/FileUpload';
 import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components/components/FileUpload';
 import { AiSummaryPopover } from '@spaarke/ui-components/components/AiSummaryPopover';
-import { getDocuments, ODataDocument } from '../api/web-api-client';
+import {
+  getDocuments,
+  getRecordDocuments,
+  deleteOwnDocument,
+  documentsPath,
+  documentContentPath,
+  documentVersionsPath,
+  type DocumentRoot,
+  type ODataDocument,
+} from '../api/web-api-client';
+import { isCreatedByCaller, type CallerIdentity } from '../api/delete-own';
+import { useDeleteOwn, DeleteOwnConfirm, DeleteFailureNotice } from './DeleteOwn';
 import { TruncatedListNotice } from './TruncatedListNotice';
-import { bffApiCall, bffApiBlob } from '../auth/bff-client';
+import { bffApiCall, bffApiBlob, problemMessage } from '../auth/bff-client';
 import { AccessLevel, ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -234,6 +260,15 @@ function formatDate(isoDate: string | null | undefined): string {
   }
 }
 
+/** How each root's record is named in user-facing text. */
+const RECORD_NOUN: Readonly<Record<DocumentRoot, string>> = {
+  projects: 'project',
+  matters: 'matter',
+  workassignments: 'work assignment',
+  servicerequests: 'service request',
+  invoices: 'invoice',
+};
+
 /**
  * Returns true when the access level allows upload and download.
  */
@@ -248,7 +283,8 @@ function canUploadOrDownload(accessLevel: AccessLevel): boolean {
 // ---------------------------------------------------------------------------
 
 interface VersionHistoryPanelProps {
-  projectId: string;
+  root: DocumentRoot;
+  recordId: string;
   documentId: string;
   documentName: string;
   open: boolean;
@@ -256,7 +292,8 @@ interface VersionHistoryPanelProps {
 }
 
 const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
-  projectId,
+  root,
+  recordId,
   documentId,
   documentName,
   open,
@@ -279,11 +316,9 @@ const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
 
       try {
         // Fixed 2026-09-02: was `/api/v1/external/documents/{id}/versions`, which does not
-        // exist. Version history — like content download — is project-scoped, so the server
-        // can enforce document→project containment before touching SPE.
-        const response = await bffApiCall<DocumentVersionsResponse>(
-          `/api/v1/external/projects/${projectId}/documents/${documentId}/versions`
-        );
+        // exist. Version history — like content download — is scoped by the record the document is filed to, so the
+        // server can enforce document→record containment before touching SPE.
+        const response = await bffApiCall<DocumentVersionsResponse>(documentVersionsPath(root, recordId, documentId));
         if (!cancelled) {
           setVersions(response.versions ?? []);
         }
@@ -304,7 +339,7 @@ const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [projectId, documentId, open]);
+  }, [root, recordId, documentId, open]);
 
   return (
     <Dialog
@@ -375,14 +410,16 @@ const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
 // ---------------------------------------------------------------------------
 
 interface UploadDialogProps {
-  projectId: string;
+  root: DocumentRoot;
+  recordId: string;
   open: boolean;
   onClose: () => void;
   onUploadComplete: () => void;
 }
 
-const UploadDialog: React.FC<UploadDialogProps> = ({ projectId, open, onClose, onUploadComplete }) => {
+const UploadDialog: React.FC<UploadDialogProps> = ({ root, recordId, open, onClose, onUploadComplete }) => {
   const styles = useStyles();
+  const noun = RECORD_NOUN[root];
   const [selectedFiles, setSelectedFiles] = React.useState<IUploadedFile[]>([]);
   const [validationErrors, setValidationErrors] = React.useState<IFileValidationError[]>([]);
   const [uploading, setUploading] = React.useState<boolean>(false);
@@ -412,7 +449,7 @@ const UploadDialog: React.FC<UploadDialogProps> = ({ projectId, open, onClose, o
     try {
       const formData = new FormData();
       formData.append('file', selectedFiles[0].file);
-      // NOTE: projectId is NOT sent in the body — it is the route parameter, and the server derives
+      // NOTE: the record id is NOT sent in the body — it is the route parameter, and the server derives
       // the storage container from it. A client must never name a container (#858).
 
       // Fixed 2026-09-02: was `POST /api/v1/external/documents/upload`, which is mapped NOWHERE in
@@ -421,7 +458,8 @@ const UploadDialog: React.FC<UploadDialogProps> = ({ projectId, open, onClose, o
       // sets the correct multipart/form-data boundary automatically.
       // Response body is the created document row; it is ignored here because onUploadComplete
       // refetches the list, which is the single source of truth for what the project contains.
-      await bffApiCall<unknown>(`/api/v1/external/projects/${projectId}/documents`, {
+      // The 201's Location header points at a URL with no GET (task 031): it is never followed.
+      await bffApiCall<unknown>(documentsPath(root, recordId), {
         method: 'POST',
         body: formData,
         headers: {},
@@ -432,26 +470,27 @@ const UploadDialog: React.FC<UploadDialogProps> = ({ projectId, open, onClose, o
       onClose();
     } catch (err) {
       console.error('[DocumentLibrary] Upload failed:', err);
-      // Branch on ApiError.statusCode — the field ApiError actually exposes (there is no `status`,
-      // and no `detail`: its `message` is the raw response text). Composing the copy here from the
-      // known file name beats parsing a ProblemDetails JSON string back out of `message`.
+      // The server's ProblemDetails `detail` is shown when it wrote one (`problemMessage`): the collision 409 names the
+      // file, the owner-refusal 409 ("Record owner unresolved") says why the record cannot take documents, a 503 says
+      // to retry. The text below is only the fallback for a response that carries no detail. ApiError exposes
+      // `statusCode` (there is no `status`/`detail`; its `message` is the raw response text).
       const statusCode = err instanceof ApiError ? err.statusCode : undefined;
+      let fallback = 'Failed to upload the document. Please check the file and try again.';
       if (statusCode === 409) {
-        // A NAME COLLISION is not a failure: nothing was uploaded and the existing document is
-        // intact, so "check the file and try again" would be misleading advice.
-        setUploadError(
-          `A file named "${selectedFiles[0].name}" already exists in this project. ` +
-            'Nothing was uploaded or changed — rename the file and try again.'
-        );
+        // A NAME COLLISION is not a failure: nothing was uploaded and the existing document is intact.
+        fallback =
+          `"${selectedFiles[0].name}" could not be uploaded because of a conflict (for example a file with that ` +
+          `name already exists in this ${noun}). Nothing was uploaded or changed.`;
+      } else if (statusCode === 413) {
+        fallback = 'The file is too large to upload.';
       } else if (statusCode === 422) {
-        setUploadError(
-          'This project has no storage configured, so documents cannot be uploaded yet. Please contact the project owner.'
-        );
+        fallback = `This ${noun} has no storage configured, so documents cannot be uploaded yet. Please contact the ${noun} owner.`;
       } else if (statusCode === 403) {
-        setUploadError('Your access level does not permit uploading documents to this project.');
-      } else {
-        setUploadError('Failed to upload the document. Please check the file and try again.');
+        fallback = `Your access level does not permit uploading documents to this ${noun}.`;
+      } else if (statusCode !== undefined && statusCode >= 500) {
+        fallback = 'The document could not be uploaded just now. Please try again later.';
       }
+      setUploadError(problemMessage(err, fallback));
     } finally {
       setUploading(false);
     }
@@ -533,12 +572,36 @@ const UploadDialog: React.FC<UploadDialogProps> = ({ projectId, open, onClose, o
 // Props
 // ---------------------------------------------------------------------------
 
-export interface DocumentLibraryProps {
-  /** Dataverse GUID of the owning sprk_project record */
-  projectId: string;
-  /** The authenticated user's access level for this project */
-  accessLevel: AccessLevel;
-}
+/** Which record's documents: a project by its id (the shorthand), or any record by root + id. Never neither. */
+export type DocumentLibraryTarget =
+  | {
+      /** Dataverse GUID of the owning sprk_project record (the project shorthand). */
+      projectId: string;
+      root?: undefined;
+      recordId?: undefined;
+    }
+  | {
+      /** Which record type the documents are filed to. */
+      root: DocumentRoot;
+      /** The record's id for `root`. */
+      recordId: string;
+      projectId?: undefined;
+    };
+
+export type DocumentLibraryProps = DocumentLibraryTarget & {
+  /** The authenticated user's access level for this record: the default for `canUpload` / `canDownload`. */
+  accessLevel?: AccessLevel;
+  /**
+   * Show the Upload control. When the host passes none: a project follows `accessLevel` (Collaborate / Full Access); any
+   * other record follows the BFF's `canCreate` on its document list (the right the upload route checks), else
+   * `accessLevel`. The server enforces Create either way.
+   */
+  canUpload?: boolean;
+  /** Show Download and Version history. Default: Collaborate / Full Access. The server enforces Read either way. */
+  canDownload?: boolean;
+  /** The signed-in principal. With it, rows the caller created show Delete; without it, no row does (task 054). */
+  caller?: CallerIdentity | null;
+};
 
 // ---------------------------------------------------------------------------
 // DocumentLibrary — main component
@@ -561,8 +624,20 @@ export interface DocumentLibraryProps {
  *
  * ADR-021: Fluent UI v9 only. makeStyles + tokens. No hard-coded colors.
  */
-export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, accessLevel }) => {
+export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({
+  projectId,
+  root = 'projects',
+  recordId: recordIdProp,
+  accessLevel = AccessLevel.ViewOnly,
+  canUpload,
+  canDownload,
+  caller,
+}) => {
   const styles = useStyles();
+  // The props type refuses a call with neither; an empty id that still arrives (a caller that casts, or a blank id from
+  // upstream) is an error state below, never a spinner that cannot end.
+  const recordId = recordIdProp ?? projectId ?? '';
+  const noun = RECORD_NOUN[root];
 
   // ---------------------------------------------------------------------------
   // State
@@ -571,35 +646,60 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
   const [documents, setDocuments] = React.useState<ODataDocument[]>([]);
   // Task 105: the BFF said the list was cut short — shown, never presented as the whole list.
   const [truncated, setTruncated] = React.useState<boolean>(false);
+  // The BFF's `canCreate` for this record (null = not said; projects never use it, they follow the access level).
+  const [listCanCreate, setListCanCreate] = React.useState<boolean | null>(null);
   const [loading, setLoading] = React.useState<boolean>(true);
   const [error, setError] = React.useState<string | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = React.useState<boolean>(false);
   const [versionHistoryDoc, setVersionHistoryDoc] = React.useState<ODataDocument | null>(null);
   const [downloadingId, setDownloadingId] = React.useState<string | null>(null);
 
-  const canActOnDocuments = canUploadOrDownload(accessLevel);
+  const showUpload = canUpload ?? listCanCreate ?? canUploadOrDownload(accessLevel);
+  const canActOnDocuments = canDownload ?? canUploadOrDownload(accessLevel);
+
+  // Delete-own (task 054): the row leaves the list on the server's 204; any refusal keeps it and is shown.
+  const del = useDeleteOwn<ODataDocument>({
+    noun: 'document',
+    remove: doc => deleteOwnDocument(doc.sprk_documentid),
+    onRemoved: doc => setDocuments(prev => prev.filter(d => d.sprk_documentid !== doc.sprk_documentid)),
+  });
+  const askDelete = del.ask;
 
   // ---------------------------------------------------------------------------
   // Data fetching
   // ---------------------------------------------------------------------------
 
   const fetchDocuments = React.useCallback(async () => {
-    if (!projectId) return;
+    if (!recordId) {
+      setLoading(false);
+      setError('Documents cannot be loaded: no record was given.');
+      return;
+    }
 
     setLoading(true);
     setError(null);
 
     try {
-      const data = await getDocuments(projectId);
-      setDocuments(data.items);
-      setTruncated(data.truncated);
+      // The project read keeps its own client function (`getDocuments`); the other roots share the task 031 route and
+      // also say whether the caller may upload.
+      if (root === 'projects') {
+        const data = await getDocuments(recordId);
+        setDocuments(data.items);
+        setTruncated(data.truncated);
+        setListCanCreate(null);
+      } else {
+        const data = await getRecordDocuments(root, recordId);
+        setDocuments(data.items);
+        setTruncated(data.truncated);
+        setListCanCreate(data.canCreate);
+      }
     } catch (err) {
       console.error('[DocumentLibrary] Failed to load documents:', err);
       setError('Failed to load documents. Please try refreshing the page.');
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [root, recordId]);
 
   React.useEffect(() => {
     void fetchDocuments();
@@ -625,9 +725,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
         // `/api/v1/external/documents/{id}/download` expecting `{ downloadUrl }`.
         // That route does not exist (guaranteed 404) and the response shape it
         // assumed is one the server is designed never to produce.
-        const blob = await bffApiBlob(
-          `/api/v1/external/projects/${projectId}/documents/${doc.sprk_documentid}/content`
-        );
+        const blob = await bffApiBlob(documentContentPath(root, recordId, doc.sprk_documentid));
 
         objectUrl = window.URL.createObjectURL(blob);
 
@@ -651,7 +749,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
         setDownloadingId(null);
       }
     },
-    [canActOnDocuments, projectId]
+    [canActOnDocuments, root, recordId]
   );
 
   // ---------------------------------------------------------------------------
@@ -734,32 +832,50 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
       }),
 
       // --- Actions ---
-      ...(canActOnDocuments
+      ...(canActOnDocuments || caller
         ? [
             createTableColumn<ODataDocument>({
               columnId: 'actions',
               renderHeaderCell: () => '',
               renderCell: item => (
                 <div className={styles.actionButtons}>
-                  <Tooltip content="Download" relationship="label">
-                    <Button
-                      appearance="subtle"
-                      size="small"
-                      icon={downloadingId === item.sprk_documentid ? <Spinner size="tiny" /> : <ArrowDownloadRegular />}
-                      disabled={downloadingId === item.sprk_documentid}
-                      onClick={() => void handleDownload(item)}
-                      aria-label={`Download ${item.sprk_name}`}
-                    />
-                  </Tooltip>
-                  <Tooltip content="Version history" relationship="label">
-                    <Button
-                      appearance="subtle"
-                      size="small"
-                      icon={<HistoryRegular />}
-                      onClick={() => setVersionHistoryDoc(item)}
-                      aria-label={`View version history for ${item.sprk_name}`}
-                    />
-                  </Tooltip>
+                  {canActOnDocuments && (
+                    <>
+                      <Tooltip content="Download" relationship="label">
+                        <Button
+                          appearance="subtle"
+                          size="small"
+                          icon={
+                            downloadingId === item.sprk_documentid ? <Spinner size="tiny" /> : <ArrowDownloadRegular />
+                          }
+                          disabled={downloadingId === item.sprk_documentid}
+                          onClick={() => void handleDownload(item)}
+                          aria-label={`Download ${item.sprk_name}`}
+                        />
+                      </Tooltip>
+                      <Tooltip content="Version history" relationship="label">
+                        <Button
+                          appearance="subtle"
+                          size="small"
+                          icon={<HistoryRegular />}
+                          onClick={() => setVersionHistoryDoc(item)}
+                          aria-label={`View version history for ${item.sprk_name}`}
+                        />
+                      </Tooltip>
+                    </>
+                  )}
+                  {/* Only a row the caller created (the server re-checks; a refusal is shown as an error). */}
+                  {isCreatedByCaller(item, caller) && (
+                    <Tooltip content="Delete" relationship="label">
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<DeleteRegular />}
+                        onClick={() => askDelete(item, item.sprk_name)}
+                        aria-label={`Delete ${item.sprk_name}`}
+                      />
+                    </Tooltip>
+                  )}
                 </div>
               ),
             }),
@@ -768,6 +884,8 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
     ],
     [
       canActOnDocuments,
+      caller,
+      askDelete,
       downloadingId,
       handleDownload,
       styles.documentName,
@@ -811,12 +929,13 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
     return (
       <div className={styles.root}>
         <TruncatedListNotice truncated={truncated} shown={0} noun="documents" />
+        <DeleteFailureNotice del={del} />
         {/* Toolbar — show upload button even when empty so users can add their first doc */}
-        {canActOnDocuments && (
+        {showUpload && (
           <div className={styles.toolbar}>
             <div className={styles.toolbarLeft}>
               <Text size={300} className={styles.emptyStateText}>
-                No documents found for this project.
+                No documents found for this {noun}.
               </Text>
             </div>
             <div className={styles.toolbarRight}>
@@ -835,20 +954,22 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
               No Documents
             </Text>
             <Text size={300} className={styles.emptyStateText}>
-              {canActOnDocuments
-                ? 'No documents have been uploaded to this project yet. Use the Upload button to add your first document.'
-                : 'No documents have been uploaded to this project yet.'}
+              {showUpload
+                ? `No documents have been uploaded to this ${noun} yet. Use the Upload button to add your first document.`
+                : `No documents have been uploaded to this ${noun} yet.`}
             </Text>
           </div>
         )}
 
         {/* Upload dialog */}
         <UploadDialog
-          projectId={projectId}
+          root={root}
+          recordId={recordId}
           open={uploadDialogOpen}
           onClose={() => setUploadDialogOpen(false)}
           onUploadComplete={() => void fetchDocuments()}
         />
+        <DeleteOwnConfirm del={del} />
       </div>
     );
   }
@@ -860,6 +981,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
   return (
     <div className={styles.root}>
       <TruncatedListNotice truncated={truncated} shown={documents.length} noun="documents" />
+      <DeleteFailureNotice del={del} />
 
       {/* Toolbar */}
       <div className={styles.toolbar}>
@@ -869,7 +991,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
           </Text>
         </div>
         <div className={styles.toolbarRight}>
-          {canActOnDocuments && (
+          {showUpload && (
             <Button appearance="primary" icon={<ArrowUploadRegular />} onClick={() => setUploadDialogOpen(true)}>
               Upload Document
             </Button>
@@ -903,16 +1025,21 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
 
       {/* Upload dialog */}
       <UploadDialog
-        projectId={projectId}
+        root={root}
+        recordId={recordId}
         open={uploadDialogOpen}
         onClose={() => setUploadDialogOpen(false)}
         onUploadComplete={() => void fetchDocuments()}
       />
 
+      {/* Delete confirmation (shared modal system, ADR-050) */}
+      <DeleteOwnConfirm del={del} />
+
       {/* Version history dialog */}
       {versionHistoryDoc && (
         <VersionHistoryPanel
-          projectId={projectId}
+          root={root}
+          recordId={recordId}
           documentId={versionHistoryDoc.sprk_documentid}
           documentName={versionHistoryDoc.sprk_name}
           open={versionHistoryDoc !== null}

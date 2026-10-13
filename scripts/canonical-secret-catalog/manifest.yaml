@@ -349,6 +349,7 @@ secrets:
     value_source: 'from-intake-parameter'
     app_settings:
       - 'Communication__DefaultMailbox'
+      - 'Communication__ApprovedSenders__0__Email'
     tags: ['communication', 'public']
 
   - canonical_name: 'Communication-WebhookUrl'
@@ -712,6 +713,26 @@ per_env_settings:
       UAMI client-id H2a Bicep emits. Consumed by GraphClientFactory to pin
       DefaultAzureCredential to the L2/BFF UAMI (rather than any other MI
       the App Service may have).
+
+  - key: 'Communication__ApprovedSenders__0__IsDefault'
+    per_env_source: 'literal'
+    literal_value: 'true'
+    iOptionsModule: 'CommunicationOptions'
+    required: true
+    notes: >-
+      F3 fix round (SPA-external-access-platform-r3, 2026-10-12). The system sender
+      (Communication:DefaultMailbox) must ALSO be an approved sender, or every grant/registration
+      email is rejected InvalidSender (CommunicationOptionsValidator fails the host's start
+      otherwise). ApprovedSenders[0] is the same mailbox as DefaultMailbox: Email comes from the
+      Communication-DefaultMailbox secret's app_settings; IsDefault and DisplayName are literals.
+
+  - key: 'Communication__ApprovedSenders__0__DisplayName'
+    per_env_source: 'literal'
+    literal_value: 'Spaarke Central'
+    iOptionsModule: 'CommunicationOptions'
+    required: true
+    notes: >-
+      See Communication__ApprovedSenders__0__IsDefault.
 
   - key: 'Graph__Scopes__0'
     per_env_source: 'literal'

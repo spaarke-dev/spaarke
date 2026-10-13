@@ -199,6 +199,9 @@ public static class GrantExternalAccessEndpoint
         // Task 181 (owner round 89 item 3): a contact that represents an internal user is told, in-app, with a link to the
         // record — only when the grant GAVE access, never for an organization-wide grant. Best effort, after the write: a
         // failure is logged and reported in the response, and never undoes the grant.
+        // Task 036 (FR-07): the same gate carries the external half — a contact that represents no internal user and is
+        // already onboarded is EMAILED a portal deep link by the same notifier (once per gain; never for an organization
+        // grant, a same-level re-grant, an expiry-only change or a lower level, which the gate below excludes).
         var notification = !grantedKey.IsOrganizationGrant && grantedKey.ContactId is { } grantedContactId && outcome.AccessGained
             ? await accessNotifier.NotifyContactGrantAsync(root.Type, root.Id, grantedContactId, outcome.GrantedLevel, httpContext.User)
             : GrantNotificationOutcome.NotApplicable;
