@@ -832,8 +832,9 @@ public sealed class ThreadResolver : IThreadResolver
     /// </summary>
     /// <returns>
     /// <c>false</c> when the thread may not follow whole because its owner or R's is the Secure team (F1-b) — nothing is
-    /// written and the caller moves only the email (rule 3). <c>true</c> otherwise: anchored, or left as it is when R's owner
-    /// is refused or R owns no thread (a party).
+    /// written and the caller moves only the email (rule 3). <c>true</c> otherwise: anchored (to a party — account / contact /
+    /// organization — keeping the thread's owner, as <see cref="CreateThreadAsync"/> does), or left as it is when R's owner
+    /// is refused.
     /// </returns>
     private async Task<bool> AnchorThreadForFilingAsync(
         Guid threadId, DataverseEntity thread, Guid communicationId, RegardingAnchor regarding, Guid recordId,
@@ -853,19 +854,23 @@ public sealed class ThreadResolver : IThreadResolver
             return true;
         }
 
-        if (ownership?.OwningTeamId is not { } teamId)
+        // A party (account / contact / organization — not an ownership parent) has no team to own its thread; like
+        // CreateThreadAsync, the thread is anchored to it and keeps its current owner (owner 2026-10-12: an email related to a
+        // contact shows on the contact's Messages panel too). Any other record with no owner team is left as it is.
+        var isParty = ownership is null && RegardingFieldMap.FieldFor(regarding.RecordType) is not null
+            && !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(regarding.RecordType);
+        if (ownership?.OwningTeamId is null && !isParty)
         {
-            // Not an ownership parent (a party: account / contact / organization) — a record thread is owned by its record's
-            // team (S6), and there is none to give it, so the thread is left as it is.
             _logger.LogInformation(
                 "Filing reconcile left thread {ThreadId} unanchored: {RecordType}:{RecordId} owns no thread (CommunicationId: " +
                 "{CommunicationId})", threadId, regarding.RecordType, recordId, communicationId);
             return true;
         }
+        var teamId = ownership?.OwningTeamId; // null for a party: the thread keeps its owner
 
         // F1-b: a whole-thread move never takes a thread out of the Secure team, nor into it. Out of it, the thread's other
         // messages would leave a secure record's isolation; into it, the thread's sharee mirror is not written here (K1).
-        if (ownership.IsSecureOwner || await ThreadOwnerMayBeSecureAsync(thread, ct))
+        if (ownership?.IsSecureOwner == true || await ThreadOwnerMayBeSecureAsync(thread, ct))
         {
             _logger.LogInformation(
                 "Filing reconcile moves only {CommunicationId}: thread {ThreadId} or {RecordType}:{RecordId} belongs to a secure " +
@@ -882,8 +887,9 @@ public sealed class ThreadResolver : IThreadResolver
         {
             ["sprk_threadtype"] = new OptionSetValue(ThreadTypeRecordAnchored),
             ["sprk_regardingrecordid"] = TruncateTo(regarding.RecordId, 100),
-            ["ownerid"] = new EntityReference("team", teamId),
         };
+        if (teamId is { } team)
+            fields["ownerid"] = new EntityReference("team", team);
         if (RegardingFieldMap.FieldFor(regarding.RecordType) is { } typedField)
             fields[typedField] = new EntityReference(regarding.RecordType, recordId); // what SetTypedRegardingLookup writes
         if (!string.IsNullOrWhiteSpace(recordName))
@@ -906,7 +912,8 @@ public sealed class ThreadResolver : IThreadResolver
 
         await _entityService.UpdateAsync("sprk_communicationthread", threadId, fields, ct);
         _logger.LogInformation(
-            "Filing reconcile anchored thread {ThreadId} to {RecordType}:{RecordId}, owned by team {TeamId} | CommunicationId: " +
+            "Filing reconcile anchored thread {ThreadId} to {RecordType}:{RecordId}, owned by team {TeamId} (none: a party, " +
+            "the owner is kept) | CommunicationId: " +
             "{CommunicationId}", threadId, regarding.RecordType, recordId, teamId, communicationId);
 
         await ReDeriveThreadNameAsync(threadId, ct); // marker-gated; a user-renamed thread keeps its name

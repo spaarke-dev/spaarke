@@ -69,10 +69,10 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// never "nothing to do"; a per-row fault is counted and the run continues; a later tick revisits both, so the job does not
 /// throw. Rule 5: one heartbeat per attempt. Rule 6: <c>AddScheduledJob</c> in <c>CommunicationModule</c>.</para>
 ///
-/// <para><b>Known limits.</b> An email filed only to a party (account / contact / organization) whose thread is unanchored
-/// stays a candidate on every pass — the reconcile leaves that thread (a party owns no thread) — so it costs reads, not
-/// writes, and each such email is reported <c>unresolved</c> (so the run is <c>partial</c>) every time. The reconcile never
-/// throws, so an Apply run re-reads each candidate after it and re-applies <see cref="Classify"/>: <c>reconciled</c> counts
+/// <para><b>Known limits.</b> An email filed to a party (account / contact / organization) is reconciled like any other
+/// filing — the reconcile anchors its thread to the party and keeps the thread's owner (a party has no team) — so a
+/// candidate that stays <c>unresolved</c> is one the reconcile genuinely could not fix (a refused owner, a fault), and it is
+/// found again next pass. The reconcile never throws, so an Apply run re-reads each candidate after it and re-applies <see cref="Classify"/>: <c>reconciled</c> counts
 /// only emails that are no longer candidates, <c>unresolved</c> those that still are (the next pass finds them again), and
 /// the status is <c>ok</c> only when nothing is unresolved or failed.</para>
 ///

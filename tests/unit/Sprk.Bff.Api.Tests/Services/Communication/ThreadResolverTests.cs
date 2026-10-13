@@ -1453,6 +1453,64 @@ public class ThreadResolverTests
             Times.Never, "the email stays in its thread");
     }
 
+    [Theory]
+    [InlineData("contact", "sprk_regardingperson")]
+    [InlineData("account", "sprk_regardingaccount")]
+    [InlineData("sprk_organization", "sprk_regardingorganization")]
+    public async Task ReconcileThreadForFiling_ReFiledToAParty_TheThreadFollowsWhole_AndKeepsItsOwner(string partyType, string partyField)
+    {
+        // Owner 2026-10-12: an email can be "Related to" a contact (or an organization / account), and it shows on that
+        // record's Messages panel like any other. A party has no team, so — as CreateThreadAsync does — the thread is
+        // anchored to it and keeps its owner.
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var party = Guid.NewGuid();
+        var oldProject = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, partyType, party);
+        SetupReconcileThreadRead(threadId, OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: "sprk_project", regardingId: oldProject));
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, partyType, party));
+        var writes = new List<Dictionary<string, object>>();
+        _entity
+            .Setup(e => e.UpdateAsync("sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, d, _) => writes.Add(d))
+            .Returns(Task.CompletedTask);
+
+        await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        writes.Should().NotBeEmpty();
+        var anchor = writes[0];
+        ((EntityReference)anchor[partyField]).Id.Should().Be(party);
+        anchor["sprk_regardingproject"].Should().Be(DBNull.Value, "the previous record's lookup is cleared");
+        writes.Should().NotContain(d => d.ContainsKey("ownerid"), "a party has no team: the thread keeps its owner");
+        _owners.Requests.Should().BeEmpty("a party is never asked of the ownership resolver");
+        _grants.Verify(g => g.GrantMessageAccessAsync(
+            communicationId, ThreadAssignment.Anchored(threadId, partyType, party), It.IsAny<CancellationToken>()), Times.Once);
+        _entity.Verify(e => e.UpdateAsync("sprk_communication", communicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the email stays in its thread");
+    }
+
+    [Fact]
+    public async Task ReconcileThreadForFiling_SecureTeamThread_ReFiledToAContact_MovesOnlyTheEmail()
+    {
+        // F1-b holds for a party too: a secure record's thread never leaves the Secure team by following an email.
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        var secureTeam = Guid.NewGuid();
+        SetupFiledEmail(communicationId, threadId, "contact", contact);
+        var thread = OpenThread(threadId, ThreadTypeRecordAnchored, regardingType: "sprk_project", regardingId: Guid.NewGuid());
+        thread["owningteam"] = new EntityReference("team", secureTeam);
+        thread["ownerid"] = new EntityReference("team", secureTeam);
+        SetupReconcileThreadRead(threadId, thread);
+        SetupThreadMessagesForFiling(threadId, Message(communicationId, "contact", contact), Message(Guid.NewGuid(), entityType: null, Guid.Empty));
+        SetupTeams(secureTeam);
+        var recordThread = SetupRecordsDefaultThread("contact", contact);
+
+        await CreateFilingSut().ReconcileThreadForFilingAsync(communicationId, CancellationToken.None);
+
+        VerifyOnlyTheEmailMoved(communicationId, threadId, recordThread, "contact", contact);
+    }
+
     public static TheoryData<string> NotAnchorableThreads => new()
     {
         "master", "previous-records-default", "anchored-to-previous-record-and-mixed", "unanchored-and-mixed",
