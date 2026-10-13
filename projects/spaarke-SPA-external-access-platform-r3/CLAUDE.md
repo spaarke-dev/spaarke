@@ -11,7 +11,7 @@ R3 makes the external SPA (`external.spaarke.com` and the Teams tab) a working d
 - **C4** grid columns;
 - **C5** Teams parity for workforce users;
 - **C6** message send;
-- **C7** workforce-contact self-registration;
+- **C7** workforce-contact sign-in and registration, end to end, under ADR-028 A9 (owner 2026-10-13): the multitenant SPA client, BFF token acceptance, the first-sign-in profile form, and the stored link for licensed users;
 - **C8** auth alignment (single-tenant workforce client, run-time backend selection, out-of-plane page fixes, modules by user type, Ciam audience forms, default-scheme CIAM guard, production build);
 - **C9** documents on every core record, creator stamps, delete-own.
 
@@ -36,15 +36,13 @@ Status: see `tasks/TASK-INDEX.md` and `current-task.md`. Spec: `spec.md` (source
 
 **Client auth and routing**
 - `api://{customerBffAppId}/user_impersonation` is the only BFF scope on both planes; `access_as_user` is retired (FR-16).
-- The workforce client:
-  - is one single-tenant Spaarke client;
-  - uses authority `https://login.microsoftonline.com/{Spaarke tenant}`;
-  - in Teams, signs in with NAA then an MSAL popup;
-  - has no `webApplicationInfo` and no Teams-SSO fallback.
+- **Licensed core users** (A8): one single-tenant Spaarke client; authority `https://login.microsoftonline.com/{Spaarke tenant}`; in Teams, NAA then an MSAL popup; no `webApplicationInfo` and no Teams-SSO fallback.
+- **Workforce contacts** (A9, browser SPA only): one multitenant Spaarke SPA client, with authority = the customer's home directory from Spaarke-owned data (`organizations` only for discovery). The BFF accepts only `iss` exact + `tid` ∈ the stamp's `CustomerTenantIds` + `aud` = the stamp BFF + a user token + `acct` = 0, keyed on (`tid`, `oid`). Never authorize on email/UPN. Licensed users reach the SPA via the stored link (`tid`, `oid`) → `systemuserid`; there is no "core user sign-in" button.
+- Terms: "Spaarke tenant" = Spaarke's Entra directory; "customer's home directory" = the customer's own. Never a bare "tenant" for the second.
 - The backend URL and scope come from Spaarke-owned data (the directory, or dev config until T240c ships), never from a link. A crafted link cannot redirect a token (FR-17, NFR-02).
 
 **Hard limits**
-- No new secret and no `ClientSecret` credential. A stamp identity never gets `User.Invite.All`; invites happen only in the shared registration service (NFR-03, FR-14).
+- No new secret and no `ClientSecret` credential. A stamp identity never gets `User.Invite.All` (NFR-03). Workforce contacts are not B2B guests, so R3 issues no invites (A9 withdrew A8's guest self-registration).
 - No mail is sent "as the user" from R3 surfaces. C6 posts to the thread only (FR-11).
 
 **BFF hygiene and tests**
@@ -63,7 +61,8 @@ Status: see `tasks/TASK-INDEX.md` and `current-task.md`. Spec: `spec.md` (source
 - **ADR-028 A2 (:70)** — path B. Single-tenant Spaarke client, NAA + popup, no SSO fallback, `user_impersonation`. Amendment task 001; it merges before or with the first C8 code task.
 - **ADR-028 A3 (:124)** — path B. Default Tier-1 modules by user type (FR-19). Task 001.
 - **ADR-028 A1 (:55)** — path B (clarify). The "no B2B guest per external user" rule targets CIAM partners. Workforce contacts are customer staff and become guests (C7). Task 001.
-- **ADR-052** — path C. The registration service host is chosen under ADR-052 §6 (task 060).
+- **ADR-052** — path C. The registration service host is chosen under ADR-052 §6 (task 060). *Lapsed: task 060 is withdrawn under A9.*
+- **ADR-028 A9** (2026-10-13) — path B, owner-approved. Workforce contacts sign in with their customer's home directory, and the A1 guest clarification and A8 guest self-registration are superseded for them. Applied in PR #1810. Cross-project note: `notes/coordination/2026-10-13-model1-workforce-signin-cross-project.md`.
 
 ## 3. Owner directives and standing decisions
 
@@ -90,11 +89,18 @@ Full table: `spec.md` §Owner Clarifications. These still constrain work:
 - 2026-10-09 — modules by user type:
   - workforce (staff and workforce contacts) → `legal-front-door` + `policy-library`;
   - CIAM → `assigned-work`.
-- 2026-10-09 — licence-free customer staff self-register through `/join?customer={key}`:
+- *Superseded 2026-10-13 by A9 (below)* — 2026-10-09: licence-free customer staff self-register through `/join?customer={key}`:
   - approval is automatic (home tenant ∈ `CustomerTenantIds` and `acct = 0`);
   - a shared Spaarke service invites them;
   - the contact is created on first sign-in through the member-test branch (#1563).
 - 2026-10-10 — the add-in is for Dataverse-licensed users only. Do not add add-in work here.
+- **2026-10-13 — A9 (owner-approved):**
+  - Workforce contacts use their company account (home directory). Licensed core users stay B2B guests (A8). Partners stay on CIAM.
+  - Licensed users are linked by a stored link (option 1). There is no core-user button.
+  - Workforce contacts get no Office add-ins. Teams for workforce contacts is deferred (soft requirement).
+  - R3 owns sign-in and registration end to end, including the BFF token acceptance, registration and stored link. UAC owns only the baseline role access.
+  - Re-plan: 040 → multitenant browser client, Teams deferred via DEF; 041 → the directory gains the home directory id(s); 056 → profile form; 012 and 060 withdrawn.
+  - Licensing approach: **not decided**. Publisher verification is needed before the first production customer (provisioning).
 - 2026-10-10 — R3 owns FR-22 (Ciam audience forms) and FR-23 (default-scheme CIAM guard). Provisioning owns `CiamGraphClientFactory` → MI-FIC, H3c, H4b `Ciam:*` and the H13 probes.
 
 **Owner answers 2026-10-12**
@@ -132,6 +138,11 @@ Full table: `spec.md` §Owner Clarifications. These still constrain work:
   - PRQ-C-14 (landed, PR #1589);
   - the per-customer shared mailbox (#1562).
 - Coordination notes: `notes/coordination/`.
+
+**A9 responsibilities (2026-10-13)** — `notes/coordination/2026-10-13-model1-workforce-signin-cross-project.md`; messages sent to UAC (-1d), word-add-in (-46) and provisioning (-b2), awaiting confirmations.
+- UAC: merges master, corrects round 97, re-scopes 186 to baseline access. It allows R3 to change `WorkforceIdentityOptions.cs`, `WorkforcePrincipalResolver.cs` and `ContactIdentityBinder.cs`, plus a new registration endpoint, with UAC reviewing the PR.
+- word-add-in: no change (licensed users on A8); live-tests licensed-guest sign-in from their home Office/Teams.
+- provisioning: multitenant BFF apps (`requestedAccessTokenVersion` = 2), the admin-consent link via `knownClientApplications`, the `CustomerTenantIds` intake, publisher verification, and the home directory id in the T240c entry.
 
 **Other projects**
 - **`spaarke-auth-system-of-record-r1`:** the auth record and `docs/architecture/SPAARKE-AUTH-ARCHITECTURE.md` are the auth basis. That project also plans an ADR-028 amendment (§12b). Task 001 coordinates so there is one amendment, or two that do not conflict.

@@ -59,11 +59,15 @@ Load when:
 - ✅ **MUST** fail closed on every error path — and **MUST NOT** cache a fault-derived result as if it were an answer (session 26 C12 / task 132)
 - ✅ **MUST** include machine-readable deny codes (e.g., `sdap.access.deny.team_mismatch`)
 
-### Model 1 workforce identity — the customer's home tenant (owner request 2026-10-11; R3)
+### Model 1 workforce identity — the customer's home directory (owner request 2026-10-11; R3; ADR-028 A8 + A9)
 
-- ✅ **MUST** treat a Model 1 customer employee as a **B2B guest in Spaarke's tenant** who authenticates in **their company's own Entra tenant (home tenant)**: the stamp token carries `tid` = Spaarke, `acct = 1`, `idp` = home-tenant issuer. Model 1 moves Spaarke's side into Spaarke's tenant, not the customer's people.
-- ✅ **MUST** key workforce membership on the customer's home tenant id(s) in `WorkforceIdentity:CustomerTenantIds` (and, for self-registration, the same list in the Spaarke registry) — **never** on `AzureAd:TenantId` (= Spaarke on Model 1), an email domain or a `#EXT#` UPN.
-- ❌ **MUST NOT** use a multitenant / `common` / `organizations` authority for Model 1 workforce sign-in — the guest lands in the home tenant with a different `oid` (ADR-028 A8).
+Terms: **Spaarke tenant** = Spaarke's Entra directory; **customer's home directory** = the customer's own Entra directory. Never write a bare "tenant" for the second.
+
+- ✅ **MUST** treat a Model 1 **licensed core user** as a **B2B guest in the Spaarke tenant** who authenticates in their customer's home directory: the stamp token carries `tid` = Spaarke, `acct = 1`, `idp` = home-directory issuer (ADR-028 A8).
+- ✅ **MUST** sign a Model 1 **workforce contact** in to the browser SPA with their company account, through one multitenant Spaarke SPA client at their customer's home directory. The BFF accepts the token only when `iss` exactly matches `https://login.microsoftonline.com/{tid}/v2.0`, `tid` is in that stamp's `WorkforceIdentity:CustomerTenantIds`, `aud` is that stamp's BFF app, it is a user token and `acct` = 0. Identity is keyed on (`tid`, `oid`). Workforce contacts are **not** B2B guests (ADR-028 A9).
+- ✅ **MUST** resolve a licensed core user who opens the browser SPA with their company account to their `systemuser` only through the stored link home (`tid`, `oid`) → `systemuserid` — never by email or UPN (A9).
+- ✅ **MUST** key workforce membership on the customer's home directory id(s) in `WorkforceIdentity:CustomerTenantIds` — **never** on `AzureAd:TenantId` (= Spaarke on Model 1), an email domain or a `#EXT#` UPN.
+- ❌ **MUST NOT** use a multitenant / `common` / `organizations` authority for Model 1 licensed-user sign-in (model-driven apps, Office add-ins, Teams) — the guest lands in the home directory with a different `oid` (A8). The **only** exception is the A9 workforce-contact browser-SPA client.
 - Full explanation and where each value lives: [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §6.5.2 "Model 1: why a customer has a home tenant at all"](../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md). Code: `WorkforceIdentityOptions.cs` `WorkforceMembershipTest`.
 
 ### SPE File Access — broker-only byte identity (binding — task 171, 2026-10-06; supersedes Pattern 4's writer-identity rule)

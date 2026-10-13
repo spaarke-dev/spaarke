@@ -48,7 +48,9 @@ public static class InviteAndGrantExternalUserEndpoint
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             // 503: the record's access settings could not be read (task 138), or the contact lookup could not be read
-            // (task 141, sdap.access.invite.contact_lookup_failed). Every 409/422/503 above is decided BEFORE
+            // (task 141, sdap.access.invite.contact_lookup_failed), or (task 184) the pending-invite marker a contact
+            // needed did not land (sdap.access.invite.invite_marker_not_written: no grant, no email — retry). Every
+            // other 409/422/503 above is decided BEFORE
             // onboarding, so it leaves no Contact, CIAM account or email behind — with two exceptions decided AFTER it,
             // which carry the onboarded contactId: the grant core's own refusal when the record or grant changed while
             // the account was provisioned (the re-run checks, a race), and the expired_not_restored 409 backstop (owner
