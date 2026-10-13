@@ -3,7 +3,7 @@
   <metadata>
     <title>UAC half of the ontology child-record contract: Decision Record subject lineage rows (C4) and the census guard for Signal, Decision Record and Budget Revision (C7 / audit F4), landed on the ontology integration branch</title>
     <phase>Session 28 — UAC (owner round 95, 2026-10-12)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes SecureChildLineage, which drives secure reconciliation, share mirroring and the 2-minute job, and changes ArchTests guards.</rigor-reason>
     <model-tier>opus</model-tier>
