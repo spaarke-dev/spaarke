@@ -12,17 +12,16 @@
 |---|---|
 | **Task** | Orchestrating ontology lanes. Child-record contract tasks 140–146 (D-131..D-133) are planned; 140 is live on dev. |
 | **Blocker** | Owner answers Q23, Q24, Q25, Q26, Q27 (below). |
-| **Next Action** | #1756 MERGED `b6d997b74`; #1763 MERGED `d0775ff1d`. Running: #1780 merge script (`bs7wb48lp`, pinned `e4f147828`); #1746 fix round 3 (sonnet). When round 3 reports → merge the base into #1746 → send uac-r2 the 3 diffs → merge. Then task 141 once #1665 + #1747 merge (Q23, Q25). |
+| **Next Action** | #1746 MERGED `376eca286` (2026-10-13; office-scope cap rerun green). Task 141 RUNNING (opus agent, `C:\wts-141`, branch `task/ontology-141-regarding-builder`; live dev seam run held for Q7; #1111 body text comes back in its report). When 141 reports → adversarial review + uac-r2 review of commit 1 → fix → merge. Then 142/143; 147 can start. |
 
 ## Lanes (worktrees `C:\wts-NNN`; all branch from `origin/docs/ontology-platform-design`)
 
 | Lane | PR | State | Next |
 |---|---|---|---|
-| **#1661** secure suppression | #1746, head `c21e82e73` (round 2 fixes `14297d25a`, plus a base merge with #1763) | Round 2 re-checks (ours + uac-r2): every claim holds. One finding, F-T1: the job test never reaches the hit-placement fault. K8 is accepted. Fix round 3 (sonnet) is running: F-T1; the K9 cross-wall lost-lower analysis (fix it if anything reads the stale stamp that night); PR-body notes K-a, K8, K9, K10. | Merge the base (now with #1756 `b6d997b74`, plus #1780 once merged) → send uac-r2 all 3 diffs in one pass (F-T1 fix, `c21e82e73`, the 2nd base merge) → merge. |
+| **141** regarding builder | (draft PR to come) | Running (opus). | uac-r2 reviews commit 1 alone; one adversarial review; then merge. |
 | **#1659** filing trigger | #1747, head `cc6b10cf5` | UAC APPROVED. | Merge when Q25 is answered. |
 
 Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-design` (`gh pr ready` first). The Office-scope CI job hits its 20-min cap (F-49, #1718); merge on log evidence with a PR comment.
-**Merge order:** whichever of #1665/#1746 merges second fixes `DecisionCommitFollowUpsTests.cs:54` and `DecisionCommitServiceTests.cs:216` (the constructor takes `IConfiguration` + `IServiceScopeFactory`).
 **Don't deploy** a BFF with SignalWriter/043 readers to dev until 141 merges: the code reads the pair type as text, but it is now a Lookup.
 
 ## Child-record contract (tasks 140–146)
