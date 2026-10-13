@@ -4,6 +4,7 @@
 # (`sprk_systemuser_{table}_createdbyperson`), instead of reporting "created another way".
 # Task 147 round 2 (D-136, review F3): the narrow profile "Spaarke Ontology Writer Field Writers" is created and checked, the BFF
 # writers rule is unchanged, and a $SolutionHomes table's missing column is never created by -Apply.
+# Task 142 (#1783 / D-135): sprk_decisionrecord joins $Tables and $SolutionHomes exactly as the budget revision did.
 #
 # The script talks to a live environment on load, so it is never run here. The relationship-name functions are read out of
 # the script's own AST and exercised against a fake reader: the code under test is the shipped code, not a copy.
@@ -60,7 +61,17 @@ Describe 'the script''s table and solution wiring' {
     It 'lists sprk_budgetrevision in $Tables and checks its column against the solutions that carry it, not SpaarkeCore' {
         $text = Get-Content -Raw $script:ScriptPath
         $text | Should -Match '(?m)^\$Tables = @\([^)]*''sprk_budgetrevision''[^)]*\)'
-        $text | Should -Match '(?m)^\$SolutionHomes = @\{ sprk_budgetrevision = @\(''SpaarkeMaster'', ''OntologyPlatformSolution''\) \}'
+        $homes = [regex]::Match($text, '(?ms)^\$SolutionHomes = @\{(.*?)^\}').Groups[1].Value
+        $homes | Should -Match '(?m)^\s+sprk_budgetrevision = @\(''SpaarkeMaster'', ''OntologyPlatformSolution''\)'
+    }
+
+    It '142: lists sprk_decisionrecord in $Tables and gives it the same solution homes as the budget revision' {
+        $text = Get-Content -Raw $script:ScriptPath
+        $text | Should -Match '(?m)^\$Tables = @\([^)]*''sprk_decisionrecord''[^)]*\)'
+        $homes = [regex]::Match($text, '(?ms)^\$SolutionHomes = @\{(.*?)^\}').Groups[1].Value
+        $homes | Should -Match '(?m)^\s+sprk_decisionrecord = @\(''SpaarkeMaster'', ''OntologyPlatformSolution''\)'
+        # 143 adds the Signal; until then it is neither in $Tables nor a solution home
+        $homes | Should -Not -Match 'sprk_signal'
     }
 
     It 'D-136: the narrow profile covers exactly sprk_budgetrevision, sprk_decisionrecord and sprk_signal' {
@@ -97,8 +108,11 @@ Describe 'a simulated run' {
             $global:SimCpNarrowTeams = @()
             $global:SimCpNarrowExtra = @()
         }
+        # The tables whose column travels in SpaarkeMaster / OntologyPlatformSolution, as the script's $SolutionHomes says.
+        $global:SimCpHomeTables = @('sprk_budgetrevision', 'sprk_decisionrecord')
         function global:SimCp-Rel([string]$t) {
-            if ($t -eq 'sprk_budgetrevision') { 'sprk_budgetrevision_CreatedByPerson_systemuser' } else { "sprk_systemuser_$($t)_createdbyperson" }
+            # the maker-made lookups (D-135 Q27) carry the maker's relationship name
+            if ($t -in $global:SimCpHomeTables) { "$($t)_CreatedByPerson_systemuser" } else { "sprk_systemuser_$($t)_createdbyperson" }
         }
         SimCp-Reset
         function global:az { 'fake-token' }
@@ -116,12 +130,14 @@ Describe 'a simulated run' {
             if ($path -like 'organizations*') { return @{ value = @(@{ name = 'sim' }) } }
             if ($path -match "^EntityDefinitions\(LogicalName='(\w+)'\)/Attributes\(LogicalName='sprk_createdbyperson'\)/Microsoft") {
                 if ($global:SimCpScenario -eq 'no-br-column' -and $Matches[1] -eq 'sprk_budgetrevision') { throw '404 not found' }
+                if ($global:SimCpScenario -eq 'no-dr-column' -and $Matches[1] -eq 'sprk_decisionrecord') { throw '404 not found' }
                 return @{ LogicalName = 'sprk_createdbyperson'; Targets = @('systemuser'); IsSecured = $true; MetadataId = (SimCp-Guid "attr-$($Matches[1])") }
             }
             if ($path -match "^RelationshipDefinitions\(SchemaName='([^']+)'\)/Microsoft.Dynamics.CRM.OneToMany") {
                 $name = $Matches[1]
                 foreach ($t in $global:SimCpTables) {
-                    if ($name -eq (SimCp-Rel $t) -and -not ($global:SimCpScenario -eq 'no-br-column' -and $t -eq 'sprk_budgetrevision')) {
+                    $gone = ($global:SimCpScenario -eq 'no-br-column' -and $t -eq 'sprk_budgetrevision') -or ($global:SimCpScenario -eq 'no-dr-column' -and $t -eq 'sprk_decisionrecord')
+                    if ($name -eq (SimCp-Rel $t) -and -not $gone) {
                         return @{ SchemaName = $name; ReferencedEntity = 'systemuser'; ReferencingEntity = $t; ReferencingAttribute = 'sprk_createdbyperson'
                             ReferencingEntityNavigationPropertyName = 'sprk_CreatedByPerson'; MetadataId = (SimCp-Guid "rel-$t")
                             CascadeConfiguration = @{ Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Merge = 'NoCascade'; Delete = 'RemoveLink' } }
@@ -164,8 +180,8 @@ Describe 'a simulated run' {
                 $rows = @($global:SimCpNarrow.Keys | ForEach-Object { @{ entityname = $_; attributelogicalname = 'sprk_createdbyperson' } }) + @($global:SimCpNarrowExtra)
                 return @{ value = $rows }
             }
-            if ($path -like '*expand=fieldsecurityprofileid*entityname eq ''sprk_budgetrevision''*') {
-                # who can write the column on the budget revision: the narrow profile does, and the script must allow it there
+            if ($path -like '*expand=fieldsecurityprofileid*entityname eq ''sprk_budgetrevision''*' -or $path -like '*expand=fieldsecurityprofileid*entityname eq ''sprk_decisionrecord''*') {
+                # who can write the column on the budget revision / decision record: the narrow profile does, and the script must allow it there
                 return @{ value = @(@{ fieldsecurityprofileid = @{ name = $narrowName } }) }
             }
             if ($path -like 'fieldpermissions?*_fieldsecurityprofileid_value eq *') {
@@ -183,9 +199,10 @@ Describe 'a simulated run' {
                 $sid = $path -replace '.*_solutionid_value eq ([0-9a-fA-F-]+).*', '$1'
                 $rows = @()
                 $budgetRevisionTable = @{ objectid = (SimCp-Guid 'table-sprk_budgetrevision'); componenttype = 1; rootcomponentbehavior = 0 }
+                $decisionRecordTable = @{ objectid = (SimCp-Guid 'table-sprk_decisionrecord'); componenttype = 1; rootcomponentbehavior = 0 }
                 if ($sid -eq (SimCp-Guid 'sol-SpaarkeCore')) {
-                    # SpaarkeCore holds every other table's column and relationship, and NOT the budget revision's.
-                    foreach ($t in $global:SimCpTables | Where-Object { $_ -ne 'sprk_budgetrevision' }) {
+                    # SpaarkeCore holds every other table's column and relationship, and NOT the budget revision's or the decision record's.
+                    foreach ($t in $global:SimCpTables | Where-Object { $_ -notin $global:SimCpHomeTables }) {
                         $rows += @{ objectid = (SimCp-Guid "attr-$t"); componenttype = 2; rootcomponentbehavior = 0 }
                         $rows += @{ objectid = (SimCp-Guid "rel-$t"); componenttype = 10; rootcomponentbehavior = 0 }
                     }
@@ -193,11 +210,15 @@ Describe 'a simulated run' {
                     $rows += @{ objectid = $writer; componenttype = 70; rootcomponentbehavior = 0 }
                 }
                 elseif ($sid -eq (SimCp-Guid 'sol-SpaarkeMaster')) {
-                    # SpaarkeMaster holds the budget revision table AND the D-136 narrow profile.
+                    # SpaarkeMaster holds the budget revision and decision record tables AND the D-136 narrow profile.
                     $rows += $budgetRevisionTable
+                    $rows += $decisionRecordTable
                     if ($global:SimCpScenario -ne 'narrow-not-in-master') { $rows += @{ objectid = $narrow; componenttype = 70; rootcomponentbehavior = 0 } }
                 }
-                elseif ($sid -eq (SimCp-Guid 'sol-OntologyPlatformSolution') -and $global:SimCpScenario -ne 'not-in-ontology') { $rows += $budgetRevisionTable }
+                elseif ($sid -eq (SimCp-Guid 'sol-OntologyPlatformSolution')) {
+                    if ($global:SimCpScenario -ne 'not-in-ontology') { $rows += $budgetRevisionTable }
+                    if ($global:SimCpScenario -ne 'dr-not-in-ontology') { $rows += $decisionRecordTable }
+                }
                 return @{ value = $rows }
             }
             throw "simulation: unhandled request $path"
@@ -212,7 +233,7 @@ Describe 'a simulated run' {
     }
     AfterAll {
         foreach ($f in 'az', 'Invoke-RestMethod', 'SimCp-Guid', 'SimCp-Rel', 'SimCp-Reset') { Remove-Item "function:global:$f" -ErrorAction SilentlyContinue }
-        Remove-Variable SimCpTables, SimCpScenario, SimCpWrites, SimCpNarrowExists, SimCpNarrow, SimCpNarrowUsers, SimCpNarrowTeams, SimCpNarrowExtra -Scope Global -ErrorAction SilentlyContinue
+        Remove-Variable SimCpTables, SimCpHomeTables, SimCpScenario, SimCpWrites, SimCpNarrowExists, SimCpNarrow, SimCpNarrowUsers, SimCpNarrowTeams, SimCpNarrowExtra -Scope Global -ErrorAction SilentlyContinue
     }
 
     It 'passes: the maker relationship name is accepted, and the column is found in SpaarkeMaster and OntologyPlatformSolution, not reported missing from SpaarkeCore' {
@@ -225,6 +246,28 @@ Describe 'a simulated run' {
         $run.Text | Should -Not -Match 'MISSING\s+\S*budgetrevision\S* in SpaarkeCore'
         $run.Text | Should -Match 'VERIFY PASS'
         $run.ExitCode | Should -Be 0
+    }
+
+    It '142 passes: the decision record''s column is found in SpaarkeMaster and OntologyPlatformSolution, not reported missing from SpaarkeCore, and the narrow profile may write it' {
+        SimCp-Reset
+        $run = Invoke-SimulatedVerify
+        $run.Text | Should -Match 'OK\s+sprk_decisionrecord\.sprk_createdbyperson \(lookup -> systemuser\)'
+        $run.Text | Should -Match 'OK\s+sprk_decisionrecord_CreatedByPerson_systemuser \(navigation sprk_CreatedByPerson'
+        $run.Text | Should -Match 'OK\s+sprk_decisionrecord\.sprk_createdbyperson in SpaarkeMaster'
+        $run.Text | Should -Match 'OK\s+sprk_decisionrecord\.sprk_createdbyperson in OntologyPlatformSolution'
+        $run.Text | Should -Not -Match 'MISSING\s+\S*decisionrecord\S* in SpaarkeCore'
+        $run.Text | Should -Not -Match 'can also write sprk_decisionrecord\.sprk_createdbyperson'
+        $run.Text | Should -Match 'VERIFY PASS'
+        $run.ExitCode | Should -Be 0
+    }
+
+    It '142 still fails when OntologyPlatformSolution does not carry the decision record''s column' {
+        SimCp-Reset; $global:SimCpScenario = 'dr-not-in-ontology'
+        $run = Invoke-SimulatedVerify
+        $run.Text | Should -Match 'MISSING\s+sprk_decisionrecord\.sprk_createdbyperson in OntologyPlatformSolution'
+        $run.Text | Should -Not -Match 'MISSING\s+sprk_budgetrevision'
+        $run.Text | Should -Match 'VERIFY FAIL'
+        $run.ExitCode | Should -Be 1
     }
 
     It 'still fails when a solution that should carry the column does not (a real gap is not hidden)' {
@@ -345,6 +388,15 @@ Describe 'a simulated run' {
         $run.Text | Should -Match 'FAIL\s+sprk_budgetrevision\.sprk_createdbyperson is missing and this script never creates it'
         $run.Text | Should -Match 'import the owning solution \(SpaarkeMaster / OntologyPlatformSolution\) first'
         $run.Text | Should -Not -Match 'DONE\s+created sprk_budgetrevision'
+        $run.ExitCode | Should -Be 1
+    }
+
+    It '142 F3: -Apply refuses to create sprk_decisionrecord.sprk_createdbyperson (it travels in SpaarkeMaster), says so, and exits non-zero' {
+        SimCp-Reset; $global:SimCpScenario = 'no-dr-column'
+        $run = Invoke-SimulatedRun @{ Apply = $true }
+        @($run.Writes | Where-Object { $_ -like '*RelationshipDefinitions*' -or $_ -like '*Attributes*' }).Count | Should -Be 0
+        $run.Text | Should -Match 'FAIL\s+sprk_decisionrecord\.sprk_createdbyperson is missing and this script never creates it'
+        $run.Text | Should -Not -Match 'DONE\s+created sprk_decisionrecord'
         $run.ExitCode | Should -Be 1
     }
 }

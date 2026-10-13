@@ -8,6 +8,7 @@ using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
@@ -55,6 +56,17 @@ public sealed class DecisionRecordWriterTests
         public CapturingLogger<DecisionRecordWriter> Log { get; } = new();
         public DecisionRecordWriter Writer { get; }
 
+        /// <summary>Task 142: the rows the core-ancestor resolver reads (an unscripted subject reads as a row with no root columns).</summary>
+        public Mock<IGenericEntityService> Entities { get; } = new();
+        public Dictionary<(string Table, Guid Id), Entity> Rows { get; } = new();
+        public Exception? RowReadFault { get; set; }
+
+        /// <summary>Task 142: the record-type catalog the shared regarding builder types the pair from (spaarkedev1's rows).</summary>
+        public Tests.TestInfrastructure.RecordTypeCatalogStub RecordTypes { get; } = new(Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1);
+
+        /// <summary>Every ownership question the mock resolver was asked, in order.</summary>
+        public List<RecordOwnershipContext> OwnerAsks { get; } = [];
+
         public Harness(RecordOwnerResolution? ownership = null, IRecordOwnershipResolver? realResolver = null)
         {
             Org.Setup(o => o.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
@@ -66,10 +78,20 @@ public sealed class DecisionRecordWriterTests
                     ["owningteam"] = new EntityReference("team", ReadBackTeam ?? SecureTeam),
                 });
             Ownership.Setup(r => r.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+                .Callback<RecordOwnershipContext, CancellationToken>((c, _) => OwnerAsks.Add(c))
                 .ReturnsAsync(ownership ?? RecordOwnerResolution.Owned(Guid.NewGuid()));
+            Entities.Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .Returns((string table, Guid id, string[] _, CancellationToken _) => RowReadFault is { } fault
+                    ? Task.FromException<Entity>(fault)
+                    : Task.FromResult(Rows.TryGetValue((table, id), out var row) ? row : new Entity(table, id)));
 
             var client = new OntologyWriterDataverseClient(() => Org.Object, NullLogger<OntologyWriterDataverseClient>.Instance);
-            Writer = new DecisionRecordWriter(client, realResolver ?? Ownership.Object, new FakeTimeProvider(Now), Log);
+            var coreAncestors = new CoreAncestorResolver(
+                Entities.Object,
+                (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
+                    CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute), StringComparer.OrdinalIgnoreCase)),
+                NullLogger<CoreAncestorResolver>.Instance);
+            Writer = new DecisionRecordWriter(client, realResolver ?? Ownership.Object, coreAncestors, RecordTypes, new FakeTimeProvider(Now), Log);
         }
 
         public Entity Row => Created.Single();
@@ -737,7 +759,10 @@ public sealed class DecisionRecordWriterTests
     {
         // The commit route hands in an owner it resolved earlier; the writer still refuses one that names no team.
         var h = new Harness();
-        var act = () => h.Writer.WriteAsync(Request(noCore: true), RecordOwnerResolution.Unchanged("keeps its creator"), CancellationToken.None);
+        var request = Request(noCore: true);
+        var handed = new DecisionRecordOwner(
+            RecordOwnerResolution.Unchanged("keeps its creator"), DecisionRecordWriter.OwnershipContextOf(request, []).Parents, null);
+        var act = () => h.Writer.WriteAsync(request, handed, CancellationToken.None);
 
         (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
         h.Created.Should().BeEmpty();
@@ -1001,6 +1026,183 @@ public sealed class DecisionRecordWriterTests
 
         await withOutcome.Should().ThrowAsync<DecisionRecordRefusedException>();
         await withRows.Should().ThrowAsync<DecisionRecordRefusedException>();
+        h.Created.Should().BeEmpty();
+    }
+
+    // ── Task 142: filed under its subject (contract C1/C2), every parent asked (C3), the deciding user recorded (#1783) ──────────
+
+    private static readonly Guid CommunicationId = Guid.NewGuid();
+
+    private static RecordOwnershipParent Parent(string table, Guid id) => new(table, id);
+
+    private static CoreAncestorResolver StampColumnsResolver(IGenericEntityService entities) => new(
+        entities,
+        (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
+            CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute), StringComparer.OrdinalIgnoreCase)),
+        NullLogger<CoreAncestorResolver>.Instance);
+
+    [Fact]
+    public async Task A142_ACommunicationSubjectUnderASecureMatter_IsFiledUnderTheSubject_StampedWithTheMatter_AndSecureOwned()
+    {
+        // Acceptance 1: the subject lookup and the (untyped: no catalog row on spaarkedev1) pair from the shared builder, THEN the
+        // core-ancestor stamp from the subject. A reversed order cannot write this row: the builder refuses a row that already carries
+        // a regarding lookup (ADR-024), and the stamp column sprk_regardingmatter is one.
+        var directory = Tests.TestInfrastructure.OwnershipDirectory.Standard()
+            .WithSecureRoot("sprk_matter", MatterId)
+            .WithRecord("sprk_communication", CommunicationId, Tests.TestInfrastructure.OwnershipDirectory.SecureBu,
+                owningTeam: Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam,
+                extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) });
+        var h = new Harness(realResolver: directory.Resolver()) { ReadBackTeam = Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam };
+        h.Rows[("sprk_communication", CommunicationId)] = new Entity("sprk_communication", CommunicationId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId),
+        };
+
+        var result = await h.Writer.WriteAsync(Request(core: Core("sprk_matter", MatterId), subject: new DecisionRecordRef("sprk_communication", CommunicationId)));
+
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(CommunicationId, "filed under its subject");
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId, "stamped with the subject's core");
+        h.Row.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(CommunicationId.ToString("D").ToLowerInvariant());
+        h.Row.Contains("sprk_regardingrecordtype").Should().BeFalse("spaarkedev1 has no sprk_communication catalog row: the pair is untyped (D-133)");
+        h.RecordTypes.Queried.Should().Equal("sprk_communication");
+        h.Row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(MatterId, "the typed lineage column stays populated until task 145");
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
+        result.SecureOwnerTeamId.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task A142_AnOrdinaryMatter_IsOwnedByItsBusinessUnitTeam_NeverAUser_AndFiledUnderTheMatterWithATypedPair()
+    {
+        // Acceptance 2.
+        var directory = Tests.TestInfrastructure.OwnershipDirectory.Standard().WithOrdinaryRoot("sprk_matter", MatterId);
+        var h = new Harness(realResolver: directory.Resolver());
+
+        var result = await h.Writer.WriteAsync(Request(core: Core("sprk_matter", MatterId)));
+
+        var owner = h.Row.GetAttributeValue<EntityReference>("ownerid");
+        owner.LogicalName.Should().Be("team");
+        owner.Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.ChildTeam);
+        h.Row.Contains("owninguser").Should().BeFalse();
+        result.SecureOwnerTeamId.Should().BeNull();
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId);
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingrecordtype").Id
+            .Should().Be(Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1["sprk_matter"]);
+        h.Row.Contains("sprk_regardingproject").Should().BeFalse();
+        h.Row.Contains("sprk_regardingcommunication").Should().BeFalse();
+        h.Row.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)
+            .Should().BeEquivalentTo(new EntityReference("systemuser", User), "#1783 / D-135: sprk_createdbyperson is the deciding user");
+    }
+
+    [Fact]
+    public async Task A142_TheOwnerIsAskedAboutEveryParent_TheCoresTheFilingDerivedToo_AndTheDecidingUserIsTheRequester()
+    {
+        var project = Guid.NewGuid();
+        var signalSubject = Guid.NewGuid();
+        var h = new Harness();
+        h.Rows[("sprk_todo", TodoId)] = new Entity("sprk_todo", TodoId) { ["sprk_regardingproject"] = new EntityReference("sprk_project", project) };
+
+        await h.Writer.WriteAsync(Request(noCore: true, subject: new DecisionRecordRef("sprk_todo", TodoId),
+            signalSubjects: [new DecisionRecordRef("sprk_document", signalSubject)]));
+
+        var asked = h.OwnerAsks.Should().ContainSingle().Subject;
+        asked.Parents.Should().Equal(Parent("sprk_todo", TodoId), Parent("sprk_project", project), Parent("sprk_document", signalSubject));
+        asked.RequestedBy!.SystemUserId.Should().Be(User, "#1783 / D-135: the deciding user is the person who asked");
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingtodo").Id.Should().Be(TodoId);
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingproject").Id.Should().Be(project, "the stamp the derived core gave");
+    }
+
+    [Fact]
+    public async Task A142_ACoreOnlyTheFilingDerives_MakesTheRecordSecure_UnderAnOrdinaryCore_F1()
+    {
+        // The communication's secure project is known here only through the filing's derivation (the directory has the subject as an
+        // ordinary row with no lineage): the derived core must be a parent of the owner question, or the record is filed ordinary.
+        var project = Guid.NewGuid();
+        var directory = Tests.TestInfrastructure.OwnershipDirectory.Standard()
+            .WithOrdinaryRoot("sprk_matter", MatterId)
+            .WithSecureRoot("sprk_project", project)
+            .WithRecord("sprk_communication", CommunicationId, Tests.TestInfrastructure.OwnershipDirectory.GeneralBu);
+        var h = new Harness(realResolver: directory.Resolver()) { ReadBackTeam = Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam };
+        h.Rows[("sprk_communication", CommunicationId)] = new Entity("sprk_communication", CommunicationId)
+        {
+            ["sprk_regardingproject"] = new EntityReference("sprk_project", project),
+        };
+
+        await h.Writer.WriteAsync(Request(core: Core("sprk_matter", MatterId), subject: new DecisionRecordRef("sprk_communication", CommunicationId)));
+
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingproject").Id.Should().Be(project);
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task A142_AnOwnerResolvedBeforeTheFirstWrite_IsUsed_WhenItAnsweredForTheSameParents()
+    {
+        var h = new Harness(Secure());
+        var request = Request(core: Core("sprk_matter", MatterId));
+
+        var owner = await h.Writer.ResolveOwnerAsync(request);
+        await h.Writer.WriteAsync(request, owner, CancellationToken.None);
+
+        h.OwnerAsks.Should().ContainSingle("the handed-in answer is the write's answer");
+        owner.Resolution.OwningTeamId.Should().Be(SecureTeam);
+        h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(SecureTeam);
+    }
+
+    [Fact]
+    public async Task A142_AnOwnerResolvedForOtherParents_IsAskedAgain_NeverReused()
+    {
+        var h = new Harness(Secure());
+        var request = Request(core: Core("sprk_matter", MatterId));
+        var stale = await h.Writer.ResolveOwnerAsync(request);
+
+        await h.Writer.WriteAsync(request with { SignalSubjects = [new DecisionRecordRef("sprk_todo", TodoId)] }, stale, CancellationToken.None);
+
+        h.OwnerAsks.Should().HaveCount(2);
+        h.OwnerAsks[1].Parents.Should().Contain(Parent("sprk_todo", TodoId));
+        h.Log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("asking again"));
+    }
+
+    [Fact]
+    public async Task A142_ASubjectNoDecisionRecordLookupCarries_IsRefused_InPreflightAndWrite_AndNothingIsWritten()
+    {
+        var h = new Harness();
+        var request = Request(noCore: true, subject: new DecisionRecordRef("sprk_contact", Guid.NewGuid()));
+
+        h.Writer.Invoking(w => w.Preflight(request)).Should().Throw<DecisionRecordRefusedException>()
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.SubjectUnsupported);
+        (await h.Writer.Invoking(w => w.WriteAsync(request)).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.SubjectUnsupported);
+        (await h.Writer.Invoking(w => w.ResolveOwnerAsync(request)).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.SubjectUnsupported);
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A142_WhenTheSubjectsCoresCannotBeRead_ItFailsClosed_AndNothingIsWritten()
+    {
+        var h = new Harness { RowReadFault = new TimeoutException("no answer") };
+        var request = Request(noCore: true, subject: new DecisionRecordRef("sprk_todo", TodoId));
+
+        (await h.Writer.Invoking(w => w.WriteAsync(request)).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.FilingFailed);
+        (await h.Writer.Invoking(w => w.ResolveOwnerAsync(request)).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.FilingFailed);
+        h.Created.Should().BeEmpty();
+        h.OwnerAsks.Should().BeEmpty("an owner is never asked about a parent list the filing could not complete");
+    }
+
+    [Fact]
+    public async Task A142_WhenTheRecordTypeCatalogFaults_ItFailsClosed_AndNothingIsWritten()
+    {
+        var h = new Harness();
+        var writer = new DecisionRecordWriter(
+            new OntologyWriterDataverseClient(() => h.Org.Object, NullLogger<OntologyWriterDataverseClient>.Instance),
+            h.Ownership.Object, StampColumnsResolver(h.Entities.Object),
+            new Tests.TestInfrastructure.RecordTypeCatalogStub((_, _) => throw new TimeoutException("catalog down")),
+            new FakeTimeProvider(Now), h.Log);
+
+        (await writer.Invoking(w => w.WriteAsync(Request())).Should().ThrowAsync<DecisionRecordRefusedException>())
+            .Which.Reason.Should().Be(DecisionRecordRefusalReason.FilingFailed);
         h.Created.Should().BeEmpty();
     }
 }

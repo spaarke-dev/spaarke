@@ -4,7 +4,7 @@
     <title>Child-record contract T2: DecisionRecordWriter files the DR under its subject, resolves the owner from all parents, and also-resolve refuses two secure walls</title>
     <phase>4c Standard child-record contract (D-131)</phase>
     <gate>blocked: 141 done; 043 (#1665) merged; D-136 narrow writer profile live on the target (147 creates it)</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Ownership and secure-family isolation in the Decision Record write path.</rigor-reason>
     <model-tier>opus</model-tier>

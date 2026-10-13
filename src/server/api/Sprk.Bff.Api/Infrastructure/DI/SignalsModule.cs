@@ -60,7 +60,9 @@ public static class SignalsModule
         services.AddSingleton<SignalWriter>();
 
         // DecisionRecordWriter (task 040, FR-18..FR-22): the one append-only Decision Record per review, created through the same
-        // dedicated writer client and uac-r2's IRecordOwnershipResolver. Called last by the commit route (task 043).
+        // dedicated writer client and uac-r2's IRecordOwnershipResolver. Called last by the commit route (task 043). Task 142: also
+        // the CoreAncestorResolver and ICommunicationDataverseService SignalWriter already takes (filing under the subject through the
+        // shared regarding builder, then the core-ancestor stamp) -- no new registration.
         services.AddSingleton<DecisionRecordWriter>();
 
         // Decision plan read (task 036, FR-49/FR-50): the Signal-level access decision (as the caller, through the

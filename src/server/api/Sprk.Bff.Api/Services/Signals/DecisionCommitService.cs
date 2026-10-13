@@ -889,6 +889,13 @@ public sealed class DecisionCommitService
             };
         }
 
+        // ---- (1c-walls) Task 142 (contract C9; uac-r2 #1665 N1 / #1778): ONE Decision Record never spans two secure walls. Also
+        // resolve is one core record's (PrepareAsync), but a core record a non-member reads can hold Signals of more than one secure
+        // family (D-123), so their secure-root sets must be the same set. After FR-51 (the answer is given only to a caller who may act
+        // on every item) and before anything is written.
+        if (p.Resolved.Count > 1 && await SecureWallsRefusalAsync(reviewId, p.Resolved, ct).ConfigureAwait(false) is { } walls)
+            return walls;
+
         // ---- (1c'') F4-a (uac-r2): a no-core item's Decision Record owner is resolved only AFTER FR-51 (step 1f), so whether the
         // subject row exists never shows through a different answer to a caller who may not act on it. Here, with no I/O: a
         // no-core Signal that names no subject has nothing to file its record under.
@@ -947,8 +954,9 @@ public sealed class DecisionCommitService
 
         // ---- (1f) The record's owner, resolved BEFORE the first write: an owner refusal refuses the decision, not the record
         // after the sends. The answer is handed to the write at step 5. The owner is uac-r2's answer for EVERY parent the record
-        // sits under (the core, if any, and the subject of every Signal it resolves: secure-if-any, uac-r2 F1; D-129), taken as
-        // returned; and (F4-b) a refusal is 422 (a fixed text for a no-core item) while a fault of the resolver is 503.
+        // sits under (the core, if any, the record's subject and every core it derives (task 142), and the subject of every Signal
+        // it resolves: secure-if-any, uac-r2 F1; D-129), taken as returned; and (F4-b) a refusal is 422 (a fixed text for a no-core
+        // item) while a fault of the resolver or of the filing derivation is 503.
         var noCore = p.RecordCore is null;
 
         // D-134: a no-core review of a PERSONAL To Do is owned by its Assigned To user's business-unit team when every parent is
@@ -960,12 +968,12 @@ public sealed class DecisionCommitService
         if (noCore && SubjectOf(p.Primary) is { } item && string.Equals(item.Entity, PersonalToDoAssignee.Table, StringComparison.OrdinalIgnoreCase))
             (assignee, assigneeUnreadable) = await PersonalToDoAssigneeAsync(item.Id, ct).ConfigureAwait(false);
 
-        RecordOwnerResolution? recordOwner;
+        DecisionRecordOwner recordOwner;
         try
         {
             recordOwner = await _records.ResolveOwnerAsync(RecordRequest(review, p, confirmedBy, now, ProjectedSteps(p), ProjectedFollowOns(p), executed: null, hash, deciderContact, assignee), ct).ConfigureAwait(false);
         }
-        catch (DecisionRecordRefusedException ex) when (ex.Reason == DecisionRecordRefusalReason.OwnerResolutionFailed)
+        catch (DecisionRecordRefusedException ex) when (ex.Reason is DecisionRecordRefusalReason.OwnerResolutionFailed or DecisionRecordRefusalReason.FilingFailed)
         {
             return noCore
                 ? Unavailable(reviewId, DecisionCommitReasons.ItemOwnerUnsupported, "The item's owner could not be checked; nothing was done.")
@@ -978,7 +986,7 @@ public sealed class DecisionCommitService
                 : Refused(reviewId, DecisionCommitReasons.RecordRefused, $"This decision cannot be recorded ({ex.Reason}); nothing was done.");
         }
 
-        if (assigneeUnreadable && recordOwner is not { IsSecureOwner: true })
+        if (assigneeUnreadable && recordOwner.Resolution is not { IsSecureOwner: true })
             return Unavailable(reviewId, DecisionCommitReasons.ItemOwnerUnsupported, "The item's owner could not be checked; nothing was done.");
 
         // ---- (2)(3)(4) The writes, in D-17 order ----------------------------------------------------------------------------
@@ -1089,6 +1097,38 @@ public sealed class DecisionCommitService
     }
 
     // ── Validation ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Task 142 (child-record contract C9, acceptance 7; uac-r2 #1665 N1 / #1778): the refusal when the Signals one decision resolves are
+    /// not all in ONE secure family (the same set of secure roots above each Signal and its subject: <see cref="SuppressionPartition"/>,
+    /// uac-r2's walk), else null. Ordinary beside secure is two families. Fail closed: an undetermined family is a family of its own (a
+    /// refusal), and a fault or a short answer is Unavailable; nothing is written either way. The text names no record.
+    /// </summary>
+    private async Task<DecisionCommitResult?> SecureWallsRefusalAsync(Guid reviewId, IReadOnlyList<SignalRow> rows, CancellationToken ct)
+    {
+        IReadOnlyList<SuppressionPartition>? families;
+        try
+        {
+            families = await _followUps.SecureFamiliesAsync(rows.Select(r => r.Id).ToList(), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Decision commit: the secure families of review {ReviewId}'s items could not be read; refusing (fail closed).", reviewId);
+            families = null;
+        }
+
+        if (families is null || families.Count != rows.Count)
+            return Unavailable(reviewId, DecisionCommitReasons.AlsoResolveNotAllowed, "Whether these items sit under the same secure records could not be checked; nothing was done. Try again shortly.");
+
+        if (families.Any(f => f.IsUndetermined) || families.Distinct().Count() > 1)
+        {
+            _logger.LogWarning("Decision commit: review {ReviewId} resolves items under different secure records ({Families}); refused, nothing written.",
+                reviewId, string.Join(" | ", families.Select(f => f.IsUndetermined ? "undetermined" : f.IsOrdinary ? "ordinary" : "secure")));
+            return Refused(reviewId, DecisionCommitReasons.AlsoResolveNotAllowed, "Also resolve accepts only items under the same secure records; nothing was done.");
+        }
+
+        return null;
+    }
 
     private async Task<(DecisionCommitResult? Refusal, Prepared? Ready)> PrepareAsync(
         DecisionReview review, IReadOnlyList<SignalRow> rows, IReadOnlyDictionary<Guid, SignalAccessDecision> access,
@@ -1663,7 +1703,8 @@ public sealed class DecisionCommitService
         new(review.ReviewId,
             p.Primary.PolicyVersionId!.Value,
             p.RecordCore,
-            p.RecordCore is null ? SubjectOf(p.Primary) : null,
+            // Task 142 (contract C1): the record is filed under the primary Signal's subject (the core record when it names none).
+            SubjectOf(p.Primary),
             confirmedBy,
             now,
             steps,

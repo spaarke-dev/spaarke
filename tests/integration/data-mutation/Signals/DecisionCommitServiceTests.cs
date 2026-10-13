@@ -145,8 +145,12 @@ public sealed class DecisionCommitServiceTests
         /// <summary>D-134: the To Do rows the app-only Assigned To read answers (an unscripted id reads as a To Do with no Assigned To).</summary>
         public Dictionary<Guid, Entity> TodoRows { get; } = new();
 
-        /// <summary>D-134: a fault of the app-only To Do read.</summary>
+        /// <summary>D-134: a fault of the app-only To Do read that names Assigned To (the assignee read). Task 142: the Decision Record's
+        /// filing reads the To Do's root columns separately (<see cref="TodoFilingReadFault"/>).</summary>
         public Exception? TodoReadFault { get; set; }
+
+        /// <summary>Task 142: a fault of the core-ancestor read of the To Do subject (its root columns, no Assigned To).</summary>
+        public Exception? TodoFilingReadFault { get; set; }
 
         /// <summary>Subject rows the CALLER cannot read (the sprk_todos entity set), and a fault answer for any subject read.</summary>
         public HashSet<Guid> CallerCannotReadSubject { get; } = new();
@@ -175,9 +179,10 @@ public sealed class DecisionCommitServiceTests
             Entities.Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => new EntityCollection(ExistingRecords.ToList()));
             Entities.Setup(e => e.RetrieveAsync("sprk_todo", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .Returns((string _, Guid id, string[] _, CancellationToken _) => TodoReadFault is { } fault
-                    ? Task.FromException<Entity>(fault)
-                    : Task.FromResult(TodoRows.TryGetValue(id, out var row) ? row : new Entity("sprk_todo", id)));
+                .Returns((string _, Guid id, string[] columns, CancellationToken _) =>
+                    (columns.Contains("sprk_assignedto") ? TodoReadFault : TodoFilingReadFault) is { } fault
+                        ? Task.FromException<Entity>(fault)
+                        : Task.FromResult(TodoRows.TryGetValue(id, out var row) ? row : new Entity("sprk_todo", id)));
 
             Identity.Setup(i => i.ResolveAsync(Caller, It.IsAny<CancellationToken>()))
                 .Returns((Guid id, CancellationToken _) =>
@@ -244,10 +249,39 @@ public sealed class DecisionCommitServiceTests
                 .Callback((Guid? _, IReadOnlyList<DecisionCommitStep> _, IReadOnlyList<DecisionCommitService.SignalRow> dismissed, CancellationToken _) =>
                     DismissedHandedOn.Add(dismissed))
                 .ReturnsAsync(Array.Empty<string>());
+            FollowUps.Setup(f => f.SecureFamiliesAsync(It.IsAny<IReadOnlyList<Guid>>(), It.IsAny<CancellationToken>()))
+                .Returns((IReadOnlyList<Guid> ids, CancellationToken _) =>
+                {
+                    FamiliesAsked.Add(ids);
+                    return FamiliesFault is { } fault
+                        ? Task.FromException<IReadOnlyList<SuppressionPartition>>(fault)
+                        : Task.FromResult<IReadOnlyList<SuppressionPartition>>(
+                            ids.Select(id => Families.TryGetValue(id, out var f) ? f : SuppressionPartition.Ordinary).ToList());
+                });
             FollowUps.Setup(f => f.AfterFailedCommitAsync(It.IsAny<Guid?>(), It.IsAny<IReadOnlyList<DecisionCommitStep>>(), It.IsAny<CancellationToken>()))
                 .Callback((Guid? _, IReadOnlyList<DecisionCommitStep> executed, CancellationToken _) => FailedHandedOn.Add(executed))
                 .Returns(Task.CompletedTask);
         }
+
+        /// <summary>Task 142: the <c>sprk_recordtype_ref</c> catalog the shared regarding builder types the Decision Record's pair from
+        /// (spaarkedev1's rows: a communication subject is untyped, as live).</summary>
+        public Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub RecordTypes { get; } =
+            new(Sprk.Bff.Api.Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1);
+
+        /// <summary>Task 142: uac-r2's REAL core-ancestor resolver over <see cref="Entities"/>; the probe says every stamp column exists
+        /// (they do on sprk_decisionrecord after task 140).</summary>
+        public CoreAncestorResolver CoreAncestors() => new(
+            Entities.Object,
+            (_, _) => Task.FromResult<IReadOnlySet<string>>(new HashSet<string>(
+                CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute), StringComparer.OrdinalIgnoreCase)),
+            NullLogger<CoreAncestorResolver>.Instance);
+
+        /// <summary>Task 142: the secure family of each Signal the commit resolves (null: all ordinary). A fault, when set, is thrown.</summary>
+        public Dictionary<Guid, SuppressionPartition> Families { get; } = new();
+
+        public Exception? FamiliesFault { get; set; }
+
+        public List<IReadOnlyList<Guid>> FamiliesAsked { get; } = new();
 
         public OntologyWriterDataverseClient WriterClient() =>
             new(() => Org.Object, NullLogger<OntologyWriterDataverseClient>.Instance);
@@ -372,7 +406,7 @@ public sealed class DecisionCommitServiceTests
                 resolver = recording.Object;
             }
 
-            var records = new DecisionRecordWriter(WriterClient(), resolver, Clock, NullLogger<DecisionRecordWriter>.Instance);
+            var records = new DecisionRecordWriter(WriterClient(), resolver, CoreAncestors(), RecordTypes, Clock, NullLogger<DecisionRecordWriter>.Instance);
             return new DecisionCommitService(access, plans, new DecisionActionExecutors(Executors.Values), records, WriterClient(),
                 Entities.Object, Probe.Object, Identity.Object, Links, LedgerStore ?? Ledger, FollowUps.Object, Lease, PlanReads, Clock, NullLogger<DecisionCommitService>.Instance);
         }
@@ -772,6 +806,121 @@ public sealed class DecisionCommitServiceTests
         rig.LinkedRecord(Second).Should().Be(RecordId);
         rig.Resolution(Second).Should().Be(SignalWriter.ResolutionActed);
         Steps(rig.Record).GetProperty("resolvedSignalIds").EnumerateArray().Select(e => e.GetGuid()).Should().Equal(Primary, Second);
+    }
+
+    // ── Task 142 (contract C9, #1778): one decision never spans two secure walls ─────────────────────────────────────────
+
+    private static readonly Guid SecureMatterX = Guid.Parse("c0430000-0000-4000-8000-0000000000e1");
+    private static readonly Guid SecureProjectY = Guid.Parse("c0430000-0000-4000-8000-0000000000e2");
+
+    private static void AssertNothingWritten(Rig rig, string because)
+    {
+        rig.Writes.Should().BeEmpty(because);
+        rig.Records.Should().BeEmpty(because);
+        rig.SignalUpdates.Should().BeEmpty(because);
+        rig.Log.Should().NotContain(l => l.StartsWith("preflight:", StringComparison.Ordinal), because);
+        rig.Status(Primary).Should().Be(Open);
+        rig.Status(Second).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task A142_AlsoResolve_AcrossTwoSecureWalls_IsRefused_AndNothingIsWritten()
+    {
+        var rig = new Rig();
+        rig.AddSignal(Second, DecisionLane.Decide, Matter, PathB);
+        rig.Families[Primary] = SuppressionPartition.Secure([("sprk_matter", SecureMatterX)]);
+        rig.Families[Second] = SuppressionPartition.Secure([("sprk_project", SecureProjectY)]);
+
+        var result = await rig.CommitAsync(PathBReview(also: [Second]));
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.AlsoResolveNotAllowed);
+        result.Detail.Should().NotContain(SecureMatterX.ToString("D")).And.NotContain(SecureProjectY.ToString("D"), "the refusal names no record");
+        rig.FamiliesAsked.Should().ContainSingle().Which.Should().Equal(Primary, Second);
+        rig.OwnerAsks.Should().BeEmpty("refused before the owner is resolved");
+        AssertNothingWritten(rig, "a two-wall decision is refused before its first write");
+    }
+
+    [Theory]
+    [InlineData("ordinary-beside-secure")]
+    [InlineData("undetermined")]
+    public async Task A142_AlsoResolve_WithAnItemOutsideTheSecureFamily_OrOneWhoseFamilyIsUnknown_IsRefused_AndNothingIsWritten(string second)
+    {
+        var rig = new Rig();
+        rig.AddSignal(Second, DecisionLane.Decide, Matter, PathB);
+        rig.Families[Primary] = SuppressionPartition.Secure([("sprk_matter", SecureMatterX)]);
+        rig.Families[Second] = second == "undetermined" ? SuppressionPartition.Undetermined : SuppressionPartition.Ordinary;
+
+        var result = await rig.CommitAsync(PathBReview(also: [Second]));
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused, second);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.AlsoResolveNotAllowed);
+        AssertNothingWritten(rig, "fail closed: " + second);
+    }
+
+    [Fact]
+    public async Task A142_AlsoResolve_WhenTheSecureFamiliesCannotBeRead_IsUnavailable_AndNothingIsWritten()
+    {
+        var rig = new Rig { FamiliesFault = new TimeoutException("no answer") };
+        rig.AddSignal(Second, DecisionLane.Decide, Matter, PathB);
+
+        var result = await rig.CommitAsync(PathBReview(also: [Second]));
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.AlsoResolveNotAllowed);
+        AssertNothingWritten(rig, "a fault is not an answer");
+    }
+
+    [Fact]
+    public async Task A142_AlsoResolve_WithinOneSecureFamily_IsRecorded_AndASingleItemDecisionReadsNoFamilies()
+    {
+        var rig = new Rig();
+        rig.AddSignal(Second, DecisionLane.Decide, Matter, PathB);
+        rig.Families[Primary] = SuppressionPartition.Secure([("sprk_matter", SecureMatterX)]);
+        rig.Families[Second] = SuppressionPartition.Secure([("sprk_matter", SecureMatterX)]);
+
+        var result = await rig.CommitAsync(PathBReview(also: [Second]));
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Records.Should().ContainSingle();
+
+        var single = new Rig();
+        (await single.CommitAsync(PathBReview())).Status.Should().Be(DecisionCommitStatus.Recorded);
+        single.FamiliesAsked.Should().BeEmpty("one item is always one family");
+    }
+
+    [Fact]
+    public async Task A142_TheRecordIsFiledUnderTheSubject_StampedFromIt_AndOwnedForEveryParent_ThroughTheRoute()
+    {
+        var rig = new Rig();
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+        rig.TodoRows[ItemTodo] = new Entity("sprk_todo", ItemTodo) { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", Matter) };
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Recorded, result.Detail);
+        rig.Record.GetAttributeValue<EntityReference>("sprk_regardingtodo").Id.Should().Be(ItemTodo, "filed under the Signal's subject");
+        rig.Record.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(Matter, "stamped from the subject");
+        rig.Record.GetAttributeValue<EntityReference>("sprk_regardingrecordtype").Id
+            .Should().Be(Tests.TestInfrastructure.RecordTypeCatalogStub.SpaarkeDev1["sprk_todo"]);
+        rig.Record.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(Matter, "the typed lineage column stays populated");
+        rig.OwnerAsks.Should().ContainSingle("the 1f answer is reused at the write: same parents");
+        rig.OwnerAsks[0].Parents.Should().Equal(new RecordOwnershipParent("sprk_matter", Matter), new RecordOwnershipParent("sprk_todo", ItemTodo));
+        rig.OwnerAsks[0].RequestedBy!.SystemUserId.Should().Be(Caller);
+    }
+
+    [Fact]
+    public async Task A142_WhenTheSubjectsFilingCannotBeRead_TheCommitIsUnavailable_AndNothingIsWritten()
+    {
+        var rig = new Rig { TodoFilingReadFault = new TimeoutException("no answer") };
+        rig.AddSignal(DoSignal, DecisionLane.Do, Matter, DoVersion, subjectEntity: "sprk_todo", subjectId: ItemTodo);
+
+        var result = await rig.CommitAsync(MarkComplete(), DoSignal);
+
+        result.Status.Should().Be(DecisionCommitStatus.Unavailable, result.Detail);
+        rig.Writes.Should().BeEmpty();
+        rig.Records.Should().BeEmpty();
+        rig.SignalUpdates.Should().BeEmpty();
     }
 
     [Fact]
@@ -1254,6 +1403,9 @@ public sealed class DecisionCommitServiceTests
     [InlineData(false)]
     public async Task F1_AnAlsoResolveSetMixingASecureAndAnOrdinarySubject_IsSecureOwned_WhicheverIsThePrimary(bool secureIsPrimary)
     {
+        // The writer's secure-if-any answer over every parent, as defence in depth: the route's family check (task 142) is stubbed at
+        // ONE family here (the Rig's default). With the families the walk really gives, the route refuses this mix before the owner is
+        // asked (A142_AnAlsoResolveMixingASecureAndAnOrdinarySubject_IsRefusedByTheFamilyCheck_BeforeTheOwnerIsAsked).
         var rig = secureIsPrimary ? F1Rig(SubjectUnderSecure, SubjectOrdinary) : F1Rig(SubjectOrdinary, SubjectUnderSecure);
 
         var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false, also: [Second]));
@@ -1262,6 +1414,22 @@ public sealed class DecisionCommitServiceTests
         rig.Record.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Tests.TestInfrastructure.OwnershipDirectory.SecureNamedTeam);
         rig.OwnerAsks.Single().Parents.Select(p => p.RecordId).Should().Contain([Matter, SubjectUnderSecure, SubjectOrdinary],
             "the primary's and the also-resolved Signal's subjects are both asked about");
+    }
+
+    [Fact]
+    public async Task A142_AnAlsoResolveMixingASecureAndAnOrdinarySubject_IsRefusedByTheFamilyCheck_BeforeTheOwnerIsAsked()
+    {
+        var rig = F1Rig(SubjectUnderSecure, SubjectOrdinary);
+        rig.Families[Primary] = SuppressionPartition.Secure([("sprk_project", SecureProjectY)]);
+        rig.Families[Second] = SuppressionPartition.Ordinary;
+
+        var result = await rig.CommitAsync(PathBReview(inquiry: false, todo: false, also: [Second]));
+
+        result.Status.Should().Be(DecisionCommitStatus.Refused);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.AlsoResolveNotAllowed);
+        rig.OwnerAsks.Should().BeEmpty();
+        rig.Writes.Should().BeEmpty();
+        rig.Records.Should().BeEmpty();
     }
 
     [Fact]

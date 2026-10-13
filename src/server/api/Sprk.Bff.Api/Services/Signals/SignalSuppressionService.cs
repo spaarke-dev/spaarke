@@ -432,6 +432,32 @@ public sealed class SignalSuppressionService
         return placed;
     }
 
+    /// <summary>
+    /// Ontology task 142 (child-record contract C9, acceptance 7; uac-r2 #1665 N1 / #1778): the secure family of each of
+    /// <paramref name="signalIds"/>, in order, from THE partition truth (<see cref="PartitionsAsync"/>: the secure roots above the Signal
+    /// row and its subject, uac-r2's own walk). The decision commit route refuses a Decision Record whose Signals are not all in one
+    /// family. Each Signal is read app-only with its lineage lookups, owner and dedupe key (the subject). Never a partial answer: a read
+    /// fault, a missing Signal, an ambiguous Secure team or a walk that does not complete throws, and the caller refuses (fail closed);
+    /// an undetermined Signal is <see cref="SuppressionPartition.Undetermined"/>.
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="PartitionsAsync"/> is the one partition truth;
+    /// this only reads the rows it is given. Extension: the existing entry points take hits or a grain, not a set of Signal ids.
+    /// Cost of doing nothing: one Decision Record could resolve Signals of two secure families, filing one family's decision where
+    /// the other's members read it.</remarks>
+    internal async Task<IReadOnlyList<SuppressionPartition>> PartitionsOfSignalsAsync(IReadOnlyList<Guid> signalIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(signalIds);
+        var items = new List<PartitionItem>(signalIds.Count);
+        foreach (var id in signalIds)
+        {
+            var signal = await _entities.RetrieveAsync("sprk_signal", id, ["sprk_dedupekey", "ownerid", .. SignalLineageColumns], ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException($"Signal {id} could not be read, so its secure family is unknown.");
+            items.Add(ItemOf(signal));
+        }
+
+        return await PartitionsAsync(items, ct).ConfigureAwait(false);
+    }
+
     /// <summary>True when <paramref name="reason"/> ("code - detail") names a catalog code that never counts toward suppression.</summary>
     public static bool IsNonCountingReason(string? reason) => NonCountingReasonCodes.Contains(ReasonCode(reason));
 

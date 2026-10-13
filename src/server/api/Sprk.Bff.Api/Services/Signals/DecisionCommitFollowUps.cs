@@ -16,6 +16,8 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// (the revision cleared it).</para>
 /// <para><b>Suppression (034 hand-off).</b> After a commit resolves Signals as Dismissed, <c>SignalSuppressionService.ApplyAsync</c>
 /// runs for each affected (policy, core record) grain, or (policy, item) for a no-core item, keyed as 034 keys it.</para>
+/// <para><b>One pre-write read (task 142).</b> <see cref="SecureFamiliesAsync"/> hands the route the secure family of each Signal it
+/// resolves, before any write, so a decision never spans two secure walls; it is the exception that throws.</para>
 /// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: 032's <see cref="SignalEvaluationTrigger"/> and 034's
 /// <see cref="SignalSuppressionService"/> do the work; this class only decides what to hand them from a commit's outcome.
 /// Extension: it is the commit route's own after-record step, split out so the route's tests can observe it. Cost of doing
@@ -86,6 +88,15 @@ public class DecisionCommitFollowUps
     /// so the condition the revision cleared is re-evaluated now. Never throws, except cancellation.</summary>
     public virtual async Task AfterFailedCommitAsync(Guid? matterId, IReadOnlyList<DecisionCommitStep> executed, CancellationToken ct) =>
         await EnqueueRevisionsAsync(matterId, executed, ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// Ontology task 142 (child-record contract C9): BEFORE the commit's first write, the secure family of each Signal the decision
+    /// resolves, in order (<see cref="SignalSuppressionService.PartitionsOfSignalsAsync"/>, the one partition truth). The route refuses
+    /// a Decision Record whose Signals are not all in one family. Unlike the after-record steps, a fault THROWS: the caller refuses.
+    /// Here because this class is the route's one seam to the suppression service (its tests observe it).
+    /// </summary>
+    public virtual Task<IReadOnlyList<SuppressionPartition>> SecureFamiliesAsync(IReadOnlyList<Guid> signalIds, CancellationToken ct) =>
+        _suppression.PartitionsOfSignalsAsync(signalIds, ct);
 
     /// <summary>The revisions a commit's steps wrote (the revise-budget step's <c>sprk_budgetrevision</c> row), landed or not.</summary>
     internal static IReadOnlyList<Guid> LandedRevisions(IReadOnlyList<DecisionCommitStep> executed) =>
