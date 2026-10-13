@@ -243,10 +243,11 @@ public class RecordOwnerAssignmentCensusTests
             + "IRecordOwnershipResolver in its preflight (secure-if-any over the matter and the budget), refuses before any "
             + "write when no owner is resolved, and writes the answer onto the row with ApplyTo before the create."),
         new CensusEntry("DecisionRecordWriter.cs", "sprk_decisionrecord", 1, Disposition.Waived,
-            "Pending ontology task 142 (contract C3, audit F1/F2/F3). Today the resolver is asked with the core record "
-            + "only, and its answer is applied only when it is secure. An ordinary answer leaves the writer identity as "
-            + "owner, and a record with no core is owned by the item's owner (a user). Task 142 passes every parent and "
-            + "takes the resolver's answer on every path.",
+            "Pending ontology task 142 (contract C3, audit F1/F2/F3). Today the decision record's owner is "
+            + "RecordOwnershipResolver's answer as returned over all parents (the core record, the item's subject and "
+            + "every Signal's subject), never the writer identity or a user. A personal no-core To Do's record goes to "
+            + "its Assigned To's business-unit team (D-134), with secure-parent precedence. Task 142 still owes the "
+            + "subject lookups, the two-wall refusal (#1778) and the census flip to Routed.",
             WaiverKind.Pending),
         new CensusEntry("SignalWriter.cs", "sprk_signal", 1, Disposition.Waived,
             "Pending ontology task 143 (contract C3, audit F2/F3). Today only a secure answer of the resolver (core "
