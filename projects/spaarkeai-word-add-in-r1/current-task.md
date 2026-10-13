@@ -9,11 +9,11 @@
 | Field | Value |
 |---|---|
 | **Task** | 129 (filed email visible on the record's Messages panel). Code complete: `IThreadResolver.ReconcileThreadForFilingAsync` (commits `48a2f8687`, `09397337f`, `cb9e10aac`), empty-thread retirement + backfill job `communication-thread-filing-sweep` (`fb9e0cdb3`), sweep review fixes (`46687a851`). Reviews: security, behaviour, re-check, sweep adversarial — no open F-class. BFF publish +25,916 B (36.46 → 36.49 MB), no vulnerable packages. |
-| **Status** | 128 deployed, awaiting owner retest. 129 NOT deployed. |
-| **Next Action** | Owner gives three separate goes: (1) dev BFF deploy (`bff-deploy`); (2) enable + trigger the sweep as a dry run — `POST /api/admin/jobs/communication-thread-filing-sweep/enable` then `/trigger`, read `/status` ResultJson with the owner (expect `unresolved` > 0 for party-only filings — documented); (3) set App Service `CommunicationThreadFilingSweep__Apply=true`, trigger, review. Then live-check PAT-444023 / communication `b22bb67e-9dc1-f111-a05c-0022482913fc`, then 129 → ✅ in TASK-INDEX + POML. T126: owner to say whether to send `notes/126-message-to-uac-r2.md` to the UAC-r2 session or relay it. |
+| **Status** | 128 deployed, awaiting owner retest. 129 DEPLOYED to dev 2026-10-12 from `f9cc25f73` (adds party anchoring: an email re-filed to a contact / account / organization takes its thread there, owner kept). Sweep run: dry run 143 candidates + 26 owner fixes → apply 143 reconciled / 26 assigned / 0 unresolved, refused, failed → verify dry run 0 candidates / 0 wouldAssign. `CommunicationThreadFilingSweep__Apply` removed again; job stays registered disabled. Reports: session scratchpad `sweep-{dryrun,apply,verify}-20261012-*`. PAT-444023 email `b22bb67e` now in active thread `b62bb67e` anchored to matter `5b297187`, owner team "Spaarke Business Unit 1". |
+| **Next Action** | Owner visual check: PAT-444023's Messages panel shows "[Spaarke] Mailbox Verification Test"; then 129 → ✅ in TASK-INDEX + POML. Open finding from the owner's screenshot: the add-in "Link another record" picker lists sprk_communication / sprk_analysis / sprk_document / sprk_reportcard by logical name, and sprk_communication / sprk_document / sprk_reportcard have no thread lookup, so an email related only to them shows on no Messages panel — owner to decide. T126: owner to say whether to send `notes/126-message-to-uac-r2.md` to the UAC-r2 session or relay it. |
 
 ### Unpushed / uncommitted
-- None. Branch pushed at `46687a851`; no PR open.
+- None after the checkpoint commit; no PR open.
 
 ## Live in dev (2026-10-08/11)
 - 2026-10-12 03:12 UTC (evening of 10-11 local): `sprk_communicationreconciliation` (fix: page loads again — `4fb7c8da6`) and `sprk_documentuploadwizard` (task 128 — `db37e6a31`) built from `a70019e3e`, published, read back byte-equal.
