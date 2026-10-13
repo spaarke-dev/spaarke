@@ -145,7 +145,7 @@ Server side: `Set-CreatePrivilegeRibbon.ps1 -Verify` PASSED on 2026-10-10. 14 cu
 Server side: G1 and G2 PASSED on 2026-10-13 (see `batch5-live-gates-2026-10-08.md`). Two checks can't run on dev without a choice from you:
 1. **ExistingAccount, live (G3).** Dev has no person with a CIAM account and no contact here; every CIAM user already has one bound contact, so a second contact with that email gives `email_ambiguous`, as task 141 designed. Pick one:
    - (a) approve deactivating the fixture contact Sarah Chen `52bb55e7…` for a few minutes, then invite a throwaway with her email, deactivate the throwaway, and reactivate her;
-   - (b) prove it on a second environment during provisioning's T240d cross-customer review (recommended; it is the real case);
+   - (b) prove it on a second environment during provisioning's T240d cross-customer review (recommended; it is the real case). **Owned by provisioning** as T240d's live acceptance check (their `notes/t240d-ciam-external-contacts-design.md` §10), using dev plus the first stamp once T240d's H3c and H4b wire that stamp to CIAM. It runs with your OK at that time;
    - (c) accept the offline proof (`ExistingCiamAccountInviteTests` and the PR's mutation tests).
    **PASS:** outcome `ExistingAccount`; the marker is written; no oid is bound; a "sign in with your existing account" email is sent; no new CIAM user is created.
 2. **E11 bind on first sign-in (needs a CIAM sign-in, which agents can't do).** Invite a fresh, unbound contact, then sign in to the external SPA with that CIAM account within 30 days. **PASS:** you get access, and the contact now carries the oid. A contact with no grant and no current invite instead gets `contact_not_invited`.
