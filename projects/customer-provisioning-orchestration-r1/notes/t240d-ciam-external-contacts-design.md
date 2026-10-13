@@ -60,6 +60,9 @@ registration has an application user there. **Step 1 can go ahead.**
 
 ## 3. (a) CIAM audience: per customer, using the customer's own BFF app
 
+> **Superseded by S1 (iii), 2026-10-12:** `spaarkeextid` will not issue a contact's token for an app homed in the Spaarke
+> tenant (AADSTS500207, §8 "S1 results"). **Option 2 is the design**; option 3 below is kept as the record of why.
+
 **Option 1: one shared CIAM API app (today's dev shape, `4a4d5126`).** Every stamp would accept the same `aud` and `iss`,
 so a token issued for customer X also passes authentication at customer Y. Isolation would then depend only on Y's
 Dataverse binding, including the E11 gap. This is the "one credential, every customer" pattern D-13 §2 rejects. It also
@@ -215,8 +218,21 @@ ARM and Graph scopes; the browser consent works). Test ran in a throwaway ACI as
   issuer domain as configuration (`Ciam:Domain`), do not read it.
 - **(ii)** Same email again → **400 `Request_BadRequest` / `ObjectConflict` on `proxyAddresses`** (because the request sets `mail`).
   This is the "already has an account" signal the invite path must handle (ISS-009 / design §5).
-- **(iii)/(iv) pending** — need a user token from a client registered IN `spaarkeextid` (owner portal step) and the
-  audience-refusal check (R1/FR-22 acceptance shape).
+- **(iii) FAIL → option 2 (2026-10-12).** Test public client `e2e75783-…` created IN `spaarkeextid` by the spike app
+  (`Application.ReadWrite.OwnedBy`; its owner is the spike app — live proof that an OwnedBy-created app lists its creator as
+  owner), admin-consented by the owner. The S1 local account (`ae9c6c5e-…`, password reset by the owner) signs in at
+  `https://spaarkeextid.ciamlogin.com/{tid}` and gets a Graph token (`idtyp=user`, `tid=7052feba…`). The same account asking
+  for `api://40ec7b2b-…/user_impersonation` (the Spaarke-tenant multitenant app) gets **`AADSTS500207: The account type can't
+  be used for the resource you're trying to access`**, both at `/authorize` and as a refresh-token redemption. A workforce
+  admin account gets the same error. Microsoft states that an external-tenant (CIAM) user cannot get an access token for an
+  API whose app is homed in a workforce tenant
+  (<https://learn.microsoft.com/en-us/answers/questions/5641439/aadsts500207-the-account-type-cant-be-used-for-the>). So the
+  customer BFF app cannot be the CIAM audience: **option 3 is out, and option 2 (one CIAM API app per customer, registered in
+  `spaarkeextid`) applies**, as §8 Outcomes set. (c) is unchanged: the keyless provisioner stays a Spaarke-tenant app with
+  its service principal in `spaarkeextid` (proven in (i)). The same mechanism creates the per-customer CIAM API app:
+  `Application.ReadWrite.OwnedBy` in `spaarkeextid` creates apps there keylessly (proven by `e2e75783`).
+- **(iv) pending** under option 2: a token for CIAM API app X is refused (401) by a BFF configured for Y and by the
+  workforce scheme; a token for Y passes authentication (R1/FR-22 acceptance shape).
 - Leftover: test local account `spike-s1-20261010154358@spaarke.com` (`ae9c6c5e-…`) — `User.Create` cannot delete it; delete in
   the Entra admin center when S1 ends, with the spike app, its SP in `spaarkeextid` and the UAMI.
 
@@ -224,7 +240,7 @@ ARM and Graph scopes; the browser consent works). Test ran in a throwaway ACI as
 
 | # | Decision | Owner |
 |---|---|---|
-| 1 | Accept option 3 (the BFF app doubles as the CIAM audience, subject to S1), with option 2 as the fallback | owner |
+| 1 | ~~Accept option 3 (the BFF app doubles as the CIAM audience, subject to S1), with option 2 as the fallback~~ — settled by S1 (iii) 2026-10-12: option 3 is impossible (AADSTS500207), option 2 applies (the owner accepted it as the fallback) | owner |
 | 2 | Approve S1 and the §7 one-time live actions in `spaarkeextid` | owner |
 | 3 | Pending-invite marker, marker-gated E11, and the invite's "already has an account" branch (a contract and schema change to the 141 binding model) | unified-access-control-r2, then the owner |
 | 4 | Invitation-link format, the SPA's customer picker and cold-landing UX, the production SPA client, and dropping `apiBaseUrl` from R3's deep-link draft | spaarke-SPA-external-access-platform-r3. R3 says its auth items are on hold for `spaarke-auth-system-of-record-r1` (R3 `design.md` §4.6) |
