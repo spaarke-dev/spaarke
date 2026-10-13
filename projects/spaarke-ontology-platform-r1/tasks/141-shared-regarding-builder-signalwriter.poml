@@ -4,7 +4,7 @@
     <title>Child-record contract: generalise TodoRegardingBuilder over table; SignalWriter writes the regarding pair + subject lookup through it (D-133)</title>
     <phase>4c Standard child-record contract (D-131)</phase>
     <gate>blocked: 140 done (✅); #1665 and #1746 merged into docs/ontology-platform-design (both touch SignalWriter or its readers; #1747 and #1756 do not). PRIORITY: start the moment both merge — this task removes the pair-type deploy hazard (see the schema-agreement guard criterion).</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Refactor of a shared BFF builder used by To Do and Event plus the Signal writer.</rigor-reason>
     <model-tier>opus</model-tier>
