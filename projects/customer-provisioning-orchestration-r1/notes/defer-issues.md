@@ -417,6 +417,22 @@ The sidecar detects the missing cmdlets before any write, so every run fails Res
 
 Until then, merge T263 only together with the approval, or accept that T186 stops at H14m.
 
+### ISS-025 — H7b does not check the `contact.sprk_externalinvitedon` field lock on stamps
+
+| Field | Value |
+|---|---|
+| **Status** | Open — before T240d production (the column lands with UAC-r2 PR #1801 / owner round 97) |
+| **Filed** | 2026-10-13 (filed by unified-access-control-r2 for this project) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1803 |
+
+UAC-r2 task 184 adds `contact.sprk_externalinvitedon`, the pending-invite marker E11 trusts on the CIAM plane. It is
+field-secured through the existing `Spaarke BFF-Managed Field Readers` (Read) and `Writers` (Read/Create/Update) profiles and
+ships in SpaarkeMaster. A user who could write it could open E11's email bind, so a stamp where the lock did not arrive is
+a tenant-isolation gap. H7b (`SecureRecordSetupProcedure`) already verifies the other BFF-managed column locks but not this
+one. **Fix:** add the column to H7b's lock verification (reuse `scripts/Set-ExternalInviteMarkerSchema.ps1 -Verify`'s
+checks); H7b never secures a column itself. If a check ever writes field-security rows, allow for `0x80041103`
+(MetadataCache lag: UAC's first `-Apply` on dev failed there although the column was readable; a re-run passed).
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
