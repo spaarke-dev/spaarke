@@ -553,6 +553,36 @@ public class DecisionActionCatalogTests
         Mock.Get(users).Verify(u => u.GetAsync(It.Is<string>(p => !p.StartsWith("sprk_signals(", StringComparison.Ordinal)), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    public static IEnumerable<object[]> EverySignalSubjectTable() =>
+        SignalWriter.RegardingLookupByEntity.Keys.Select(k => new object[] { k });
+
+    // Task 141 fix round 2 (K4b-a). The three theory cases above converged on "no subject lookup carries the pair id", so none of
+    // them reaches the ownership-parent test in AuthorizeNoCoreRecordAsync with a REAL, derivable subject any more. This one does:
+    // every table a Signal can name as its subject is derivable, passes that test, and goes on to the caller's own read.
+    [Theory]
+    [MemberData(nameof(EverySignalSubjectTable))]
+    public async Task ANoCoreDoItem_WithAnyDerivableSubject_ReachesTheCallersOwnRead(string subjectTable)
+    {
+        var users = Users(signal: NoCoreDoRow(subjectTable), core: Ok(new { createdon = "x" }), who: Ok(new { UserId = OwnerId }));
+
+        var decision = await Access(users, coreSet: "subject_set").AuthorizeAsync(SignalId, CancellationToken.None);
+
+        decision.Outcome.Should().Be(SignalAccessOutcome.Allowed);
+        Mock.Get(users).Verify(u => u.GetAsync($"subject_set({SubjectId})?$select=createdon", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public void EveryTableASignalCanNameAsItsSubject_IsAnOwnershipParent_SoTheK2SubjectTestHasNoLiveFalseBranchYet()
+    {
+        // SignalCoreRecordAccess' `!IsOwnershipParent(subjectType)` refusal is defence in depth: the 9 subject lookups on
+        // sprk_signal are all ownership parents today, so no derivable subject can reach it. If a lookup is added for a table that
+        // is not a parent, this fails: add the case that reaches that refusal (a derivable non-parent subject is the uniform
+        // NotFound and nothing is read) and keep this test honest.
+        SignalWriter.RegardingLookupByEntity.Keys
+            .Where(k => !RecordOwnershipResolver.IsOwnershipParent(k))
+            .Should().BeEmpty();
+    }
+
     [Fact]
     public async Task ANoCoreDoItem_WithNoSubjectId_IsTheUniformNotFound()
     {

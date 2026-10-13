@@ -200,7 +200,8 @@ public sealed class SignalCoreRecordAccess
         if (subjectId == Guid.Empty || !RecordOwnershipResolver.IsOwnershipParent(subjectType))
         {
             // No subject pair, or a table that is not one of uac-r2's ownership parents: a forged or stale pointer (the K2 rule,
-            // applied to the subject).
+            // applied to the subject). Defence in depth for the second half: every table sprk_signal has a subject lookup for is
+            // an ownership parent today (pinned by DecisionActionCatalogTests), so only an added non-parent lookup reaches it.
             _logger.LogWarning("Signal access: the no-core Signal's subject pair is missing or not an ownership-parent table; denying.");
             return SignalAccessDecision.NotFound;
         }

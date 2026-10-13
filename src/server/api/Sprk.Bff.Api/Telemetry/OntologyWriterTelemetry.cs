@@ -83,6 +83,22 @@ public static class OntologyWriterTelemetry
     public static void RecordDecisionPlanRefused(string reason) =>
         DecisionPlanRefusedCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
 
+    /// <summary>
+    /// <c>customMetrics/ontology.task.create_faults</c> (task 141 fix round 2, K1): a <c>TaskActionCore</c> create that
+    /// returned <see cref="Guid.Empty"/> because of a fault that is NOT a refusal worth a Warning: Dataverse access denied
+    /// or a programming fault (<see cref="TaskCreateFaultReason"/>). Same <see cref="MeterName"/>, already registered.
+    /// </summary>
+    private static readonly Counter<long> TaskCreateFaultsCounter = Meter.CreateCounter<long>(
+        name: "ontology.task.create_faults",
+        unit: "{fault}",
+        description: "Count of task creates swallowed as Guid.Empty because Dataverse denied access or the call was malformed, by reason. " +
+                     "The task core swallows these by contract; this makes them visible.");
+
+    /// <summary>Records one swallowed task-create fault (task 141). <paramref name="reason"/> MUST be one of
+    /// <see cref="TaskCreateFaultReason"/>'s constants.</summary>
+    public static void RecordTaskCreateFault(string reason) =>
+        TaskCreateFaultsCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
+
     /// <summary>Records one rule description that could not be produced (task 026). <paramref name="reason"/> MUST be one of
     /// <see cref="RuleDescriptionRefusalReason"/>'s constants.</summary>
     public static void RecordRuleDescriptionRefused(string reason) =>
@@ -156,6 +172,16 @@ public static class EvaluatorSignalAction
 
     /// <summary>A no-core Signal was reassigned to its item's current owner.</summary>
     public const string Reassigned = "reassigned";
+}
+
+/// <summary>The bounded <c>reason</c> values of <c>ontology.task.create_faults</c> (task 141 fix round 2).</summary>
+public static class TaskCreateFaultReason
+{
+    /// <summary>Dataverse refused the BFF identity (403 / <c>0x80040220</c> / <c>0x80040299</c>).</summary>
+    public const string AccessDenied = "access_denied";
+
+    /// <summary>An <see cref="ArgumentException"/>: the call itself was malformed.</summary>
+    public const string ArgumentFault = "argument_fault";
 }
 
 /// <summary>Bounded-cardinality reasons a rule description could not be produced (task 026).</summary>

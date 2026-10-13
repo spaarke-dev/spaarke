@@ -83,4 +83,15 @@ public static class OntologyWriterEvents
     /// <summary>Task 033: a policy's CURRENT version has a passed <c>sprk_inforceto</c> (no version is in force). Nothing is
     /// evaluated, closed or raised for it; the run is failed. Structured properties: <c>policyCode</c>, <c>versionId</c>, <c>inForceTo</c>.</summary>
     public static readonly EventId PolicyVersionNotInForce = new(50309, nameof(PolicyVersionNotInForce));
+
+    /// <summary>Task 141 fix round 2 (K1): <c>TaskActionCore</c> could not build a task's regarding pair because Dataverse refused
+    /// the BFF identity (the same detection <see cref="SignalWriter"/> uses). Logged at Error; the core still returns
+    /// <see cref="Guid.Empty"/> (nothing is created, and the callers' contract is unchanged). A missing privilege is a
+    /// deployment fault, not a transient one. Metered as <see cref="Telemetry.TaskCreateFaultReason.AccessDenied"/>.</summary>
+    public static readonly EventId TaskRegardingAccessDenied = new(50370, nameof(TaskRegardingAccessDenied));
+
+    /// <summary>Task 141 fix round 2 (K1): <c>TaskActionCore</c> hit an <see cref="ArgumentException"/> building a task's regarding
+    /// pair, which is a programming fault (a malformed call), not a catalog fault. Logged at Error; returns
+    /// <see cref="Guid.Empty"/>. Metered as <see cref="Telemetry.TaskCreateFaultReason.ArgumentFault"/>.</summary>
+    public static readonly EventId TaskRegardingArgumentFault = new(50371, nameof(TaskRegardingArgumentFault));
 }

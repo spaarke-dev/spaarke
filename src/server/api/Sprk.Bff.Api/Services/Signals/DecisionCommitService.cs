@@ -221,6 +221,15 @@ public static class DecisionCommitReasons
     public const string NotResumable = "ontology.decision.not_resumable";
     public const string NotAuthorized = "ontology.decision.not_authorized";
     public const string CoreChanged = "ontology.decision.core_changed";
+
+    /// <summary>Task 141 fix round 2 (K2): a Signal names a subject (its pair id is set) but the subject's table cannot be
+    /// derived, for example the subject was deleted and its RemoveLink cascade cleared the lookup. Refused exactly as before
+    /// (Forbidden, fail closed, no new allow path); only the code and message say what is wrong. A Replay's warning for the
+    /// same case is the bare <see cref="ReplaySubjectMissingWarning"/>, as the replay's other warnings are bare.</summary>
+    public const string SignalSubjectMissing = "ontology.decision.signal_subject_missing";
+
+    /// <summary>The replay-repair warning for <see cref="SignalSubjectMissing"/> (the sibling of <c>signal_close_not_authorized</c>).</summary>
+    public const string ReplaySubjectMissingWarning = "signal_subject_missing";
 }
 
 /// <summary>Stable EventIds for the commit route (50360-50369, assigned by the coordinator 2026-10-11).</summary>
@@ -698,7 +707,8 @@ public sealed class DecisionCommitService
             }
 
             if (blocked is null && await CallerMayDecideAsync(http, core, rows, CancellationToken.None).ConfigureAwait(false) is { } denied)
-                blocked = denied.Status == DecisionCommitStatus.Forbidden ? "signal_close_not_authorized" : "signal_close_not_checked";
+                blocked = denied.ReasonCode == DecisionCommitReasons.SignalSubjectMissing ? DecisionCommitReasons.ReplaySubjectMissingWarning
+                    : denied.Status == DecisionCommitStatus.Forbidden ? "signal_close_not_authorized" : "signal_close_not_checked";
         }
 
         if (blocked is { } why)
@@ -1300,7 +1310,12 @@ public sealed class DecisionCommitService
             // example the subject was deleted and its RemoveLink cascade cleared the lookup) is an unknown subject, never "no
             // subject": the caller's Write on it cannot be shown, so the decision is refused like an unreadable subject.
             if (row.SubjectEntity is not { Length: > 0 } subject)
-                return Forbidden("You do not have permission to change an item in this decision.");
+                return new DecisionCommitResult
+                {
+                    Status = DecisionCommitStatus.Forbidden, // K2: the refusal is unchanged; only its code and message are specific
+                    ReasonCode = DecisionCommitReasons.SignalSubjectMissing,
+                    Detail = "This Signal's subject no longer exists.",
+                };
             if (!checkedSubjects.Add((subject, subjectId)))
                 continue;
             if (await CallerHoldsOnAsync(http, sets, subject, subjectId, WriteOperation, ct).ConfigureAwait(false) is not { } mayWrite)
@@ -1671,6 +1686,8 @@ public sealed class DecisionCommitService
             DeciderContactId: deciderContact,
             // uac-r2 F1: the record's owner is asked about EVERY Signal it resolves (primary and also-resolve), not just the core, so a
             // Signal whose subject sits under a secure record makes the record secure-owned even under an ordinary matter.
+            // Defence in depth: FR-51 (CallerMayDecideAsync, always before this) already refuses the same rows for the same predicate
+            // (pair id set, subject table underivable), so a commit never reaches the throw here; SignalSubjectsOf is tested directly.
             SignalSubjects: SignalSubjectsOf(p.Resolved),
             // D-134: a personal To Do's Assigned To user (no-core only; the writer applies it only when every parent is ordinary).
             AssigneeSystemUserId: assignee);

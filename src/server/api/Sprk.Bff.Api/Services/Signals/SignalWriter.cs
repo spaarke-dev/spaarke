@@ -725,7 +725,7 @@ public sealed partial class SignalWriter
     /// could reproduce for a different privilege). Mirrors <see cref="DataverseServiceClientImpl.IsAlternateKeyDuplicate"/>'s
     /// typed-first, message-fallback classification style.
     /// </summary>
-    private static bool IsDataverseAccessDenied(Exception ex)
+    internal static bool IsDataverseAccessDenied(Exception ex)
     {
         for (Exception? e = ex; e is not null; e = e.InnerException)
         {

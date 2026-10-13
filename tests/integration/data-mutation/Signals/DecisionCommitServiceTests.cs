@@ -1924,10 +1924,33 @@ public sealed class DecisionCommitServiceTests
 
         var result = await rig.CommitAsync(review, DoSignal);
 
+        // Task 141 fix round 2 (K2): the same refusal (Forbidden, fail closed), with its own code and message.
         result.Status.Should().Be(DecisionCommitStatus.Forbidden);
-        result.ReasonCode.Should().Be(DecisionCommitReasons.NotAuthorized);
+        result.ReasonCode.Should().Be(DecisionCommitReasons.SignalSubjectMissing);
+        result.ReasonCode.Should().Be("ontology.decision.signal_subject_missing");
+        result.Detail.Should().Be("This Signal's subject no longer exists.");
         rig.Writes.Should().BeEmpty();
         rig.Status(DoSignal).Should().Be(Open);
+    }
+
+    [Fact]
+    public async Task K2_ARecordedReplay_WhoseSignalSubjectNoLongerExists_SaysSo_AndStillClosesNothing()
+    {
+        // The replay-repair asks FR-51 again; a Signal whose subject was deleted since the first run (its lookup cleared, the pair
+        // id left) is refused as before, now with the subject-missing code instead of signal_close_not_authorized.
+        var rig = new Rig();
+        FirstCloseFails(rig);
+        var review = PathBReview(inquiry: false, todo: false);
+        (await rig.CommitAsync(review)).Status.Should().Be(DecisionCommitStatus.Recorded);
+        rig.Signals[Primary]["sprk_regardingrecordid"] = ItemTodo.ToString("D"); // the subject lookup is not set: it was cleared
+
+        var replay = await rig.CommitAsync(review);
+
+        replay.Status.Should().Be(DecisionCommitStatus.Recorded);
+        replay.Replayed.Should().BeTrue();
+        replay.Signals.Single().Should().Be(new DecisionCommitSignal(Primary, "Unchanged", "signal_subject_missing"));
+        replay.Warnings.Should().Contain("signal_subject_missing").And.NotContain("signal_close_not_authorized");
+        rig.Status(Primary).Should().Be(Open);
     }
 
     [Fact]

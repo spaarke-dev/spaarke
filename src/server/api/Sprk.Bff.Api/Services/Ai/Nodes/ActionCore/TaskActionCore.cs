@@ -3,6 +3,8 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Telemetry;
 using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
@@ -210,10 +212,10 @@ internal sealed class TaskActionCore
                         // Task 141 review F1: a sprk_recordtype_ref read that FAULTS is not "no catalog row" — the builder
                         // throws instead of writing an untyped pair. Same error contract as the stamp failure below (the
                         // degraded-success Guid.Empty): the task is NOT created, and every caller already handles that.
-                        _logger.LogWarning(ex,
-                            "CreateTask: the regarding pair for {RegardingType} {RegardingId} could not be built; " +
-                            "refusing to create the sprk_event.",
-                            input.RegardingObjectType, input.RegardingObjectId.Value);
+                        // Task 141 fix round 2 (K1): still Guid.Empty (a rethrow would 500 CommunicationCreateTaskApplyService and
+                        // abort CommunicationRiActionService's outbox write), but a denied BFF identity and a malformed call are
+                        // not a transient catalog fault: Error + their own EventId + counter. Other faults stay at Warning.
+                        LogRegardingPairFault(ex, input.RegardingObjectType, input.RegardingObjectId.Value);
                         return Guid.Empty;
                     }
                 }
@@ -322,6 +324,33 @@ internal sealed class TaskActionCore
             // Return a degraded success — the task payload was assembled correctly
             // but Dataverse rejected it.
             return Guid.Empty;
+        }
+    }
+
+    private void LogRegardingPairFault(Exception ex, string regardingType, Guid regardingId)
+    {
+        if (SignalWriter.IsDataverseAccessDenied(ex))
+        {
+            _logger.LogError(OntologyWriterEvents.TaskRegardingAccessDenied, ex,
+                "CreateTask: Dataverse denied access building the regarding pair for {RegardingType} {RegardingId}; " +
+                "refusing to create the sprk_event (reason={Reason}).",
+                regardingType, regardingId, TaskCreateFaultReason.AccessDenied);
+            OntologyWriterTelemetry.RecordTaskCreateFault(TaskCreateFaultReason.AccessDenied);
+        }
+        else if (ex is ArgumentException)
+        {
+            _logger.LogError(OntologyWriterEvents.TaskRegardingArgumentFault, ex,
+                "CreateTask: a programming fault (ArgumentException) building the regarding pair for {RegardingType} {RegardingId}; " +
+                "refusing to create the sprk_event (reason={Reason}).",
+                regardingType, regardingId, TaskCreateFaultReason.ArgumentFault);
+            OntologyWriterTelemetry.RecordTaskCreateFault(TaskCreateFaultReason.ArgumentFault);
+        }
+        else
+        {
+            _logger.LogWarning(ex,
+                "CreateTask: the regarding pair for {RegardingType} {RegardingId} could not be built; " +
+                "refusing to create the sprk_event.",
+                regardingType, regardingId);
         }
     }
 

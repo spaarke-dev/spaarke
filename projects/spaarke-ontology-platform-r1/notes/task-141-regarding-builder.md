@@ -237,3 +237,89 @@ Mutations (each applied alone, rebuilt, the 14 new tests run, the code restored 
 Publish size (`dotnet publish -c Release`, `Compress-Archive`, 192 files both): base `origin/docs/ontology-platform-design`
 `fd161c1ea` (docs-only ahead of the merged `a30d60e89`) 38,586,487 B; head 38,587,782 B; delta **+1,295 B** compressed
 (+5,936 B uncompressed, `Sprk.Bff.Api.dll` +5,120 B). Total 36.80 MB. No package change.
+
+## Fix round 2: PR #1805 final items (F, K1, K2, K4b), 2026-10-13
+
+Merged `origin/docs/ontology-platform-design` first (brings #1797 and #1807); clean, no conflict.
+
+### F. `CreateTaskNodeExecutor` no longer reports success when no task was created
+
+`TaskActionCore` answers `Guid.Empty` for a refusal or a Dataverse rejection. The executor logged "task created" and returned
+`NodeOutput.Ok(... "Task created: ...")` with an empty `taskId`. It now returns `NodeOutput.Error(...)` with
+`NodeErrorCodes.InternalError` and "Task was not created: ..." (the error shape the executor's own catch already uses), and logs at
+Error. `TaskActionCore`'s contract (swallow, return `Guid.Empty`) is unchanged, so `IActionSeam` callers are unaffected.
+
+- Existing test edited: `CreateTaskNodeExecutorSeamTests.ExecuteAsync_WhenCreateThrows_...` pinned the old degraded success
+  (`Success == true`, `TaskId == Guid.Empty`); it now asserts the error, and is renamed to say so.
+- New test: `CreateTaskNodeExecutorTests.ExecuteAsync_WhenTheCoreCreatedNothing_ReturnsAnErrorNotTaskCreated` (an owner refusal,
+  which the seam test does not cover).
+
+### K1. Swallowed regarding-pair faults in `TaskActionCore` are visible
+
+Still returns `Guid.Empty` (a rethrow would bring back a 500 in `CommunicationCreateTaskApplyService` and abort
+`CommunicationRiActionService`'s outbox write). In the catch around `TodoRegardingBuilder.ApplyResolverPairAsync`:
+
+| Fault | Level | EventId | Counter reason |
+|---|---|---|---|
+| Dataverse access denied (`SignalWriter.IsDataverseAccessDenied`, made `internal`, not copied) | Error | `OntologyWriterEvents.TaskRegardingAccessDenied` 50370 | `access_denied` |
+| `ArgumentException` (a programming fault) | Error | `OntologyWriterEvents.TaskRegardingArgumentFault` 50371 | `argument_fault` |
+| anything else (catalog fault) | Warning | none (unchanged) | none |
+
+Telemetry: there is no meter in `TaskActionCore`'s neighbourhood, so the counter `ontology.task.create_faults` (dimension `reason`,
+`TaskCreateFaultReason`) is added to `OntologyWriterTelemetry`, whose meter `Sprk.Bff.Api.Ontology` is already registered in
+`TelemetryModule`. Section 11: (1) Existing: `ontology.writer.failures` is the nearest, but it is the Signal writer's refusal
+count and an alert on it would start firing for task creates. (2) Extension: extending that counter with new reasons would
+conflate the two; a second counter on the same meter costs one field and one method and needs no registration. (3) Cost of doing
+nothing: a missing Dataverse privilege on the BFF identity makes every task create for a regarding record return `Guid.Empty` with
+a Warning indistinguishable from a transient catalog read, and nobody is told.
+
+Not changed, noted: the `CreateAsync` catch at the end of `CreateAsync` (a Dataverse rejection of the `sprk_event` create itself)
+still logs every fault, access denied included, at Warning. Same swallow-by-contract; out of the agreed scope.
+
+New tests: `TaskActionCoreFaultVisibilityTests` (3): access denied and `ArgumentException` each return `Guid.Empty`, create nothing,
+log at Error on their own EventId and bump the counter; another fault stays a Warning and is not counted.
+
+### K2. A deleted Signal subject has its own reason (uac-r2 option a)
+
+When a Signal's `sprk_regardingrecordid` is set but its subject table cannot be derived, the refusal is the same (Forbidden, fail
+closed, no new allow path). Only the code and message change:
+
+- FR-51 route check (`CallerMayDecideAsync`): `DecisionCommitReasons.SignalSubjectMissing` = `ontology.decision.signal_subject_missing`,
+  detail "This Signal's subject no longer exists.", status still `Forbidden` (HTTP status unchanged).
+- Replay-repair (`ReplayRecordedAsync`): the per-Signal warning is `signal_subject_missing` instead of `signal_close_not_authorized`.
+  The replay's warnings are bare codes (`signal_close_not_authorized`, `signal_close_not_checked`), the route's reason codes carry the
+  `ontology.decision.` prefix; each follows its own convention. `ReasonCode` and `Warning` are strings, so no contract shape changes.
+
+Existing test edited: `ASignalWhoseSubjectTableCannotBeDerived_IsForbidden_...` asserted `NotAuthorized`; it now asserts the new code
+and message (status still `Forbidden`). New: `K2_ARecordedReplay_WhoseSignalSubjectNoLongerExists_SaysSo_AndStillClosesNothing`.
+
+### K4b. Coverage
+
+- (a) `SignalCoreRecordAccess` `!IsOwnershipParent(subjectType)` (about :200): **a derivable subject that is not an ownership parent
+  does not exist today.** All 9 tables `sprk_signal` has a subject lookup for (`SignalAndDecisionRecordRegardingLookupByEntity`) are
+  ownership parents, so the second half of that condition is defence in depth that no real subject can reach, and the old
+  `sprk_signal`/`systemuser` cases were never real subjects (they are now underivable). Added instead: a theory over every table a
+  Signal can name as its subject (all reach the caller's own read, so none is wrongly denied there), and a pin test that every such
+  table is an ownership parent, which fails the day a non-parent lookup is added and says to add the case that reaches the refusal.
+  A one-line comment at the condition says the same.
+- (b) `SignalSubjectsOf` refuses an unknown subject: already covered directly by
+  `TheDecisionRecordOwnerParents_RefuseASignalWhoseSubjectTableCannotBeDerived_NeverDropIt` (round 1, mutation D). Not duplicated.
+- (c) Commit-level proof at the `SignalSubjectsOf` call site (`RecordRequest`, about :1689) **cannot be written without a production
+  change.** FR-51 (`CallerMayDecideAsync`) always runs first over the same `p.Resolved` rows and refuses on the identical predicate
+  (pair id set, subject table underivable), so no commit reaches the throw; no stub or arrangement of the rig lets FR-51 allow that
+  row. Mutation check run anyway: the call site changed back to `.Select(SubjectOf).OfType<DecisionRecordRef>()` leaves all 153
+  `DecisionCommit` tests green, which is the proof. A defence-in-depth comment is added at the call site.
+
+### Verification (fix round 2)
+
+| Run | Result |
+|---|---|
+| build `tests/unit/Sprk.Bff.Api.Tests` (builds the BFF) | 0 warnings, 0 errors |
+| filter `TodoRegardingBuilder`, `TaskActionCore`, `CreateTaskNodeExecutor`, `SignalWriter`, `DecisionCommit`, `DecisionActionCatalog`, `SignalCoreRecordAccess`, `TodoGeneration`, `InquiryReply`, `CommunicationCreateTaskApply`, `CommunicationRiAction`, `CommunicationEnrichment`, `ActionSeam` | 525 passed |
+| filter `Signal`, `Decision`, `Workspace`, `SecureChild`, `RecordOwnership` | 2725 passed |
+| `Spaarke.ArchTests` | 969 passed |
+
+Mutations (applied, rebuilt, new tests run, restored): F `if (false && taskId == Guid.Empty)`: the 2 executor tests failed; K1 both
+branches disabled: the 2 error-level tests failed (the Warning test still passes, as it should); K2 route code set back to
+`NotAuthorized`: the route test and the replay test failed. K4c: see above (no test can fail). Publish size was not re-measured this
+round: about 110 added lines of source, no package change.
