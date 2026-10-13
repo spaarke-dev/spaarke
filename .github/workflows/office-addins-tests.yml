@@ -121,6 +121,9 @@ on:
       # change there changes what ships.
       - 'src/client/office-addins/**'
       - 'src/client/shared/Spaarke.Auth/**'
+      # The web resource built from it (#1655): sprk_/scripts/bff_auth.js, both committed copies.
+      - 'src/solutions/webresources/sprk_bff_auth.js'
+      - 'src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/bff_auth.js'
       # Third path, which the deploy workflow does NOT carry (reported as a
       # separate finding in notes/043): jest.config.js AND webpack.config.js
       # both map `@spaarke/communication-components/logic/connections/provenance`
@@ -140,6 +143,15 @@ on:
       - 'src/server/api/Sprk.Bff.Api/Services/Office/**'
       - 'src/server/api/Sprk.Bff.Api/Workers/Office/**'
       - 'src/server/api/Sprk.Bff.Api/Services/Documents/**'
+      # Route files outside those folders that the add-ins call (#1782 review):
+      # record search, visualization, rag send-to-index, file access, v1 documents,
+      # and the communications send the add-in's Send-email tab uses.
+      - 'src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs'
       # The suites themselves, and the project that compiles them.
       - 'tests/unit/Sprk.Bff.Api.Tests/**'
       - 'tests/unit/domain/**'
@@ -162,6 +174,8 @@ on:
     paths:
       - 'src/client/office-addins/**'
       - 'src/client/shared/Spaarke.Auth/**'
+      - 'src/solutions/webresources/sprk_bff_auth.js'
+      - 'src/dataverse/solutions/SpaarkeMaster/WebResources/sprk_/scripts/bff_auth.js'
       - 'src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
       - '.github/workflows/office-addins-tests.yml'
       # Mirrors the pull_request server paths above (task 070) so a direct push to
@@ -171,6 +185,15 @@ on:
       - 'src/server/api/Sprk.Bff.Api/Services/Office/**'
       - 'src/server/api/Sprk.Bff.Api/Workers/Office/**'
       - 'src/server/api/Sprk.Bff.Api/Services/Documents/**'
+      # Route files outside those folders that the add-ins call (#1782 review):
+      # record search, visualization, rag send-to-index, file access, v1 documents,
+      # and the communications send the add-in's Send-email tab uses.
+      - 'src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs'
+      - 'src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs'
       - 'tests/unit/Sprk.Bff.Api.Tests/**'
       - 'tests/unit/domain/**'
       - 'tests/integration/contract/Api/**'
@@ -445,6 +468,12 @@ jobs:
         working-directory: src/client/shared/Spaarke.Auth
         run: npx jest --ci --maxWorkers=2
 
+      # sprk_/scripts/bff_auth.js (Spaarke.BffAuth, the form scripts' sign-in) is BUILT from this library
+      # (#1655). A library change that is not rebuilt into it, or a hand edit of the generated file, fails here.
+      - name: "Check the bff_auth.js web resource is a current build of @spaarke/auth"
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npm run check:webresource
+
       - name: Install dependencies
         working-directory: src/client/office-addins
         # NOT `npm ci` (root CLAUDE.md §12); a bare `npm install` also fails here
@@ -626,6 +655,35 @@ jobs:
   # omission shows up as one missing line in the filter. Measured at 2026-09-28:
   # 1,708 tests selected; 1,752 passed / 0 failed / 24 skipped in 3 m 44 s locally.
   #
+  # RE-NARROWED 2026-10-12 (#1748). By then the broad terms (`Api.Ai`, `Domain.Ai`,
+  # `AccessControl`, all of `Integration.DataMutation`) had grown the selection to
+  # 5,151 tests; the test step alone took 17 m 24 s on CI and the 20-minute job cap
+  # cancelled the run AFTER every test passed. The filter now keeps only what the
+  # Office add-ins reach: the `/api/office/*` routes, the `/api/documents/*` identity
+  # and open-links routes, `GET|PUT /api/v1/documents/{id}`, `/api/ai/search/records`,
+  # `/api/ai/visualization/related`, `/api/ai/rag/send-to-index`, `/api/communications/send`,
+  # the file-access broker, and the share-link authorization they depend on.
+  # Everything dropped still runs in Tier 2 (`ci-tier2-advisory.yml`: the four shards
+  # `Api.Office.`, `Api.Insights.|Integration.`, `Api.|Seam.`, and everything else
+  # partition the whole of `Sprk.Bff.Api.Tests`). Selection at #1748: 1,239 tests
+  # (1,231 passed / 8 skipped / 0 failed locally); #1782 added back rag send-to-index,
+  # the file-access broker and communications-send authorization (+202), giving 1,441.
+  #
+  # TWO PARALLEL LEGS (#1782). Narrowing alone left the test step at ~13 min on CI
+  # (~16-17 min with restore/build) against a 20-minute cap - too thin under runner
+  # load. The selection therefore runs as a 2-leg matrix, each leg its own job
+  # with its own cap and its own vacuous-green floor:
+  #   api-office  294 tests  `Api.Office` contract suite (a full host boots per class;
+  #                          ~590 of the ~1,110 CPU-seconds)
+  #   rest      1,147 tests  every other term (TRX total, 2026-10-12)
+  # The legs partition the selection: no term is in both, and `rest` names no
+  # `Api.Office` prefix, so no test runs twice or not at all. WHEN YOU ADD A TERM,
+  # add it to exactly ONE leg; `Api.Office` terms belong in `api-office`.
+  # The check names are `Server tests (office scope) (api-office)` and `... (rest)`.
+  # Nothing references the old single name: master's ruleset requires only `Router`
+  # and `Client lint (type-aware ratchet)`, no `needs:` chain reads this job, and
+  # no `ci-summary` job exists anywhere under .github/workflows.
+  #
   # NOT COVERED, deliberately, because they are DIFFERENT ASSEMBLIES: this project
   # also touched `tests/Spaarke.ArchTests/**` (2 files) and
   # `tests/integration/Spe.Integration.Tests/**` (1 file). ArchTests already run in
@@ -634,10 +692,45 @@ jobs:
   # `notes/070-pr-time-runner.md` rather than silently omitted.
   # ============================================================================
   server-tests:
-    name: Server tests (office scope)
+    name: Server tests (office scope) (${{ matrix.leg }})
     runs-on: ubuntu-latest
-    # Local wall-clock for the filtered set is 3 m 44 s; CI adds restore + build.
-    # 20 minutes is a hang guard with roughly 2x margin, NOT a budget to grow into.
+    strategy:
+      # Both legs report even when one fails: a red `api-office` must not hide
+      # whether `rest` is also red.
+      fail-fast: false
+      matrix:
+        include:
+          - leg: api-office
+            # a ~0.8x floor on 294 selected (see the floor comment below).
+            min_selected: '235'
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Office'
+          - leg: rest
+            # ~0.8x floor on 1,147 selected.
+            min_selected: '917'
+            # Terms, grouped by the add-in surface they protect (each is `Sprk.Bff.Api.Tests.<x>`):
+            #   /api/office/*            Services.Office, Domain.Office, Seam.Office,
+            #                            Auth.Office, Integration.DataMutation.OfficeVersionSave,
+            #                            ...RecordOwnership.OfficeRecordOwnership,
+            #                            Regression.Issue1084_Office, Regression.Issue1086_Office
+            #   /api/documents/*, /v1/   Api.Documents, Services.Documents, Domain.Dataverse, Filters,
+            #                            OpenLinksEndpointTests, ...RecordOwnership.SecureChildOwnershipDocumentRefile,
+            #                            Integration.DataMutation.SpeUploadPaths
+            #   /api/ai/search|visualiz. Api.Ai.RecordSearch, Api.Ai.Visualization
+            #   /api/ai/rag/send-to-index Api.Ai.RagSendToIndex, Api.Ai.SendToIndex
+            #   /api/communications/send Api.Communication.CommunicationRecordAuthorizationContractTests
+            #   file access              AccessControl.FileAccessBroker
+            #   share-link / save auth   AccessControl.ShareLink, AccessControl.OfficeSaveContainerProvenance,
+            #                            Infrastructure.Graph, Infrastructure.Authentication
+            #   problem+json regression  Integration.Regression
+            # DO NOT widen to `Api.Ai`, `Domain.Ai` or `AccessControl` wholesale - they are
+            # ~3,500 tests the add-ins do not exercise (the cause of #1748); Tier 2 runs them.
+            # `Api.Office` is deliberately ABSENT here: it is the other leg.
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.RecordSearch|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.Visualization|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.OfficeVersionSave|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.OfficeRecordOwnership|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership.SecureChildOwnershipDocumentRefile|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation.SpeUploadPaths|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.Regression|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Dataverse|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Filters|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Graph|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Authentication|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.OfficeSaveContainerProvenance|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.ShareLink|FullyQualifiedName~Sprk.Bff.Api.Tests.Auth.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Regression.Issue1084_Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Regression.Issue1086_Office|FullyQualifiedName~Sprk.Bff.Api.Tests.OpenLinksEndpointTests|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.RagSendToIndex|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai.SendToIndex|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.FileAccessBroker|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Communication.CommunicationRecordAuthorizationContractTests'
+    # Per leg, on CI (4 vCPUs): the un-split 1,239-test selection was ~13 min of tests
+    # (old 5,151-test selection: 17 m 24 s). By testhost CPU time `api-office` is
+    # ~590 of ~1,110 CPU-s, so expect ~7 min of tests for `api-office` and ~6 min for
+    # `rest`, plus ~3-4 min restore + build each, in parallel. 20 minutes is a hang
+    # guard with ~2x margin, NOT a budget to grow into.
     # If this job approaches the cap, NARROW THE FILTER - do not raise the cap.
     # Raising it is how Tier 2 ended up cancelled in 6 of 6 runs.
     timeout-minutes: 20
@@ -651,10 +744,11 @@ jobs:
       #
       # A FLOOR, not an equality. Unlike the typecheck debt pin above, tests are
       # EXPECTED to grow, and an exact pin would fail every PR that adds one. Set
-      # ~6% under the measured 1,708 so ordinary churn does not trip it while a
+      # ~20% under each leg's measured count (294 / 1,147; set per leg in the matrix
+      # above) so ordinary churn does not trip it while a
       # collapse does. Re-baseline UPWARD only, deliberately, in the PR that grows
       # the suites.
-      MIN_SELECTED_TESTS: '1600'
+      MIN_SELECTED_TESTS: ${{ matrix.min_selected }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -688,7 +782,7 @@ jobs:
         env:
           DOTNET_NOLOGO: 'true'
           DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
-          TEST_FILTER: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Ai|FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.DataMutation|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.Regression|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Documents|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Ai|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.Dataverse|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.Office|FullyQualifiedName~Sprk.Bff.Api.Tests.Filters|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Graph|FullyQualifiedName~Sprk.Bff.Api.Tests.Infrastructure.Authentication|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl'
+          TEST_FILTER: ${{ matrix.filter }}
         run: |
           # `set +e` IS LOAD-BEARING HERE TOO - the lesson from tasks 056 and 069.
           # `shell: bash` expands to `bash --noprofile --norc -e -o pipefail {0}`, so
@@ -721,7 +815,7 @@ jobs:
           total=${total:-0}; passed=${passed:-0}; failed=${failed:-0}
 
           {
-            echo "# Office-scope server suites"
+            echo "# Office-scope server suites (${{ matrix.leg }} leg)"
             echo
             echo "| | Count |"
             echo "|---|---|"
