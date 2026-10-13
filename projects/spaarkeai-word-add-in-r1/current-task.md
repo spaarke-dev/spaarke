@@ -2,20 +2,21 @@
 
 > **Format (2026-10-06):** CURRENT state only, REWRITTEN at each checkpoint. Standing directives + gotchas: project `CLAUDE.md` → "Standing directives & gotchas" (incl. "Multi-customer add-in (Model 1)" and "Guest sign-in, PCFs and telemetry" blocks). History: git log + `notes/handoff-history/` (do not load on recovery).
 
-> **Last Updated**: 2026-10-10 (task 127 rollout complete in dev; 14 PCFs re-synced to master in dev).
+> **Last Updated**: 2026-10-12 (task 129 code complete + reviewed, pushed at `46687a851`; awaiting owner deploy go).
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | None active. Task 127 is rolled out to dev (all 4 steps; record in `notes/127-client-telemetry.md` "Rollout record"). |
-| **Status** | Waiting on owner live checks (below). Task 126 blocked on UAC-r2. |
-| **Next Action** | Wait for the owner's UAT results and fix what they find. If the Matter footer still shows v1.1.84 after a hard refresh, the next step is an owner-approved publish that moves `customcontrols.version` (see #1591 / project CLAUDE.md Deploy). |
+| **Task** | 129 (filed email visible on the record's Messages panel). Code complete: `IThreadResolver.ReconcileThreadForFilingAsync` (commits `48a2f8687`, `09397337f`, `cb9e10aac`), empty-thread retirement + backfill job `communication-thread-filing-sweep` (`fb9e0cdb3`), sweep review fixes (`46687a851`). Reviews: security, behaviour, re-check, sweep adversarial — no open F-class. BFF publish +25,916 B (36.46 → 36.49 MB), no vulnerable packages. |
+| **Status** | 128 ✅ (owner retest passed 2026-10-12). 129 ✅ (owner confirmed 2026-10-12). 129 was DEPLOYED to dev 2026-10-12 from `f9cc25f73` (adds party anchoring: an email re-filed to a contact / account / organization takes its thread there, owner kept). Sweep run: dry run 143 candidates + 26 owner fixes → apply 143 reconciled / 26 assigned / 0 unresolved, refused, failed → verify dry run 0 candidates / 0 wouldAssign. `CommunicationThreadFilingSweep__Apply` removed again; job stays registered disabled. Reports: session scratchpad `sweep-{dryrun,apply,verify}-20261012-*`. PAT-444023 email `b22bb67e` now in active thread `b62bb67e` anchored to matter `5b297187`, owner team "Spaarke Business Unit 1". |
+| **Next Action** | Open finding from the owner's screenshot: the add-in "Link another record" picker lists sprk_communication / sprk_analysis / sprk_document / sprk_reportcard by logical name, and sprk_communication / sprk_document / sprk_reportcard have no thread lookup, so an email related only to them shows on no Messages panel — owner to decide. T126: message sent 2026-10-12 to session spaarke-wt-unified-access-control-r2-1d but HELD there for its user's approval (not yet read); owner is relaying it as well; 126 stays blocked until UAC-r2 answers the `tid` question and states its external-flag plan. |
 
 ### Unpushed / uncommitted
-- None after the docs PR for this checkpoint merges.
+- None after the checkpoint commit; no PR open.
 
-## Live in dev (2026-10-08/10)
+## Live in dev (2026-10-08/11)
+- 2026-10-12 03:12 UTC (evening of 10-11 local): `sprk_communicationreconciliation` (fix: page loads again — `4fb7c8da6`) and `sprk_documentuploadwizard` (task 128 — `db37e6a31`) built from `a70019e3e`, published, read back byte-equal.
 - Guest sign-in fix (#1453, tasks 122-125): @spaarke/auth + 10 PCFs + 8 code pages + 3 web resources.
 - Task 121 (pane Message-ID, per-caller duplicate check, file-if-unfiled): #1495, add-in + BFF.
 - Task 127 (#1537): BFF `cc9fd0809`; code pages DailyBriefing/EmailPage/CommunicationReconciliation from `9c04c4320`; SemanticSearchControl **1.1.85** + VisualHost **1.4.40** from `f022544d6`; Matter main form static `appInsightsKey` + `tenantId` removed, `sprk_matter` published.

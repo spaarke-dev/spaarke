@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai.Tools;
@@ -603,6 +604,15 @@ public static class CommunicationModule
         services.AddSingleton<IThreadKeyStrategy, EmailThreadKeyStrategy>();
         services.AddSingleton<IThreadKeyStrategy, MessagingThreadKeyStrategy>();
         services.AddSingleton<IThreadResolver, ThreadResolver>();
+
+        // spaarkeai-word-add-in-r1 task 129 — the backfill / safety-net sweep that makes existing filed emails show on their
+        // records and gives anchored threads their S6 owner (ADR-036 IScheduledJob, ADR-052 "BFF, schedule"). Registered
+        // DISABLED: it runs only when an admin triggers it (POST /api/admin/jobs/communication-thread-filing-sweep/trigger,
+        // SystemAdmin) or enables the schedule, and writes only while CommunicationThreadFilingSweep:Apply is true. Beside
+        // the resolver it calls, so it exists wherever the resolver does (bff-extensions.md §F.1).
+        services.AddScheduledJob<CommunicationThreadFilingSweepJob>(
+            CommunicationThreadFilingSweepJob.DefaultCronSchedule, enabled: false);
+        services.TryAddSingleton(TimeProvider.System);
     }
 
     /// <summary>

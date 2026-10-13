@@ -4,7 +4,7 @@
     <title>FR-05: migrate Word to the unified JSON manifest</title>
     <phase>1 Foundation</phase>
     <gate>startable</gate>
-    <status>completed-with-escalation</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New file creation (`word/manifest.json`) plus a build-config edit, with explicit constraints. No .cs/.ts service logic; the risk is deployment/registration, not code correctness. Quality gates skipped per the Step 3.5.5 decision tree.</rigor-reason>
     <model-tier>sonnet</model-tier>

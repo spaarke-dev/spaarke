@@ -72,6 +72,67 @@ public interface IThreadResolver
     Task ReDeriveThreadNameAsync(Guid threadId, CancellationToken ct = default);
 
     /// <summary>
+    /// spaarkeai-word-add-in-r1 task 129: after an EMAIL was re-filed (by <c>SecureChildReconciler.AfterRefileAsync</c>, the
+    /// step every re-file writer shares, or by a writer that does not run it: the association engine's <c>ResolveAsync</c>
+    /// and the playbook update node), its thread follows the filing so the email shows on the record's Messages panel, which
+    /// lists threads by the THREAD's typed regarding. Let R be the email's primary typed regarding (ADR-024 priority) and T
+    /// its thread:
+    /// <list type="bullet">
+    /// <item>not an email → nothing;</item>
+    /// <item>no thread: filed → a thread is resolved for it (<see cref="ResolveAndAssignAsync"/>) and it is granted to the
+    /// audience that join fixed; unfiled → nothing;</item>
+    /// <item>unfiled (an unlink) and T is an Open thread anchored to a record → the email moves to the thread the unfiled
+    /// ingest gives it (the fallback ladder: the per-user master keyed on the email's owner), with no grant; otherwise
+    /// nothing;</item>
+    /// <item>T is active and already anchored to ANY record the email is filed to (any of its typed regarding lookups, not
+    /// only R), or T is not Open (a private thread keeps its isolation) → nothing;</item>
+    /// <item>T is active, not a default thread (neither the per-user master nor a record's per-record default), every active message
+    /// in T is an email, no OTHER active message in T is filed to a record other than R — whether T is unanchored or anchored
+    /// to a previous record (owner clarification 2026-10-11) — and neither T's owner nor R's S6 owner is the Secure team
+    /// (an undeterminable owner counts as Secure) → the whole of T follows: anchored to R (its typed regarding, R's primary
+    /// name read server-side, a previous record's lookup and display fields cleared, Record-Anchored), owned by R's team (S6;
+    /// a refusal, or a record that is not an ownership parent, leaves T and the email untouched), its name re-derived
+    /// (marker-gated), and every active message in T filed to R is granted to R's members (unfiled messages are not);</item>
+    /// <item>otherwise (T is inactive or a default thread, holds a non-email message or another active message filed to a
+    /// different record, or T or R is secure) → only the email moves, to R's active per-record default thread (Tier 2)
+    /// through the S6 join, and is granted to R's members.</item>
+    /// </list>
+    /// The grant audience is always R — the email's own regarding, just validated by the filing write — never a re-read of
+    /// a thread column (#1629). Prior grants are not revoked. Best-effort / non-fatal (NFR-02): never throws; any failure is
+    /// logged and the filing stands.
+    /// </summary>
+    Task ReconcileThreadForFilingAsync(Guid communicationId, CancellationToken ct = default);
+
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 129 (backfill sweep): gives an ACTIVE, Open thread that is anchored to a record (a typed
+    /// regarding lookup — the one anchor rule, <see cref="ThreadResolver"/>'s <c>ThreadAnchorOf</c>) the owner S6 gives such a
+    /// thread: the anchor record's team, resolved by the SAME step the filing reconcile and the thread-create paths use. Fixes
+    /// threads created before S6 reached them (owned by the BFF's app user in the root business unit, so a child-business-unit
+    /// user could not read them). Changes the owner and nothing else.
+    /// <list type="bullet">
+    /// <item>the thread is unreadable, inactive, not Open, unanchored, or anchored to a record that owns no thread (a party:
+    /// account / contact / organization) → <see cref="ThreadOwnerReconcileOutcome.NotApplicable"/>;</item>
+    /// <item>S6 refuses the anchor record's owner → <see cref="ThreadOwnerReconcileOutcome.Refused"/>, the thread is left;</item>
+    /// <item>the thread's current owner, or the owner S6 gives, is the Secure Record team — or that cannot be told (the same
+    /// detection as the filing reconcile's whole-thread move: <c>SecureChildShareSynchronizer</c> / <c>IsSecureOwner</c>) →
+    /// <see cref="ThreadOwnerReconcileOutcome.SkippedSecure"/>, the thread is left (a secure record's mirrored shares are not
+    /// written here);</item>
+    /// <item>the thread carries MORE than one typed regarding lookup (the anchor is then the first in priority order, which
+    /// is not necessarily the record the thread is for) → <see cref="ThreadOwnerReconcileOutcome.SkippedAmbiguousAnchor"/>,
+    /// the thread is left — a wrong re-own is worse than an unowned thread;</item>
+    /// <item>already owned by that team → <see cref="ThreadOwnerReconcileOutcome.AlreadyCorrect"/>, no write;</item>
+    /// <item>otherwise the owner is assigned → <see cref="ThreadOwnerReconcileOutcome.Assigned"/>, and the result carries the
+    /// owner it replaced (<see cref="ThreadOwnerReconcileResult.PreviousOwnerType"/> /
+    /// <see cref="ThreadOwnerReconcileResult.PreviousOwnerId"/>) so a wrong re-own can be reversed from the run history.</item>
+    /// </list>
+    /// With <paramref name="dryRun"/> the same answer is computed and NOTHING is written (<c>Assigned</c> then means "would
+    /// be assigned"). Best-effort / non-fatal (NFR-02): never throws; a fault is logged and answers
+    /// <see cref="ThreadOwnerReconcileOutcome.Failed"/>.
+    /// </summary>
+    Task<ThreadOwnerReconcileResult> ReconcileAnchoredThreadOwnerAsync(
+        Guid threadId, bool dryRun = false, CancellationToken ct = default);
+
+    /// <summary>
     /// FR-17 rename (task 004): sets <c>sprk_name</c> AND flips the naming-edited marker
     /// (<c>sprk_nameisautoderived</c> → Edited/<c>false</c>) in ONE write, so a later
     /// <see cref="ReDeriveThreadNameAsync"/> short-circuits at the marker gate and never overwrites the
@@ -131,6 +192,53 @@ public interface IThreadResolver
 /// denormalized <c>sprk_regardingrecord*</c> pointer the resolver already stamps at thread create.
 /// </summary>
 public sealed record RecordThreadAnchor(string EntityType, string RecordId, string? RecordName);
+
+/// <summary>What <see cref="IThreadResolver.ReconcileAnchoredThreadOwnerAsync"/> did (or, on a dry run, would do) for a thread.</summary>
+public enum ThreadOwnerReconcileOutcome
+{
+    /// <summary>The owner was set to the anchor record's team (on a dry run: would be set).</summary>
+    Assigned,
+
+    /// <summary>The thread is already owned by the anchor record's team; nothing written.</summary>
+    AlreadyCorrect,
+
+    /// <summary>Its current owner or the owner S6 gives is the Secure Record team, or that could not be told; left as it is.</summary>
+    SkippedSecure,
+
+    /// <summary>Not a thread this applies to (unreadable, inactive, not Open, unanchored, or anchored to a party); left as it is.</summary>
+    NotApplicable,
+
+    /// <summary>S6 refused the anchor record's owner; left as it is.</summary>
+    Refused,
+
+    /// <summary>A fault (logged); left as it is.</summary>
+    Failed,
+
+    /// <summary>
+    /// More than one typed regarding lookup is populated on the thread, so which record it is "for" cannot be told; left as it
+    /// is (never re-owned). Appended last so the values above keep their numbers.
+    /// </summary>
+    SkippedAmbiguousAnchor,
+}
+
+/// <summary>
+/// The answer of <see cref="IThreadResolver.ReconcileAnchoredThreadOwnerAsync"/>: the <see cref="Outcome"/>, and for an
+/// <see cref="ThreadOwnerReconcileOutcome.Assigned"/> thread the owner it replaced and the team it gets — the before-state a
+/// wrong re-own is reversed from. Converts implicitly from a bare outcome (every other answer carries nothing more).
+/// </summary>
+/// <param name="Outcome">What was (or, on a dry run, would be) done.</param>
+/// <param name="PreviousOwnerType">Logical name of the previous <c>ownerid</c> (<c>systemuser</c> / <c>team</c>); null when none was read.</param>
+/// <param name="PreviousOwnerId">Id of the previous <c>ownerid</c>; null when none was read.</param>
+/// <param name="NewOwnerTeamId">The team the thread is (or would be) given.</param>
+public sealed record ThreadOwnerReconcileResult(
+    ThreadOwnerReconcileOutcome Outcome,
+    string? PreviousOwnerType = null,
+    Guid? PreviousOwnerId = null,
+    Guid? NewOwnerTeamId = null)
+{
+    /// <summary>A bare outcome with no before-state.</summary>
+    public static implicit operator ThreadOwnerReconcileResult(ThreadOwnerReconcileOutcome outcome) => new(outcome);
+}
 
 /// <summary>Whose read grant a message gets from the thread it joined (#1629).</summary>
 public enum ThreadGrantAudience
