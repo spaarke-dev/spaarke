@@ -111,6 +111,22 @@ Delta **+0.100 MB** (under the +5 MB trigger; total far under 55/60 MB). `dotnet
 | A6 | Rollback package `deploy/rollback/spaarke-bff-dev-wwwroot-20261013T034808Z.zip` (50.6 MB), expanded to `deploy/rollback/wwwroot-20261013T034808Z/` (222 files, 144.3 MB) |
 | A7 | `/healthz` 200, `/healthz/dataverse` 200 |
 
+### Phase C-W, 2026-10-13 ~12:40 UTC (owner-approved "yes approved to run workforce probes")
+
+Identity `ralph.schroeder@spaarke.com` via Azure CLI. Token (masked): `tid=a221a95e...`, `aud=api://1e40baad...` (the `api://` form, accepted), `scp=SDAP.Access user_impersonation`, `ver=1.0`, `acct=0`. Test matter "Test New Matter via Workspace" `34625b38-68a5-f111-aaad-7ced8ddc4cc6`.
+
+| # | Result | Verdict |
+|---|---|---|
+| C-W1 `GET /me` | 200; contact `8e9918a9...`, systemuser `1d02f31c...` | PASS |
+| C-W2 `GET /me/entitlements` | 200; `plane=workforce`, `["legal-front-door","policy-library"]`, `intakeRequestTypes` all four | PASS (FR-19) |
+| C-W3 messages read | test matter 200; random GUID 403 | PASS (FR-04/FR-11) |
+| C-W4 message post | 201, message `b38f0ab7-03c7-f111-a05c-0022482913fc` (`isMine` true). With an `attachments` property: 400 `EXT_MESSAGES_ATTACHMENTS_NOT_SUPPORTED` | PASS (FR-04/FR-11). **Message left on the test matter, body "[R3 probe 038] safe to delete"; owner deletes it manually** |
+| C-W5 `GET /notifications` | 200; lists other users' messages on the test matter; the probe's own message is absent, as designed (own messages dropped by the creator stamp, `ExternalNotificationFeedEndpoints.cs:21-22`) | PASS (FR-08) |
+| C-W6 intake submit (Policy Question) | **500 `EXT_INTAKE_INTERNAL_ERROR`**. App Insights `spe-insights-dev-67e2xz`, operation `f280d5f9...`: Dataverse 403 on `POST sprk_servicerequests`, `0x80040299` "Read Privilege Check For Owner failed: Principal team cf15f587-baa0-f111-aaac-000d3a99d1d7 (owning team of 'Spaarke Business Unit 1') is missing prvReadsprk_ServiceRequest". No partial row (checked by name) | **FAIL (FR-05): dev configuration, not code.** The owning team's roles are Spaarke Basic User, Reporting Access Viewer, AI Analysis User, Office Add In User; none reads `sprk_servicerequest`. Role "Spaarke Internal Contact User (Workforce)" exists in every BU with 0 privileges. Owner decision pending |
+| C-W7 document upload | 201, document `2a0b7abd-03c7-f111-a05c-0022482913fc` | PASS (FR-24) |
+| C-W8a delete own document | 204; no longer listed | PASS (FR-26) |
+| C-W8b delete own service request | not run: C-W6 created nothing | blocked by C-W6 |
+
 ### Phase B, 2026-10-13: R3 reached dev by the master deploy (no R3 deploy run)
 
 Owner direction: word-add-in-r1 merges to master (PR #1796, `99ec749cd`) and deploys the BFF from master, which already holds R3 (#1795). That session reported: 36.6 MB package, SHA-256 match on the critical files, `/healthz` pass.
