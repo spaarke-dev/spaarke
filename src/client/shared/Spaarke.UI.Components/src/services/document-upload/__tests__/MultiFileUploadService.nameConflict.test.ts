@@ -219,6 +219,42 @@ describe('MultiFileUploadService — name-collision propagation', () => {
     expect(requests[0].conflictBehavior).toBeUndefined();
   });
 
+  // Task 128 (owner UAT 2026-10-11): on a `rename` retry SPE stores the file under a NEW name. The
+  // result must still say which input file it came from, or the caller loses the upload.
+  it('pairs each upload with the input file name when SPE stores it under another name', async () => {
+    const { service } = stubUploadService({
+      'a.docx': { success: true, data: speMetadata('a 1.docx') },
+      'b.docx': { success: true, data: speMetadata('b.docx') },
+    });
+
+    const result = await new MultiFileUploadService(service, silentLogger).uploadFiles({
+      files: [file('a.docx'), file('b.docx')],
+      target: TARGET,
+      conflictBehavior: 'rename',
+    });
+
+    expect(result.uploads.map(u => [u.sourceFileName, u.metadata.name])).toEqual([
+      ['a.docx', 'a 1.docx'],
+      ['b.docx', 'b.docx'],
+    ]);
+    // `uploadedFiles` is unchanged for its existing consumers: the stored metadata, same order.
+    expect(result.uploadedFiles).toEqual(result.uploads.map(u => u.metadata));
+  });
+
+  it('leaves a failed file out of `uploads`', async () => {
+    const { service } = stubUploadService({
+      'ok.docx': { success: true, data: speMetadata('ok.docx') },
+      'broken.docx': { success: false, error: 'File upload failed: HTTP 500' },
+    });
+
+    const result = await new MultiFileUploadService(service, silentLogger).uploadFiles({
+      files: [file('ok.docx'), file('broken.docx')],
+      target: TARGET,
+    });
+
+    expect(result.uploads.map(u => u.sourceFileName)).toEqual(['ok.docx']);
+  });
+
   it.each(['rename', 'replace'] as const)('passes an explicit conflictBehavior=%s down on a retry', async behavior => {
     const { service, requests } = stubUploadService({
       'a.docx': { success: true, data: speMetadata('a.docx') },

@@ -72,6 +72,7 @@ import type {
     OrchestratorFileProgress,
     OrchestratorResult,
 } from "./services/uploadOrchestrator";
+import { addSelectedFiles } from "./fileSelection";
 import { FileUploadProgress } from "./components/FileUploadProgress";
 import type { ConflictResolution } from "./components/FileUploadProgress";
 import { buildSuccessConfig } from "./components/SuccessScreen";
@@ -143,18 +144,10 @@ const INITIAL_FILE_STATE: IFileState = {
 function fileReducer(state: IFileState, action: FileAction): IFileState {
     switch (action.type) {
         case "ADD_FILES": {
-            // De-duplicate by name + size (same logic as LegalWorkspace reference)
-            const existing = new Set(
-                state.selectedFiles.map((f) => `${f.name}::${f.sizeBytes}`)
-            );
-            const newFiles = action.files.filter(
-                (f) => !existing.has(`${f.name}::${f.sizeBytes}`)
-            );
-            return {
-                ...state,
-                selectedFiles: [...state.selectedFiles, ...newFiles],
-                validationErrors: [], // Clear errors on successful add
-            };
+            // A re-picked file is ignored; a different file with a selected file's name is refused
+            // (every row, retry and result below is keyed by name — task 128 review K1).
+            const { selectedFiles, validationErrors } = addSelectedFiles(state.selectedFiles, action.files);
+            return { ...state, selectedFiles, validationErrors };
         }
         case "REMOVE_FILE":
             return {

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="128" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Document upload wizard: a renamed upload (name conflict → keep both) is reported as failed</title>
+    <phase>8 — UAT findings, owner 2026-10-11</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx in a shared library and a code page that is deployed.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Scoped client fix with a known root cause.</model-tier-reason>
+    <effort>high</effort>
+    <deps>none</deps>
+    <tags>code-page, frontend, document-upload, testing</tags>
+  </metadata>
+  <prompt>Owner UAT 2026-10-11 as Test User 1 on CMRCL-497830: a file whose name already existed in the container got a 409; the user chose to keep both; SPE stored the retry as `… 1.DOCX` and the BFF created the document. The wizard then showed the picked file stuck at "Uploading (100%)", a stray "Complete" row under the server's name, and a final "Upload failed — None of the selected files could be uploaded". Root cause: `uploadOrchestrator.ts` maps upload and record-create results back to the picked files by NAME (`uploadedFileMap` keyed by `SpeFileMetadata.name` at :292/:315; `cr.fileName` at :390/:462), and on a rename the server's name differs from the picked file's name. `DocumentUploadWizardDialog.tsx` then keys `uploadedDocumentMap` and `mergeOrchestratorResults` by the same name.</prompt>
+  <goal>Every per-file result (upload, record create, progress, summary, Next Steps payload) is attributed to the file the user picked, whatever name SPE stores it under.</goal>
+  <constraints>
+    <constraint>Carry the picked file's identity from `MultiFileUploadService.uploadFiles` (it holds `files[i]` next to each result) — an additive field on `UploadFilesResult`; do not change `uploadedFiles` or other consumers (CreateMatter/Project/Event/Invoice/Analysis wizards).</constraint>
+    <constraint>Map record-create results back by the SPE item id (`CreateResult.itemId` = `SpeFileMetadata.id`), never by name.</constraint>
+    <constraint>Unit tests fail before and pass after: a renamed upload counts as a success on the picked file's row; a non-renamed batch is unchanged; a real failure still fails.</constraint>
+    <constraint>Deploy the DocumentUploadWizard code page to dev only with the owner's go; note `origin/chore/shared-building-blocks` (unmerged, 2026-10-03) also edits `uploadOrchestrator.ts`.</constraint>
+  </constraints>
+  <acceptance-criteria>
+    <criterion testable="true">Orchestrator test: picked `a.docx`, server returns `a 1.docx` → fileResults has one entry `a.docx`, success, with createResult; no entry under `a 1.docx`; progress events for the record phases use `a.docx`.</criterion>
+    <criterion testable="true">MultiFileUploadService test: each uploaded result carries its source file name, including when the server renames.</criterion>
+    <criterion testable="true">Negative: an upload that fails, or a record create that fails, is still a failure on its own row.</criterion>
+    <criterion testable="true">`build:prod` of Spaarke.UI.Components and the DocumentUploadWizard code page pass; existing tests pass.</criterion>
+    <criterion testable="false">Owner live check: the conflict → keep-both flow ends with the picked file Complete and the summary showing it uploaded.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>`UploadFilesResult` (MultiFileUploadService) and the wizard orchestrator.</existing>
+    <extension>Yes — an additive field on the existing result; no new service.</extension>
+    <cost-of-doing-nothing>Any keep-both upload is reported as failed while the document exists, so users retry and create duplicates.</cost-of-doing-nothing>
+  </justification>
+</task>

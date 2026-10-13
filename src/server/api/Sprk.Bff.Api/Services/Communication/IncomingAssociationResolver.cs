@@ -49,6 +49,12 @@ public sealed class IncomingAssociationResolver
 
     private readonly ILogger<IncomingAssociationResolver> _logger;
 
+    /// <summary>
+    /// spaarkeai-word-add-in-r1 task 129: after an EXISTING communication is filed (a reparent), its thread follows the
+    /// filing. Optional, like <see cref="IncomingCommunicationProcessor"/>'s; best-effort (never throws).
+    /// </summary>
+    private readonly IThreadResolver? _threadResolver;
+
     /// <summary>Deterministic rungs (Kind 0–3), evaluated unconditionally, in ascending Order.</summary>
     private readonly IReadOnlyList<IAssociationRung> _deterministicRungs;
 
@@ -77,7 +83,8 @@ public sealed class IncomingAssociationResolver
         AssociationStatusMapper statusMapper,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
-        ILogger<IncomingAssociationResolver> logger)
+        ILogger<IncomingAssociationResolver> logger,
+        IThreadResolver? threadResolver = null)
     {
         _communicationService = communicationService;
         _genericEntityService = genericEntityService;
@@ -85,6 +92,7 @@ public sealed class IncomingAssociationResolver
         _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger;
+        _threadResolver = threadResolver;
 
         // Rungs are DI-registered (CommunicationModule). Partition into deterministic (0–3) and AI (4–5),
         // each ordered by Order. Deterministic rungs always run (reinforcement + always-run detectors);
@@ -121,7 +129,13 @@ public sealed class IncomingAssociationResolver
         var decision = await EvaluateInternalAsync(message, context, communicationId, admitTargets: null, ct);
 
         // An EXISTING row being filed: a reparent (task 146) — the owner is re-derived before the write.
-        await ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: false, ct);
+        var refiled = await ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: false, ct);
+
+        // Spaarkeai-word-add-in-r1 task 129: the filing was written — the email's thread follows it (best-effort; never
+        // throws). Here, not in ApplyDecisionAsync: ApplyToExistingRecordAsync's caller (the Office reconciled-email filing)
+        // runs SecureChildReconciler.AfterRefileAsync, which reconciles — once per filing.
+        if (refiled && _threadResolver is not null)
+            await _threadResolver.ReconcileThreadForFilingAsync(communicationId, ct);
     }
 
     /// <summary>
@@ -145,7 +159,8 @@ public sealed class IncomingAssociationResolver
     /// before anything is written.
     /// </summary>
     /// <remarks>Only the record <paramref name="onlyRecordId"/> is filed: the decision is narrowed to it first
-    /// (<see cref="NarrowToRecord"/>), so the writes AND the provenance say the same thing.</remarks>
+    /// (<see cref="NarrowToRecord"/>), so the writes AND the provenance say the same thing. The thread is NOT reconciled
+    /// here: the caller runs <c>SecureChildReconciler.AfterRefileAsync</c>, the one step after a re-file, which does it.</remarks>
     /// <returns><c>false</c> (nothing written) when the decision does not write <paramref name="onlyRecordId"/>.</returns>
     public async Task<bool> ApplyToExistingRecordAsync(
         Guid communicationId, AssociationDecision decision, Guid onlyRecordId, CancellationToken ct)
@@ -470,7 +485,9 @@ public sealed class IncomingAssociationResolver
     /// Writes the regarding lookups, status, and provenance JSON. Populates the ADR-024 polymorphic
     /// resolver fields whenever a regarding lookup was written (Resolved or Suggested). Non-fatal writes.
     /// </summary>
-    private async Task ApplyDecisionAsync(
+    /// <returns><c>true</c> when an existing row was RE-FILED (the reparent branch wrote it) — the caller reconciles its
+    /// thread (task 129).</returns>
+    private async Task<bool> ApplyDecisionAsync(
         Guid communicationId,
         AssociationDecision decision,
         bool ownerAlreadyResolved,
@@ -478,6 +495,7 @@ public sealed class IncomingAssociationResolver
     {
         var fields = await BuildDecisionFieldsAsync(communicationId, decision, ct);
 
+        var refiled = false;
         var parentChanges = Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesIn(fields);
         if (ownerAlreadyResolved || parentChanges.Count == 0)
         {
@@ -503,11 +521,13 @@ public sealed class IncomingAssociationResolver
 
             if (reparent.IsRefused)
                 throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communication", reparent);
+            refiled = true;
         }
 
         _logger.LogDebug(
             "Applied association to communication {CommunicationId} | Status: {Status}, AutoFiled: {AutoFiled}, FieldCount: {FieldCount}",
             communicationId, AssociationStatusCodes.Name(decision.Status), decision.AutoFiled, fields.Count);
+        return refiled;
     }
 
     /// <summary>

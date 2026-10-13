@@ -308,6 +308,14 @@ export interface UploadFilesResult {
   uploadedFiles: SpeFileMetadata[];
 
   /**
+   * The same successful uploads, in the same order, each paired with the name of the file the
+   * caller passed in. `metadata.name` is the name SPE STORED, which differs on a `rename` retry
+   * (`a.docx` → `a 1.docx`). A caller that maps results back to its own files uses
+   * `sourceFileName`; matching on `metadata.name` loses every renamed upload.
+   */
+  uploads: { sourceFileName: string; metadata: SpeFileMetadata }[];
+
+  /**
    * Errors for failed uploads.
    *
    * `nameConflict` marks the recoverable subset: nothing was written for that file, and retrying it

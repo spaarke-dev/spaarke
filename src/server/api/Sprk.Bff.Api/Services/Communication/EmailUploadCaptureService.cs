@@ -48,14 +48,26 @@ public sealed class EmailUploadCaptureService
     private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly ILogger<EmailUploadCaptureService> _logger;
+    private readonly IThreadResolver? _threadResolver;
+    private readonly Access.IDirectThreadAccessService? _directThreadAccess;
 
+    /// <param name="threadResolver">Spaarkeai-word-add-in-r1 task 129: the captured email gets a thread through the same
+    /// resolution the mailbox and send paths use — without one it never shows on its record's Messages panel, which lists
+    /// threads. Optional
+    /// like theirs; the host registers it unconditionally.</param>
+    /// <param name="directThreadAccess">The #1629 per-message grant for the thread the join returned (the same join→grant
+    /// sequence as <see cref="CommunicationService"/>).</param>
     public EmailUploadCaptureService(
         ICommunicationDataverseService communicationService,
         IncomingAssociationResolver associationResolver,
         ICommunicationEnrichmentService enrichmentService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
-        ILogger<EmailUploadCaptureService> logger)
+        ILogger<EmailUploadCaptureService> logger,
+        IThreadResolver? threadResolver = null,
+        Access.IDirectThreadAccessService? directThreadAccess = null)
     {
+        _threadResolver = threadResolver;
+        _directThreadAccess = directThreadAccess;
         _communicationService = communicationService;
         _associationResolver = associationResolver;
         _enrichmentService = enrichmentService;
@@ -204,6 +216,11 @@ public sealed class EmailUploadCaptureService
                 }
             }
 
+            // ── Thread (task 129): after the association, so a new thread is anchored to the record the email is filed to —
+            //    the same order as the mailbox path (IncomingCommunicationProcessor step 4.6) and the same join→grant sequence
+            //    as the send path (CommunicationService). Best-effort (NFR-02/NFR-04): the record already exists. ──
+            await ResolveThreadAsync(communicationId, envelope, ct);
+
             // ── Triage/enrichment: the SAME entry point the inbound + outbound paths invoke, so upload capture
             //    is not forked. archivedDocumentId=null: the .eml + attachments are RAG-indexed / AI-analyzed by
             //    the Office finalization job (OfficeJobQueue.QueueUploadFinalizationAsync), so EnrichAsync's
@@ -236,6 +253,39 @@ public sealed class EmailUploadCaptureService
                 "Upload email capture failed (non-fatal) for message {MessageId}; the save proceeds as an archive.",
                 request.Email?.InternetMessageId);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Gives the captured email a thread through the shared resolution and grants it to that thread's audience (#1629: the
+    /// audience the resolution fixed). The upload envelope carries no reply-chain headers (In-Reply-To / References), which
+    /// are what the email key strategy joins on, so in practice a capture starts a new thread anchored to the record it is
+    /// filed to. Never throws: a failure leaves the email without a thread, which the next filing reconcile resolves.
+    /// </summary>
+    private async Task ResolveThreadAsync(Guid communicationId, NormalizedMessage envelope, CancellationToken ct)
+    {
+        if (_threadResolver is null)
+            return;
+
+        try
+        {
+            var assignment = await _threadResolver.ResolveAndAssignAsync(
+                new ThreadResolutionRequest
+                {
+                    CommunicationId = communicationId,
+                    ChannelType = CommunicationType.Email,
+                    Direction = CommunicationDirection.Incoming,
+                    Message = envelope,
+                },
+                ct);
+
+            if (assignment is not null && _directThreadAccess is not null)
+                await _directThreadAccess.GrantMessageAccessAsync(communicationId, assignment, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex, "Upload-capture thread resolution failed (non-fatal) | CommunicationId: {CommunicationId}", communicationId);
         }
     }
 
