@@ -357,6 +357,13 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
     private async Task ApplyAsync(PolicyRow policy, SignalEvaluationPolicy spec, EpisodePlan plan, RunCounts counts, CancellationToken ct)
     {
+        // Task 145 (D-123, #1747 finding e): a Signal never carries the subject or sender of a witness in another (or an undetermined)
+        // secure family. Every write below can create a row (a reconcile creates when its row is gone), so both take the filtered lines.
+        var evidence = await _suppression.EvidenceWithinPartitionAsync(
+            policy.Code, plan.Reconciles.Select(r => r.Hit).Concat(plan.Creates.Select(c => c.Hit)).ToList(), ct).ConfigureAwait(false);
+        SignalHit Writable(SignalHit hit) =>
+            evidence.TryGetValue((hit.SubjectEntity, hit.SubjectId), out var lines) ? hit with { Evidence = lines } : hit;
+
         // Ids of the Signals this pass actually closed. A re-file's new episode is created only when its predecessor closed.
         var closedIds = new HashSet<Guid>();
         foreach (var signal in plan.Closes)
@@ -429,7 +436,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
             await GuardAsync(policy, "reconcile", hit.SubjectId, counts, writerLogged: false, async () =>
             {
-                var result = await _writer.WriteAsync(BuildRequest(policy, spec, hit, signal.Episode), ct).ConfigureAwait(false);
+                var result = await _writer.WriteAsync(BuildRequest(policy, spec, Writable(hit), signal.Episode), ct).ConfigureAwait(false);
                 if (result.IsSkipped) counts.Refused++;
                 else counts.Updated++;
             }).ConfigureAwait(false);
@@ -452,7 +459,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
             await GuardAsync(policy, "create", create.Hit.SubjectId, counts, writerLogged: false, async () =>
             {
-                var result = await _writer.WriteAsync(BuildRequest(policy, spec, create.Hit, create.Episode), ct).ConfigureAwait(false);
+                var result = await _writer.WriteAsync(BuildRequest(policy, spec, Writable(create.Hit), create.Episode), ct).ConfigureAwait(false);
                 if (result.IsSkipped) counts.Refused++;
                 else if (!result.Created) counts.Updated++;
                 else if (create.Episode > 1) counts.Reraised++;

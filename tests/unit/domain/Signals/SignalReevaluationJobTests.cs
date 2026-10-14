@@ -396,6 +396,32 @@ public partial class SignalReevaluationJobTests
     }
 
     [Fact]
+    public async Task Run_T145_AWitnessAlsoFiledUnderASecureProject_IsWrittenWithoutItsSubjectOrSender()
+    {
+        // D-123 / uac-r2 #1747 finding (e), through the job's real write path: the communication is filed to ordinary matter M (the
+        // hit) and to secure project X (another filing), so M's Signal, read by M's business unit, carries no subject or sender of it.
+        // Run_PathBHit_WritesOneWitnessLinePerExistsClause_AndNoWitnessValueInTheSentence is the ordinary control (detail kept).
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var secureProject = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001a5");
+        h.Sysadmin.SecureProject(secureProject);
+        var witness = h.Sysadmin.WitnessRows["sprk_communication"].Single();
+        witness["sprk_regardingproject"] = new EntityReference("sprk_project", secureProject);
+        witness["owningteam"] = new EntityReference("team", h.Sysadmin.SecureTeamId!.Value);
+
+        await h.RunAsync();
+
+        var created = h.Org.CreatedPayloads.Single();
+        var evidence = System.Text.Json.JsonDocument.Parse(created.GetAttributeValue<string>("sprk_evidencerefs")!).RootElement;
+        evidence.GetArrayLength().Should().Be(1, "the witness line is still written");
+        evidence[0].TryGetProperty("text", out _).Should().BeFalse("the communication's subject stays behind the secure wall");
+        evidence[0].TryGetProperty("source", out _).Should().BeFalse("and so does its sender");
+        evidence[0].GetProperty("ref").GetString().Should().Be($"sprk_communication:{Lower(CommunicationId)}");
+        evidence[0].GetProperty("asOf").GetString().Should().Be("2026-10-05T09:15:00Z");
+        evidence[0].GetProperty("clause").GetString().Should().Be("all[0]");
+        created.GetAttributeValue<string>("sprk_evidencerefs").Should().NotContain("Rate increase").And.NotContain("partner@firm.example");
+    }
+
+    [Fact]
     public async Task Run_NoCoreToDoWhoseOwnerAnswerChanged_ReownsItsSignalToTheNewTeam_ThroughTheReconciler_Once()
     {
         // Task 143: the item's answer moves to another ordinary team (its user moved unit, or D-134's assignee changed). The job
@@ -2384,6 +2410,13 @@ public partial class SignalReevaluationJobTests
             [OtherTeamId] = OtherBusinessUnitId,
         };
 
+        /// <summary>Task 145: the Secure Record owner team exists and <paramref name="projectId"/> is a secure root it owns.</summary>
+        public World SecureProject(Guid projectId)
+        {
+            SecureTeamId = Guid.Parse("5ec0be00-0000-4000-8000-000000000001");
+            return Stub(new Entity("sprk_project", projectId) { ["owningteam"] = new EntityReference("team", SecureTeamId.Value), ["sprk_issecure"] = true });
+        }
+
         /// <summary>#1661: the Secure Record owner team exists and <paramref name="matterId"/> is a secure root it owns.</summary>
         public World SecureMatter(Guid matterId)
         {
@@ -2567,6 +2600,15 @@ public partial class SignalReevaluationJobTests
                 case "sprk_matter" when SecureTeamId is not null && query.ColumnSet.Columns.Contains("sprk_issecure")
                                          && Value("sprk_matterid") is Guid rootId && _rows.TryGetValue(("sprk_matter", rootId), out var root):
                     result.Entities.Add(root);
+                    break;
+                // Task 145: a secure project root (the same root read as a matter's), and a witness communication read by id with its
+                // lineage lookups and owner (the evidence filter's ReadSubjectRowsAsync).
+                case "sprk_project" when SecureTeamId is not null && query.ColumnSet.Columns.Contains("sprk_issecure")
+                                          && Value("sprk_projectid") is Guid projectId && _rows.TryGetValue(("sprk_project", projectId), out var project):
+                    result.Entities.Add(project);
+                    break;
+                case "sprk_communication" when query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_communicationid") is { } byId:
+                    foreach (var witness in WitnessRows["sprk_communication"].Where(w => byId.Values.Contains(w.Id))) result.Entities.Add(witness);
                     break;
                 // #1661 round 3 F-T1: the Decision Records the Signals cite, for both reads of them (the lineage walk's, with the lookup
                 // columns, and the suppression pass's facts: class, reason, decided-on). A record not stubbed is absent, as in Dataverse.

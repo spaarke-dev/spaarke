@@ -470,6 +470,104 @@ public sealed class SignalSuppressionService
         return await PartitionsAsync(items, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Ontology task 145 (D-123; uac-r2 #1747 finding e): each hit's witness lines as its Signal may carry them. A witness line's
+    /// detail (<see cref="SignalEvidenceRef.Text"/>, the communication's subject, and <see cref="SignalEvidenceRef.Source"/>, its sender)
+    /// is kept only when the witness row's secure family is KNOWN and EQUAL to the family of the Signal the hit will write; otherwise
+    /// both are cleared and the rest of the line (kind, ref, as-of, clause) stays, so the planner's dated-evidence rule (D-119) and the
+    /// line itself are unchanged. Both families come from THE partition truth (<see cref="PartitionsAsync"/>: uac-r2's walk above the
+    /// hit's Signal as the writer would write it plus its subject, and above the witness row itself). Undetermined counts as secure: an
+    /// undetermined family on either side, a witness row that cannot be read, a ref that names no lineage table, or a fault clears the
+    /// detail (fail closed; a fault clears it on every line of the call, logged once at Warning). Keyed like
+    /// <see cref="PartitionsOfHitsAsync"/>: by the hit's (subject table, subject id).
+    /// </summary>
+    /// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="PartitionsAsync"/> (the one partition truth) and
+    /// <see cref="ReadSubjectRowsAsync"/> (a lineage row read by table and id); this only applies them to the witness rows. Extension: the
+    /// existing entry points place Signals and hits, never the related rows a hit's evidence quotes. Cost of doing nothing: a matter
+    /// Signal owned by the matter's business-unit team carries the subject and sender of a communication that is secure through another
+    /// filing, so a non-member of that family reads them (D-123).</remarks>
+    internal async Task<IReadOnlyDictionary<(string SubjectEntity, Guid SubjectId), IReadOnlyList<SignalEvidenceRef>>> EvidenceWithinPartitionAsync(
+        string policyCode, IReadOnlyList<SignalHit> hits, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(hits);
+        var result = new Dictionary<(string, Guid), IReadOnlyList<SignalEvidenceRef>>();
+        foreach (var hit in hits) result[(hit.SubjectEntity, hit.SubjectId)] = hit.Evidence;
+
+        var detailed = hits.Where(h => h.Evidence.Any(HasDetail)).ToList();
+        if (detailed.Count == 0) return result;
+
+        try
+        {
+            // No Secure Record owner team in this environment: every family is ordinary (PartitionsAsync's own rule), nothing to read.
+            if (await ResolveSecureTeamAsync(ct).ConfigureAwait(false) is null) return result;
+
+            var hitPartitions = await PartitionsAsync(detailed.Select(h => ItemOf(policyCode, h)).ToList(), ct).ConfigureAwait(false);
+
+            var witnesses = detailed.SelectMany(h => h.Evidence).Where(HasDetail)
+                .Select(l => WitnessOf(l.Ref)).OfType<(string Table, Guid Id)>().Distinct().ToList();
+            var rows = await ReadSubjectRowsAsync(
+                witnesses.Select(w => new PartitionItem(new Entity("sprk_signal"), null, w.Table, w.Id)).ToList(), ct).ConfigureAwait(false);
+            var readable = witnesses.Where(rows.ContainsKey).ToList();
+            var witnessPartitions = await PartitionsAsync(
+                readable.Select(w => new PartitionItem(rows[w], rows[w].GetAttributeValue<EntityReference>("owningteam"), null, Guid.Empty)).ToList(),
+                ct).ConfigureAwait(false);
+            var familyOfWitness = new Dictionary<(string, Guid), SuppressionPartition>();
+            for (var i = 0; i < readable.Count; i++) familyOfWitness[readable[i]] = witnessPartitions[i];
+
+            var cleared = 0;
+            for (var i = 0; i < detailed.Count; i++)
+            {
+                var signalFamily = hitPartitions[i];
+                result[(detailed[i].SubjectEntity, detailed[i].SubjectId)] = detailed[i].Evidence.Select(line =>
+                {
+                    if (!HasDetail(line)) return line;
+                    var same = !signalFamily.IsUndetermined
+                        && WitnessOf(line.Ref) is { } witness
+                        && familyOfWitness.TryGetValue(witness, out var witnessFamily)
+                        && !witnessFamily.IsUndetermined
+                        && witnessFamily == signalFamily;
+                    if (same) return line;
+                    cleared++;
+                    return line with { Text = null, Source = null };
+                }).ToList();
+            }
+
+            if (cleared > 0)
+            {
+                _logger.LogInformation(
+                    "Policy {PolicyCode}: the detail of {Count} witness line(s) was left off their Signals because the witness is in another (or an undetermined) secure family (D-123).",
+                    policyCode, cleared);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(SuppressionEvents.Failed, ex,
+                "Policy {PolicyCode}: the secure families of the Signals' witnesses could not be read ({ExceptionType}); every witness line is written without its detail (D-123, fail closed).",
+                policyCode, ex.GetType().Name);
+            foreach (var hit in detailed)
+            {
+                result[(hit.SubjectEntity, hit.SubjectId)] = hit.Evidence.Select(l => HasDetail(l) ? l with { Text = null, Source = null } : l).ToList();
+            }
+        }
+
+        return result;
+
+        static bool HasDetail(SignalEvidenceRef line) => line.Text is not null || line.Source is not null;
+    }
+
+    /// <summary>The (table, id) a witness line's <see cref="SignalEvidenceRef.Ref"/> (<c>{table}:{id}</c>, as the evaluator writes it)
+    /// names, when the table is a lineage child the walk can start from; otherwise null (its detail is then never kept).</summary>
+    private static (string Table, Guid Id)? WitnessOf(string? reference)
+    {
+        var separator = reference?.IndexOf(':', StringComparison.Ordinal) ?? -1;
+        if (separator <= 0) return null;
+        var table = reference![..separator].ToLowerInvariant();
+        return SecureChildLineage.IsChild(table) && !string.Equals(table, SignalLineage.LogicalName, StringComparison.Ordinal)
+            && Guid.TryParse(reference[(separator + 1)..], out var id) && id != Guid.Empty
+                ? (table, id)
+                : null;
+    }
+
     /// <summary>True when <paramref name="reason"/> ("code - detail") names a catalog code that never counts toward suppression.</summary>
     public static bool IsNonCountingReason(string? reason) => NonCountingReasonCodes.Contains(ReasonCode(reason));
 

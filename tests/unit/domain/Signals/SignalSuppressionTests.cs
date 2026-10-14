@@ -1484,6 +1484,107 @@ public class SignalSuppressionTests
 
     private static SuppressionGrain Matter() => SuppressionGrain.ForCore(MatterType, MatterId);
 
+    // =====================================================================================
+    // Task 145 (D-123, uac-r2 #1747 finding e): witness detail never crosses a secure-family wall
+    // =====================================================================================
+
+    private const string WitnessSubject = "Rate increase from Firm LLP";
+    private const string WitnessSender = "partner@firm.example";
+
+    /// <summary>A matter hit (subject and core: the matter) quoting one communication as its witness, as the evaluator builds it.</summary>
+    private static SignalHit MatterHitQuoting(Guid matterId, Guid communicationId) =>
+        new("sprk_matter", matterId, "Acme v Beta", "MAT-0001", new SignalCoreRecord("sprk_matter", matterId, MatterType, null),
+            null, null, new Dictionary<string, object?>(),
+            [
+                new SignalEvidenceRef("communication", $"sprk_communication:{communicationId:D}", "Fact")
+                {
+                    Text = WitnessSubject, Source = WitnessSender, AsOf = "2026-10-05T09:15:00Z", Clause = "all[0]",
+                },
+            ]);
+
+    /// <summary>A communication filed under <paramref name="matterId"/> and, when given, also under a secure project (another filing).</summary>
+    private static Guid FiledCommunication(Store s, Guid matterId, Guid? secureProject = null, string owner = Store.OrdinaryTeam)
+    {
+        var id = Guid.NewGuid();
+        s.Subject(id, family: secureProject, owner: owner);
+        s.Others.Single(r => r.Id == id)["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId);
+        return id;
+    }
+
+    [Fact]
+    public async Task T145_ACommunicationFiledToOrdinaryMAndSecureX_GivesMsSignalNoSubjectOrSender()
+    {
+        var s = new Store();
+        var mixed = FiledCommunication(s, MatterId, secureProject: Store.ProjectA, owner: Store.SecureOwner);
+        var hit = MatterHitQuoting(MatterId, mixed);
+
+        var evidence = await s.Service.EvidenceWithinPartitionAsync(Code, [hit], default);
+
+        var line = evidence[("sprk_matter", MatterId)].Should().ContainSingle().Subject;
+        line.Text.Should().BeNull("the communication is secure through project A; M's Signal is read by M's business unit");
+        line.Source.Should().BeNull();
+        line.Should().BeEquivalentTo(hit.Evidence[0] with { Text = null, Source = null },
+            "the rest of the line (kind, ref, as-of, clause) stays: the planner's dated-evidence rule reads it (D-119)");
+    }
+
+    [Fact]
+    public async Task T145_APurelyOrdinaryCommunication_StillGivesItsSubjectAndSender()
+    {
+        // Must-not-fire control for the test above: the same shape with no secure filing keeps its detail.
+        var s = new Store();
+        var ordinary = FiledCommunication(s, MatterId);
+        var hit = MatterHitQuoting(MatterId, ordinary);
+
+        var evidence = await s.Service.EvidenceWithinPartitionAsync(Code, [hit], default);
+
+        evidence[("sprk_matter", MatterId)].Should().ContainSingle().Which.Should().Be(hit.Evidence[0]);
+    }
+
+    [Fact]
+    public async Task T145_ASecureSignalQuotingAWitnessOfItsOwnFamily_KeepsTheDetail()
+    {
+        // Beyond the named cases (one line): proves the rule compares FAMILIES, not "secure witness → clear", so a secure matter's own
+        // Signal (owned by the Secure team, read by the family) still shows what its own secure communication said.
+        var s = new Store();
+        var secureMatter = Guid.NewGuid();
+        s.SecureMatter(secureMatter);
+        var own = FiledCommunication(s, secureMatter, owner: Store.SecureOwner);
+        var hit = MatterHitQuoting(secureMatter, own);
+
+        var evidence = await s.Service.EvidenceWithinPartitionAsync(Code, [hit], default);
+
+        evidence[("sprk_matter", secureMatter)].Should().ContainSingle().Which.Text.Should().Be(WitnessSubject);
+    }
+
+    [Fact]
+    public async Task T145_AWitnessWhoseFamilyIsUndetermined_CountsAsSecure_AndGivesNoDetail()
+    {
+        // Undetermined counts as secure (D-123): Secure-team-owned but filed under no secure root, so its family cannot be named.
+        var s = new Store();
+        var orphan = FiledCommunication(s, MatterId, owner: Store.SecureOwner);
+        var hit = MatterHitQuoting(MatterId, orphan);
+
+        var evidence = await s.Service.EvidenceWithinPartitionAsync(Code, [hit], default);
+
+        evidence[("sprk_matter", MatterId)].Should().ContainSingle().Which.Text.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task T145_WhenTheFamiliesCannotBeRead_EveryLineLosesItsDetail_FailClosed()
+    {
+        var s = new Store();
+        var ordinary = FiledCommunication(s, MatterId);
+        var hit = MatterHitQuoting(MatterId, ordinary);
+        s.FailReads = true;
+
+        var evidence = await s.Service.EvidenceWithinPartitionAsync(Code, [hit], default);
+
+        var line = evidence[("sprk_matter", MatterId)].Should().ContainSingle().Subject;
+        line.Text.Should().BeNull("a family that cannot be read is never assumed equal");
+        line.Source.Should().BeNull();
+        line.AsOf.Should().Be("2026-10-05T09:15:00Z", "the line itself is still written");
+    }
+
     private static SignalHit Hit(Guid coreId, Guid subjectId, Guid? type = null) =>
         new("sprk_communication", subjectId, "A communication", null, new SignalCoreRecord("sprk_matter", coreId, type ?? MatterType, null),
             null, null, new Dictionary<string, object?>(), []);
