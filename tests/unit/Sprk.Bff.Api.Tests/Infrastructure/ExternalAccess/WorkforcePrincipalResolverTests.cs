@@ -17,6 +17,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Membership;
@@ -427,6 +428,49 @@ public class WorkforcePrincipalResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_WorkforceHomePrincipal_IsDeniedBeforeAnyLookup()
+    {
+        // Review F2 (task 045): until task 046 adds the home branch, a WorkforceHome-authenticated principal must not
+        // reach the systemuser lookup or the binder - its oid is the CUSTOMER directory's. Task 046 removes this guard
+        // and this test.
+        var dataverse = new Mock<IDataverseService>();
+        var identity = new Mock<IIdentityNormalizationService>();
+        var user = HomePrincipal(BuildUser(TestOid, CustomerTenant, email: TestEmail));
+
+        var result = await CreateSut(dataverse.Object, identity.Object).ResolveAsync(user, CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.Principal.Should().BeNull();
+        result.DenyReason.Should().Be(WorkforceDenyReason.PrincipalNotResolved);
+        result.DenyCode.Should().Be(WorkforcePrincipalResolver.DenyWorkforceHomeResolutionPending)
+            .And.Be("sdap.access.deny.workforce_home_resolution_pending");
+        dataverse.Invocations.Should().BeEmpty("no Dataverse call may precede the deny");
+        identity.Invocations.Should().BeEmpty();
+        _store.Reads.Should().BeEmpty("the binder is never called");
+        _store.Writes.Should().BeEmpty();
+        _store.Contacts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_BearerWorkforcePrincipal_IsUnaffectedByTheWorkforceHomeGuard()
+    {
+        // Regression control for the guard above: a Bearer (default scheme) workforce principal is unaffected.
+        var dataverse = new Mock<IDataverseService>();
+        SetupSystemUserLookup(dataverse, TestOid, TestSystemUserId);
+        var identity = new Mock<IIdentityNormalizationService>();
+        identity
+            .Setup(x => x.ResolveAsync(TestSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PersonIdentity(TestSystemUserId, ContactId: TestContactId));
+        var user = new ClaimsPrincipal(new ClaimsIdentity(
+            BuildUser(TestOid, CustomerTenant).Claims, authenticationType: Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerDefaults.AuthenticationScheme));
+
+        var result = await CreateSut(dataverse.Object, identity.Object).ResolveAsync(user, CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue();
+        result.Principal!.SystemUserId.Should().Be(TestSystemUserId);
+    }
+
+    [Fact]
     public async Task ResolveAsync_SystemUserLookupThrows_DeniesFailClosed()
     {
         var dataverse = new Mock<IDataverseService>();
@@ -778,6 +822,10 @@ public class WorkforcePrincipalResolverTests
                 ["AzureAd:TenantId"] = stampTenant,
             }).Build(),
             logger ?? NullLogger<WorkforcePrincipalResolver>.Instance);
+
+    /// <summary>The same claims, authenticated by the WorkforceHome scheme (the handler stamps this AuthenticationType).</summary>
+    private static ClaimsPrincipal HomePrincipal(ClaimsPrincipal source)
+        => new(new ClaimsIdentity(source.Claims, authenticationType: AuthSchemes.WorkforceHome));
 
     private static ClaimsPrincipal BuildUser(
         Guid? oid, Guid? tid = null, string? email = null, string? preferredUsername = null, string? acct = "0",

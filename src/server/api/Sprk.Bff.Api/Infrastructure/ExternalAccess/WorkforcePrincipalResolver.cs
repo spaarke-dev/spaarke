@@ -34,6 +34,7 @@ using System.Security.Claims;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Api.Membership;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Spaarke.Dataverse;
@@ -68,6 +69,12 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
     // Deny codes (auth.md format: {domain}.{area}.{action}.{reason}).
     internal const string DenyMissingIdentityClaims = "sdap.access.deny.missing_identity_claims";
     internal const string DenyPrincipalNotResolved = "sdap.access.deny.principal_not_resolved";
+
+    /// <summary>
+    /// A principal authenticated by the <see cref="AuthSchemes.WorkforceHome"/> scheme (a customer's home-directory token,
+    /// ADR-028 A9) is refused until task 046 adds the home branch. See the guard at the top of <c>ResolveAsync</c>.
+    /// </summary>
+    internal const string DenyWorkforceHomeResolutionPending = "sdap.access.deny.workforce_home_resolution_pending";
 
     /// <summary>
     /// The oid names a systemuser that is DISABLED. Such a user is "no longer a valid principal"
@@ -127,6 +134,22 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
     {
         ArgumentNullException.ThrowIfNull(user);
         ct.ThrowIfCancellationRequested();
+
+        // ── TEMPORARY guard (task 045, review F2) — remove in task 046. A WorkforceHome token comes from a CUSTOMER'S
+        //    home directory; its oid is that directory's, and the resolution below (systemuser by oid, then the contact
+        //    bound to the oid) was written for tokens from the stamp's own tenant. Until task 046 replaces this with the
+        //    home branch, deny any principal whose authentication scheme is WorkforceHome BEFORE any Dataverse read or
+        //    binder call. 046's tests must remove this guard along with its deny test
+        //    (ResolveAsync_WorkforceHomePrincipal_IsDeniedBeforeAnyLookup).
+        if (user.Identities.Any(i => i.IsAuthenticated &&
+                                     string.Equals(i.AuthenticationType, AuthSchemes.WorkforceHome, StringComparison.Ordinal)))
+        {
+            _logger.LogWarning(
+                "[WF-AUTH] Workforce caller authenticated by the {Scheme} scheme — denying ({DenyCode}) until home resolution exists",
+                AuthSchemes.WorkforceHome, DenyWorkforceHomeResolutionPending);
+            return WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, DenyWorkforceHomeResolutionPending);
+        }
 
         // ── Identity from claims (reuse MembershipEndpoints extraction, per ADR-028) ──
         var oid = MembershipEndpoints.ExtractAadObjectId(user);
