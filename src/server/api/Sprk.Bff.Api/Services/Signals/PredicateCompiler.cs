@@ -503,7 +503,7 @@ public sealed partial class PredicateCompiler
         if (root.TryGetProperty("when", out var when) && when.ValueKind == JsonValueKind.Object)
         {
             var whenConditions = CompileFilterConditions(subject, when, nowUtc, "when",
-                (field, _) =>
+                (field, pin) =>
                 {
                     if (Sprk.Bff.Api.Services.Finance.FinanceBaseValues.IsDerived(subject, field))
                     {
@@ -515,7 +515,8 @@ public sealed partial class PredicateCompiler
                             "budget rows; a 'when' on the stored column would read a value that is not kept current. Scope the rule with another column.");
                     }
 
-                    UseOf(positiveUses, field).RecordWhen(subject);
+                    if (ReferenceEquals(pin, AbsentPin)) UseOf(positiveUses, field).RecordWhenAbsent(subject);
+                    else UseOf(positiveUses, field).RecordWhen(subject);
                     if (DateOnlyColumns.Contains((subject, field)))
                     {
                         dateOnlyWhenFields.Add(field);
@@ -551,7 +552,7 @@ public sealed partial class PredicateCompiler
             // Positive-field tracking is passed ONLY for an exists clause (review finding #5).
             var linkFilter = new XElement("filter", new XAttribute("type", "and"),
                 CompileFilterConditions(related, clause.GetProperty("filter"), nowUtc, where + ".filter",
-                    isExists ? (field, pin) => UseOf(positiveUses, field).RecordExists(related, pin) : null));
+                    isExists ? (field, pin) => UseOf(positiveUses, field).RecordExists(related, ReferenceEquals(pin, AbsentPin) ? null : pin) : null));
 
             var path = RequireVerifiedJoin(
                 subject, related, RequireIdentifier(clause.GetProperty("path").GetString(), where + ".path"), where + ".path");
@@ -734,11 +735,20 @@ public sealed partial class PredicateCompiler
         private readonly HashSet<string> _entities = new(StringComparer.Ordinal);
         private readonly List<object?> _existsPins = new();
         private bool _readByWhen;
+        private bool _requiredAbsent;
 
         public void RecordWhen(string subjectEntity)
         {
             _readByWhen = true;
             _entities.Add(subjectEntity);
+        }
+
+        /// <summary>Task 061 (D-54): the subject's own <c>{"null": true}</c> test. The field is read, but only to require that it is
+        /// EMPTY, so no token may name it: its value is null for every hit.</summary>
+        public void RecordWhenAbsent(string subjectEntity)
+        {
+            RecordWhen(subjectEntity);
+            _requiredAbsent = true;
         }
 
         /// <param name="pin">The single value the clause pins the field to (see <see cref="PinOf"/>), or
@@ -756,6 +766,11 @@ public sealed partial class PredicateCompiler
             if (_entities.Count > 1 || (_readByWhen && _existsPins.Count > 0))
             {
                 return TemplateFieldClass.Ambiguous;
+            }
+
+            if (_requiredAbsent)
+            {
+                return TemplateFieldClass.Unpinned;
             }
 
             if (_readByWhen)
@@ -844,6 +859,25 @@ public sealed partial class PredicateCompiler
 
                 case JsonValueKind.Object:
                     var ops = value.EnumerateObject().ToList();
+                    if (ops.Count == 1 && ops[0].Name is NullTestMember or NotNullTestMember)
+                    {
+                        // Task 061 (D-54): a null test on the row's OWN column. Never pins (it names no value), so a template
+                        // can never read the field. The two FetchXML operators are 'null' / 'not-null' on the subject (or the
+                        // clause's related row); the notExists anti-join's own 'null' carries an entityname and is a different
+                        // condition (see the link-entity branch of CompileParsedCore).
+                        if (ops[0].Value.ValueKind != JsonValueKind.True)
+                        {
+                            throw new PredicateCompilationException(
+                                $"{at}: '{ops[0].Name}' is a null test and takes no operand; write {{\"{ops[0].Name}\": true}}.");
+                        }
+
+                        conditions.Add(NullTestCondition(attribute, ops[0].Name == NullTestMember ? "null" : "not-null"));
+                        // A column the rule requires to be EMPTY has no value for a sentence to state (and the writer refuses a
+                        // null fact), so it is reported as AbsentPin, which no consumer may read as a pinned value.
+                        pin = ops[0].Name == NullTestMember ? AbsentPin : null;
+                        break;
+                    }
+
                     if (ops.Count == 2)
                     {
                         // D-40: a two-bound relative-date range. Never pins (it can match many values).
@@ -966,6 +1000,18 @@ public sealed partial class PredicateCompiler
 
     /// <summary>Task 031: the exact text the compiler emits for an instant, so the evaluator can find a compiled condition.</summary>
     internal static string FormatInstantForFetch(DateTimeOffset instant) => FormatInstant(instant);
+
+    /// <summary>The null-test members of a filter value (task 061): <c>{"null": true}</c> and <c>{"notNull": true}</c>.</summary>
+    internal const string NullTestMember = "null";
+    internal const string NotNullTestMember = "notNull";
+
+    /// <summary>The "pin" a <c>{"null": true}</c> test reports to <c>recordPositive</c>: the field is required to hold NO value.</summary>
+    private static readonly object AbsentPin = new();
+
+    private static XElement NullTestCondition(string attribute, string fetchOperator) =>
+        new("condition",
+            new XAttribute("attribute", attribute),
+            new XAttribute("operator", fetchOperator));
 
     private static XElement Condition(string attribute, string op, string value) =>
         new("condition",

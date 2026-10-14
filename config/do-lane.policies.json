@@ -1,0 +1,147 @@
+{
+  "_version": "1.0",
+  "kind": "do-lane-policies",
+  "description": "The four Do-lane policies of ontology task 061 (D-16, D-31, D-43, D-54): subject-only Existence rules evaluated by the ONE evaluator (SignalEvaluator via the nightly SignalReevaluationJob), reproducing the Daily Briefing collector's predicates (the due-soon window is the POML's three days; the collector's own is the caller's Due-soon setting). Applied to Dataverse by scripts/Apply-DoLanePolicies.ps1 (idempotent upsert by the fixed ids below). Policies are created with sprk_enabled = No; the owner turns them on after review, and the script never changes sprk_enabled on an existing row. A version row is immutable once published (FR-49): a changed body, plan or template is a NEW version (a new entry with a higher versionNumber and its own id), never an edit of this one. The overdue threshold is the 'now-1d' in each overdue body (D-43: starts at 1 day; tune in UAT by publishing a new version). Event rules read sprk_duedate, never sprk_finalduedate (D-27).",
+  "eventTypeTask": "124f5fc9-98ff-f011-8406-7c1e525abd8b",
+  "policies": [
+    {
+      "policyId": "00000000-0000-4000-8000-000000006101",
+      "code": "POL-TASK-OVERDUE",
+      "name": "Open task past its due date",
+      "shortName": "Overdue task",
+      "lane": "Do",
+      "subjectType": "Event",
+      "workType": "Finish or reschedule",
+      "severity": "Warning",
+      "priority": 500,
+      "countsTowardSuppression": true,
+      "currentVersion": 1,
+      "versions": [
+        {
+          "versionId": "00000000-0000-4000-8000-000000006111",
+          "versionNumber": 1,
+          "inForceFrom": "2026-10-14T00:00:00Z",
+          "ruleType": "Existence",
+          "ruleBody": {
+            "type": "Existence",
+            "subject": "sprk_event",
+            "when": {
+              "sprk_eventtype_ref": "124f5fc9-98ff-f011-8406-7c1e525abd8b",
+              "statuscode": 659490001,
+              "sprk_duedate": { "<=": "now-1d" }
+            },
+            "all": []
+          },
+          "shortHeadline": "Open task past its due date",
+          "messageTemplate": "This task is open and its due date has passed.",
+          "proposedAction": "mark-complete: finish the task, or reschedule or reassign it.",
+          "decisionPlan": { "actions": ["mark-complete", "reschedule", "reassign"], "nextSteps": [] }
+        }
+      ]
+    },
+    {
+      "policyId": "00000000-0000-4000-8000-000000006102",
+      "code": "POL-TASK-DUESOON",
+      "name": "Open task coming due",
+      "shortName": "Task due soon",
+      "lane": "Do",
+      "subjectType": "Event",
+      "workType": "Coming due",
+      "severity": "Info",
+      "priority": 500,
+      "countsTowardSuppression": true,
+      "currentVersion": 1,
+      "versions": [
+        {
+          "versionId": "00000000-0000-4000-8000-000000006112",
+          "versionNumber": 1,
+          "inForceFrom": "2026-10-14T00:00:00Z",
+          "ruleType": "Existence",
+          "ruleBody": {
+            "type": "Existence",
+            "subject": "sprk_event",
+            "when": {
+              "sprk_eventtype_ref": "124f5fc9-98ff-f011-8406-7c1e525abd8b",
+              "statuscode": 659490001,
+              "sprk_duedate": { ">=": "now", "<=": "now+3d" }
+            },
+            "all": []
+          },
+          "shortHeadline": "Open task coming due",
+          "messageTemplate": "This task is open and is coming due.",
+          "proposedAction": "mark-complete: finish the task, or reschedule it.",
+          "decisionPlan": { "actions": ["mark-complete", "reschedule"], "nextSteps": [] }
+        }
+      ]
+    },
+    {
+      "policyId": "00000000-0000-4000-8000-000000006103",
+      "code": "POL-WA-RESPONSE",
+      "name": "Work assignment past its response date",
+      "shortName": "Response overdue",
+      "lane": "Do",
+      "subjectType": "Work Assignment",
+      "workType": "Chase a response",
+      "severity": "Warning",
+      "priority": 500,
+      "countsTowardSuppression": true,
+      "currentVersion": 1,
+      "versions": [
+        {
+          "versionId": "00000000-0000-4000-8000-000000006113",
+          "versionNumber": 1,
+          "inForceFrom": "2026-10-14T00:00:00Z",
+          "ruleType": "Existence",
+          "ruleBody": {
+            "type": "Existence",
+            "subject": "sprk_workassignment",
+            "when": {
+              "statecode": 0,
+              "sprk_responseduedate": { "<=": "now-1d" },
+              "sprk_respondedon": { "null": true }
+            },
+            "all": []
+          },
+          "shortHeadline": "Work assignment past its response date with no response",
+          "messageTemplate": "This work assignment is active, its response date has passed and no response is recorded.",
+          "proposedAction": "send-reminder: chase the response, extend the response date, or record the response.",
+          "decisionPlan": { "actions": ["send-reminder", "extend-response-date", "record-the-response"], "nextSteps": [] }
+        }
+      ]
+    },
+    {
+      "policyId": "00000000-0000-4000-8000-000000006104",
+      "code": "POL-TODO-OVERDUE",
+      "name": "To Do past its due date",
+      "shortName": "Overdue To Do",
+      "lane": "Do",
+      "subjectType": "To Do",
+      "workType": "Finish or reschedule",
+      "severity": "Info",
+      "priority": 500,
+      "countsTowardSuppression": true,
+      "currentVersion": 1,
+      "versions": [
+        {
+          "versionId": "00000000-0000-4000-8000-000000006114",
+          "versionNumber": 1,
+          "inForceFrom": "2026-10-14T00:00:00Z",
+          "ruleType": "Existence",
+          "ruleBody": {
+            "type": "Existence",
+            "subject": "sprk_todo",
+            "when": {
+              "statuscode": [1, 659490001],
+              "sprk_duedate": { "<=": "now-1d" }
+            },
+            "all": []
+          },
+          "shortHeadline": "To Do past its due date",
+          "messageTemplate": "This To Do is open and its due date has passed.",
+          "proposedAction": "mark-complete: finish the To Do, or reschedule or reassign it.",
+          "decisionPlan": { "actions": ["mark-complete", "reschedule", "reassign"], "nextSteps": [] }
+        }
+      ]
+    }
+  ]
+}

@@ -316,7 +316,8 @@ public sealed class PolicyVersionValidator
                         detail.Add("read by an 'exists' clause that does not pin it to exactly one value (a " +
                                    "range, '<>' or multi-value list can match several rows with different " +
                                    "values, so the value is not defined; pin it with a single value, or remove " +
-                                   $"it from the template): [{string.Join(", ", unpinned)}]");
+                                   "it from the template), or required to be empty by a 'when' null test (an " +
+                                   $"empty field has no value to state): [{string.Join(", ", unpinned)}]");
                     }
 
                     if (ambiguous.Length > 0)
