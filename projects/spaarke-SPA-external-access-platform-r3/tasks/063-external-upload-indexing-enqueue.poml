@@ -4,7 +4,7 @@
     <title>External document upload is queued for AI Search indexing and document profile (check-2 issue 5)</title>
     <phase>5b Owner check-2 fixes</phase>
     <gate>startable: owner decided 2026-10-13 "yes files should be indexed and document profile"</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tags bff-api, ai; adds a call on an external write path</rigor-reason>
     <model-tier>opus</model-tier>
