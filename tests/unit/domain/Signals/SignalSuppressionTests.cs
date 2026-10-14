@@ -1400,6 +1400,80 @@ public class SignalSuppressionTests
     }
 
     // =====================================================================================
+    // Ontology task 144 (uac-r2 #1746 K4 / K7): a Signal registered with the core-ancestor stamp reaches a project or work-assignment
+    // core through its own sprk_regarding{project,workassignment} stamp, where the typed lookup it lacks (audit F5) never could.
+    // =====================================================================================
+
+    private static readonly Guid SecureWorkAssignmentId = Guid.Parse("5ec0be00-0000-4000-8000-0000000000c1");
+
+    public static TheoryData<string, string> ProjectAndWorkAssignmentCores => new()
+    {
+        { "sprk_project", "sprk_regardingproject" },
+        { "sprk_workassignment", "sprk_regardingworkassignment" },
+    };
+
+    private static (Guid Core, Guid Type) SecureCore(Store s, string table)
+    {
+        if (table == "sprk_project") return (Store.ProjectA, ProjectType);
+        s.SecureWorkAssignment(SecureWorkAssignmentId);
+        return (SecureWorkAssignmentId, WorkAssignmentType);
+    }
+
+    [Theory]
+    [MemberData(nameof(ProjectAndWorkAssignmentCores))]
+    public async Task K4_ASecureOwnedSignal_OnAProjectOrWorkAssignmentCore_LeavesTheUndeterminedBucket_OnceItsStampExists(string coreTable, string stampColumn)
+    {
+        var s = new Store();
+        var (core, type) = SecureCore(s, coreTable);
+        var subject = Guid.NewGuid();
+        // The subject does not reach the root: an ordinary team's communication filed under nothing the walk can follow (#1746 K4).
+        s.Subject(subject);
+        var signal = s.Dismiss(core, subject, daysAgo: 1, coreType: type, secure: true);
+
+        (await s.Service.PartitionsOfSignalsAsync([signal], default)).Should().Equal([SuppressionPartition.Undetermined],
+            "before the stamp: a Secure-owned Signal with no secure root found is undetermined");
+
+        s.Signals.Single(x => x.Id == signal)[stampColumn] = new EntityReference(coreTable, core); // the restamper's write
+
+        (await s.Service.PartitionsOfSignalsAsync([signal], default)).Should().Equal([SuppressionPartition.Secure([(coreTable, core)])],
+            "the stamp reaches the secure core, so the Signal is counted and muted in its own family");
+    }
+
+    [Theory]
+    [MemberData(nameof(ProjectAndWorkAssignmentCores))]
+    public async Task K7_AHitOnASecureProjectOrWorkAssignmentCore_IsPlacedInItsSecurePartition_NeverOrdinary(string coreTable, string _)
+    {
+        var s = new Store();
+        var (core, type) = SecureCore(s, coreTable);
+        var subject = Guid.NewGuid();
+        s.Subject(subject); // an ordinary team's subject that does not reach the core: before 144 the hit was Ordinary (#1746 K7)
+        var hit = new SignalHit("sprk_communication", subject, "A communication", null, new SignalCoreRecord(coreTable, core, type, null),
+            null, null, new Dictionary<string, object?>(), []);
+
+        var placed = await s.Service.PartitionsOfHitsAsync(Code, [hit], default);
+
+        placed.Should().NotBeNull();
+        placed![("sprk_communication", subject)].Should().Be(SuppressionPartition.Secure([(coreTable, core)]),
+            "the hit's Signal will carry the core's stamp, so an ordinary partition's stamp never mutes it");
+    }
+
+    [Fact]
+    public async Task K7_AHitOnAnOrdinaryProjectCore_StaysOrdinary()
+    {
+        // Must-not-fire control: the stamp column names an ordinary core, so nothing moves to a secure partition.
+        var s = new Store();
+        var subject = Guid.NewGuid();
+        s.Subject(subject);
+        var hit = new SignalHit("sprk_communication", subject, "A communication", null, new SignalCoreRecord("sprk_project", ProjectId, ProjectType, null),
+            null, null, new Dictionary<string, object?>(), []);
+        s.OrdinaryProject(ProjectId);
+
+        var placed = await s.Service.PartitionsOfHitsAsync(Code, [hit], default);
+
+        placed![("sprk_communication", subject)].Should().Be(SuppressionPartition.Ordinary);
+    }
+
+    // =====================================================================================
     // Fixtures
     // =====================================================================================
 
@@ -1582,6 +1656,12 @@ public class SignalSuppressionTests
 
         /// <summary>A secure matter (owned by the Secure team, flagged secure): a hit whose core record is this matter sits under it.</summary>
         public void SecureMatter(Guid id) => Others.Add(Root("sprk_matter", id, secure: true));
+
+        /// <summary>Ontology task 144: a secure work assignment (owned by the Secure team, flagged secure).</summary>
+        public void SecureWorkAssignment(Guid id) => Others.Add(Root("sprk_workassignment", id, secure: true));
+
+        /// <summary>Ontology task 144: an ordinary project (user-owned, not flagged).</summary>
+        public void OrdinaryProject(Guid id) => Others.Add(Root("sprk_project", id, secure: false));
 
         private static Entity Root(string table, Guid id, bool secure)
         {
