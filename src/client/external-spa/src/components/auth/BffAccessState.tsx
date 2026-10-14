@@ -44,6 +44,25 @@ export function accessFailureOf(err: unknown): BffAccessFailure | null {
   return null;
 }
 
+/** The BFF's reason code for a CIAM sign-in with no matching invite (`ContactBindingDecision.DenyContactNotInvited`). */
+export const DENY_CONTACT_NOT_INVITED = 'sdap.access.deny.contact_not_invited';
+
+/**
+ * Task 185 (design §4.1 step 6, owner Q9): the server's `detail` for a 403 `contact_not_invited` ("open the invitation
+ * link from your email in this browser ..."), so the denied state tells the invitee what to do. Any other error → null
+ * (the page's own denied sentence applies).
+ */
+export function deniedDetailOf(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.statusCode !== 403) return null;
+  try {
+    const body = JSON.parse(err.message) as { reasonCode?: unknown; detail?: unknown };
+    if (body.reasonCode !== DENY_CONTACT_NOT_INVITED) return null;
+    return typeof body.detail === 'string' && body.detail.trim() ? body.detail.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 const SIGN_IN_UNAVAILABLE =
   'Sign-in could not be started from here. Reload the page, or open the link again from your invitation. If this keeps happening, contact the record team.';
 

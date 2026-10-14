@@ -47,13 +47,19 @@ public sealed record ContactGrantRevokeRequest(Guid AccessRecordId);
 /// <param name="Narrowed">The grantor's level lowered the request.</param>
 /// <param name="ExpiryDate">The expiry the grant carries.</param>
 /// <param name="ExpiryNarrowed">The requested (or default) expiry was cut back to the grantor's own.</param>
+/// <param name="Invite">
+/// Task 185 slice E (§12 I-4): what the grant did about the colleague's CIAM invite. A contact never invites, so an unbound
+/// colleague with an email is <see cref="GrantInviteStatus.NeedsInternalInvite"/> and the record's internal owner is told.
+/// Additive; no other field changes.
+/// </param>
 public sealed record ContactGrantResponse(
     Guid AccessRecordId,
     Guid GranteeContactId,
     ExternalAccessLevel? GrantedAccessLevel,
     bool Narrowed,
     DateOnly? ExpiryDate,
-    bool ExpiryNarrowed);
+    bool ExpiryNarrowed,
+    GrantInviteResult? Invite = null);
 
 /// <summary>One grant the caller issued.</summary>
 public sealed record ContactIssuedGrant(
