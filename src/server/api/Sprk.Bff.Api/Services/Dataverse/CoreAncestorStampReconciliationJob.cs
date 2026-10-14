@@ -55,6 +55,12 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// state) and writes nothing. An unparseable value is report-only too. The admin <c>disable</c> endpoint stops it
 /// (ADR-036).</para>
 ///
+/// <para><b>Report-only tables</b> (ontology task 144, uac-r2's "report-only first"): the tables in
+/// <see cref="ReportOnlyTablesConfigKey"/> (default <see cref="DefaultReportOnlyTables"/>: Signals and Decision Records) are
+/// scanned, counted and sampled, but the job never writes them, neither as a direct repair nor in the cascade below another
+/// row it repairs. Every other table keeps repairing (the storage resolver's 409-stale recovery depends on it). Set the key
+/// to an empty value to let the job write them; the BFF's own re-file paths re-stamp them regardless.</para>
+///
 /// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): in the BFF on the in-process <c>Spaarke.Scheduling</c> host — BFF
 /// domain code (<see cref="CoreAncestorResolver"/>, the restamper) over BFF-owned tables, BFF identity, low volume (live
 /// 2026-10-02: 14 to-dos, 1 event, 5 communications and 0 analyses are filed under an intermediate at all). The one
@@ -69,6 +75,13 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
 
     /// <summary>The dry-run switch: <c>false</c> (or an unparseable value) = report only. Absent = writes on.</summary>
     internal const string WritesEnabledConfigKey = "CoreAncestor:StampReconciliation:WritesEnabled";
+
+    /// <summary>Ontology task 144: tables the job reports but never writes (comma-separated). Absent = <see cref="DefaultReportOnlyTables"/>;
+    /// empty = none.</summary>
+    internal const string ReportOnlyTablesConfigKey = "CoreAncestor:StampReconciliation:ReportOnlyTables";
+
+    /// <summary>Report-only until the owner turns them on (uac-r2 condition on task 144).</summary>
+    internal static readonly IReadOnlyList<string> DefaultReportOnlyTables = ["sprk_signal", "sprk_decisionrecord"];
 
     internal const int PageSize = 1000;
     internal const int MaxPages = 20;
@@ -146,12 +159,26 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
         }
     }
 
+    /// <summary>The tables this run reports but never writes (<see cref="ReportOnlyTablesConfigKey"/>).</summary>
+    internal IReadOnlySet<string> ReportOnlyTables
+    {
+        get
+        {
+            var raw = _configuration[ReportOnlyTablesConfigKey];
+            IEnumerable<string> tables = raw is null
+                ? DefaultReportOnlyTables
+                : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return new HashSet<string>(tables, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
     public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         var started = _timeProvider.GetTimestamp();
         var writesEnabled = WritesEnabled;
+        var reportOnlyTables = ReportOnlyTables;
         var counts = new RunCounts();
         var problems = new List<string>();
         var status = StatusOk;
@@ -175,8 +202,8 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
                 // The before-state, for EVERY stale row, in BOTH modes, before anything is written.
                 _logger.LogInformation(
                     "{Prefix} stale mode={Mode} entity={Entity} id={Id} source={Source} before=[{Before}] after=[{After}] correlationId={CorrelationId}",
-                    LogPrefix, writesEnabled ? "write" : "report-only", row.Entity, row.Id, row.Source, row.Before,
-                    row.After, context.CorrelationId);
+                    LogPrefix, writesEnabled && !reportOnlyTables.Contains(row.Entity) ? "write" : "report-only", row.Entity,
+                    row.Id, row.Source, row.Before, row.After, context.CorrelationId);
             }
 
             if (writesEnabled)
@@ -184,7 +211,13 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
                 foreach (var row in stale)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    await RepairAsync(idempotency, row, counts, context, cancellationToken).ConfigureAwait(false);
+                    if (reportOnlyTables.Contains(row.Entity))
+                    {
+                        counts.ReportedOnly++;
+                        continue;
+                    }
+
+                    await RepairAsync(idempotency, row, counts, reportOnlyTables, context, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -241,6 +274,8 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
                     status,
                     mode = writesEnabled ? "write" : "report-only",
                     writesEnabled,
+                    reportOnlyTables = reportOnlyTables.Order(StringComparer.Ordinal).ToArray(),
+                    counts.ReportedOnly,
                     attempt = context.Attempt,
                     counts.Scanned,
                     counts.Stale,
@@ -446,7 +481,8 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
     }
 
     private async Task RepairAsync(
-        IIdempotencyService idempotency, StaleRow row, RunCounts counts, JobRunContext context, CancellationToken ct)
+        IIdempotencyService idempotency, StaleRow row, RunCounts counts, IReadOnlySet<string> reportOnlyTables,
+        JobRunContext context, CancellationToken ct)
     {
         // The CLAIM is keyed by the row and the value it plans, so no two runs write the same repair at once. The completion
         // MARKER is keyed to THIS run as well (the host's retries of a run share its RunId): a row put back out of band AFTER
@@ -477,7 +513,8 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
                 return;
             }
 
-            var report = await _restamper.RestampChildAsync(row.Entity, row.Id, ct).ConfigureAwait(false);
+            var report = await _restamper.RestampChildAsync(row.Entity, row.Id, ct, holdTables: reportOnlyTables)
+                .ConfigureAwait(false);
 
             if (report.ChangedRecords.Contains((row.Entity, row.Id)))
             {
@@ -787,6 +824,7 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
         public int RepairFailures;
         public int Unverified;
         public int OrphanSourceGone;
+        public int ReportedOnly;
         public int ScanFailures;
         public bool Truncated;
         public bool Resumed;
