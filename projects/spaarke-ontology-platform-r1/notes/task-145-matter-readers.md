@@ -47,13 +47,30 @@ or the column stays as context.
 communication detail.
 
 **After:** `SignalSuppressionService.EvidenceWithinPartitionAsync` (called once per policy run at the top of
-`SignalReevaluationJob.ApplyAsync`, for every reconcile and create; evidence is stored only when a row is created, so an existing Signal is not rewritten, see §6) keeps a line's text and source only when the witness's
+`SignalReevaluationJob.ApplyAsync`, for every reconcile and create; evidence is stored only when a row is created) keeps a line's text and source only when the witness's
 secure-root family equals the Signal's family and neither is Undetermined. Otherwise it writes the line with `Text = null,
 Source = null`; ref, tier, confidence, asOf and clause stay, and the UI renders a missing text as Missing. Both families come from
 `PartitionsAsync`, the one partition truth (uac-r2's `SecureRootsAboveAsync` walk). The witness rows come from
 `ReadSubjectRowsAsync`. An environment with no Secure Record owner team (`ResolveSecureTeamAsync` null) is all-ordinary and is
 left unchanged. A fault while reading the families clears the detail on every line (fail closed) and logs
 `SuppressionEvents.Failed` at Warning.
+
+**Stored evidence (review F1, option A; §6).** Evidence is written once, at create, so the create-time filter alone would leave
+detail on an existing Signal whose witness later moves into a secure family. Each pass therefore also runs
+`SignalReevaluationJob.RedactStoredEvidenceAsync`, LAST in the policy's pass:
+- It takes every Signal of the policy read this pass, open AND resolved, with `sprk_evidencerefs` (added to
+  `ReadPolicySignalsAsync`'s columns).
+- `SignalSuppressionService.StoredEvidenceToRedactAsync` places each Signal from its row as read (`PartitionsAsync`) and the
+  witnesses through the same `WitnessFamiliesAsync`, and applies the same `KeepsDetail` rule as a create.
+- A stored line that fails the rule loses `text` and `source`; every other property is kept as stored. It is monotonic: detail
+  is never added or restored.
+- `SignalWriter.RedactEvidenceAsync` writes only `sprk_evidencerefs`, conditional on the version read. A concurrent change wins
+  and is counted `changedSinceRead`; the next pass retries.
+- A family-read fault writes nothing that pass. It counts as a policy failure, logs a Warning, and the next pass retries. So a
+  fault neither strips detail nor widens it.
+- It runs last so its writes never invalidate the versions this pass's own conditional closes were planned on.
+- Task 144's report-only tables do not apply: they hold stamp writes, and evidence is not a stamp.
+- The run result counts `evidenceRedacted`. A write failure is metered `signal_evidence_redact_failed`.
 
 ## 3. Stamp backfill (criterion 4)
 
@@ -110,6 +127,25 @@ without `-Apply` about 10 minutes later: `stampEmpty` should be 0 on both tables
 
 The existing `Run_PathBHit_WritesOneWitnessLinePerExistsClause…` stays as the ordinary control.
 
+Review F1 (option A), through the job's real write path:
+
+| Test | Proves |
+|---|---|
+| `Run_T145F1_AWitnessRefiledIntoSecureXAfterTheSignalWasCreated_LosesItsDetailOnTheNextPass_Once` | Created with the detail; after a re-file into secure X the next pass makes one conditional write of `sprk_evidencerefs` only (ref, asOf and clause stay). A third pass writes nothing (monotonic). |
+| `Run_T145F1_AWitnessThatStaysInTheSignalsFamily_KeepsItsDetail` | Ordinary, same family: no write, and the detail stays. With a Secure team present, this is also the create-path ordinary control. |
+| `Run_T145F1_AFamilyReadFault_LeavesTheStoredLinesUntouchedThatPass_AndTheNextPassClearsThem` | A fault writes nothing (`policyFailures:1`, `SuppressionEvents.Failed` logged); the next pass clears. |
+| `Run_T145F1_ASignalChangedSinceTheRead_IsNotOverwritten_AndOnceResolvedIsStillRedactedNextPass` | A person's resolve between read and write wins (`changedSinceRead:1`, nothing written unconditionally). The next pass redacts the now **resolved** Signal. |
+
+The job fixture now makes matter M a readable ordinary root (`OrdinaryMatterBesideSecureX`). Without it the walk could not name
+M's family, every line was undetermined, and the earlier `Run_T145_…SecureProject…` tests would have passed even for an ordinary
+witness. Those two tests use the same fixture now, so their clearing is attributable to X.
+
+Redaction-guard seeding proof. Each mutation was applied alone, then the source was restored:
+- no redaction pass (the before-state): 3 F1 tests fail;
+- a fault answers "nothing to clear" silently: 1 fails;
+- stored lines always keep their detail: 3 fail;
+- an unconditional write instead of the version-conditional one: 3 fail.
+
 Mutations killed:
 - the suppression filter always keeping detail: 2 tests fail;
 - clearing on any secure family: 1 fails;
@@ -132,38 +168,40 @@ Mutations killed:
    extended to produce this report.
 3. **Cost of doing nothing:** the owner cannot approve the backfill on a report (POML step 3).
 
+`SignalSuppressionService.StoredEvidenceToRedactAsync` (internal), with the private helpers `WitnessFamiliesAsync` and `KeepsDetail`
+factored out of `EvidenceWithinPartitionAsync`:
+1. **Existing:** the create-time filter covers only rows being created.
+2. **Extension:** it extends the same service and shares its helpers; there is no new class, interface or DI registration.
+3. **Cost of doing nothing:** a Signal created before its witness moved into a secure family keeps that family's subject and
+   sender (review F1).
+
+`SignalWriter.RedactEvidenceAsync`, the failure reason `OntologyWriterFailureReason.SignalEvidenceRedactFailed` and the run
+counter `evidenceRedacted`:
+1. **Existing:** the writer is the one owner of `sprk_signal` writes; `MarkClearedObservedAsync` is the conditional-write
+   pattern copied.
+2. **Extension:** neither existing write can be extended to cover this: they write other columns with other semantics, and
+   reusing `signal_close_failed` would meter a redaction failure as a close.
+3. **Cost of doing nothing:** the redaction would need an unconditional write (clobbering a concurrent resolve) or a second
+   writer of `sprk_signal`.
+
 Published size: the measurement is in the PR body.
 
-## 6. OPEN: review F1 — evidence is written at create only (needs a design decision)
+## 6. Review F1: evidence is written at create only — DECIDED: F1 → A in 145, B in 038, DR snapshot deferred to the owner
 
 Adversarial review pass 1 (2026-10-14) found the following.
-- `SignalWriter` writes `sprk_evidencerefs` only on create. A reconcile updates only `sprk_lastevaluated` and `sprk_duedate`.
-- So the filter protects every NEW Signal, and every Signal re-created after its row is gone.
-- An existing Signal keeps the detail it had at create in two cases:
-  - its witness later becomes secure (it is re-filed under secure X), or
-  - the Signal's own family changes.
-- A pass whose family read faulted strips detail permanently, and nothing restores it.
-- The Decision Record's `factSnapshot` also freezes the evidence "as it stood" on an append-only record.
+- `SignalWriter` writes `sprk_evidencerefs` only on create, so the create-time filter did not protect an existing Signal whose
+  witness later moved into a secure family, or whose own family moved.
+- A fault stripped a create's detail permanently.
+- The Decision Record's `sprk_factsnapshot` freezes the evidence on an append-only record.
 
-The fix is not mechanical. Each option changes what the stored evidence means.
-- **A. Redaction pass in the job.** Each pass, read `sprk_evidencerefs` of every Signal of the policy, open AND resolved. Clear
-  `text`/`source` on the stored lines whose witness family no longer equals the Signal's. Make the write conditional on the
-  version.
-  - Costs: a new write on existing Signals, and a walk over all of them.
-  - It never restores detail.
-  - It does not touch a Decision Record snapshot already written.
-- **B. Read-time filter.** The Signal read route (task 038, in flight) and the decision wizard drop `text`/`source` per the
-  caller's families.
-  - Protects every reader without rewriting stored rows.
-  - But the stored row still holds the detail. A direct Dataverse read (a model-driven view of `sprk_evidencerefs`) bypasses it.
-- **C. A + B.**
-
-**Recommendation: C, or A as the D-123 floor.**
-
-Ownership and approval:
-- uac-r2 should rule on whether a stored-but-unrendered field breaches D-123.
-- The Decision Record snapshot question (an append-only record carrying detail from a later-secure communication) needs the
-  owner.
+**Main-session decision (2026-10-14): F1 → A in 145, B in 038, DR snapshot deferred to the owner.**
+- **A (done here):** the stored-evidence redaction pass (§2). On a fault it leaves the lines untouched for that pass (defer, never
+  widen).
+- **B:** the read-time filter belongs to task 038's Signal read route. 038's agent owns it; this task does not touch 038's code.
+- **Decision Record `sprk_factsnapshot`:** unchanged in 145, and nothing is written to existing Decision Records. Deferred to the
+  owner as **DI-78** ([#1871](https://github.com/spaarke-dev/spaarke/issues/1871)). The question: redact an append-only Decision
+  Record's snapshot by a service write after a re-file, or store communication evidence in Decision Record snapshots as references
+  only, without subject and sender.
 
 ## 7. Known limits and items for uac-r2
 
@@ -171,12 +209,19 @@ Ownership and approval:
   stay without the text, so a reader of the Signal learns that a witness exists and when it arrived. The Signal itself already reveals that its predicate held. The line keeps its ref so that
   dated evidence (D-119 asOf/clause) and the drill-through stay intact, and the drill-through is itself access-checked.
 - **K-145-2. SignalWriter writes no stamp at create.** This was already a known item in 144. The DR writer stamps at create
-  through `CoreAncestorResolver.StampAsync`; a Signal gets its stamp only from the job, once the hold is released. Recommendation:
-  C2 parity in SignalWriter's create, in the #1854 lane, which owns SignalWriter now. It is not in this task's closed acceptance
-  set.
+  through `CoreAncestorResolver.StampAsync`; a Signal gets its stamp only from the job, once the hold is released. Filed as
+  **DI-79** ([#1872](https://github.com/spaarke-dev/spaarke/issues/1872)): C2 parity in SignalWriter's create.
 - **K-145-3. A uac-r2 comment.** `SecureChildLineage`'s comment says "typed core lookups stay until ontology task 145's backfill
   … is verified". Per K1 and §1 above, the backfill does not justify retirement: the typed columns are context and stay in
   lineage unless uac-r2 re-proves the premise per column. Please update that comment in uac-r2's lane.
+- **K-145-5. A create during a fault is written without detail.** The create-time filter clears every line when the families
+  cannot be read. The redaction pass never restores detail, so that Signal stays without it. This errs in the safe direction
+  (never wider).
+- **K-145-6. Ordinary detail crosses business units.** Ordinary equals ordinary whoever owns the rows, so an ordinary witness
+  from another business unit keeps its detail on an ordinary Signal. This is outside D-123 and pre-existing. Filed as **DI-80**
+  ([#1873](https://github.com/spaarke-dev/spaarke/issues/1873)).
+- **K-145-7. Redaction cost.** Each pass walks the families of every Signal of the policy whose stored evidence still has
+  detail. Once cleared, a line is never walked again, but a Signal whose detail stays in its family is walked every pass.
 - **K-145-4. Stale stamps are not counted.** The dry run counts only *empty* stamps on intermediate-filed rows. A stamp that is
   set but stale needs the subject's root, which is the job's derivation; it appears in the job's report-only log
   (`traces | where message has "[CORE-ANCESTOR-RECON] stale mode=report-only"`).
@@ -184,6 +229,8 @@ Ownership and approval:
 **uac-r2 should review:**
 - `EvidenceWithinPartitionAsync`: its use of `PartitionsAsync` and `ReadSubjectRowsAsync`, and its Undetermined and fault
   handling;
+- the stored-evidence redaction pass (`StoredEvidenceToRedactAsync`, `RedactEvidenceAsync`): the same rule as a create, open and
+  resolved Signals, monotonic, conditional, untouched on a fault;
 - the decision to keep the typed columns as context and in lineage;
 - K-145-3;
 - the `-Apply` release of the 144 job's hold, including the D-138 report-only review it presupposes.
