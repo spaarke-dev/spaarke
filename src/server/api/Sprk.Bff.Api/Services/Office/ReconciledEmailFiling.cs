@@ -139,17 +139,31 @@ public sealed class ReconciledEmailFiling
             // Ontology task 144: the rows filed under the communication (to-dos, events, Signals, Decision Records) copy its
             // root, so they are re-stamped NOW, in the same operation — the filing route and the AI update tool do the same.
             // A stamp left stale since the communication was unfiled outside the BFF is corrected here rather than at the
-            // 5-minute job. Before the step below, which reads those stamps as ownership parents. Never throws (no caller
-            // token is passed); a child that fails is logged and the reconciliation job repairs it.
-            var restamp = await _restamper
-                .AfterWriteAsync(CommunicationEntity, communicationId, FilingColumns, CancellationToken.None)
-                .ConfigureAwait(false);
-            if (!restamp.Complete)
+            // 5-minute job. Before the step below, which reads those stamps as ownership parents. The restamper never throws
+            // by contract (no caller token is passed); a fault here is still caught locally, because the filing has landed and
+            // the ownership step and the Signal trigger below must run whatever happens to the re-stamp.
+            try
+            {
+                var restamp = await _restamper
+                    .AfterWriteAsync(CommunicationEntity, communicationId, FilingColumns, CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (!restamp.Complete)
+                {
+                    _logger.LogWarning(
+                        "Office save filed communication {CommunicationId}, but the core-ancestor re-stamp of what is filed under " +
+                        "it did not finish (failures={Failures} truncated={Truncated}); the reconciliation job repairs it within one " +
+                        "cycle, except Signals and Decision Records while they are report-only there (ontology task 144).",
+                        communicationId, restamp.Failures.Count, restamp.Truncated);
+                }
+            }
+            catch (Exception ex)
             {
                 _logger.LogWarning(
+                    ex,
                     "Office save filed communication {CommunicationId}, but the core-ancestor re-stamp of what is filed under it " +
-                    "did not finish (failures={Failures} truncated={Truncated}); the reconciliation job completes it within one " +
-                    "cycle (ontology task 144).", communicationId, restamp.Failures.Count, restamp.Truncated);
+                    "faulted; the filing stands, and the reconciliation job re-stamps them within one cycle, except Signals and " +
+                    "Decision Records while they are report-only there (ontology task 144).",
+                    communicationId);
             }
 
             // The one step after every re-file. Never throws; the filing above stands.

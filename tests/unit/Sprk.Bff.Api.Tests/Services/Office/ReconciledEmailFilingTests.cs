@@ -99,7 +99,11 @@ public class ReconciledEmailFilingTests
                 null!, configuration, NullLogger<SecureChildReconciler>.Instance);
             var filing = new ReconciledEmailFiling(
                 resolver, Dataverse.Object, Probe.Object, children,
-                Isolation is { } stamped ? SecureChildShareWorld.RestamperOver(() => stamped) : Stamps.Restamper,
+                Isolation is { } stamped
+                    ? SecureChildShareWorld.RestamperOver(() => stamped)
+                    : RestamperLogger is { } restamperLogger
+                        ? new CoreAncestorRestamper(Stamps.Service, Stamps.Resolver, restamperLogger)
+                        : Stamps.Restamper,
                 NullLogger<ReconciledEmailFiling>.Instance,
                 Trigger?.Object);
 
@@ -122,6 +126,23 @@ public class ReconciledEmailFilingTests
 
         /// <summary>Ontology D-48 (#1659): the association-confirmed Signal trigger the filing queues; null = none registered.</summary>
         public Mock<SignalEvaluationTrigger>? Trigger { get; set; }
+
+        /// <summary>Ontology task 144: logs the real restamper writes to; null = none. A throwing logger breaks the
+        /// restamper's never-throws contract, the one way a fault can escape it.</summary>
+        public Microsoft.Extensions.Logging.ILogger<CoreAncestorRestamper>? RestamperLogger { get; set; }
+    }
+
+    /// <summary>A logger that throws on every write (a fault inside the restamper's own reporting).</summary>
+    private sealed class ThrowingLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state,
+            Exception? exception, Func<TState, Exception?, string> formatter) =>
+            throw new InvalidOperationException("Test: the restamper's logger faulted.");
     }
 
     /// <summary>The communication as it reads after the filing: on the matter, with or without a triage category.</summary>
@@ -243,6 +264,61 @@ public class ReconciledEmailFilingTests
 
         result.Should().Be(ReconciledFilingResult.NotPermitted);
         world.Stamps.Patches.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Ontology task 144: a filing whose write fails re-stamps nothing")]
+    public async Task FileIfUnfiled_WhenTheWriteFails_RestampsNothing()
+    {
+        var world = new World(reconciled: true, Unfiled());
+        world.Dataverse
+            .Setup(d => d.UpdateAsync("sprk_communication", CanonicalId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse down"));
+        world.Stamps
+            .Row("sprk_communication", CanonicalId, [("sprk_regardingmatter", "sprk_matter", MatterId)])
+            .Row("sprk_signal", Guid.NewGuid(),
+                [("sprk_regardingcommunication", "sprk_communication", CanonicalId), ("sprk_regardingmatter", "sprk_matter", Guid.NewGuid())],
+                pairId: CanonicalId.ToString());
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Failed);
+        world.Stamps.Patches.Should().BeEmpty("nothing was filed, so nothing under it moved");
+    }
+
+    [Fact(DisplayName = "Ontology task 144: a re-stamp that THROWS never undoes the filing, skips the ownership step or the Signal trigger")]
+    public async Task FileIfUnfiled_WhenTheRestampThrows_TheFilingStands_AndTheTriggerStillRuns()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var world = new World(reconciled: true, Unfiled(), Unfiled(), FiledToMatter(classified: true))
+        {
+            Trigger = trigger,
+            RestamperLogger = new ThrowingLogger<CoreAncestorRestamper>(),
+        };
+        world.Stamps
+            .Row("sprk_communication", CanonicalId, [("sprk_regardingmatter", "sprk_matter", MatterId)])
+            .FailScan("sprk_signal");
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed, "the filing landed before the re-stamp; it is not reported as failed");
+        world.Ownership.Reparents.Should().ContainSingle();
+        FilingSignalDoubles.VerifyEnqueuedOnce(trigger, MatterId, CanonicalId);
+    }
+
+    [Fact(DisplayName = "Ontology task 144: a re-stamp that does not finish never skips the ownership step or the Signal trigger")]
+    public async Task FileIfUnfiled_WhenTheRestampFails_TheFilingStands_AndTheTriggerStillRuns()
+    {
+        var trigger = FilingSignalDoubles.Trigger();
+        var world = new World(reconciled: true, Unfiled(), Unfiled(), FiledToMatter(classified: true)) { Trigger = trigger };
+        world.Stamps
+            .Row("sprk_communication", CanonicalId, [("sprk_regardingmatter", "sprk_matter", MatterId)])
+            .FailScan("sprk_signal");
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed);
+        world.Ownership.Reparents.Should().ContainSingle();
+        FilingSignalDoubles.VerifyEnqueuedOnce(trigger, MatterId, CanonicalId);
     }
 
     [Fact]
