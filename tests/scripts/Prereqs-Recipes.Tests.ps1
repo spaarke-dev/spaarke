@@ -312,6 +312,32 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
         }
     }
 
+    Context 'PRQ-C-11 pay-as-you-go billing (T186 L12: Power Platform API 2024-10-01, not preview pac licensing)' {
+        It 'exits 0 when an Enabled policy on the stamp subscription has the environment linked' {
+            Set-Rules $script:Dir az @(@('api.bap.microsoft.com', '0', 'env-1\r\n'), @('billingPolicies?api-version', '0', 'pol-1\r\n'), @('billingPolicies/pol-1/environments/env-1', '0', ''))
+            (Invoke-Recipe 'PRQ-C-11' $script:Common $script:Dir).Exit | Should Be 0
+            (Get-Content (Join-Path $script:Dir 'calls.log') -Raw) | Should Match "billingInstrument.subscriptionId=='44444444-4444-4444-4444-444444444444'"
+        }
+        It 'exits 1 when no Enabled policy is on the stamp subscription' {
+            Set-Rules $script:Dir az @(@('api.bap.microsoft.com', '0', 'env-1\n'), @('billingPolicies?api-version', '0', ''))
+            $r = Invoke-Recipe 'PRQ-C-11' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'no Enabled pay-as-you-go billing policy'
+        }
+        It 'exits 1 when the policy does not have the environment linked (404)' {
+            Set-Rules $script:Dir az @(@('api.bap.microsoft.com', '0', 'env-1\n'), @('billingPolicies?api-version', '0', 'pol-1\n'), @('billingPolicies/pol-1/environments/env-1', '3', ''))
+            $r = Invoke-Recipe 'PRQ-C-11' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'linked to no Enabled billing policy'
+        }
+        It 'exits 1 when no environment has the URL' {
+            Set-Rules $script:Dir az @(, @('api.bap.microsoft.com', '0', ''))
+            $r = Invoke-Recipe 'PRQ-C-11' $script:Common $script:Dir
+            $r.Exit | Should Be 1
+            $r.Output | Should Match 'no Power Platform environment has the URL'
+        }
+    }
+
     Context 'PRQ-C-12 guest access' {
         It 'exits 1 while guest access is restricted, 0 once it is off' {
             Set-Rules $script:Dir az @(, @('restrictGuestUserAccess', '0', 'True\r\n'))
