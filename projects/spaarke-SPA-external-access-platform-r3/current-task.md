@@ -24,9 +24,16 @@
 Option B; no delete after close; invoice upload = invoice rights only; team-access and renewal bell items wanted; contact owned by the customer's primary BU; intake (department from contact, Invention partners behind a flag, incidents simple, fixed lists, NDA review + issue); grid views from Dataverse views; 060 shared service OK if Model 1 allows; dev dispatch "ok"; 060 tenant-wide group permission approved if it cannot be scoped. Deferred: DEF-001 #1736 NDA generation, DEF-002 #1737 incident alerting.
 
 ## Open owner questions
-1. Check-2 issue 3 ("Number —" on SPA-created service requests): the repo has no numbering (no autonumber, plugin, flow or script); MDA rows get RQST-0001 from something live-only. Needs a read-only look at the dev column (AutoNumberFormat) and flows on `sprk_servicerequest`.
-2. Owner check 3 (CIAM partner, 2026-10-13): documents fail on a newly granted matter; no document preview; grid row not selectable / no download; no +New; partner does not see MDA-sent messages. Code investigation running; App Insights read-only query offered (awaiting OK).
-3. Owner deletes probe message `b38f0ab7-03c7-f111-a05c-0022482913fc` by hand.
+1. Check-2 issue 3 (Service Request number): the read-only check on dev found no autonumber on `sprk_servicerequestnumber`, no workflows, flows or form scripts on `sprk_servicerequest`; 1 of 2 rows is numbered (probably typed by hand). Proposal: set AutoNumberFormat `RQST-{SEQNUM:4}` in the solution + dev (schema change, owner-gated). Awaiting the owner.
+2. Owner deletes probe message `b38f0ab7-03c7-f111-a05c-0022482913fc` by hand.
+
+## Owner check 3 (CIAM partner, 2026-10-13): findings
+- #1 documents "could not be loaded": `sprk_documenttype` is a choice (number) but `DocumentRow` maps it as a string, so any typed document fails the whole list (App Insights: 4x InvalidOperationException on `$.value[n].sprk_documenttype`) → **task 064**.
+- #2/#3 no preview / no download in the Documents grid: grid config 3af4102c has `selectionMode: none`; no download action → **task 066**; preview → **DEF-003 #1828** (R4).
+- #4 "+New": record detail is read-only by design; Invoice create → **DEF-004 #1829** (invoice intake project, ontology-r1).
+- #5 partner does not see MDA messages: the MDA send leaves `sprk_isinternalonly` null, and a null flag is hidden from contacts (fail closed) → **task 065** (owner: default No, sender can tick Internal only; old dev rows not corrected).
+- Upload 409s in the logs = same-name file already exists (ConflictBehavior.Fail by design). Message POST 403 on an invoice = the access level lacks Create (by design).
+- Found in the logs: **ISS-006 #1830**, UAC's JIT revocation sweep failing every 5 min on dev (UAC notified).
 
 ## Option B known limits (notes/task-039-notes.md §12.11) (notes/task-039-notes.md §12.11)
 Messages and feed give no "incomplete" signal; `Truncated` may over-report; a project pair naming a deleted matter stays secure permanently; `IGenericEntityService` filing seam is DI-supplied (drop = over-hide, not leak).

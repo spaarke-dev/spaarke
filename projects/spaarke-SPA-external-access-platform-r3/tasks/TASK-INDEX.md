@@ -1,7 +1,7 @@
 # Task Index — Spaarke External Access Platform R3
 
 > **Status**: Initialized 2026-10-10 by `/project-pipeline`; execution not started.
-> **Total**: 48 tasks (P0: 3 · P1: 3 · P2: 1 · P3: 10 · P4: 4 · P4b A9: 9 · P5: 8 · P5b check-2 fixes: 3 · P6: 1 cancelled · P7: 5 · wrap-up: 1).
+> **Total**: 51 tasks (P0: 3 · P1: 3 · P2: 1 · P3: 10 · P4: 4 · P4b A9: 9 · P5: 8 · P5b owner-check fixes: 6 · P6: 1 cancelled · P7: 5 · wrap-up: 1).
 > **2026-10-13:** ADR-028 A9 tasks added (044–048, 058, 059, 074–076) from `notes/a9-bff-design.md` §10 (owner: "yes go on design note", "yes include teams"); 060 cancelled (superseded by A9); 012/056 superseded in part (notes in their POMLs); 071 widened to A9 Teams. Owner check-2 fixes added (061–063).
 > **Source**: `spec.md` (FR-01–FR-26). Plan: `plan.md`. Operating manual: `CLAUDE.md`.
 
@@ -49,6 +49,9 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 061 | Shared DataGrid shows option-set labels from @formattedValues (check-2 #1) | P5b | 🔲 [open] | none | S/h | FULL | CHK2 |
 | 062 | Message sender name falls back to createdby (check-2 #4) | P5b | 🔲 [open] | none | S/h | FULL | CHK2 |
 | 063 | External upload queued for indexing + profile (check-2 #5) | P5b | 🔲 [open] | none (owner: index + profile, 2026-10-13) | O/h | FULL | — (serial: ExternalProjectDataEndpoints.cs) |
+| 064 | External document lists fail when a document has a type (sprk_documenttype option set) (check-3 #1) | P5b | 🔲 [open] | none | S/h | FULL | CHK3 |
+| 065 | MDA message send carries "Internal only" (default No) + sender (check-3 #5) | P5b | 🔲 [open] | none | O/h | FULL | CHK3 |
+| 066 | Documents grid / document detail: download or open the file (check-3 #2-3) | P5b | 🔲 [open] | none | S/h | FULL | CHK3 |
 | 070 | Deploy SPA + dev Teams package to dev | P7 | 🔲 [open] | 038, 042, 043, 053, 055, 056, 057 | S/h | STANDARD | — (live, owner-gated) |
 | 071 | Teams live check: contact, licensed user, unlisted directory × desktop/web/mobile (FR-21, A9) | P7 | 🔲 [open] | 070, 075, 076 | S/h | STANDARD | — (owner-driven) |
 | 072 | Both-plane E2E on dev, success criteria 1–12 + FR-10 | P7 | 🔲 [open] | 002, 070, 071 | S/h | STANDARD | — (live) |
@@ -74,6 +77,7 @@ At most 4 agents per wave (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=4`, `.claude/co
 | 8 | 038, 056 | Wave 7 + 010/012/036; 003 + 041 | live BFF deploy · SPA join page + App.tsx | NO (deploy, auth) |
 | 9 | 070 → 071 → 072 → 073 → 090 | sequential | live deploys and verification | NO (deploy, live) |
 | — | 060 | cancelled 2026-10-13 | superseded by ADR-028 A9 | — |
+| CHK3 | 064, 065, 066 | none | ExternalDataService.cs · CommunicationService.cs + sprk_communication_send · external-spa detail + DocumentLibrary (no overlap; 064 vs 063: 063 is ExternalProjectDataEndpoints.cs) | NO (security-relevant 065) |
 | CHK2 | 061, 062 | none | shared DataGrid.tsx · CommunicationThreadReadService.cs (no overlap) | NO (2 tasks) |
 | A9-1 | 044, 045 | none | Dataverse solution + schema script · AuthorizationModule + ArchTests | NO (auth, schema) |
 | A9-2 | 046; 059 (live, alongside) | 044 + 045; 044 | ExternalAccess resolver/decision/store · Entra + app settings | NO (auth, live) |

@@ -179,6 +179,32 @@ Decide the owning BU of a workforce contact (a per-stamp customer BU, or the mat
 
 ---
 
+### ISS-006 — Dev: SPE JIT-grant revocation sweep fails every 5 minutes (Graph "Invalid hostname for this tenancy")
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | now |
+| **Filed** | 2026-10-13 |
+| **Source** | R3 owner check 3 log review (read-only App Insights query, owner-approved) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1830 |
+
+**Description**
+
+On `spaarke-bff-dev`, `SpeContainerMembershipSync.RemoveRevokedJitGrantsAsync` throws Graph `ODataError` "Invalid hostname for this tenancy" about every 5 minutes: 287 in 24h up to 2026-10-14 01:45 UTC. It fails while reading container markers (`SpeContainerMembershipService.ReadMarkersAsync` → `ReadMarkersCoreAsync`, the `FileStorageContainer` GET). If every sweep fails, a revoked external user may keep SPE container membership, and with it file access. The owner is UAC; this is not R3 code.
+
+**Entry-points**
+
+- KQL (appId `6a76b012-46d9-412f-b4ab-4905658a9559`): `exceptions | where outerMessage contains 'hostname' | summarize count(), max(timestamp) by tostring(details[0].parsedStack[0].method)`
+- `src/server/api/Sprk.Bff.Api/Services/Access/SpeContainerMembershipSync.cs`; `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SpeContainerMembershipService.cs` (~:532-551)
+
+**Suggested fix**: identify the container id the sweep reads (likely a container of another tenant or app, or a stale id). Decide whether one bad row should fail the whole sweep, or be skipped and logged so the remaining revocations still run.
+
+**Estimated effort**: half a day to diagnose.
+**Related**: unified-access-control-r2 (SPE membership / JIT grants).
+
+---
+
 ### DEF-001 — Generate and send the standard NDA from the intake request (separate project)
 
 | Field | Value |
@@ -229,6 +255,64 @@ A Policy Question about something that already happened (breach, bribery, miscon
 
 **Estimated effort**: 1-2 days once the per-customer mailbox exists.
 **Blockers**: per-customer designated mailbox (#1562).
+
+---
+
+### DEF-003 — In-page document preview in the external SPA (R3 ships download/open only)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-13 |
+| **Source** | Owner check 3 (2026-10-13): document detail shows the header but no file; owner decision: download/open is enough for R3, preview in R4 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1828 |
+
+**Description**
+
+An external user (partner or workforce contact) cannot preview a document inside the external SPA; opening one shows only its fields. R3 adds download/open (task 066). No preview component or external preview route exists.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs:585-620`: the only content route, `GET /api/v1/external/{root}/{id}/documents/{documentId}/content` (app-only byte stream; no signed URL or SPE pointer by design).
+- `src/client/external-spa/src/components/detail/RecordDetailFields.tsx:120-134` (fields only); `DocumentLibrary.tsx:720-741` (download helper).
+
+**Suggested fix**: render the byte stream through a blob URL (PDF and images) in the document detail, or add a server preview route; keep the no-signed-URL rule.
+
+**Estimated effort**: 2-4 days, including the file-type decision.
+**Blockers**: task 066 first. Target: external access R4.
+
+---
+
+### DEF-004 — Create Invoice (+New) from the external SPA: deferred to the invoice intake project (ontology-r1)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | someday |
+| **Filed** | 2026-10-13 |
+| **Source** | Owner check 3 (2026-10-13): the only "+New" wanted is Invoices; it belongs to the larger invoice intake/processing project tied to `spaarke-ontology-platform-r1` |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1829 |
+
+**Description**
+
+External users cannot submit an invoice through the portal; invoices are created only internally. The record detail is read-only by design (spec decision 2026-08-12), and the grids' "New" command needs Xrm, so it does nothing in the SPA.
+
+**Entry-points (context for the invoice project)**
+
+- Shared wizard `src/client/shared/Spaarke.UI.Components/src/components/CreateInvoiceWizard/`:
+  - `invoiceService.ts` sets `sprk_invoicenumber`, `sprk_name`, `sprk_description`, `sprk_vendororg` and `sprk_invoicedate`;
+  - it works through IDataService and the ADR-024 resolver, and its file pipeline dual-binds the file to the Invoice and the host;
+  - it has no external-plane (app-only) create path.
+- External BFF: invoice document routes only (list, download, upload, versions) under `/api/v1/external/invoices/{id}/documents` (`ExternalProjectDataEndpoints.cs:350-381`), plus message routes. There is no create route.
+- Grid "New": `CommandBar.tsx:225-247`; `external-spa/src/widgets/GridWidgetBody.tsx:18-21`.
+- R3 rules (project CLAUDE.md): an invoice document upload needs only the invoice's rights (the union of its parents); invoice threads stay any-parent.
+- An external create would also need creator stamping (`sprk_createdbycontact`, the task 030 pattern) and an owner-team rule like ISS-005 (#1673).
+
+**Suggested fix**: in the invoice intake project, an app-only, Tier-2-authorized external create route plus an SPA intake form, reusing `invoiceService`'s field manifest.
+
+**Estimated effort**: unknown; it depends on the invoice intake design.
+**Blockers**: the invoice intake project; ISS-005 (#1673).
 
 ---
 
