@@ -79,7 +79,7 @@ public sealed class CiamGraphClientFactory
     /// <summary>
     /// Task 185 slice F: whether every <c>Ciam:*</c> value this factory needs is configured. Pure; never throws.
     /// </summary>
-    // T240d (provisioning) makes Ciam:GraphProvisioner:CertificateName optional when MI-FIC is configured; do not tighten this.
+    // T240d (provisioning) relaxes this and EnsureConfigured: MI-FIC stamps set no Ciam:GraphProvisioner:CertificateName.
     internal bool IsConfigured =>
         _instance is not null && _tenantId is not null && _clientId is not null && _certificateName is not null;
 
@@ -87,6 +87,7 @@ public sealed class CiamGraphClientFactory
     /// Task 185 slice F: throws <see cref="InvalidOperationException"/> naming the first <c>Ciam:*</c> value that is not
     /// configured — the validation the constructor used to run, moved to first use with the same messages.
     /// </summary>
+    // T240d (provisioning) relaxes this: MI-FIC stamps set no Ciam:GraphProvisioner:CertificateName.
     internal void EnsureConfigured()
     {
         _ = _instance ?? throw new InvalidOperationException("Ciam:Instance is not configured.");
