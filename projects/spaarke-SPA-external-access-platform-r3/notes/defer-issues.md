@@ -184,7 +184,7 @@ Decide the owning BU of a workforce contact (a per-stamp customer BU, or the mat
 | Field | Value |
 |---|---|
 | **Status** | Open |
-| **Urgency** | now |
+| **Urgency** | someday (re-triaged by UAC 2026-10-13: not a security gap) |
 | **Filed** | 2026-10-13 |
 | **Source** | R3 owner check 3 log review (read-only App Insights query, owner-approved) |
 | **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1830 |
@@ -202,6 +202,8 @@ On `spaarke-bff-dev`, `SpeContainerMembershipSync.RemoveRevokedJitGrantsAsync` t
 
 **Estimated effort**: half a day to diagnose.
 **Related**: unified-access-control-r2 (SPE membership / JIT grants).
+
+**UAC triage (2026-10-13, verified by R3 against `SpeContainerMembershipSync.cs:356-377`)**: each record is caught separately, so a bad container pointer fails only its own record and the sweep continues. The rate (one per 5-minute pass) matches a single record. JIT grants are made only through the ownership guard, so none can exist on a container outside the tenancy. Fix (UAC, non-urgent): treat this Graph error like the existing `NotOwned` skip (Warning, not failed) and correct that record's pointer.
 
 ---
 
