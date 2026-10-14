@@ -933,18 +933,114 @@ public sealed class ExternalMultiRootListReadTests : IClassFixture<ExternalRootE
         reads.Should().Be(0);
     }
 
-    [Fact]
-    public void InvoicesModule_ScopeRows_StaysTheUnionOfItsParents()
-    {
-        // Owner decision 2026-10-11: an invoice is reached through ANY accessible parent. Not changed.
-        var module = Registry().FindByEntity("sprk_invoice")!;
-        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
-        var row = new Dictionary<string, object?>
-        {
-            ["@logicalName"] = "sprk_invoice", ["sprk_project"] = RecordA, ["sprk_matter"] = Hidden,
-        };
+    // ---- Task 187, fix round 1, owner decision D2: the invoices module (/fetch) applies the live-parent rule ----
+    //
+    // An invoice is still reached through ANY accessible parent (owner decision 2026-10-11, option A): one also under an
+    // ORDINARY root the caller cannot read is listed. One whose live roots include a SECURE root the caller cannot read (its
+    // own matter or project, or the root its agreement is filed under) is withheld, as round 100's family rule asks.
 
-        module.ScopeRows(caller, new[] { row }).Should().HaveCount(1);
+    private static readonly Guid Agreement = Guid.Parse("a0390000-0000-4000-8000-0000000000a6");
+
+    private const string InvoiceGridFetch =
+        "<fetch><entity name='sprk_invoice'><attribute name='sprk_invoiceid'/><attribute name='sprk_name'/>"
+        + "<attribute name='sprk_project'/></entity></fetch>";
+
+    [Fact]
+    public void InvoicesModule_RequiresReadOnSecureRoots_AndReadsItsAgreement()
+    {
+        var module = Registry().FindByEntity("sprk_invoice")!;
+
+        module.RequireReadOnSecureRoots.Should().BeTrue("D2: an invoice behind a secure root's wall is withheld");
+        module.RootRuleAttributes.Should().BeEquivalentTo(new[] { "sprk_matter", "sprk_project", "sprk_regardingagreement" });
+    }
+
+    [Fact]
+    public async Task InvoicesModuleFetch_AnInvoiceAlsoUnderASecureRootTheCallerCannotRead_IsWithheld()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, Hidden);
+
+        var (body, executed) = await RunInvoicesFetchAsync(caller, new[]
+        {
+            InvoiceRow("Project only", project: RecordA),
+            InvoiceRow("Also under secure matter", project: RecordA, matter: Hidden),
+        });
+
+        body.Entities.Select(r => r["sprk_name"]).Should().Equal("Project only");
+        executed.Should().Contain("name=\"sprk_matter\"").And.Contain("name=\"sprk_regardingagreement\"");
+        body.Entities.Single().Keys.Should().BeEquivalentTo(new[] { "@logicalName", "sprk_name", "sprk_project" },
+            "the columns the server projected for the rule are not returned");
+    }
+
+    [Fact]
+    public async Task InvoicesModuleFetch_AnInvoiceAlsoUnderAnOrdinaryRootTheCallerCannotRead_IsListed_OptionA()
+    {
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden);
+
+        var (body, _) = await RunInvoicesFetchAsync(caller, new[] { InvoiceRow("Also under an ordinary matter", project: RecordA, matter: Hidden) });
+
+        body.Entities.Select(r => r["sprk_name"]).Should().Equal("Also under an ordinary matter");
+    }
+
+    [Fact]
+    public async Task InvoicesModuleFetch_AnInvoiceWhoseAgreementIsUnderSecureX_IsWithheld_AndListed_ForACallerWhoReadsX()
+    {
+        _fixture.Data.AddSecureRoot(ExternalGrantRootType.Matter, Hidden);
+        _fixture.Data.AddFilingRow("sprk_agreement", Agreement, ("sprk_regardingmatter", "sprk_matter", Hidden));
+        var rows = new[] { InvoiceRow("Plain", project: RecordA), InvoiceRow("Agreement under secure X", project: RecordA, agreement: Agreement) };
+
+        var (projectOnly, _) = await RunInvoicesFetchAsync(
+            PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) }), rows);
+        var (alsoX, _) = await RunInvoicesFetchAsync(
+            PrincipalWith(
+                projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) },
+                matters: new Dictionary<Guid, AccessRights> { [Hidden] = AccessRights.Read }),
+            rows);
+
+        projectOnly.Entities.Select(r => r["sprk_name"]).Should().Equal("Plain");
+        alsoX.Entities.Select(r => r["sprk_name"]).Should().Equal("Plain", "Agreement under secure X");
+    }
+
+    [Fact]
+    public async Task InvoicesModuleFetch_AnInvoiceWhoseAgreementIsUnderAnOrdinaryRoot_IsListed()
+    {
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, Hidden);
+        _fixture.Data.AddFilingRow("sprk_agreement", Agreement, ("sprk_regardingmatter", "sprk_matter", Hidden));
+        var caller = PrincipalWith(projects: new[] { CallerProjectAccess.FromLevel(RecordA, ExternalAccessLevel.ViewOnly) });
+
+        var (body, _) = await RunInvoicesFetchAsync(caller, new[] { InvoiceRow("Agreement under ordinary", project: RecordA, agreement: Agreement) });
+
+        body.Entities.Select(r => r["sprk_name"]).Should().Equal("Agreement under ordinary");
+    }
+
+    private static IReadOnlyDictionary<string, object?> InvoiceRow(
+        string name, Guid? project = null, Guid? matter = null, Guid? agreement = null) => new Dictionary<string, object?>
+    {
+        ["@logicalName"] = "sprk_invoice",
+        ["sprk_name"] = name,
+        ["sprk_project"] = project,
+        ["sprk_matter"] = matter,
+        ["sprk_regardingagreement"] = agreement is { } a ? new Microsoft.Xrm.Sdk.EntityReference("sprk_agreement", a) : null,
+    };
+
+    /// <summary>The real invoices-module fetch pipeline, with the REAL secure-flag and live-parent reads over FakeDataverse.</summary>
+    private async Task<(FetchResponseDto Body, string Executed)> RunInvoicesFetchAsync(
+        CallerPrincipal caller, IReadOnlyList<IReadOnlyDictionary<string, object?>> rows)
+    {
+        var executed = string.Empty;
+        var data = _fixture.Data.NewService();
+        var result = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
+            new FetchRequestDto("sprk_invoice", InvoiceGridFetch, PagingCookie: null),
+            caller, Registry(), new FetchXmlEntityExtractor(),
+            (request, _) =>
+            {
+                executed = request.FetchXml;
+                return Task.FromResult(new FetchResponseDto(
+                    ProjectThroughFetch(request.FetchXml, rows), MoreRecords: false, PagingCookie: null));
+            },
+            data.GetNonSecureRootsAsync, NullLogger.Instance, CancellationToken.None, data.GetLiveParentRootsAsync);
+        return (result.Should().BeOfType<Ok<FetchResponseDto>>().Subject.Value!, executed);
     }
 
     // =====================================================================

@@ -170,8 +170,10 @@ public sealed class ExternalModuleDescriptor
     /// holds Read on, as well as matching SOME dimension (<see cref="ExternalMultiRootRule"/>, the rule every list on the
     /// plane shares; owner decision 2026-10-12, option B; renamed from <c>RequireReadOnEveryRoot</c> with the rule change).
     /// Default false: the OR across dimensions is the module's visibility. Set for the documents module (fix round for r3
-    /// task 039): a document filed to a secure matter AND an accessible project is not the project reader's to list.
-    /// The invoices module leaves it off: an invoice is reached through the UNION of its parents (owner decision 2026-10-11).
+    /// task 039): a document filed to a secure matter AND an accessible project is not the project reader's to list. Set for
+    /// the invoices module too (unified-access-control-r2 task 187, owner decision D2): an invoice is still reached through
+    /// the UNION of its parents (owner decision 2026-10-11, option A), but one whose live roots include a SECURE root the
+    /// caller cannot read is withheld.
     /// </summary>
     public bool RequireReadOnSecureRoots { get; init; }
 

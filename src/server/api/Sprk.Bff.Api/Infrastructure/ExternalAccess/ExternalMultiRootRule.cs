@@ -27,10 +27,15 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// <c>sprk_issecure</c> takes effect on the next request.</para>
 /// <para><b>One implementation.</b> Every path calls <see cref="SecureRootsReadable(CallerPrincipal, SecureRootFlags, ValueTuple{ExternalGrantRootType, string}[])"/>
 /// with flags from <see cref="ReadFlagsAsync"/>: the event, to-do and document lists, the single-document download and
-/// versions routes, the message threads, the notification feed and the module grid's documents module.</para>
+/// versions routes, the message threads, the notification feed and the module grid's documents and invoices modules.</para>
+/// <para><b>Invoices</b> (unified-access-control-r2 task 187, fix round 1, owner round 100). An invoice is still reached
+/// through ANY accessible parent (owner 2026-10-11, option A), but one whose live roots include a SECURE root the caller
+/// cannot read is withheld from the invoices list (D2) and its thread and documents are refused (D4); an invoice thread's
+/// messages are decided like any thread's, over their other parents (D1).</para>
 /// <para><b>Not covered.</b> The delete-own paths (task 032, <c>AuthorizeDeleteOwnAsync</c>) keep Read on EVERY parent
-/// (FR-26); the invoice message thread stays any-parent (owner 2026-10-11). <c>sprk_regardingservicerequest</c> is not
-/// consulted: a service request is reached through its requester and carries no secure flag.</para>
+/// (FR-26), and add the live-parent check of this rule for to-dos, events and documents (task 187, D3).
+/// <c>sprk_regardingservicerequest</c> is not consulted: a service request is reached through its requester and carries no
+/// secure flag.</para>
 /// </remarks>
 internal static class ExternalMultiRootRule
 {
