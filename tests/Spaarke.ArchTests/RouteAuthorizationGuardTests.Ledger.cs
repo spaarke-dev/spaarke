@@ -2311,9 +2311,9 @@ public partial class RouteAuthorizationGuardTests
             + "the validationToken handshake (ComposeSyncEndpoints.cs:104-110) only echoes the token."),
         Permanent("POST /api/communications/incoming-webhook", PermanentBasis.AnonymousByDesign, "167",
             "Graph mail-notification webhook. Mandatory control: RequireWebhookSignature at "
-            + "CommunicationEndpoints.cs:402, which fails closed with no key or header "
-            + "(WebhookSignatureFilter.cs:93-117), and RequireRateLimiting(\"webhook-graph\") at :406 (defense in depth); "
-            + "the validationToken handshake (CommunicationEndpoints.cs:1175-1184) only echoes the token."),
+            + "CommunicationEndpoints.cs:513, which fails closed with no key or header "
+            + "(WebhookSignatureFilter.cs:93-117), and RequireRateLimiting(\"webhook-graph\") at :517 (defense in depth); "
+            + "the validationToken handshake (CommunicationEndpoints.cs:1291-1301) only echoes the token."),
 
         // ---------- the task-167 UNOWNED-NEW findings — ASSIGNED at the integration (2026-10-05) ----------
         // The 21 of notes/task-167-every-route-authorization-guard.md §3, each given to the task whose surface it is

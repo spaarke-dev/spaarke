@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Signals;
 
 namespace Sprk.Bff.Api.Services.Office;
 
@@ -69,19 +70,24 @@ public sealed class ReconciledEmailFiling
     private readonly CallerRecordAccessProbe _accessProbe;
     private readonly SecureChildReconciler _children;
     private readonly ILogger<ReconciledEmailFiling> _logger;
+    private readonly SignalEvaluationTrigger? _signalTrigger;
 
+    /// <param name="signalTrigger">Ontology D-48 (#1659): queues the matter's Signal re-evaluation once a classified communication
+    /// is filed to it. Registered in production; null only where a test builds the filing without it.</param>
     public ReconciledEmailFiling(
         IncomingAssociationResolver associationResolver,
         IGenericEntityService dataverse,
         CallerRecordAccessProbe accessProbe,
         SecureChildReconciler children,
-        ILogger<ReconciledEmailFiling> logger)
+        ILogger<ReconciledEmailFiling> logger,
+        SignalEvaluationTrigger? signalTrigger = null)
     {
         _associationResolver = associationResolver ?? throw new ArgumentNullException(nameof(associationResolver));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _accessProbe = accessProbe ?? throw new ArgumentNullException(nameof(accessProbe));
         _children = children ?? throw new ArgumentNullException(nameof(children));
         _logger = logger;
+        _signalTrigger = signalTrigger;
     }
 
     /// <summary>
@@ -135,6 +141,12 @@ public sealed class ReconciledEmailFiling
             _logger.LogInformation(
                 "Office save filed the unfiled communication {CommunicationId} it reconciled to under {EntityType} {EntityId} " +
                 "(task 121).", communicationId, target.EntityType, target.EntityId);
+
+            // Ontology D-48 / #1659 (additive): a communication classified first and filed to a matter now is evaluated for
+            // that matter's Signals at once, not at the nightly pass. Never throws; the filing above stands either way.
+            await FiledCommunicationSignalTrigger
+                .EnqueueIfClassifiedOnMatterAsync(_dataverse, _signalTrigger, communicationId, _logger)
+                .ConfigureAwait(false);
             return ReconciledFilingResult.Filed;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)

@@ -35,6 +35,11 @@ public static class SignalTriggerEvents
 
     /// <summary>Warning: an enqueue exceeded <see cref="SignalEvaluationTrigger.EnqueueTimeout"/> and was abandoned (the nightly pass covers it).</summary>
     public static readonly EventId EnqueueTimedOut = new(50343, nameof(EnqueueTimedOut));
+
+    /// <summary>Warning: the filing path could not read the communication it just filed (a fault or the
+    /// <c>FiledCommunicationSignalTrigger.ReadTimeout</c>), so no Signal trigger was queued for it (D-48, #1659); the nightly
+    /// pass covers it.</summary>
+    public static readonly EventId FilingReadFailed = new(50344, nameof(FilingReadFailed));
 }
 
 /// <summary>
