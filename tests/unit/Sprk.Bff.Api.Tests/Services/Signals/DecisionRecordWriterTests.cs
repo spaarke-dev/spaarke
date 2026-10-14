@@ -1118,6 +1118,7 @@ public sealed partial class DecisionRecordWriterTests
         var asked = h.OwnerAsks.Should().ContainSingle().Subject;
         asked.Parents.Should().Equal(Parent("sprk_todo", TodoId), Parent("sprk_project", project), Parent("sprk_document", signalSubject));
         asked.RequestedBy!.SystemUserId.Should().Be(User, "#1783 / D-135: the deciding user is the person who asked");
+        asked.KeepCreatorUnlessTargetIsTeamOwned.Should().BeFalse("task 042: only a gate decision asks as the content of a communication; the review route is unchanged");
         h.Row.GetAttributeValue<EntityReference>("sprk_regardingtodo").Id.Should().Be(TodoId);
         h.Row.GetAttributeValue<EntityReference>("sprk_regardingproject").Id.Should().Be(project, "the stamp the derived core gave");
     }

@@ -734,6 +734,10 @@ public sealed class DecisionRecordWriter
         return RecordOwnershipContext.ForParents(parents) with { RequestedBy = RecordRequester.Of(request.ConfirmedByUserId) };
     }
 
+    /// <summary>A gate decision (<see cref="WriteGateDecisionAsync"/>) is the only request with no deciding person: a review always has one
+    /// (<see cref="Validate"/> refuses an empty <see cref="DecisionRecordRequest.ConfirmedByUserId"/>).</summary>
+    private static bool IsGateDecision(DecisionRecordRequest request) => request.ConfirmedByUserId == Guid.Empty;
+
     /// <summary>
     /// Task 142 (contract C1): the record the Decision Record is filed under: <see cref="DecisionRecordRequest.ItemSubject"/>, else the
     /// core record. No I/O.
@@ -806,6 +810,16 @@ public sealed class DecisionRecordWriter
         // asked with EVERY parent the record sits under, exactly as returned (secure-if-any). owningbusinessunit is never set here (it
         // derives from the owner); a refusal writes nothing; KeepCreator is not requested, so an Unchanged answer is refused.
         var context = OwnershipContextOf(request, filing.DerivedCores);
+        if (IsGateDecision(request))
+        {
+            // Task 042 (security fails closed): a gate record is CONTENT of the communication it is about (uac-r2's ContentOf shape). When the
+            // communication is not team-owned the resolver reads ITS OWN filing: filed -> secure-if-any over what it is filed under; unfiled
+            // (E1, owner round 10 item 8: an unfiled communication keeps its creator and its privacy rests on per-participant shares) ->
+            // Unchanged, which this writer refuses (requireTeam). A business-unit default team must never be handed a decision about a
+            // communication that is private to its participants. The review route never sets this.
+            context = context with { KeepCreatorUnlessTargetIsTeamOwned = true };
+        }
+
         DecisionRecordOwner owner;
         if (handed is not null && handed.Answers(context.Parents, request.AssigneeSystemUserId))
         {

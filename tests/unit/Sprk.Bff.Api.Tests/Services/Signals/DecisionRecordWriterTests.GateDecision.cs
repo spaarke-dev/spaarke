@@ -196,17 +196,18 @@ public sealed partial class DecisionRecordWriterTests
     }
 
     [Fact]
-    public async Task Gate_AnUnfiledCommunication_IsStillRecorded_FiledUnderTheCommunicationAlone()
+    public async Task Gate_AnUnfiledCommunication_IsRefused_NotHandedToTheBusinessUnitsDefaultTeam_FailClosed()
     {
+        // Owner round 10 item 8 (E1): an unfiled communication keeps its creator and its privacy rests on per-participant shares. A decision
+        // about it owned by the business unit's default team (Basic User = Read on sprk_decisionrecord) would widen who can read it, so the
+        // gate asks as the content of the communication; the resolver answers Unchanged and this writer refuses (nothing is written).
         var directory = Standard().WithRecord("sprk_communication", CommunicationId, ChildBu);
         var h = new Harness(realResolver: directory.Resolver());
 
-        await h.Writer.WriteGateDecisionAsync(Gate());
+        var act = () => h.Writer.WriteGateDecisionAsync(Gate());
 
-        h.Row.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(CommunicationId);
-        h.Row.Contains("sprk_regardingmatter").Should().BeFalse();
-        h.Row.Contains("sprk_corerecordtype").Should().BeFalse();
-        h.Row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(ChildTeam, "the communication's business unit's default team (D-129)");
+        (await act.Should().ThrowAsync<DecisionRecordRefusedException>()).Which.Reason.Should().Be(DecisionRecordRefusalReason.OwnerRefused);
+        h.Created.Should().BeEmpty();
     }
 
     [Fact]
@@ -243,6 +244,7 @@ public sealed partial class DecisionRecordWriterTests
         var asked = h.OwnerAsks.Should().ContainSingle().Subject;
         asked.Parents.Should().Equal(Parent("sprk_matter", MatterId), Parent("sprk_communication", CommunicationId));
         asked.RequestedBy.Should().BeNull("no person asked: a system decision");
+        asked.KeepCreatorUnlessTargetIsTeamOwned.Should().BeTrue("a gate record is content of the communication: an unfiled one keeps its creator and is refused, never given to a business-unit team");
     }
 
     [Fact]

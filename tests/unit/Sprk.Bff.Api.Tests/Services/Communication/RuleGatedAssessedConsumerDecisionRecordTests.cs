@@ -144,7 +144,7 @@ public sealed class RuleGatedAssessedConsumerDecisionRecordTests
     }
 
     [Fact]
-    public async Task AWriterRefusal_NeverChangesTheConsumer_ItIsLoggedAtError_AndTheOwnerOfTheCommunicationIsNotAsked()
+    public async Task AWriterRefusal_NeverChangesTheConsumer_ItIsLoggedAtError()
     {
         var rig = new Rig(matter: MatterId);
         rig.Writer.Ownership.Setup(r => r.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
