@@ -288,13 +288,15 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
     }
 
     [Fact]
-    public async Task WriteAsync_TodoWithNoMatterAndNoProject_HasNoCoreRecord_IsOwnedByTheTodosOwner()
+    public async Task WriteAsync_TodoWithNoMatterAndNoProject_HasNoCoreRecord_IsOwnedByItsBusinessUnitsTeam_NeverAUser()
     {
         if (!_dv.IsLive) return;
 
+        // Task 143 (D-129/D-130): the probe is user-owned (the operator); its Signal is owned by the resolver's answer for the To Do,
+        // the default team of the To Do's business unit, never by a user. Live, this needs F2 (that team's Read on sprk_signal,
+        // 0x80040299) — an owner decision open at task 143.
         var subjectId = await CreateProbeAsync(new Entity("sprk_todo") { ["sprk_name"] = "zz-037-todo-nocore" });
-        var todoOwner = (await _dv.OperatorClient.RetrieveAsync("sprk_todo", subjectId, new ColumnSet("ownerid")))
-            .GetAttributeValue<EntityReference>("ownerid");
+        var todoBusinessUnit = await BusinessUnitOfAsync("sprk_todo", subjectId);
 
         var first = await BuildWriter().WriteAsync(DoRequest(subjectId, "sprk_todo"));
         var second = await BuildWriter().WriteAsync(DoRequest(subjectId, "sprk_todo"));
@@ -304,15 +306,17 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
         second.Created.Should().BeFalse();
         row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Should().BeNull();
         row.GetAttributeValue<string>("sprk_corerecordid").Should().BeNull();
-        row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(todoOwner.Id);
+        row.GetAttributeValue<EntityReference>("ownerid").LogicalName.Should().Be("team");
+        row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(todoBusinessUnit);
     }
 
     [Fact]
-    public async Task WriteAsync_TeamOwnedTodoWithNoCoreRecord_IsOwnedByThatTeam()
+    public async Task WriteAsync_TeamOwnedTodoWithNoCoreRecord_IsOwnedByItsBusinessUnitsDefaultTeam()
     {
         if (!_dv.IsLive) return;
 
-        // 12 of the 25 no-core To Dos in dev are owned by a BU default team (BFF-created rows, task 080).
+        // 12 of the 25 no-core To Dos in dev are owned by a BU default team (BFF-created rows, task 080). Task 143: the resolver's
+        // answer for this To Do is its unit's default team, which here is the team that owns it.
         var teamId = Guid.Parse("cf15f587-baa0-f111-aaac-000d3a99d1d7"); // Spaarke Business Unit 1 (Owner team)
         var subjectId = await CreateProbeAsync(new Entity("sprk_todo")
         {
@@ -356,8 +360,17 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
             query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
             return (await _dv.OperatorClient.RetrieveMultipleAsync(query, ct)).Entities.FirstOrDefault();
         });
+        // Task 143: the scope the writer resolves its D-134 assignee read from. The no-core To Do probes here have no Assigned To,
+        // so the link store is never read (PersonalToDoAssignee answers "no single user" from the To Do row itself); an in-memory
+        // one with nobody linked stands in for it. No probe re-owns a Signal, so no reconciler is registered.
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped<Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessStore>(
+            services, _ => new Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore());
+        var scopes = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<
+            Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(
+            Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services));
         return new SignalWriter(
-            writerClient, sysadmin, coreAncestors, recordTypes, ownership, TimeProvider.System, NullLogger<SignalWriter>.Instance);
+            writerClient, sysadmin, coreAncestors, recordTypes, ownership, scopes, TimeProvider.System, NullLogger<SignalWriter>.Instance);
     }
 
     private static SignalWriteRequest Request(Guid subjectId, string subjectEntity, string displayName) => new(

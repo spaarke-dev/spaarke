@@ -1100,7 +1100,7 @@ public class SignalWriterTests
         row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Id.Should().Be(sysadmin.CatalogId("sprk_servicerequest"));
         row.GetAttributeValue<string>("sprk_corerecordid").Should().Be(Lower(ServiceRequestId));
         row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", DefaultTeamId));
-        row.Attributes.Keys.Should().NotContain("owningbusinessunit", "the fake derives no unit for this team; the writer sends none");
+        writerOrg.CreatedPayloads.Should().ContainSingle().Which.Attributes.Keys.Should().NotContain("owningbusinessunit", "C3: never sent");
         row.Attributes.Keys.Should().NotContain("sprk_matter");
     }
 
@@ -1365,6 +1365,19 @@ public class SignalWriterTests
         core.NoCoreOwner.Should().BeEquivalentTo(new EntityReference("team", AssigneeTeamId), "a team, never a user");
     }
 
+    [Theory]
+    [InlineData("systemuser")]
+    [InlineData("team-empty")]
+    public async Task ReassignNoCoreOwner_NeverTakesAUserOrAnEmptyTeam_D130(string shape)
+    {
+        var writer = Build(new FakeOrganizationService(), new FakeSysadminClient(), new FakeTimeProvider(FirstRun));
+        var owner = shape == "systemuser" ? new EntityReference("systemuser", TodoOwnerUserId) : new EntityReference("team", Guid.Empty);
+
+        var act = async () => await writer.ReassignNoCoreOwnerAsync(Guid.NewGuid(), owner, "POL-DO-ITEM");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
     [Fact]
     public async Task DeriveCoreRecord_NoCoreOwnerRefused_IsTheWritersEscalation()
     {
@@ -1459,7 +1472,7 @@ public class SignalWriterTests
         var user = Guid.NewGuid();
         var dr = new DecisionRecordRequest(Guid.NewGuid(), PolicyVersionId,
             coreEntity is null ? null : new DecisionRecordCore(coreEntity, coreId, Guid.NewGuid()),
-            new DecisionRecordRef(subjectEntity, subjectId), user, null, [], [], null, [], new Dictionary<string, object?>(), null, null, null);
+            new Sprk.Bff.Api.Services.Signals.Actions.DecisionRecordRef(subjectEntity, subjectId), user, null, [], [], null, [], new Dictionary<string, object?>(), null, null, null);
 
         var signal = SignalWriter.OwnershipContextOf(coreEntity, coreId, stamps, subjectEntity, subjectId, Ownership.RecordRequester.Of(user));
         var record = DecisionRecordWriter.OwnershipContextOf(dr, stamps);
