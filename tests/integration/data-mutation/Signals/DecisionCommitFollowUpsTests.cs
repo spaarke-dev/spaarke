@@ -73,7 +73,7 @@ public sealed class DecisionCommitFollowUpsTests
 
     private static DecisionCommitService.SignalRow Row(Guid? coreType, Guid? core, string? dedupe, Guid? policy) =>
         new(Guid.NewGuid(), DecisionLane.Decide, policy, Guid.NewGuid(), coreType, core, false, SignalWriter.SignalStatusOpen, null, null,
-            null, null, core, null, false, dedupe, null, "1");
+            null, null, null, false, dedupe, null, "1");
 
     [Fact]
     public async Task ARevisionTheDecisionWrote_QueuesTheBudgetRevisionTrigger_ForTheMatter_WithNoDelay()

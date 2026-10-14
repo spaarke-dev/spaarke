@@ -588,6 +588,23 @@ public sealed class DecisionCommitServiceTests
         request.SignalId.Should().Be(Primary);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task T145_TheDecisionsMatter_IsTheCorePairsMatter_NeverTheTypedSprkMatter(bool typedNamesAnotherMatter)
+    {
+        // D-34 (task 145): the matter the executors act on (and the budget-revision trigger re-evaluates) is the decision CONTEXT, so it
+        // comes from sprk_corerecordtype + sprk_corerecordid. The typed sprk_matter lookup is not read: whether it names another matter
+        // or is empty, the answer is the core's.
+        var rig = new Rig();
+        if (typedNamesAnotherMatter) rig.Signals[Primary]["sprk_matter"] = new EntityReference("sprk_matter", Guid.NewGuid());
+        else rig.Signals[Primary].Attributes.Remove("sprk_matter");
+
+        await rig.CommitAsync(PathBReview());
+
+        rig.Executors["add-todo"].Requests.Single().MatterId.Should().Be(Matter);
+    }
+
     // ── AC2: the dismissal ───────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
