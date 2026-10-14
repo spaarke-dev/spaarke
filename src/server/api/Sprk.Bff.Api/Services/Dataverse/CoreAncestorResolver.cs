@@ -202,7 +202,10 @@ public sealed class CoreAncestorResolver
     /// <c>sprk_analysis</c> (2026-10-02).
     /// </summary>
     /// <remarks>
-    /// Only these four tables carry the <c>sprk_regarding{core}</c> stamp columns. A document, an invoice, a work
+    /// Ontology task 144 adds <c>sprk_signal</c> and <c>sprk_decisionrecord</c>, stamped OUTSIDE the access taxonomy
+    /// (<see cref="StampedOutsideAccessTaxonomy"/>), so the restamper and the reconciliation job keep their stamp equal to
+    /// their subject's current root.
+    /// Of the tables in the access taxonomy, only these carry the <c>sprk_regarding{core}</c> stamp columns. A document, an invoice, a work
     /// assignment, a project and a contact carry none, so they are never re-stamped (a work assignment's
     /// <c>sprk_regardingmatter</c> is its own, user-chosen filing — task 155 interpretation iii). A service request is
     /// CORE: a to-do's <c>sprk_regardingservicerequest</c> is a root column, not a source. <c>sprk_analysis</c>'s
@@ -248,7 +251,25 @@ public sealed class CoreAncestorResolver
                 ("sprk_regardinginvoice", "sprk_invoice"), ("sprk_regardingagreement", "sprk_agreement"),
                 ("sprk_regardingbudget", "sprk_budget"), ("sprk_reportcard", "sprk_reportcard"),
             ],
+            // Ontology task 144 (D-131, child-record contract C2): a Signal and a Decision Record are stamped children OUTSIDE
+            // the access taxonomy (StampedOutsideAccessTaxonomy). Their stamp lives in the four sprk_regarding{core} columns (the
+            // To Do convention) and follows their SUBJECT: these are the subject lookups that name an intermediate (live
+            // spaarkedev1 2026-10-12, ontology task 140; solution source sprk_Signal / sprk_DecisionRecord). A subject that is
+            // itself a core (sprk_regarding{matter,project,workassignment,servicerequest}) is the row's own root, never a
+            // source, so ClassifyStampSource reads such a row as filed under no intermediate and nothing re-stamps it. The
+            // typed sprk_matter / sprk_project / sprk_workassignment and the decision context (sprk_corerecordid,
+            // sprk_corerecordtype, the policy version, the snapshot) are not stamp columns and are never written here (D-34).
+            ["sprk_signal"] = OntologySubjectSources(),
+            ["sprk_decisionrecord"] = OntologySubjectSources(),
         };
+
+    /// <summary>The subject lookups of a Signal / Decision Record that name an intermediate (task 144): the stamp's sources.</summary>
+    private static IReadOnlyList<(string Column, string Intermediate)> OntologySubjectSources() =>
+    [
+        ("sprk_regardingcommunication", "sprk_communication"), ("sprk_regardingdocument", "sprk_document"),
+        ("sprk_regardingevent", "sprk_event"), ("sprk_regardinginvoice", "sprk_invoice"),
+        ("sprk_regardingtodo", "sprk_todo"),
+    ];
 
     /// <summary>
     /// The typed PARTY regarding lookups of each table that carries the polymorphic pair (task 155 f5, from the f3 / f4

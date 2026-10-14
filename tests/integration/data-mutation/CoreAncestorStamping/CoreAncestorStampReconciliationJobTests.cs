@@ -580,6 +580,30 @@ public class CoreAncestorStampReconciliationJobTests
             "the typed pair names an invoice the row no longer carries, and the copy equals that invoice's matter");
     }
 
+    [Theory(DisplayName = "Ontology task 144: report-only lists a stale Signal / Decision Record (its communication re-filed out of band) and writes NOTHING")]
+    [InlineData("sprk_signal")]
+    [InlineData("sprk_decisionrecord")]
+    public async Task ReportOnly_ListsAStaleOntologyRow_AndWritesNothing(string table)
+    {
+        // Task 144 registers both tables with StampSourceColumns, so the job scans them like any other stamped child; the
+        // switch stays report-only until the owner turns writes on (uac-r2 condition).
+        var row = Guid.Parse("14400000-0000-0000-0000-000000000501");
+        var world = new StampWorld()
+            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterB)])
+            .Row(table, row,
+                [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Communication.ToString());
+
+        var run = await Job(world, writesEnabled: "false").ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        world.Patches.Should().BeEmpty("report-only writes nothing");
+        Counts(run).GetProperty("stale").GetInt32().Should().Be(1);
+        Counts(run).GetProperty("sampleStale").EnumerateArray().Select(e => e.GetString())
+            .Should().ContainSingle().Which.Should().Be($"{table}:{row:D}");
+        world.Lookup(table, row, "sprk_regardingmatter").Should().Be(MatterA);
+    }
+
     private static CoreAncestorStampReconciliationJob Job(
         StampWorld world,
         string? writesEnabled = null,
