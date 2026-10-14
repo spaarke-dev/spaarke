@@ -1250,6 +1250,13 @@ involved (the type is shared), so renaming the container does not matter.
 marker the customer's BFF recognises its containers by (T227d) — GET first, so a re-run writes nothing. A refusal is
 Resumable (`spe-container-marker-failed`); the container stays on the run's record and a resume marks it.
 
+**Pre-marker containers (issue #1889).** Only the BFF's and H8's *creation* paths write the marker, so per-record (secure)
+containers created before T227d carry none and the guard refuses them (404 `spe_container_not_owned`). An environment that
+holds such containers runs `Backfill-SpeContainerBusinessUnitStamp.ps1 -CustomerId <the BFF's Customer__Id>` — dry run,
+then `-Apply -MaxWritesPerRun 1`, then `-Apply` — and then `-Verify` (it must exit 0) **before the guard-carrying BFF is
+deployed there**. It marks only containers its records derive an owner for, only where the marker is absent (a different
+or ambiguous marker is listed, never overwritten), and writes a reversal manifest first.
+
 Container ID persisted to the Dataverse env-var (`sprk_SharePointEmbeddedContainerId`, H7) and to the BFF as plain settings (`EmailProcessing__DefaultContainerId`, `Communication__ArchiveContainerId`, H4b — T227c) — enables I4 invariant enforcement.
 
 **Lead-time**: none per customer. The container type and its owning app are a one-time setup; H0's `SpeOwnerCredential`

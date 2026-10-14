@@ -1176,7 +1176,12 @@ bind its containers with `-Bind`). This script is the ONE remaining reader of `s
 .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Apply
 .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Bind '<containerId>=<buId>' -Apply
 .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Verify   # must exit 0
+.\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -CustomerId <Customer__Id>          # issue #1889: also mark pre-marker containers (dry run; then -Apply -MaxWritesPerRun 1, -Apply, -Verify)
 ```
+
+`-CustomerId` (issue #1889) adds the customer-marker pass: derivable containers with no marker get it, never overwritten
+(`MARKER-FOREIGN` / `MARKER-MALFORMED` are listed), underivable and stamp-disputed containers are never marked; `-Verify`
+then also fails on any unmarked one. Tests: `tests/scripts/Backfill-SpeContainerMarker.Tests.ps1`.
 
 **Shared module:** `common/SpeContainerBinding.ps1` — THE PowerShell constant for the property name and
 `Invoke-SpeContainerBindOrRemove` (stamp the business unit AND mark the customer — `-CustomerId`, the BFF's `Customer__Id`,
