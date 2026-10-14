@@ -1524,14 +1524,6 @@ public class SignalWriterTests
         signal.WhenUnfiled.Should().Be(record.WhenUnfiled);
     }
 
-    /// <summary>The parent lookups a filed To Do row carries in the ownership directory: its matter, and (K2) a project too.</summary>
-    private static Dictionary<string, object> FiledUnder(bool andAProject)
-    {
-        var columns = new Dictionary<string, object> { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) };
-        if (andAProject) columns["sprk_regardingproject"] = new EntityReference("sprk_project", ProjectId);
-        return columns;
-    }
-
     public static TheoryData<string> OwnerParityShapes() => new()
     {
         "one-assignee", "no-assigned-to", "filed-under-matter", "assignee-unit-has-no-team",
@@ -1559,7 +1551,9 @@ public class SignalWriterTests
                 secureTodo ? TestInfrastructure.OwnershipDirectory.SecureBu
                     : filed ? TestInfrastructure.OwnershipDirectory.GeneralBu : TestInfrastructure.OwnershipDirectory.ChildBu,
                 owningTeam: secureTodo ? TestInfrastructure.OwnershipDirectory.SecureNamedTeam : null,
-                extra: filed ? FiledUnder(secureStamp) : null);
+                // The secure project is deliberately NOT a lookup on the directory's row: it reaches both writers only as a core-ancestor stamp
+                // (read from the To Do by CoreAncestorResolver), so dropping the stamp parents from a writer's question changes its answer.
+                extra: filed ? new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) } : null);
         if (secureStamp)
         {
             directory.WithSecureRoot("sprk_project", ProjectId);
