@@ -161,25 +161,117 @@ public class CommunicationThreadReadServiceTests
     }
 
     [Fact]
-    public async Task ReadThreadAsync_RowWithOnlyCreatedBy_SentByNameIsTheCreatingUser()
+    public async Task ReadThreadAsync_RowWithOnlyCreatedBy_WhenCreatedByIsAPerson_SentByNameIsTheCreatingUser()
     {
-        // An MDA-sent message: sprk_sentby is empty and there is no creator contact; only createdby is set.
-        (await SenderNameOf(MessageRow(Guid.NewGuid(), body: "from the MDA", createdByName: "Dana Dataverse")))
+        // An MDA-sent message: sprk_sentby is empty and there is no creator contact; only createdby (a person) is set.
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), body: "from the MDA", createdByName: "Dana Dataverse", createdByExpand: CreatedByPerson())))
             .Should().Be("Dana Dataverse");
+    }
+
+    [Theory]
+    [InlineData(0)] // Read-Write
+    [InlineData(1)] // Administrative
+    [InlineData(2)] // Read
+    [InlineData(5)] // Delegated Admin
+    public async Task ReadThreadAsync_CreatedByPerson_AnyInteractiveAccessMode_IsNamed(int accessMode)
+    {
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), createdByName: "Dana Dataverse", createdByExpand: CreatedByPerson(accessMode))))
+            .Should().Be("Dana Dataverse");
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_CreatedByIsTheBffApplicationUser_SentByNameIsNull()
+    {
+        // The BFF creates communication rows through the app identity, so createdby is its application user (applicationid
+        // set, access mode 4): that account's name must never reach a partner as the sender.
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), body: "sent by the BFF", createdByName: "Spaarke BFF App", createdByExpand: CreatedByApplication())))
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_CreatedByWithApplicationIdButInteractiveMode_SentByNameIsNull()
+    {
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), createdByName: "Spaarke BFF App", createdByExpand: CreatedByApplication(accessMode: 0))))
+            .Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(3)] // Support User
+    [InlineData(4)] // Non-interactive (a non-interactive account with no applicationid is still not a person)
+    public async Task ReadThreadAsync_CreatedByNonInteractiveWithoutApplicationId_SentByNameIsNull(int accessMode)
+    {
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), createdByName: "Service Account", createdByExpand: CreatedByPerson(accessMode))))
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_CreatedByNameButNoExpand_CannotBeClassified_SentByNameIsNull()
+    {
+        // The expand did not come back (e.g. no read on systemuser): unclassifiable is NOT a person.
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), createdByName: "Dana Dataverse")))
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_CreatedByExpandNull_SentByNameIsNull()
+    {
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), createdByName: "Dana Dataverse", createdByExpand: El<string?>(null))))
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_CreatedByExpandMissingApplicationId_CannotBeClassified_SentByNameIsNull()
+    {
+        var expand = El(new Dictionary<string, object?> { ["accessmode"] = 0 });
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), createdByName: "Dana Dataverse", createdByExpand: expand)))
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_CreatedByExpandMissingAccessMode_CannotBeClassified_SentByNameIsNull()
+    {
+        var expand = El(new Dictionary<string, object?> { ["applicationid"] = null });
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), createdByName: "Dana Dataverse", createdByExpand: expand)))
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_CreatedByExpandMalformed_CannotBeClassified_SentByNameIsNull()
+    {
+        var expand = El(new Dictionary<string, object?> { ["applicationid"] = null, ["accessmode"] = "zero" });
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), createdByName: "Dana Dataverse", createdByExpand: expand)))
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_CreatedByPersonWithoutAFormattedName_SentByNameIsNull()
+    {
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), createdByExpand: CreatedByPerson()))).Should().BeNull();
     }
 
     [Fact]
     public async Task ReadThreadAsync_SentByWinsOverCreatorContactAndCreatedBy()
     {
         (await SenderNameOf(MessageRow(Guid.NewGuid(), sentBy: Guid.NewGuid(), sentByName: "Alice Attorney",
-                createdByContactName: "Pat Partner", createdByName: "Dana Dataverse")))
+                createdByContactName: "Pat Partner", createdByName: "Dana Dataverse", createdByExpand: CreatedByPerson())))
             .Should().Be("Alice Attorney");
     }
 
     [Fact]
     public async Task ReadThreadAsync_CreatorContactWinsOverCreatedBy_WhenNoSentBy()
     {
-        (await SenderNameOf(MessageRow(Guid.NewGuid(), createdByContactName: "Pat Partner", createdByName: "Dana Dataverse")))
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), createdByContactName: "Pat Partner", createdByName: "Dana Dataverse", createdByExpand: CreatedByPerson())))
+            .Should().Be("Pat Partner");
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_SentByAndCreatorContactStillWin_EvenWhenCreatedByIsTheApplication()
+    {
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), sentBy: Guid.NewGuid(), sentByName: "Alice Attorney",
+                createdByName: "Spaarke BFF App", createdByExpand: CreatedByApplication())))
+            .Should().Be("Alice Attorney");
+        (await SenderNameOf(MessageRow(Guid.NewGuid(), createdByContactName: "Pat Partner",
+                createdByName: "Spaarke BFF App", createdByExpand: CreatedByApplication())))
             .Should().Be("Pat Partner");
     }
 
@@ -190,7 +282,23 @@ public class CommunicationThreadReadServiceTests
     }
 
     [Fact]
-    public async Task ReadThreadAsync_SelectsCreatedByLookup_ForTheSenderFallback()
+    public async Task ReadThreadAsync_NeverReturnsTheCreatedByIdOrAnApplicationName_InTheDto()
+    {
+        var createdById = Guid.NewGuid();
+        var row = MessageRow(Guid.NewGuid(), createdByName: "Spaarke BFF App", createdByExpand: CreatedByApplication());
+        row["_createdby_value"] = El(createdById.ToString());
+        SetupMessages(row);
+        SetupAttachments();
+        SetupThreadName(null);
+
+        var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
+
+        var json = JsonSerializer.Serialize(result);
+        json.Should().NotContain(createdById.ToString()).And.NotContain("Spaarke BFF App");
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_SelectsAndExpandsCreatedBy_ForThePersonOnlyFallback()
     {
         string? sent = null;
         _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
@@ -202,8 +310,8 @@ public class CommunicationThreadReadServiceTests
         await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
 
         sent.Should().Contain("_createdby_value").And.NotContain("_createdby_value@", "the annotation is a header preference, not a $select column");
+        sent.Should().Contain("&$expand=createdby($select=applicationid,accessmode)&");
     }
-
     [Fact]
     public async Task ReadThreadAsync_PrivilegedMessage_IsReturnedWithPrivilegeMetadataNotHidden()
     {
@@ -590,7 +698,7 @@ public class CommunicationThreadReadServiceTests
         string? from = null, string? inReplyTo = null, bool internalOnly = false, int privilege = PrivilegeNone,
         int? direction = null, Guid? sentBy = null, string? sentByName = null,
         string? subject = null, string? to = null, bool isPrivate = false,
-        string? createdByName = null, string? createdByContactName = null)
+        string? createdByName = null, string? createdByContactName = null, JsonElement? createdByExpand = null)
     {
         var row = new Dictionary<string, JsonElement>
         {
@@ -618,8 +726,18 @@ public class CommunicationThreadReadServiceTests
         // Task 062: the creating user (the row's createdby lookup) and the creator contact (task 034) names.
         if (createdByName is not null) row["_createdby_value@OData.Community.Display.V1.FormattedValue"] = El(createdByName);
         if (createdByContactName is not null) row["_sprk_createdbycontact_value@OData.Community.Display.V1.FormattedValue"] = El(createdByContactName);
+        // The `$expand=createdby($select=applicationid,accessmode)` object; absent = the expand did not come back.
+        if (createdByExpand is not null) row["createdby"] = createdByExpand.Value;
         return row;
     }
+
+    /// <summary>The expanded <c>createdby</c> object: an interactive PERSON (null applicationid, access mode 0 Read-Write).</summary>
+    private static JsonElement CreatedByPerson(int accessMode = 0)
+        => El(new Dictionary<string, object?> { ["applicationid"] = null, ["accessmode"] = accessMode, ["systemuserid"] = Guid.NewGuid() });
+
+    /// <summary>The expanded <c>createdby</c> object for an APPLICATION user (applicationid set, access mode 4 Non-interactive).</summary>
+    private static JsonElement CreatedByApplication(int accessMode = 4)
+        => El(new Dictionary<string, object?> { ["applicationid"] = Guid.NewGuid(), ["accessmode"] = accessMode, ["systemuserid"] = Guid.NewGuid() });
 
     private static Dictionary<string, JsonElement> AttachmentRow(
         Guid attachmentId, Guid messageId, Guid docId, string name, int type) => new()

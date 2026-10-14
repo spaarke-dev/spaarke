@@ -400,6 +400,46 @@ public class ExternalMessageSendTests
         messages.Should().ContainSingle().Which.SenderName.Should().Be("Lee Lawyer");
     }
 
+    // ── task 062 rework: the createdby fallback names a PERSON only, never the BFF's application user ──────────────
+
+    private async Task<string?> SenderNameWithCreatedBy(string createdByName, Dictionary<string, object?>? createdByExpand)
+    {
+        var project = Guid.NewGuid();
+        var caller = Ciam(project: project, contactId: Guid.NewGuid());
+        var dto = Created(await Post("projects", project, caller, "From the model-driven app"));
+        var dataverseRow = AsDataverseRow(TheRow(), Guid.Parse(dto.SprkCommunicationid), "2026-10-11T09:00:00Z");
+        dataverseRow["_createdby_value"] = El(Guid.NewGuid().ToString("D"));
+        dataverseRow["_createdby_value@OData.Community.Display.V1.FormattedValue"] = El(createdByName);
+        if (createdByExpand is not null)
+            dataverseRow["createdby"] = El(createdByExpand);
+        // No contact name annotation and no sprk_sentby: only createdby can name the sender.
+        dataverseRow.Remove("_sprk_createdbycontact_value@OData.Community.Display.V1.FormattedValue");
+
+        var messages = Messages(await ReadBack("projects", project, caller, dataverseRow));
+        _lastReadOData.Should().Contain("_createdby_value").And.Contain("&$expand=createdby($select=applicationid,accessmode)&");
+        return messages.Should().ContainSingle().Subject.SenderName;
+    }
+
+    [Fact]
+    public async Task ExternalRead_CreatedByIsAnApplicationUser_SenderNameIsNull()
+    {
+        (await SenderNameWithCreatedBy("Spaarke BFF App",
+            new() { ["applicationid"] = Guid.NewGuid(), ["accessmode"] = 4 })).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExternalRead_CreatedByIsAnInteractiveUser_SenderNameIsTheirName()
+    {
+        (await SenderNameWithCreatedBy("Dana Dataverse",
+            new() { ["applicationid"] = null, ["accessmode"] = 0 })).Should().Be("Dana Dataverse");
+    }
+
+    [Fact]
+    public async Task ExternalRead_CreatedByCannotBeClassified_SenderNameIsNull()
+    {
+        (await SenderNameWithCreatedBy("Dana Dataverse", createdByExpand: null)).Should().BeNull();
+    }
+
     [Fact]
     public async Task InvoiceUnderAMatterTheCallerCanCreateOn_Is201_RegardingTheInvoice()
     {

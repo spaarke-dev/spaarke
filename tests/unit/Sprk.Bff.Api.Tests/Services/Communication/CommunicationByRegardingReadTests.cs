@@ -128,6 +128,7 @@ public class CommunicationByRegardingReadTests
         await Sut().ReadByRegardingAsync("sprk_matter", RecordId, Caller(), CancellationToken.None);
 
         messageQuery.Should().Contain("_createdby_value").And.NotContain("_createdby_value@");
+        messageQuery.Should().Contain("&$expand=createdby($select=applicationid,accessmode)&");
     }
 
     [Fact]
