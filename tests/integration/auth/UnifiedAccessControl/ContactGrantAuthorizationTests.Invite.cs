@@ -52,6 +52,20 @@ public partial class ContactGrantAuthorizationTests
         told.GetAttributeValue<string>("title").Should().Contain("needs an invite").And.Contain("Apollo");
     }
 
+    /// <summary>Only a write that gave access tells the owner: the same grant posted again is still NeedsInternalInvite, and
+    /// the owner is told once.</summary>
+    [Fact]
+    public async Task ContactGrant_PostedTwice_TellsTheOwnerOnce()
+    {
+        var h = WireInviteSeams();
+
+        await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate));
+        var again = Ok<ContactGrantResponse>(await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate)));
+
+        again.Invite.Should().Be(new GrantInviteResult(GrantInviteStatus.NeedsInternalInvite));
+        ToldUser(h).Should().Be(RecordOwner, "one notice, from the write that gave access");
+    }
+
     [Fact]
     public async Task ContactGrant_ToABoundColleague_IsNotNeeded_AndNobodyIsTold()
     {

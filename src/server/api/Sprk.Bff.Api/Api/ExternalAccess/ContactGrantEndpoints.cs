@@ -231,7 +231,9 @@ public static class ContactGrantEndpoints
             invite = new GrantInviteResult(GrantInviteStatus.Failed, GrantInviteStatus.InviteFailedReasonCode);
         }
 
-        if (invite.Status == GrantInviteStatus.NeedsInternalInvite)
+        // Only a write that GAVE access tells anyone (as /grant gates its notifier), so a re-posted grant does not repeat the
+        // internal user's notice. The response still says NeedsInternalInvite.
+        if (invite.Status == GrantInviteStatus.NeedsInternalInvite && outcome.AccessGained)
         {
             await accessNotifier.NotifyInviteNeededAsync(
                 g.RootType, g.RootId, grantee, httpContext.User, cap.Granters ?? Array.Empty<Guid>());
