@@ -316,5 +316,227 @@ function Get-MailboxAccessState {
               diagnostic = "App $AppId holds $($views.Count) application role assignment(s)." }
 }
 
+# ---------------------------------------------------------------------------------------------------------------------
+# Task 263 (H14m) — the customer's Spaarke-tenant shared mailbox (owner decision 2026-10-10, #1562).
+# One shared mailbox per customer, named sprk-{customerId}-mail, a DIRECT member of the customer's scope group
+# (Spaarke-AppAccess-{customerId}) so H14a's group-scoped Mail.* roles reach it. Get-before-set: every fact is read
+# before any write, and anything foreign is Drift with NOTHING created. Writes need PRQ-E-16 (New-Mailbox -Shared +
+# Add-DistributionGroupMember -BypassSecurityGroupManagerCheck); reads need only what PRQ-E-15 already grants
+# (Get-Recipient, Test-ServicePrincipalAuthorization). Design: projects/customer-provisioning-orchestration-r1/notes/
+# t263-customer-shared-mailbox.md.
+# ---------------------------------------------------------------------------------------------------------------------
+$script:MailboxNamePattern    = '^sprk-(?<cid>[a-z][a-z0-9]{2,7})-mail$'
+$script:ScopeGroupNamePattern = '^Spaarke-AppAccess-(?<cid>[a-z][a-z0-9]{2,7})$'
+# Join retry for a freshly created mailbox (replication); 6 x 10 s stays well inside the Worker's 6-minute call timeout.
+$script:JoinAttempts = 6
+$script:JoinRetryDelaySeconds = 10
+
+function Test-CustomerMailboxRequest {
+    <# Validation errors for POST /ensure-customer-mailbox and /read-customer-mailbox (same body; empty = valid). #>
+    param($Body)
+    $errors = @()
+    foreach ($f in 'tenantId', 'organization', 'appId', 'scopeGroupId', 'expectedScopeGroupName', 'name', 'displayName', 'primarySmtpAddress', 'correlationId') {
+        if (-not ($Body.PSObject.Properties[$f] -and -not [string]::IsNullOrWhiteSpace([string]$Body.$f))) { $errors += "$f is required" }
+    }
+    $errors += Test-OrganizationShape $Body
+    $text = { param($n) if ($Body.PSObject.Properties[$n]) { [string]$Body.$n } else { '' } }
+    if ((& $text 'appId') -and (& $text 'appId') -notmatch $script:GuidPattern) { $errors += 'appId must be a GUID' }
+    if ((& $text 'scopeGroupId') -and -not (Test-ScopeGroupIdShape (& $text 'scopeGroupId'))) { $errors += 'scopeGroupId must be the group''s Entra object id (GUID) or email address' }
+    $name = & $text 'name'
+    $groupName = & $text 'expectedScopeGroupName'
+    $nameMatch = [regex]::Match($name, $script:MailboxNamePattern)
+    $groupMatch = [regex]::Match($groupName, $script:ScopeGroupNamePattern)
+    if ($name -and -not $nameMatch.Success) { $errors += "name '$name' must be sprk-{customerId}-mail" }
+    if ($groupName -and -not $groupMatch.Success) { $errors += "expectedScopeGroupName '$groupName' must be Spaarke-AppAccess-{customerId}" }
+    # Both names must name the SAME customer — the mailbox may only ever join its own customer's group.
+    if ($nameMatch.Success -and $groupMatch.Success -and $nameMatch.Groups['cid'].Value -cne $groupMatch.Groups['cid'].Value) {
+        $errors += 'name and expectedScopeGroupName name different customers'
+    }
+    $address = & $text 'primarySmtpAddress'
+    if ($address -and $address -notmatch $script:EmailPattern) { $errors += 'primarySmtpAddress must be an email address' }
+    $display = & $text 'displayName'
+    if ($display.Length -gt 256 -or $display -match '[\x00-\x1F\x7F]') { $errors += 'displayName must be 1-256 characters without control characters' }
+    # @(...) around the whole if: an if statement unrolls a one-element array to a scalar (no .Count under StrictMode).
+    $roles = @(if ($Body.PSObject.Properties['roles']) { $Body.roles })
+    if ($roles.Count -eq 0) { $errors += 'roles must list at least one role' }
+    foreach ($r in $roles) { if ($script:AllowedRoles -notcontains [string]$r) { $errors += "role '$r' is not one the sidecar knows ($($script:AllowedRoles -join ', '))" } }
+    return , $errors
+}
+
+function ConvertTo-FilterLiteral([string]$Value) { return $Value.Replace("'", "''") }
+
+function Get-CustomerMailboxFacts {
+    <#
+    .SYNOPSIS
+        READ-ONLY: everything H14m decides on. Returns @{ group; mailbox; conflicts; whenCreated }. Never writes.
+        Conflicts are the Drift reasons (each would make the ensure create or change nothing):
+          - the scope group's Name is not the expected Spaarke-AppAccess-{customerId};
+          - more than one recipient carries the mailbox's name, alias or address;
+          - the recipient found is not a SharedMailbox, or its name / alias / address differ (a foreign mailbox,
+            e.g. another customer's or a person's at that address);
+          - the mailbox is not a member of the scope group, or is a member of any OTHER group.
+        A missing scope group is returned as group = $null (the caller reports Failure, not Drift).
+    #>
+    param($Request)
+    $group = Resolve-ScopeGroup ([string]$Request.scopeGroupId)
+    if (-not $group) { return @{ group = $null; mailbox = $null; conflicts = @(); whenCreated = '' } }
+    $conflicts = @()
+    $groupName = Get-PropertyText $group 'Name'
+    if (-not [string]::Equals($groupName, [string]$Request.expectedScopeGroupName, [StringComparison]::OrdinalIgnoreCase)) {
+        $conflicts += "Scope group '$($Request.scopeGroupId)' is named '$groupName', expected '$($Request.expectedScopeGroupName)' — it is not this customer's group (a mailbox joining it would be reachable by another stamp)."
+    }
+    $name = [string]$Request.name
+    $address = [string]$Request.primarySmtpAddress
+    $filter = "Alias -eq '$(ConvertTo-FilterLiteral $name)' -or Name -eq '$(ConvertTo-FilterLiteral $name)' -or EmailAddresses -eq 'smtp:$(ConvertTo-FilterLiteral $address)'"
+    $found = @(Get-Recipient -Filter $filter -ErrorAction Stop)
+    if ($found.Count -gt 1) {
+        $conflicts += "$($found.Count) recipients carry name/alias '$name' or address '$address': $(($found | ForEach-Object { "$(Get-PropertyText $_ 'Name') ($(Get-PropertyText $_ 'RecipientTypeDetails'))" }) -join ', ')."
+        return @{ group = $group; mailbox = $null; conflicts = $conflicts; whenCreated = '' }
+    }
+    if ($found.Count -eq 0) { return @{ group = $group; mailbox = $null; conflicts = $conflicts; whenCreated = '' } }
+
+    $m = $found[0]
+    $whenCreated = Get-PropertyText $m 'WhenCreatedUTC'
+    $type = Get-PropertyText $m 'RecipientTypeDetails'
+    if ($type -ne 'SharedMailbox') { $conflicts += "Recipient '$(Get-PropertyText $m 'Name')' is a $type, not a SharedMailbox." }
+    foreach ($pair in @(@('Name', $name), @('Alias', $name), @('PrimarySmtpAddress', $address))) {
+        $actual = Get-PropertyText $m $pair[0]
+        if (-not [string]::Equals($actual, $pair[1], [StringComparison]::OrdinalIgnoreCase)) {
+            $conflicts += "Recipient '$(Get-PropertyText $m 'Name')' has $($pair[0]) '$actual', expected '$($pair[1])' — not this customer's mailbox."
+        }
+    }
+    # In the scope group: MemberOfGroup is a documented recipient filter property (DN; direct membership).
+    $dn = Get-PropertyText $m 'DistinguishedName'
+    $groupDn = Get-PropertyText $group 'DistinguishedName'
+    $inScope = @(Get-Recipient -Filter "MemberOfGroup -eq '$(ConvertTo-FilterLiteral $groupDn)' -and Alias -eq '$(ConvertTo-FilterLiteral (Get-PropertyText $m 'Alias'))'" -ErrorAction Stop).Count -gt 0
+    # Every group the mailbox is a DIRECT member of — for the "no other group" rule (live check M5 in the design note).
+    $groups = @(Get-Recipient -Filter "Members -eq '$(ConvertTo-FilterLiteral $dn)'" -ErrorAction Stop)
+    if (-not $inScope) {
+        $conflicts += "Mailbox '$name' exists (created $whenCreated UTC) but is not a member of the scope group '$groupName'. If this run created it and stopped before joining it, add it to the group, then clear the quarantine."
+    }
+    $others = @($groups | Where-Object { -not [string]::Equals((Get-PropertyText $_ 'DistinguishedName'), $groupDn, [StringComparison]::OrdinalIgnoreCase) })
+    if ($others.Count -gt 0) {
+        $conflicts += "Mailbox '$name' is also a member of: $(($others | ForEach-Object { Get-PropertyText $_ 'Name' }) -join ', ') — another stamp may reach it."
+    }
+    return @{ group = $group; mailbox = $m; conflicts = $conflicts; whenCreated = $whenCreated }
+}
+
+function Get-CustomerMailboxAuthorization {
+    <#
+    .SYNOPSIS
+        READ-ONLY: Exchange's own answer to "do the stamp identity's roles reach this mailbox?" — one entry per expected
+        role, inScope true only when Test-ServicePrincipalAuthorization reports that role InScope. Evaluates the
+        configuration, not the 30 min - 2 h cache that Graph calls go through.
+    #>
+    param([string]$AppId, [string]$Mailbox, [string[]]$Roles)
+    $rows = @(Test-ServicePrincipalAuthorization -Identity $AppId -Resource $Mailbox -ErrorAction Stop)
+    $result = @()
+    foreach ($role in $Roles) {
+        $hit = @($rows | Where-Object { (Get-PropertyText $_ 'RoleName') -eq $role -and [string](Get-PropertyText $_ 'InScope') -eq 'True' })
+        $result += [ordered]@{ role = $role; inScope = ($hit.Count -gt 0) }
+    }
+    return , $result
+}
+
+function Test-CustomerMailboxWritePermission {
+    <#
+    .SYNOPSIS
+        Exchange Online loads only the cmdlets and parameters the caller's roles allow. Returns the missing ones (empty =
+        both writes are possible), so an ensure without PRQ-E-16 fails BEFORE creating a mailbox it could not join.
+    #>
+    $missing = @()
+    $create = Get-Command New-Mailbox -ErrorAction SilentlyContinue
+    if (-not $create -or -not $create.Parameters.ContainsKey('Shared')) { $missing += 'New-Mailbox -Shared' }
+    $join = Get-Command Add-DistributionGroupMember -ErrorAction SilentlyContinue
+    if (-not $join -or -not $join.Parameters.ContainsKey('BypassSecurityGroupManagerCheck')) { $missing += 'Add-DistributionGroupMember -BypassSecurityGroupManagerCheck' }
+    return , $missing
+}
+
+function Invoke-CustomerMailboxEnsure {
+    <#
+    .SYNOPSIS
+        Get-before-set ensure of the customer's shared mailbox. Returns @{ outcome = Success|AlreadyCompliant|Drift|Failure;
+        created; verified; authorization; conflicts; diagnostic }. Requires an open Exchange Online session.
+        Drift, and a Failure before the first write, leave nothing created. After the writes, a failed read-back is
+        Failure with created = $true (the next run judges what exists); a crash between the two writes leaves a mailbox
+        outside the group, which the next run reports as Drift (design note §8, K2).
+    #>
+    param($Request)
+    $roles = @($Request.roles | ForEach-Object { [string]$_ })
+    $facts = Get-CustomerMailboxFacts $Request
+    if (-not $facts.group) {
+        return @{ outcome = 'Failure'; created = $false; verified = $false; authorization = @(); conflicts = @()
+                  diagnostic = "Scope group '$($Request.scopeGroupId)' was not found in Exchange Online (it must be a mail-enabled security group)." }
+    }
+    if ($facts.conflicts.Count -gt 0) {
+        return @{ outcome = 'Drift'; created = $false; verified = $false; authorization = @(); conflicts = $facts.conflicts
+                  diagnostic = 'Existing Exchange configuration differs from the expected mailbox; nothing was created or changed.' }
+    }
+
+    $created = $false
+    if (-not $facts.mailbox) {
+        $missing = @(Test-CustomerMailboxWritePermission)
+        if ($missing.Count -gt 0) {
+            return @{ outcome = 'Failure'; created = $false; verified = $false; authorization = @(); conflicts = @()
+                      diagnostic = "Spaarke Exchange Admin cannot run $($missing -join ' / ') — prerequisite PRQ-E-16 (owner decision D32) is not applied. Nothing was created." }
+        }
+        $new = New-Mailbox -Shared -Name ([string]$Request.name) -Alias ([string]$Request.name) -DisplayName ([string]$Request.displayName) -PrimarySmtpAddress ([string]$Request.primarySmtpAddress) -ErrorAction Stop
+        $created = $true
+        # A new mailbox can take a little while to replicate before a group accepts it as a member, so the join is
+        # retried inside this request. A mailbox left outside the group is Drift on the next run (design note §8).
+        $joined = $false; $lastError = ''
+        for ($attempt = 1; $attempt -le $script:JoinAttempts -and -not $joined; $attempt++) {
+            try {
+                Add-DistributionGroupMember -Identity (Get-PropertyText $facts.group 'DistinguishedName') -Member (Get-PropertyText $new 'DistinguishedName') -BypassSecurityGroupManagerCheck -ErrorAction Stop | Out-Null
+                $joined = $true
+            }
+            catch {
+                $lastError = $_.Exception.Message
+                if ($attempt -lt $script:JoinAttempts) { Start-Sleep -Seconds $script:JoinRetryDelaySeconds }
+            }
+        }
+        if (-not $joined) {
+            return @{ outcome = 'Failure'; created = $true; verified = $false; authorization = @(); conflicts = @()
+                      diagnostic = "Created shared mailbox '$($Request.name)' but could not add it to the scope group after $($script:JoinAttempts) attempts: $lastError. The next run will report it as outside the scope group (Drift): add it to the group, then clear the quarantine." }
+        }
+        # Read back: the same facts must now be conflict-free with the mailbox present.
+        $facts = Get-CustomerMailboxFacts $Request
+        if (-not $facts.mailbox -or $facts.conflicts.Count -gt 0) {
+            return @{ outcome = 'Failure'; created = $true; verified = $false; authorization = @(); conflicts = @($facts.conflicts)
+                      diagnostic = "Read-back after creating '$($Request.name)' did not show it, shared and in the scope group only: $(@($facts.conflicts) -join ' ')" }
+        }
+    }
+
+    $authorization = Get-CustomerMailboxAuthorization -AppId ([string]$Request.appId) -Mailbox ([string]$Request.primarySmtpAddress) -Roles $roles
+    $verified = @($authorization | Where-Object { -not $_.inScope }).Count -eq 0
+    $state = if ($verified) { 'every role in scope' } else { "not in scope yet: $((@($authorization | Where-Object { -not $_.inScope }) | ForEach-Object { $_.role }) -join ', ')" }
+    return @{ outcome = $(if ($created) { 'Success' } else { 'AlreadyCompliant' }); created = $created; verified = $verified
+              authorization = $authorization; conflicts = @()
+              diagnostic = "Shared mailbox '$($Request.name)' <$($Request.primarySmtpAddress)> $(if ($created) { 'created and added to' } else { 'already in' }) the scope group; authorization for app $($Request.appId): $state." }
+}
+
+function Get-CustomerMailboxState {
+    <#
+    .SYNOPSIS
+        READ-ONLY (H13): @{ outcome = Success|Failure; exists; conflicts; authorization; diagnostic }. Never creates,
+        changes or removes anything. A missing scope group is Failure (no verdict), not "everything wrong".
+    #>
+    param($Request)
+    $facts = Get-CustomerMailboxFacts $Request
+    if (-not $facts.group) {
+        return @{ outcome = 'Failure'; exists = $false; conflicts = @(); authorization = @()
+                  diagnostic = "Scope group '$($Request.scopeGroupId)' was not found in Exchange Online — cannot judge the mailbox." }
+    }
+    if (-not $facts.mailbox) {
+        return @{ outcome = 'Success'; exists = $false; conflicts = @($facts.conflicts); authorization = @()
+                  diagnostic = "No recipient named '$($Request.name)' or addressed '$($Request.primarySmtpAddress)'." }
+    }
+    $roles = @($Request.roles | ForEach-Object { [string]$_ })
+    $authorization = Get-CustomerMailboxAuthorization -AppId ([string]$Request.appId) -Mailbox ([string]$Request.primarySmtpAddress) -Roles $roles
+    return @{ outcome = 'Success'; exists = $true; conflicts = @($facts.conflicts); authorization = $authorization
+              diagnostic = "Mailbox '$($Request.name)' found; $(@($facts.conflicts).Count) conflict(s)." }
+}
+
 Export-ModuleMember -Function Get-SidecarSettings, Test-SecretEqual, Get-ExchangeConnectParameters, Test-ApplyRequest, Test-ReadRequest,
-    Test-AssigneeIs, Test-AssignmentInScope, Invoke-MailboxAccessApply, Get-MailboxAccessState
+    Test-AssigneeIs, Test-AssignmentInScope, Invoke-MailboxAccessApply, Get-MailboxAccessState,
+    Test-CustomerMailboxRequest, Invoke-CustomerMailboxEnsure, Get-CustomerMailboxState

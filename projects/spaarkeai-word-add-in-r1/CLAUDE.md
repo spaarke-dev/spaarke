@@ -303,7 +303,11 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
     - Desktop Office and Word are not yet verified.
     - Microsoft does not document NAA for a guest whose authority is another directory.
     - If it fails, raise it with the owner before any workaround.
-  - **Teams for workforce contacts is deferred.**
+  - **Teams is in scope (owner 2026-10-13; ADR-028 A9 as updated by SPA-r3 `63b7c575b`).**
+    - The Teams host (the legal front door SPA) signs in workforce contacts AND licensed users through the A9 multitenant client: NAA, with the authority = the Teams context tid.
+    - Licensed users in Teams resolve to their systemuser through the stored link.
+    - External partners (CIAM) get no Teams access.
+    - SPA-r3 owns all of it. The Office add-ins are unchanged (A8).
   - **Anti-conflict rule:** ADR-028 is the single authority. Before recording an owner auth decision, merge master and check it against ADR-028. On a conflict, raise the §6.5 block before writing it down.
   - **Dropped work:** the T126 home-tenant scheme of 2026-10-12 was dropped. It is parked on the local branch `wip/t126-workforce-customer`; review findings are in `notes/126-message-to-uac-r2.md`.
 - **Diagnostics view** (task 113) is on the dev site via `ADDIN_DIAGNOSTICS_ENABLED: "true"` in `deploy-office-addins.yml` — remove it once provisioning's guest tests are done.

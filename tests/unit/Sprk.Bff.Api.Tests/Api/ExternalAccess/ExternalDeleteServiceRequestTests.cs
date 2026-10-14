@@ -410,7 +410,7 @@ public sealed class ExternalDeleteServiceRequestTests : IClassFixture<ExternalDe
 
         (await NewService(handler).HasRelatedRecordsAsync(id)).Should().BeFalse();
 
-        handler.Requests.Should().HaveCount(8);
+        handler.Requests.Should().HaveCount(9);
         foreach (var relation in ServiceRequestRelations)
         {
             var lookup = $"_{relation.LookupAttribute}_value";
@@ -516,7 +516,7 @@ public sealed class ExternalDeleteServiceRequestTests : IClassFixture<ExternalDe
         found.OneToMany.OrderBy(x => x).Should().Equal(ServiceRequestRelations
             .Select(r => r.EntityLogicalName + "." + r.LookupAttribute)
             .OrderBy(x => x));
-        found.OneToMany.Should().HaveCount(8);
+        found.OneToMany.Should().HaveCount(9);
     }
 
     // Must-fire / must-not-fire controls for the scan above, on injected documents (a relationship exported under the
