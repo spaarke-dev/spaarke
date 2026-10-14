@@ -12,7 +12,7 @@ using Sprk.Bff.Api.Services.Registration;
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
 /// <summary>What one grant-notification attempt did (task 181).</summary>
-internal enum GrantNotificationOutcome
+public enum GrantNotificationOutcome
 {
     /// <summary>Nobody is to be told: no internal user behind the grantee, only the granter, or a walled user.</summary>
     NotApplicable,
@@ -54,7 +54,7 @@ internal enum GrantNotificationOutcome
 /// <c>SendCiamOnboardingEmailAsync</c> uses (the shared mailbox, app-only; never the user's mailbox, no OBO). Best effort,
 /// like everything here: a send that is refused or fails is logged and the grant stands.</para>
 /// </remarks>
-internal sealed class GrantAccessNotifier
+public sealed class GrantAccessNotifier
 {
     /// <summary>The <c>appnotification</c> category (the Daily Briefing groups by it).</summary>
     internal const string Category = "access";

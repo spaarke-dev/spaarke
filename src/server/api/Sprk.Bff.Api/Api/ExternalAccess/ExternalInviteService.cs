@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <see cref="InviteOnGrantAsync"/> (pinned by <c>ContactGrantGuardTests</c>): a contact never invites.</para>
 /// <para>The plaintext code goes only into the invite email's link: never logged, never in a response.</para>
 /// </remarks>
-internal sealed class ExternalInviteService
+public sealed class ExternalInviteService
 {
     private const string ContactEntitySet = "contacts";
 
