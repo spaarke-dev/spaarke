@@ -128,3 +128,32 @@ parent isolates this task's delta exactly. Well under the +5 MB task threshold a
   Production `BootedBff` boot is in progress in a parallel collection. Pre-existing latent flake; not seen in the runs here.
 - Pre-existing HIGH transitive CVE above.
 - Ship with 046 only (POML note): until 046, a WorkforceHome principal reaches `WorkforcePrincipalResolver`'s A8 create path.
+
+## Fix round 1
+
+Review passes A and B (auth task, two passes). Findings and disposition:
+
+| Pass | Finding | Disposition |
+|---|---|---|
+| A | K2: 045-without-046 window (a WorkforceHome principal reaches the A8 create path) | Superseded by the F2 guard below |
+| A | K3: "tid is not the Spaarke tenant" rule skipped when `AzureAd:TenantId` is not a GUID | Fixed: fail closed (`WorkforceHomeDeny.SpaarkeTenantUnknown`, logged as `Reason`); no startup refusal |
+| A | K4s | Accepted (known limits above) |
+| B | F2: no mechanical guard for the 045-without-046 window | Fixed: `WorkforcePrincipalResolver.ResolveAsync` denies any identity with `AuthenticationType == WorkforceHome` first, before any Dataverse/binder call (`sdap.access.deny.workforce_home_resolution_pending`, reason `PrincipalNotResolved`) |
+| B | K2: census did not pin the default authenticate/challenge schemes | Fixed: `DefaultSchemes_AreTheWorkforceBearerScheme` (both boots) |
+| B | K3: `BootedApp` cleared `NetworkStepsForBootedHostTests` for Development boots too | Fixed: reset in `finally` only when `_redis is not null` (the condition under which this boot set it) |
+
+**F2 guard lifecycle.** Task 046 replaces it with the home branch; 046's tests must remove the guard and
+`ResolveAsync_WorkforceHomePrincipal_IsDeniedBeforeAnyLookup`. The "Ship with 046 only" line above is now enforced by the
+guard rather than by convention.
+
+**Strategy reach.** `WorkforcePrincipalStrategy` (CallerPrincipalResolver.cs) calls only `IWorkforcePrincipalResolver.ResolveAsync`
+and composes the accessible set after a resolved principal; it has no other route to `ContactIdentityBinder` (the other
+binder callers are the invite endpoints, not principal resolution). It needed no guard of its own.
+
+**Tests.** `ResolveAsync_WorkforceHomePrincipal_IsDeniedBeforeAnyLookup` (Dataverse and identity doubles record zero
+invocations, binder store zero reads/writes); `ResolveAsync_BearerWorkforcePrincipal_IsUnaffectedByTheWorkforceHomeGuard`
+(regression control); `SpaarkeTenantNotAGuid_RejectsEveryHomeToken_FailClosed` (null, empty, placeholder, non-GUID, zero
+GUID; with a real tenant the same token is not refused for that reason); `DefaultSchemes_AreTheWorkforceBearerScheme`.
+
+**Seeding proof.** Guard disabled (`if (false && ...)`) and the K3 branch disabled together: the deny test and all five
+K3 cases failed (6 failed, 1 passed - the Bearer control, as it should); both restored byte-for-byte, then 165 / 91 pass.

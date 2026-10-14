@@ -504,6 +504,9 @@ public static class AuthorizationModule
         /// <summary><c>tid</c> = <c>AzureAd:TenantId</c>: a Spaarke-tenant token belongs to the default scheme.</summary>
         internal const string SpaarkeTenant = "tid_is_spaarke_tenant";
 
+        /// <summary><c>AzureAd:TenantId</c> is not a non-zero GUID, so the "not the Spaarke tenant" rule cannot be applied: fail closed.</summary>
+        internal const string SpaarkeTenantUnknown = "spaarke_tenant_id_not_configured";
+
         /// <summary><c>tid</c> = <c>Ciam:TenantId</c>: a CIAM token belongs to the Ciam scheme.</summary>
         internal const string CiamTenant = "tid_is_ciam_tenant";
 
@@ -613,7 +616,7 @@ public static class AuthorizationModule
     /// is accepted, otherwise a <see cref="WorkforceHomeDeny"/> reason. Every claim is read from the validated token
     /// itself, so inbound claim mapping cannot hide or rename one. Accepts only when ALL hold:
     /// <list type="number">
-    ///   <item><c>tid</c> is a non-zero GUID, is neither <c>AzureAd:TenantId</c> nor <c>Ciam:TenantId</c>, and is in
+    ///   <item><c>tid</c> is a non-zero GUID, <c>AzureAd:TenantId</c> is a non-zero GUID (else every token is rejected), is neither <c>AzureAd:TenantId</c> nor <c>Ciam:TenantId</c>, and is in
     ///   <paramref name="customerTenantIds"/> (empty rejects all);</item>
     ///   <item><c>iss</c> equals <c>https://login.microsoftonline.com/{tid}/v2.0</c> exactly (ordinal);</item>
     ///   <item>a user token: <c>idtyp</c>, if present, is <c>user</c>, and <c>scp</c> contains <c>user_impersonation</c>;</item>
@@ -644,7 +647,15 @@ public static class AuthorizationModule
 
         tokenTenantId = tid;
 
-        if (Guid.TryParse(spaarkeTenantId?.Trim(), out var spaarke) && tenant == spaarke)
+        // Fail closed: the "tid is not the Spaarke tenant" rule needs the Spaarke tenant. When AzureAd:TenantId is unset,
+        // a placeholder or otherwise not a non-zero GUID the rule cannot be applied, so no home token is accepted (it was
+        // skipped, i.e. fail open, before review K3). No startup refusal: the scheme just rejects until configured.
+        if (!Guid.TryParse(spaarkeTenantId?.Trim(), out var spaarke) || spaarke == Guid.Empty)
+        {
+            return WorkforceHomeDeny.SpaarkeTenantUnknown;
+        }
+
+        if (tenant == spaarke)
         {
             return WorkforceHomeDeny.SpaarkeTenant;
         }

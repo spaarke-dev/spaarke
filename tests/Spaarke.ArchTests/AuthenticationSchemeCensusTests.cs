@@ -144,6 +144,20 @@ public sealed class AuthenticationSchemeCensusTests
         }
     }
 
+    [Fact(DisplayName = "Task 045: the default authenticate and challenge schemes stay the workforce Bearer scheme")]
+    public async Task DefaultSchemes_AreTheWorkforceBearerScheme()
+    {
+        // Review K2: a token reaching any route that does not name its scheme is authenticated by the DEFAULT scheme.
+        // Registering WorkforceHome (or any scheme) must never change either default.
+        foreach (var app in Apps)
+        {
+            var schemes = app.Services.GetRequiredService<IAuthenticationSchemeProvider>();
+
+            Assert.Equal(JwtBearerDefaults.AuthenticationScheme, (await schemes.GetDefaultAuthenticateSchemeAsync())?.Name);
+            Assert.Equal(JwtBearerDefaults.AuthenticationScheme, (await schemes.GetDefaultChallengeSchemeAsync())?.Name);
+        }
+    }
+
     [Fact(DisplayName = "Task 045: WorkforceHome is named by the ExternalCollaboration policy and no other")]
     public async Task WorkforceHome_IsNamedByExternalCollaborationOnly()
     {

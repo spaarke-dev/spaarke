@@ -129,7 +129,12 @@ public sealed class BootedApp : IDisposable
         finally
         {
             // Consulted only while Program registers its modules; never left set for anything else in the process.
-            Sprk.Bff.Api.Infrastructure.DI.CacheModule.NetworkStepsForBootedHostTests = null;
+            // Reset only when THIS boot set it (review K3): a Development boot never sets it, so it must not clear
+            // another boot's hook.
+            if (_redis is not null)
+            {
+                Sprk.Bff.Api.Infrastructure.DI.CacheModule.NetworkStepsForBootedHostTests = null;
+            }
         }
     }
 

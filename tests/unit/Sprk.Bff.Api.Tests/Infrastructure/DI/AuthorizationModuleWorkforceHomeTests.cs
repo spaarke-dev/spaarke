@@ -162,6 +162,27 @@ public sealed class AuthorizationModuleWorkforceHomeTests
         host.DenyReasons.Should().Contain(AuthorizationModule.WorkforceHomeDeny.SpaarkeTenant);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("#{AzureAdTenantId}#")]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public void SpaarkeTenantNotAGuid_RejectsEveryHomeToken_FailClosed(string? spaarkeTenantId)
+    {
+        // Review K3: the "tid is not the Spaarke tenant" rule used to be SKIPPED when AzureAd:TenantId was not a GUID
+        // (fail open). It must reject instead - even a token the rest of the allowlist would accept.
+        var token = new JsonWebToken(HomeToken());
+        var listed = new HashSet<Guid> { Guid.Parse(CustomerTenantId) };
+
+        AuthorizationModule.WorkforceHomeDenyReason(token, listed, spaarkeTenantId, CiamTenantId, out _)
+            .Should().Be(AuthorizationModule.WorkforceHomeDeny.SpaarkeTenantUnknown);
+
+        // Control: with a real Spaarke tenant the same token is not refused for that reason.
+        AuthorizationModule.WorkforceHomeDenyReason(token, listed, SpaarkeTenantId, CiamTenantId, out _)
+            .Should().NotBe(AuthorizationModule.WorkforceHomeDeny.SpaarkeTenantUnknown);
+    }
+
     [Fact]
     public async Task CiamTenantToken_Returns401_EvenWhenListed()
     {
