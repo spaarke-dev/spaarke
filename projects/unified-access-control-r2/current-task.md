@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives incl. the ADR-028 A9 block, §5 Environment, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` (rounds 1–99) and `notes/decisions.md`. Task 185 decisions: `notes/185-invite-code-design.md` §11–§12. Live records: `notes/batch5-live-gates-2026-10-08.md`. Narrative: checkpoint commit messages.
+> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives incl. the ADR-028 A9 block, §5 Environment, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` (rounds 1–100b) and `notes/decisions.md`. Task 185 decisions: `notes/185-invite-code-design.md` §11–§12. Live records: `notes/batch5-live-gates-2026-10-08.md`. Narrative: checkpoint commit messages.
 
 > **Last Updated**: 2026-10-14 (checkpoint #34).
 
@@ -25,7 +25,7 @@
   - Task 183 (#1797) closes after ontology's 148 live gate (412 → Conflict).
 - **Provisioning:** 185's release gate is MET. SpaarkeMaster 1.2.3.0 is published (CI run 38603706393, master `bd52b6290`, PR #1860) and carries `contact.sprk_externalinvitecodehash`, secured: Writers 4/4/4, Readers no row. T240d builds on `6da771b96`.
 - **SPA-r3:** has master merged into R3. 046 (WorkforcePrincipalResolver and the binder), 047, 048 (systemuser home-link columns, owner-approved schema) and 058 come to UAC for review.
-- **word-add-in:** the owner is UATing add-ins on dev at `6da771b96`. Their #1815 changes `Set-ExternalFlagForB2BGuests.ps1`. UAC's "no -Apply in Model 1" rule stays until the owner restates it.
+- **word-add-in:** the owner is UATing add-ins on dev at `8a1f3bb11`. Their #1815 changes `Set-ExternalFlagForB2BGuests.ps1`. UAC's "no -Apply in Model 1" rule stays until the owner restates it.
 - **Task 186 (baseline access only):** pending SPA-r3's principal contract. Tell provisioning when the Workforce role is final.
 - **SPA-r3 064 doc-type fix** (`ExternalDataService.cs:142`, `sprk_documenttype` read as a string, which empties external document lists on dev) is on the R3 branch only. They were asked to land it on master.
 - **Issues filed this period:** #1813, #1817, #1830 (triaged), #1857 (task 187, fixed).
@@ -39,4 +39,4 @@
 - F7, F9, CIAM emails G8, banner re-check 153, Remove-TestContainers, the checklist, 165(d), 171.
 
 ## Not started
-178, 136, 036, 037, 039, 099, 090 wrap-up, and 013/058 bookkeeping.
+136, 036, 037, 039, 099, 090 wrap-up, and 013/058 bookkeeping. (178 moved to uac-secure-project-r3.)
