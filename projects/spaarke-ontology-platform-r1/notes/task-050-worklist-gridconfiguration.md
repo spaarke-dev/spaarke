@@ -11,7 +11,7 @@ main session (the POML carries a completion block).
 |---|---|
 | `config/worklist.gridconfiguration.json` | The definition: `kind: worklist`, one FetchXML per lane (`lanes.decide`, `lanes.do`) and three secondary sets (`secondary.closedToday`, `.suppressed`, `.closedEarlier`). 8,402 of the 20,000 characters `sprk_configjson` holds. |
 | `scripts/Apply-WorklistGridConfiguration.ps1` | Idempotent create/update with `-WhatIf`, read-only `-Verify` (lint + run all five queries + row state), read-back after a write. Fixed row id `00000000-0000-4000-8000-000000005010`. |
-| `tests/integration/data-mutation/Signals/WorklistGridConfigurationTests.cs` | Offline guard: structure, the acceptance negatives, and every column and option value checked against the repo solution source (`sprk_Signal`, `sprk_Policy` `Entity.xml`). 10 seeded-defect controls. |
+| `tests/integration/data-mutation/Signals/WorklistGridConfigurationTests.cs` | Offline guard: structure, the acceptance negatives, and every column and option value checked against the repo solution source (`sprk_Signal`, `sprk_Policy` `Entity.xml`). 11 seeded-defect controls. |
 | `tests/integration/seam/Signals/WorklistGridConfigurationLiveTests.cs` | The real-schema pairing (ADR-038): the same queries run against live Dataverse, with live metadata checks. Opt-in (`SIGNALS_LIVE_DATAVERSE_URL`), read-only. |
 
 ## Row shape (what task 038 reads)
@@ -108,10 +108,15 @@ row plus `Apply-WorklistGridConfiguration.ps1`, with no code change (criterion 4
   `sprk_regardingrecordid` are strings; `sprk_duedate` is Date Only.
 - Apply per-item "today" to `closedToday`/`closedEarlier` as in decision 5, and the D-42 rank to the lanes.
 
+## Review (one adversarial pass, sonnet, read-only)
+
+No F1-F3. One F4, disclosed above: membership is not proven on rows (blocked on the dev write approval) -> filed [#1843](https://github.com/spaarke-dev/spaarke/issues/1843), F-72. K-class, not fixed: a stamp that lapsed under a minute ago is in no set for up to a minute (K1/K2, decision 3); `-RequireRow` is ignored without `-Verify`; the ps1 lint and the C# `Problems` check overlap (K3); the live seam is opt-in so a CI pass means skipped (K4). Fixed from the review: the closed-set note tells 038 that auto-closures are included (`sprk_resolutiontype` is selected); `-Verify` now reports an inactive row.
+
 ## Deferred / noticed (not fixed here, D-106/D-127)
 
 - **New-environment seeding.** `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DataverseWebApiDataGridSeeder.cs`
   seeds the reconciliation grid configurations for a new customer environment; the worklist row (id 5010) is not in it, so a freshly
   provisioned environment will have no worklist row until it is added or the apply script is run. Dev only is in scope for the MVP; filed as
   [#1836](https://github.com/spaarke-dev/spaarke/issues/1836) (`ontology-deferred`), recorded as F-71 in `defer-issues.md`.
+- Membership on rows: [#1843](https://github.com/spaarke-dev/spaarke/issues/1843), F-72.
 - `isValidDataGridConfiguration` + `GridConfigurationService` list the worklist row in the section picker for `sprk_signal` (see "Row shape").

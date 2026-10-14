@@ -134,7 +134,7 @@ function Invoke-Dv([string]$Method, [string]$Uri, $Body) {
 }
 
 function Get-Row {
-    $r = Invoke-Dv GET "$ApiBase/sprk_gridconfigurations?`$select=sprk_gridconfigurationid,sprk_name,sprk_entitylogicalname,sprk_configjson&`$filter=sprk_gridconfigurationid eq $RowId" $null
+    $r = Invoke-Dv GET "$ApiBase/sprk_gridconfigurations?`$select=sprk_gridconfigurationid,sprk_name,sprk_entitylogicalname,sprk_configjson,statecode&`$filter=sprk_gridconfigurationid eq $RowId" $null
     if ($r.value.Count -eq 0) { return $null }
     $r.value[0]
 }
@@ -165,6 +165,7 @@ if ($Verify) {
         Write-Host "Row $RowId : ABSENT (not applied)." -ForegroundColor Yellow
         if ($RequireRow) { $failed = $true }
     }
+    elseif ($row.statecode -ne 0) { Write-Host "Row $RowId : INACTIVE (statecode $($row.statecode)); the route would not find it." -ForegroundColor Red; $failed = $true }
     elseif (Test-RowMatches $row) { Write-Host "Row $RowId : IN SYNC with $DefinitionPath." -ForegroundColor Green }
     else { Write-Host "Row $RowId : DRIFT (the live row differs from the repo definition)." -ForegroundColor Red; $failed = $true }
     if ($failed) { exit 1 }
