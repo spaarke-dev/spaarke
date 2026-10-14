@@ -1365,6 +1365,45 @@ public class SignalWriterTests
         core.NoCoreOwner.Should().BeEquivalentTo(new EntityReference("team", AssigneeTeamId), "a team, never a user");
     }
 
+    [Fact]
+    public async Task D134_TheAssigneesTeamIsRefused_WritesNothing_NeverFallsBackToTheTodosOwnTeam()
+    {
+        // Review F3: the second question (the assignee's team, ForUserTeam) is refused — e.g. the assignee's unit has no default
+        // team. The Decision Record refuses here (requireTeam); so does the Signal: nothing is written, the To Do's team is not used.
+        var writerOrg = new FakeOrganizationService();
+        var ownership = new FakeOwnershipResolver
+        {
+            AnswerFor = context => context.CallerSystemUserId == AssigneeUserId && context.Parents.Count == 0
+                ? Ownership.RecordOwnerResolution.Refused(Ownership.RecordOwnerRefusal.NoOwnerSource, "the assignee's unit has no default team")
+                : Ownership.RecordOwnerResolution.Owned(DefaultTeamId),
+        };
+
+        var result = await Build(writerOrg, PersonalTodo(AssigneeContactId), new FakeTimeProvider(FirstRun), ownership: ownership,
+            links: LinkedAssignee()).WriteAsync(DoRequest("sprk_todo", TodoId));
+
+        result.IsSkipped.Should().BeTrue();
+        writerOrg.CreateCallCount.Should().Be(0);
+        ownership.Contexts.Should().HaveCount(2, "the assignee's team was asked, and its refusal stands");
+    }
+
+    [Fact]
+    public async Task D134_TheAssigneesTeamQuestionFaults_FailsClosed_NoCoreOwnerUnresolved()
+    {
+        var writerOrg = new FakeOrganizationService();
+        var ownership = AssigneeAware();
+        ownership.FaultFor = context => context.CallerSystemUserId == AssigneeUserId && context.Parents.Count == 0
+            ? new TimeoutException("the resolver's read of the assignee's unit timed out")
+            : null;
+
+        var act = async () => await Build(writerOrg, PersonalTodo(AssigneeContactId), new FakeTimeProvider(FirstRun), ownership: ownership,
+            links: LinkedAssignee()).WriteAsync(DoRequest("sprk_todo", TodoId));
+
+        var thrown = await act.Should().ThrowAsync<SignalWriterEscalationException>();
+        thrown.Which.Reason.Should().Be(OntologyWriterFailureReason.NoCoreOwnerUnresolved);
+        thrown.Which.InnerException.Should().BeOfType<TimeoutException>();
+        writerOrg.CreateCallCount.Should().Be(0);
+    }
+
     [Theory]
     [InlineData("systemuser")]
     [InlineData("team-empty")]
@@ -1482,6 +1521,75 @@ public class SignalWriterTests
         signal.TargetRecordId.Should().Be(record.TargetRecordId);
         signal.RequestedBy.Should().Be(record.RequestedBy);
         signal.WhenUnfiled.Should().Be(record.WhenUnfiled);
+    }
+
+    public static TheoryData<string> OwnerParityShapes() => new()
+    {
+        "one-assignee", "no-assigned-to", "filed-under-matter", "assignee-unit-has-no-team",
+    };
+
+    [Theory]
+    [MemberData(nameof(OwnerParityShapes))]
+    public async Task D134_TheSignalAndItsDecisionRecord_AboutTheSameToDo_GetTheSameOwner_FromTheRealResolver(string shape)
+    {
+        // Review F3 (criterion "the Signal and its DR agree"): ONE world, uac-r2's REAL resolver, BOTH writers. The Decision
+        // Record's assignee is read as DecisionCommitService reads it (PersonalToDoAssignee, only when the review has no core).
+        // The To Do sits in the child unit, its Assigned To user in the general unit, a filed To Do's matter in the child unit.
+        var filed = shape == "filed-under-matter";
+        var lonelyBu = Guid.Parse("55555555-0000-4000-8000-0000000000e1");
+        var directory = TestInfrastructure.OwnershipDirectory.Standard()
+            .WithOrdinaryRoot("sprk_matter", MatterId)
+            .WithBusinessUnit(lonelyBu, "A unit with no default team")
+            .WithUser(AssigneeUserId, Guid.NewGuid(),
+                shape == "assignee-unit-has-no-team" ? lonelyBu : TestInfrastructure.OwnershipDirectory.GeneralBu)
+            .WithRecord("sprk_todo", TodoId,
+                filed ? TestInfrastructure.OwnershipDirectory.GeneralBu : TestInfrastructure.OwnershipDirectory.ChildBu,
+                extra: filed ? new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) } : null);
+        var resolver = directory.Resolver();
+        var sysadmin = PersonalTodo(shape == "no-assigned-to" ? null : AssigneeContactId, filedUnderMatter: filed);
+        var links = LinkedAssignee();
+
+        var writerOrg = new FakeOrganizationService
+        {
+            TeamBusinessUnits =
+            {
+                [TestInfrastructure.OwnershipDirectory.GeneralTeam] = TestInfrastructure.OwnershipDirectory.GeneralBu,
+                [TestInfrastructure.OwnershipDirectory.ChildTeam] = TestInfrastructure.OwnershipDirectory.ChildBu,
+            },
+        };
+        var signal = await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun), ownership: resolver, links: links)
+            .WriteAsync(DoRequest("sprk_todo", TodoId));
+        Guid? signalOwner = signal.IsSkipped ? null : writerOrg.Rows[signal.SignalId].GetAttributeValue<EntityReference>("ownerid").Id;
+
+        var assignee = filed ? null : await PersonalToDoAssignee.ResolveAsync(sysadmin, links, TodoId, CancellationToken.None);
+        var recordWriter = new DecisionRecordWriter(
+            new OntologyWriterDataverseClient(() => new FakeOrganizationService(), NullLogger<OntologyWriterDataverseClient>.Instance),
+            resolver,
+            new Ownership.CoreAncestorResolver(sysadmin, StampColumnProbe, NullLogger<Ownership.CoreAncestorResolver>.Instance),
+            new RecordTypeCatalogStub(RecordTypeCatalogStub.SpaarkeDev1), new FakeTimeProvider(FirstRun), NullLogger<DecisionRecordWriter>.Instance);
+        var review = new DecisionRecordRequest(Guid.NewGuid(), PolicyVersionId,
+            filed ? new DecisionRecordCore("sprk_matter", MatterId, Guid.NewGuid()) : null,
+            new Sprk.Bff.Api.Services.Signals.Actions.DecisionRecordRef("sprk_todo", TodoId), TestInfrastructure.OwnershipDirectory.CallerUserId,
+            null, [], [], null, [], new Dictionary<string, object?>(), null, null, null) with { AssigneeSystemUserId = assignee };
+        Guid? recordOwner;
+        try
+        {
+            recordOwner = (await recordWriter.ResolveOwnerAsync(review)).Resolution.OwningTeamId;
+        }
+        catch (DecisionRecordRefusedException)
+        {
+            recordOwner = null;
+        }
+
+        Guid? expected = shape switch
+        {
+            "one-assignee" => TestInfrastructure.OwnershipDirectory.GeneralTeam,   // the Assigned To user's unit's team
+            "no-assigned-to" => TestInfrastructure.OwnershipDirectory.ChildTeam,   // the To Do's own unit's team
+            "filed-under-matter" => TestInfrastructure.OwnershipDirectory.ChildTeam, // the matter's team: a core filing wins
+            _ => null,                                                             // both refuse; neither falls back
+        };
+        signalOwner.Should().Be(expected, "the Signal's owner");
+        recordOwner.Should().Be(expected, "the Decision Record's owner");
     }
 
     [Fact]

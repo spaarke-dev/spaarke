@@ -221,7 +221,9 @@ public sealed class SignalSentenceTemplateException : Exception
 /// and every core record the subject's stamps name (secure-if-any, the same set the Decision Record's owner is asked about,
 /// task 142). A refusal — or an answer that names no team — writes nothing at all: it is logged at Warning
 /// (<see cref="OntologyWriterEvents.WriteSkippedOwnerRefused"/>), metered as <see cref="OntologyWriterFailureReason.OwnerRefused"/>
-/// and returned as a skipped result. After CREATE the row is read back: a secure row by <c>owningteam</c>
+/// and returned as a skipped result. (In the nightly job a no-core item's refusal is met first, by
+/// <see cref="DeriveCoreRecordAsync"/> while the evaluator plans: the job logs it at Error as
+/// <see cref="OntologyWriterEvents.WriteRefused"/> with this writer's escalation attached, and nothing is written.) After CREATE the row is read back: a secure row by <c>owningteam</c>
 /// (<see cref="OntologyWriterFailureReason.SecureOwnerMismatch"/>), an ordinary one by <c>ownerid</c>
 /// (<see cref="OntologyWriterFailureReason.OwnerMismatch"/>, or <see cref="OntologyWriterFailureReason.NoCoreOwnerMismatch"/>
 /// for a no-core row); a reconcile re-checks the existing row the same way and escalates rather than touch a mis-owned row.
@@ -455,9 +457,9 @@ public sealed partial class SignalWriter
     /// </summary>
     /// <exception cref="ArgumentException">A required field is missing, exceeds its schema length limit, or
     /// <c>Lane</c>/<c>Severity</c> is not one of the live schema's option values.</exception>
-    /// <exception cref="SignalWriterEscalationException">The grouping matter, its owning business unit, or the
-    /// business-unit assignment itself cannot be derived or verified (the binding escalation trigger — see
-    /// class remarks).</exception>
+    /// <exception cref="SignalWriterEscalationException">The core record cannot be derived; a no-core item's owner cannot be
+    /// resolved; or the resolver's owner does not read back on the created row, or on the existing row a reconcile meets (the
+    /// binding escalation trigger — see class remarks). A refused owner is not thrown: it is a skipped result.</exception>
     /// <exception cref="SignalSentenceTemplateException"><paramref name="request"/>'s message template cannot
     /// be rendered strictly from the detection-time snapshot (§0.3).</exception>
     public async Task<SignalWriteResult> WriteAsync(SignalWriteRequest request, CancellationToken ct = default)
@@ -717,12 +719,7 @@ public sealed partial class SignalWriter
                 return true;
             }
 
-            var m = e.Message;
-            if (!string.IsNullOrEmpty(m) && (
-                m.Contains("0x80040220", StringComparison.OrdinalIgnoreCase) ||
-                m.Contains("0x80040299", StringComparison.OrdinalIgnoreCase) ||
-                m.Contains("does not have", StringComparison.OrdinalIgnoreCase) && m.Contains("right", StringComparison.OrdinalIgnoreCase) ||
-                m.Contains("Privilege Check", StringComparison.OrdinalIgnoreCase)))
+            if (IsAccessDeniedMessage(e.Message))
             {
                 return true;
             }
@@ -730,6 +727,14 @@ public sealed partial class SignalWriter
 
         return false;
     }
+
+    /// <summary>The message fallback of <see cref="IsDataverseAccessDenied"/>, also used on a reconciler's refusal text.</summary>
+    internal static bool IsAccessDeniedMessage(string? m) =>
+        !string.IsNullOrEmpty(m) && (
+            m.Contains("0x80040220", StringComparison.OrdinalIgnoreCase) ||
+            m.Contains("0x80040299", StringComparison.OrdinalIgnoreCase) ||
+            m.Contains("does not have", StringComparison.OrdinalIgnoreCase) && m.Contains("right", StringComparison.OrdinalIgnoreCase) ||
+            m.Contains("Privilege Check", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>spec FR-03 as amended by D-13 (task 031): <c>{policycode}|{subject logical name}|{subject id}|{episode}</c>.
     /// Task 007 re-keyed the existing dev rows as episode 1. D-132 (task 141): <paramref name="subjectEntity"/> is the subject
@@ -957,10 +962,11 @@ public sealed partial class SignalWriter
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            var faultReason = IsDataverseAccessDenied(ex) ? OntologyWriterFailureReason.DataverseAccessDenied : OntologyWriterFailureReason.SignalReassignFailed;
             _logger.LogError(OntologyWriterEvents.WriteRefused, ex,
                 "No-core Signal re-own failed for policy {PolicyCode}, signal {SignalId} (reason={Reason}).",
-                policyCode, signalId, OntologyWriterFailureReason.SignalReassignFailed);
-            OntologyWriterTelemetry.RecordFailure(OntologyWriterFailureReason.SignalReassignFailed);
+                policyCode, signalId, faultReason);
+            OntologyWriterTelemetry.RecordFailure(faultReason);
             throw;
         }
 
@@ -980,10 +986,15 @@ public sealed partial class SignalWriter
                 break;
 
             case OrdinaryRowReownOutcome.Failed:
+                // Task 143 (review F1): the reconciler returns Dataverse's refusal as text, so it is classified on that text the way
+                // IsDataverseAccessDenied classifies an exception's message (F2's 0x80040299 is metered as the access denial it is).
+                var failedReason = IsAccessDeniedMessage(result.Detail)
+                    ? OntologyWriterFailureReason.DataverseAccessDenied
+                    : OntologyWriterFailureReason.SignalReassignFailed;
                 _logger.LogError(OntologyWriterEvents.WriteRefused,
                     "No-core Signal re-own failed for policy {PolicyCode}, signal {SignalId}: {Detail} (reason={Reason}).",
-                    policyCode, signalId, result.Detail, OntologyWriterFailureReason.SignalReassignFailed);
-                OntologyWriterTelemetry.RecordFailure(OntologyWriterFailureReason.SignalReassignFailed);
+                    policyCode, signalId, result.Detail, failedReason);
+                OntologyWriterTelemetry.RecordFailure(failedReason);
                 throw new InvalidOperationException($"The no-core Signal {signalId:D} could not be re-owned: {result.Detail}");
         }
 

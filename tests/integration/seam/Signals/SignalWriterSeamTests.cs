@@ -306,7 +306,20 @@ public sealed class SignalWriterSeamTests : IClassFixture<SignalWriterSeamTests.
         second.Created.Should().BeFalse();
         row.GetAttributeValue<EntityReference>("sprk_corerecordtype").Should().BeNull();
         row.GetAttributeValue<string>("sprk_corerecordid").Should().BeNull();
-        row.GetAttributeValue<EntityReference>("ownerid").LogicalName.Should().Be("team");
+        var defaultTeam = (await _dv.OperatorClient.RetrieveMultipleAsync(new QueryExpression("team")
+        {
+            ColumnSet = new ColumnSet("teamid"),
+            Criteria =
+            {
+                Conditions =
+                {
+                    new ConditionExpression("businessunitid", ConditionOperator.Equal, todoBusinessUnit),
+                    new ConditionExpression("isdefault", ConditionOperator.Equal, true),
+                },
+            },
+        })).Entities.Should().ContainSingle().Subject;
+        row.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("team", defaultTeam.Id),
+            "exactly the default team of the To Do's unit (review F3), not any team there");
         row.GetAttributeValue<EntityReference>("owningbusinessunit").Id.Should().Be(todoBusinessUnit);
     }
 
