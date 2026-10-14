@@ -376,6 +376,23 @@ internal sealed class SecureChildShareWorld
             return;
         }
 
+        // Ontology task 144: the core-ancestor re-stamp writes stamp columns only (a value, or DBNull to clear one).
+        if (fields.Count > 0 && fields.Keys.All(StampColumns.Contains))
+        {
+            StampWrites.Add((table, id, new Dictionary<string, object>(fields)));
+            if (!_rows.TryGetValue((table, id), out var stamped))
+                throw new InvalidOperationException($"Test: {table} {id} does not exist.");
+            foreach (var (column, stamp) in fields)
+            {
+                if (stamp is DBNull)
+                    stamped.Attributes.Remove(column);
+                else
+                    stamped[column] = stamp;
+            }
+
+            return;
+        }
+
         if (!fields.TryGetValue("ownerid", out var value) || value is not EntityReference owner || fields.Count != 1)
             throw new NotSupportedException($"The test world models owner updates only (got {string.Join(",", fields.Keys)}).");
 
@@ -386,6 +403,28 @@ internal sealed class SecureChildShareWorld
         if (_ignoredOwnerWrites.Contains(id))
             return;
         MoveOwner(table, id, principal);
+    }
+
+    /// <summary>Ontology task 144: every core-ancestor stamp write (<see cref="RestamperOver"/>), in order, as sent.</summary>
+    public List<(string Table, Guid Id, Dictionary<string, object> Fields)> StampWrites { get; } = new();
+
+    private static readonly HashSet<string> StampColumns = new(
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute),
+        StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Ontology task 144: one row by id with the requested columns only (an empty list answers the row with none), or
+    /// Dataverse's ObjectDoesNotExist fault — an <see cref="IGenericEntityService.RetrieveAsync"/> of this world.
+    /// </summary>
+    public Entity Retrieve(string table, Guid id, string[]? columns)
+    {
+        if (_failingRowReads.Contains((table, id)))
+            throw new InvalidOperationException($"Test: this {table} row cannot be read.");
+        if (!_rows.TryGetValue((table, id), out var row))
+            throw new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = -2147220969 },
+                new System.ServiceModel.FaultReason($"{table} {id} does not exist"));
+        return Project(row, columns is null ? new ColumnSet(true) : new ColumnSet(columns));
     }
 
     public SecureChildShareWorld Add(string table, Guid id, params (string Column, object Value)[] columns)
@@ -470,6 +509,23 @@ internal sealed class SecureChildShareWorld
         return new SecureChildReconciler(
             entities, resolver, synchronizer, webApi, configuration, NullLogger<SecureChildReconciler>.Instance,
             accessCacheInvalidator);
+    }
+
+    /// <summary>
+    /// Ontology task 144: the REAL <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper"/> over this world — its
+    /// resolver and its cascade read these rows (single-row reads included) and its stamp writes land here
+    /// (<see cref="StampWrites"/>), so a re-file's re-stamp and the ownership pass after it see the same rows, as in Dataverse.
+    /// </summary>
+    public static Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper RestamperOver(Func<SecureChildShareWorld> current)
+    {
+        var entities = EntitiesOver(current);
+        entities
+            .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string table, Guid id, string[] columns, CancellationToken _) => Task.FromResult(current().Retrieve(table, id, columns)));
+        var resolver = new Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver(
+            entities.Object, ColumnProbe(), NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance);
+        return new Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper(
+            entities.Object, resolver, NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper>.Instance);
     }
 
     /// <summary>

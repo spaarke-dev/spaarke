@@ -17,6 +17,8 @@ using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Tests.AccessControl;
+using Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 using Sprk.Bff.Api.Tests.Domain.Signals;
 using Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -88,13 +90,17 @@ public class ReconciledEmailFilingTests
             // The reconciler's share mirror and descendant pass run over loose doubles; it never throws by contract.
             var entities = new Mock<IGenericEntityService>();
             var configuration = new ConfigurationBuilder().Build();
-            var children = new SecureChildReconciler(
+            var children = Isolation is { } isolation
+                ? SecureChildShareWorld.ReconcilerOver(() => isolation, new FakeRecordShareTable(), null!)
+                : new SecureChildReconciler(
                 entities.Object, Ownership,
                 new SecureChildShareSynchronizer(entities.Object, Mock.Of<IDataverseRecordShareService>(), null!, configuration,
                     NullLogger<SecureChildShareSynchronizer>.Instance),
                 null!, configuration, NullLogger<SecureChildReconciler>.Instance);
             var filing = new ReconciledEmailFiling(
-                resolver, Dataverse.Object, Probe.Object, children, Stamps.Restamper, NullLogger<ReconciledEmailFiling>.Instance,
+                resolver, Dataverse.Object, Probe.Object, children,
+                Isolation is { } stamped ? SecureChildShareWorld.RestamperOver(() => stamped) : Stamps.Restamper,
+                NullLogger<ReconciledEmailFiling>.Instance,
                 Trigger?.Object);
 
             var outcome = await capture.CaptureWithOutcomeAsync(request, "user-oid", CancellationToken.None);
@@ -109,6 +115,10 @@ public class ReconciledEmailFilingTests
         /// <summary>Ontology task 144: the rows filed under the communication, as the core-ancestor re-stamp reads and writes them
         /// (the REAL <see cref="CoreAncestorRestamper"/> over an in-memory Dataverse; empty unless a test seeds it).</summary>
         public StampWorld Stamps { get; } = new();
+
+        /// <summary>Ontology task 144: when set, the re-stamp AND the ownership pass run over this one secure-child world (the
+        /// REAL restamper and the REAL reconciler, ownership resolver and share synchronizer), so the re-own reads the new stamp.</summary>
+        public SecureChildShareWorld? Isolation { get; set; }
 
         /// <summary>Ontology D-48 (#1659): the association-confirmed Signal trigger the filing queues; null = none registered.</summary>
         public Mock<SignalEvaluationTrigger>? Trigger { get; set; }
@@ -186,6 +196,36 @@ public class ReconciledEmailFilingTests
         world.Stamps.Lookup("sprk_todo", todo, "sprk_regardingmatter").Should().Be(MatterId);
         world.Stamps.Patches.Should().NotContain(p => p.Entity == "sprk_communication",
             "the communication's own filing is the association engine's write, never the restamper's");
+    }
+
+    [Fact(DisplayName = "Ontology task 144: filing the reconciled communication under a SECURE matter re-owns its Signal and Decision Record to the Secure Record owner team and re-stamps them, in the same operation")]
+    public async Task FileIfUnfiled_UnderASecureMatter_ReownsAndRestampsTheSignalAndDecisionRecordFiledUnderIt()
+    {
+        // The window case of the 144 trace: the communication was on an ORDINARY matter and was unfiled outside the BFF, so
+        // its Signal and Decision Record still say that matter; the Office save files it under the secure MatterId.
+        var staleMatter = Guid.NewGuid();
+        var signal = Guid.NewGuid();
+        var decisionRecord = Guid.NewGuid();
+        var isolation = SecureChildShareWorld.Standard()
+            .SecureRoot("sprk_matter", MatterId)
+            .OrdinaryRoot("sprk_matter", staleMatter)
+            // As the filing leaves it: under the secure matter, re-owned by the reparent to the named team.
+            .SecureChild("sprk_communication", CanonicalId, ("sprk_regardingmatter", "sprk_matter", MatterId))
+            .OrdinaryChild("sprk_signal", signal,
+                ("sprk_regardingcommunication", "sprk_communication", CanonicalId), ("sprk_regardingmatter", "sprk_matter", staleMatter))
+            .OrdinaryChild("sprk_decisionrecord", decisionRecord,
+                ("sprk_regardingcommunication", "sprk_communication", CanonicalId), ("sprk_regardingmatter", "sprk_matter", staleMatter));
+        var world = new World(reconciled: true, Unfiled()) { Isolation = isolation };
+
+        var (_, result) = await world.SaveAsync(PaneSave(Matter()));
+
+        result.Should().Be(ReconciledFilingResult.Filed);
+        foreach (var (table, id) in new[] { ("sprk_signal", signal), ("sprk_decisionrecord", decisionRecord) })
+        {
+            isolation.ValueOf<EntityReference>(table, id, "sprk_regardingmatter")!.Id.Should().Be(MatterId);
+            isolation.OwnerOf(table, id).Should().Be(DataversePrincipalRef.Team(SecureChildShareWorld.SecureTeam),
+                $"the {table} follows the communication into isolation in the same operation");
+        }
     }
 
     [Fact(DisplayName = "Ontology task 144: a filing that is refused re-stamps nothing")]
