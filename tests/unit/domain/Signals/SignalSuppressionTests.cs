@@ -1400,8 +1400,9 @@ public class SignalSuppressionTests
     }
 
     // =====================================================================================
-    // Ontology task 144 (uac-r2 #1746 K4 / K7): a Signal registered with the core-ancestor stamp reaches a project or work-assignment
-    // core through its own sprk_regarding{project,workassignment} stamp, where the typed lookup it lacks (audit F5) never could.
+    // Ontology task 144 (uac-r2 #1746 K7, and a characterisation of K4): a Signal registered with the core-ancestor stamp reaches a
+    // project or work-assignment core through its own sprk_regarding{project,workassignment} stamp, where the typed lookup it lacks
+    // (audit F5) never could.
     // =====================================================================================
 
     private static readonly Guid SecureWorkAssignmentId = Guid.Parse("5ec0be00-0000-4000-8000-0000000000c1");
@@ -1421,8 +1422,12 @@ public class SignalSuppressionTests
 
     [Theory]
     [MemberData(nameof(ProjectAndWorkAssignmentCores))]
-    public async Task K4_ASecureOwnedSignal_OnAProjectOrWorkAssignmentCore_LeavesTheUndeterminedBucket_OnceItsStampExists(string coreTable, string stampColumn)
+    public async Task Characterisation_AStampOnTheSignal_IsALineageLookupTheWalkFollows_ToAProjectOrWorkAssignmentCore(string coreTable, string stampColumn)
     {
+        // CHARACTERISATION (review F3: not acceptance-7 evidence). The stamp is written here by hand; it pins only that the partition
+        // walk follows sprk_regarding{project,workassignment} on a Signal, so that a stamp the restamper writes (proven in
+        // OntologyStampedChildRestampTests and SecureChildOwnershipAiToolTests.OntologyRestamp) moves a Secure-owned Signal out of the
+        // undetermined bucket.
         var s = new Store();
         var (core, type) = SecureCore(s, coreTable);
         var subject = Guid.NewGuid();
