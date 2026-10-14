@@ -21,7 +21,14 @@ Rule (`scripts/Set-ExternalFlagForB2BGuests.ps1 -CustomerTenantIds`):
 
 ## ADR check (ADR-028 A8/A9, `.claude/constraints/auth.md` Model 1 block)
 
-**§6.5 path pending the owner.** `auth.md:69` says workforce membership is keyed on `CustomerTenantIds`, "**never** on … an email domain or a `#EXT#` UPN". The script decides whether a licensed guest belongs to the customer by looking up the directory of their email domain. My first reading was "Path C, comply", on the grounds that the rule governs the BFF's run-time classification of workforce contacts. The second review (opus) pointed out that the rule's text is not limited to run time, so calling it compliance narrowed a MUST on my own reading. That is the silent path §6.5 forbids. Raised with the owner on 2026-10-13. The options:
+**Resolved 2026-10-13: Path B.** The owner delegated the choice: "whatever is the correct approach that all are aligned". The bottom line is that workforce contact-users must never be marked external or CIAM.
+
+- Only `.claude/constraints/auth.md:69` says "never … an email domain". ADR-028 itself keys membership on validated `iss`/`tid`.
+- So `auth.md:69` gained a scope note, in PR #1815. The rule governs what the BFF accepts or binds from a token. It does not cover this reviewed operator data step on `systemuser.sprk_isexternal`.
+- Workforce contacts are contacts, not systemusers, and never reach this script. Their plane is `contact.sprk_identityplane` (Workforce or External), written at sign-in by `ContactIdentityBinder`.
+- SPA-r3 (pending edits to adjacent `auth.md` lines) and UAC-r2 (owner of task 114 and the flag) were told.
+
+The original analysis, for the record: `auth.md:69` says workforce membership is keyed on `CustomerTenantIds`, "**never** on … an email domain or a `#EXT#` UPN". The script decides whether a licensed guest belongs to the customer by looking up the directory of their email domain. My first reading was "Path C, comply", on the grounds that the rule governs the BFF's run-time classification of workforce contacts. The second review (opus) pointed out that the rule's text is not limited to run time, so calling it compliance narrowed a MUST on my own reading. That is the silent path §6.5 forbids. Raised with the owner on 2026-10-13. The options:
 
 - **Path B, recommended:** clarify the rule's scope in `auth.md:69`. The rule's purpose is that the BFF never grants membership from a spoofable claim at sign-in. This script is different:
   - it is an operator data step on `systemuser.sprk_isexternal`, dry-run and reviewed by the owner;

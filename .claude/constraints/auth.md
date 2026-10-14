@@ -67,6 +67,13 @@ Terms: **Spaarke tenant** = Spaarke's Entra directory; **customer's home directo
 - ✅ **MUST** sign a Model 1 **workforce contact** in to the browser SPA with their company account, through one multitenant Spaarke SPA client at their customer's home directory. The BFF accepts the token only when `iss` exactly matches `https://login.microsoftonline.com/{tid}/v2.0`, `tid` is in that stamp's `WorkforceIdentity:CustomerTenantIds`, `aud` is that stamp's BFF app, it is a user token and `acct` = 0. Identity is keyed on (`tid`, `oid`). Workforce contacts are **not** B2B guests (ADR-028 A9).
 - ✅ **MUST** resolve a licensed core user who opens the browser SPA with their company account to their `systemuser` only through the stored link home (`tid`, `oid`) → `systemuserid` — never by email or UPN (A9).
 - ✅ **MUST** key workforce membership on the customer's home directory id(s) in `WorkforceIdentity:CustomerTenantIds` — **never** on `AzureAd:TenantId` (= Spaarke on Model 1), an email domain or a `#EXT#` UPN.
+  - **Scope (owner 2026-10-13, §6.5 path B; word-add-in-r1 task 126):** this governs what the BFF accepts or binds from a sign-in token, as ADR-028 A9 states it (validated `iss`/`tid`).
+  - It does not cover the operator's reviewed data step `scripts/Set-ExternalFlagForB2BGuests.ps1 -CustomerTenantIds`, which sets `systemuser.sprk_isexternal` on licensed B2B guests. That step:
+    - may use a guest's email domain only as the input to a Graph directory lookup;
+    - compares directory ids;
+    - is reviewed as a dry run;
+    - never writes a guest it cannot place.
+  - Workforce contacts never reach it. They are contacts, not systemusers, and their plane is `contact.sprk_identityplane`, written at sign-in.
 - ❌ **MUST NOT** use a multitenant / `common` / `organizations` authority for Model 1 licensed-user sign-in (model-driven apps, Office add-ins, Teams) — the guest lands in the home directory with a different `oid` (A8). The **only** exception is the A9 workforce-contact browser-SPA client.
 - Full explanation and where each value lives: [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §6.5.2 "Model 1: why a customer has a home tenant at all"](../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md). Code: `WorkforceIdentityOptions.cs` `WorkforceMembershipTest`.
 
