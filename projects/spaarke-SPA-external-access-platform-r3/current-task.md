@@ -24,7 +24,7 @@
 Option B; no delete after close; invoice upload = invoice rights only; team-access and renewal bell items wanted; contact owned by the customer's primary BU; intake (department from contact, Invention partners behind a flag, incidents simple, fixed lists, NDA review + issue); grid views from Dataverse views; 060 shared service OK if Model 1 allows; dev dispatch "ok"; 060 tenant-wide group permission approved if it cannot be scoped. Deferred: DEF-001 #1736 NDA generation, DEF-002 #1737 incident alerting.
 
 ## Open owner questions
-1. Check-2 issue 3 (Service Request number): the read-only check on dev found no autonumber on `sprk_servicerequestnumber`, no workflows, flows or form scripts on `sprk_servicerequest`; 1 of 2 rows is numbered (probably typed by hand). Proposal: set AutoNumberFormat `RQST-{SEQNUM:4}` in the solution + dev (schema change, owner-gated). Awaiting the owner.
+1. Check-2 issue 3: owner said yes to autonumber 2026-10-13 → task 067 (dev apply gated).
 2. Owner deletes probe message `b38f0ab7-03c7-f111-a05c-0022482913fc` by hand.
 
 ## Owner check 3 (CIAM partner, 2026-10-13): findings
