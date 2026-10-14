@@ -1324,7 +1324,9 @@ public sealed partial class SignalWriter
 
         if (core.Entity is not null)
         {
-            // D-36: the generic core-record pair (catalog type + id); sprk_matter as well only when the core is a matter.
+            // D-36: the generic core-record pair (catalog type + id); sprk_matter as well only when the core is a matter. Task 145:
+            // sprk_matter is decision CONTEXT (the frozen core, an owner parent in the lineage), never the filing; the filing is the
+            // subject lookup plus the live sprk_regarding{core} stamp, which follows the subject (144 review K1).
             entity["sprk_corerecordtype"] = new EntityReference("sprk_recordtype_ref", coreTypeRefId!.Value);
             entity["sprk_corerecordid"] = core.Id.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant();
             if (core.Entity == "sprk_matter")
