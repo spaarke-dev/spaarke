@@ -172,9 +172,12 @@ jobs:
       #   Sprk.Bff.Api.Tests.{Seam, AccessControl, Api, Integration, DataMutation,
       #                       Domain, Contract, Auth, Regression, Tenant}
       # Not included: Eval (LLM golden-utterance suites), Services/Infrastructure
-      # (mostly unit tests of unrelated services), and anything Compose: those tests
-      # parse Git-LFS .docx fixtures, which this job does not fetch (a mutation run
-      # does not need the 100+ MB corpus and an LFS pointer would fail the initial run).
+      # (mostly unit tests of unrelated services), anything Compose (those tests parse
+      # Git-LFS .docx fixtures, which this job does not fetch, and an LFS pointer would
+      # fail the initial run), and, for cost, Api.Office / Api.Insights / Api.Documents:
+      # host-booting suites that are ~34 of the ~89 test-minutes of the whole suite.
+      # The first proof run kept them and Stryker's initial test run (10,152 tests) had
+      # not finished after 56 minutes. See scripts/ci/run-stryker.sh for the filter.
       - name: Mutate (Sprk.Bff.Api)
         id: bff
         if: steps.scope.outputs.bff_count != '0'

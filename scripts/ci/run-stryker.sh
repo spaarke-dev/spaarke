@@ -29,7 +29,11 @@ test_dir="tests/unit/Sprk.Bff.Api.Tests"
 # The KEEP-path test set (ADR-038): see the comment above the "Mutate" steps in
 # mutation-nightly.yml for how the namespaces were derived and what is excluded and why.
 keep='FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.|FullyQualifiedName~Sprk.Bff.Api.Tests.Domain.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.|FullyQualifiedName~Sprk.Bff.Api.Tests.Regression.|FullyQualifiedName~Sprk.Bff.Api.Tests.AccessControl.|FullyQualifiedName~Sprk.Bff.Api.Tests.Auth.|FullyQualifiedName~Sprk.Bff.Api.Tests.DataMutation.|FullyQualifiedName~Sprk.Bff.Api.Tests.Contract.|FullyQualifiedName~Sprk.Bff.Api.Tests.Tenant.'
-filter="(${keep})&FullyQualifiedName!~Compose&Category!=Flaky"
+# Excluded for cost: Compose (LFS fixtures) and the three host-booting namespaces that
+# dominate test time (measured 2026-10-13, summed test-minutes: Api.Office 20.2,
+# Api.Insights 9.0, Api.Documents 4.5 of ~89 in the whole suite). The first proof run
+# with them in (10,152 tests) had not finished Stryker's initial test run after 56 min.
+filter="(${keep})&FullyQualifiedName!~Compose&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Documents.&Category!=Flaky"
 
 # Stryker globs are matched inside the project directory.
 mutate_json="$(sed "s#^${prefix}#**/#" "$files" | jq -R . | jq -sc .)"
@@ -46,7 +50,7 @@ jq -n \
   --argjson mutate "$mutate_json" \
   --arg since "$since" \
   --arg filter "$filter" \
-  --argjson concurrency "$(nproc)" \
+  --argjson concurrency "2" \
   '{
     "stryker-config": {
       "project": $project,
