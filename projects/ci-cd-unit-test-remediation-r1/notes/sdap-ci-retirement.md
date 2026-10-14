@@ -53,8 +53,9 @@ owner, edited in place, closed with "Recovered". Decision logic for the first tw
 `scripts/ci/master-ci-verdict.ps1`. It judges master's **current state**, not the triggering run alone: the newest
 25 completed master push runs, each job (and each Tier 2 shard) from the most recent run that executed it. So a
 docs-only push (Tier 1 skipped, Router green) cannot close a compile-break alert, a path-gated job keeps its last
-real result, and runs finishing out of order cannot hide an older run's failure. Known limit: a job not executed
-in the last 25 master runs drops out of the evaluation. The standalone alerts skip posting when a newer master
+real result, and runs finishing out of order cannot hide an older run's failure. Known limits: a job not executed
+in the last 25 master runs drops out of the evaluation; a job that failed and was then renamed or removed stays
+red until it ages out. The standalone alerts skip posting when a newer master
 run of that workflow has already completed. Replay any past state with `-AsOf`:
 
 | Replayed run | router-master | tier2 | |

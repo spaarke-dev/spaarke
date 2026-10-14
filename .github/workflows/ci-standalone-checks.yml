@@ -522,8 +522,10 @@ jobs:
           # the newer run opened. Every job here runs on every non-docs push, so the newest
           # completed run is always a full verdict. If the check itself fails, post anyway.
           if [ "$EVENT" = "push" ]; then
-            newest="$(gh api "repos/${REPO}/actions/workflows/ci-standalone-checks.yml/runs?branch=master&event=push&status=completed&per_page=1" --jq '.workflow_runs[0].run_number // 0' || echo 0)"
-            if [ "${newest:-0}" -gt "$RUN_NUMBER" ]; then
+            newest="$(gh api "repos/${REPO}/actions/workflows/ci-standalone-checks.yml/runs?branch=master&event=push&status=completed&per_page=1" --jq '.workflow_runs[0].run_number // 0' 2>/dev/null || true)"
+            # On an API error gh prints the error body; anything not a plain number means "unknown: post".
+            case "$newest" in ''|*[!0-9]*) newest=0 ;; esac
+            if [ "$newest" -gt "$RUN_NUMBER" ]; then
               echo "status=skip" >> "$GITHUB_OUTPUT"
               echo "Superseded: newer master run #${newest} has already completed and posted; not posting run #${RUN_NUMBER}." >> "$GITHUB_STEP_SUMMARY"
               exit 0

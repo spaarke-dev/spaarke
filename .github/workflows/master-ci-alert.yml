@@ -133,7 +133,8 @@ jobs:
       # The verdict step failing (GitHub API errors after retries, a script bug) would otherwise
       # leave both alerts silently stale. Raise a separate alert for that, clear it on success.
       - name: Raise or clear master-ci-alert/evaluation
-        if: always() && (steps.read.outcome == 'success' || steps.read.outcome == 'failure')
+        # Any outcome but skipped: failure, or cancelled (job timeout / runner loss), is failing.
+        if: always() && steps.read.outcome != 'skipped'
         uses: ./.github/actions/quality-alert
         with:
           check: master-ci-alert/evaluation

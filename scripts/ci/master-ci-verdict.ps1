@@ -43,9 +43,10 @@
     Every gh call is retried (3 attempts); if one still fails the script throws, and the
     workflow raises the master-ci-alert/evaluation alert instead of staying silent.
 
-    KNOWN LIMIT: a job whose last execution is older than the window (default 25 master runs)
-    is no longer considered, so its alert would close as recovered. At current master volume
-    the window covers roughly a working day.
+    KNOWN LIMITS: a job whose last execution is older than the window (default 25 master runs)
+    is no longer considered, so its alert would close as recovered; at current master volume the
+    window covers roughly a working day. Conversely, a job that failed and was then renamed or
+    removed keeps its red until it ages out of the window, since it never executes again.
 
 .PARAMETER RunId
     The triggering CI run. It identifies the workflow; it is also the window's end with -AsOf.
@@ -214,7 +215,7 @@ if ($reasons.Count -gt 0) {
         ($reasons | ForEach-Object { "- $_" })
         ''
         'Every branch cut from master now starts red. A cancelled job is what a timeout reports and counts as failing.'
-        'This alert closes itself once every job listed has passed on a later master run.'
+        'This alert closes itself once every job listed has executed again and passed on a later master run. A path-gated job runs only when its paths change; a job not executed in the newest 25 master runs (for example renamed or removed) drops out of the evaluation.'
     ) -join "`n"
 } elseif ($jobState.Count -gt 0) {
     $out.router_status = 'ok'
@@ -258,7 +259,7 @@ if ($shardState.Count -eq 0) {
             ($bad | ForEach-Object { "- $_" })
             ''
             'Tier 2 is advisory (it never blocks a merge), which is why this alert exists: otherwise nobody sees it.'
-            'The shard log names the failing tests. This alert closes itself once every shard listed passes on a later master run.'
+            'The shard log names the failing tests. This alert closes itself once every shard listed passes on a later master run that changes BFF paths (shards run only then).'
         ) -join "`n"
     } else {
         $out.tier2_status = 'ok'
