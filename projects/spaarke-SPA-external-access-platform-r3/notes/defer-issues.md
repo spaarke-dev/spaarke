@@ -261,6 +261,42 @@ No committed ribbon or form references `Sprk.Communication.Send`; `Communication
 
 ---
 
+### ISS-009 — External read ignores thread privacy; two writers can put a partner-visible item into a Private thread
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-14 |
+| **Source** | Task 065 re-check of fix round 3 (adversarial review), "outside the diff". Both paths existed before 065. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1859 |
+
+**Description**
+
+The external read `CommunicationThreadReadService.FilterExternalMessagesAsync` hides a communication from partners (CIAM and workforce contacts) only on `sprk_isinternalonly`. It never looks at the thread's privacy. Task 065 makes every writer apply a "Private thread means internal" floor at write time, but two older writers still put a `false` row into a thread that may be Private:
+
+- `CommunicationService.PostToRecordThreadAsync` (~:1395) writes `false` for a contact's own post into the record's default thread, even if that thread has been made Private.
+- `ThreadResolver` re-file rules can move a `false` email into a record's default thread with no privacy check.
+
+Failure mode: a record's default thread is made Private and a partner posts to it, or an email is re-filed into it. Every other partner with access to that record then sees the item.
+
+There is a related design question for the owner: when a thread becomes Private, should partners stop seeing its earlier messages? Today a privacy change only affects later messages.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs` `FilterExternalMessagesAsync` (~:549)
+- `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs` `PostToRecordThreadAsync` (~:1395)
+- `src/server/api/Sprk.Bff.Api/Services/Communication/Threads/ThreadResolver.cs`, the re-file rules
+- Shared floor helper: `Services/Communication/CommunicationInternalOnlyFloor.cs` (task 065)
+
+**Suggested fix**: gate the external read on thread privacy as well as the flag (hide any item in a thread not explicitly Open). That one change covers every writer and any later privacy change. Alternatively, apply the 065 floor in the two writers.
+
+**Estimated effort**: 0.5-1 day, plus the owner's answer on retroactive privacy.
+**Blockers**: task 065 merged.
+**Related**: task 065 (notes/task-065-notes.md), ADR-028 external plane.
+
+---
+
 ### DEF-001 — Generate and send the standard NDA from the intake request (separate project)
 
 | Field | Value |
