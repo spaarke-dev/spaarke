@@ -338,6 +338,37 @@ Failure mode: an external licensed user with read on a matter's communications r
 
 ---
 
+### ISS-011 — External document lists show documents with no file; download and versions then answer 409
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-14 |
+| **Source** | UAC-r2 task 187 live document leg on dev at R3 `4e23edeb2` (passed). Filed by UAC as #1886; tracked here because external documents are R3's surface. |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1886 |
+
+**Description**
+
+Two dev documents (`122f4462…`, `d4300ad0…`) have no SPE pointer. The external document list returns them, but download and versions answer 409 "No file attached", and the SPA gives no hint before the click.
+
+Failure mode: a partner clicks a listed document and gets an error.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalDataService.cs` (DocumentRow / the document DTO)
+- The external SPA document grid and its download action (`src/client/external-spa/`)
+
+**Suggested fix**
+
+Add `hasFile` to the external document DTO, and have the SPA show the row without a download action. Or omit file-less rows from the list. Owner choice: hiding them changes what a partner can see is filed.
+
+**Estimated effort**: hours.
+**Blockers**: none.
+**Related**: task 066 (download/open only), DEF-003 (preview).
+
+---
+
 ### DEF-001 — Generate and send the standard NDA from the intake request (separate project)
 
 | Field | Value |
