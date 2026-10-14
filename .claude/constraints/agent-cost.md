@@ -75,7 +75,7 @@ All are documented at https://code.claude.com/docs/en/sub-agents, `/model-config
 
 | Setting | Where | Value | Effect |
 |---|---|---|---|
-| `PreToolUse` hook `scripts/quality/require-agent-model.py` (matcher `Agent\|Task\|Workflow`) | `hooks` | — | Denies a sub-agent launch with no `model` (and no definition `model:`), and a workflow script with an `agent()` call naming no model. Claude re-issues the call with a model; the user is never asked. Tests: `scripts/quality/tests/test_require_agent_model.py` |
+| `PreToolUse` hook `scripts/quality/require-agent-model.py` (matcher `Agent\|Task\|Workflow`) | `hooks` | — | Denies a sub-agent launch with no `model` (and no definition `model:`), and a workflow script with an `agent()` call naming no model. Claude re-issues the call with a model; the user is never asked. Logs each allowed launch to `~/.claude/spend-archive/agent-launches.csv` for `spend-report.py --model-fit`. Tests: `scripts/quality/tests/test_require_agent_model.py` |
 | `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` | `env` | `4` | Concurrent Agent-tool sub-agents per session (default 20) |
 | `CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS` | `env` | `4` | Concurrent workflow agents per run (default up to 16) |
 | `workflowSizeGuideline` | top level | `small` | Advice to Claude: fewer than 5 workflow agents. Not a cap. |
@@ -89,4 +89,5 @@ Not changed:
 
 - `python scripts/ai-cost/get-project-cost.py <slug>` gives a project's all-time total.
 - `/project-spend-update` refreshes the board fields.
-- For a per-day split by project, model, or main vs sub-agent, group the transcript `usage` records by `timestamp[:10]`; see the 2026-10-09 PR description for the script.
+- `python scripts/ai-cost/spend-report.py --days 14` splits spend by day, project, model, and main vs sub-agent.
+- `python scripts/ai-cost/spend-report.py --days 7 --model-fit` joins each sub-agent run to the model and effort the launch hook logged, with the task's rework line, to show whether the chosen model fit the work (`scripts/ai-cost/README.md`).

@@ -651,6 +651,11 @@ CREATE: projects/{project-name}/tasks/TASK-INDEX.md
     | A | 020, 021, 022 | 010 complete | Independent API endpoints |
     | B | 031, 032 | 030 complete | Separate UI components |
     ```
+
+SET the board field "Tasks Planned" (number) to the number of task files just created, once, when the tasks are first created.
+  Never on later runs or syncs, and never overwrite a non-empty value. The Task Count field keeps tracking the current number.
+  Field id: gh project field-list 2 --owner spaarke-dev --format json  (name "Tasks Planned")
+  If the project has no board item yet, skip; `python scripts/ai-cost/backfill-tasks-planned.py <slug> --apply` sets it later from git history.
 ```
 
 **Output to User:**
