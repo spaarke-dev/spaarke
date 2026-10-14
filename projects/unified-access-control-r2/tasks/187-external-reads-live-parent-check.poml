@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="187" project="unified-access-control-r2">
+  <metadata>
+    <title>External reads check each row's LIVE parents, not only its copied stamp (D-123; issue #1857)</title>
+    <phase>Session 28: UAC (owner round 99, 2026-10-14)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security: the external plane reads app-only, so this check IS the secure wall for external callers.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security and tenant isolation; fails closed; touches several external read surfaces.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ExternalDataService.cs, which SPA-r3 also edits (task 064: CollectionPrefer, the collection-page reader's Prefer header, DocumentRow.SprkDocumenttype). Do not touch the shared collection-page reader.</parallel-reason>
+    <deps>none (master at or after 6da771b96)</deps>
+    <tags>bff-api, security, access-control, tenant-isolation, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <origin>
+      Found by ontology-r1 (task 144 window trace, 2026-10-14). Mapped by uac-r2 on origin/master 630373cbb; issue #1857.
+      Owner round 99 (2026-10-14) chose "Live-parent check (precise)" over the owner-team check, so the fix must not over-hide: a row whose live parents the caller can read stays visible.
+    </origin>
+  </metadata>
+
+  <goal>
+External read surfaces (/api/v1/external/**, app-only) decide visibility from a child row's COPIED core-ancestor stamp (sprk_regardingproject / matter / workassignment) through ExternalMultiRootRule.SecureRootsReadable. They never check the row's live parents. Two shapes leak a row that SecureChildReconciler has put behind a secure root to an external reader of an ordinary root:
+(a) Transient: a parent is re-filed outside the BFF, and the copy is stale until CoreAncestorStampReconciliationJob runs.
+(b) Permanent "carrier": a row's own pair names ordinary M (DirectRootLink, never restamped) while another lookup on it (e.g. sprk_regardingcommunication) points at a parent filed under secure X. AmbiguousSource and InconsistentPair rows are never repaired either.
+
+Fix: every external read of a child row also selects the row's source and carrier lookups (the CoreAncestorResolver.StampSourceColumns sources for that table, plus every SecureChildReconciler lineage parent lookup, plus the document related links sprk_relatedevent / sprk_relatedcommunication / sprk_relatedtodo / sprk_invoice). It resolves those parents' LIVE roots in batch, reusing the existing primitives (EffectiveRootFlags.ReadAncestryAsync, SecureRootInheritance.TypedLookupsOf, ReadSecureRootFlagsAsync). The rule then evaluates the union {stamped roots} ∪ {live roots of every parent}: a row is listed only when the caller holds Read on every SECURE root in that union, the same rule that applies to stamped roots today. The parent the user filed under is one input among others, never the only one. The walk is bounded; reaching the bound, a read failure, or an unresolvable parent means the row is WITHHELD (fail closed), logged with ids only, with Truncated set where the list contract has it.
+  </goal>
+
+  <surfaces>
+    Each surface is in scope; confirm each against master first and record file:line in the task notes.
+    - To-do lists: ExternalDataService.GetTodosAsync (~:1498), BuildTodoListUrl (~:1541) ($select only; the $filter stays).
+    - Event lists: GetEventsAsync (~:1583), ReadableEventsAsync (~:1619).
+    - PATCH /todos/{id}: GetTodoRootAsync (~:1436). The write must refuse when a live parent is a secure root the caller can't read (404 or 403, matching the existing deny shape).
+    - DELETE /todos/{id} and /events/{id}: the same check (creator-only today, but the creator may have lost access through a re-file).
+    - Messages (/{root}/{id}/messages) and /notifications: SecureRootsFilter / CommunicationThreadReadService.ExternalSelect.
+    - Invoice message threads (ExternalMessageEndpoints.cs:385): there is no rule at all today. Apply the live-parent check.
+    - Documents (list, download, versions, module /fetch): the document's own root links stay the primary input. Add its related links' live roots.
+    - Module /fetch invoices and service-request documents: classify (in scope, or SAFE with reason) in the notes. No change without evidence.
+  </surfaces>
+
+  <constraints>
+    - ADR-028 and the project CLAUDE.md binding rules apply. Every endpoint keeps its auth. No new policy, no new endpoint, no new DI registration unless §11 is answered in the notes.
+    - Reuse: no new resolver class if EffectiveRootFlags / SecureRootInheritance / ExternalMultiRootRule can be extended. Answer CLAUDE.md §11's three questions for any new surface.
+    - Fail closed everywhere. Never treat an unreadable parent as non-secure.
+    - Do not edit the shared collection-page reader (~:2926) or the CollectionPrefer line (SPA-r3 task 064 owns them).
+    - If WorkforcePrincipalResolver.ResolveAsync is touched (it shouldn't be), SPA-r3's 045 WorkforceHome guard stays first.
+    - Logs carry ids and counts only.
+    - Query cost is bounded: at most one batched read per parent table per page, plus the existing flag read. State the measured worst case in the notes.
+    - No Dataverse schema change. No live writes beyond the deploy and the live gate's allowed set.
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>Carrier (permanent): a to-do whose stamp is ordinary M and whose sprk_regardingcommunication points at a communication under secure X is NOT listed to an external caller with Read on M only. It IS listed to a caller with Read on M and on X. Tests show both cases.</criterion>
+    <criterion>Stale copy (transient): a to-do whose stamp says M while its source intermediate's live root is secure X is withheld from an M-only reader. The same holds for an event.</criterion>
+    <criterion>No over-hiding: an ordinary to-do and event with fresh stamps and only ordinary parents lists exactly as before (existing tests unchanged and green).</criterion>
+    <criterion>PATCH and DELETE on a to-do (and DELETE on an event) whose live parent is a secure root the caller can't read are refused with the existing deny shape. Nothing is written.</criterion>
+    <criterion>Messages, notifications and invoice threads: a thread whose communication's live parent is secure X is withheld from an M-only reader.</criterion>
+    <criterion>Documents: a document whose related link points at a secure parent the caller can't read is withheld from the list and refused on download and versions.</criterion>
+    <criterion>Fail closed: a parent read that throws, a parent that can't be resolved, or the walk bound being reached withholds the row (tests for each). It never lists the row.</criterion>
+    <criterion>Negative control: each new test fails when the live-parent input is removed from the rule (mutation checked and recorded in the notes).</criterion>
+    <criterion>A source-scan guard or ArchTest fails if a new external child-row read builds its $select without the parent lookups, or calls SecureRootsReadable with stamped roots only (must-fire and must-not-fire controls; ratchet baseline if existing violations remain).</criterion>
+    <criterion>BFF build 0 errors; targeted tests green; full ArchTests green; publish-size delta measured against a fresh master build.</criterion>
+    <criterion>Deployed to dev; server-side live gate: an external caller's to-do and event lists answer 200 with no new 5xx, and an App Insights check shows no new exception class.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    - Code and tests on branch uac/187-external-live-parent (worktree C:/wt187), PR to master.
+    - notes/task-187-external-live-parent.md: the surface table with file:line, the §11 answers, the query cost, the mutation evidence.
+  </outputs>
+</task>

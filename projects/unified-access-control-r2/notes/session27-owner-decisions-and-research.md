@@ -1558,3 +1558,9 @@ The full record is in `notes/185-invite-code-design.md` §11.
 - **The plaintext code:** fixed in 185's scope with a "system mail" send option (no AI enrichment, the link removed from the stored body, no Sent Items).
 - **Q5–Q9:** accepted as recommended.
 - **The owner's question** "is the plaintext copy really a threat?" was answered: low risk. Using it needs a compromised stamp that can create CIAM accounts AND a co-operating reader inside the customer. Also, invite emails were going through AI triage like any other email.
+
+## Round 99 (2026-10-14): OWNER: external stale-stamp fix shape (task 187, #1857)
+
+- **The finding** (ontology-r1, mapped by uac-r2 on `630373cbb`): external read surfaces admit a child row by its COPIED core-ancestor stamp only. A stale copy, or a "carrier" row (its own pair names ordinary M; another lookup puts it under secure X; never restamped), lists behind the D-123 wall to an external reader of M. The surfaces affected are to-dos, events, PATCH/DELETE on to-dos, messages, notifications, invoice threads and document related links. `ReconciledEmailFiling` was refuted as an exposure: it hides rows, it does not expose them.
+- **Options offered:** (A) an owner-team check: cheap and fail-closed, but it over-hides carriers; (B) a live-parent check: precise, with a bounded extra read; (A then B).
+- **The owner chose (B) "Live-parent check (precise)".** Each external row read resolves the live roots of its source and carrier parents and evaluates them alongside the stamped roots. The walk is bounded and fails closed. A row whose live parents the caller can read stays visible.
