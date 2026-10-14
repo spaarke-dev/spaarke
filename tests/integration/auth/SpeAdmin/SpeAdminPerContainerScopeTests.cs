@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Tests.Contract.SpeAdmin;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Auth.SpeAdmin;
@@ -145,8 +146,12 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
 
         AssertUniformContainerNotFound(problem, "c-other", recycleBin: true);
         HandlerConfigReads().Should().Be(1);
-        _fixture.Graph.AllRequests.Should().ContainSingle("the binding is read from the recycle bin, and nothing else")
-            .Which.Path.Should().StartWith($"{DeletedPath}/c-other");
+        // #1652: a deleted container carries no stamp — its binding is the ownership record, admitted only because Graph
+        // lists the id under deletedContainers. One list read, one record read, nothing acted on.
+        _fixture.Graph.AllRequests.Should().ContainSingle("only the recycle bin's list was read; nothing was restored or purged")
+            .Which.Path.Should().Be(DeletedPath);
+        _fixture.DeletedRecords.CallsOf("Read").Should().ContainSingle();
+        _fixture.DeletedRecords.CallsOf("Delete").Should().BeEmpty();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -431,7 +436,7 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     [Fact]
     public async Task ADeletedContainerGoneBetweenTheFilterAndTheRestore_GetsTheFiltersExact404()
     {
-        _fixture.Graph.StubGet($"{DeletedPath}/c-race", ContainerJson("c-race", TypeT, UnitA.ToString()));
+        StubDeleted("c-race", UnitA.ToString());
         _fixture.Graph.StubPost($"{DeletedPath}/c-race", """{"error":{"code":"itemNotFound","message":"gone"}}""", 404);
         using var client = Admin();
 
@@ -533,9 +538,7 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     [Fact]
     public async Task RecycleBinList_ForALeafAdmin_HoldsOnlyItsOwnDeletedContainers_ReadFromTheRecycleBin()
     {
-        _fixture.Graph.StubGetExact(DeletedPath, DeletedListJson("c-own", "c-other"));
-        StubDeleted("c-own", UnitA.ToString());
-        StubDeleted("c-other", UnitB.ToString());
+        // StubContainers listed c-own (Unit A's record) and c-other (Unit B's record) as deleted.
         using var client = Admin();
 
         var body = await Json(await client.GetAsync($"/api/spe/recyclebin?configId={ConfigA}"));
@@ -1162,6 +1165,7 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
         StubContainer("c-type", TypeX, UnitA.ToString());
         _fixture.Graph.StubGet($"{ContainersPath}/c-gone", """{"error":{"code":"itemNotFound","message":"x"}}""", 404);
         _fixture.Graph.StubGet($"{ContainersPath}/c-fault", """{"error":{"code":"serviceNotAvailable","message":"x"}}""", 500);
+        _deletedIds.Clear();
         StubDeleted("c-own", UnitA.ToString());
         StubDeleted("c-other", UnitB.ToString());
     }
@@ -1169,8 +1173,27 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     private void StubContainer(string id, string type, string? stamp) =>
         _fixture.Graph.StubGet($"{ContainersPath}/{id}", ContainerJson(id, type, stamp));
 
-    private void StubDeleted(string id, string? stamp) =>
-        _fixture.Graph.StubGet($"{DeletedPath}/{id}", ContainerJson(id, TypeT, stamp));
+    private readonly List<string> _deletedIds = new();
+
+    /// <summary>
+    /// A container in the recycle bin (#1652): Graph lists it under <c>deletedContainers</c> for Type T and — when
+    /// <paramref name="stamp"/> is a business unit — this stamp's ownership record, written when the BFF deleted it, names
+    /// that unit. A null stamp = no record (deleted outside the BFF, or before records existed). Graph's own
+    /// <c>deletedContainers/{id}</c> carries no customProperties (measured on dev), so none is stubbed.
+    /// </summary>
+    private void StubDeleted(string id, string? stamp)
+    {
+        if (!_deletedIds.Contains(id))
+        {
+            _deletedIds.Add(id);
+        }
+
+        _fixture.Graph.ReplaceGetExact(DeletedPath, DeletedListJson(_deletedIds.ToArray()));
+        if (stamp is not null)
+        {
+            _fixture.DeletedRecords.Seed(id, TestSpeOwnership.AllowAllCustomer, Guid.Parse(stamp), TypeT, ConfigA);
+        }
+    }
 
     private void StubCreate(string id, string type) =>
         _fixture.Graph.StubPostExact(ContainersPath, ContainerJson(id, type, null), 201);

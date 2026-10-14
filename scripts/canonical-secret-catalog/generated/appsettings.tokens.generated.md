@@ -146,6 +146,7 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Consumers**:
   - BFF: Communication:DefaultMailbox / Communication:ApprovedSenders[0]:Email
 - **App-setting keys**:
+  - `Communication__ApprovedSenders__0__Email`
   - `Communication__DefaultMailbox`
 
 ### `Communication-Webhook-SigningKey`

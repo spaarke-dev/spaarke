@@ -350,7 +350,8 @@ public class UploadPipelineTelemetryTests
 
         // Act
         var result = await sut.UpdateUploadedFilesAsync(sessionIdString, tenantId, enriched);
-        await System.Threading.Tasks.Task.Delay(50); // give the fire-and-forget Cosmos write room to settle
+        // No wait: UploadPersisted is emitted inside the awaited call (the Cosmos write is fire-and-forget
+        // and nothing asserted below depends on it).
 
         // Assert
         result.Should().BeTrue();

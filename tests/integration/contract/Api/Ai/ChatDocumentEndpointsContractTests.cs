@@ -342,7 +342,7 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
     }
 
     [Fact]
-    public async Task FireDocumentUploadedEvent_InvalidSessionIdFormat_Returns400ProblemDetails()
+    public async Task FireDocumentUploadedEvent_InvalidSessionIdFormat_Returns404NotFoundOrNotOwned()
     {
         _fx.Reset();
         var client = _fx.CreateAuthenticatedClient();

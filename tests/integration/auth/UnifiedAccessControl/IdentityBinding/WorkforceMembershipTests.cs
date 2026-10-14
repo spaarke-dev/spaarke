@@ -16,14 +16,14 @@ public class WorkforceMembershipTests
 
     [Fact]
     public void AUserTokenFromAConfiguredTenantWithAcctZero_IsAMember()
-        => WorkforceMembershipTest.Evaluate(CallerKind.UserDelegated, CustomerTenant.ToString(), "0", OnlyT)
+        => WorkforceMembershipTest.Evaluate(CallerKind.UserDelegated, CustomerTenant.ToString(), "0", OnlyT, null, null)
             .Should().Be(WorkforceMembership.Member);
 
     [Theory]
     [InlineData(CallerKind.Application)]
     [InlineData(CallerKind.Indeterminate)]
     public void ANonUserToken_IsNeverAMember_WhateverElseItCarries(CallerKind kind)
-        => WorkforceMembershipTest.Evaluate(kind, CustomerTenant.ToString(), "0", OnlyT)
+        => WorkforceMembershipTest.Evaluate(kind, CustomerTenant.ToString(), "0", OnlyT, null, null)
             .Should().Be(WorkforceMembership.NotUserToken);
 
     [Fact]
@@ -35,23 +35,24 @@ public class WorkforceMembershipTests
         var claims = WorkforceCallerClaims.From(token);
 
         claims.Kind.Should().Be(CallerKind.Application);
-        WorkforceMembershipTest.Evaluate(claims.Kind, claims.TenantId, claims.Acct, OnlyT)
+        WorkforceMembershipTest.Evaluate(claims.Kind, claims.TenantId, claims.Acct, OnlyT, null, null)
             .Should().Be(WorkforceMembership.NotUserToken);
     }
 
     [Fact]
     public void AnEmptyTenantList_MakesNobodyAMember()
-        => WorkforceMembershipTest.Evaluate(CallerKind.UserDelegated, CustomerTenant.ToString(), "0", new HashSet<Guid>())
+        => WorkforceMembershipTest.Evaluate(CallerKind.UserDelegated, CustomerTenant.ToString(), "0", new HashSet<Guid>(), null, null)
             .Should().Be(WorkforceMembership.TenantListEmpty);
 
     [Fact]
     public void Model1_AMemberOfTheRegistrationsOwnTenant_IsNotAMember_AndAMemberOfTheCustomerTenantIs()
     {
         // T configured as the customer tenant; the app registration (AzureAd:TenantId) lives in S. The member test
-        // never consults AzureAd:TenantId — S's staff are a FOREIGN tenant here, T's employees are members.
-        WorkforceMembershipTest.Evaluate(CallerKind.UserDelegated, SpaarkeTenant.ToString(), "0", OnlyT)
+        // never consults AzureAd:TenantId for a MEMBER — S's staff are a FOREIGN tenant here, T's employees are members.
+        // (A registered guest (FR-15) additionally requires tid = AzureAd:TenantId; no stamp tenant is passed here.)
+        WorkforceMembershipTest.Evaluate(CallerKind.UserDelegated, SpaarkeTenant.ToString(), "0", OnlyT, null, null)
             .Should().Be(WorkforceMembership.ForeignTenant);
-        WorkforceMembershipTest.Evaluate(CallerKind.UserDelegated, CustomerTenant.ToString(), "0", OnlyT)
+        WorkforceMembershipTest.Evaluate(CallerKind.UserDelegated, CustomerTenant.ToString(), "0", OnlyT, null, null)
             .Should().Be(WorkforceMembership.Member);
     }
 
@@ -62,12 +63,12 @@ public class WorkforceMembershipTests
     [InlineData("2", WorkforceMembership.AcctUnrecognized)]
     [InlineData("member", WorkforceMembership.AcctUnrecognized)]
     public void Acct_OnlyZeroIsAMember_AndAbsenceFailsClosed(string? acct, WorkforceMembership expected)
-        => WorkforceMembershipTest.Evaluate(CallerKind.UserDelegated, CustomerTenant.ToString(), acct, OnlyT)
+        => WorkforceMembershipTest.Evaluate(CallerKind.UserDelegated, CustomerTenant.ToString(), acct, OnlyT, null, null)
             .Should().Be(expected);
 
     [Fact]
     public void AnUnparseableTid_IsForeign()
-        => WorkforceMembershipTest.Evaluate(CallerKind.UserDelegated, "not-a-tenant", "0", OnlyT)
+        => WorkforceMembershipTest.Evaluate(CallerKind.UserDelegated, "not-a-tenant", "0", OnlyT, null, null)
             .Should().Be(WorkforceMembership.ForeignTenant);
 
     [Fact]
@@ -77,7 +78,7 @@ public class WorkforceMembershipTests
         // not consulted. And a guest whose email is in the customer's domain is still a guest.
         var claims = WorkforceCallerClaims.From(WorkforceUser(Guid.NewGuid(), CustomerTenant, acct: "1",
             email: "employee@customer.example"));
-        WorkforceMembershipTest.Evaluate(claims.Kind, claims.TenantId, claims.Acct, OnlyT)
+        WorkforceMembershipTest.Evaluate(claims.Kind, claims.TenantId, claims.Acct, OnlyT, null, null)
             .Should().Be(WorkforceMembership.Guest);
     }
 

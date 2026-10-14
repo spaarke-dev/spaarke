@@ -334,6 +334,15 @@ environments:
       # Content Safety (T246): served by the multi-service AIServices account spaarke-openai-dev (eastus); the BFF
       # calls it with its managed identity (Cognitive Services User). Required at BFF startup outside Development/Testing.
       content_safety_endpoint: https://spaarke-openai-dev.cognitiveservices.azure.com/
+      # System sender (owner decision 2026-10-11; F3 fix round 2026-10-12): grant/registration email is sent from
+      # Communication__DefaultMailbox, which MUST also be Communication__ApprovedSenders__N__Email or the send is rejected
+      # InvalidSender (CommunicationOptionsValidator fails the host's start outside Development/Testing). Non-secret.
+      # Verified read-only 2026-10-12. The staging slot needs the same settings (not yet verified).
+      communication_default_mailbox: mailbox-central@spaarke.com # Communication__DefaultMailbox
+      communication_approved_senders:
+        - email: mailbox-central@spaarke.com # Communication__ApprovedSenders__0__Email
+          is_default: true # Communication__ApprovedSenders__0__IsDefault
+          display_name: Spaarke Central # Communication__ApprovedSenders__0__DisplayName (the value the deploy scripts emit; the live value was not read)
       secrets:
         # api_client_secret / graph_api_client_secret REMOVED 2026-08-24 (spaarke-auth-v4 task 033).
         # The BFF identity is secret-free: it authenticates with a Managed-Identity-issued federated

@@ -10,7 +10,6 @@ Caching OBO (On-Behalf-Of) Graph tokens to avoid repeated token exchanges.
 ## Read These Files
 1. `src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs` — Server-side OBO token cache (canonical for both server-side OBO and v2 architecture)
 2. `src/client/shared/Spaarke.Auth/src/index.ts` + `BrowserMsalStrategy.ts` — v2 client-side cache (`InMemoryCache` wrapper around pluggable `AuthStrategy`; MSAL `localStorage` for cross-tab/iframe sharing). Per ADR-028, consumers MUST use `@spaarke/auth` via `initAuth()` + `useAuth()` / `authenticatedFetch` — do NOT instantiate `PublicClientApplication` directly.
-3. `src/client/pcf/UniversalQuickCreate/control/services/auth/MsalAuthProvider.ts` — **Pre-v2 holdout**: this is the ONLY remaining PCF still using a local `MsalAuthProvider` (all other PCFs + Code Pages migrated in Phase B). Scheduled for `auth-v3-hardening` Phase H cleanup. Do NOT pattern new PCFs on this file; use `@spaarke/auth` (Read These Files #2).
 
 ## Constraints
 - **ADR-009**: Redis-first for token storage (server side)

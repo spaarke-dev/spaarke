@@ -5,7 +5,7 @@
 // Applications since task 251, owner D26). T4 silent-fail trap owner.
 //
 // PURPOSE:
-//   One of H14's 3 DAG-parallel sub-steps (spec.md FR-19). Grants the customer
+//   The first of H14's two in-process sub-steps (H14a, then H14m — task 263; spec.md FR-19). Grants the customer
 //   stamp's managed identity the Exchange "Application Mail.*" roles, scoped to
 //   the customer's mail-enabled security group, so the stamp's Graph mail calls
 //   reach that group's mailboxes and no others (H10 no longer grants the Entra

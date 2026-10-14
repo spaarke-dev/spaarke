@@ -202,6 +202,12 @@ internal sealed class UpdateRecordActionCore
         await RestampAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
         await SecureFiledRootAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
 
+        // Spaarkeai-word-add-in-r1 task 129: a re-filed communication's thread follows the filing, so it shows on the record's
+        // Messages panel. This node's re-file does not run SecureChildReconciler.AfterRefileAsync (the step the other re-file
+        // writers share, which reconciles), so it reconciles here — once. Never throws.
+        if (parentChanges.Count > 0)
+            await ReconcileThreadAfterRefileAsync(input.EntityLogicalName, input.RecordId).ConfigureAwait(false);
+
         // Task 142 (L1, owner Q5 + A4): a PATCH that wrote a root's "Assigned *" column (as a value or an @odata.bind)
         // materializes the Assigned-To access now. After the PATCH committed; never throws and never fails this update.
         await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
@@ -209,6 +215,21 @@ internal sealed class UpdateRecordActionCore
             cancellationToken).ConfigureAwait(false);
 
         return updatePayload.Keys.ToArray();
+    }
+
+    /// <summary>
+    /// Task 129: after a written re-file of a <c>sprk_communication</c>, its thread follows the filing
+    /// (<see cref="Sprk.Bff.Api.Services.Communication.IThreadResolver.ReconcileThreadForFilingAsync"/>, best-effort, never
+    /// throws). No other table; a host without the resolver skips it. Runs to completion once the record is written.
+    /// </summary>
+    private async Task ReconcileThreadAfterRefileAsync(string entityLogicalName, Guid recordId)
+    {
+        if (!string.Equals(entityLogicalName?.Trim(), "sprk_communication", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        using var scope = _scopeFactory.CreateScope();
+        if (scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Communication.IThreadResolver>() is { } threads)
+            await threads.ReconcileThreadForFilingAsync(recordId, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>

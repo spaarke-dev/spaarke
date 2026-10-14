@@ -320,7 +320,8 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     //   Services/Compose/ComposeService.cs:1448                   ReplaceFileContentAsUserAsync       record
     //   Services/Compose/ComposeService.cs:1484                   UploadSmallAsUserAsync              CLIENT
     //   Services/Compose/ComposeService.cs:1515                   ReplaceFileContentAsUserAsync       CLIENT
-    //   Services/DocumentCheckoutService.cs:787                   DeleteFileAsync                     record
+    //   Services/DocumentCheckoutService.cs :: DeleteAsync (best-effort)  DeleteFileAsync          record
+    //   Services/DocumentCheckoutService.cs :: DeleteFileOrRefuseAsync    DeleteFileAsync          record  <-- task 032
     //   Services/Email/EmailAttachmentProcessor.cs:232            UploadSmallAsync                    DEAD
     //   Services/Office/OfficeStorageUploader.cs:54               UploadSmallAsync                    CLIENT  <-- NEW
     //   Services/Office/OfficeStorageUploader.cs:86               DeleteFileAsync                     record
@@ -750,6 +751,16 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "authorized against, so the authorization key and the storage target are the same value "
             + "(ADR-003; ADR-007). Contrast Api/DocumentsEndpoints.cs DeleteFileAsync, which takes both from "
             + "the route — same sink, opposite provenance."),
+
+        new SinkSite("Services/DocumentCheckoutService.cs", "DeleteFileAsync", 2,
+            Provenance.ServerDerivedRecord, "",
+            "document.DriveId / document.ItemId off the authorized sprk_document row, verified by "
+            + "RecordContainerResolver.EnsureDocumentPointerContainerAsync before the delete",
+            "spaarke-SPA-external-access-platform-r3 task 032 (FR-26): the same delete as occurrence #1 under the "
+            + "VerifiedFileFirstKeepRowOnFailure policy (DeleteFileOrRefuseAsync), used by the external delete-own "
+            + "route. The pointer is read off the row the caller was authorized against (creator stamp + Read on "
+            + "every parent) and the pointer check runs first, so a re-pointed item id is refused, never deleted "
+            + "(ADR-003; ADR-007)."),
 
         new SinkSite("Services/Office/OfficeStorageUploader.cs", "DeleteFileAsync", 1,
             Provenance.ServerDerivedRecord, "",

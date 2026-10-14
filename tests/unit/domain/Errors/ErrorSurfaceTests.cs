@@ -137,6 +137,107 @@ public class ErrorSurfaceTests
         result.Should().Contain("TimeoutException");
     }
 
+    [Fact]
+    public void Explain_WhenExceptionIsNull_ThrowsArgumentNullExceptionNamingTheParameter()
+    {
+        // A null here is a programming error in the catch block. Without the guard it surfaces later as a
+        // NullReferenceException from ex.Message — inside the very handler that is building the error response.
+        var act = () => ProblemDetailsHelper.Explain("Could not list containers.", null!);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("ex");
+    }
+
+    [Fact]
+    public void Explain_WhenExceptionHasAMessage_ProducesTheExactTypeColonMessageForm()
+    {
+        ProblemDetailsHelper.Explain("Sign-in failed.", new InvalidOperationException("vault unreachable"))
+            .Should().Be("Sign-in failed. InvalidOperationException: vault unreachable");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Explain_WhenExceptionMessageIsEmptyOrBlank_ProducesTheExactParenthesisedTypeForm(string message)
+    {
+        // No cause text to append: the summary is followed by the bare type name in parentheses — and the
+        // "Type: " separator must not dangle after it.
+        ProblemDetailsHelper.Explain("Could not list environments.", new TimeoutException(message))
+            .Should().Be("Could not list environments. (TimeoutException)");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FromLegacyError — correlationId is present when supplied, absent when not
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task FromLegacyError_WithACorrelationId_CarriesItAsAnExtensionAlongsideTheLegacyErrorMember()
+    {
+        var (status, body) = await ExecuteAsync(
+            ProblemDetailsHelper.FromLegacyError(StatusCodes.Status404NotFound, "Analysis not found.", "corr-123"));
+
+        status.Should().Be(404);
+        body.GetProperty("detail").GetString().Should().Be("Analysis not found.");
+        body.GetProperty("error").GetString().Should().Be("Analysis not found.");
+        body.GetProperty("correlationId").GetString().Should().Be("corr-123");
+    }
+
+    [Fact]
+    public async Task FromLegacyError_WithoutACorrelationId_OmitsTheMemberRatherThanEmittingNull()
+    {
+        var (status, body) = await ExecuteAsync(
+            ProblemDetailsHelper.FromLegacyError(StatusCodes.Status400BadRequest, "Bad input."));
+
+        status.Should().Be(400);
+        body.GetProperty("error").GetString().Should().Be("Bad input.");
+        body.TryGetProperty("correlationId", out _).Should().BeFalse(
+            "the old body had no correlation id on this path; a null member would be a new, empty contract field");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Forbidden — title, reason code, and the optional traceId
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Forbidden_ProducesA403WithTheForbiddenTitleAndTheReasonCode()
+    {
+        var (status, body) = await ExecuteAsync(ProblemDetailsHelper.Forbidden("sdap.access.deny.test_reason"));
+
+        status.Should().Be(403);
+        body.GetProperty("status").GetInt32().Should().Be(403);
+        body.GetProperty("title").GetString().Should().Be("Forbidden");
+        body.GetProperty("reasonCode").GetString().Should().Be("sdap.access.deny.test_reason");
+        body.GetProperty("detail").GetString().Should().Be("Access denied", "the default when no explanation is supplied");
+    }
+
+    [Fact]
+    public async Task Forbidden_WithADetail_UsesItInsteadOfTheDefault()
+    {
+        var (_, body) = await ExecuteAsync(
+            ProblemDetailsHelper.Forbidden("code", detail: "Only an application holding the role may call this."));
+
+        body.GetProperty("detail").GetString().Should().Be("Only an application holding the role may call this.");
+    }
+
+    [Fact]
+    public async Task Forbidden_WithATraceId_CarriesItAsAnExtension()
+    {
+        var (_, body) = await ExecuteAsync(ProblemDetailsHelper.Forbidden("code", traceId: "trace-abc"));
+
+        body.GetProperty("traceId").GetString().Should().Be("trace-abc");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Forbidden_WithoutAUsableTraceId_OmitsTheMember(string? traceId)
+    {
+        var (_, body) = await ExecuteAsync(ProblemDetailsHelper.Forbidden("code", traceId: traceId));
+
+        body.TryGetProperty("traceId", out _).Should().BeFalse(
+            "a blank trace id is noise to support, and a null one would add an empty contract field");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // ExtractRequestId — the value an operator quotes to Microsoft support
     // ─────────────────────────────────────────────────────────────────────────

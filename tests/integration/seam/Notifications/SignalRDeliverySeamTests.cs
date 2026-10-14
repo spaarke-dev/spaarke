@@ -252,18 +252,16 @@ public sealed class SignalRDeliverySeamTests
     // Live end-to-end variant — GATED on a provisioned Azure SignalR resource.
     // ─────────────────────────────────────────────────────────────────────────
 
-    [Fact]
+    [SkippableFact]
     public async Task PingUserAsync_AgainstLiveResource_NegotiatesRealConnection()
     {
         var connString = Environment.GetEnvironmentVariable(LiveConnStringEnvVar);
-        if (string.IsNullOrWhiteSpace(connString))
-        {
-            // SKIPPED (documented): Serverless real delivery needs a PROVISIONED Azure SignalR
-            // resource. Set env var SPAARKE_SIGNALR_TEST_CONNSTRING to run this against a real resource.
-            // The boundary-double tests above cover the delivery logic up to the SDK network glue.
-            Assert.True(true, $"Live SignalR test skipped: {LiveConnStringEnvVar} not set.");
-            return;
-        }
+        // Serverless real delivery needs a PROVISIONED Azure SignalR resource. Set env var
+        // SPAARKE_SIGNALR_TEST_CONNSTRING to run this against a real resource; without it the test
+        // reports Skipped (not a vacuous Passed). The boundary-double tests above cover the delivery
+        // logic up to the SDK network glue.
+        Skip.If(string.IsNullOrWhiteSpace(connString),
+            $"Live SignalR test skipped: {LiveConnStringEnvVar} not set.");
 
         var options = Microsoft.Extensions.Options.Options.Create(new SignalRDeliveryOptions
         {

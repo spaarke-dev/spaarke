@@ -287,6 +287,29 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - **First production deploy waits** for provisioning's directory endpoint (their 240c) + the add-in's runtime customer selection (`{authority, bffApiScope, apiBaseUrl}` into `AuthService.initialize`), its own package ID/name (dev + prod both install in Spaarke's tenant), and a manual prod deploy job. Store (AppSource) publishing is the recommended production distribution, after that.
 - **Server Graph cannot reach a guest's mailbox** (home tenant): email body + attachments are captured IN THE ADD-IN with Office.js (task 116) — never reintroduce a server-only Graph fetch for content.
 - **Office on the web has no `openBrowserWindow`**: anything that opens Spaarke must fall back to `window.open` from the click (task 120).
+- **The add-in is for licensed core users only** (owner 2026-10-13). Workforce contact users (customer staff without a Power Apps licence) use the external SPA, not the Office add-ins.
+  - **Sign-in model: ADR-028 Amendment A9** (owner-approved 2026-10-13; PR #1810).
+    - Licensed core users stay B2B guests on A8's single-tenant Spaarke-tenant client (NAA, then popup).
+    - Workforce contacts sign in to the browser SPA only, through a multitenant Spaarke SPA client at their customer's home directory. They are not guests.
+    - Partners use CIAM.
+  - **Ownership:**
+    - SPA-r3 owns workforce sign-in and registration end to end, including the BFF token acceptance and the stored link.
+    - UAC-r2 owns the baseline role.
+    - Provisioning owns app registrations and consent.
+  - **Terms:** say "Spaarke tenant" and "customer's home directory". A bare "tenant" means the Spaarke tenant.
+  - **The add-in changes nothing.** A9 forbids moving the add-in's sign-in to the multitenant client or to an `organizations`/`common` authority. `/api/office/*` stays Spaarke-tenant only.
+  - **Live-test risk:** a licensed guest signing in to the add-in from their own home Office, with the authority pinned to the Spaarke tenant.
+    - Outlook on the web was verified on 2026-10-08.
+    - Desktop Office and Word are not yet verified.
+    - Microsoft does not document NAA for a guest whose authority is another directory.
+    - If it fails, raise it with the owner before any workaround.
+  - **Teams is in scope (owner 2026-10-13; ADR-028 A9 as updated by SPA-r3 `63b7c575b`).**
+    - The Teams host (the legal front door SPA) signs in workforce contacts AND licensed users through the A9 multitenant client: NAA, with the authority = the Teams context tid.
+    - Licensed users in Teams resolve to their systemuser through the stored link.
+    - External partners (CIAM) get no Teams access.
+    - SPA-r3 owns all of it. The Office add-ins are unchanged (A8).
+  - **Anti-conflict rule:** ADR-028 is the single authority. Before recording an owner auth decision, merge master and check it against ADR-028. On a conflict, raise the §6.5 block before writing it down.
+  - **Dropped work:** the T126 home-tenant scheme of 2026-10-12 was dropped. It is parked on the local branch `wip/t126-workforce-customer`; review findings are in `notes/126-message-to-uac-r2.md`.
 - **Diagnostics view** (task 113) is on the dev site via `ADDIN_DIAGNOSTICS_ENABLED: "true"` in `deploy-office-addins.yml` — remove it once provisioning's guest tests are done.
 
 ### Guest sign-in, PCFs and telemetry — owner decisions 2026-10-08/09 (tasks 121-127)

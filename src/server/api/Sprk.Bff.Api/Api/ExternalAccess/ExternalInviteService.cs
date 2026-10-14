@@ -1,0 +1,520 @@
+using System.Text.Json;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Registration;
+using static Sprk.Bff.Api.Api.ExternalAccess.InviteExternalUserEndpoint;
+
+namespace Sprk.Bff.Api.Api.ExternalAccess;
+
+/// <summary>
+/// unified-access-control-r2 task 185 slice E (design note §11 option (c), §12 I-5) — the ONE CIAM invite core, shared by
+/// <c>/invite</c>, <c>/invite-and-grant</c> and the grant flows that send the invite automatically (<c>/grant</c>).
+/// </summary>
+/// <remarks>
+/// <para><b>CLAUDE.md §11.</b></para>
+/// <list type="number">
+/// <item><b>Existing:</b> the provision logic in <see cref="InviteExternalUserEndpoint"/> (<c>ProvisionAsync</c>: task 184's
+/// marker-first ordering, the ExistingAccount branch and the 503 <c>invite_marker_not_written</c>).</item>
+/// <item><b>Extension:</b> it is the same logic moved, not new behaviour; the endpoint becomes a thin caller
+/// (<see cref="InviteExternalUserEndpoint.ProvisionAsync"/> forwards here), and the grant flows call the same core.</item>
+/// <item><b>Cost of doing nothing:</b> without it the grant flows cannot send the invite the owner required in round 98, short
+/// of copying 184's marker-first ordering into four places.</item>
+/// </list>
+/// <para><b>The grant flows (§12).</b> <see cref="InviteOnGrantAsync"/> runs AFTER a grant was written: an unbound contact
+/// with an email is invited (I-1: a failed invite never undoes the grant; it is answered <see cref="GrantInviteStatus.Failed"/>
+/// with its code and logged at Warning without the code). A current marker (under 30 days) sends no new code
+/// (<see cref="GrantInviteStatus.AlreadyPending"/>, I-2). A bound contact, or one an internal user links to, needs none
+/// (<see cref="GrantInviteStatus.NotNeeded"/>). The grant flows decide the invite contact WITHOUT the binder's collision
+/// flagging: a grant is not an invite request, so an email it cannot invite onto (two active contacts, say) is answered
+/// <see cref="GrantInviteStatus.Failed"/> with the invite's own reason code, and only an explicit Invite flags it.</para>
+/// <para><b>Contact-side grants (task 140, I-4).</b> They call <see cref="AssessAsync"/> only, never
+/// <see cref="InviteOnGrantAsync"/> (pinned by <c>ContactGrantGuardTests</c>): a contact never invites.</para>
+/// <para>The plaintext code goes only into the invite email's link: never logged, never in a response.</para>
+/// </remarks>
+public sealed class ExternalInviteService
+{
+    private const string ContactEntitySet = "contacts";
+
+    private readonly DataverseWebApiClient _dataverse;
+    private readonly CiamUserProvisioningService _ciam;
+    private readonly RegistrationEmailService _emails;
+    private readonly ContactIdentityBinder _binder;
+    private readonly IConfiguration _configuration;
+    private readonly CustomerIdentity _customer;
+    private readonly TimeProvider _time;
+    private readonly ILogger<ExternalInviteService> _logger;
+
+    /// <param name="ciam">
+    /// The CIAM provisioner, injected directly (task 185 slice F, ADR-010 path C: lazy validation instead of a service
+    /// locator). It constructs on a host without the <c>Ciam:*</c> configuration and validates at first use, so <c>/grant</c>
+    /// and <c>/contact-grants</c> resolve this service there; an invite on such a host is answered
+    /// <see cref="GrantInviteStatus.Failed"/> with <see cref="GrantInviteStatus.CiamNotConfiguredReasonCode"/> and the grant
+    /// stands (I-1).
+    /// </param>
+    public ExternalInviteService(
+        DataverseWebApiClient dataverse,
+        CiamUserProvisioningService ciam,
+        RegistrationEmailService emails,
+        ContactIdentityBinder binder,
+        IConfiguration configuration,
+        CustomerIdentity customer,
+        TimeProvider time,
+        ILogger<ExternalInviteService> logger)
+    {
+        _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
+        _ciam = ciam ?? throw new ArgumentNullException(nameof(ciam));
+        _emails = emails ?? throw new ArgumentNullException(nameof(emails));
+        _binder = binder ?? throw new ArgumentNullException(nameof(binder));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _customer = customer ?? throw new ArgumentNullException(nameof(customer));
+        _time = time ?? throw new ArgumentNullException(nameof(time));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    // =========================================================================
+    // The grant flows
+    // =========================================================================
+
+    /// <summary>
+    /// What the grant to <paramref name="contactId"/> needs, read only (nothing is written, nothing flagged). <c>Final</c> is
+    /// the answer when no invite is to be sent; <c>null</c> when the contact is an active, unbound contact with an email that
+    /// no internal user links to and that holds no current invite — one an invite would be sent to. Never throws for a
+    /// read that fails: that is <see cref="GrantInviteStatus.Failed"/> with the invite's lookup code.
+    /// </summary>
+    internal async Task<GrantInviteAssessment> AssessAsync(Guid contactId, CancellationToken ct)
+    {
+        var store = _binder.Store;
+
+        var contact = await store.GetContactAsync(contactId, ct).ConfigureAwait(false);
+        if (contact.Status != LookupStatus.Read)
+            return GrantInviteAssessment.Done(Failed(ContactBindingDecision.InviteContactLookupFailed));
+
+        if (contact.Rows.FirstOrDefault(r => r.ContactId == contactId) is not { } row)
+            return GrantInviteAssessment.Done(Failed(GrantInviteStatus.ContactNotActiveReasonCode));
+        if (!row.IsActive)
+            return GrantInviteAssessment.Done(Failed(GrantInviteStatus.ContactNotActiveReasonCode));
+
+        switch (row.Binding.Kind)
+        {
+            case BindingKind.Bound:
+                return GrantInviteAssessment.Done(new GrantInviteResult(GrantInviteStatus.NotNeeded));
+            case BindingKind.Unreadable:
+                return GrantInviteAssessment.Done(Failed(ContactBindingDecision.InviteContactBindingUnreadable));
+        }
+
+        if (string.IsNullOrWhiteSpace(row.Email))
+            return GrantInviteAssessment.Done(new GrantInviteResult(GrantInviteStatus.NoEmail));
+
+        // A contact an internal user links to is that user's: they sign in on the workforce plane (and are told in-app by
+        // the grant notifier). No external account is ever attached to it (the invite core refuses it).
+        var references = await store.FindSystemUsersLinkingAsync(new[] { contactId }, ct).ConfigureAwait(false);
+        if (references.Status != LookupStatus.Read)
+            return GrantInviteAssessment.Done(Failed(ContactBindingDecision.InviteContactLookupFailed));
+        if (references.References.Any(r => r.LinkedContactId == contactId))
+            return GrantInviteAssessment.Done(new GrantInviteResult(GrantInviteStatus.NotNeeded));
+
+        // §12 I-2: a current invite (marker under 30 days) is kept — a new code would break a link the person may be about
+        // to open. A marker column not provisioned here is "no invite yet", as E11 reads it.
+        var intent = await store.FindBindIntentAsync(contactId, ct).ConfigureAwait(false);
+        if (intent.InviteStatus == LookupStatus.Failed || intent.ContactId != contactId)
+            return GrantInviteAssessment.Done(Failed(ContactBindingDecision.InviteContactLookupFailed));
+        if (intent.InviteStatus == LookupStatus.Read
+            && ContactBindingDecision.IsInviteMarkerCurrent(intent.InvitedOn, _time.GetUtcNow()))
+            return GrantInviteAssessment.Done(new GrantInviteResult(GrantInviteStatus.AlreadyPending));
+
+        return GrantInviteAssessment.Invite(row, references);
+    }
+
+    /// <summary>
+    /// After an internal user's grant to <paramref name="contactId"/> was written: sends the CIAM invite (with its code) when
+    /// the contact is unbound and has an email (§11 option (c)). Never throws and never undoes the grant (I-1): a failure is
+    /// logged at Warning (never the code) and answered <see cref="GrantInviteStatus.Failed"/> with its reason code. Runs on
+    /// <see cref="CancellationToken.None"/>, as the grant notifier does: the grant is written, so the person is invited even
+    /// if the granter's browser has gone.
+    /// </summary>
+    public async Task<GrantInviteResult> InviteOnGrantAsync(Guid contactId)
+    {
+        var ct = CancellationToken.None;
+        try
+        {
+            var assessment = await AssessAsync(contactId, ct).ConfigureAwait(false);
+            if (assessment.Final is { } final)
+                return Logged(contactId, final);
+
+            var row = assessment.Contact!;
+            var email = row.Email!.Trim();
+
+            // The invite core's own decision over the email, WITHOUT the binder's collision flagging (a grant is not an
+            // invite request). The grantee must be the contact the email resolves to.
+            var emailLookup = await _binder.Store.FindActiveContactsByEmailAsync(email, ct).ConfigureAwait(false);
+            var decision = ContactBindingDecision.DecideInvite(emailLookup, assessment.References);
+            switch (decision.Action)
+            {
+                case InviteContactAction.Refuse:
+                case InviteContactAction.Fail:
+                    return Logged(contactId, Failed(decision.ReasonCode ?? ContactBindingDecision.InviteContactLookupFailed));
+                case InviteContactAction.AlreadyProvisioned when decision.ContactId == contactId:
+                    return Logged(contactId, new GrantInviteResult(GrantInviteStatus.NotNeeded));
+                case InviteContactAction.ProvisionExisting when decision.ContactId == contactId:
+                    break;
+                default:
+                    return Logged(contactId, Failed(GrantInviteStatus.ContactMismatchReasonCode));
+            }
+
+            var etag = emailLookup.Rows.FirstOrDefault(r => r.ContactId == contactId)?.ETag;
+            var resolution = new InviteContactResolution(InviteContactAction.ProvisionExisting, contactId, etag, null, null);
+
+            var portalUrl = _configuration["ExternalAccess:PortalUrl"];
+            if (string.IsNullOrWhiteSpace(portalUrl))
+                return Logged(contactId, Failed(GrantInviteStatus.InviteFailedReasonCode));
+
+            // Task 185 slice F: a host without Ciam:* constructs the provisioner but cannot create an account. Answered here,
+            // before anything is written (no marker, no code), as the invite core would refuse it.
+            if (!_ciam.IsConfigured)
+                return Logged(contactId, Failed(GrantInviteStatus.CiamNotConfiguredReasonCode));
+
+            var (firstName, lastName) = await ReadNamesAsync(contactId).ConfigureAwait(false);
+            var request = new InviteExternalUserRequest(
+                email, Guid.Empty, AccessLevel: 0, firstName, lastName, ExpiryDate: null, OrganizationId: null);
+
+            var outcome = await ProvisionAsync(
+                request, _dataverse, _ciam, _emails, _binder, portalUrl, InviteLinkCustomerKey(_customer), _logger,
+                resolution, ct).ConfigureAwait(false);
+
+            if (outcome.Refusal is { } refusal)
+                return Logged(contactId, Failed(refusal.ReasonCode));
+            if (outcome.Failure is { } failure)
+                return Logged(contactId, Failed(failure.ReasonCode));
+            if (outcome.EmailFailed)
+                return Logged(contactId, Failed(GrantInviteStatus.EmailNotSentReasonCode));
+
+            if (outcome.Status == ExistingAccountStatus)
+            {
+                // §12 I-10: the operator log keeps the branch; the inviter is answered Sent, as for a new account.
+                _logger.LogInformation(
+                    "[EXT-INVITE] Grant to contact {ContactId}: the person already has a CIAM account ({InviteOutcome}); " +
+                    "the existing-account email was sent. Operator log only: the grant response says {InviteStatus}.",
+                    contactId, ExistingAccountStatus, GrantInviteStatus.Sent);
+            }
+
+            return Logged(contactId, outcome.Status switch
+            {
+                ExistingAccountStatus => new GrantInviteResult(GrantInviteStatus.Sent),
+                AlreadyProvisionedStatus => new GrantInviteResult(GrantInviteStatus.NotNeeded),
+                ProvisionedStatus => new GrantInviteResult(GrantInviteStatus.Sent),
+                _ => Failed(GrantInviteStatus.InviteFailedReasonCode),
+            });
+        }
+        catch (Exception ex)
+        {
+            // The exception never carries the code (it exists only inside the core, until the email is sent).
+            _logger.LogWarning(ex,
+                "[EXT-INVITE] The automatic invite for contact {ContactId} after a grant failed. The grant stands; retry with Invite.",
+                contactId);
+            return Failed(GrantInviteStatus.InviteFailedReasonCode);
+        }
+    }
+
+    private GrantInviteResult Logged(Guid contactId, GrantInviteResult result)
+    {
+        if (result.Status == GrantInviteStatus.Failed)
+        {
+            _logger.LogWarning(
+                "[EXT-INVITE] The automatic invite for contact {ContactId} after a grant was not sent ({ReasonCode}). The grant " +
+                "stands; retry with Invite.", contactId, result.ErrorCode);
+        }
+        else
+        {
+            _logger.LogInformation(
+                "[EXT-INVITE] Grant to contact {ContactId}: invite {InviteStatus}.", contactId, result.Status);
+        }
+
+        return result;
+    }
+
+    private static GrantInviteResult Failed(string reasonCode) => new(GrantInviteStatus.Failed, reasonCode);
+
+    /// <summary>The contact's first and last name for the CIAM account and the email greeting; best effort (nulls).</summary>
+    private async Task<(string? FirstName, string? LastName)> ReadNamesAsync(Guid contactId)
+    {
+        try
+        {
+            var row = await _dataverse.RetrieveAsync<Dictionary<string, JsonElement>>(
+                ContactEntitySet, contactId, "firstname,lastname", CancellationToken.None).ConfigureAwait(false);
+            return (StringOf(row, "firstname"), StringOf(row, "lastname"));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-INVITE] The name of contact {ContactId} could not be read; the invite is sent without it.", contactId);
+            return (null, null);
+        }
+
+        static string? StringOf(Dictionary<string, JsonElement>? row, string column)
+            => row is not null && row.TryGetValue(column, out var value) && value.ValueKind == JsonValueKind.String
+               && value.GetString() is { } s && !string.IsNullOrWhiteSpace(s)
+                ? s.Trim()
+                : null;
+    }
+
+    // =========================================================================
+    // The invite core (moved from InviteExternalUserEndpoint, task 185 §12 I-5; behaviour unchanged)
+    // =========================================================================
+
+    /// <summary>
+    /// Resolves-or-creates the Dataverse Contact by email and — if not already provisioned — creates a
+    /// CIAM local account, persists the returned oid to <c>Contact.sprk_externalobjectid</c> (plane External),
+    /// and sends the onboarding email. <b>Idempotent</b>: a Contact already bound on the CIAM plane creates NO
+    /// second account ("AlreadyProvisioned"). <b>Refuses</b> (task 141) a contact bound on the WORKFORCE plane,
+    /// one an internal user links to, an ambiguous email, or an unreadable binding — BEFORE any CIAM account is
+    /// created. Returns a <see cref="InviteLookupFailure"/> (HTTP 503, its own reason code) when the contact
+    /// lookup could not be read. Stamps the pending-invite marker before the CIAM account is created (task 184), and
+    /// answers "ExistingAccount" — no account, the contact kept pending, the sign-in email sent — when the person already
+    /// has a CIAM account. Answers a retryable 503 (<see cref="ContactBindingDecision.InviteMarkerNotWritten"/>, no email)
+    /// when the marker write failed, or when the contact is left with no oid (ExistingAccount, a failed oid write) and the
+    /// marker did not land. Throws on any other hard failure (Contact create, CIAM create, oid bind). Shared
+    /// by <c>/invite</c>, <c>/invite-and-grant</c> (task 029) and the grant flows (task 185).
+    /// </summary>
+    /// <param name="resolution">
+    /// The invite resolution the caller ALREADY made with <see cref="ContactIdentityBinder.ResolveInviteContactAsync"/>,
+    /// or <c>null</c> to resolve here. <c>/invite-and-grant</c> resolves once, BEFORE onboarding, judges that contact
+    /// with the grant checks (task 139), and passes the same resolution in — so the contact the checks judged IS the
+    /// contact onboarding provisions: one email→contact answer, never a second, possibly different, lookup.
+    /// </param>
+    internal static async Task<ProvisionOutcome> ProvisionAsync(
+        InviteExternalUserRequest request,
+        DataverseWebApiClient dataverseClient,
+        CiamUserProvisioningService ciamProvisioner,
+        RegistrationEmailService emailService,
+        ContactIdentityBinder binder,
+        string portalUrl,
+        string? customerKey,
+        ILogger logger,
+        InviteContactResolution? resolution,
+        CancellationToken ct)
+    {
+        // Task 185: the invite link is built from trusted config only. A portal URL it cannot use (not https, credentials in
+        // it) stops the invite here, before anything is resolved, written or created.
+        if (BuildInviteLink(portalUrl, customerKey, inviteCode: null) is null)
+        {
+            throw new InvalidOperationException(
+                "ExternalAccess:PortalUrl must be an absolute https URL with no credentials to build the invite link.");
+        }
+
+        // Task 185 slice F: the CIAM configuration is validated at first use. On a host without Ciam:* this throws
+        // InvalidOperationException HERE, before any contact is resolved, created or marked.
+        ciamProvisioner.EnsureConfigured();
+
+        resolution ??= await binder.ResolveInviteContactAsync(request.Email, ct);
+
+        if (NotProvisionable(resolution, request.Email, logger) is { } stopped)
+        {
+            return stopped;
+        }
+
+        Guid contactId;
+        string? etag = null;
+        switch (resolution.Action)
+        {
+            case InviteContactAction.AlreadyProvisioned:
+                // Idempotency gate: an oid bound on the CIAM plane means the CIAM account already exists — do NOT
+                // create a second account (and do not re-send the onboarding email).
+                logger.LogInformation(
+                    "[EXT-INVITE] Contact {ContactId} ({Email}) already has a CIAM oid bound — skipping account creation (idempotent).",
+                    resolution.ContactId, request.Email);
+                return new ProvisionOutcome(resolution.ContactId!.Value, AlreadyProvisionedStatus);
+
+            case InviteContactAction.ProvisionExisting:
+                contactId = resolution.ContactId!.Value;
+                etag = resolution.ETag;
+                break;
+
+            case InviteContactAction.CreateContact:
+                contactId = await CreateContactAsync(dataverseClient, request, logger, ct);
+                break;
+
+            default:
+                // NeedReferenceLookup (or an action this code does not know) cannot reach here: the binder
+                // completes the reference lookup itself. Fail closed — nothing is created.
+                throw new InvalidOperationException(
+                    $"The invite decision for '{request.Email}' ended in an unexpected state ({resolution.Action}).");
+        }
+
+        // Task 184 — the pending-invite marker, BEFORE the CIAM account exists: a first CIAM sign-in that has to email-bind
+        // this contact finds THIS environment's intent. Which paths NEED it:
+        //   - the normal new-account path does NOT: the CIAM create and the oid bind happen in this request, so the
+        //     contact is bound before anyone signs in. It proceeds when the column is not provisioned yet (a customer
+        //     stamp between Deploy-Release's Phase 2 BFF deploy and its Phase 3 SpaarkeMaster import).
+        //   - "ExistingAccount" and the oid-write-failed repair path DO: the contact is left with no oid, and the marker
+        //     is the only evidence E11 can bind it on (a later grant is the other). If the marker did not land there,
+        //     the invite answers a retryable 503 (InviteMarkerNotWritten) and sends no email — never a success that
+        //     leaves a contact no sign-in can bind.
+        // A marker write that FAILED (anything but Written / ColumnMissing) stops the invite here: 503, nothing created.
+        var mark = await binder.MarkInviteSentAsync(contactId, etag, ct);
+        var markerLanded = mark.Status == StoreWriteStatus.Written;
+
+        // Task 185: the link both invite emails open. It carries the one-time code only when the marker and its hash landed
+        // (a new-account invite on a stamp without the columns binds in this request and needs none). Never logged.
+        var inviteUrl = BuildInviteLink(portalUrl, customerKey, mark.InviteCode)!;
+        switch (mark.Status)
+        {
+            case StoreWriteStatus.Written:
+                // The marker moved the row version. The bind below re-reads the contact and binds it only while it is
+                // still active and unbound, under its fresh version (the path a just-created contact already takes).
+                etag = null;
+                break;
+            case StoreWriteStatus.ColumnMissing:
+                break;
+            default:
+                logger.LogWarning(
+                    "[EXT-INVITE] Contact {ContactId} for {Email} could not be marked invited ({Status}) — no CIAM account created.",
+                    contactId, request.Email, mark.Status);
+                return MarkerNotWritten(contactId);
+        }
+
+        // Create the CIAM local account (broker-only; no B2B guest).
+        string rawOid;
+        try
+        {
+            rawOid = await ciamProvisioner.CreateCiamUserAsync(request.Email, request.FirstName, request.LastName, ct);
+        }
+        catch (CiamAccountAlreadyExistsException)
+        {
+            // Task 184 — the person already has a CIAM account (Graph 400 ObjectConflict on proxyAddresses). The invite
+            // succeeds: the contact stays PENDING (marker set, no oid), and the first sign-in email-binds it under E11's
+            // intent gate. The existing account's oid is deliberately NOT looked up here (no User.Read.All on any stamp).
+            // The marker is this contact's only evidence, so without it there is no success to report: 503, no email.
+            if (!markerLanded)
+            {
+                logger.LogWarning(
+                    "[EXT-INVITE] {Email} already has a CIAM account, but contact {ContactId} carries no pending-invite marker "
+                    + "({Status}) — answered 503, no email sent. Retry once the column is provisioned.",
+                    request.Email, contactId, mark.Status);
+                return MarkerNotWritten(contactId);
+            }
+
+            // §12 I-10: this operator log line is the ONLY place the branch is named; the inviter's response never says it.
+            logger.LogInformation(
+                "[EXT-INVITE] {Email} already has a CIAM account ({InviteOutcome}) — contact {ContactId} kept pending; the first "
+                + "sign-in binds it.",
+                request.Email, ExistingAccountStatus, contactId);
+            var existingAccountEmailFailed = false;
+            try
+            {
+                await emailService.SendCiamExistingAccountEmailAsync(
+                    request.Email, request.FirstName ?? string.Empty, portalUrl, inviteUrl, ct);
+            }
+            catch (Exception ex)
+            {
+                existingAccountEmailFailed = true;
+                logger.LogWarning(ex, "[EXT-INVITE] Contact {ContactId} kept pending for {Email}, but the sign-in email failed to send.",
+                    contactId, request.Email);
+            }
+
+            return new ProvisionOutcome(contactId, ExistingAccountStatus, EmailFailed: existingAccountEmailFailed);
+        }
+
+        if (!Guid.TryParse(rawOid, out var ciamOid) || ciamOid == Guid.Empty)
+        {
+            throw new InvalidOperationException($"CIAM returned an object id that is not a GUID for '{request.Email}'.");
+        }
+
+        // Persist the oid (D format) + plane External, conditional on the row version read with it. If the bind
+        // does not land, no email is sent, so nobody holds a code: a retried invite (ExistingAccount, a new code) repairs it.
+        // Task 185 (owner Q5): when the marker and its code hash landed, the same bind PATCH clears the now-inert hash.
+        var bind = await binder.BindInvitedContactAsync(contactId, etag, ciamOid, consumeInviteCode: markerLanded, ct);
+        if (bind.Status != StoreWriteStatus.Written && !markerLanded)
+        {
+            // Task 184 — the repair path needs the marker: without it the first sign-in finds no intent (unless a grant
+            // follows, which this failure prevents). Retryable: a retry finds the account and answers "ExistingAccount"
+            // once the marker can land. No email.
+            logger.LogWarning(
+                "[EXT-INVITE] CIAM account {Oid} was created for {Email} but neither its oid ({BindStatus}) nor the pending-invite "
+                + "marker landed on contact {ContactId} — answered 503, no email sent.",
+                ciamOid, request.Email, bind.Status, contactId);
+            return MarkerNotWritten(contactId);
+        }
+
+        if (bind.Status != StoreWriteStatus.Written)
+        {
+            throw new InvalidOperationException(
+                $"CIAM account {ciamOid:D} was created for '{request.Email}' but its oid could not be bound to contact " +
+                $"{contactId:D} ({bind.Status}). No email was sent: retry the invite, which sends a new invite code that binds " +
+                "the contact at its first sign-in.");
+        }
+
+        // Send the onboarding email (task 024; task 185: its links open the invite link).
+        // Non-fatal: the account + oid are persisted. But the link carries the invite code, which exists only in this email,
+        // so a failed send leaves nobody holding the code: sending the portal URL out of band does not help. The person needs
+        // a re-invite, which sends a new code. EmailFailed reports it (the routes' emailSent, the grant flows' email_not_sent).
+        var onboardingEmailFailed = false;
+        try
+        {
+            await emailService.SendCiamOnboardingEmailAsync(
+                request.Email, request.FirstName ?? string.Empty, portalUrl, inviteUrl, ct);
+        }
+        catch (Exception ex)
+        {
+            onboardingEmailFailed = true;
+            logger.LogWarning(ex, "[EXT-INVITE] CIAM account created for {Email} but onboarding email failed to send.", request.Email);
+        }
+
+        logger.LogInformation(
+            "[EXT-INVITE] Provisioned CIAM user {Oid} for {Email} — Contact: {ContactId}",
+            ciamOid, request.Email, contactId);
+
+        return new ProvisionOutcome(contactId, ProvisionedStatus, EmailFailed: onboardingEmailFailed);
+    }
+
+    /// <summary>
+    /// Task 184 — the retryable 503 of an invite whose contact needed the pending-invite marker as its only evidence and
+    /// did not get it. Reported through the existing lookup-failure shape (503 + reason code), so /invite-and-grant writes
+    /// no grant and neither route sends an email.
+    /// </summary>
+    private static ProvisionOutcome MarkerNotWritten(Guid contactId)
+        => new(contactId, "MarkerNotWritten",
+            Failure: new InviteLookupFailure(
+                ContactBindingDecision.InviteMarkerNotWritten,
+                ContactIdentityBinder.InviteMessage(ContactBindingDecision.InviteMarkerNotWritten)!,
+                Title: "Invite could not be recorded"));
+
+    /// <summary>Creates a new, unbound Contact for the invite email. Throws on failure.</summary>
+    private static async Task<Guid> CreateContactAsync(
+        DataverseWebApiClient dataverseClient,
+        InviteExternalUserRequest request,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["emailaddress1"] = request.Email,
+            ["firstname"] = request.FirstName ?? string.Empty,
+            ["lastname"] = request.LastName ?? request.Email.Split('@')[0]
+        };
+
+        var newContactId = await dataverseClient.CreateAsync(ContactEntitySet, payload, ct);
+        if (newContactId == Guid.Empty)
+        {
+            throw new InvalidOperationException($"Failed to create a Contact for '{request.Email}'.");
+        }
+
+        logger.LogInformation("[EXT-INVITE] Created new Contact {ContactId} for email {Email}",
+            newContactId, request.Email);
+        return newContactId;
+    }
+}
+
+/// <summary>
+/// Task 185 slice E — <see cref="ExternalInviteService.AssessAsync"/>'s answer: a final <see cref="GrantInviteResult"/>, or
+/// the unbound contact (with its reference read) an invite would be sent to.
+/// </summary>
+internal sealed record GrantInviteAssessment(GrantInviteResult? Final, ContactBindingRow? Contact, ReferenceLookup? References)
+{
+    /// <summary>No invite is to be sent; <paramref name="result"/> is the answer.</summary>
+    public static GrantInviteAssessment Done(GrantInviteResult result) => new(result, null, null);
+
+    /// <summary>An invite would be sent to <paramref name="contact"/>.</summary>
+    public static GrantInviteAssessment Invite(ContactBindingRow contact, ReferenceLookup references) => new(null, contact, references);
+}

@@ -1,4 +1,7 @@
 ## SharePoint Embedded + Graph
+- [Entra publisher verification (2026-10-14)](publisher-verification-2026-10-14.md) — setVerifiedPublisher delegated-only (app-only NOT supported); PGA ID + MFA + App Admin; admin consent not blocked
+- [B2B guest (A8) vs multi-tenant /organizations (Option A) (2026-10-13)](b2b-guest-vs-multitenant-home-authority-2026-10-13.md) — auto-redeem needs BOTH tenants; MFA trust off by default; MS-managed consent default; NAA silent for guest/multitenant unconfirmed
+- [B2B guest home-tenant classification (2026-10-12)](b2b-guest-home-tenant-classification-2026-10-12.md) — no documented home-tid claim/user prop; tid=resource tenant; idp GUID practice only; beta signIn.homeTenantId; bind at invite time
 - [SPE app-only per-container isolation (2026-10-06)](spe-apponly-per-container-isolation-2026-10-06.md) — app-only = ALL containers of CT; no per-container app scoping; CT-per-customer is the only hard boundary
 - [SPE container customProperties (2026-10-06)](spe-container-custom-properties.md) — not settable at create (PATCH …/customProperties after); `$select=id,containerTypeId,customProperties` reads type+marker in one app-only GET; any app with Write/Full on the CT and container Writers can edit; containerId == driveId (`b!`)
 - [SPE JIT membership vs item sharing (2026-10-06)](spe-jit-membership-item-sharing-office-edit-2026-10-06.md) — item invite to non-member documented; DELETE container perm also strips item perms; preview URL = caller rights
@@ -46,6 +49,7 @@
 
 ## Dataverse / Power Platform / MDA
 - [navigateTo dialog chrome vs dark mode (2026-10-05)](navigateto-dialog-chrome-dark-mode-2026-10-05.md) — 5 navOptions, no hideHeader; MDA dark mode unsupported (Spaarke uses undocumented flag); sidePanes hideHeader
+- [PP licensing: multiplexing/ISV/app-only API (2026-10-13)](pp-licensing-multiplexing-isv-workforce-partners-2026-10-13.md) — PLG Oct 2026 p.24-25; no API-only SKU; non-licensed req pool 25k/day; ISV licence mgmt = model-driven only
 - [PAYG + B2B guest Dataverse users (2026-10-07)](payg-b2b-guest-dataverse-user-provisioning-2026-10-07.md) — guests covered w/o licence; `pac licensing *billing-policy*` (not pac admin); JIT role-assoc by oid alternate key; BAP addUser = tenant admin only
 - [Autonumber on existing primary-name col (2026-10-02)](dataverse-autonumber-existing-primary-name-2026-10-02.md) — text→autonumber documented; fill-if-empty community-only; seed default 1000, not in solution; no uniqueness vs manual values
 - [MDA clickable form banner (2026-09-30)](mda-clickable-form-banner-options-2026-09-30.md) — addGlobalNotification app-wide/persists; setFormNotification text-only; PCF MessageBar REC

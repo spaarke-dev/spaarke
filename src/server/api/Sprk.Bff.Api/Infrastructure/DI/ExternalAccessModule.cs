@@ -2,6 +2,7 @@ using Azure.Core;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -37,6 +38,22 @@ public static class ExternalAccessModule
     /// </summary>
     private static readonly IReadOnlySet<Guid> NoSavedQueries = new HashSet<Guid>();
 
+    /// <summary>
+    /// The related twin of each core-root link on <c>sprk_document</c> (project, matter, work assignment), from the one
+    /// canonical declaration (<see cref="DocumentLinkFields"/>), as the documents module's extra multi-root lookups.
+    /// </summary>
+    private static RootLookup[] DocumentRelatedRootTwins() => DocumentLinkFields.All
+        .Where(f => f.LogicalName.StartsWith("sprk_related", StringComparison.Ordinal))
+        .Select(f => f.TargetEntityLogicalName switch
+        {
+            "sprk_project" => (RootLookup?)new RootLookup(f.LogicalName, ExternalGrantRootType.Project),
+            "sprk_matter" => new RootLookup(f.LogicalName, ExternalGrantRootType.Matter),
+            "sprk_workassignment" => new RootLookup(f.LogicalName, ExternalGrantRootType.WorkAssignment),
+            _ => null,
+        })
+        .OfType<RootLookup>()
+        .ToArray();
+
     private static readonly IReadOnlySet<Guid> OutsideCounselGridConfigurationIds = new HashSet<Guid>
     {
         Guid.Parse("61711823-1092-f111-b8dc-7ced8ddc4a05"), // Projects
@@ -44,7 +61,7 @@ public static class ExternalAccessModule
         Guid.Parse("3ff4102c-1092-f111-b8dc-7ced8ddc4a05"), // Invoices
         Guid.Parse("42f4102c-1092-f111-b8dc-7ced8ddc4a05"), // Work Assignments
         Guid.Parse("583a2a33-1092-f111-b8dc-7ced8ddc4a05"), // Matters
-        Guid.Parse("403e5d37-cb94-f111-b8db-00224835447a"), // Service Requests (internal-only, task 028)
+        Guid.Parse("403e5d37-cb94-f111-b8db-00224835447a"), // Service Requests (workforce; CIAM only when the partner switch is on - task 028 / r3 task 011)
     };
 
     /// <summary>
@@ -88,9 +105,20 @@ public static class ExternalAccessModule
             client.Timeout = TimeSpan.FromSeconds(15);
         });
 
-        // Module entitlement resolver (task 072, owner Option B) — resolves the Tier-1 module-code set
-        // the external-spa widget registry gates tabs on (/api/v1/external/me/entitlements): workforce
-        // from sprk_approlemodulemap (App-Role → module), CIAM blanket outside-counsel set. Typed
+        // Per-customer external-access switches (external-access-platform-r3 task 011, spec FR-06 / FR-19, ADR-028
+        // A8). PartnerServiceRequestsEnabled (default false) lets CIAM partners use the Service Requests module for
+        // their own requests and adds legal-front-door to their default modules. Read by the entitlement resolver
+        // below and by the "service-requests" descriptor. ValidateOnStart so an invalid value fails startup rather
+        // than the first external module read: ANY non-boolean value, INCLUDING EMPTY (""), fails startup - remove
+        // the setting to turn it off. No custom validator (a bound bool has no other invalid value).
+        services.AddOptions<ExternalAccessOptions>()
+            .BindConfiguration(ExternalAccessOptions.SectionName)
+            .ValidateOnStart();
+
+        // Module entitlement resolver (task 072; defaults by principal kind, r3 task 011 / A8) — resolves the
+        // Tier-1 module-code set the external-spa widget registry gates tabs on (/api/v1/external/me/entitlements):
+        // workforce → legal-front-door + policy-library + sprk_approlemodulemap extras (App-Role → module); CIAM →
+        // assigned-work (+ legal-front-door when ExternalAccess:PartnerServiceRequestsEnabled is on). Typed
         // HttpClient (app-only Dataverse read, broker-only NFR-02) with a 60s Redis map cache (ADR-009 —
         // caches the small GLOBAL config map as DATA, never an authorization decision). Concrete
         // registration (ADR-010) — single implementation, mirroring ExternalParticipationService.
@@ -220,6 +248,12 @@ public static class ExternalAccessModule
         // /grant and /share-user send after a write gives an internal user access. Task 100's channel (NotificationService),
         // the Web API client and the No Access guard, all unconditional (ADR-032: no Null-Object). Scoped for the guard.
         services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier>();
+
+        // unified-access-control-r2 task 185 slice E (§12 I-5) — the ONE CIAM invite core, moved out of /invite: /invite and
+        // /invite-and-grant call it, and /grant calls it to invite an unbound grantee automatically (owner round 98, option (c)).
+        // Every dependency (Web API client, CIAM provisioner, registration email, binder, CustomerIdentity, TimeProvider) is
+        // unconditional (ADR-032: no Null-Object). Scoped, beside the notifier the same grant flows use.
+        services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService>();
         services.AddHttpClient<NoAccessEnforcementStore>((sp, client) =>
         {
             client.Timeout = TimeSpan.FromSeconds(15);
@@ -364,6 +398,12 @@ public static class ExternalAccessModule
         {
             Name = "documents",
             RecordEntity = "sprk_document",
+            // Fix round for r3 task 039 (ExternalMultiRootRule, owner decision 2026-10-12, option B): a document also filed
+            // to a SECURE root the caller cannot read is not listed by the grid, as on the record-detail document routes.
+            RequireReadOnSecureRoots = true,
+            // ... including a root reached only through the related twin of a typed link (K3): the fetch endpoint projects
+            // these three server-side, after the column guard; they are not readable columns and never reach the caller.
+            AdditionalRootLookups = DocumentRelatedRootTwins(),
             ScopeDimensions = new[]
             {
                 new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
@@ -375,20 +415,28 @@ public static class ExternalAccessModule
             // sprk_filepath …).
             SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
             PrimaryNameAttribute = "sprk_documentname",
+            // spaarke-SPA-external-access-platform-r3 task 032 (FR-26, review 031 K2): plus the two creator stamps, so a
+            // documents grid can offer Delete only on the caller's own rows. Not grid-derived; the server re-checks every
+            // delete (ExternalProjectDataEndpoints.AuthorizeDeleteOwnAsync).
             ReadableColumns = new HashSet<string>
             {
                 "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
                 "sprk_project", "sprk_matter", "sprk_workassignment",
+                "sprk_createdbyperson", "sprk_createdbycontact",
             },
         });
 
         // Invoices — visible when attached to an accessible matter OR project (invoices carry both
         // sprk_matter and sprk_project lookups; R1's project-only scope silently hid matter-parented
         // invoices — the concrete over-hide task 028 fixes).
+        // unified-access-control-r2 task 187, fix round 1, owner decision D2 (round 100): still reached through ANY accessible
+        // parent (option A), but an invoice whose LIVE roots include a SECURE root the caller cannot read (its own matter or
+        // project, or the root its agreement is filed under) is withheld, the secure-family rule every child list applies.
         services.AddExternalModule(new ExternalModuleDescriptor
         {
             Name = "invoices",
             RecordEntity = "sprk_invoice",
+            RequireReadOnSecureRoots = true,
             ScopeDimensions = new[]
             {
                 new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
@@ -446,30 +494,12 @@ public static class ExternalAccessModule
             },
         });
 
-        // Service Requests (task 028) — INTERNAL-ONLY. Shows the caller's OWN submitted requests
-        // (sprk_requestedby == caller contact). Fail-closed for the CIAM partner plane: the accessible
-        // set is empty for a non-workforce caller, so a partner sees 0 rows even if the tab were somehow
-        // requested — server-side enforcement of "internal-only" that does not rely on the client hiding
-        // the tab (the external-spa also entitlement-gates the tab off the partner surface).
-        services.AddExternalModule(new ExternalModuleDescriptor
-        {
-            Name = "service-requests",
-            RecordEntity = "sprk_servicerequest",
-            RecordIdAttribute = "sprk_requestedby",
-            AccessibleRecordIds = p =>
-                p.Plane == CallerPrincipalPlane.Workforce && p.ContactId != Guid.Empty
-                    ? new HashSet<Guid> { p.ContactId }
-                    : EmptyRecordIds,
-            // Grid 403e5d37. Primary name = sprk_name. Unchanged by task 157 (task 134 already admitted no
-            // sibling-view column here).
-            SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
-            PrimaryNameAttribute = "sprk_name",
-            ReadableColumns = new HashSet<string>
-            {
-                "sprk_servicerequestid", "sprk_servicerequestnumber", "sprk_name", "statuscode", "createdon",
-                "sprk_requestedby",
-            },
-        });
+        // Service Requests (task 028; partner switch r3 task 011). Shows the caller's OWN submitted requests
+        // (sprk_requestedby == caller contact). The descriptor is built from ExternalAccessOptions at registry
+        // construction, so it is registered through a factory rather than AddExternalModule (which takes a built
+        // instance); the registry enumerates it like every other descriptor. See ServiceRequestsModule below.
+        services.AddSingleton(sp => ServiceRequestsModule(
+            sp.GetRequiredService<IOptions<ExternalAccessOptions>>().Value.PartnerServiceRequestsEnabled));
 
         // grid-configuration (D-016-2): every <DataGrid configId=…/> widget fetches its own
         // sprk_gridconfiguration record via BffDataverseClient.retrieveRecord BEFORE it can resolve
@@ -681,4 +711,38 @@ public static class ExternalAccessModule
         services.AddSingleton(descriptor);
         return services;
     }
+
+    /// <summary>
+    /// The Service Requests module (task 028; FR-06 partner switch, external-access-platform-r3 task 011). A caller sees
+    /// only its OWN requests: the single scope dimension is <c>sprk_requestedby</c> and the accessible set is exactly the
+    /// caller's contact id. Workforce callers with a contact always qualify. A CIAM partner contact qualifies ONLY when
+    /// <paramref name="partnerServiceRequestsEnabled"/> is on (<c>ExternalAccess:PartnerServiceRequestsEnabled</c>,
+    /// default off); with it off the CIAM set is empty, so a partner sees 0 rows even if the tab were requested —
+    /// server-side enforcement that does not rely on the client hiding the tab. A principal with no contact
+    /// (<see cref="Guid.Empty"/>) is always empty. Internal for the switch-off/switch-on tests.
+    /// </summary>
+    internal static ExternalModuleDescriptor ServiceRequestsModule(bool partnerServiceRequestsEnabled) => new()
+    {
+        Name = "service-requests",
+        RecordEntity = "sprk_servicerequest",
+        RecordIdAttribute = "sprk_requestedby",
+        AccessibleRecordIds = p =>
+            p.ContactId != Guid.Empty
+            && (p.Plane == CallerPrincipalPlane.Workforce
+                || (partnerServiceRequestsEnabled && p.Plane == CallerPrincipalPlane.CiamContact))
+                ? new HashSet<Guid> { p.ContactId }
+                : EmptyRecordIds,
+        // Grid 403e5d37. Primary name = sprk_name. Unchanged by task 157 (task 134 already admitted no
+        // sibling-view column here).
+        SavedQueryIds = NoSavedQueries, // grid source inline (live 2026-10-02): no registered view
+        PrimaryNameAttribute = "sprk_name",
+        ReadableColumns = new HashSet<string>
+        {
+            "sprk_servicerequestid", "sprk_servicerequestnumber", "sprk_name", "statuscode", "createdon",
+            "sprk_requestedby",
+            // Owner decision 2026-10-12: the SPA hides Delete on a closed request. statecode is the platform's own
+            // open (0) / closed (1) flag; the delete route enforces it again server-side.
+            "statecode",
+        },
+    };
 }

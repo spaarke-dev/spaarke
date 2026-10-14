@@ -52,14 +52,15 @@ public interface IDirectThreadAccessService
     Task<IReadOnlyList<Guid>> GetParticipantSystemUserIdsAsync(Guid threadId, CancellationToken ct = default);
 
     /// <summary>
-    /// Grants Read access on <paramref name="communicationId"/> so its thread's authorized principals can
-    /// see it under the impersonated read (task 050). Topology decides the principal source (task 052 / FR-11):
-    /// <b>Direct</b> → <paramref name="threadId"/>'s current explicit two-party list (<c>ownerid</c> ∪
-    /// POA-shared principal, UNCHANGED from task 043). <b>Open / record-anchored</b> → the task-041
-    /// <c>IThreadMembershipDerivationService.DeriveAuthorizedSetAsync</c> systemuser participants (contacts
-    /// skipped — R2 scope). A no-op when the thread has no derivable membership either way. Best-effort /
-    /// non-fatal (NFR-02): failures are logged and swallowed — the message already persisted; a missed
-    /// grant degrades to "not yet visible", never fails the send/ingest.
+    /// Grants Read access on <paramref name="communicationId"/> so the audience of the thread it joined can see it under
+    /// the impersonated read (task 050). The audience is <paramref name="assignment"/>'s, fixed when the message joined the
+    /// thread (#1629: the thread's type and lookups are not re-read here, so its owner cannot redirect the grant):
+    /// <b>Direct</b> → the thread's explicit two-party list (<c>ownerid</c> ∪ POA-shared principal, task 043);
+    /// <b>record</b> → the systemusers the anchor record's user lookups name, and the members of every team a lookup names
+    /// (task 052 / FR-11), EXCEPT the team that owns the MESSAGE, whose members already read it (#1629 F-A, F2); the
+    /// anchor's own owner team is expanded when it is not the message's owner; <b>none</b> → nothing. Never on a secure
+    /// message (task 149): a Secure-team-owned message is granted to nobody. Best-effort / non-fatal (NFR-02): failures are
+    /// logged and swallowed — the message already persisted; a missed grant degrades to "not yet visible".
     /// </summary>
-    Task GrantMessageAccessAsync(Guid communicationId, Guid threadId, CancellationToken ct = default);
+    Task GrantMessageAccessAsync(Guid communicationId, ThreadAssignment assignment, CancellationToken ct = default);
 }

@@ -21,3 +21,8 @@
 *.csx  text eol=crlf
 *.vb   text eol=crlf
 *.vbx  text eol=crlf
+
+# External SPA node scripts are imported by vitest (tests/check-dist.test.ts). A CRLF after the
+# `#!/usr/bin/env node` shebang (Windows core.autocrlf=true checkout) makes the test file fail to
+# load, so keep these LF on every platform. Storage is already LF; no content churn. (R3 task 056)
+src/client/external-spa/scripts/*.mjs text eol=lf

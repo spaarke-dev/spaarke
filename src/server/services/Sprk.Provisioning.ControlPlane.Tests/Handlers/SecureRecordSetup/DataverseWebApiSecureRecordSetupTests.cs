@@ -280,6 +280,31 @@ public sealed class DataverseWebApiSecureRecordSetupTests
         (await act.Should().ThrowAsync<SecureRecordSetupDataverseException>()).Which.Kind.Should().Be(SecureRecordSetupFaultKind.Auth);
     }
 
+    [Fact]
+    public async Task W12_IsAttributeSecured_404IsAbsent_AndEveryOtherFaultThrows()
+    {
+        var absent = new Recorder().Respond(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        (await Api(absent).IsAttributeSecuredAsync("contact", "sprk_externalinvitecodehash", CancellationToken.None)).Should().BeNull();
+        absent.Requests.Single().Uri.Should().EndWith(
+            "/EntityDefinitions(LogicalName='contact')/Attributes(LogicalName='sprk_externalinvitecodehash')?$select=IsSecured");
+
+        var secured = new Recorder().Respond(_ => Json(new Dictionary<string, object> { ["IsSecured"] = true }));
+        (await Api(secured).IsAttributeSecuredAsync("contact", "sprk_externalinvitecodehash", CancellationToken.None)).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, SecureRecordSetupFaultKind.Auth)]
+    [InlineData(HttpStatusCode.InternalServerError, SecureRecordSetupFaultKind.Other)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, SecureRecordSetupFaultKind.Other)]
+    public async Task W12b_IsAttributeSecured_NonSuccessOtherThan404_Throws_NeverAbsent(HttpStatusCode status, SecureRecordSetupFaultKind kind)
+    {
+        var http = new Recorder().Respond(_ => new HttpResponseMessage(status));
+
+        var act = () => Api(http).IsAttributeSecuredAsync("contact", "sprk_externalinvitecodehash", CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SecureRecordSetupDataverseException>()).Which.Kind.Should().Be(kind);
+    }
+
     // ------------------------------------------------------------ helpers
 
     private static SecureRecordSetupWebApi Api(Recorder http)

@@ -146,6 +146,36 @@ public static class SecureRecordSetupRejectionCodes
     /// </summary>
     public const string NoAccessEntryRolesIncomplete = "secure_setup.no_access_entry_roles_incomplete";
 
+    // ---- External-invite columns (ISS-025 / #1803; unified-access-control-r2 tasks 184 and 185) ----
+
+    /// <summary>
+    /// S22: <c>contact.sprk_externalinvitedon</c> (ships in SpaarkeMaster 1.2.2.0) is absent or not secured, the Readers profile
+    /// does not hold Read on it (read != 4), or the Writers profile does not hold 4/4/4 (Resumable: import SpaarkeMaster, H6).
+    /// A Readers row that can create or update the column is <see cref="InviteMarkerLockOtherWriter"/> instead.
+    /// </summary>
+    public const string InviteMarkerLockIncomplete = "secure_setup.invite_marker_lock_incomplete";
+
+    /// <summary>
+    /// S22: a profile other than "Spaarke BFF-Managed Field Writers" (and System Administrator) may create or update
+    /// <c>contact.sprk_externalinvitedon</c> — the Readers profile included: every default team is its member
+    /// (QuarantineRequired).
+    /// </summary>
+    public const string InviteMarkerLockOtherWriter = "secure_setup.invite_marker_lock_other_writer";
+
+    /// <summary>
+    /// S22: <c>contact.sprk_externalinvitecodehash</c> exists (it ships in a later SpaarkeMaster release; ABSENT is the expected
+    /// state until then and is not a failure) but is not secured, or the Writers profile does not hold 4/4/4 (Resumable:
+    /// import SpaarkeMaster, H6).
+    /// </summary>
+    public const string InviteCodeHashLockIncomplete = "secure_setup.invite_code_hash_lock_incomplete";
+
+    /// <summary>
+    /// S22: a profile other than "Spaarke BFF-Managed Field Writers" (and System Administrator) can read, create or update
+    /// <c>contact.sprk_externalinvitecodehash</c> — the Readers profile included, which must hold no row or a 0/0/0 row
+    /// (QuarantineRequired: who is granted access is an operator decision; nothing is removed here).
+    /// </summary>
+    public const string InviteCodeHashLockOtherAccess = "secure_setup.invite_code_hash_lock_other_access";
+
     /// <summary>
     /// Dry run finished: the plan is in the <see cref="H7bSecureRecordSetupHandler.PlanGateId"/> gate evidence and nothing
     /// was written. The run stops here so no later handler runs against an environment the dry run left unconfigured.

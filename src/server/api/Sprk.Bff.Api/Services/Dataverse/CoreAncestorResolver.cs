@@ -302,6 +302,16 @@ public sealed class CoreAncestorResolver
                 ("sprk_regardingcontact", "contact"), ("sprk_regardingorganization", "sprk_organization"),
                 ("sprk_regardingtimekeeper", "sprk_timekeeper"),
             ],
+            // spaarke-SPA-external-access-platform-r3 task 031 (owner decision 2026-10-11: a service request regarding a
+            // secure record stores its documents in that record's container), so the storage resolver now reads the
+            // service request's own row, pair included. Its party regarding lookups, from the solution source
+            // (Entities/sprk_ServiceRequest/Entity.xml; Other/Relationships/{Account,Contact,sprk_Organization}.xml).
+            // sprk_requestedby (→ contact) is the requester, not a regarding: no builder pairs it with the pair id.
+            ["sprk_servicerequest"] =
+            [
+                ("sprk_regardingcontact", "contact"), ("sprk_regardingorganization", "sprk_organization"),
+                ("sprk_regardingaccount", "account"),
+            ],
         };
 
     /// <summary>

@@ -88,7 +88,7 @@ public sealed class H3EntraAppRegHandlerTests
     private const string KeyVaultName = "sprk-acme-prod-kv";
     private const string BffAppRegId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     private const string UamiObjectId = "ffffffff-1111-2222-3333-000000000000";
-    private const int ExpectedScopeCount = 5;
+    private static readonly int ExpectedScopeCount = EntraAppRegPermissionCatalog.All.Count;
     private const string DataverseEnvUrl = "https://spaarke-acme.crm.dynamics.com/";
     private const string AddInClientId = "c1258e2d-1688-49d2-ac99-a7485ebd9995";
 
@@ -273,7 +273,7 @@ public sealed class H3EntraAppRegHandlerTests
         var repo = new FakeRepository(run, etag: "etag-5");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         var verifier = FakeVerifier.Pending(0, ExpectedScopeCount,
-            "Tenant admin has not yet granted consent for the 5 delegated scopes.");
+            "Tenant admin has not yet granted consent for the delegated scopes.");
         var handler = BuildHandler(repo, provisioner, verifier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -622,12 +622,12 @@ public sealed class H3EntraAppRegHandlerTests
         FakeRepository repo,
         FakeProvisioner provisioner,
         FakeVerifier verifier,
-        int expectedScopeCount = ExpectedScopeCount,
+        int? expectedScopeCount = null,
         List<string>? preAuthorizedClientAppIds = null)
     {
         var options = Options.Create(new EntraAppRegOptions
         {
-            ExpectedDelegatedScopeCount = expectedScopeCount,
+            ExpectedDelegatedScopeCount = expectedScopeCount ?? ExpectedScopeCount,
             PreAuthorizedClientAppIds = preAuthorizedClientAppIds ?? [],
         });
         return new H3EntraAppRegHandler(

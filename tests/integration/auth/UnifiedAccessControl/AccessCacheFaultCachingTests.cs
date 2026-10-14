@@ -560,7 +560,7 @@ public sealed class AccessCacheFaultCachingTests
             .ReturnsAsync(() =>
             {
                 var rows = new EntityCollection();
-                rows.Entities.Add(new Entity("systemuser") { Id = IdentityWorld.UserId });
+                rows.Entities.Add(new Entity("systemuser") { Id = IdentityWorld.UserId, ["isdisabled"] = false });
                 return rows;
             });
         var resolver = new WorkforcePrincipalResolver(

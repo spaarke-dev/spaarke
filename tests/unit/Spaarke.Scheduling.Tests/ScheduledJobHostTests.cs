@@ -67,7 +67,6 @@ public class ScheduledJobHostTests
         var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
 
         await host.StartAsync(CancellationToken.None);
-        await Task.Delay(300);
         await host.StopAsync(CancellationToken.None);
 
         store.RunRecords.Should().BeEmpty();
@@ -81,11 +80,13 @@ public class ScheduledJobHostTests
         registry.Register(fake);
         var store = new InMemoryBackgroundJobStore();
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
-
-        await host.StartAsync(CancellationToken.None);
-        await Task.Delay(400);
-        await host.StopAsync(CancellationToken.None);
+        // Step-driven (not the background loop): one refresh, virtual time moved past several cron
+        // occurrences, one tick, then drain — a flat result cannot be a loop that never got scheduled.
+        await using var driver = new StepDriver(registry, store, StepOptions(TimeSpan.FromHours(1)), Noon);
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None);
+        driver.Time.SetUtcNow(At(12, 0, 5));
+        driver.Tick();
+        await driver.DrainAsync();
 
         fake.InvocationCount.Should().Be(0);
         store.RunRecords.Should().BeEmpty();
@@ -98,11 +99,11 @@ public class ScheduledJobHostTests
         var store = new InMemoryBackgroundJobStore();
         store.AddOrReplaceJob(EverySecond("missing-handler"));
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
-
-        await host.StartAsync(CancellationToken.None);
-        await Task.Delay(2000); // 2 seconds — well past first fire interval if any handler existed
-        await host.StopAsync(CancellationToken.None);
+        await using var driver = new StepDriver(registry, store, StepOptions(TimeSpan.FromHours(1)), Noon);
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None);
+        driver.Time.SetUtcNow(At(12, 0, 5)); // past several every-second occurrences
+        driver.Tick();
+        await driver.DrainAsync();
 
         store.RunRecords.Should().BeEmpty();
     }
@@ -117,11 +118,11 @@ public class ScheduledJobHostTests
         var store = new InMemoryBackgroundJobStore();
         store.AddOrReplaceJob(EverySecond("disabled-job", enabled: false));
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
-
-        await host.StartAsync(CancellationToken.None);
-        await Task.Delay(2000);
-        await host.StopAsync(CancellationToken.None);
+        await using var driver = new StepDriver(registry, store, StepOptions(TimeSpan.FromHours(1)), Noon);
+        await driver.Host.RefreshDefinitionsAsync(CancellationToken.None);
+        driver.Time.SetUtcNow(At(12, 0, 5)); // past several every-second occurrences
+        driver.Tick();
+        await driver.DrainAsync();
 
         fake.InvocationCount.Should().Be(0);
         store.RunRecords.Should().BeEmpty();

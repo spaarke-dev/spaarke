@@ -457,8 +457,8 @@ same rules for batch mode.
 | `identityPreset` | H11 | `B2BGuest` \| `NativeAccount`, exact case (`userprov-missing-identity-preset` / `userprov-invalid-identity-preset`); **a `Model1` run takes only `B2BGuest`** (owner D2, T232 — `userprov-model1-requires-b2b-guest`) |
 | `environmentSecurityGroupId` | H11 | **B2BGuest (every Model 1 run)**: object id (GUID) of the environment's security group `sprk-{customerId}-users`, created by the operator and set on the environment (`PRQ-C-10`) — `userprov-missing-security-group-id` / `userprov-invalid-security-group-id` (T232) |
 | `usersJson` | H11 | JSON array, 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName`; `B2BGuest`: `email` (`userprov-missing-users` / `userprov-malformed-users-payload` / `userprov-invalid-user-entry` / `userprov-too-many-users`). Personal data: stored in the L2 run document (owner decision D15); never in git; diagnostics and logs identify users by position / Entra object id. |
-| `exchangePolicyScopeGroupId` | H14a | non-blank (`h14a-missing-policy-scope-group-id`). The mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (only its **direct** members' mailboxes are reachable) — **created by the Exchange admin of the stamp's tenant before the run** (prerequisite `PRQ-C-08`; L2 never creates it — its membership is the customer's access decision). |
-| `communicationDefaultMailbox` | H4 → KV `Communication-DefaultMailbox` | `local@domain.tld` (`intake-communication-default-mailbox-invalid`) |
+| `exchangePolicyScopeGroupId` | H14a, H14m | non-blank (`h14a-missing-policy-scope-group-id`). The mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (only its **direct** members' mailboxes are reachable) — **created by the Exchange admin of the stamp's tenant before the run**, named **`Spaarke-AppAccess-{customerId}`** (prerequisite `PRQ-C-08`; L2 never creates it). H14m adds exactly one member — the customer's shared mailbox (T263); every other member is the customer's access decision. |
+| `communicationDefaultMailbox` | H4 → KV `Communication-DefaultMailbox`; H14m | `local@domain.tld` (`intake-communication-default-mailbox-invalid`). **The address of the customer's Spaarke-tenant shared mailbox that H14m creates** (T263): an address in an accepted domain of Spaarke's tenant (e.g. `acme@spaarke.onmicrosoft.com`) that is **not** in use — an existing mailbox there that is not this customer's `sprk-{customerId}-mail` quarantines the run. |
 
 **API surface** (per FR-21):
 
@@ -506,10 +506,33 @@ legacy and caps at a few hundred policies per tenant). L2 does that through its 
    Worker reads the tenant's initial domain (`contoso.onmicrosoft.com`) there and the sidecar connects with
    `-Organization <initial domain>` — the only value Microsoft documents for app-only sign-in. With the tenant id, Exchange
    connects and reads but refuses every write with "doesn't have write permission to target DC" (2026-10-04).
+5. **Shared-mailbox roles for H14m (task 263) — owner decision D32 (2026-10-10); applied on Spaarke's tenant 2026-10-13** (M1–M5 and M7 passed the same day; RBAC changes
+   take 30 min – 2 h to propagate). Apply exactly this set on any other tenant; nothing wider.
+   H14m creates each customer's shared mailbox and adds it to the customer's scope group. `Spaarke App RBAC Admin` cannot
+   (it holds no `New-Mailbox` or `Add-DistributionGroupMember`), and widening it is an owner decision. The narrowest set
+   found is two custom roles plus one scope, assigned with `-App` (non-delegating). Run as an Organization Management
+   admin; first confirm the parents with `Get-ManagementRoleEntry '*\New-Mailbox' -Parameters Shared` and
+   `Get-ManagementRoleEntry '*\Add-DistributionGroupMember' -Parameters BypassSecurityGroupManagerCheck`:
+   ```powershell
+   New-ManagementRole -Name 'Spaarke Shared Mailbox Create' -Parent 'Mail Recipient Creation' -EnabledCmdlets New-Mailbox
+   Set-ManagementRoleEntry 'Spaarke Shared Mailbox Create\New-Mailbox' -Parameters Shared,Name,Alias,DisplayName,PrimarySmtpAddress
+   New-ManagementRole -Name 'Spaarke Scope Group Membership' -Parent 'Security Group Creation and Membership' -EnabledCmdlets Add-DistributionGroupMember
+   Set-ManagementRoleEntry 'Spaarke Scope Group Membership\Add-DistributionGroupMember' -Parameters Identity,Member,BypassSecurityGroupManagerCheck
+   New-ManagementScope -Name 'Spaarke Customer Scope Groups' -RecipientRestrictionFilter "RecipientTypeDetails -eq 'MailUniversalSecurityGroup' -and Name -like 'Spaarke-AppAccess-*'"
+   New-ManagementRoleAssignment -Name 'sprk-exoadmin-sharedmbx-create' -App <app id> -Role 'Spaarke Shared Mailbox Create'
+   New-ManagementRoleAssignment -Name 'sprk-exoadmin-scopegroup-member' -App <app id> -Role 'Spaarke Scope Group Membership' -CustomResourceScope 'Spaarke Customer Scope Groups'
+   ```
+   Then run live checks M1–M7 (`projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md`
+   §5). Without these roles H14m fails Resumable (`h14m-mailbox-ensure-failed`, naming PRQ-E-16) **before** creating
+   anything — Exchange Online only loads the cmdlets a caller's roles allow, and the sidecar checks for both first.
+   Not requested: `Remove-Mailbox` / `Remove-DistributionGroupMember` (decommission is manual in r1 — §7.9) and
+   `Set-Mailbox`.
 
 Residual risk, stated plainly: an identity that can create application role assignments can grant any app — itself
-included — the four mailbox roles organization-wide (the scope is optional). Only the L2 Worker can obtain its token;
-audit `New-ManagementRoleAssignment` in the unified audit log.
+included — the four mailbox roles organization-wide (the scope is optional). With step 5 it can also create any
+shared mailbox and add any recipient to any `Spaarke-AppAccess-*` group, which would let that customer's stamp reach it;
+the code only ever adds `sprk-{customerId}-mail` to its own customer's group. Only the L2 Worker can obtain its token;
+audit `New-ManagementRoleAssignment`, `New-Mailbox` and `Add-DistributionGroupMember` in the unified audit log.
 
 > **Verified live (2026-10-04)**: sign-in, connect with the initial domain, app-only writes (`New-ServicePrincipal`,
 > `New-ManagementRoleAssignment -RecipientGroupScope`), the escalation refusals, and `Test-ServicePrincipalAuthorization`
@@ -788,11 +811,42 @@ the list of a running stamp, start a new run (upgrade) with the new list — nev
 hand (H13 T7 fails a stamp whose slots differ from its run). Never `AzureAd__TenantId`, never `TenantRouting:Tenants[]`.
 
 🔴 **Model 1 is the case that makes this a separate setting.** In Model 1 the per-customer BFF app registration
-lives in **Spaarke's** tenant (D-13), so `AzureAd:TenantId` is Spaarke's tenant while the customer's employees
-sign in with the **customer's** `tid`. Keying the member test on `AzureAd:TenantId` would refuse every Model-1
-Type-2 employee **and** auto-bind Spaarke's own staff into the customer's environment. Set the CUSTOMER's tenant
-here. In Model 2 the registration lives in the customer's tenant and the two values coincide — list it anyway;
-nothing is inferred.
+lives in **Spaarke's** tenant (D-13), so `AzureAd:TenantId` is Spaarke's tenant. Keying the member test on
+`AzureAd:TenantId` would refuse every Model-1 Type-2 employee **and** auto-bind Spaarke's own staff into the
+customer's environment. Set the CUSTOMER's tenant here. In Model 2 the registration lives in the customer's tenant
+and the two values coincide — list it anyway; nothing is inferred.
+
+##### Model 1: why a customer has a "home tenant" at all (read this before asking again)
+
+> Recorded 2026-10-11 at the owner's request (`spaarke-SPA-external-access-platform-r3`), verified against
+> `WorkforceIdentityOptions.cs` `WorkforceMembershipTest.Evaluate` / `IsRegisteredGuest`.
+
+Model 1 puts **Spaarke's side** (the stamp, its BFF app registration, its Dataverse environment) in Spaarke's
+tenant. It does **not** move the customer's people. A customer's employees keep their own company work accounts
+in **their company's own Entra tenant** — the customer's **home tenant** (e.g. Contoso's tenant). They reach the
+stamp as **B2B guests in Spaarke's tenant**, authenticating at home.
+
+| Where the home tenant appears | What it is |
+|---|---|
+| The guest's token from the stamp (Spaarke-pinned authority, ADR-028 A8; proven live 2026-10-08) | `tid` = **Spaarke's** tenant, `acct = 1` (guest), `idp` = `https://sts.windows.net/{home tenant id}/` |
+| `WorkforceIdentity__CustomerTenantIds__N` (this setting) | The customer's home tenant id(s): "whose employees count as this customer's workforce" |
+| The Spaarke registry, next to `sprk_securitygroupid` (R3 task 060 for current customers; provisioning intake for new ones) | The same list per customer key, read by the shared workforce self-registration service |
+
+It is checked in two places:
+
+1. **Every request to the customer's BFF** (`WorkforceMembershipTest`). A Model 1 guest is a member only when
+   `acct = 1` **and** `tid` = the stamp tenant **and** the home tenant parsed from `idp` ∈ `CustomerTenantIds`
+   (R3 FR-15). A guest from any other home tenant is denied (`sdap.access.deny.workforce_tenant_not_customer`).
+   A direct member of the listed tenant (`tid` ∈ list, `acct = 0`) is the Model 2 / dev path.
+2. **Workforce self-registration** (R3 FR-14, task 060). The person signs in at home first; the service admits them
+   only if that home `tid` ∈ the customer's list **and** `acct = 0` (a member there, not someone else's guest),
+   and only then invites them into Spaarke's tenant and the customer's `sprk-{customerId}-users` group.
+
+**Without the list**, anyone with any Microsoft work account could register as that customer's staff, and a guest
+from another company invited for an unrelated reason would be bound into the customer's environment.
+
+**Not to be confused with:** `AzureAd:TenantId` (the stamp's own tenant = Spaarke's on Model 1), the CIAM tenant
+(partners with no company Entra account; never valid here — startup refuses it), or `TenantRouting:Tenants[]`.
 
 Outside a provisioning run (Spaarke's own environments — dev), the same setting by hand, on BOTH slots:
 
@@ -804,7 +858,8 @@ az webapp config appsettings set --resource-group <rg> --name <app-service-name>
 ```
 
 **The member test also needs the `acct` claim** (§7.3): a member is a user token (`CallerIdentity`, never an
-app-only token) whose `tid` is listed here AND whose `acct` claim is `0`. A token with no `acct` claim fails
+app-only token) whose `tid` is listed here AND whose `acct` claim is `0` — or, on Model 1, the registered-guest
+branch above (`acct = 1`, `tid` = stamp tenant, `idp` home tenant listed here). A token with no `acct` claim fails
 closed (`sdap.access.deny.workforce_acct_claim_missing`) — membership is never inferred from an email domain or
 a `#EXT#` UPN.
 
@@ -1045,6 +1100,8 @@ former `scripts/Register-EntraAppRegistrations.ps1` path was retired by task 130
   not create (H3 keeps exactly `spaarke-uami-trust` and `spaarke-l2-worker`, repairing either by triple), or when anyone but
   the control plane owns it (`appreg-adoption-refused`; nothing is written). The name
   `spaarke-bff-api-{customerId}` is predictable, and an adopted registration gets the stamp's FIC and Dataverse admin.
+- **admin-consent gate (Model 1, Spaarke tenant):** when the run waits on H3's `admin-consent` gate, a Spaarke-tenant admin opens Entra admin center -> App registrations -> `spaarke-bff-api-{customerId}` -> API permissions -> **Grant admin consent for Spaarke**; that covers all 6 delegated permissions in `EntraAppRegPermissionCatalog`. Then advance the gate with `POST /api/runs/{id}/gates/admin-consent/advance` (API surface table above).
+  Known limit (ISS-018 K1): an app registration H3 created before 2026-10-14 would keep a stale delegated entry with id `75359482-...` (the reconcile only adds); none exists, because H3 had never run live.
 
 **Office add-in and Teams sign-in redirects are NOT on the customer's registration.** The shared clients sign in with
 their OWN app registrations (production add-in: `1958aec2…` "Spaarke Office Add-in (Production)"), so `brk-multihub://<host>` and
@@ -1065,7 +1122,7 @@ it once by hand:
 ```
 
 Both are idempotent and keep every other optional claim. Optional claims on the resource registration apply to
-every access token issued FOR it — Teams SSO included (`webApplicationInfo.id` is this registration) — see
+every access token issued FOR it — including the workforce tokens the External Access SPA and Teams tab acquire (the single-tenant Spaarke client, NAA then MSAL popup, scope `user_impersonation`; the Teams manifest declares no `webApplicationInfo` and there is no Teams-SSO path, ADR-028 A8) — see
 Microsoft's [optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference).
 Without it every Type-2 first sign-in is denied `sdap.access.deny.workforce_acct_claim_missing` (fail closed).
 
@@ -1326,12 +1383,26 @@ configured (`userprov-license-sku-not-configured`).
 must carry `sprk_isexternal = Yes`. A user flagged external is refused a share on a Restricted record and gets no
 internal-only message.
 
-> **Do NOT run `scripts/Set-ExternalFlagForB2BGuests.ps1` on a Model 1 stamp** (#1564). Under Model 1 every customer
-> employee is a B2B guest (`#EXT#`) in Spaarke's tenant (§7.7), so the script would mark every customer employee
-> external. The rule for who is external on a Model 1 stamp is undecided and belongs to unified-access-control-r2; do not
-> run the script (dry run included, for its report) until that project records the rule and this guide is updated. The
-> script is unchanged and may still be right for an environment whose B2B guests really are external people (not a Model 1
-> stamp). The older instruction (dry run → `-Apply` → `-Verify`, §12.2 Phase 7b) does not apply to Model 1 stamps.
+> **On a Model 1 stamp, run the script with `-CustomerTenantIds`** (spaarkeai-word-add-in-r1 task 126, owner 2026-10-13;
+> ADR-028 A8/A9). Under Model 1 the customer's licensed core users are B2B guests (`#EXT#`) in the Spaarke tenant (A8), so
+> "every guest is external" would mark the customer's own staff external. Workforce contacts are not guests (A9: they sign
+> in to the SPA with their company account and are contacts), so they never reach this script. The script requires a mode:
+>
+> | Stamp | Mode | Rule |
+> |---|---|---|
+> | Model 1 | `-CustomerTenantIds <id>[,<id>…]` = the stamp's `WorkforceIdentity__CustomerTenantIds__N` list (§6.5.2) | Each guest's email domain is resolved to its home directory with Graph `findTenantInformationByDomainName`. A guest of a listed directory (or one listed in `-InternalUserIds`) is the customer's staff and is **never written**. A guest of another directory is set to Yes unless it already is Yes. A guest whose domain does not resolve, or whose two addresses resolve to different directories, is **reported for review and never written** (unless already Yes). Only a stored Yes counts as a decision: No is the column's default, so a new guest carries it without anyone choosing it. The script refuses the stamp's own directory or an empty id as a customer directory, and refuses `-Apply` when it has guests to set but none of the stamp's guests resolves to the customer's directories (before the customer has any guest staff, set such an outsider's flag by hand). These guards catch only an id that matches no guest; another real directory with guests on the stamp passes them, so **check the ids against the stamp BFF's settings (the §12.3 query) before `-Apply`**. |
+> | Every guest is an outsider (not Model 1) | `-AllGuestsExternal` | Unchanged task 114 behaviour: every guest still blank or No is set to Yes. |
+>
+> Dry run → review the report with the owner → `-Apply` → `-Verify` (exit 0 only when nothing is left to set **or to
+> review**). Settle each "review" row:
+>
+> - **Unresolved guest:** set the user's flag to Yes (an outsider), or add the user's `systemuserid` to `-InternalUserIds`
+>   (customer staff, for example on a subsidiary's domain verified in another directory) and pass that list on every run.
+> - **Customer staff flagged external:** set the flag back to No. On Model 1 the customer's staff are internal; this row
+>   does not clear while the flag is Yes.
+>
+> The same applies to a customer staffer whose address resolves to another directory: the dry run proposes "set Yes", so
+> add them to `-InternalUserIds` before `-Apply`. §12.2 Phase 7b has the commands.
 
 ### 7.8 Phase 8 — Configuration Seed (H12a, H12b, H12c)
 
@@ -1347,9 +1418,34 @@ Both consume the **declarative seed manifest** (resolves the `scripts/seed-data`
 
 ### 7.9 Phase 9 — Post-Deploy Integrations (H14)
 
-One sub-step:
+Two sub-steps, in order (H14m is not attempted when H14a fails — its authorization test needs H14a's assignments):
 
 - **(a) Exchange mailbox access (RBAC for Applications, task 251)** — the stamp UAMI only (the BFF app registration does no app-only mail; granting it would widen its reach). Through the Worker's sidecar: register the UAMI in Exchange (`New-ServicePrincipal`), then one assignment per mailbox role, named `{prefix}-{customerId}-{Role}`, scoped to the intake group. Get-before-set: any existing assignment that differs → Drift, nothing changed (**T4**). Grants take effect in 30 min – 2 h (Microsoft).
+- **(m) The customer's shared mailbox (H14m, task 263 — owner decision 2026-10-10, #1562)** — Model 1 reaches only
+  Spaarke-tenant mailboxes (customer staff mailboxes live in their home tenant), so each customer gets **one Spaarke-tenant
+  shared mailbox**:
+  1. Through the sidecar (`POST /ensure-customer-mailbox`), get-before-set: Exchange name/alias `sprk-{customerId}-mail`,
+     address = intake `communicationDefaultMailbox` (the same value H4 writes to `Communication-DefaultMailbox`, so the
+     BFF's default sender is this mailbox), display name = intake `displayName`; created with `New-Mailbox -Shared` and
+     added to the scope group `Spaarke-AppAccess-{customerId}` (`Add-DistributionGroupMember`), then
+     `Test-ServicePrincipalAuthorization` must report every stamp mail role (`Application Mail.Read/ReadWrite/Send`) in scope.
+  2. In the stamp's Dataverse, as the BFF app registration (the H7/H7b identity): exactly one `sprk_communicationaccount`
+     row for that address — Shared Account, App-Only, send- and receive-enabled, default sender, `sprk_securitygroupid` =
+     the scope group, **Verified** (the message says it is Exchange's configuration-level authorization; Graph calls can lag a
+     new grant by 30 min – 2 h, and a user can re-run `POST /api/communications/accounts/{id}/verify` any time). L2 does not
+     call that endpoint: it is a user endpoint (Write on the account), and right after H14a its Graph test would fail.
+  - **A second run writes nothing** (mailbox `AlreadyCompliant`, row already Verified).
+  - **Quarantine, nothing changed** (`h14m-mailbox-drift`): a recipient with that name, alias or address that is not a
+    shared mailbox, has another name/address (another customer's or a person's), sits outside the scope group or in any
+    other group; or the scope group is not named `Spaarke-AppAccess-{customerId}`. `h14m-account-row-conflict`: the stamp
+    has several rows for the address, an inactive one, or one of another type.
+  - **Resumable**: `h14m-mailbox-ensure-failed` (sidecar / Exchange / **the T263 Exchange roles not applied — §4.2.1 step 5,
+    pending owner decision D32**; nothing is created), `h14m-mailbox-unverified` (a role not yet in scope; no row written),
+    `h14m-account-verification-failed` (the row says the BFF's own verification FAILED — never overwritten; re-verify in the
+    app, then resume), `h14m-account-row-failed`.
+  - **Decommission (manual in r1)**: `Remove-DistributionGroupMember -Identity 'Spaarke-AppAccess-{customerId}' -Member
+    'sprk-{customerId}-mail' -BypassSecurityGroupManagerCheck`, `Remove-Mailbox 'sprk-{customerId}-mail'` (soft-deleted 30
+    days), then **deactivate** (never delete) the account row. Design: `projects/customer-provisioning-orchestration-r1/notes/t263-customer-shared-mailbox.md`.
 
 **Removed (ISS-019 / #1560): H14b (Graph webhook subscriptions) and H14c (Dataverse service-endpoint webhook).** They registered
 receivers at `{stamp}/api/webhooks/graph/{module}` and `{stamp}/api/webhooks/dataverse/communication`; the stamp BFF maps neither
@@ -1357,9 +1453,8 @@ route (its mail receiver is `POST /api/communications/incoming-webhook`), so the
 stop at H14b. Mail needs no provisioning-time subscription: the BFF's `GraphSubscriptionManager` creates and renews its own
 Graph subscription for each receive-enabled mailbox, using the `Communication-WebhookUrl` that `customer.bicep` sets
 (`{stamp}/api/communications/incoming-webhook`); `InboundPollingBackupService` (5 min) and delta reconciliation (15 min)
-run regardless. The mailbox records themselves (`sprk_communicationaccount`, verified with
-`POST /api/communications/accounts/{id}/verify`) are not created by any provisioning step — an operator creates them by hand
-(tracked as #1562). Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. The stamp's
+run regardless. The mailbox record (`sprk_communicationaccount`) is created and verified by H14m (above) — no hand step.
+Run intake no longer takes `communicationGraphResource` / `emailGraphResource`. The stamp's
 `Communication__WebhookSigningKey` setting still resolves to Key Vault secret `Communication-Webhook-SigningKey` (H4 generates it; the BFF requires it for the receiver's HMAC check).
 
 **Explicitly NOT included** (per r3 task 060): S2S consent flows — the S2S Dataverse app-reg was dropped.
@@ -1374,6 +1469,11 @@ run regardless. The mailbox records themselves (`sprk_communicationaccount`, ver
 - Workspace-layout render succeeds
 - Wizard field-map succeeds
 - **All 7 §4B T1–T7 silent-fail traps cleared** (see §9)
+- **The customer mailbox (T263)**: read-only, the shared mailbox `sprk-{customerId}-mail` exists at the intake address,
+  in the scope group and no other group, every stamp mail role in scope (`Test-ServicePrincipalAuthorization`), and the
+  stamp has exactly one active, shared, **Verified** `sprk_communicationaccount` row for it. Missing, foreign or
+  unverified → QuarantineRequired `h13-customer-mailbox-failed`; no verdict (sidecar or Dataverse unreachable, missing
+  input) → Resumable `h13-customer-mailbox-inconclusive`
 - **The §4D I2–I5 tenant-isolation invariants sample-verified on the deployed stamp** (see §8; I1 is a build gate —
   T230a), with I3 checking the Cosmos account holds exactly `cosmos-db.bicep`'s containers and partition keys
 - (Naming conformance is a blocking CI gate — `scripts/naming-conformance-check.ps1` in `sdap-ci.yml` — not a per-run
@@ -1411,7 +1511,19 @@ no solution import can create. Since T256, **H7b creates it on every run**, afte
   #1565) — other members of that profile are never touched;
 - a check that `sprk_noaccessentry` is readable, and that the `Spaarke Access Administrator` role holds Read on it at
   Global while `Spaarke Core User` holds none (unified-access-control-r2 task 154; verified, never repaired — H7b
-  refuses `secure_setup.no_access_entry_roles_incomplete` and names `scripts/Set-NoAccessEntryRolePrivileges.ps1`).
+  refuses `secure_setup.no_access_entry_roles_incomplete` and names `scripts/Set-NoAccessEntryRolePrivileges.ps1`);
+- a read-only check (S22, ISS-025 / #1803) that `contact.sprk_externalinvitedon` (SpaarkeMaster 1.2.2.0 and later) is
+  field-secured, that `Spaarke BFF-Managed Field Readers` holds Read only (4/0/0) and `Writers` 4/4/4, and that no other
+  profile (System Administrator excepted) can create or update it — a missing column or a wrong lock refuses
+  `secure_setup.invite_marker_lock_incomplete` (Resumable: import SpaarkeMaster) or
+  `secure_setup.invite_marker_lock_other_writer` (QuarantineRequired);
+- the same check for `contact.sprk_externalinvitecodehash` (unified-access-control-r2 task 185) once a SpaarkeMaster release
+  carries it: secured, `Writers` 4/4/4, and no access for `Readers` (no row or 0/0/0) or any other profile (System
+  Administrator excepted), else `secure_setup.invite_code_hash_lock_incomplete` (Resumable) or
+  `secure_setup.invite_code_hash_lock_other_access` (QuarantineRequired). While the column is absent that is the expected
+  state: H7b does not fail, and records an "absent — ships in a later SpaarkeMaster release" note in the `notes` of gate
+  `h7b-secure-record-setup`. Neither check writes a field-security row; auditing and Advanced Find on the hash column are
+  not verified by H7b.
 
 An intake `secureRecordSetupDryRun: true` makes H7b read only. It records its plan in gate `h7b-secure-setup-plan` and
 stops the run.
@@ -1813,8 +1925,8 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 .\scripts\Repair-SpeConfigSecretName.ps1 ... -MintClientSecret -Apply
 .\scripts\Repair-SpeConfigSecretName.ps1 ... -Verify
 # Phase 6 — BFF deploy
-# ⚠️ Phase 7b (Set-ExternalFlagForB2BGuests.ps1) is NOT run on Model 1 stamps (#1564) — see Phase 7b below.
-# EXISTING non-Model-1 environment receiving the BFF that carries unified-access-control-r2 task 114: run Phase 7b (all
+# Phase 7b (Set-ExternalFlagForB2BGuests.ps1) takes -CustomerTenantIds on a Model 1 stamp — see Phase 7b below.
+# EXISTING environment receiving the BFF that carries unified-access-control-r2 task 114: run Phase 7b (all
 # three steps, -Verify exit 0) BEFORE this deploy. That BFF reads a BLANK sprk_isexternal as internal, so a B2B guest still
 # blank when it starts is shared with on Restricted records and receives internal-only messages. (A NEW environment has
 # no users yet: Phase 7b follows H11 below, before anyone is given access.)
@@ -1824,22 +1936,27 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 # Interim: PPAC UI + Graph SDK; see auth-deployment-setup stub for MI-first checklist
 # T2 verification MANDATORY: systemusers?$filter=applicationid eq {uami-app-id} returns 1
 
-# Phase 7b — 🛑 DO NOT RUN ON A MODEL 1 STAMP (#1564). Under Model 1 every customer employee is a B2B guest (#EXT#) in
-# Spaarke's tenant, so this step would mark every customer employee external. Skip Phase 7b (all three commands, the dry
-# run too) on Model 1 until unified-access-control-r2 decides the rule and this guide is updated.
-# B2B guests are flagged external (unified-access-control-r2 task 114, owner round 67 — per environment,
-# after the users exist, and again whenever B2B guests are added outside the product). A BLANK sprk_isexternal means
-# NOT external: Manage Access "+ User" and the Assigned-To rule share with the user, internal-only messages reach them,
-# and a Restricted record keeps their share. This sets sprk_isexternal = Yes on every systemuser whose user name holds
-# "#EXT#" and changes nothing else. Dry run first and review the list with the owner, then -Apply, then -Verify (exit 0).
+# Phase 7b — B2B guests who are outsiders are flagged external (unified-access-control-r2 task 114, owner round 67;
+# Model 1 rule: spaarkeai-word-add-in-r1 task 126, owner 2026-10-13 — per environment, after the users exist, and again
+# whenever B2B guests are added outside the product). A BLANK sprk_isexternal means NOT external: Manage Access "+ User"
+# and the Assigned-To rule share with the user, internal-only messages reach them, and a Restricted record keeps their
+# share. The script requires a mode (§7.7, after the H11 notes):
+#   MODEL 1 stamp: -CustomerTenantIds = the stamp's WorkforceIdentity__CustomerTenantIds__N values (read them with the
+#     §12.3 query). The customer's own staff (guests of a listed home directory, or in -InternalUserIds) are never
+#     written; a guest of another directory not already Yes is set to Yes (No is the column default, not a decision);
+#     an unresolvable or inconsistent guest is listed as "review" and never written.
+#   Every guest an outsider (not Model 1): -AllGuestsExternal (sets every #EXT# user still blank or No to Yes).
+# Dry run first and review the report with the owner, then -Apply, then -Verify (exit 0). A "review" row fails -Verify
+# until it is settled (§7.7): an outsider gets Yes by hand; customer staff go in -InternalUserIds (same list every run).
 # ORDER: in an EXISTING environment this runs BEFORE Phase 6 deploys the BFF carrying task 114 (the BFF before it already
 # treats a blank flag as external, so running this first changes nothing for it). If that BFF was deployed first: run
 # this at once, and allow 10 minutes after -Apply — the identity resolver caches sprk_isexternal for 10 minutes, and that
 # cached answer also decides a licensed user's Restricted-record access on the SPA/Teams plane.
 # Within 5 minutes of -Apply the BFF removes each newly flagged guest's share on every Restricted record.
-.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>"            # dry run (read-only)
-.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -Apply
-.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -Verify    # MUST exit 0
+.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerTenantIds "<customer-tenant-guid>"   # Model 1 dry run (read-only)
+.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerTenantIds "<customer-tenant-guid>" -Apply
+.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerTenantIds "<customer-tenant-guid>" -Verify   # MUST exit 0
+# Not Model 1: replace -CustomerTenantIds "<…>" with -AllGuestsExternal in all three commands.
 
 # Phase 8 — config seed
 .\scripts\seed-data\Deploy-All-AI-SeedData.ps1 -EnvironmentUrl "<dv-org-url>"

@@ -126,6 +126,12 @@
     },
     {
       "type": "Role",
+      "name": "Spaarke Internal Contact User (Workforce)",
+      "reason": "UAC-r2 round-97 baseline role for Model 1 workforce contacts (ADR-028 A9). Its privileges are still pending an owner decision (sprk_servicerequest read, SPA-r3 task 038 C-W6), and no customer environment signs in workforce contacts until the A9 provisioning work lands. Ships in the release after UAC task 186 closes.",
+      "date": "2026-10-13"
+    },
+    {
+      "type": "Role",
       "name": "Spaarke Provisioning Registry",
       "reason": "Control-plane role for the admin/registry environment only; no customer environment uses it.",
       "date": "2026-10-07"

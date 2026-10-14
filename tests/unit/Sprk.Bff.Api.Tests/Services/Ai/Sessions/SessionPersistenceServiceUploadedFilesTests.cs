@@ -51,6 +51,12 @@ public class SessionPersistenceServiceUploadedFilesTests
     private readonly IConfiguration _configuration;
     private readonly SessionPersistenceService _sut;
 
+    // Signalled by the Cosmos container double when the fire-and-forget upsert actually runs, so tests await
+    // the write itself instead of sleeping and hoping it has landed.
+    private readonly TaskCompletionSource _cosmosUpserted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private Task CosmosUpsertedAsync() => _cosmosUpserted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
     public SessionPersistenceServiceUploadedFilesTests()
     {
         _cache = new TrackingTenantCache();
@@ -101,7 +107,7 @@ public class SessionPersistenceServiceUploadedFilesTests
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<StoredSession, PartitionKey?, ItemRequestOptions?, CancellationToken>(
-                (s, _, _, _) => capturedSession = s)
+                (s, _, _, _) => { capturedSession = s; _cosmosUpserted.TrySetResult(); })
             .ReturnsAsync(CreateFakeUpsertResponse());
 
         var uploadedAt = DateTimeOffset.UtcNow.AddMinutes(-1);
@@ -138,7 +144,7 @@ public class SessionPersistenceServiceUploadedFilesTests
 
         // Act
         var result = await _sut.UpdateUploadedFilesAsync(SessionId, TenantId, enriched);
-        await Task.Delay(50); // fire-and-forget Cosmos
+        await CosmosUpsertedAsync(); // fire-and-forget Cosmos write
 
         // Assert
         result.Should().BeTrue();
@@ -200,6 +206,8 @@ public class SessionPersistenceServiceUploadedFilesTests
                 It.IsAny<PartitionKey?>(),
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
+            .Callback<StoredSession, PartitionKey?, ItemRequestOptions?, CancellationToken>(
+                (_, _, _, _) => _cosmosUpserted.TrySetResult())
             .ReturnsAsync(CreateFakeUpsertResponse());
 
         const string sensitiveSummary = "SENSITIVE-SUMMARY-DO-NOT-LOG";
@@ -225,7 +233,7 @@ public class SessionPersistenceServiceUploadedFilesTests
 
         // Act
         await _sut.UpdateUploadedFilesAsync(SessionId, TenantId, enriched);
-        await Task.Delay(50);
+        await CosmosUpsertedAsync();
 
         // Assert — scan ALL logger invocations across ALL levels for any sensitive literal
         var allLogInvocations = _loggerMock.Invocations
@@ -267,11 +275,13 @@ public class SessionPersistenceServiceUploadedFilesTests
                 It.IsAny<PartitionKey?>(),
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
+            .Callback<StoredSession, PartitionKey?, ItemRequestOptions?, CancellationToken>(
+                (_, _, _, _) => _cosmosUpserted.TrySetResult())
             .ReturnsAsync(CreateFakeUpsertResponse());
 
         // Act
         var result = await _sut.UpdateUploadedFilesAsync(SessionId, TenantId, BuildEnrichedFiles(1));
-        await Task.Delay(50);
+        await CosmosUpsertedAsync();
 
         // Assert
         result.Should().BeTrue();
@@ -315,11 +325,13 @@ public class SessionPersistenceServiceUploadedFilesTests
                 It.IsAny<PartitionKey?>(),
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
+            .Callback<StoredSession, PartitionKey?, ItemRequestOptions?, CancellationToken>(
+                (_, _, _, _) => _cosmosUpserted.TrySetResult())
             .ReturnsAsync(CreateFakeUpsertResponse());
 
         // Act
         var result = await _sut.UpdateUploadedFilesAsync(SessionId, TenantId, BuildEnrichedFiles(1));
-        await Task.Delay(50);
+        await CosmosUpsertedAsync();
 
         // Assert
         result.Should().BeTrue();
@@ -350,6 +362,17 @@ public class SessionPersistenceServiceUploadedFilesTests
         var existing = BuildStoredSession();
         await SeedSession(existing);
 
+        // Signalled by the service's swallow-and-log branch, so the test awaits the failure path itself.
+        var failureLogged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _loggerMock
+            .Setup(l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Cosmos DB write failed")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
+            .Callback(new InvocationAction(_ => failureLogged.TrySetResult()));
+
         _containerMock
             .Setup(c => c.UpsertItemAsync(
                 It.IsAny<StoredSession>(),
@@ -365,7 +388,8 @@ public class SessionPersistenceServiceUploadedFilesTests
         await act.Should().NotThrowAsync(
             "UpdateUploadedFilesAsync must mirror SaveTabsAsync — Cosmos failures are swallowed at Warning level, never re-thrown");
 
-        await Task.Delay(50); // allow fire-and-forget Cosmos task to complete its failure log
+        // The swallowed failure must be logged (Warning) rather than silently dropped.
+        await failureLogged.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         // Returned true because the Redis write completed BEFORE the Cosmos upsert was awaited
         // (fire-and-forget). The contract: true means "session existed + Redis path completed".

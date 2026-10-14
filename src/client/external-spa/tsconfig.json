@@ -26,7 +26,8 @@
       "react-dom": ["./node_modules/@types/react-dom"],
       "react-dom/*": ["./node_modules/@types/react-dom/*"],
       "@fluentui/react-components": ["./node_modules/@fluentui/react-components"],
-      "@fluentui/react-icons": ["./node_modules/@fluentui/react-icons"]
+      "@fluentui/react-icons": ["./node_modules/@fluentui/react-icons"],
+      "dompurify": ["./node_modules/dompurify"]
     },
     "typeRoots": ["./node_modules/@types"]
   },

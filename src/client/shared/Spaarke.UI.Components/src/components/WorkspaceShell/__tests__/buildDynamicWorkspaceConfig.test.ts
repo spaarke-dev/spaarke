@@ -206,11 +206,14 @@ describe('buildDynamicWorkspaceConfig — contentSizing (FR-01)', () => {
  *   (g) A row WITH `rowHeight: '80vh'` produces a `WorkspaceRowConfig` where
  *       `maxHeight === '80vh'` and `overflow === 'hidden'`.
  *   (h) When a row has `rowHeight` set AND a section in the row has
- *       `contentSizing: 'clamped'`, BOTH constraints coexist: the row wrapper
- *       carries the `maxHeight`/`overflow: 'hidden'` ceiling, and the section
- *       still applies its own `defaultHeight` on the inner card style. This is
- *       the "row's ceiling wins for the outer wrapper" contract — the row's
- *       overflow prevents any over-constraint from the section's inner style.
+ *       `contentSizing: 'clamped'`, the row's height wins over the section's
+ *       `defaultHeight`: the row wrapper carries the `maxHeight`/
+ *       `overflow: 'hidden'` ceiling, and the section card is sized to the
+ *       row height LITERALLY (`height`/`maxHeight`/`minHeight`) — the
+ *       registration `defaultHeight` hint is ignored. Operator intent
+ *       (rowHeight) > registration hint (defaultHeight). Behaviour introduced by
+ *       803c77ace (R2 UAT §5.6): a literal value gives the subtree a
+ *       determinate parent height, where a `100%` chain did not.
  *   (i) A row that overflows its column template (more sections than slots)
  *       propagates `rowHeight` to every auto-appended overflow row.
  *
@@ -266,11 +269,11 @@ describe('buildDynamicWorkspaceConfig — rowHeight (FR-02)', () => {
     expect(config.rows![0].overflow).toBe('hidden');
   });
 
-  it('(h) row rowHeight + section contentSizing:"clamped" — row ceiling coexists with section defaultHeight (row wins on outer wrapper)', () => {
-    // Section is clamped with defaultHeight 480px; row imposes a 100vh ceiling.
-    // Expected: WorkspaceRowConfig carries maxHeight:100vh + overflow:hidden
-    // (row wrapper wins). The section still carries its own maxHeight:480px on
-    // the inner card style — but the row's overflow:hidden prevents over-constraint.
+  it('(h) row rowHeight + section contentSizing:"clamped" — row height wins over section defaultHeight (section card sized to row height)', () => {
+    // Section is clamped with defaultHeight 480px; row imposes a 100vh height.
+    // Expected: WorkspaceRowConfig carries maxHeight:100vh + overflow:hidden,
+    // and the section card is sized literally to the row height (100vh) — the
+    // registration defaultHeight (480px) is overridden (803c77ace, R2 UAT §5.6).
     const registry = [
       makeRegistration('clamped-section', {
         defaultHeight: '480px',
@@ -285,13 +288,15 @@ describe('buildDynamicWorkspaceConfig — rowHeight (FR-02)', () => {
     expect(config.rows![0].maxHeight).toBe('100vh');
     expect(config.rows![0].overflow).toBe('hidden');
 
-    // Section still gets its own maxHeight (per FR-01 clamped behavior);
-    // the row wrapper's overflow:hidden ensures the section's inner style
-    // does not over-constrain the outer wrapper.
+    // Row height wins over defaultHeight: the section card is sized literally
+    // to the row height, and 480px appears nowhere on the card.
     const section = config.sections[0];
-    expect(section.style?.maxHeight).toBe('480px');
+    expect(section.style?.height).toBe('100vh');
+    expect(section.style?.maxHeight).toBe('100vh');
+    expect(section.style?.minHeight).toBe('100vh');
     expect(section.style?.overflow).toBe('hidden');
     expect(section.style?.display).toBe('flex');
+    expect(section.style?.flexDirection).toBe('column');
   });
 
   it('(i) row overflow (more sections than slots) — rowHeight propagates to every auto-appended overflow row', () => {

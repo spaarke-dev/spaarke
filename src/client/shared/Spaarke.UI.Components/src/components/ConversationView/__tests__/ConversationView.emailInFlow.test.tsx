@@ -188,14 +188,20 @@ describe('ConversationView email-in-flow (FR-04)', () => {
     const block = await screen.findByRole('group', { name: /^Email: Contract draft/ });
     const row = block.parentElement as HTMLElement;
     // Dialog is closed before the open-icon is clicked.
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog', { hidden: true })).not.toBeInTheDocument();
 
     await userEvent.click(within(row).getByRole('button', { name: 'Open email' }));
 
     // The extended dialog appears, carrying the regarding record (folded into
     // the composer's association chips) — proving thread + regarding context.
     // SendEmailDialog uses modalType="alert" (no light dismiss) → role="alertdialog".
-    const dialog = await screen.findByRole('alertdialog', {}, { timeout: 4000 });
+    // `hidden: true`: under jsdom the dialog surface keeps `aria-hidden="true"` even once open. That is a
+    // tabster Modalizer-in-jsdom artefact (Modalizer's `_onFocus` ignores non-programmatic focus events), not a
+    // focus-timing race. So this queries the DOM node directly (context carried) and separately asserts below
+    // that focus really did move inside the dialog.
+    const dialog = await screen.findByRole('alertdialog', { hidden: true }, { timeout: 4000 });
+    // Focus has moved inside the dialog.
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
     expect(within(dialog).getByText(/Smith v Jones/)).toBeInTheDocument();
   });
 

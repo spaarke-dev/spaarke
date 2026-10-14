@@ -221,7 +221,10 @@ describe('initAuth — tenant discovery (#1453)', () => {
     await initAuth({ ...baseCfg, tenantId: ENV_TENANT });
 
     expect(pcaAuthorities).toEqual([`https://login.microsoftonline.com/${ENV_TENANT}`]);
-    expect(fetchMock).not.toHaveBeenCalled();
+    // No TENANT discovery (env var, /api/config/client). The Dataverse user check (#1656 - WhoAmI /
+    // systemusers, made at the first token acquisition) is not tenant discovery.
+    const discovery = fetchMock.mock.calls.filter(c => !/\/WhoAmI|\/systemusers\(/.test(String(c[0])));
+    expect(discovery).toHaveLength(0);
   });
 
   it('createCodePageAuthInitializer without tenantId gets the discovered tenant too', async () => {

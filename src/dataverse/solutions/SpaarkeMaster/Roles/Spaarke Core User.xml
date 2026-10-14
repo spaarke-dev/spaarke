@@ -123,6 +123,7 @@
     <RolePrivilege name="prvAppendToSLAKPIInstance" level="Basic" />
     <RolePrivilege name="prvAppendToSocialProfile" level="Basic" />
     <RolePrivilege name="prvAppendTosprk_Agreement" level="Deep" />
+    <RolePrivilege name="prvAppendTosprk_AISearchIndex" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_analysis" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Budget" level="Deep" />
     <RolePrivilege name="prvAppendTosprk_Communication" level="Deep" />
@@ -372,6 +373,7 @@
     <RolePrivilege name="prvReadAppConfigMaster" level="Global" />
     <RolePrivilege name="prvReadApplicationFile" level="Global" />
     <RolePrivilege name="prvReadAppModule" level="Global" />
+    <RolePrivilege name="prvReadappnotification" level="Basic" />
     <RolePrivilege name="prvReadArticle" level="Global" />
     <RolePrivilege name="prvReadArticleTemplate" level="Global" />
     <RolePrivilege name="prvReadAsyncOperation" level="Basic" />
@@ -493,7 +495,6 @@
     <RolePrivilege name="prvReadsprk_aimodeldeployment" level="Global" />
     <RolePrivilege name="prvReadsprk_AIOutputType" level="Deep" />
     <RolePrivilege name="prvReadsprk_AIRetrievalMode" level="Deep" />
-    <RolePrivilege name="prvAppendTosprk_AISearchIndex" level="Deep" />
     <RolePrivilege name="prvReadsprk_AISearchIndex" level="Deep" />
     <RolePrivilege name="prvReadsprk_AISkillType" level="Deep" />
     <RolePrivilege name="prvReadsprk_AIToolType" level="Deep" />
@@ -750,6 +751,5 @@
     <RolePrivilege name="prvWriteUserSettings" level="Local" />
     <RolePrivilege name="prvWriteWorkflow" level="Basic" />
     <RolePrivilege name="prvWriteWorkflowSession" level="Basic" />
-    <RolePrivilege name="prvReadappnotification" level="Basic" />
   </RolePrivileges>
 </Role>

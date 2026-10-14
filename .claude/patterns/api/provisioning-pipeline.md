@@ -30,4 +30,4 @@ Any multi-step provisioning or setup workflow where:
 ## Related
 
 - `DemoExpirationService.cs` — Same per-step try/catch pattern for cleanup operations
-- `src/server/api/Sprk.Bff.Api/Endpoints/RegistrationEndpoints.cs` — Catches `DemoProvisioningException` and returns step details in ProblemDetails
+- `src/server/api/Sprk.Bff.Api/Api/RegistrationEndpoints.cs` — Catches `DemoProvisioningException` and returns step details in ProblemDetails

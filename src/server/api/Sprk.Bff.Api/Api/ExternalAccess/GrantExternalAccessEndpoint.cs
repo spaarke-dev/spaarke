@@ -83,6 +83,7 @@ public static class GrantExternalAccessEndpoint
         CallerRecordAccessProbe callerAccessProbe,
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         GrantAccessNotifier accessNotifier,
+        ExternalInviteService invites,
         HttpContext httpContext,
         ILogger<Program> logger,
         TimeProvider timeProvider,
@@ -199,7 +200,22 @@ public static class GrantExternalAccessEndpoint
         // Task 181 (owner round 89 item 3): a contact that represents an internal user is told, in-app, with a link to the
         // record — only when the grant GAVE access, never for an organization-wide grant. Best effort, after the write: a
         // failure is logged and reported in the response, and never undoes the grant.
+        // Task 036 (FR-07): the same gate carries the external half — a contact that represents no internal user and is
+        // already onboarded is EMAILED a portal deep link by the same notifier (once per gain; never for an organization
+        // grant, a same-level re-grant, an expiry-only change or a lower level, which the gate below excludes).
+        //
+        // Task 185 slice E (owner round 98, option (c); §12 I-1 to I-3): a contact grant to an UNBOUND contact with an email
+        // sends the CIAM invite, with its code, so the person's first sign-in from that email binds through the marker leg. It
+        // runs after the write and never undoes it: a failed invite is reported in `invite` (Failed + its code). A current
+        // invite is kept (AlreadyPending); a bound contact needs none (NotNeeded) and keeps the notification below. The invite
+        // REPLACES the "you were given access" email for the contact it just invited (I-3): one email per person.
+        var invite = !grantedKey.IsOrganizationGrant && grantedKey.ContactId is { } inviteeId
+            ? await invites.InviteOnGrantAsync(inviteeId)
+            : null;
+        var justInvited = invite?.Status is GrantInviteStatus.Sent; // both invite emails (§12 I-10)
+
         var notification = !grantedKey.IsOrganizationGrant && grantedKey.ContactId is { } grantedContactId && outcome.AccessGained
+                           && !justInvited
             ? await accessNotifier.NotifyContactGrantAsync(root.Type, root.Id, grantedContactId, outcome.GrantedLevel, httpContext.User)
             : GrantNotificationOutcome.NotApplicable;
 
@@ -210,7 +226,8 @@ public static class GrantExternalAccessEndpoint
             SpeContainerMembershipGranted: false,
             GrantedAccessLevel: outcome.GrantedLevel,
             Narrowed: outcome.Narrowed,
-            NotificationFailed: notification == GrantNotificationOutcome.Failed));
+            NotificationFailed: notification == GrantNotificationOutcome.Failed,
+            Invite: invite));
     }
 
     /// <summary>

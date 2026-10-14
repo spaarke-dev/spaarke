@@ -69,6 +69,14 @@ public enum StoreWriteStatus
     /// re-reading and retrying changes nothing, so the binder denies and flags the holder (owner round 4 item 4, B2).
     /// </summary>
     KeyConflict,
+
+    /// <summary>
+    /// A written column is not provisioned in this environment. Returned ONLY by the pending-invite marker write
+    /// (<see cref="IContactIdentityStore.MarkInvitedAsync"/>, tasks 184 and 185: the marker OR its invite-code hash
+    /// column), whose caller proceeds without the marker on a BFF deployed before the schema; every other write reports a
+    /// missing column as <see cref="Failed"/>.
+    /// </summary>
+    ColumnMissing,
 }
 
 /// <summary>A store write's result; <see cref="ContactId"/> is set by a successful create.</summary>
@@ -126,11 +134,39 @@ public interface IContactIdentityStore
     Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct);
 
     /// <summary>
+    /// Tasks 184 and 185 — this environment's intent for <paramref name="contactId"/>, for the CIAM plane's E11: its
+    /// pending-invite marker (<c>sprk_externalinvitedon</c>) and the stored invite-code hash
+    /// (<c>sprk_externalinvitecodehash</c>), read together in ONE query of their own (never in <c>ContactSelect</c>), so a
+    /// missing column reads as <see cref="LookupStatus.ColumnMissing"/> here and nowhere else. No grant is read (task 185,
+    /// option (c)): a grant is no bind evidence.
+    /// </summary>
+    Task<BindIntentLookup> FindBindIntentAsync(Guid contactId, CancellationToken ct);
+
+    /// <summary>
+    /// Tasks 184 and 185 — writes the pending-invite marker (<c>sprk_externalinvitedon</c> = <paramref name="invitedOn"/>,
+    /// UTC) AND the new invite's stored code hash (<c>sprk_externalinvitecodehash</c> = <paramref name="inviteCodeHash"/>)
+    /// onto an existing contact in ONE request, so a re-invite replaces both together. Conditional on
+    /// <paramref name="etag"/> when there is one (else <c>If-Match: *</c>, so the PATCH never creates a row). Writes nothing
+    /// else. <see cref="StoreWriteStatus.ColumnMissing"/> when either column is not provisioned here.
+    /// </summary>
+    Task<StoreWriteResult> MarkInvitedAsync(
+        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct);
+
+    /// <summary>
     /// Writes the oid (D format) into the binding AND the uniqueness mirror, with the plane, in ONE request,
     /// conditional on <paramref name="etag"/>. Another contact holding the oid in its mirror makes the platform
     /// refuse the write (<see cref="StoreWriteStatus.KeyConflict"/>).
     /// </summary>
     Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct);
+
+    /// <summary>
+    /// Task 185 — <see cref="BindOidAsync"/>'s bind PLUS <c>sprk_externalinvitecodehash = null</c>, in ONE request
+    /// conditional on <paramref name="etag"/> (never <c>*</c>; no row version, no write). The invite code is consumed by
+    /// the same write that binds the oid, so it is single-use. The marker is not touched. A separate method so the
+    /// workforce and systemuser binds stay byte-identical.
+    /// </summary>
+    Task<StoreWriteResult> BindOidAndConsumeInviteAsync(
+        Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct);
 
     /// <summary>
     /// Creates a contact for <paramref name="oid"/> — one POST carrying the binding, the uniqueness mirror and the
@@ -261,6 +297,98 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
            + $"&$filter=({string.Join(" or ", contactIds.Select(id => $"_sprk_primarycontact_value eq {id:D}"))})"
            + "&$top=50";
 
+    /// <summary>
+    /// Tasks 184 and 185 — the pending-invite marker of one contact and its stored invite-code hash, in their own query
+    /// (never in <see cref="ContactSelect"/>). The contact id is selected too, so the answer is checked to be about this
+    /// contact.
+    /// </summary>
+    public static string BuildInviteMarkerPath(Guid contactId)
+        => $"contacts({contactId:D})?$select=contactid,{ContactBindingDecision.ExternalInvitedOnColumn},"
+           + ContactBindingDecision.ExternalInviteCodeHashColumn;
+
+    /// <summary>
+    /// Tasks 184 and 185 — what the marker leg's answer says. Pure.
+    /// <list type="bullet">
+    ///   <item>A fault stays that fault: <c>ColumnMissing</c> (the marker or the hash column is not provisioned — no invite
+    ///   evidence; the decision denies <c>contact_not_invited</c>) or <c>Failed</c>.</item>
+    ///   <item>A 404 is <c>Read</c>, no marker: the contact does not exist, so nothing invited it.</item>
+    ///   <item>A body that is absent, not JSON, not an object, or about another contact (its <c>contactid</c> missing or
+    ///   different) is <c>Failed</c>: an answer we cannot read is never "not invited", and never "invited".</item>
+    ///   <item>Otherwise <c>Read</c>, with the stored time or null (<see cref="ParseInvitedOn"/>) and the stored hash as
+    ///   text or null (the decision checks its format; never logged).</item>
+    /// </list>
+    /// </summary>
+    public static (LookupStatus Status, DateTimeOffset? InvitedOn, string? InviteCodeHash) InterpretMarkerLeg(
+        LookupStatus status, HttpStatusCode code, string? body, Guid contactId)
+    {
+        if (status != LookupStatus.Read)
+        {
+            return (status, null, null);
+        }
+
+        if (code == HttpStatusCode.NotFound)
+        {
+            return (LookupStatus.Read, null, null);
+        }
+
+        using var doc = body is null ? null : TryParseJson(body);
+        if (doc is null
+            || doc.RootElement.ValueKind != JsonValueKind.Object
+            || GuidOf(doc.RootElement, "contactid") != contactId)
+        {
+            return (LookupStatus.Failed, null, null);
+        }
+
+        return (LookupStatus.Read, ParseInvitedOn(doc.RootElement),
+            StringOf(doc.RootElement, ContactBindingDecision.ExternalInviteCodeHashColumn));
+    }
+
+    /// <summary>
+    /// Tasks 184 and 185 — the marker write's body: the marker (UTC, second precision) AND the new invite's stored code
+    /// hash, together, so a re-invite replaces both in one request. Nothing else.
+    /// </summary>
+    public static Dictionary<string, object?> InviteMarkerPayload(DateTimeOffset invitedOn, string inviteCodeHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(inviteCodeHash);
+        return new Dictionary<string, object?>
+        {
+            [ContactBindingDecision.ExternalInvitedOnColumn] =
+                invitedOn.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
+            [ContactBindingDecision.ExternalInviteCodeHashColumn] = inviteCodeHash,
+        };
+    }
+
+    /// <summary>The marker write's columns: a write fault naming EITHER is <see cref="StoreWriteStatus.ColumnMissing"/>.</summary>
+    public static readonly IReadOnlyList<string> InviteMarkerColumns = new[]
+    {
+        ContactBindingDecision.ExternalInvitedOnColumn,
+        ContactBindingDecision.ExternalInviteCodeHashColumn,
+    };
+
+    /// <summary>
+    /// Task 184 — the marker read's answer from a contact row: the stored UTC time, or null when the column is empty or
+    /// not a date-time (an unparseable value is no evidence). Pure.
+    /// </summary>
+    public static DateTimeOffset? ParseInvitedOn(JsonElement row)
+        => StringOf(row, ContactBindingDecision.ExternalInvitedOnColumn) is { } raw
+           && DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var on)
+            ? on
+            : null;
+
+    /// <summary>
+    /// True when a WRITE's error says a payload column does not exist on the table. Dataverse words a write differently
+    /// from a read (<see cref="ClassifyError"/>): the OData payload deserializer answers "The property '…' does not exist
+    /// on type 'Microsoft.Dynamics.CRM.contact'" (0x80048d19); older stacks answer "Invalid property '…' was found". Both
+    /// are matched together with a column name, so another column's fault is never read as one of these missing. True when
+    /// the error names ANY of <paramref name="columns"/> (task 185: the marker write carries two). Pure.
+    /// </summary>
+    public static bool IsWriteColumnMissing(string? error, params string[] columns)
+        => error is not null
+           && columns.Any(column => !string.IsNullOrEmpty(column) && error.Contains(column, StringComparison.OrdinalIgnoreCase))
+           && (error.Contains("does not exist on type", StringComparison.OrdinalIgnoreCase)
+               || error.Contains("Invalid property", StringComparison.OrdinalIgnoreCase)
+               || error.Contains("Could not find a property named", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>The masking probe: rows that carry a plane marker.</summary>
     public static string BuildProbePath()
         => $"contacts?$select=contactid,{ContactBindingDecision.ExternalObjectIdColumn},{ContactBindingDecision.IdentityPlaneColumn}"
@@ -309,6 +437,18 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         [ContactBindingDecision.KeyMirrorColumn] = oid.ToString("D"),
         [ContactBindingDecision.IdentityPlaneColumn] = (int)plane,
     };
+
+    /// <summary>
+    /// Task 185 — the consuming bind's payload: exactly <see cref="BindPayload"/> plus the invite-code hash set to null, in
+    /// the one request, so the code is consumed by the write that binds the oid (never a second write that could be lost).
+    /// The marker is not touched.
+    /// </summary>
+    public static Dictionary<string, object?> BindAndConsumeInvitePayload(Guid oid, IdentityPlaneMarker plane)
+    {
+        var payload = BindPayload(oid, plane);
+        payload[ContactBindingDecision.ExternalInviteCodeHashColumn] = null;
+        return payload;
+    }
 
     /// <summary>
     /// The create payload: the binding (the field-secured column the BFF's writer profile may create), the uniqueness
@@ -587,6 +727,36 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         return ClassifyProbe(lookup);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// ONE read, reported as it ended: the decision fails closed on a fault. No grant is read (task 185, option (c)), so no
+    /// grant fault can deny and no grant can bind.
+    /// </remarks>
+    public async Task<BindIntentLookup> FindBindIntentAsync(Guid contactId, CancellationToken ct)
+    {
+        // The pending-invite marker and its code hash, in their OWN query: a BFF deployed before either column gets
+        // ColumnMissing here and nowhere else.
+        var (inviteRead, code, inviteBody, _) = await GetAsync(BuildInviteMarkerPath(contactId), ct).ConfigureAwait(false);
+        var (inviteStatus, invitedOn, inviteCodeHash) = InterpretMarkerLeg(inviteRead, code, inviteBody, contactId);
+
+        if (inviteStatus == LookupStatus.ColumnMissing)
+        {
+            _logger.LogWarning(
+                "[ID-BIND] {Marker} or {Hash} is not provisioned in this environment: CIAM email binds are denied "
+                + "(contact_not_invited). Apply scripts/Set-ExternalInviteMarkerSchema.ps1 and "
+                + "scripts/Set-ExternalInviteCodeHashSchema.ps1.",
+                ContactBindingDecision.ExternalInvitedOnColumn, ContactBindingDecision.ExternalInviteCodeHashColumn);
+        }
+
+        return new BindIntentLookup(contactId, inviteStatus, invitedOn) { InviteCodeHash = inviteCodeHash };
+    }
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> MarkInvitedAsync(
+        Guid contactId, string? etag, DateTimeOffset invitedOn, string inviteCodeHash, CancellationToken ct)
+        => WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", InviteMarkerPayload(invitedOn, inviteCodeHash),
+            ("If-Match", RowVersionPrecondition(etag) ?? "*"), ct, missingColumns: InviteMarkerColumns);
+
     /// <summary>The masking verdict over the probe's rows. Pure.</summary>
     public static BindingReadability ClassifyProbe(ContactLookup probe)
     {
@@ -615,6 +785,14 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct)
         => RowVersionPrecondition(etag) is { } version
             ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", BindPayload(oid, plane), ("If-Match", version), ct)
+            : Task.FromResult(NoRowVersion("bind", contactId));
+
+    /// <inheritdoc />
+    public Task<StoreWriteResult> BindOidAndConsumeInviteAsync(
+        Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct)
+        => RowVersionPrecondition(etag) is { } version
+            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", BindAndConsumeInvitePayload(oid, plane),
+                ("If-Match", version), ct)
             : Task.FromResult(NoRowVersion("bind", contactId));
 
     /// <inheritdoc />
@@ -725,9 +903,15 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         return new StorePage<T>(LookupStatus.Read, rows, next);
     }
 
+    /// <param name="missingColumns">
+    /// Tasks 184 and 185: the columns whose absence this caller handles itself (the pending-invite marker and its code
+    /// hash). When the FULL error body says one of them does not exist, the write answers
+    /// <see cref="StoreWriteStatus.ColumnMissing"/>; every other caller passes null and keeps reporting a missing column as
+    /// <see cref="StoreWriteStatus.Failed"/>.
+    /// </param>
     private async Task<StoreWriteResult> WriteAsync(
         HttpMethod method, string path, Dictionary<string, object?> payload, (string Name, string Value)? precondition,
-        CancellationToken ct)
+        CancellationToken ct, IReadOnlyList<string>? missingColumns = null)
     {
         try
         {
@@ -784,6 +968,11 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             if (IsKeyMissing(body))
             {
                 return new StoreWriteResult(StoreWriteStatus.KeyMissing, Error: Trim(body));
+            }
+
+            if (missingColumns is { Count: > 0 } && IsWriteColumnMissing(body, missingColumns.ToArray()))
+            {
+                return new StoreWriteResult(StoreWriteStatus.ColumnMissing, Error: Trim(body));
             }
 
             _logger.LogWarning("[ID-BIND] {Method} {Path} failed: {Status} {Body}", method, path, (int)response.StatusCode, Trim(body));
