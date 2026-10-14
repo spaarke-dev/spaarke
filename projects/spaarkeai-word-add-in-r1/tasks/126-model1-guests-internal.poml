@@ -3,7 +3,7 @@
   <metadata>
     <title>Model 1: the external-flag script treats the stamp's licensed core users (B2B guests) as internal (re-scoped 2026-10-13 under ADR-028 A9)</title>
     <phase>7 — B2B guest sign-in on Dataverse surfaces (#1453), owner 2026-10-08</phase>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Access-control flag on systemusers (security); script used by the deployment guide.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -21,7 +21,7 @@ The original goals G2 (the workforce member test for guests) and G3 (guest conta
 
 What remains is G1. `scripts/Set-ExternalFlagForB2BGuests.ps1`, which the deployment guide requires, sets `sprk_isexternal = true` on every `#EXT#` systemuser. On a Model 1 stamp that is wrong: it would mark the customer's own licensed staff as external, which removes their Restricted-record shares and internal-only messages. Dev evidence: Ralph Dewey is correctly `No` today.
 
-Step 1 (design, owner confirms): choose how the script decides that a guest belongs to the stamp's customer.
+Step 1 DECIDED (owner 2026-10-13): option (a). A customer may license someone who is not their own staff, so the script must tell them apart. Original options, for the record:
 - (a) The guest's email domain is resolved with Graph `findTenantInformationByDomainName`, and the result is in `WorkforceIdentity:CustomerTenantIds` / the provisioning customer record.
 - (b) A recorded set, e.g. the stored-link (tid, oid) once SPA-r3 ships it.
 - (c) Model 1 rule: every guest systemuser in the stamp is the customer's licensed staff (internal), with an explicit exception list for others.
@@ -31,7 +31,7 @@ Recommend one, with the reason; there is no home-directory claim on the systemus
 Step 2: implement it in the script, keeping dry run as the default. Update the deployment guide's step, and the stale D-13 comment in `WorkforceIdentityOptions.cs` (SPA-r3's file; coordinate) so it describes A8/A9.</prompt>
   <goal>On a Model 1 stamp, the external-flag script never marks the customer's licensed core users (B2B guests) as external, and still flags any guest who is not the customer's staff. The deployment guide and the D-13 comment match ADR-028 A8/A9.</goal>
   <constraints>
-    <constraint>Owner confirms the Step 1 rule before implementation. ADR-028 is the single authority: on a conflict, raise CLAUDE.md 6.5. Do not touch workforce-contact sign-in or the stored link (SPA-r3, A9).</constraint>
+    <constraint>Rule is option (a), owner 2026-10-13: domain lookup via findTenantInformationByDomainName against the stamp's customer home-directory list; unresolvable = report, never flip. ADR-028 is the single authority: on a conflict, raise CLAUDE.md 6.5. Do not touch workforce-contact sign-in or the stored link (SPA-r3, A9).</constraint>
     <constraint>Do not edit UAC-r2's `tests/integration/auth/UnifiedAccessControl/*` or `SecureBuRoleDepthAssertion*`; add new tests elsewhere unless UAC-r2 agrees.</constraint>
     <constraint>Any `-Apply` of the script on any environment needs the owner's go. If the rule needs BFF code, the BFF §10 obligations apply.</constraint>
   </constraints>

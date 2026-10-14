@@ -1381,12 +1381,26 @@ configured (`userprov-license-sku-not-configured`).
 must carry `sprk_isexternal = Yes`. A user flagged external is refused a share on a Restricted record and gets no
 internal-only message.
 
-> **Do NOT run `scripts/Set-ExternalFlagForB2BGuests.ps1` on a Model 1 stamp** (#1564). Under Model 1 every customer
-> employee is a B2B guest (`#EXT#`) in Spaarke's tenant (§7.7), so the script would mark every customer employee
-> external. The rule for who is external on a Model 1 stamp is undecided and belongs to unified-access-control-r2; do not
-> run the script (dry run included, for its report) until that project records the rule and this guide is updated. The
-> script is unchanged and may still be right for an environment whose B2B guests really are external people (not a Model 1
-> stamp). The older instruction (dry run → `-Apply` → `-Verify`, §12.2 Phase 7b) does not apply to Model 1 stamps.
+> **On a Model 1 stamp, run the script with `-CustomerTenantIds`** (spaarkeai-word-add-in-r1 task 126, owner 2026-10-13;
+> ADR-028 A8/A9). Under Model 1 the customer's licensed core users are B2B guests (`#EXT#`) in the Spaarke tenant (A8), so
+> "every guest is external" would mark the customer's own staff external. Workforce contacts are not guests (A9: they sign
+> in to the SPA with their company account and are contacts), so they never reach this script. The script requires a mode:
+>
+> | Stamp | Mode | Rule |
+> |---|---|---|
+> | Model 1 | `-CustomerTenantIds <id>[,<id>…]` = the stamp's `WorkforceIdentity__CustomerTenantIds__N` list (§6.5.2) | Each guest's email domain is resolved to its home directory with Graph `findTenantInformationByDomainName`. A guest of a listed directory (or one listed in `-InternalUserIds`) is the customer's staff and is **never written**. A guest of another directory is set to Yes unless it already is Yes. A guest whose domain does not resolve, or whose two addresses resolve to different directories, is **reported for review and never written** (unless already Yes). Only a stored Yes counts as a decision: No is the column's default, so a new guest carries it without anyone choosing it. The script refuses the stamp's own directory or an empty id as a customer directory, and refuses `-Apply` when it has guests to set but none of the stamp's guests resolves to the customer's directories (before the customer has any guest staff, set such an outsider's flag by hand). These guards catch only an id that matches no guest; another real directory with guests on the stamp passes them, so **check the ids against the stamp BFF's settings (the §12.3 query) before `-Apply`**. |
+> | Every guest is an outsider (not Model 1) | `-AllGuestsExternal` | Unchanged task 114 behaviour: every guest still blank or No is set to Yes. |
+>
+> Dry run → review the report with the owner → `-Apply` → `-Verify` (exit 0 only when nothing is left to set **or to
+> review**). Settle each "review" row:
+>
+> - **Unresolved guest:** set the user's flag to Yes (an outsider), or add the user's `systemuserid` to `-InternalUserIds`
+>   (customer staff, for example on a subsidiary's domain verified in another directory) and pass that list on every run.
+> - **Customer staff flagged external:** set the flag back to No. On Model 1 the customer's staff are internal; this row
+>   does not clear while the flag is Yes.
+>
+> The same applies to a customer staffer whose address resolves to another directory: the dry run proposes "set Yes", so
+> add them to `-InternalUserIds` before `-Apply`. §12.2 Phase 7b has the commands.
 
 ### 7.8 Phase 8 — Configuration Seed (H12a, H12b, H12c)
 
@@ -1819,8 +1833,8 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 .\scripts\Repair-SpeConfigSecretName.ps1 ... -MintClientSecret -Apply
 .\scripts\Repair-SpeConfigSecretName.ps1 ... -Verify
 # Phase 6 — BFF deploy
-# ⚠️ Phase 7b (Set-ExternalFlagForB2BGuests.ps1) is NOT run on Model 1 stamps (#1564) — see Phase 7b below.
-# EXISTING non-Model-1 environment receiving the BFF that carries unified-access-control-r2 task 114: run Phase 7b (all
+# Phase 7b (Set-ExternalFlagForB2BGuests.ps1) takes -CustomerTenantIds on a Model 1 stamp — see Phase 7b below.
+# EXISTING environment receiving the BFF that carries unified-access-control-r2 task 114: run Phase 7b (all
 # three steps, -Verify exit 0) BEFORE this deploy. That BFF reads a BLANK sprk_isexternal as internal, so a B2B guest still
 # blank when it starts is shared with on Restricted records and receives internal-only messages. (A NEW environment has
 # no users yet: Phase 7b follows H11 below, before anyone is given access.)
@@ -1830,22 +1844,27 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 # Interim: PPAC UI + Graph SDK; see auth-deployment-setup stub for MI-first checklist
 # T2 verification MANDATORY: systemusers?$filter=applicationid eq {uami-app-id} returns 1
 
-# Phase 7b — 🛑 DO NOT RUN ON A MODEL 1 STAMP (#1564). Under Model 1 every customer employee is a B2B guest (#EXT#) in
-# Spaarke's tenant, so this step would mark every customer employee external. Skip Phase 7b (all three commands, the dry
-# run too) on Model 1 until unified-access-control-r2 decides the rule and this guide is updated.
-# B2B guests are flagged external (unified-access-control-r2 task 114, owner round 67 — per environment,
-# after the users exist, and again whenever B2B guests are added outside the product). A BLANK sprk_isexternal means
-# NOT external: Manage Access "+ User" and the Assigned-To rule share with the user, internal-only messages reach them,
-# and a Restricted record keeps their share. This sets sprk_isexternal = Yes on every systemuser whose user name holds
-# "#EXT#" and changes nothing else. Dry run first and review the list with the owner, then -Apply, then -Verify (exit 0).
+# Phase 7b — B2B guests who are outsiders are flagged external (unified-access-control-r2 task 114, owner round 67;
+# Model 1 rule: spaarkeai-word-add-in-r1 task 126, owner 2026-10-13 — per environment, after the users exist, and again
+# whenever B2B guests are added outside the product). A BLANK sprk_isexternal means NOT external: Manage Access "+ User"
+# and the Assigned-To rule share with the user, internal-only messages reach them, and a Restricted record keeps their
+# share. The script requires a mode (§7.7, after the H11 notes):
+#   MODEL 1 stamp: -CustomerTenantIds = the stamp's WorkforceIdentity__CustomerTenantIds__N values (read them with the
+#     §12.3 query). The customer's own staff (guests of a listed home directory, or in -InternalUserIds) are never
+#     written; a guest of another directory not already Yes is set to Yes (No is the column default, not a decision);
+#     an unresolvable or inconsistent guest is listed as "review" and never written.
+#   Every guest an outsider (not Model 1): -AllGuestsExternal (sets every #EXT# user still blank or No to Yes).
+# Dry run first and review the report with the owner, then -Apply, then -Verify (exit 0). A "review" row fails -Verify
+# until it is settled (§7.7): an outsider gets Yes by hand; customer staff go in -InternalUserIds (same list every run).
 # ORDER: in an EXISTING environment this runs BEFORE Phase 6 deploys the BFF carrying task 114 (the BFF before it already
 # treats a blank flag as external, so running this first changes nothing for it). If that BFF was deployed first: run
 # this at once, and allow 10 minutes after -Apply — the identity resolver caches sprk_isexternal for 10 minutes, and that
 # cached answer also decides a licensed user's Restricted-record access on the SPA/Teams plane.
 # Within 5 minutes of -Apply the BFF removes each newly flagged guest's share on every Restricted record.
-.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>"            # dry run (read-only)
-.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -Apply
-.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -Verify    # MUST exit 0
+.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerTenantIds "<customer-tenant-guid>"   # Model 1 dry run (read-only)
+.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerTenantIds "<customer-tenant-guid>" -Apply
+.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -CustomerTenantIds "<customer-tenant-guid>" -Verify   # MUST exit 0
+# Not Model 1: replace -CustomerTenantIds "<…>" with -AllGuestsExternal in all three commands.
 
 # Phase 8 — config seed
 .\scripts\seed-data\Deploy-All-AI-SeedData.ps1 -EnvironmentUrl "<dv-org-url>"
