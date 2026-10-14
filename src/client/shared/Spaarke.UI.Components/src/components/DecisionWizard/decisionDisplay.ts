@@ -5,7 +5,15 @@
  * Task: spaarke-ontology-platform-r1, task 058.
  */
 
-import type { DecisionAction, DecisionParameter, DismissalReason, SuppressionStatus } from './decisionWizardTypes';
+import type {
+  DecisionAction,
+  DecisionCommitFailure,
+  DecisionCommitRef,
+  DecisionParameter,
+  DecisionPlan,
+  DismissalReason,
+  SuppressionStatus,
+} from './decisionWizardTypes';
 
 export interface ValueRow {
   code: string;
@@ -97,4 +105,96 @@ export function suppressionEffect(
 export function joinLabels(labels: readonly string[]): string {
   if (labels.length <= 1) return labels.join('');
   return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
+// ---------------------------------------------------------------------------
+// Failures and warnings, in words a person can act on (no HTTP phrases, codes or ids)
+// ---------------------------------------------------------------------------
+
+/** The heading of a failed attempt: what happened to the decision, not the status line of the request. */
+export function failureHeading(failure: DecisionCommitFailure): string {
+  switch (failure.httpStatus) {
+    case 0:
+      return 'The decision may not have been recorded';
+    case 403:
+      return 'You cannot record this decision';
+    case 404:
+      return 'This item could not be found';
+    case 409:
+      return 'This decision is already being recorded';
+    case 422:
+      return 'The decision was refused';
+    case 503:
+      return 'Recording is unavailable right now';
+    default:
+      return 'The decision was not recorded';
+  }
+}
+
+/** What to tell the person; the route's own sentence is used only when it has no code to translate. */
+export function failureMessage(failure: DecisionCommitFailure): string {
+  switch (failure.reasonCode) {
+    case 'ontology.decision.review_changed':
+      return 'This decision was changed after an earlier attempt that may have been partly carried out, so it was not recorded again. Put your choices back as they were and try again, or close without recording.';
+    case 'ontology.decision.not_resumable':
+      return 'The earlier attempt cannot be continued. Nothing more was recorded.';
+    case 'ontology.decision.review_in_progress':
+      return 'This decision is already being recorded. Wait a moment, then try again.';
+  }
+  if (failure.httpStatus === 409) return 'This decision is already being recorded. Wait a moment, then try again.';
+  if (failure.httpStatus === 503) return 'Recording could not start. Nothing was written. Try again in a moment.';
+  if (failure.httpStatus === 0)
+    return 'The request could not be completed, so it is not known whether anything was written.';
+  return failure.detail && failure.detail !== failure.title
+    ? failure.detail
+    : 'Something went wrong while recording this decision.';
+}
+
+const ENTITY_NOUNS: Record<string, string> = {
+  sprk_budgetrevision: 'Budget revision',
+  sprk_budget: 'Budget',
+  sprk_event: 'Event',
+  sprk_todo: 'To Do',
+  sprk_communication: 'Message',
+  sprk_workassignment: 'Work assignment',
+  sprk_servicerequest: 'Service request',
+  sprk_decisionrecord: 'Decision Record',
+};
+
+/**
+ * The writes of a failed attempt as one line each: the action they belong to ("Revise budget"), else the kind of record
+ * ("Budget revision"). Never an entity name or an id.
+ */
+export function describeWrites(
+  refs: readonly DecisionCommitRef[],
+  failure: DecisionCommitFailure,
+  plan: DecisionPlan
+): string[] {
+  const labelOf = (code: string): string | null =>
+    [...plan.actions, ...plan.nextSteps].find(a => a.code === code)?.label ?? null;
+  const lines: string[] = [];
+  for (const ref of refs) {
+    const step = failure.steps.find(s => [...s.written, ...s.possiblyWritten].some(w => w.id === ref.id));
+    const line = (step && labelOf(step.code)) ?? ENTITY_NOUNS[ref.entity] ?? 'A record';
+    if (!lines.includes(line)) lines.push(line);
+  }
+  return lines;
+}
+
+const WARNING_TEXT: Record<string, string> = {
+  signal_close_not_checked: 'An item could not be checked, so it was left open.',
+  signal_close_not_authorized: 'You are not allowed to close one of the other items, so it was left open.',
+  signal_unreadable: 'An item could not be read, so it was left open.',
+  signal_unversioned: 'An item could not be closed safely, so it was left open.',
+  signal_changed: 'An item kept changing while it was being closed, so it was left as it is.',
+  signal_close_failed: 'An item could not be closed and was left open.',
+  signal_subject_missing: 'An item refers to a record that no longer exists, so it was left open.',
+};
+
+/** A warning from the commit answer as a sentence; a code this build does not know reads generically. */
+export function describeWarning(warning: string): string {
+  return (
+    WARNING_TEXT[warning] ??
+    (/^[a-z0-9_.]+$/.test(warning) ? 'The decision was recorded, but one follow-up step needs a look.' : warning)
+  );
 }

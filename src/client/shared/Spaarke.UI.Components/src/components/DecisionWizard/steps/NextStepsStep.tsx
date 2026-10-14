@@ -11,6 +11,7 @@ import type { FollowOnCardConfig } from '../../WizardFollowOns/followOnTypes';
 import type { IWizardShellHandle } from '../../Wizard/wizardShellTypes';
 import { withNextSelected } from '../decisionDraft';
 import { useDecisionItem } from '../decisionItemContext';
+import { LockedNote } from './ParameterFields';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalM },
@@ -26,7 +27,7 @@ export interface NextStepsStepProps {
 }
 
 export const NextStepsStep: React.FC<NextStepsStepProps> = ({ handle, cards, canonicalOrder }) => {
-  const { draft, update, resolution, plan } = useDecisionItem();
+  const { draft, update, resolution, plan, locked } = useDecisionItem();
   const styles = useStyles();
 
   if (resolution) {
@@ -43,6 +44,29 @@ export const NextStepsStep: React.FC<NextStepsStepProps> = ({ handle, cards, can
             {made.map((f, i) => (
               <li key={`${f.code}-${f.id ?? i}`}>
                 <Body1>{plan.nextSteps.find(n => n.code === f.code)?.label ?? f.code}</Body1>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  }
+
+  if (locked) {
+    const added = plan.nextSteps.filter(n => draft.nextSelected.includes(n.code));
+    return (
+      <div className={styles.root} data-testid="step-next">
+        <Text as="h2" size={500} weight="semibold">
+          Next steps
+        </Text>
+        <LockedNote />
+        {added.length === 0 ? (
+          <Caption1 className={styles.meta}>No Next steps were added to this decision.</Caption1>
+        ) : (
+          <ul className={styles.list}>
+            {added.map(n => (
+              <li key={n.code}>
+                <Body1>{n.label}</Body1>
               </li>
             ))}
           </ul>

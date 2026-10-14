@@ -142,6 +142,23 @@ describe('buildReview', () => {
     expect(plain.dismissal).toEqual({ code: 'already-approved-offline' });
   });
 
+  it('sends dismissal detail only for a reason that asks for it, and clears it when the reason changes', () => {
+    let d = emptyDraft(ID);
+    for (const a of pathBPlan.actions) d = skip(d, a.code);
+    d = withDismissal(d, 'other', 'stale words');
+    // Choosing another reason starts with no detail ...
+    d = withDismissal(d, 'already-approved-offline');
+    expect(d.dismissalDetail).toBe('');
+    // ... and detail left in a draft by any other path is still not posted for a reason that does not ask for it.
+    const leftover = buildReview(pathBPlan, { ...d, dismissalDetail: 'stale words' });
+    expect(leftover.dismissal).toEqual({ code: 'already-approved-offline' });
+    // The reason that asks for it still sends it.
+    expect(buildReview(pathBPlan, withDismissal(d, 'other', 'real words')).dismissal).toEqual({
+      code: 'other',
+      detail: 'real words',
+    });
+  });
+
   it('carries the ticked Next steps taken, Also resolve and the retry flag', () => {
     let d = take(emptyDraft(ID), 'send-budget-inquiry');
     d = withNextSelected(d, ['add-todo']);
@@ -188,6 +205,15 @@ describe('readiness', () => {
     expect(reviewReady(pathBPlan, d)).toBe(false);
     d = withDismissal(d, 'other', 'because');
     expect(reviewReady(pathBPlan, d)).toBe(true);
+  });
+
+  it('refuses a Money value whose comma could be a decimal comma, instead of reading it as thousands', () => {
+    for (const ambiguous of ['1,5', '12,50', '1.234,56', '1,2345', ',5', '1e3', '.5', '1 250', '$10']) {
+      expect({ ambiguous, parsed: parseMoney(ambiguous) }).toEqual({ ambiguous, parsed: null });
+    }
+    expect(parseMoney('1250')).toBe(1250);
+    expect(parseMoney('1250.50')).toBe(1250.5);
+    expect(parseMoney('1,250,000.25')).toBe(1250000.25);
   });
 
   it('parses Money as zero or more, with thousands separators', () => {

@@ -43,6 +43,7 @@ import { DecisionItemContext } from './decisionItemContext';
 import type { DecisionItemContextValue, DecisionLookup } from './decisionItemContext';
 import type {
   DecisionCommitFailure,
+  DecisionCommitResult,
   DecisionPlan,
   DecisionResolution,
   DecisionWizardItem,
@@ -84,6 +85,16 @@ export interface DecisionItemWizardProps {
   resolution: DecisionResolution | null;
   justRecorded: boolean;
   failure: DecisionCommitFailure | null;
+  /**
+   * The Failed (or unanswered) attempt that pins the review, while there is one: its id may not change and the route has seen
+   * its content, so the steps are read-only until the attempt is repeated or the wizard is closed. `resumable` of THIS failure,
+   * not of the latest answer, decides whether the next try resumes it.
+   */
+  pinnedFailure: DecisionCommitFailure | null;
+  /** Items the wizard knows are closed (recorded here, resolved by Also resolve, or opened closed). */
+  closedIds: ReadonlySet<string>;
+  /** The route's 200 answer for the item just recorded, for its warnings and per-item states. */
+  recordResult: DecisionCommitResult | null;
   /** True while the request is in flight. */
   recording: boolean;
   /** Post the one review. Resolves when the attempt is over (recorded or failed); never rejects. */
@@ -143,15 +154,24 @@ const ShellSync: React.FC<{ handle: IWizardShellHandle; syncRef: React.MutableRe
     const current = handle.state.steps[handle.state.currentStepIndex]?.id;
     const want = new Set(sync.desiredIds);
     // Only steps this component manages are ever removed.
-    for (const id of have) {
-      if (want.has(id) || !(id.startsWith(ACTION_PREFIX) || id.startsWith(FOLLOW_ON_PREFIX) || id === NEXT)) continue;
-      handle.removeDynamicStep(id);
-      // Next on an action that excludes the step after it has already moved the shell onto that step: removing the step
-      // being viewed steps the shell back one, so go forward again, onto what follows it.
-      if (id === current) handle.nextStep();
-      // A step an exclusion removed has not been decided (it will be asked again if the exclusion lifts).
-      const scope = scopeOfStep(id);
-      if (scope && !sync.readOnly) sync.update(d => clearDecision(d, scope));
+    const remove = [...have].filter(
+      id => !want.has(id) && (id.startsWith(ACTION_PREFIX) || id.startsWith(FOLLOW_ON_PREFIX) || id === NEXT)
+    );
+    // The steps that are not being viewed go first: one action can exclude several later steps, and removing the step being
+    // viewed steps the shell back, so it must be the last removal.
+    for (const id of remove.filter(x => x !== current)) handle.removeDynamicStep(id);
+    if (current && remove.includes(current)) {
+      // Next on an action that excludes the step after it has already moved the shell onto that step. Removing the step being
+      // viewed steps the shell back one, so go forward again, onto what follows it.
+      handle.removeDynamicStep(current);
+      handle.nextStep();
+    }
+    // A step an exclusion removed has not been decided (it will be asked again if the exclusion lifts).
+    if (!sync.readOnly) {
+      for (const id of remove) {
+        const scope = scopeOfStep(id);
+        if (scope) sync.update(d => clearDecision(d, scope));
+      }
     }
     for (const id of sync.desiredIds) {
       if (have.has(id)) continue;
@@ -174,6 +194,9 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   resolution,
   justRecorded,
   failure,
+  pinnedFailure,
+  closedIds,
+  recordResult,
   recording,
   onRecord,
   lookup,
@@ -185,11 +208,12 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   today,
 }) => {
   const readOnly = resolution != null;
+  const locked = pinnedFailure != null && !readOnly;
   const replayable = readOnly && hasRecordedDecision(resolution);
 
   // Latest values for predicates and effects that outlive a render (dynamic steps keep their first closure).
-  const latest = React.useRef({ plan, draft, resolution, recording, failure });
-  latest.current = { plan, draft, resolution, recording, failure };
+  const latest = React.useRef({ plan, draft, resolution, recording, failure, pinnedFailure });
+  latest.current = { plan, draft, resolution, recording, failure, pinnedFailure };
 
   const onDraftRef = React.useRef(onDraftChange);
   onDraftRef.current = onDraftChange;
@@ -279,7 +303,8 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
             const l = latest.current;
             if (l.resolution || l.recording) return false;
             // A message went out and the first attempt cannot be resumed: the owner decides, not another click (task 043).
-            if (l.failure?.sentButNotRecorded && !l.failure.resumable) return false;
+            const pinned = l.pinnedFailure ?? l.failure;
+            if (pinned?.sentButNotRecorded && !pinned.resumable) return false;
             return reviewReady(l.plan, l.draft);
           },
           renderContent: handle => (
@@ -360,7 +385,8 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
   const statusBar = resolution ? (
     <StatusBar
       ref={statusBarRef}
-      state={resolveConsoleState(resolution.resolutionType, resolution.recordClass)}
+      state={resolution.leftOpen ? 'Open' : resolveConsoleState(resolution.resolutionType, resolution.recordClass)}
+      note={resolution.leftOpen ? 'Inquiry sent, still open' : undefined}
       recordId={resolution.recordNumber ?? undefined}
       recordClass={resolution.recordClass ?? undefined}
       decidedBy={resolution.decidedByName}
@@ -382,13 +408,20 @@ export const DecisionItemWizard: React.FC<DecisionItemWizardProps> = ({
     resolution,
     justRecorded,
     failure,
+    locked,
+    closedIds,
+    recordResult,
     lookup,
     openItemsLeft,
     today,
   };
 
   const baseLabel = dismissal ? 'Dismiss and record' : 'Record decision';
-  const finishLabel = failure?.resumable ? 'Retry recording' : failure?.httpStatus === 0 ? 'Try again' : baseLabel;
+  const finishLabel = (pinnedFailure ?? failure)?.resumable
+    ? 'Retry recording'
+    : failure?.httpStatus === 0
+      ? 'Try again'
+      : baseLabel;
 
   // The in-flight / after-success guard (#1386 K3): the shell leaves Finish enabled with stayOpenOnFinish and no success
   // screen, so the request itself is single-flight (parent) and the button is disabled by `canAdvance` while it runs and

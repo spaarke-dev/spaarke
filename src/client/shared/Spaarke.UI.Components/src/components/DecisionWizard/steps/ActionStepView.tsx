@@ -13,7 +13,7 @@ import { actionScope, nextScope, fieldLabel } from '../decisionDraft';
 import { describeValues, joinLabels } from '../decisionDisplay';
 import { useDecisionItem } from '../decisionItemContext';
 import type { DecisionAction } from '../decisionWizardTypes';
-import { ParameterFields } from './ParameterFields';
+import { LockedNote, ParameterFields } from './ParameterFields';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalL },
@@ -43,7 +43,7 @@ export interface ActionStepViewProps {
 }
 
 export const ActionStepView: React.FC<ActionStepViewProps> = ({ kind, code }) => {
-  const { plan, draft, resolution } = useDecisionItem();
+  const { plan, draft, resolution, locked } = useDecisionItem();
   const styles = useStyles();
   const list = kind === 'action' ? plan.actions : plan.nextSteps;
   const action: DecisionAction | undefined = list.find(a => a.code === code);
@@ -118,6 +118,7 @@ export const ActionStepView: React.FC<ActionStepViewProps> = ({ kind, code }) =>
         </>
       ) : (
         <>
+          {locked ? <LockedNote /> : null}
           {laterExcluded.length > 0 ? (
             <Body1 className={styles.note} data-testid="excludes-note">
               Taking this removes {joinLabels(laterExcluded)} from this review: they cannot be combined.

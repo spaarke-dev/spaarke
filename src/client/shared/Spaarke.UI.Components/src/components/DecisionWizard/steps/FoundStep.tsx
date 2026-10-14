@@ -43,7 +43,9 @@ const useStyles = makeStyles({
 });
 
 export const FoundStep: React.FC = () => {
-  const { item, plan, resolution, today } = useDecisionItem();
+  const { item, plan, resolution, closedIds, today } = useDecisionItem();
+  // Items closed in this session (recorded here, or resolved by Also resolve) are no longer open.
+  const otherOpen = item.otherOpenItems.filter(o => !closedIds.has(o.signalId));
   const styles = useStyles();
   const line = composeIssueLine(item.row, today);
   const closed = resolution != null;
@@ -112,16 +114,16 @@ export const FoundStep: React.FC = () => {
         </Accordion>
       ) : null}
 
-      {!closed && item.core && item.otherOpenItems.length > 0 ? (
+      {!closed && item.core && otherOpen.length > 0 ? (
         <div className={styles.section} data-testid="other-open-items">
           <Text weight="semibold">
             Other open {plan.lane} items{coreName ? ` on ${coreName}` : ''}{' '}
             <Badge appearance="tint" color="informative" size="small">
-              {item.otherOpenItems.length}
+              {otherOpen.length}
             </Badge>
           </Text>
           <ul className={styles.otherList}>
-            {item.otherOpenItems.map(o => {
+            {otherOpen.map(o => {
               const l = composeIssueLine(o, today);
               return (
                 <li key={o.signalId}>

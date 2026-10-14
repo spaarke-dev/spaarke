@@ -12,6 +12,7 @@ import type { ILookupItem } from '../../types/LookupTypes';
 import type { ItemDraft } from './decisionDraft';
 import type {
   DecisionCommitFailure,
+  DecisionCommitResult,
   DecisionLookupRequest,
   DecisionPlan,
   DecisionResolution,
@@ -35,6 +36,12 @@ export interface DecisionItemContextValue {
   justRecorded: boolean;
   /** The last failed attempt to record this item, if any. */
   failure: DecisionCommitFailure | null;
+  /** A failed attempt pins the review: its fields and choices are read-only until the attempt is repeated. */
+  locked: boolean;
+  /** Items known to be closed (recorded here, resolved by Also resolve, or opened closed). */
+  closedIds: ReadonlySet<string>;
+  /** The route's 200 answer for the item just recorded (warnings, per-item states); null otherwise. */
+  recordResult: DecisionCommitResult | null;
   /** Absent when the host cannot search; a Lookup / Person field then says so. */
   lookup: DecisionLookup | null;
   /** Other open items remaining after this one (for the status bar). */

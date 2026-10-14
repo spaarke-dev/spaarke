@@ -34,6 +34,8 @@ export interface StatusBarProps {
   reason?: string | null;
   /** For `Superseded`: what replaced it (a record number or name). Shown as "Superseded by ...". */
   supersededBy?: string | null;
+  /** A short qualifier that follows the state, for example "Inquiry sent, still open" (task 058). */
+  note?: string | null;
   /** How many other open items are left on the same card after this one closed. `0` reads "No other open items". */
   openItemsLeft?: number | null;
   className?: string;
@@ -58,7 +60,19 @@ const useStyles = makeStyles({
 });
 
 export const StatusBar = React.forwardRef<HTMLDivElement, StatusBarProps>(function StatusBar(
-  { state, recordId, recordClass, decidedBy, decidedOn, recorded, reason, supersededBy, openItemsLeft, className },
+  {
+    state,
+    recordId,
+    recordClass,
+    decidedBy,
+    decidedOn,
+    recorded,
+    reason,
+    supersededBy,
+    note,
+    openItemsLeft,
+    className,
+  },
   ref
 ) {
   const styles = useStyles();
@@ -78,6 +92,7 @@ export const StatusBar = React.forwardRef<HTMLDivElement, StatusBarProps>(functi
     when,
     reason?.trim() ? `Reason: ${reason.trim()}` : null,
     supersededBy?.trim() ? `Superseded by ${supersededBy.trim()}` : null,
+    note?.trim() ? note.trim() : null,
     left,
   ].filter((p): p is string => !!p);
 

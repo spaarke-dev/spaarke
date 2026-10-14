@@ -19,15 +19,18 @@ import * as React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { FluentProvider, webDarkTheme } from '@fluentui/react-components';
 import { DecisionCommitError } from '../decisionWizardTypes';
-import type { DecisionCommitFailure, DecisionReview } from '../decisionWizardTypes';
+import type { DecisionCommitFailure, DecisionReview, DecisionWizardItem } from '../decisionWizardTypes';
 import { DecisionWizard } from '../DecisionWizard';
 import {
   BUDGET_A,
   BUDGET_B,
   DECIDED_ID,
   DO_ID,
+  OTHER_ID,
   PATH_B_ID,
   SENTENCE,
+  matterCore,
+  otherRow,
   THRESHOLD_ID,
   TODAY,
   approveFirstPlan,
@@ -76,6 +79,7 @@ const plans = {
   [DO_ID]: doPlan,
   [notFiledItem.row.signalId]: pathBPlan,
   [DECIDED_ID]: pathBPlan,
+  [OTHER_ID]: pathBPlan,
   [dismissedItem.row.signalId]: pathBPlan,
 };
 
@@ -180,8 +184,7 @@ describe('the steps come from the plan', () => {
     setup([doItem]);
     await loaded();
     await next(u);
-    await u.click(await screen.findByRole('button', { name: /^skip$/i }));
-    await u.click(await screen.findByRole('button', { name: /^skip$/i }));
+    for (let i = 0; i < 3; i++) await u.click(await screen.findByRole('button', { name: /^skip$/i }));
     await next(u);
     await screen.findByTestId('step-confirm');
     expect(screen.queryByTestId('also-resolve')).toBeNull();
@@ -499,7 +502,7 @@ describe('Escape and the backdrop never close; closing asks when anything is unr
     await u.click(within(check).getByRole('button', { name: 'Keep deciding' }));
     expect(onClose).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByText('Discard unrecorded choices?')).toBeNull());
-    expect((screen.getByRole('textbox', { name: /^To\b/ }) as HTMLInputElement).value).toBe('typed');
+    expect(((await screen.findByRole('textbox', { name: /^To\b/ })) as HTMLInputElement).value).toBe('typed');
 
     await u.click(button('Close'));
     const again = await screen.findByRole('alertdialog');
@@ -574,7 +577,16 @@ describe('a failed record lists the writes that landed and writes no record (D-1
     failedStep: 3,
     landed: [{ entity: 'sprk_budgetrevision', id: 'rev-1' }],
     possiblyLanded: [],
-    steps: [],
+    steps: [
+      {
+        key: 'revise-budget',
+        code: 'revise-budget',
+        phase: 3,
+        status: 'Done',
+        written: [{ entity: 'sprk_budgetrevision', id: 'rev-1' }],
+        possiblyWritten: [],
+      },
+    ],
     recordMayExist: false,
     sentButNotRecorded: false,
     resumable: true,
@@ -599,7 +611,10 @@ describe('a failed record lists the writes that landed and writes no record (D-1
     await toConfirm(u);
     await u.click(button('Record decision'));
     const panel = await screen.findByTestId('commit-failure');
-    expect(within(panel).getByTestId('landed-writes')).toHaveTextContent('sprk_budgetrevision rev-1');
+    // Plain words: the action that was carried out, no entity name, no id.
+    expect(within(panel).getByTestId('landed-writes')).toHaveTextContent('Revise budget');
+    expect(panel.textContent).not.toMatch(/sprk_|rev-1|HTTP/);
+    expect(panel).toHaveTextContent('The decision was not recorded');
     expect(within(panel).getByTestId('record-status')).toHaveTextContent('No Decision Record was written.');
     expect(panel).toHaveTextContent('trace-9');
     // Nothing flipped: still editable, still the Confirm step.
@@ -624,7 +639,8 @@ describe('a failed record lists the writes that landed and writes no record (D-1
           resumable: false,
           sentButNotRecorded: true,
           landed: [],
-          possiblyLanded: [{ entity: 'email', id: 'm-1' }],
+          possiblyLanded: [{ entity: 'sprk_communication', id: 'm-1' }],
+          steps: [],
         })
       )
     );
@@ -632,7 +648,8 @@ describe('a failed record lists the writes that landed and writes no record (D-1
     await u.click(button('Record decision'));
     const panel = await screen.findByTestId('commit-failure');
     expect(panel).toHaveTextContent('A message was sent but the decision was not recorded.');
-    expect(within(panel).getByTestId('possibly-landed-writes')).toHaveTextContent('email m-1');
+    expect(within(panel).getByTestId('possibly-landed-writes')).toHaveTextContent('Message');
+    expect(panel.textContent).not.toMatch(/sprk_|m-1/);
     expect(button('Record decision')).toBeDisabled();
   });
 
@@ -671,7 +688,9 @@ describe('a failed record lists the writes that landed and writes no record (D-1
     );
     await toConfirm(u);
     await u.click(button('Record decision'));
-    await screen.findByTestId('commit-failure');
+    const refusal = await screen.findByTestId('commit-failure');
+    expect(refusal).toHaveTextContent('The decision was refused');
+    expect(refusal.textContent).not.toMatch(/Unprocessable|Conflict|HTTP/);
     await u.click(button('Back'));
     await u.click(button('Back'));
     await u.click(button('Back'));
@@ -769,7 +788,291 @@ describe('D-53: drafts are templates, not AI', () => {
   });
 });
 
+// ---------------------------------------------------------------------------------------------------------------------
+// Findings of the independent review of task 058 (each of these failed before its fix)
+// ---------------------------------------------------------------------------------------------------------------------
+
+const otherItem: DecisionWizardItem = {
+  row: otherRow,
+  core: matterCore,
+  sentence: SENTENCE,
+  evidence: [],
+  otherOpenItems: [],
+};
+
+const failedOutcome = (overrides: Partial<DecisionCommitFailure> = {}): DecisionCommitFailure => ({
+  httpStatus: 500,
+  title: 'The decision was not recorded',
+  detail: 'Step 3 failed.',
+  reasonCode: 'ontology.decision.step_failed',
+  correlationId: 'trace-1',
+  failedStep: 3,
+  landed: [{ entity: 'sprk_budgetrevision', id: 'rev-1' }],
+  possiblyLanded: [],
+  steps: [],
+  recordMayExist: false,
+  sentButNotRecorded: false,
+  resumable: true,
+  replayed: false,
+  ...overrides,
+});
+
+const reviewShape = (r: DecisionReview) => ({ actions: r.actions, nextSteps: r.nextSteps, dismissal: r.dismissal });
+
+/** The threshold item: Approve variance (10), skip Send budget inquiry, Confirm. */
+async function thresholdToConfirm(u: ReturnType<typeof user>) {
+  await loaded();
+  await next(u);
+  enter(screen.getByRole('textbox', { name: /^Approved overage/ }), '10');
+  await next(u);
+  await u.click(button('Skip'));
+  await next(u);
+  await screen.findByTestId('step-confirm');
+}
+
+/** The Path B item with every action skipped: the dismissal Confirm. */
+async function pathBToDismissal(u: ReturnType<typeof user>) {
+  await loaded();
+  await next(u);
+  for (let i = 0; i < 3; i++) await u.click(await screen.findByRole('button', { name: /^skip$/i }));
+  await next(u);
+  await screen.findByTestId('step-confirm');
+}
+
+describe('a failed attempt pins the review (duplicate-write hazard)', () => {
+  it('keeps the review id and takes retry from the pinned failure through a conflict, and locks the steps', async () => {
+    const u = user();
+    const { service } = setup([thresholdItem]);
+    service.commit.mockRejectedValueOnce(new DecisionCommitError(failedOutcome())).mockRejectedValueOnce(
+      new DecisionCommitError(
+        failedOutcome({
+          httpStatus: 409,
+          resumable: false,
+          landed: [],
+          reasonCode: 'ontology.decision.review_in_progress',
+        })
+      )
+    );
+    await thresholdToConfirm(u);
+    await u.click(button('Record decision'));
+    await screen.findByTestId('commit-failure');
+
+    // The steps are read-only now: the route has seen this decision, and a changed one under the same id is refused.
+    await u.click(button('Back'));
+    await u.click(button('Back'));
+    await u.click(button('Back'));
+    await screen.findByTestId('step-action-approve-variance');
+    expect(screen.getByRole('textbox', { name: /^Approved overage/ })).toBeDisabled();
+    expect(screen.getByTestId('locked-note')).toBeInTheDocument();
+    await next(u);
+    await u.click(button('Skip'));
+    await next(u);
+    await screen.findByTestId('step-confirm');
+
+    await u.click(button('Retry recording'));
+    await waitFor(() => expect(screen.getByTestId('commit-failure')).toHaveTextContent('already being recorded'));
+    // The conflict says nothing about whether the FIRST attempt can be resumed: the next try still resumes it.
+    await u.click(button('Retry recording'));
+    await screen.findByTestId('status-bar');
+
+    const reviews = service.commit.mock.calls.map(c => c[1] as DecisionReview);
+    expect(reviews).toHaveLength(3);
+    expect(new Set(reviews.map(r => r.reviewId)).size).toBe(1);
+    expect(reviews.map(r => r.retry)).toEqual([undefined, true, true]);
+    expect(reviews.map(reviewShape)).toEqual([
+      reviewShape(reviews[0]),
+      reviewShape(reviews[0]),
+      reviewShape(reviews[0]),
+    ]);
+  });
+
+  it('a Failed outcome with nothing landed also keeps the id (a new id would run landed steps again)', async () => {
+    const u = user();
+    const { service } = setup([thresholdItem]);
+    service.commit.mockRejectedValueOnce(
+      new DecisionCommitError(failedOutcome({ landed: [], resumable: false, possiblyLanded: [] }))
+    );
+    await thresholdToConfirm(u);
+    await u.click(button('Record decision'));
+    await screen.findByTestId('commit-failure');
+    await u.click(button('Record decision'));
+    await waitFor(() => expect(service.commit).toHaveBeenCalledTimes(2));
+    const [first, second] = service.commit.mock.calls.map(c => c[1] as DecisionReview);
+    expect(second.reviewId).toBe(first.reviewId);
+    expect(second.retry).toBeUndefined();
+  });
+});
+
+describe('recording lands on Confirm', () => {
+  it('after Record the closed item is on its Confirm step', async () => {
+    const u = user();
+    const { service } = setup([thresholdItem]);
+    await thresholdToConfirm(u);
+    await u.click(button('Record decision'));
+    const bar = await screen.findByTestId('status-bar');
+    expect(service.commit).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(bar).toHaveFocus());
+    const confirm = await screen.findByTestId('step-confirm');
+    expect(within(confirm).getByTestId('offered-actions')).toHaveTextContent('Approve variance');
+    expect(screen.queryByTestId('step-action-send-budget-inquiry')).toBeNull();
+    expect(screen.queryByTestId('step-found')).toBeNull();
+    // Back still walks the steps that were sent, from the last step (a closed item lists every action the plan offered).
+    await u.click(button('Back'));
+    expect(await screen.findByTestId('step-action-send-budget-inquiry')).toBeInTheDocument();
+  });
+});
+
+describe('one action that excludes several later steps', () => {
+  it('Next on Mark complete removes both Reschedule and Reassign and lands on what follows', async () => {
+    const u = user();
+    setup([doItem]);
+    await loaded();
+    await next(u);
+    await screen.findByTestId('step-action-mark-complete');
+    await next(u);
+    expect(await screen.findByTestId('step-next')).toBeInTheDocument();
+    await waitFor(() => expect(stepLabels()).toEqual(['What was found', 'Mark complete', 'Next steps', 'Confirm']));
+    await next(u);
+    const confirm = await screen.findByTestId('step-confirm');
+    expect(within(confirm).getByTestId('offered-reschedule')).toHaveTextContent(
+      'Cannot be combined with Mark complete'
+    );
+    expect(within(confirm).getByTestId('offered-reassign')).toHaveTextContent('Cannot be combined with Mark complete');
+  });
+});
+
+describe('dismissal detail follows its reason', () => {
+  it('detail typed for Other is not posted once another reason is chosen', async () => {
+    const u = user();
+    const { service } = setup([pathBItem]);
+    await pathBToDismissal(u);
+    const reason = screen.getByRole('combobox', { name: /reason for dismissing/i });
+    enter(reason, 'other');
+    enter(screen.getByRole('textbox', { name: /^Detail/ }), 'stale words');
+    enter(reason, 'already-approved-offline');
+    expect(screen.queryByRole('textbox', { name: /^Detail/ })).toBeNull();
+    await u.click(button('Dismiss and record'));
+    await waitFor(() => expect(service.commit).toHaveBeenCalledTimes(1));
+    expect((service.commit.mock.calls[0][1] as DecisionReview).dismissal).toEqual({ code: 'already-approved-offline' });
+  });
+});
+
+describe('what the route says it closed', () => {
+  it('an item it left open stays open and its warning is shown in words', async () => {
+    const u = user();
+    const { service } = setup([pathBItem, otherItem]);
+    service.commit.mockResolvedValueOnce(
+      commitResult({
+        signals: [
+          { signalId: PATH_B_ID, state: 'Dismissed' },
+          { signalId: OTHER_ID, state: 'Unchanged', warning: 'signal_close_failed' },
+        ],
+      })
+    );
+    await pathBToDismissal(u);
+    enter(screen.getByRole('combobox', { name: /reason for dismissing/i }), 'already-approved-offline');
+    await u.click(screen.getByRole('checkbox', { name: /second invoice/i }));
+    await u.click(button('Dismiss and record'));
+    const bar = await screen.findByTestId('status-bar');
+    expect((service.commit.mock.calls[0][1] as DecisionReview).alsoResolve).toEqual([OTHER_ID]);
+    // The other item was not closed: it is still counted, and the person is told.
+    expect(bar).toHaveTextContent('1 other open item left');
+    expect(screen.getByTestId('record-warnings')).toHaveTextContent('An item could not be closed and was left open.');
+    expect(screen.getByTestId('record-warnings').textContent).not.toMatch(/signal_close_failed/);
+    expect(button('Next open item')).toBeInTheDocument();
+  });
+
+  it('an inquiry that was sent leaves the item open: the bar says so', async () => {
+    const u = user();
+    const { service } = setup([thresholdItem]);
+    service.commit.mockResolvedValueOnce(commitResult({ signals: [{ signalId: THRESHOLD_ID, state: 'InquirySent' }] }));
+    await thresholdToConfirm(u);
+    await u.click(button('Record decision'));
+    const bar = await screen.findByTestId('status-bar');
+    expect(bar).toHaveAttribute('data-state', 'Open');
+    expect(bar).toHaveTextContent('Inquiry sent, still open');
+    expect(screen.getByTestId('left-open')).toBeInTheDocument();
+  });
+
+  it('an item recorded here is no longer listed as another open item on the item that named it', async () => {
+    const u = user();
+    setup([pathBItem, otherItem], OTHER_ID);
+    await pathBToDismissal(u);
+    enter(screen.getByRole('combobox', { name: /reason for dismissing/i }), 'already-approved-offline');
+    await u.click(button('Dismiss and record'));
+    await screen.findByTestId('status-bar');
+    await u.click(screen.getByRole('button', { name: /previous record/i }));
+    const found = await screen.findByTestId('step-found');
+    expect(within(found).queryByTestId('other-open-items')).toBeNull();
+  });
+});
+
+describe('words a person can act on', () => {
+  it('a refusal reads as a refusal, with the changed-review text rewritten', async () => {
+    const u = user();
+    const { service } = setup([thresholdItem]);
+    service.commit.mockRejectedValueOnce(
+      new DecisionCommitError(
+        failedOutcome({
+          httpStatus: 422,
+          title: 'Unprocessable Entity',
+          detail: 'This review id was already used for a different decision.',
+          reasonCode: 'ontology.decision.review_changed',
+          landed: [],
+          resumable: false,
+        })
+      )
+    );
+    await thresholdToConfirm(u);
+    await u.click(button('Record decision'));
+    const panel = await screen.findByTestId('commit-failure');
+    expect(panel).toHaveTextContent('The decision was refused');
+    expect(panel).toHaveTextContent('Put your choices back as they were');
+    expect(panel.textContent).not.toMatch(/review id|Unprocessable|ontology\./);
+  });
+});
+
+describe('an amount is never read differently from how it was meant', () => {
+  it('a comma that could be a decimal comma is refused, so Next stays disabled', async () => {
+    const u = user();
+    setup([thresholdItem]);
+    await loaded();
+    await next(u);
+    const amount = screen.getByRole('textbox', { name: /^Approved overage/ });
+    enter(amount, '1,5');
+    expect(button('Next')).toBeDisabled();
+    expect(screen.getByText(/digits with a period/i)).toBeInTheDocument();
+    enter(amount, '1,250.50');
+    expect(button('Next')).toBeEnabled();
+  });
+});
+
+describe('a decided item whose plan cannot be read', () => {
+  it('still opens read-only with its status bar and snapshot, without per-action steps', async () => {
+    const service = makeService({ plans: {} });
+    renderWizard({
+      service,
+      loadItem: makeLoader([decidedItem]),
+      itemIds: [DECIDED_ID],
+      startItemId: DECIDED_ID,
+    });
+    expect(await screen.findByTestId('status-bar')).toHaveAttribute('data-state', 'Decided');
+    expect(await screen.findByTestId('step-confirm')).toBeInTheDocument();
+    expect(screen.queryByTestId('item-error')).toBeNull();
+  });
+});
+
+/** The BFF's AI routes are /api/ai/... (chat, analysis, capabilities); /api/v1/ai/... is the versioned form. */
+const AI_ROUTE = /openai|assistant draft|\/api\/(v1\/)?ai(\/|\b)/i;
+
 describe('ADR-021 / D-26 guards', () => {
+  it('the AI-route scan fires on the real AI routes and not on the signals routes (control)', () => {
+    expect(AI_ROUTE.test("fetch('/api/ai/chat/sessions')")).toBe(true);
+    expect(AI_ROUTE.test('`${base}/api/v1/ai/analysis`')).toBe(true);
+    expect(AI_ROUTE.test('new OpenAI()')).toBe(true);
+    expect(AI_ROUTE.test('/api/v1/signals/1/decision-plan')).toBe(false);
+  });
+
   const dir = path.resolve(__dirname, '..');
   const sources = (): Array<{ file: string; text: string }> => {
     const out: Array<{ file: string; text: string }> = [];
@@ -810,7 +1113,7 @@ describe('ADR-021 / D-26 guards', () => {
   it('has no AI call and no draft badge in source', () => {
     for (const { file, text } of sources()) {
       const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-      expect({ file, ai: /openai|assistant draft|\/api\/v1\/ai\//i.test(code) }).toEqual({ file, ai: false });
+      expect({ file, ai: AI_ROUTE.test(code) }).toEqual({ file, ai: false });
     }
   });
 

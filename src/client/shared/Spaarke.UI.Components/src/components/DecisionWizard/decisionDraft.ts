@@ -128,7 +128,9 @@ export function withNextSelected(draft: ItemDraft, selected: string[]): ItemDraf
 }
 
 export function withDismissal(draft: ItemDraft, code: string, detail?: string): ItemDraft {
-  return { ...draft, dismissalCode: code, dismissalDetail: detail ?? draft.dismissalDetail };
+  // Detail belongs to the reason it was typed for: choosing another reason starts with none.
+  const kept = code === draft.dismissalCode ? draft.dismissalDetail : '';
+  return { ...draft, dismissalCode: code, dismissalDetail: detail ?? kept };
 }
 
 export function withAlsoResolve(draft: ItemDraft, signalId: string, ticked: boolean): ItemDraft {
@@ -213,11 +215,17 @@ export function fieldValue(draft: ItemDraft, scope: StepScope, parameterCode: st
 const isBlank = (value: string): boolean => value.trim() === '';
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** A Money field is a number of zero or more (the executors refuse a negative amount). */
+/**
+ * A Money field is a number of zero or more (the executors refuse a negative amount). Only two shapes are read, so a value is
+ * never read differently from how it was meant: plain digits with an optional ".cents" (`1250`, `1250.50`), or digits grouped
+ * by commas in threes with an optional ".cents" (`1,250.50`). Anything else is refused, in particular `1,5` and `1.234,56`, where
+ * a decimal comma would otherwise be read as a thousands separator and change the amount by a factor of ten or more.
+ */
 export function parseMoney(value: string): number | null {
-  if (isBlank(value)) return null;
-  const n = Number(value.replace(/,/g, '').trim());
-  return Number.isFinite(n) && n >= 0 ? n : null;
+  const text = value.trim();
+  if (text === '') return null;
+  if (!/^(\d+|\d{1,3}(,\d{3})+)(\.\d+)?$/.test(text)) return null;
+  return Number(text.replace(/,/g, ''));
 }
 
 /** Whether one field is acceptable: a required field must be filled; a filled field must be well formed. */
@@ -347,7 +355,10 @@ export function buildReview(plan: DecisionPlan, draft: ItemDraft, options: { ret
   if (nextSteps.length > 0) review.nextSteps = nextSteps;
   if (draft.alsoResolve.length > 0) review.alsoResolve = [...draft.alsoResolve];
   if (taken.size === 0 && nextSteps.length === 0) {
-    const detail = draft.dismissalDetail.trim();
+    // Detail is sent only for a reason that asks for it: the field is not shown for the others, so text left in the draft from
+    // another reason must not be posted.
+    const reason = plan.dismissalReasons.find(r => r.code === draft.dismissalCode);
+    const detail = reason?.requiresDetail ? draft.dismissalDetail.trim() : '';
     review.dismissal = detail ? { code: draft.dismissalCode, detail } : { code: draft.dismissalCode };
   }
   if (options.retry) review.retry = true;

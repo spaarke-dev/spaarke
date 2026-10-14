@@ -51,6 +51,29 @@ No escalation trigger fired: every templated draft needs only data the plan and 
 9. **Templated drafts (D-53)** are keyed by parameter code (`subject`, `body`, `title`, `description`) from the sentence, headline, rule short name and core record name. No AI call; a source-scan test asserts it.
 10. **Dismissal keeps nothing else.** A Not filed item has no Also resolve and no other open items (D-34/35).
 
+## Review round (independent adversarial review, opus)
+
+Nine fix-now findings, all fixed in this PR with a test that fails without the fix (checked by removing each fix in turn):
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | Duplicate-write hazard: after a failure that kept the review id, an edit then a refusal rotated the id, and the route re-ran the landed writes | `failureKeepsReview` keeps the id for everything except a plain 4xx refusal (500, 409, 503 and no answer all keep it). The first failure that keeps the id PINS the review: the id never changes, `retry` comes from the pinning failure (a later 409 or refusal does not clear it), and the steps are read-only while pinned (fields disabled, a note says why). |
+| 2 | After Record the closed item could be on any step | The item wizard remounts on record, so it opens read-only on its last step (Confirm); asserted. |
+| 3 | One action excluding two later steps left the shell stuck | `ShellSync` removes the steps that are not being viewed first, then the viewed one followed by `nextStep()`. The Do fixture now matches the real catalog (Mark complete excludes Reschedule and Reassign; Reassign added). |
+| 4 | Dismissal detail typed for Other was posted after another reason was chosen | Detail is sent only for a reason that requires it, and choosing another reason clears it. |
+| 5 | The commit answer's per-item states were ignored | Only `Acted` / `Dismissed` count as closed (the item itself and Also resolve items); `InquirySent` shows "Inquiry sent, still open" (StatusBar `note`); warnings (the answer's and each Signal's) are shown in words. |
+| 6 | Items closed in this session were still listed as other open items | Found and Confirm filter `otherOpenItems` through the wizard's closed set; a ticked item that closed meanwhile is not asked for again. |
+| 7 | Failure text had HTTP phrases, entity names and ids | Headings by outcome, writes named by the action they belong to (or the kind of record), the review-changed and not-resumable text rewritten. |
+| 8 | `1,5` was read as 15 | Money accepts plain digits or comma-grouped thousands with an optional `.cents`; anything ambiguous is refused with a message that says how to write it. |
+| 9 | The no-AI source scan looked for `/api/v1/ai/` but the BFF's AI routes are `/api/ai/...` | Regex covers both; a control test shows it fires on the real routes and not on the signals routes. |
+
+Known limits from the same review:
+
+- **K2 (decided-item replay needs the plan route): fixed.** When the plan cannot be read for a decided item, the wizard falls back to an empty plan: the status bar, the fact snapshot and the record summary still show, without per-action steps. An open item still needs the plan.
+- **K1 (ui-test step to add).** Under jsdom, Fluent's focus manager marks a re-opened nested Discard dialog `aria-hidden`. The first opening is checked accessibly in the unit test; the second uses a `hidden: true` query. Browser ui-test step for the 058 list: "Type a value, click Close, choose Keep deciding, click Close again: the second Discard dialog is announced by a screen reader, is not `aria-hidden` in the inspector, and focus lands inside it".
+- While a review is pinned, the shell's Skip button on a step still changes that step's ring (the draft is read-only and ignores it). Confirm and the posted review always show the pinned choices.
+- Recording remounts the shell, so the modal flashes once when an item is recorded (like browsing to another item).
+
 ## Why the tests drive DOM events, not user-event
 
 `DecisionWizard.test.tsx` uses `fireEvent` for clicks, typing and selects, like the other Wizard tests (`WizardShell.characterization.test.tsx`). With user-event, focus moves, and Fluent's focus manager (tabster) in jsdom blurs the focused field on a 100 ms timer (dropping keystrokes) and marks the dialog `aria-hidden`. A control with a plain `WizardShell` and one `Input` shows the same blur, so it is jsdom + tabster behaviour, not the wizard's. One query uses `hidden: true` (the re-opened nested Discard dialog) for the same reason; the first opening of that dialog is checked accessibly.

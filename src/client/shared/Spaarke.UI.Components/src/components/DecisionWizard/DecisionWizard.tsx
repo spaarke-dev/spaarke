@@ -27,7 +27,13 @@ import { DecisionItemWizard, hasRecordedDecision } from './DecisionItemWizard';
 import { buildReview, emptyDraft, hasUnrecordedChoices, newReviewId } from './decisionDraft';
 import type { ItemDraft } from './decisionDraft';
 import type { DecisionLookup } from './decisionItemContext';
-import { failureKeepsReview, resolutionFromRecord, reviewKey } from './decisionRecording';
+import {
+  closesSignal,
+  failureKeepsReview,
+  isFailedOutcome,
+  resolutionFromRecord,
+  reviewKey,
+} from './decisionRecording';
 import { withTemplatedDefaults } from './templatedDrafts';
 import { DecisionCommitError } from './decisionWizardTypes';
 import type {
@@ -122,6 +128,7 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   const [drafts, setDrafts] = React.useState<Record<string, ItemDraft>>({});
   const [recorded, setRecorded] = React.useState<Record<string, Recorded>>({});
   const [failures, setFailures] = React.useState<Record<string, DecisionCommitFailure>>({});
+  const [pinned, setPinned] = React.useState<Record<string, DecisionCommitFailure>>({});
   const [recording, setRecording] = React.useState<string | null>(null);
   const [alsoClosed, setAlsoClosed] = React.useState<readonly string[]>([]);
   const [confirmClose, setConfirmClose] = React.useState(false);
@@ -132,7 +139,12 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   const live = React.useRef({ service, loadItem, loaded, drafts, failures, recorded, onRecorded });
   live.current = { service, loadItem, loaded, drafts, failures, recorded, onRecorded };
   const recordingRef = React.useRef<string | null>(null);
-  const attempts = React.useRef<Record<string, { key: string; failure: DecisionCommitFailure }>>({});
+  // Per item: the review a failed attempt posted. Once a failure keeps the review id it is PINNED: the id never changes again,
+  // the review cannot be edited, and `pinning` is the Failed outcome whose `resumable` decides `retry`.
+  const attempts = React.useRef<
+    Record<string, { key: string; pinned: boolean; pinning: DecisionCommitFailure | null }>
+  >({});
+  const closedNow = React.useRef<(id: string) => boolean>(() => false);
   const mounted = React.useRef(true);
   React.useEffect(() => {
     mounted.current = true;
@@ -150,7 +162,14 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
       const open = !item.resolution;
       const needPlan = open || decided;
       const [plan, suppression] = await Promise.all([
-        needPlan ? live.current.service.getPlan(id) : Promise.resolve(emptyPlan(item)),
+        needPlan
+          ? live.current.service.getPlan(id).catch(err => {
+              // A decided item replays from its record; without the plan it still shows the record, the status bar and the
+              // fact snapshot, just no per-action steps. An open item needs the plan to be decided at all.
+              if (open) throw err;
+              return emptyPlan(item);
+            })
+          : Promise.resolve(emptyPlan(item)),
         open
           ? live.current.service.getSuppression(id).then(
               s => ({ s, failed: false }),
@@ -183,6 +202,8 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
 
   // ---- Drafts ------------------------------------------------------------------------------------------
   const updateDraft = React.useCallback((id: string, change: (d: ItemDraft) => ItemDraft) => {
+    // A pinned review is read-only: any change would be a different decision under an id the route has already seen.
+    if (attempts.current[id]?.pinned) return;
     setDrafts(prev => (prev[id] ? { ...prev, [id]: change(prev[id]) } : prev));
   }, []);
 
@@ -196,15 +217,22 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
       recordingRef.current = id;
       setRecording(id);
 
-      const lastFailure = live.current.failures[id];
-      const retry = lastFailure?.resumable === true;
-      let sendDraft = draft;
-      let review = buildReview(l.plan, sendDraft, { retry });
-      // An edit after a plain refusal is a different decision and gets its own review id; a failure that may have landed
-      // writes keeps its id (the route then refuses a changed review rather than run landed steps again).
       const previous = attempts.current[id];
-      if (previous && previous.key !== reviewKey(review) && !failureKeepsReview(previous.failure)) {
-        sendDraft = { ...draft, reviewId: newReviewId() };
+      const isPinned = previous?.pinned === true;
+      // `retry` resumes the Failed first attempt; it comes from the failure that pinned the review, not from the latest answer
+      // (a refusal after it says nothing about whether the first attempt can be resumed).
+      const retry = isPinned && previous?.pinning?.resumable === true;
+      let sendDraft = draft;
+      if (!isPinned) {
+        // Items that closed since they were ticked are not asked for again.
+        const stillOpen = draft.alsoResolve.filter(x => !closedNow.current(x));
+        if (stillOpen.length !== draft.alsoResolve.length) sendDraft = { ...draft, alsoResolve: stillOpen };
+      }
+      let review = buildReview(l.plan, sendDraft, { retry });
+      // An edit after a plain refusal (nothing stored) is a different decision and gets its own review id. A pinned review
+      // is never edited and never changes id: a new id would run the steps that already landed again.
+      if (previous && !isPinned && previous.key !== reviewKey(review)) {
+        sendDraft = { ...sendDraft, reviewId: newReviewId() };
         review = buildReview(l.plan, sendDraft, { retry: false });
         updateDraft(id, d => ({ ...d, reviewId: sendDraft.reviewId }));
       }
@@ -215,13 +243,20 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         const resolution = resolutionFromRecord(l.plan, l.item, sendDraft, review, result, new Date());
         delete attempts.current[id];
         setRecorded(prev => ({ ...prev, [id]: { result, resolution } }));
+        setPinned(prev => {
+          if (!(id in prev)) return prev;
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
         setFailures(prev => {
           if (!(id in prev)) return prev;
           const next = { ...prev };
           delete next[id];
           return next;
         });
-        const also = review.alsoResolve ?? [];
+        // Only what the route says it closed (Acted or Dismissed) counts as closed here; an item it left open stays open.
+        const also = (review.alsoResolve ?? []).filter(x => closesSignal(result, x));
         if (also.length > 0) {
           setAlsoClosed(prev => [...prev, ...also.filter(x => !prev.includes(x))]);
           // Their cached copies are open; a later visit must read them again.
@@ -249,8 +284,24 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
                 resumable: false,
                 replayed: false,
               } as DecisionCommitFailure);
-        attempts.current[id] = { key: reviewKey(review), failure };
+        const keeps = failureKeepsReview(failure);
+        const wasPinned = attempts.current[id]?.pinned === true;
+        // The first failure that keeps the id pins the review. After that only a new Failed outcome replaces the failure that
+        // decides `retry`; a refusal or an in-progress answer leaves it alone.
+        const pinning =
+          keeps && (!wasPinned || isFailedOutcome(failure)) ? failure : (attempts.current[id]?.pinning ?? null);
+        const isNowPinned = keeps || wasPinned;
+        attempts.current[id] = {
+          key: wasPinned ? attempts.current[id].key : reviewKey(review),
+          pinned: isNowPinned,
+          pinning,
+        };
         setFailures(prev => ({ ...prev, [id]: failure }));
+        setPinned(prev => {
+          const shown = attempts.current[id].pinning;
+          if (!isNowPinned || !shown) return prev;
+          return prev[id] === shown ? prev : { ...prev, [id]: shown };
+        });
       } finally {
         recordingRef.current = null;
         if (mounted.current) setRecording(null);
@@ -262,12 +313,17 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   // ---- What is closed, what is open --------------------------------------------------------------------
   const isClosed = React.useCallback(
     (id: string): boolean => {
-      if (recorded[id] || alsoClosed.includes(id)) return true;
+      const r = recorded[id];
+      // Recorded, but the route left the item open (an inquiry was sent: Acknowledged, linked to the record).
+      if (r) return !r.resolution.leftOpen;
+      if (alsoClosed.includes(id)) return true;
       const l = loaded[id];
       return l?.status === 'ready' && l.item.resolution != null;
     },
     [recorded, alsoClosed, loaded]
   );
+  closedNow.current = isClosed;
+  const closedIds = React.useMemo(() => new Set(itemIds.filter(isClosed)), [itemIds, isClosed]);
 
   const openItemsLeft = itemIds.filter(id => id !== currentId && !isClosed(id)).length;
   const nextOpenIndex = (() => {
@@ -319,7 +375,9 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
     const resolution = done?.resolution ?? state.item.resolution ?? null;
     body = (
       <DecisionItemWizard
-        key={currentId}
+        // Recording remounts the shell so it opens, read-only, on its last step (the Confirm step): the steps it listed while
+        // being decided can differ from the steps a closed item lists.
+        key={done ? `${currentId}:recorded` : currentId}
         item={state.item}
         plan={state.plan}
         suppression={state.suppression}
@@ -329,6 +387,9 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
         resolution={resolution}
         justRecorded={done != null}
         failure={failures[currentId] ?? null}
+        pinnedFailure={pinned[currentId] ?? null}
+        closedIds={closedIds}
+        recordResult={done?.result ?? null}
         recording={recording === currentId}
         onRecord={() => record(currentId)}
         lookup={itemLookup}

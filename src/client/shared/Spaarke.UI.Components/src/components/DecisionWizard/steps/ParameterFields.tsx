@@ -35,10 +35,20 @@ const useStyles = makeStyles({
 });
 
 const INVALID: Partial<Record<DecisionParameter['kind'], string>> = {
-  Money: 'Enter an amount of zero or more.',
+  Money: 'Enter an amount of zero or more, as digits with a period for cents, for example 1250.50.',
   Date: 'Enter a date.',
   Choice: 'Choose one of the options.',
 };
+
+/** Shown on a step while a failed attempt pins the review: the route has seen this exact decision, so it cannot change. */
+export const LockedNote: React.FC = () => (
+  <MessageBar intent="info" data-testid="locked-note">
+    <MessageBarBody>
+      An earlier attempt to record this decision did not finish, so it cannot be changed now. Record the same decision
+      again, or close without recording.
+    </MessageBarBody>
+  </MessageBar>
+);
 
 interface FieldProps {
   parameter: DecisionParameter;
@@ -46,7 +56,7 @@ interface FieldProps {
 }
 
 const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
-  const { draft, update, lookup, item } = useDecisionItem();
+  const { draft, update, lookup, item, locked } = useDecisionItem();
   const styles = useStyles();
   const id = fieldValue(draft, scope, parameter.code);
   const name = fieldLabel(draft, scope, parameter.code);
@@ -79,6 +89,16 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
     };
   }, [kind, lookup, hasValue, search, update, scope, parameter.code, parameter.required]);
 
+  if (locked) {
+    return (
+      <div data-testid={`field-${parameter.code}`}>
+        <Field label={parameter.label} required={parameter.required}>
+          <Input readOnly disabled value={id ? (name ?? 'Selected record') : ''} />
+        </Field>
+      </div>
+    );
+  }
+
   if (!lookup) {
     return (
       <MessageBar intent="warning" data-testid={`field-${parameter.code}`}>
@@ -107,7 +127,7 @@ const LookupParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
 };
 
 const ScalarParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
-  const { draft, update } = useDecisionItem();
+  const { draft, update, locked } = useDecisionItem();
   const styles = useStyles();
   const value = fieldValue(draft, scope, parameter.code);
   const typed = draft.values[scope]?.[parameter.code] !== undefined;
@@ -119,11 +139,13 @@ const ScalarParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
   let control: React.ReactElement;
   switch (parameter.kind) {
     case 'TextArea':
-      control = <Textarea rows={6} resize="vertical" value={value} onChange={(_e, data) => set(data.value)} />;
+      control = (
+        <Textarea rows={6} resize="vertical" disabled={locked} value={value} onChange={(_e, data) => set(data.value)} />
+      );
       break;
     case 'Choice':
       control = (
-        <Select value={value} onChange={(_e, data) => set(data.value)}>
+        <Select value={value} disabled={locked} onChange={(_e, data) => set(data.value)}>
           <option value="">Choose...</option>
           {(parameter.options ?? []).map(o => (
             <option key={o.value} value={o.value}>
@@ -134,13 +156,13 @@ const ScalarParameter: React.FC<FieldProps> = ({ parameter, scope }) => {
       );
       break;
     case 'Date':
-      control = <Input type="date" value={value} onChange={(_e, data) => set(data.value)} />;
+      control = <Input type="date" disabled={locked} value={value} onChange={(_e, data) => set(data.value)} />;
       break;
     case 'Money':
-      control = <Input inputMode="decimal" value={value} onChange={(_e, data) => set(data.value)} />;
+      control = <Input inputMode="decimal" disabled={locked} value={value} onChange={(_e, data) => set(data.value)} />;
       break;
     default:
-      control = <Input value={value} onChange={(_e, data) => set(data.value)} />;
+      control = <Input disabled={locked} value={value} onChange={(_e, data) => set(data.value)} />;
   }
 
   return (

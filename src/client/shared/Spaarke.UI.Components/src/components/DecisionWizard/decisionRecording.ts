@@ -20,19 +20,43 @@ import type {
 import type { RecordClass } from '../ConsoleKit/consoleStatus';
 
 /**
- * A failure that must keep its review id: something may have landed or been sent (a new id would run the landed steps again),
- * the answer is not known (the same id makes a repeat safe), or the failed attempt is resumable. Only a plain refusal (nothing
- * written) may be edited into a different review with a fresh id.
+ * A failure that must keep its review id. The commit route stores the FIRST outcome of a review id: a repeat of the same id with
+ * the same content returns it (or resumes it with `retry`), the same id with different content is refused, and a NEW id runs
+ * every step again, including the writes that already landed. So only a plain refusal that stored nothing (a 4xx other than
+ * 409: forbidden, not found, refused or invalid) may be edited into a different review under a fresh id. Everything else keeps
+ * the id: a Failed outcome (500), a review already in progress or in conflict (409), the service unavailable (503), no answer
+ * at all (0), and anything that reports landed, possibly landed, resumable, record-may-exist or sent-but-not-recorded.
  */
 export function failureKeepsReview(failure: DecisionCommitFailure): boolean {
-  return (
+  if (
     failure.landed.length > 0 ||
     failure.possiblyLanded.length > 0 ||
     failure.resumable ||
     failure.recordMayExist ||
-    failure.sentButNotRecorded ||
-    failure.httpStatus === 0
-  );
+    failure.sentButNotRecorded
+  ) {
+    return true;
+  }
+  const plainRefusal = failure.httpStatus >= 400 && failure.httpStatus < 500 && failure.httpStatus !== 409;
+  return !plainRefusal;
+}
+
+/** The Signal states of a 200 answer that mean the item is closed. `InquirySent` and `Unchanged` leave it open. */
+const CLOSED_STATES: readonly string[] = ['Acted', 'Dismissed'];
+
+/**
+ * Whether the route says it closed this Signal. Only Acted and Dismissed count; an answer that lists no Signals at all (an older
+ * route) is taken at the review's word.
+ */
+export function closesSignal(result: DecisionCommitResult, signalId: string): boolean {
+  const state = result.signals.find(s => s.signalId === signalId)?.state;
+  if (state === undefined) return result.signals.length === 0;
+  return CLOSED_STATES.includes(state);
+}
+
+/** A `Failed` outcome (the route's 500): the answer that says what landed and whether the review can be resumed. */
+export function isFailedOutcome(failure: DecisionCommitFailure): boolean {
+  return failure.httpStatus === 500;
 }
 
 /** The content of a review without its identity: two reviews with the same key are the same decision. */
@@ -63,6 +87,7 @@ export function resolutionFromRecord(
   });
   const derived = deriveRecordClass(plan, draft).recordClass;
   return {
+    leftOpen: !closesSignal(result, item.row.signalId),
     resolutionType: dismissed ? 'Dismissed' : 'Acted',
     recordClass: stored ?? derived,
     recordNumber: null,

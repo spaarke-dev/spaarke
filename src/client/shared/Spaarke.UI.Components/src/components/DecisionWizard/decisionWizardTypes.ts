@@ -270,6 +270,11 @@ export interface DecisionResolution {
   /** Every action the rule offered, in order, with taken / skipped and the values sent. */
   steps?: DecidedStep[];
   followOns?: DecidedFollowOn[];
+  /**
+   * True when a record was written but the item stays open (an inquiry was sent: Acknowledged and linked to the record). Set
+   * only for an item recorded in this session; the status bar then says "Inquiry sent, still open".
+   */
+  leftOpen?: boolean;
   /** The evidence as it stood when the record was written. Shown INSTEAD of `evidence` for a decided item. */
   factSnapshot?: DecisionEvidenceRef[];
 }

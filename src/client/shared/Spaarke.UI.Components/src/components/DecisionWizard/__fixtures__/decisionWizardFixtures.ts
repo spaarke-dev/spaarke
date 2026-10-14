@@ -119,7 +119,8 @@ export const markComplete: DecisionAction = {
   isRecommended: true,
   parameters: [{ code: 'note', label: 'Completion note', kind: 'TextArea', required: false }],
   effectLines: ['Sets the item to Completed'],
-  excludes: ['reschedule'],
+  // The real catalog: Mark complete excludes both (and the plan builder makes the lists mutual).
+  excludes: ['reschedule', 'reassign'],
 };
 
 export const reschedule: DecisionAction = {
@@ -132,6 +133,19 @@ export const reschedule: DecisionAction = {
     { code: 'reason', label: 'Reason', kind: 'Text', required: true },
   ],
   effectLines: ['Moves the due date of the item'],
+  excludes: ['mark-complete'],
+};
+
+export const reassign: DecisionAction = {
+  code: 'reassign',
+  label: 'Reassign',
+  recordClass: 'Routine',
+  isRecommended: false,
+  parameters: [
+    { code: 'assignee', label: 'Reassign to', kind: 'Person', required: true },
+    { code: 'note', label: 'Note to them', kind: 'TextArea', required: false },
+  ],
+  effectLines: ['Assigns the item to the person above'],
   excludes: ['mark-complete'],
 };
 
@@ -195,7 +209,7 @@ export const doPlan: DecisionPlan = {
   signalId: DO_ID,
   lane: 'Do',
   policyVersionId: 'dddddddd-0000-0000-0000-000000000002',
-  actions: [markComplete, reschedule],
+  actions: [markComplete, reschedule, reassign],
   nextSteps: [addTodo],
   dismissalReasons: doReasons,
 };

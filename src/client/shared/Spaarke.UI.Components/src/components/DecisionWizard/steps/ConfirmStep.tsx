@@ -42,10 +42,18 @@ import {
   withDismissal,
 } from '../decisionDraft';
 import type { StepScope } from '../decisionDraft';
-import { describeValues, suppressionEffect } from '../decisionDisplay';
+import {
+  describeValues,
+  describeWarning,
+  describeWrites,
+  failureHeading,
+  failureMessage,
+  suppressionEffect,
+} from '../decisionDisplay';
 import { useDecisionItem } from '../decisionItemContext';
 import { composeIssueLine } from '../../Worklist/composeIssueLine';
-import type { DecisionAction, DecisionCommitFailure } from '../decisionWizardTypes';
+import type { DecisionAction, DecisionCommitFailure, DecisionPlan } from '../decisionWizardTypes';
+import { LockedNote } from './ParameterFields';
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', rowGap: tokens.spacingVerticalL },
@@ -79,32 +87,32 @@ const useStyles = makeStyles({
   landed: { margin: 0, paddingLeft: tokens.spacingHorizontalXL },
 });
 
-const refText = (r: { entity: string; id: string }): string => `${r.entity} ${r.id}`;
-
 /** D-17: the user sees which writes landed. A failure writes no record, so the record is not listed as a landed write. */
-export const FailurePanel: React.FC<{ failure: DecisionCommitFailure }> = ({ failure }) => {
+export const FailurePanel: React.FC<{ failure: DecisionCommitFailure; plan: DecisionPlan }> = ({ failure, plan }) => {
   const styles = useStyles();
+  const landed = describeWrites(failure.landed, failure, plan);
+  const possibly = describeWrites(failure.possiblyLanded, failure, plan);
   return (
     <MessageBar intent="error" role="alert" data-testid="commit-failure">
       <MessageBarBody>
-        <MessageBarTitle>{failure.title}</MessageBarTitle>
-        <div>{failure.detail}</div>
-        {failure.landed.length > 0 ? (
+        <MessageBarTitle>{failureHeading(failure)}</MessageBarTitle>
+        <div>{failureMessage(failure)}</div>
+        {landed.length > 0 ? (
           <div data-testid="landed-writes">
-            <Text weight="semibold">These writes were completed before the failure:</Text>
+            <Text weight="semibold">These were already carried out:</Text>
             <ul className={styles.landed}>
-              {failure.landed.map(r => (
-                <li key={`${r.entity}-${r.id}`}>{refText(r)}</li>
+              {landed.map(line => (
+                <li key={line}>{line}</li>
               ))}
             </ul>
           </div>
         ) : null}
-        {failure.possiblyLanded.length > 0 ? (
+        {possibly.length > 0 ? (
           <div data-testid="possibly-landed-writes">
-            <Text weight="semibold">These may have been written (no clear answer):</Text>
+            <Text weight="semibold">These may have been carried out (no clear answer):</Text>
             <ul className={styles.landed}>
-              {failure.possiblyLanded.map(r => (
-                <li key={`${r.entity}-${r.id}`}>{refText(r)}</li>
+              {possibly.map(line => (
+                <li key={line}>{line}</li>
               ))}
             </ul>
           </div>
@@ -124,9 +132,33 @@ export const FailurePanel: React.FC<{ failure: DecisionCommitFailure }> = ({ fai
 };
 
 export const ConfirmStep: React.FC = () => {
-  const { item, plan, draft, update, resolution, suppression, suppressionFailed, failure, today } = useDecisionItem();
+  const {
+    item,
+    plan,
+    draft,
+    update,
+    resolution,
+    suppression,
+    suppressionFailed,
+    failure,
+    locked,
+    closedIds,
+    recordResult,
+    today,
+  } = useDecisionItem();
   const styles = useStyles();
   const coreName = item.core?.name?.trim() || null;
+
+  // What the route said while closing: its own warnings and each Signal's (an item it could not close is named, not hidden).
+  const warnings = recordResult
+    ? Array.from(
+        new Set(
+          [...recordResult.warnings, ...recordResult.signals.map(s => s.warning).filter((w): w is string => !!w)].map(
+            describeWarning
+          )
+        )
+      )
+    : [];
 
   // ---- Closed item: the read-only record of the decision ---------------------------------------
   if (resolution) {
@@ -143,6 +175,23 @@ export const ConfirmStep: React.FC = () => {
           </Body1>
         ) : null}
         {resolution.reason ? <Body1 data-testid="dismissal-reason">Reason: {resolution.reason}</Body1> : null}
+        {resolution.leftOpen ? (
+          <Body1 data-testid="left-open">
+            The inquiry was sent and the decision recorded. This item stays open until the work is done.
+          </Body1>
+        ) : null}
+        {warnings.length > 0 ? (
+          <MessageBar intent="warning" data-testid="record-warnings">
+            <MessageBarBody>
+              <MessageBarTitle>The decision was recorded. Please check:</MessageBarTitle>
+              <ul className={styles.landed}>
+                {warnings.map(w => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            </MessageBarBody>
+          </MessageBar>
+        ) : null}
         <ul className={styles.list} data-testid="offered-actions">
           {plan.actions.map(a => {
             const step = resolution.steps?.find(s => s.code === a.code);
@@ -188,7 +237,7 @@ export const ConfirmStep: React.FC = () => {
   const next = takenNextSteps(plan, draft);
   const missing = undecidedSteps(plan, draft);
   const reason = plan.dismissalReasons.find(r => r.code === draft.dismissalCode);
-  const others = plan.lane === 'Decide' && item.core ? item.otherOpenItems : [];
+  const others = plan.lane === 'Decide' && item.core ? item.otherOpenItems.filter(o => !closedIds.has(o.signalId)) : [];
 
   const rowsFor = (a: DecisionAction, scope: ReturnType<typeof actionScope>) =>
     describeValues(a, stepValues(a, draft, scope), code => fieldLabel(draft, scope, code));
@@ -278,6 +327,7 @@ export const ConfirmStep: React.FC = () => {
         <div className={styles.box} data-testid="dismissal">
           <Field label="Reason for dismissing" required>
             <Select
+              disabled={locked}
               value={draft.dismissalCode}
               onChange={(_e, data) => update(d => withDismissal(d, data.value))}
               aria-label="Reason for dismissing"
@@ -294,6 +344,7 @@ export const ConfirmStep: React.FC = () => {
             <Field label="Detail" required>
               <Textarea
                 rows={3}
+                disabled={locked}
                 value={draft.dismissalDetail}
                 onChange={(_e, data) => update(d => withDismissal(d, d.dismissalCode, data.value))}
               />
@@ -316,6 +367,7 @@ export const ConfirmStep: React.FC = () => {
           {others.map(o => (
             <Checkbox
               key={o.signalId}
+              disabled={locked}
               checked={draft.alsoResolve.includes(o.signalId)}
               onChange={(_e, data) => update(d => withAlsoResolve(d, o.signalId, data.checked === true))}
               label={composeIssueLine(o, today).headline}
@@ -330,7 +382,8 @@ export const ConfirmStep: React.FC = () => {
         </MessageBar>
       ) : null}
 
-      {failure ? <FailurePanel failure={failure} /> : null}
+      {locked ? <LockedNote /> : null}
+      {failure ? <FailurePanel failure={failure} plan={plan} /> : null}
     </div>
   );
 };
