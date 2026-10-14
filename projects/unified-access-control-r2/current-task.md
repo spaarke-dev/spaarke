@@ -2,35 +2,37 @@
 
 > **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives incl. the ADR-028 A9 block, §5 Environment, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` (rounds 1–99) and `notes/decisions.md`. Task 185 decisions: `notes/185-invite-code-design.md` §11–§12. Live records: `notes/batch5-live-gates-2026-10-08.md`. Narrative: checkpoint commit messages.
 
-> **Last Updated**: 2026-10-14 (checkpoint #33).
+> **Last Updated**: 2026-10-14 (checkpoint #34).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Mode** | Round 90 wrap-up: fix only findings that affect uac-r2 or break a real path (security counts); file everything else as an issue. A task closes on merge + deploy + server-side live gate. |
-| **Running** | The task 187 implementer (Opus, xhigh) in worktree `C:/wt187`, branch `uac/187-external-live-parent` (from master `6da771b96`). It opens a PR; it does not merge or deploy. |
-| **Next Action** | When 187's PR is up: **two** adversarial passes (security), then fix rounds until no F remains, a scoped re-check of each fix, merge (`git merge-tree` check, Router green, `--match-head-commit`, no `--delete-branch`), deploy master to dev (`scripts/Deploy-BffApi.ps1 -Environment dev -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev`, from a clean worktree; tell word-add-in, since the owner is UATing add-ins on dev), run the server-side live gate, then close 187. Tell ontology-r1 when it merges. |
+| **Running** | UAC reviews of ontology PR #1878 (task 042, DR for the comms rule gate). Waiting on ontology's fix SHA for #1874 (145 F1: early-return policies skip the stored-evidence redaction). |
+| **Next Action** | Re-check #1874's fix diff when it arrives; reply on #1878. Then pick the next uac-r2 item from "Not started" with the owner (wrap-up mode). Re-run 187's document leg once SPA-r3's 064 doc-type fix is on master. |
 
-## Task 187 (security, #1857): external reads check live parents
-- **The finding** (ontology-r1, mapped by uac-r2): external lists admit a child row by its copied stamp only. Stale copies and "carrier" rows (permanent) list behind the D-123 wall. Affected: to-dos, events, PATCH/DELETE on to-dos, messages, notifications, invoice threads, document related links.
-- **Owner round 99:** the live-parent check (precise), not the owner-team check.
-- **Collision rule:** don't touch ExternalDataService's shared collection-page reader or `CollectionPrefer` (SPA-r3 task 064). SPA-r3's 045 WorkforceHome guard stays first in `WorkforcePrincipalResolver.ResolveAsync`.
-- **Open:** invoice threads were "no rule" by owner option A. If the implementer reports a conflict with that decision, it goes to the owner.
+## Done this session
+- **185** (#1827, `6da771b96`): merged, deployed and the live gate passed. The SpaarkeMaster 1.2.3.0 release gate is met. The live CIAM bind is on the owner checklist §12.
+- **187** (#1861, `8a1f3bb11`, security #1857): merged, deployed and the live gate passed (G4 is on the owner checklist §13). Owner rounds 99, 100 and 100b.
+- **The secure family is its own project:** `projects/uac-secure-project-r3/` (pre-design), which starts after uac-r2. Task 178 moves there. The team type is decided as an owner team per family (round 100b).
+- **K-145-3:** comment PR #1875 (base docs/ontology-platform-design) is open; ontology merges it.
 
 ## Other lanes
 - **Ontology:**
-  - #1854 (143 K1/K2): CLEAN at `d4a98260d`; they merge.
-  - Task 144 resumes on guard option A with UAC's 5 conditions. UAC reviews its exemption commit in 144's PR.
+  - CLEAN and merged or merging: #1854 (143), #1858 (148: report-only first, and UAC reviews the dev run before the owner enables writes), #1862 (144).
+  - #1874 (145): 1 F open. #1878 (042): review running.
   - Task 183 (#1797) closes after ontology's 148 live gate (412 → Conflict).
 - **Provisioning:** 185's release gate is MET. SpaarkeMaster 1.2.3.0 is published (CI run 38603706393, master `bd52b6290`, PR #1860) and carries `contact.sprk_externalinvitecodehash`, secured: Writers 4/4/4, Readers no row. T240d builds on `6da771b96`.
 - **SPA-r3:** has master merged into R3. 046 (WorkforcePrincipalResolver and the binder), 047, 048 (systemuser home-link columns, owner-approved schema) and 058 come to UAC for review.
 - **word-add-in:** the owner is UATing add-ins on dev at `6da771b96`. Their #1815 changes `Set-ExternalFlagForB2BGuests.ps1`. UAC's "no -Apply in Model 1" rule stays until the owner restates it.
 - **Task 186 (baseline access only):** pending SPA-r3's principal contract. Tell provisioning when the Workforce role is final.
-- **Issues filed this period:** #1813, #1817, #1830 (triaged), #1857 (task 187).
+- **SPA-r3 064 doc-type fix** (`ExternalDataService.cs:142`, `sprk_documenttype` read as a string, which empties external document lists on dev) is on the R3 branch only. They were asked to land it on master.
+- **Issues filed this period:** #1813, #1817, #1830 (triaged), #1857 (task 187, fixed).
 
 ## Open owner items
-- The live CIAM sign-ins: checklist §12 (185's code-gated bind) and §11 (184's ExistingAccount option).
+- The live CIAM sign-ins: checklist §12 (185's code-gated bind) and §11 (184's ExistingAccount option). §13: 187's optional live secure-wall proof.
+- Ontology owner questions: #1876 (unfiled communication gate DR), #1877 (D-37 tie), #1871; and enabling 148's writes after its report-only dev run.
 - Restate the Model 1 `-Apply` rule once #1815 merges.
 - Task 186 ceiling decision.
 - #1747 and #1776.

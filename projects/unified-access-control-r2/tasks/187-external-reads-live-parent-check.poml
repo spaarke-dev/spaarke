@@ -3,7 +3,7 @@
   <metadata>
     <title>External reads check each row's LIVE parents, not only its copied stamp (D-123; issue #1857)</title>
     <phase>Session 28: UAC (owner round 99, 2026-10-14)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security: the external plane reads app-only, so this check IS the secure wall for external callers.</rigor-reason>
     <model-tier>opus</model-tier>

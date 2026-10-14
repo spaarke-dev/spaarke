@@ -157,3 +157,10 @@ Server side PASSED on 2026-10-14 (G0–G5, `batch5-live-gates-2026-10-08.md`). N
 2. **No code, no bind.** Sign in with the same kind of fresh invited contact, but open the plain portal URL instead of the email link. **PASS:** no access (`contact_not_invited`), and nothing is bound.
 3. **Code used once.** After step 1, open the same email link again in a private window and sign in with a *different* CIAM account. **PASS:** no access.
 4. **The masked hash (optional, after step 1's invite and before the sign-in).** As testuser1, read that contact's `sprk_externalinvitecodehash`. **PASS:** masked or not returned.
+
+## 13. External reads behind the secure wall (task 187, #1861, on dev since 2026-10-14)
+
+The server-side checks PASSED on 2026-10-14 (G0–G3 and G5, `batch5-live-gates-2026-10-08.md`). The live secure-wall proof (G4) needs a throwaway record, so it is your call. Optional: the PR's tests and mutation evidence are the offline proof.
+1. **Carrier To Do.** As an internal user, create a To Do filed under an ordinary matter M that testuser1 can see externally. Set its "regarding communication" to an email that is filed under a secure project testuser1 can't read. **PASS:** testuser1's external To Do list for M does not show it; a user who can read both does see it.
+2. **Clean up:** delete the throwaway To Do.
+
