@@ -150,7 +150,7 @@ export function failureMessage(failure: DecisionCommitFailure): string {
     : 'Something went wrong while recording this decision.';
 }
 
-const ENTITY_NOUNS: Record<string, string> = {
+const ENTITY_NOUNS: Partial<Record<string, string>> = {
   sprk_budgetrevision: 'Budget revision',
   sprk_budget: 'Budget',
   sprk_event: 'Event',

@@ -76,7 +76,7 @@ export const FoundStep: React.FC = () => {
 
       <div className={styles.section} data-testid="evidence">
         <Text weight="semibold">Evidence</Text>
-        {closed && resolution?.factSnapshot ? (
+        {closed && resolution.factSnapshot ? (
           <Caption1 className={styles.meta} data-testid="snapshot-note">
             The facts as they stood when this was recorded, not today&apos;s data.
           </Caption1>

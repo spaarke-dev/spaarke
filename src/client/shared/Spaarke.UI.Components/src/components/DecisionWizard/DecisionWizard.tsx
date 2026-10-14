@@ -124,11 +124,11 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   const today = React.useMemo(() => todayProp ?? new Date(), [todayProp]);
 
   const [index, setIndex] = React.useState(() => Math.max(0, itemIds.indexOf(startItemId)));
-  const [loaded, setLoaded] = React.useState<Record<string, Loaded>>({});
-  const [drafts, setDrafts] = React.useState<Record<string, ItemDraft>>({});
-  const [recorded, setRecorded] = React.useState<Record<string, Recorded>>({});
-  const [failures, setFailures] = React.useState<Record<string, DecisionCommitFailure>>({});
-  const [pinned, setPinned] = React.useState<Record<string, DecisionCommitFailure>>({});
+  const [loaded, setLoaded] = React.useState<Partial<Record<string, Loaded>>>({});
+  const [drafts, setDrafts] = React.useState<Partial<Record<string, ItemDraft>>>({});
+  const [recorded, setRecorded] = React.useState<Partial<Record<string, Recorded>>>({});
+  const [failures, setFailures] = React.useState<Partial<Record<string, DecisionCommitFailure>>>({});
+  const [pinned, setPinned] = React.useState<Partial<Record<string, DecisionCommitFailure>>>({});
   const [recording, setRecording] = React.useState<string | null>(null);
   const [alsoClosed, setAlsoClosed] = React.useState<readonly string[]>([]);
   const [confirmClose, setConfirmClose] = React.useState(false);
@@ -142,7 +142,9 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   // Per item: the review a failed attempt posted. Once a failure keeps the review id it is PINNED: the id never changes again,
   // the review cannot be edited, and `pinning` is the Failed outcome whose `resumable` decides `retry`.
   const attempts = React.useRef<
-    Record<string, { key: string; pinned: boolean; pinning: DecisionCommitFailure | null; sent: ItemDraft | null }>
+    Partial<
+      Record<string, { key: string; pinned: boolean; pinning: DecisionCommitFailure | null; sent: ItemDraft | null }>
+    >
   >({});
   const closedNow = React.useRef<(id: string) => boolean>(() => false);
   const mounted = React.useRef(true);
@@ -221,9 +223,9 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
       const isPinned = previous?.pinned === true;
       // `retry` resumes the Failed first attempt; it comes from the failure that pinned the review, not from the latest answer
       // (a refusal after it says nothing about whether the first attempt can be resumed).
-      const retry = isPinned && previous?.pinning?.resumable === true;
+      const retry = isPinned && previous.pinning?.resumable === true;
       // A pinned review is posted exactly as first sent (items that closed since were already dropped from it).
-      let sendDraft = isPinned && previous?.sent ? previous.sent : draft;
+      let sendDraft = isPinned && previous.sent ? previous.sent : draft;
       if (!isPinned) {
         // Items that closed since they were ticked are not asked for again.
         const stillOpen = draft.alsoResolve.filter(x => !closedNow.current(x));
@@ -286,21 +288,22 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
                 replayed: false,
               } as DecisionCommitFailure);
         const keeps = failureKeepsReview(failure);
-        const wasPinned = attempts.current[id]?.pinned === true;
+        const prior = attempts.current[id];
+        const wasPinned = prior?.pinned === true;
         // The first failure that keeps the id pins the review. After that only a new Failed outcome replaces the failure that
         // decides `retry`; a refusal or an in-progress answer leaves it alone.
         const pinning =
-          keeps && (!wasPinned || isFailedOutcome(failure)) ? failure : (attempts.current[id]?.pinning ?? null);
+          keeps && (!wasPinned || isFailedOutcome(failure)) ? failure : (prior?.pinning ?? null);
         const isNowPinned = keeps || wasPinned;
         attempts.current[id] = {
-          key: wasPinned ? attempts.current[id].key : reviewKey(review),
+          key: wasPinned ? prior.key : reviewKey(review),
           pinned: isNowPinned,
           pinning,
-          sent: wasPinned ? (attempts.current[id].sent ?? sendDraft) : sendDraft,
+          sent: wasPinned ? (prior.sent ?? sendDraft) : sendDraft,
         };
         setFailures(prev => ({ ...prev, [id]: failure }));
         setPinned(prev => {
-          const shown = attempts.current[id].pinning;
+          const shown = attempts.current[id]?.pinning;
           if (!isNowPinned || !shown) return prev;
           return prev[id] === shown ? prev : { ...prev, [id]: shown };
         });
@@ -335,8 +338,8 @@ export const DecisionWizard: React.FC<DecisionWizardProps> = ({
   })();
 
   // ---- Close with the discard check ------------------------------------------------------------------
-  const hasUnrecorded = Object.keys(drafts).some(
-    id => !recorded[id] && !alsoClosed.includes(id) && hasUnrecordedChoices(drafts[id])
+  const hasUnrecorded = Object.entries(drafts).some(
+    ([id, d]) => d !== undefined && !recorded[id] && !alsoClosed.includes(id) && hasUnrecordedChoices(d)
   );
   const requestClose = React.useCallback(() => {
     if (recordingRef.current) return;

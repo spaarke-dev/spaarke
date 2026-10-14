@@ -27,7 +27,7 @@ type Template = (context: TemplateContext) => string | null;
 const about = (c: TemplateContext): string => c.coreName ?? c.headline;
 
 /** Parameter code to template. Free-text parameters only. */
-const TEMPLATES: Readonly<Record<string, Template>> = {
+const TEMPLATES: Readonly<Partial<Record<string, Template>>> = {
   subject: c => `${c.ruleShortName ?? 'Question'}: ${about(c)}`,
   body: c =>
     [
