@@ -26,7 +26,7 @@
 
 .PARAMETER TestCorsOrigin
     Origin to test CORS preflight against.
-    Default: https://spaarke-demo.crm.dynamics.com
+    Default: https://spaarkedev1.crm.dynamics.com
 
 .EXAMPLE
     .\Test-CustomDomain.ps1
@@ -40,7 +40,7 @@ param(
     [string]$CustomDomain = 'api.spaarke.com',
     [string]$AppServiceName = 'spaarke-bff-prod',
     [string]$ResourceGroupName = 'rg-spaarke-platform-prod',
-    [string]$TestCorsOrigin = 'https://spaarke-demo.crm.dynamics.com'
+    [string]$TestCorsOrigin = 'https://spaarkedev1.crm.dynamics.com'
 )
 
 $ErrorActionPreference = 'Stop'

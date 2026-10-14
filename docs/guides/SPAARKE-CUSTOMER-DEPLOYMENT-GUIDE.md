@@ -1025,12 +1025,13 @@ that stands it up). It is a deployment setting, not a Dataverse column, because 
   deploy to an environment that carries the setting without declaring it. The declaration must be a JSON boolean (`true` /
   `false`, unquoted): the deploy FAILS on any other type, because PowerShell reads the string `"false"` as true (round 57
   item 3; the parse is `scripts/common/SpeAdminOperatorMarker.ps1`, which `SpeAdminOperatorEnvironmentMarkerGuardTests` runs).
-- **Standing up Spaarke's production operator environment** (`demo` — `spaarke-bff-demo`, Stopped, which declares `false`
-  today) is the change that adds the marker: its registry key set to `true`, its name in
-  `SpeAdminOperatorEnvironmentMarkerGuardTests.SpaarkeOperatedEnvironments`, and the App Service setting (the next
-  `Deploy-BffApi.ps1 -Environment demo` run sets it). Until then it refuses those routes (fail closed). The entry is
-  reachable through `-Environment` (main-session round 62 item 2): task T242b added `demo` to `Deploy-BffApi.ps1`'s
-  `-Environment` `ValidateSet`, so the declaration and its `requiredCorsOrigins` gate are read by a demo deploy.
+- **Standing up Spaarke's production operator environment** is the change that adds the marker: a registry entry in
+  `config/environments.json` with the key set to `true`, its name in
+  `SpeAdminOperatorEnvironmentMarkerGuardTests.SpaarkeOperatedEnvironments`, the entry added to `Deploy-BffApi.ps1`'s
+  `-Environment` `ValidateSet` (so the declaration and its `requiredCorsOrigins` gate are read by a deploy), and the App
+  Service setting (the next `Deploy-BffApi.ps1` run for it sets it). Until then it refuses those routes (fail closed). The old
+  `demo` entry (`spaarke-bff-demo`) was the candidate until it was retired on 2026-10-14 and removed from the registry; the
+  demo is now the ACME stamp built by provisioning (T186), a customer environment that never carries the marker.
 - **A declared marker is bound to its App Service** (round 62 item 1): when the entry declares `true`, the deploy FAILS
   unless `-AppServiceName` and `-ResourceGroupName` equal that entry's `appServiceName` / `resourceGroup`
   (`Assert-SpeAdminOperatorMarkerTarget`, `scripts/common/SpeAdminOperatorMarker.ps1`). The declaration is read by the
@@ -1352,7 +1353,7 @@ Model 1 run takes only `B2BGuest`):
 1. **Before inviting anyone** it refuses (Resumable, nothing written) a run whose environment security group
    (`environmentSecurityGroupId`, `PRQ-C-10`) is not named `sprk-{customerId}-users` or not security-enabled
    (`userprov-security-group-rejected`), or whose environment restricts guests
-   (`organization.restrictguestuseraccess`, `PRQ-C-12` — `userprov-guest-access-restricted`). The group is the
+   (`organization.restrictGuestUserAccess`, `PRQ-C-12` — `userprov-guest-access-restricted`). The group is the
    isolation boundary between Model 1 environments: all live in Spaarke's tenant, so an environment without it admits
    every user of that tenant, including other customers' guests. H11 checks the group's **name**; that it is the group
    **set on the environment** is checked by the skill (Step 1e-bis, Power Platform admin API) — only a Power Platform

@@ -223,20 +223,20 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 **Command:**
 ```powershell
+# -EnvironmentUrl is required: the old demo environment was retired 2026-10-14 and the demo is now the
+# ACME stamp built by the provisioning control plane (no static default URL).
+
 # Preview what would be created (recommended first)
-.\Load-DemoSampleData.ps1 -DryRun
+.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -DryRun
 
 # Load all sample data
-.\Load-DemoSampleData.ps1
-
-# Load into a different environment
 .\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com"
 
 # Skip optional steps
-.\Load-DemoSampleData.ps1 -SkipAiSeedData -SkipSpeUpload -SkipAiIndexing
+.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -SkipAiSeedData -SkipSpeUpload -SkipAiIndexing
 
 # Force recreate existing records
-.\Load-DemoSampleData.ps1 -Force
+.\Load-DemoSampleData.ps1 -EnvironmentUrl "https://myenv.crm.dynamics.com" -Force
 ```
 
 **Data Sources:**
