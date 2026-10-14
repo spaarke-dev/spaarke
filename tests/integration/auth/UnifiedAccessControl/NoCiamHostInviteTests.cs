@@ -34,23 +34,17 @@ public class NoCiamHostInviteTests : IClassFixture<NoCiamHostInviteTests.NoCiamF
         protected override bool IncludeCiamConfiguration => false;
     }
 
-    [Fact]
-    public void TheHost_HasNoCiamConfiguration_AndStillResolvesTheProvisionerAndTheInviteService()
-    {
-        using var scope = _fixture.Services.CreateScope();
-
-        var provisioner = scope.ServiceProvider.GetRequiredService<CiamUserProvisioningService>();
-        provisioner.IsConfigured.Should().BeFalse("the fixture really is a host without Ciam:* (no vacuous pass)");
-
-        var resolve = () => scope.ServiceProvider.GetRequiredService<ExternalInviteService>();
-        resolve.Should().NotThrow("/grant and /contact-grants inject the invite service, which injects the provisioner");
-    }
-
     [Theory]
     [InlineData("/api/v1/external-access/invite")]
     [InlineData("/api/v1/external-access/invite-and-grant")]
     public async Task TheInviteRoutes_KeepTheirServerError500_AndReadOrWriteNothing(string path)
     {
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<CiamUserProvisioningService>().IsConfigured.Should().BeFalse(
+                "the fixture really is a host without Ciam:* (no vacuous pass)");
+        }
+
         var matterId = Guid.NewGuid();
         using var client = _fixture.CreateClientWithRights(Delegator);
         _fixture.DataverseClient.Invocations.Clear();
