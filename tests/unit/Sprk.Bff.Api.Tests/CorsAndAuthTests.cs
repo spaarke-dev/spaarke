@@ -27,6 +27,21 @@ public class CorsAndAuthTests : IClassFixture<CustomWebAppFactory>
         res.Headers.TryGetValues("Access-Control-Allow-Origin", out var values).Should().BeTrue();
     }
 
+    // Task 185 (uac-r2): the external SPA sends the invite code as X-Spaarke-Invite-Code on its BFF calls. It is
+    // cross-origin, so without this header in the allow-list the browser's preflight refuses every such call.
+    [Fact]
+    public async Task Cors_Preflight_AllowsTheInviteCodeHeader()
+    {
+        var req = new HttpRequestMessage(HttpMethod.Options, "/api/v1/external/me/entitlements");
+        req.Headers.Add("Origin", "https://localhost:5173");
+        req.Headers.Add("Access-Control-Request-Method", "GET");
+        req.Headers.Add("Access-Control-Request-Headers", "authorization,x-spaarke-invite-code");
+        var res = await _client.SendAsync(req);
+        res.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        res.Headers.TryGetValues("Access-Control-Allow-Headers", out var allowed).Should().BeTrue();
+        string.Join(",", allowed!).Should().ContainEquivalentOf("X-Spaarke-Invite-Code");
+    }
+
     // Repointed TWICE, and the reason is the same both times: this test checks BEARER ENFORCEMENT, so
     // it must probe a route that EXISTS. A deleted route answers 404, which says nothing about auth.
     //

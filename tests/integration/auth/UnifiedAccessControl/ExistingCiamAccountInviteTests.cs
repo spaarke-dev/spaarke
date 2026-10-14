@@ -1,10 +1,13 @@
+using System.Reflection;
 using System.Security.Claims;
+using System.Text.Json;
 using Azure.Core;
 using Azure.Security.KeyVault.Secrets;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.Graph.Models.ODataErrors;
@@ -39,6 +42,7 @@ public class ExistingCiamAccountInviteTests
 {
     private const string Email = "partner@outside.test";
     private const string PortalUrl = "https://external.test";
+    private const string CustomerKey = "acme";
 
     private readonly Harness _h = new();
     private readonly Guid _matter = Guid.NewGuid();
@@ -78,21 +82,69 @@ public class ExistingCiamAccountInviteTests
     private static InviteExternalUserRequest Request()
         => new(Email, Guid.Empty, (int)ExternalAccessLevel.Collaborate, "Pat", "Partner", null, null, "matter", Guid.Empty);
 
-    private Task<IResult> InviteAndGrant() =>
+    private static IConfiguration PortalConfig() => new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl })
+        .Build();
+
+    private Task<IResult> InviteAndGrant(ILogger<Program>? logger = null, ContactIdentityBinder? binder = null) =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             Request() with { RecordId = _matter },
             _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
-            _ciam, _h.Emails, IdentityBindingTestKit.Binder(_h.Identities),
-            new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = PortalUrl })
-                .Build(),
-            _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities),
+            PortalConfig(), Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey),
+            _h.Materializer, _h.Notifier, Context(), logger ?? NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
     /// <summary>The /invite core, as the route runs it.</summary>
-    private Task<InviteExternalUserEndpoint.ProvisionOutcome> Invite(ContactIdentityBinder? binder = null) =>
+    private Task<InviteExternalUserEndpoint.ProvisionOutcome> Invite(ContactIdentityBinder? binder = null, ILogger? logger = null) =>
         InviteExternalUserEndpoint.ProvisionAsync(
             Request(), _h.Grants, _ciam, _h.Emails, binder ?? IdentityBindingTestKit.Binder(_h.Identities), PortalUrl,
-            NullLogger<Program>.Instance, resolution: null, CancellationToken.None);
+            CustomerKey, logger ?? NullLogger<Program>.Instance, resolution: null, CancellationToken.None);
+
+    /// <summary>
+    /// The /invite ROUTE handler itself (private; reached by reflection so the test reads the response the route returns,
+    /// not one it rebuilt).
+    /// </summary>
+    private async Task<IResult> InviteRoute(ILogger<Program>? logger = null)
+    {
+        var handler = typeof(InviteExternalUserEndpoint).GetMethod("InviteExternalUserAsync", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("The /invite handler was not found.");
+        var task = (Task<IResult>)handler.Invoke(null, new object[]
+        {
+            Request() with { RecordId = _matter }, _h.Grants, _h.Participations, _ciam, _h.Emails,
+            IdentityBindingTestKit.Binder(_h.Identities), PortalConfig(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.TestSpeOwnership.Customer(CustomerKey), Context(),
+            logger ?? NullLogger<Program>.Instance, CancellationToken.None,
+        })!;
+        return await task;
+    }
+
+    /// <summary>
+    /// Task 185 slice D: the code the LAST invite email carried, read from its link. Asserts the link's shape
+    /// (<c>{portal}/?customer={key}#invite={code}</c>, §12 I-12) and that the code matches the hash the invite stored.
+    /// </summary>
+    private string InviteEmailCode(Guid contact, string? storedHash = null)
+    {
+        var code = CodeIn(_h.Emails.InviteUrls.Should().NotBeEmpty("an invite email was sent").And.Subject.Last());
+        var stored = storedHash ?? _h.Identities.Contacts[contact].InviteCodeHash;
+        stored.Should().NotBeNull("the invite writes the code's hash with the marker")
+            .And.HaveLength(InviteCode.StoredValueLength);
+        InviteCode.Matches(stored, code, contact).Should().BeTrue("the emailed code is the one whose hash was stored");
+        return code;
+    }
+
+    /// <summary>The code in an invite link, after checking the link is exactly the portal, the customer key and the code.</summary>
+    private static string CodeIn(string inviteUrl)
+    {
+        const string prefix = PortalUrl + "/?customer=" + CustomerKey + "#invite=";
+        inviteUrl.Should().StartWith(prefix);
+        var code = inviteUrl[prefix.Length..];
+        InviteCode.IsWellFormed(code).Should().BeTrue("the link carries a 43-character base64url code");
+        return code;
+    }
+
+    /// <summary>The pieces of a stored value no log line may carry: the whole value and its salt and digest.</summary>
+    private static IEnumerable<string> HashParts(string stored)
+        => new[] { stored }.Concat(stored.Split(':', '.').Where(p => p.Length >= 16));
 
     private static HttpContext Context() => new DefaultHttpContext
     {
@@ -103,15 +155,23 @@ public class ExistingCiamAccountInviteTests
 
     // ── The ExistingAccount branch ──────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// §12 I-10 (owner round 98c): the inviter is answered "Provisioned", the new-account status, so the response never tells
+    /// an inviter that the email already has a CIAM account. The operator log records ExistingAccount. MUTATION: answering
+    /// the branch in <c>onboardStatus</c> fails this test.
+    /// </summary>
     [Fact]
     public async Task InviteAndGrant_OfAPersonWithACiamAccount_SucceedsAsExistingAccount_PendingContact_SignInEmailOnly()
     {
         var contact = UnboundContact();
         _ciam.Failure = ObjectConflictOnProxyAddresses();
+        var log = new BindingLogCapture<Program>();
 
-        var body = (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+        var body = (await InviteAndGrant(log)).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
 
-        body.OnboardStatus.Should().Be("ExistingAccount");
+        body.OnboardStatus.Should().Be(InviteExternalUserEndpoint.ProvisionedStatus, "the inviter sees the new-account answer");
+        log.Messages.Should().Contain(m => m.Contains(InviteExternalUserEndpoint.ExistingAccountStatus),
+            "the operator log keeps the branch");
         body.ContactId.Should().Be(contact);
         _h.Identities.Contacts[contact].Oid.Should().BeNull("the existing account's oid is never looked up at invite time");
         _h.Identities.Contacts[contact].InvitedOn.Should().NotBeNull("the contact stays pending: marker set, no oid");
@@ -120,10 +180,11 @@ public class ExistingCiamAccountInviteTests
         _h.Emails.Sent.Should().BeEmpty("one email per invite: the sign-in email is this person's notice");
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
 
-        // The first CIAM sign-in binds the pending contact (E11, under the intent gate).
+        // The first CIAM sign-in binds the pending contact (E11, under the intent gate; task 185: with the email's code).
+        var code = InviteEmailCode(contact);
         var existingOid = Guid.NewGuid();
         var signIn = await IdentityBindingTestKit.Binder(_h.Identities)
-            .ResolveCiamCallerAsync(existingOid.ToString(), Email, CancellationToken.None);
+            .ResolveCiamCallerAsync(existingOid.ToString(), Email, code, CancellationToken.None);
         signIn.ContactId.Should().Be(contact);
         _h.Identities.Contacts[contact].Oid.Should().Be(existingOid.ToString("D"));
     }
@@ -143,6 +204,28 @@ public class ExistingCiamAccountInviteTests
         _h.Identities.Contacts[contact].Oid.Should().BeNull();
         _h.Emails.ExistingAccount.Should().ContainSingle();
         _h.Emails.Onboarding.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// §12 I-10 (owner round 98c), the /invite ROUTE: a person who already has a CIAM account is answered "Provisioned", the
+    /// same as a new account, while the existing-account email is sent and the operator log names ExistingAccount (never the
+    /// code or its hash). MUTATION: returning the branch in the response's <c>status</c> fails this test.
+    /// </summary>
+    [Fact]
+    public async Task InviteRoute_OfAPersonWithACiamAccount_AnswersLikeANewAccount_OnlyTheLogSaysExistingAccount()
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+        var log = new BindingLogCapture<Program>();
+
+        var body = (await InviteRoute(log)).Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+
+        body.Status.Should().Be(InviteExternalUserEndpoint.ProvisionedStatus, "the inviter is never told the account existed");
+        _h.Emails.ExistingAccount.Should().ContainSingle("the person still gets the existing-account email");
+        log.Messages.Should().Contain(m => m.Contains(InviteExternalUserEndpoint.ExistingAccountStatus));
+        var code = InviteEmailCode(contact);
+        var stored = _h.Identities.Contacts[contact].InviteCodeHash!;
+        log.Messages.Should().NotContain(m => m.Contains(code, StringComparison.Ordinal) || m.Contains(stored, StringComparison.Ordinal));
     }
 
     [Theory]
@@ -185,6 +268,31 @@ public class ExistingCiamAccountInviteTests
         _h.Emails.Onboarding.Should().ContainSingle();
     }
 
+    /// <summary>
+    /// Task 185 (owner Q5, design §7): the new-account path is unchanged — same request, no code presented, same status —
+    /// except that its bind PATCH also clears the now-inert code hash, in the same write as the oid. Nothing is left on a
+    /// bound contact for a later unbind to reopen.
+    /// </summary>
+    [Fact]
+    public async Task ANewAccountInvite_ClearsTheCodeHashInItsOwnBindPatch()
+    {
+        var contact = UnboundContact();
+        string? hashAtCreate = null;
+        _ciam.OnCreate = () => hashAtCreate = _h.Identities.Contacts[contact].InviteCodeHash;
+
+        var outcome = await Invite();
+
+        outcome.Status.Should().Be("Provisioned");
+        hashAtCreate.Should().NotBeNull("the marker write carried the hash, before the CIAM account");
+        var oid = _ciam.Created.Single().Oid;
+        _h.Identities.Writes.Where(w => w.RowId == contact).Select(w => w.Op)
+            .Should().Equal("invite-marker", "bind");
+        _h.Identities.Writes.Single(w => w.Op == "bind").Detail
+            .Should().Be($"{oid:D}|{IdentityPlaneMarker.External}|invite-code-hash=null");
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().BeNull();
+        _h.Identities.Contacts[contact].InvitedOn.Should().NotBeNull("the marker is never cleared");
+    }
+
     /// <summary>The retryable 503 of an invite whose contact needed the marker and did not get it (fix round 1, F4-2).</summary>
     private static void ShouldBeMarkerNotWritten(IResult result)
     {
@@ -212,11 +320,20 @@ public class ExistingCiamAccountInviteTests
     /// column). In that window the NORMAL new-account path needs no marker — the CIAM create and the oid bind happen in
     /// the same request — so it still succeeds.
     /// </summary>
-    [Fact]
-    public async Task BeforeTheSchema_ANewAccountInvite_StillSucceeds_ItsOidIsBoundInTheSameRequest()
+    [Theory]
+    [InlineData("marker-column")]
+    [InlineData("hash-column")] // task 185: the marker column is there, the hash column is not (either one missing)
+    public async Task BeforeTheSchema_ANewAccountInvite_StillSucceeds_ItsOidIsBoundInTheSameRequest(string missing)
     {
         var contact = UnboundContact();
-        _h.Identities.InviteMarkerStatus = LookupStatus.ColumnMissing;
+        if (missing == "marker-column")
+        {
+            _h.Identities.InviteMarkerStatus = LookupStatus.ColumnMissing;
+        }
+        else
+        {
+            _h.Identities.InviteCodeHashColumnMissing = true;
+        }
 
         var body = (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
 
@@ -224,6 +341,8 @@ public class ExistingCiamAccountInviteTests
         _ciam.Created.Should().ContainSingle();
         _h.Identities.Contacts[contact].InvitedOn.Should().BeNull();
         _h.Identities.Contacts[contact].Oid.Should().Be(_ciam.Created.Single().Oid.ToString("D"));
+        _h.Identities.Writes.Single(w => w.Op == "bind").Detail.Should().NotContain("invite-code-hash",
+            "task 185: with the columns missing the bind payload is exactly the plain bind");
         _h.Emails.Onboarding.Should().ContainSingle();
         _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle();
     }
@@ -284,9 +403,15 @@ public class ExistingCiamAccountInviteTests
         _h.Identities.Contacts[contact].Oid.Should().BeNull();
     }
 
-    /// <summary>With the marker landed, a failed oid write keeps today's 500, and the first sign-in repairs the binding.</summary>
+    /// <summary>
+    /// With the marker landed, a failed oid write keeps today's 500. Task 185 (owner Q6, design §6): no email was sent, so
+    /// nobody holds a code and the first sign-in is denied <c>contact_not_invited</c>; a RETRIED invite answers
+    /// ExistingAccount (the CIAM account exists) with a NEW code, and that code repairs the binding. Before 185 this test was
+    /// <c>AFailedOidWrite_WithTheMarker_KeepsThe500_AndTheFirstSignInRepairsIt</c>. Slice D: the 500's logged reason says
+    /// "retry the invite" (it said "The first CIAM sign-in repairs the binding").
+    /// </summary>
     [Fact]
-    public async Task AFailedOidWrite_WithTheMarker_KeepsThe500_AndTheFirstSignInRepairsIt()
+    public async Task AFailedOidWrite_WithTheMarker_KeepsThe500_AndARetriedInviteWithANewCodeRepairsIt()
     {
         var contact = UnboundContact();
         _h.Identities.FailBind = true;
@@ -295,11 +420,25 @@ public class ExistingCiamAccountInviteTests
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
         _h.Identities.Contacts[contact].InvitedOn.Should().NotBeNull();
+        _h.Emails.Onboarding.Should().BeEmpty("no email was sent, so no code is in anyone's hands");
         _h.Identities.FailBind = false;
         var created = _ciam.Created.Single().Oid;
+        var firstHash = _h.Identities.Contacts[contact].InviteCodeHash;
+
+        var withoutCode = await IdentityBindingTestKit.Binder(_h.Identities)
+            .ResolveCiamCallerAsync(created.ToString(), Email, inviteCode: null, CancellationToken.None);
+        withoutCode.DenyCode.Should().Be(ContactBindingDecision.DenyContactNotInvited, "the first sign-in no longer repairs it");
+
+        // The retry: the CIAM account now exists, so the invite answers ExistingAccount and sends a new code.
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+        (await Invite()).Status.Should().Be(InviteExternalUserEndpoint.ExistingAccountStatus);
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().NotBe(firstHash, "the retried invite carries a new code");
+        _h.Emails.ExistingAccount.Should().ContainSingle();
+
         var signIn = await IdentityBindingTestKit.Binder(_h.Identities)
-            .ResolveCiamCallerAsync(created.ToString(), Email, CancellationToken.None);
+            .ResolveCiamCallerAsync(created.ToString(), Email, InviteEmailCode(contact), CancellationToken.None);
         signIn.ContactId.Should().Be(contact);
+        _h.Identities.Contacts[contact].Oid.Should().Be(created.ToString("D"));
     }
 
     [Fact]
@@ -313,10 +452,271 @@ public class ExistingCiamAccountInviteTests
             clock, NullLogger<ContactIdentityBinder>.Instance);
 
         await Invite(binder);
+        var firstHash = _h.Identities.Contacts[contact].InviteCodeHash;
         clock.Advance(TimeSpan.FromDays(3));
         await Invite(binder);
 
         _h.Identities.Contacts[contact].InvitedOn.Should().Be(IdentityBindingTestKit.Now.AddDays(3));
+        // Task 185: the re-invite replaced the code's hash in the same write (the earlier code is superseded).
+        _h.Identities.Contacts[contact].InviteCodeHash.Should().NotBeNull().And.NotBe(firstHash);
+    }
+
+    // ── Task 185 slice D: the invite emails carry the code ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Both invite emails open the invite link, <c>{portal}/?customer={key}#invite={code}</c>, and its code is the one
+    /// whose hash the invite stored. The new-account bind clears the hash, so that case reads the hash as it stood when the
+    /// CIAM account was created (after the marker write, before the bind).
+    /// MUTATION: passing the base portal URL (or no code) into either email fails this test.
+    /// </summary>
+    [Theory]
+    [InlineData("onboarding")]
+    [InlineData("existing-account")]
+    public async Task BothInviteEmails_CarryALinkWhoseCodeMatchesTheStoredHash(string email)
+    {
+        var contact = UnboundContact();
+        string? hashAtCreate = null;
+        _ciam.OnCreate = () => hashAtCreate = _h.Identities.Contacts[contact].InviteCodeHash;
+        if (email == "existing-account")
+        {
+            _ciam.Failure = ObjectConflictOnProxyAddresses();
+        }
+
+        var outcome = await Invite();
+
+        outcome.Status.Should().Be(email == "existing-account" ? InviteExternalUserEndpoint.ExistingAccountStatus : "Provisioned");
+        (email == "existing-account" ? _h.Emails.ExistingAccount : _h.Emails.Onboarding).Should().ContainSingle();
+        _h.Emails.InviteUrls.Should().ContainSingle();
+        InviteEmailCode(contact, hashAtCreate);
+    }
+
+    /// <summary>
+    /// A re-invite sends a NEW code and the earlier link stops matching (superseded): each email's code matches only the
+    /// hash its own invite stored.
+    /// </summary>
+    [Fact]
+    public async Task AReInvite_EmailsANewCode_AndTheEarlierCodeNoLongerMatches()
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        await Invite();
+        var first = InviteEmailCode(contact);
+        await Invite();
+        var second = InviteEmailCode(contact);
+
+        second.Should().NotBe(first);
+        InviteCode.Matches(_h.Identities.Contacts[contact].InviteCodeHash, first, contact).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The invite API responses never carry the code: /invite (the route handler itself) and /invite-and-grant answer the
+    /// BASE portal URL, and the serialized JSON does not contain the code. Owner decision: the code goes only into the email.
+    /// </summary>
+    [Fact]
+    public async Task TheInviteResponses_NeverCarryTheCode()
+    {
+        var contact = UnboundContact();
+        _ciam.Failure = ObjectConflictOnProxyAddresses();
+
+        var invite = (await InviteRoute()).Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+        var inviteCode = InviteEmailCode(contact);
+        invite.InviteRedeemUrl.Should().Be(PortalUrl, "the response carries the base portal URL, not the invite link");
+        var inviteJson = JsonSerializer.Serialize(invite, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        inviteJson.Should().NotContain(inviteCode).And.NotContain("invite=");
+
+        var grant = (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+        var grantCode = InviteEmailCode(contact);
+        grant.PortalUrl.Should().Be(PortalUrl);
+        var grantJson = JsonSerializer.Serialize(grant, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        grantJson.Should().NotContain(grantCode).And.NotContain(inviteCode).And.NotContain("invite=");
+    }
+
+    /// <summary>
+    /// No log line written while inviting (the endpoint core, the binder) carries the code or its stored hash, on the
+    /// new-account path, the ExistingAccount path and through /invite-and-grant.
+    /// </summary>
+    [Theory]
+    [InlineData("new-account")]
+    [InlineData("existing-account")]
+    [InlineData("invite-and-grant")]
+    public async Task NoLogLine_CarriesTheCodeOrItsHash(string path)
+    {
+        var endpointLog = new BindingLogCapture<Program>();
+        var binderLog = new BindingLogCapture<ContactIdentityBinder>();
+        var binder = IdentityBindingTestKit.Binder(_h.Identities, binderLog);
+        var contact = UnboundContact();
+        string? hashAtCreate = null;
+        _ciam.OnCreate = () => hashAtCreate = _h.Identities.Contacts[contact].InviteCodeHash;
+        if (path != "new-account")
+        {
+            _ciam.Failure = ObjectConflictOnProxyAddresses();
+        }
+
+        if (path == "invite-and-grant")
+        {
+            (await InviteAndGrant(endpointLog, binder)).Should().BeOfType<Ok<InviteAndGrantResponse>>();
+        }
+        else
+        {
+            await Invite(binder, endpointLog);
+        }
+
+        var stored = hashAtCreate ?? _h.Identities.Contacts[contact].InviteCodeHash!;
+        var secrets = HashParts(stored).Append(InviteEmailCode(contact, stored)).ToList();
+        var lines = endpointLog.Messages.Concat(binderLog.Messages).ToList();
+        lines.Should().NotBeEmpty("the invite logs its steps");
+        foreach (var secret in secrets)
+        {
+            lines.Should().NotContain(line => line.Contains(secret, StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// Owner Q6: a failed oid write after the marker landed keeps the 500, and its reason now says "retry the invite"
+    /// (no email was sent, so nobody holds a code; the first sign-in no longer repairs it).
+    /// </summary>
+    [Fact]
+    public async Task AFailedOidWrite_WithTheMarker_ItsReasonSaysRetryTheInvite()
+    {
+        UnboundContact();
+        _h.Identities.FailBind = true;
+
+        var thrown = await FluentActions.Invoking(() => Invite()).Should().ThrowAsync<InvalidOperationException>();
+
+        thrown.Which.Message.Should().Contain("retry the invite").And.NotContain("first CIAM sign-in repairs");
+        _h.Emails.InviteUrls.Should().BeEmpty("no email, so no code was sent");
+    }
+
+    /// <summary>A portal URL the invite link cannot be built from (not https) stops the invite before anything is written.</summary>
+    [Theory]
+    [InlineData("http://external.test")]
+    [InlineData("https://user:pass@external.test")]
+    [InlineData("not a url")]
+    public async Task AnUnusablePortalUrl_StopsTheInvite_BeforeAnyWrite(string portalUrl)
+    {
+        var contact = UnboundContact();
+
+        var invoke = () => InviteExternalUserEndpoint.ProvisionAsync(
+            Request(), _h.Grants, _ciam, _h.Emails, IdentityBindingTestKit.Binder(_h.Identities), portalUrl,
+            CustomerKey, NullLogger<Program>.Instance, resolution: null, CancellationToken.None);
+
+        await invoke.Should().ThrowAsync<InvalidOperationException>();
+        _h.Identities.Contacts[contact].InvitedOn.Should().BeNull();
+        _ciam.Created.Should().BeEmpty();
+        _h.Emails.InviteUrls.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("https://external.test", "acme", "CODE", "https://external.test/?customer=acme#invite=CODE")]
+    [InlineData("https://external.test/portal/?x=1#f", "acme", "CODE", "https://external.test/portal/?customer=acme#invite=CODE")]
+    [InlineData("https://external.test", null, "CODE", "https://external.test/#invite=CODE")]
+    [InlineData("https://external.test", "a b", null, "https://external.test/?customer=a%20b")]
+    [InlineData("https://external.test", null, null, "https://external.test/")]
+    [InlineData("http://localhost:5173", "acme", "CODE", "http://localhost:5173/?customer=acme#invite=CODE")]
+    [InlineData("http://external.test", "acme", "CODE", null)]
+    public void BuildInviteLink_UsesOnlyTrustedConfig_TheKeyAndTheCode(string portal, string? key, string? code, string? expected)
+        => InviteExternalUserEndpoint.BuildInviteLink(portal, key, code).Should().Be(expected);
+
+    // ── Task 185 adversarial pass 2, F2: an invite email that did not send is reported ───────────────────────
+
+    /// <summary>The shared mailbox refusing the send (a Graph 429).</summary>
+    private static HttpRequestException MailboxThrottled()
+        => new("Simulated mailbox throttling.", null, System.Net.HttpStatusCode.TooManyRequests);
+
+    /// <summary>The code hash the invite stored, read when the CIAM account is created (a new account's bind then clears it).</summary>
+    private string? _hashAtCreate;
+
+    /// <summary>Sets up one of the two onboarding branches: a new CIAM account, or a person who already has one.</summary>
+    private Guid ContactOnBranch(string branch)
+    {
+        var contact = UnboundContact();
+        _ciam.OnCreate = () => _hashAtCreate = _h.Identities.Contacts[contact].InviteCodeHash;
+        if (branch == "existing-account")
+            _ciam.Failure = ObjectConflictOnProxyAddresses();
+        return contact;
+    }
+
+    /// <summary>
+    /// The /invite ROUTE, when the invite email fails to send: nobody holds the code, so the response says so —
+    /// <c>emailSent: false</c> and <c>email_not_sent</c> — and §12 I-10: the WHOLE response (status code and every field) is the
+    /// same on both branches. MUTATION: dropping the report on either branch fails that row.
+    /// </summary>
+    [Theory]
+    [InlineData("new-account")]
+    [InlineData("existing-account")]
+    public async Task InviteRoute_WhenTheInviteEmailFails_ReportsEmailNotSent_IdenticallyOnBothBranches(string branch)
+    {
+        var contact = ContactOnBranch(branch);
+        _h.Emails.InviteEmailFailure = MailboxThrottled();
+        var log = new BindingLogCapture<Program>();
+
+        var body = (await InviteRoute(log)).Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+
+        body.Should().Be(new InviteExternalUserResponse(
+            contact, PortalUrl, InviteExternalUserEndpoint.ProvisionedStatus,
+            EmailSent: false, EmailErrorCode: GrantInviteStatus.EmailNotSentReasonCode));
+        _h.Emails.InviteUrls.Should().BeEmpty("the send failed");
+        _hashAtCreate.Should().NotBeNull("the marker and the code's hash landed before the account step");
+        foreach (var part in HashParts(_hashAtCreate!))
+            log.Messages.Should().NotContain(m => m.Contains(part, StringComparison.Ordinal), "never log a hash");
+    }
+
+    /// <summary>
+    /// /invite-and-grant, when the invite email fails to send: the grant is written (200), and the response reports the email
+    /// the same way on both branches (§12 I-10). MUTATION: dropping the report on either branch fails that row.
+    /// </summary>
+    [Theory]
+    [InlineData("new-account")]
+    [InlineData("existing-account")]
+    public async Task InviteAndGrant_WhenTheInviteEmailFails_ReportsEmailNotSent_IdenticallyOnBothBranches(string branch)
+    {
+        var contact = ContactOnBranch(branch);
+        _h.Emails.InviteEmailFailure = MailboxThrottled();
+        var log = new BindingLogCapture<Program>();
+
+        var body = (await InviteAndGrant(log)).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+
+        body.Should().Be(new InviteAndGrantResponse(
+            contact, InviteExternalUserEndpoint.ProvisionedStatus, body.AccessRecordId, PortalUrl,
+            GrantedAccessLevel: ExternalAccessLevel.Collaborate, Narrowed: false, NotificationFailed: false,
+            EmailSent: false, EmailErrorCode: GrantInviteStatus.EmailNotSentReasonCode));
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("the grant stands");
+        _h.Emails.InviteUrls.Should().BeEmpty("the send failed");
+        _hashAtCreate.Should().NotBeNull("the marker and the code's hash landed before the account step");
+        foreach (var part in HashParts(_hashAtCreate!))
+            log.Messages.Should().NotContain(m => m.Contains(part, StringComparison.Ordinal), "never log a hash");
+    }
+
+    /// <summary>A sent invite email is reported as sent, with no error code, on both routes and both branches.</summary>
+    [Theory]
+    [InlineData("new-account")]
+    [InlineData("existing-account")]
+    public async Task InviteRoute_WhenTheInviteEmailIsSent_ReportsNoFailure_IdenticallyOnBothBranches(string branch)
+    {
+        var contact = ContactOnBranch(branch);
+
+        var body = (await InviteRoute()).Should().BeOfType<Ok<InviteExternalUserResponse>>().Subject.Value!;
+
+        body.Should().Be(new InviteExternalUserResponse(
+            contact, PortalUrl, InviteExternalUserEndpoint.ProvisionedStatus, EmailSent: true, EmailErrorCode: null));
+        _h.Emails.InviteUrls.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData("new-account")]
+    [InlineData("existing-account")]
+    public async Task InviteAndGrant_WhenTheInviteEmailIsSent_ReportsNoFailure_IdenticallyOnBothBranches(string branch)
+    {
+        var contact = ContactOnBranch(branch);
+
+        var body = (await InviteAndGrant()).Should().BeOfType<Ok<InviteAndGrantResponse>>().Subject.Value!;
+
+        body.Should().Be(new InviteAndGrantResponse(
+            contact, InviteExternalUserEndpoint.ProvisionedStatus, body.AccessRecordId, PortalUrl,
+            GrantedAccessLevel: ExternalAccessLevel.Collaborate, Narrowed: false, NotificationFailed: false,
+            EmailSent: true, EmailErrorCode: null));
+        _h.Emails.InviteUrls.Should().ContainSingle();
     }
 
     // ── Doubles ─────────────────────────────────────────────────────────────────────────────────────────────

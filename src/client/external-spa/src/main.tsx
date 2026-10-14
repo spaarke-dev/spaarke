@@ -31,6 +31,7 @@ import { App } from './App';
 import { isDevMockEnabled } from './dev-mock';
 import { isJoinPath } from './auth/registration-client';
 import { JoinPage } from './pages/JoinPage';
+import { captureInviteCode, clearInviteCode } from './auth/invite-code';
 
 // Power Pages Code Page SPA — React 18 with createRoot (bundled, not platform-provided).
 // External users authenticate via Entra B2B — they are guest accounts in the main
@@ -189,6 +190,7 @@ const StandaloneBootstrap: React.FC = () => {
 
   const handleResetRealm = React.useCallback(() => {
     clearStoredRealm();
+    clearInviteCode(); // task 185
     clearActiveBackend();
     setError(null);
     setPlane(null);
@@ -399,6 +401,8 @@ function renderJoin(root: Root, inTeams: boolean): void {
 }
 
 async function main() {
+  // Task 185: FIRST, before any MSAL work — store the invite link's code and strip it from the URL (auth/invite-code.ts).
+  captureInviteCode();
   const rootElement = getRootElement();
   if (!rootElement) return;
   const root = createRoot(rootElement);

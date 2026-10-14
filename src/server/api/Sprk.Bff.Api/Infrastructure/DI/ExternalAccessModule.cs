@@ -248,6 +248,12 @@ public static class ExternalAccessModule
         // /grant and /share-user send after a write gives an internal user access. Task 100's channel (NotificationService),
         // the Web API client and the No Access guard, all unconditional (ADR-032: no Null-Object). Scoped for the guard.
         services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.GrantAccessNotifier>();
+
+        // unified-access-control-r2 task 185 slice E (§12 I-5) — the ONE CIAM invite core, moved out of /invite: /invite and
+        // /invite-and-grant call it, and /grant calls it to invite an unbound grantee automatically (owner round 98, option (c)).
+        // Every dependency (Web API client, CIAM provisioner, registration email, binder, CustomerIdentity, TimeProvider) is
+        // unconditional (ADR-032: no Null-Object). Scoped, beside the notifier the same grant flows use.
+        services.AddScoped<Sprk.Bff.Api.Api.ExternalAccess.ExternalInviteService>();
         services.AddHttpClient<NoAccessEnforcementStore>((sp, client) =>
         {
             client.Timeout = TimeSpan.FromSeconds(15);

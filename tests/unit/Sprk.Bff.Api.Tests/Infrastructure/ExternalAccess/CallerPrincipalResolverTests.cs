@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -420,6 +421,7 @@ public class CallerPrincipalResolverTests
     {
         var oid = Guid.NewGuid();
         var store = new InMemoryContactIdentityStore();
+        string? presentedCode = null;
         switch (scenario)
         {
             case "email-ambiguous":
@@ -438,8 +440,13 @@ public class CallerPrincipalResolverTests
             case "key-conflict":
                 // B2: the repair bind's target is free, but another contact holds the oid in the uniqueness mirror.
                 // Task 184: invited here, so the repair bind is attempted (E11's intent gate).
-                store.AddContact(Guid.NewGuid(), email: "x@firm.example", invitedOn: IdentityBindingTestKit.Now);
+                // Task 185: the intent gate needs the invite's code too, so the request presents it in the header.
+                var invited = Guid.NewGuid();
+                var invite = InviteCode.Create(invited);
+                store.AddContact(invited, email: "x@firm.example", invitedOn: IdentityBindingTestKit.Now,
+                    inviteCodeHash: invite.StoredValue);
                 store.AddContact(Guid.NewGuid(), email: "y@firm.example", keyMirror: oid.ToString("D"));
+                presentedCode = invite.Code;
                 break;
             case "not-invited":
                 // Task 184: an unbound contact with the email, but no grant and no pending invite in this environment.
@@ -458,6 +465,10 @@ public class CallerPrincipalResolverTests
                 .AddLogging().BuildServiceProvider(),
         };
         http.Response.Body = new MemoryStream();
+        if (presentedCode is not null)
+        {
+            http.Request.Headers[CiamContactPrincipalStrategy.InviteCodeHeader] = presentedCode;
+        }
 
         var result = await strategy.ResolveAsync(http, CancellationToken.None);
 
@@ -467,6 +478,209 @@ public class CallerPrincipalResolverTests
         http.Response.Body.Position = 0;
         var body = await new StreamReader(http.Response.Body).ReadToEndAsync();
         body.Should().Contain(expectedCode);
+    }
+
+    // ── Task 185 slice C: the X-Spaarke-Invite-Code header (design §4.1 step 5) ───────────────────────────
+
+    private const string InvitedEmail = "invitee@firm.example";
+
+    private static DefaultHttpContext CiamRequest(Guid oid, string? inviteCode, params string[] extraCodes)
+    {
+        var http = new DefaultHttpContext
+        {
+            User = Principal(
+                ("iss", $"https://x.ciamlogin.com/{CiamTenantId}/v2.0"),
+                ("oid", oid.ToString()),
+                ("preferred_username", InvitedEmail)),
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+        };
+        http.Response.Body = new MemoryStream();
+        if (inviteCode is not null)
+        {
+            http.Request.Headers[CiamContactPrincipalStrategy.InviteCodeHeader] =
+                new StringValues(new[] { inviteCode }.Concat(extraCodes).ToArray());
+        }
+
+        return http;
+    }
+
+    private static async Task<string> DenyBodyAsync(CallerPrincipalResolution result, HttpContext http)
+    {
+        await result.Failure!.ExecuteAsync(http);
+        http.Response.Body.Position = 0;
+        return await new StreamReader(http.Response.Body).ReadToEndAsync();
+    }
+
+    private static Mock<IAccessibleRecordSetService> EmptyCiamScope(Guid contactId)
+    {
+        var accessible = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
+        foreach (var entityType in RootsWithAPowerlessEntry.Keys)
+        {
+            SetupCiamComposition(accessible, contactId, entityType, new Dictionary<Guid, AccessRights>());
+        }
+
+        return accessible;
+    }
+
+    [Fact]
+    public async Task CiamStrategy_TheInviteCodeHeader_ReachesTheBindDecision_AndTheBindConsumesIt()
+    {
+        var contactId = Guid.NewGuid();
+        var oid = Guid.NewGuid();
+        var invite = InviteCode.Create(contactId);
+        var store = new InMemoryContactIdentityStore();
+        store.AddContact(contactId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
+            inviteCodeHash: invite.StoredValue);
+        var strategy = new CiamContactPrincipalStrategy(
+            IdentityBindingTestKit.Binder(store), EmptyCiamScope(contactId).Object,
+            Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+
+        var result = await strategy.ResolveAsync(CiamRequest(oid, invite.Code), CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue("the header carried the invite's code to E11's marker leg");
+        result.Principal!.ContactId.Should().Be(contactId);
+        var row = store.Contacts[contactId];
+        Guid.Parse(row.Oid!).Should().Be(oid);
+        row.InviteCodeHash.Should().BeNull("the bind consumed the code in the same write");
+    }
+
+    [Theory]
+    [InlineData("absent")]
+    [InlineData("malformed")]
+    [InlineData("repeated")]
+    [InlineData("wrong")]
+    public async Task CiamStrategy_WithoutTheInvitesCode_DeniesNotInvited_WithTheOpenTheLinkGuidance(string header)
+    {
+        var contactId = Guid.NewGuid();
+        var invite = InviteCode.Create(contactId);
+        var wrong = InviteCode.Create(contactId).Code;
+        var store = new InMemoryContactIdentityStore();
+        store.AddContact(contactId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
+            inviteCodeHash: invite.StoredValue);
+        var http = header switch
+        {
+            "absent" => CiamRequest(Guid.NewGuid(), null),
+            "malformed" => CiamRequest(Guid.NewGuid(), invite.Code + "x"),
+            "repeated" => CiamRequest(Guid.NewGuid(), invite.Code, invite.Code),
+            _ => CiamRequest(Guid.NewGuid(), wrong),
+        };
+        var strategy = new CiamContactPrincipalStrategy(
+            IdentityBindingTestKit.Binder(store), new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
+            Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+
+        var result = await strategy.ResolveAsync(http, CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        var body = await DenyBodyAsync(result, http);
+        http.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        body.Should().Contain(ContactBindingDecision.DenyContactNotInvited, "the uniform deny reason code is unchanged");
+        body.Should().Contain("Open the invitation link from your email in this browser");
+        body.Should().NotContain(invite.Code, "the header is never echoed back");
+        body.Should().NotContain(wrong);
+        body.Should().NotContain(invite.StoredValue);
+        store.Contacts[contactId].Oid.Should().BeNull();
+        store.Contacts[contactId].InviteCodeHash.Should().Be(invite.StoredValue, "a deny consumes nothing");
+    }
+
+    [Fact]
+    public async Task CiamStrategy_ABoundCaller_ResolvesByOid_AndTheHeaderIsIgnored()
+    {
+        var contactId = Guid.NewGuid();
+        var oid = Guid.NewGuid();
+        var store = new InMemoryContactIdentityStore();
+        store.AddContact(contactId, email: InvitedEmail, oid: oid.ToString("D"), plane: IdentityPlaneMarker.External);
+        var strategy = new CiamContactPrincipalStrategy(
+            IdentityBindingTestKit.Binder(store), EmptyCiamScope(contactId).Object,
+            Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+
+        var result = await strategy.ResolveAsync(
+            CiamRequest(oid, InviteCode.Create(Guid.NewGuid()).Code), CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue();
+        result.Principal!.ContactId.Should().Be(contactId);
+        store.Writes.Should().BeEmpty("a bound caller makes no write, whatever code it carries");
+    }
+
+    [Fact]
+    public async Task TheInviteCodeHeader_OnAWorkforceToken_IsNeverRead_TheCiamStrategyIsNotReached()
+    {
+        // The CIAM strategy behind the resolver would bind this contact if it saw the header; on a workforce token it is
+        // never selected, so nothing binds and nothing is consumed.
+        var contactId = Guid.NewGuid();
+        var invite = InviteCode.Create(contactId);
+        var store = new InMemoryContactIdentityStore();
+        store.AddContact(contactId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
+            inviteCodeHash: invite.StoredValue);
+        var ciam = new CiamContactPrincipalStrategy(
+            IdentityBindingTestKit.Binder(store), new Mock<IAccessibleRecordSetService>(MockBehavior.Strict).Object,
+            Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+        var workforce = new StubStrategy(CallerPrincipalPlane.Workforce);
+        var resolver = CreateResolver(ciam, workforce);
+        var http = new DefaultHttpContext
+        {
+            User = Principal(
+                ("iss", $"https://login.microsoftonline.com/{WorkforceTenantId}/v2.0"),
+                ("tid", WorkforceTenantId), ("oid", Guid.NewGuid().ToString()), ("preferred_username", InvitedEmail)),
+        };
+        http.Request.Headers[CiamContactPrincipalStrategy.InviteCodeHeader] = invite.Code;
+
+        var result = await resolver.ResolveAsync(http, CancellationToken.None);
+
+        workforce.Called.Should().BeTrue();
+        result.Principal!.Plane.Should().Be(CallerPrincipalPlane.Workforce);
+        store.Writes.Should().BeEmpty();
+        store.Contacts[contactId].InviteCodeHash.Should().Be(invite.StoredValue);
+    }
+
+    [Fact]
+    public async Task TheInviteCode_AndItsHash_AreAbsentFromEveryLogLine_OnTheDenyAndOnTheBind()
+    {
+        var contactId = Guid.NewGuid();
+        var invite = InviteCode.Create(contactId);
+        var wrong = InviteCode.Create(contactId).Code;
+        var store = new InMemoryContactIdentityStore();
+        store.AddContact(contactId, email: InvitedEmail, invitedOn: IdentityBindingTestKit.Now,
+            inviteCodeHash: invite.StoredValue);
+        var binderLog = new BindingLogCapture<ContactIdentityBinder>();
+        var strategyLog = new BindingLogCapture<CiamContactPrincipalStrategy>();
+        var strategy = new CiamContactPrincipalStrategy(
+            IdentityBindingTestKit.Binder(store, binderLog), EmptyCiamScope(contactId).Object, strategyLog);
+
+        var denied = await strategy.ResolveAsync(CiamRequest(Guid.NewGuid(), wrong), CancellationToken.None);
+        var bound = await strategy.ResolveAsync(CiamRequest(Guid.NewGuid(), invite.Code), CancellationToken.None);
+
+        denied.IsResolved.Should().BeFalse();
+        bound.IsResolved.Should().BeTrue();
+        var lines = binderLog.Messages.Concat(strategyLog.Messages).ToList();
+        lines.Should().NotBeEmpty("the deny and the bind are both logged");
+        lines.Should().NotContain(l => l.Contains(invite.Code) || l.Contains(wrong) || l.Contains(invite.StoredValue));
+        lines.Should().NotContain(l => l.Contains(CiamContactPrincipalStrategy.InviteCodeHeader));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("short")]
+    [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA+")] // 43 chars, not base64url
+    public void ReadInviteCode_AnythingButOneWellFormedValue_IsNoCode(string? value)
+    {
+        var http = new DefaultHttpContext();
+        if (value is not null)
+        {
+            http.Request.Headers[CiamContactPrincipalStrategy.InviteCodeHeader] = value;
+        }
+
+        CiamContactPrincipalStrategy.ReadInviteCode(http.Request).Should().BeNull();
+    }
+
+    [Fact]
+    public void ReadInviteCode_OneWellFormedValue_IsTheCode()
+    {
+        var code = InviteCode.Create(Guid.NewGuid()).Code;
+        var http = new DefaultHttpContext();
+        http.Request.Headers[CiamContactPrincipalStrategy.InviteCodeHeader] = code;
+
+        CiamContactPrincipalStrategy.ReadInviteCode(http.Request).Should().Be(code);
     }
 
     // ── Construction-time pruning (task 136 · defect C2) — both strategies ─────────────────────────────

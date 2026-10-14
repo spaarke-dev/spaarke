@@ -55,7 +55,7 @@ public class GrantAccessNotificationTests
         GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contactId, Guid.Empty, level, null, null, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
-            _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
     private Task<IResult> Share(Guid user, ExternalAccessLevel level = ExternalAccessLevel.Collaborate) =>
         InternalShareEndpoints.ShareAsync(
@@ -327,7 +327,7 @@ public class GrantAccessNotificationTests
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(contact, Guid.Empty, ExternalAccessLevel.Collaborate, Today.AddDays(80), null, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
-            _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
         OkBody<GrantAccessResponse>(result);
         _h.Grants.ActiveRowsOf(_matter, contact).Single().ExpiresDate.Should().Be(Today.AddDays(80));
@@ -342,7 +342,7 @@ public class GrantAccessNotificationTests
         var result = await GrantExternalAccessEndpoint.GrantAccessAsync(
             new GrantAccessRequest(Guid.Empty, Guid.Empty, ExternalAccessLevel.Collaborate, null, organization, "matter", _matter),
             _h.Grants, _h.Participations, _h.AccessibleRecords, new EverythingProbe(),
-            _h.Materializer, _h.Notifier, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
+            _h.Materializer, _h.Notifier, _h.Invites, Context(), NullLogger<Program>.Instance, _h.Time, CancellationToken.None);
 
         OkBody<GrantAccessResponse>(result).NotificationFailed.Should().BeFalse();
         _h.Grants.ActiveRowsOf(_matter, organizationId: organization).Should().ContainSingle();

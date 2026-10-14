@@ -49,6 +49,10 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
                 .ToList();
         }
 
+        // Task 185 (owner round 98 Q4): a system-mail send (an invite link with its one-time code) keeps no copy in the
+        // sending mailbox's Sent Items. Every other send is unchanged (true).
+        var saveToSentItems = request.Communication.SystemMail is null;
+
         GraphServiceClient graphClient;
         try
         {
@@ -59,7 +63,7 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
                     new Microsoft.Graph.Me.SendMail.SendMailPostRequestBody
                     {
                         Message = message,
-                        SaveToSentItems = true
+                        SaveToSentItems = saveToSentItems
                     },
                     cancellationToken: cancellationToken);
             }
@@ -70,7 +74,7 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
                     new Microsoft.Graph.Users.Item.SendMail.SendMailPostRequestBody
                     {
                         Message = message,
-                        SaveToSentItems = true
+                        SaveToSentItems = saveToSentItems
                     },
                     cancellationToken: cancellationToken);
             }
@@ -134,9 +138,13 @@ public sealed class EmailChannelSender : ICommunicationChannelSender
 
         // Best-effort capture of the just-sent message's real RFC-2822 Internet-Message-Id (FR-06 —
         // feeds the W1 thread rung). MUST NOT fail the send (NFR-06); returns null on any error.
-        var internetMessageId = await TryCaptureInternetMessageIdAsync(
-            graphClient, request.UserMode, request.FromAddress, request.Communication.Subject,
-            request.CorrelationId, cancellationToken);
+        // A message that was not saved to Sent Items cannot be found there, so a system-mail send skips the lookup (no
+        // Sent Items read, no "not found" warning on every invite).
+        var internetMessageId = saveToSentItems
+            ? await TryCaptureInternetMessageIdAsync(
+                graphClient, request.UserMode, request.FromAddress, request.Communication.Subject,
+                request.CorrelationId, cancellationToken)
+            : null;
 
         return new ChannelSendResult
         {
