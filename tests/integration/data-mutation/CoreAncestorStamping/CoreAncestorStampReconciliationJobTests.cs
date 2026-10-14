@@ -637,6 +637,23 @@ public class CoreAncestorStampReconciliationJobTests
         Counts(run).GetProperty("reportedOnly").GetInt32().Should().Be(0);
     }
 
+    [Fact(DisplayName = "Ontology task 144: a report-only setting naming a table the job does not stamp fails closed - the defaults stay held and the run is partial")]
+    public async Task ReportOnlyTables_WithAnUnknownTable_KeepsTheDefaultHolds()
+    {
+        var world = StaleOntologyWorld("sprk_signal");
+
+        var run = await Job(world, reportOnlyTables: "sprk_signals").ExecuteAsync(Context(), CancellationToken.None);
+
+        world.Lookup("sprk_signal", OntologyRow, "sprk_regardingmatter").Should().Be(MatterA, "a typo never releases the hold");
+        world.Lookup("sprk_signal", SignalOfTodo, "sprk_regardingmatter").Should().Be(MatterA);
+        world.Lookup("sprk_todo", TodoOfCommunication, "sprk_regardingmatter").Should().Be(MatterB);
+        run.Success.Should().BeFalse("a misconfigured hold is reported, never a clean run");
+        run.ErrorMessage.Should().Contain("sprk_signals");
+        Counts(run).GetProperty("status").GetString().Should().Be("partial");
+        Counts(run).GetProperty("reportOnlyTables").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("sprk_decisionrecord", "sprk_signal", "sprk_signals");
+    }
+
     [Fact(DisplayName = "Ontology task 144: with writes OFF, a stale Signal is reported and nothing at all is written")]
     public async Task WritesOff_ReportsTheOntologyRow_AndWritesNothing()
     {

@@ -183,6 +183,26 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
         var problems = new List<string>();
         var status = StatusOk;
 
+        var unknownHolds = reportOnlyTables
+            .Where(t => !CoreAncestorResolver.StampSourceColumns.ContainsKey(t))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        if (unknownHolds.Count > 0)
+        {
+            // Fail closed: a report-only entry that names no stamped table is a typo ("sprk_signals"), and honouring the
+            // rest of the setting would silently start writing the tables it meant to hold. Keep the default holds too,
+            // and report the run as partial until the setting is corrected.
+            reportOnlyTables = new HashSet<string>(reportOnlyTables.Concat(DefaultReportOnlyTables), StringComparer.OrdinalIgnoreCase);
+            status = StatusPartial;
+            problems.Add($"{ReportOnlyTablesConfigKey} names tables the job does not stamp ({string.Join(", ", unknownHolds)}); "
+                + "the default report-only tables are held as well.");
+            _logger.LogWarning(
+                "{Prefix} {Key} names tables the job does not stamp ({Unknown}); the default report-only tables ({Defaults}) are "
+                + "held as well until the setting is corrected. correlationId={CorrelationId}",
+                LogPrefix, ReportOnlyTablesConfigKey, string.Join(", ", unknownHolds), string.Join(", ", DefaultReportOnlyTables),
+                context.CorrelationId);
+        }
+
         try
         {
             using var scope = _scopeFactory.CreateScope();
@@ -257,10 +277,12 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
             + "repaired={Repaired} cascaded={Cascaded} alreadyApplied={AlreadyApplied} claimHeld={ClaimHeld} "
             + "repairFailures={RepairFailures} unverified={Unverified} orphanSourceGone={OrphanSourceGone} "
             + "scanFailures={ScanFailures} truncated={Truncated} resumed={Resumed} "
+            + "reportedOnly={ReportedOnly} reportOnlyTables=[{ReportOnlyTables}] "
             + "durationMs={DurationMs} trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             LogPrefix, status, writesEnabled ? "write" : "report-only", context.Attempt, counts.Scanned, counts.Stale,
             counts.Repaired, counts.Cascaded, counts.AlreadyApplied, counts.ClaimHeld, counts.RepairFailures,
             counts.Unverified, counts.OrphanSourceGone, counts.ScanFailures, counts.Truncated, counts.Resumed,
+            counts.ReportedOnly, string.Join(",", reportOnlyTables.Order(StringComparer.Ordinal)),
             (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
 
         return new JobRunResult(

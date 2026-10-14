@@ -125,8 +125,15 @@ security, dataverse, testing).
   the storage resolver's 409-stale recovery depends on that.
 - The BFF's own re-file paths (filing route, update tool, `ReconciledEmailFiling`) re-stamp Signals and DRs regardless: they
   pass no hold list. That is the contract this task adds.
-- Turning the job's writes on for Signals and DRs is an **owner decision**: set the key to an empty value.
+- Turning the job's writes on for Signals and DRs is an **owner decision**: set the key to an empty value. Use JSON
+  configuration or an App Service setting with an explicit empty value; some hosts drop an empty environment variable, which
+  reads as "absent" and keeps the defaults (fails closed).
+- A setting that names a table the job does not stamp (a typo such as `sprk_signals`) **fails closed**: the default holds are
+  kept as well, a Warning is logged, and the run reports `partial` until it is corrected
+  (`ReportOnlyTables_WithAnUnknownTable_KeepsTheDefaultHolds`).
+- The heartbeat log line carries `reportedOnly` and `reportOnlyTables`.
 - Tests: `ReportOnlyTables_ByDefault_ReportTheOntologyRows_AndRepairEveryOtherTable` (Signal and DR),
+  `ReportOnlyTables_WithAnUnknownTable_KeepsTheDefaultHolds`,
   `ReportOnlyTables_Empty_RepairsTheOntologyRows` (must-fire control), `WritesOff_ReportsTheOntologyRow_AndWritesNothing`.
 
 ### The read-only run (spaarkedev1, 2026-10-14)
@@ -177,6 +184,9 @@ job.
 | "Append-only" wording on the DR writer and the D-34 ArchTests | K | Amended to "append-only except the live stamp columns (task 144, C2)". |
 | To-do cascade, DR volume, no stamp at create, stamp follows the subject | K | Recorded above. |
 | Stale stamp readable through the external To Do / event lists | F (security) | Not filed by 144, by instruction; uac-r2 owns it. |
+| Re-check: a typo in `ReportOnlyTables` silently releases the hold | K2 | Fixed: fails closed (defaults kept, Warning, run `partial`); test. |
+| Re-check: `reportedOnly` missing from the heartbeat log | K3 | Fixed: heartbeat carries `reportedOnly` and `reportOnlyTables`. |
+| Re-check: an empty environment variable may be dropped by the host | K3 | Recorded above (set it in JSON or as an explicit empty App Service setting). |
 
 ## BFF hygiene
 
