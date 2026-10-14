@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-12 late (main session). State only — history is in git log, task `<completion>` blocks and
+> **Last Updated**: 2026-10-13 (main session). State only — history is in git log, task `<completion>` blocks and
 > `notes/handoff-history/2026-10.md`. Standing rules: [`CLAUDE.md`](CLAUDE.md) §3 (D-106 critical path; D-123 secure family;
 > D-126 deploys from master; D-127 MVP first; D-129/D-130 team ownership via RecordOwnershipResolver) and §6 gotchas.
 > Decisions: [`notes/decisions.md`](notes/decisions.md) (D-1..D-133). Deferred work: one self-contained GitHub issue per item,
@@ -12,18 +12,16 @@
 |---|---|
 | **Task** | Orchestrating ontology lanes. Child-record contract tasks 140–146 (D-131..D-133) are planned; 140 is live on dev. |
 | **Blocker** | Owner answers Q23, Q24, Q25, Q26, Q27 (below). |
-| **Next Action** | 2026-10-13: #1746 `376eca286`, #1797 `4053387fe`, #1807 (147) `236cace5c` MERGED. D-136 narrow writer profile LIVE on spaarkedev1. #1805 (141) uac-r2 CLEAN, merge script pinned `c2ccfc0f4` (workflow-only base merge). Task 142 RUNNING (opus, `C:\wts-142`, branched from 141's head; opens its PR after #1805 merges). Then 143 (after 142; shared DecisionCommitService regions) → 144 → 145 → 146; 148 after 142+143. The ontology branch carries master's split office-scope CI job (13acdd5c7) minus master-only check:webresource (8a8fef96f). After #1805 merges: tick the #1111 body's task-141 precondition (text in the 141 agent report / notes/task-141). |
+| **Next Action** | 2026-10-13: #1805 (141) `d6b952bdf` and #1824 (142) `9c188eda3` MERGED. D-136 narrow writer profile LIVE on spaarkedev1. Task 143 RUNNING (opus, `C:\wts-143`); it now rebases on the base and opens its PR, which then goes to uac-r2 review → merge. Then 144 → 145 → 146; 148 after 143. Code Quality is red repo-wide (Dependencies audit, new crypto advisories, #1826; the job is continue-on-error), so merge past it on evidence with a PR comment. |
 
 ## Lanes (worktrees `C:\wts-NNN`; all branch from `origin/docs/ontology-platform-design`)
 
 | Lane | PR | State | Next |
 |---|---|---|---|
-| **141** regarding builder | #1805 | uac-r2 CLEAN; merging on green (pinned `c2ccfc0f4`). Follow-ups #1806, #1813, #1818. | Tick #1111 precondition. |
-| **142** DR writer contract | (draft after #1805) | Running (opus). | Two adversarial passes (security) + uac-r2. |
+| **143** D-130 owner on Signal writers | (opens after rebase on `9c188eda3`) | Running (opus, two adversarial passes). | uac-r2 review → merge. |
 | **#1659** filing trigger | #1747, head `cc6b10cf5` | UAC APPROVED. | Merge when Q25 is answered. |
 
 Merge: `scratchpad/merge-when-green2.sh <pr> <full sha> docs/ontology-platform-design` (`gh pr ready` first). The Office-scope CI job hits its 20-min cap (F-49, #1718); merge on log evidence with a PR comment.
-**Don't deploy** a BFF with SignalWriter/043 readers to dev until 141 merges: the code reads the pair type as text, but it is now a Lookup.
 
 ## Child-record contract (tasks 140–146)
 
