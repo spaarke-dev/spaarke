@@ -17,7 +17,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { FluentProvider, webDarkTheme } from '@fluentui/react-components';
 import { DecisionCommitError } from '../decisionWizardTypes';
 import type { DecisionCommitFailure, DecisionReview } from '../decisionWizardTypes';
@@ -46,7 +45,22 @@ import {
 } from '../__fixtures__/decisionWizardFixtures';
 import { makeLoader, makeLookup, makeService, renderWizard } from './decisionTestKit';
 
-const user = () => userEvent.setup();
+/**
+ * Interaction goes through DOM events (the idiom of the other Wizard tests), not a user-event simulation: user-event moves
+ * focus, and Fluent's focus manager (tabster) answers in jsdom on a 100 ms timer by blurring the field mid-typing and marking
+ * the dialog aria-hidden, which is jsdom behaviour and not the wizard's.
+ */
+const user = () => ({
+  click: async (element: Element) => {
+    // A click on a field focuses it (that is what opens a lookup's results); the event is sent without moving real focus.
+    if (element instanceof HTMLInputElement) fireEvent.focus(element);
+    fireEvent.click(element);
+  },
+  selectOptions: async (element: Element, value: string) => {
+    fireEvent.change(element, { target: { value } });
+  },
+});
+const enter = (element: HTMLElement, value: string) => fireEvent.change(element, { target: { value } });
 const stepper = () => within(screen.getByRole('navigation', { name: 'Wizard steps' }));
 const stepLabels = () =>
   stepper()
@@ -92,12 +106,12 @@ async function next(u: ReturnType<typeof user>) {
 }
 
 async function fillInquiry(u: ReturnType<typeof user>) {
-  await u.type(screen.getByRole('textbox', { name: /^To\b/ }), 'budgets@acme.example');
+  enter(screen.getByRole('textbox', { name: /^To\b/ }), 'budgets@acme.example');
 }
 
 async function fillRevise(u: ReturnType<typeof user>) {
-  await u.type(screen.getByRole('textbox', { name: /^New budget/ }), '250000');
-  await u.type(screen.getByRole('textbox', { name: /^Reason for revision/ }), 'Appeal added');
+  enter(screen.getByRole('textbox', { name: /^New budget/ }), '250000');
+  enter(screen.getByRole('textbox', { name: /^Reason for revision/ }), 'Appeal added');
 }
 
 describe('the steps come from the plan', () => {
@@ -116,7 +130,7 @@ describe('the steps come from the plan', () => {
     await next(u);
     expect(await screen.findByTestId('step-action-send-budget-inquiry')).toBeInTheDocument();
     expect(screen.getByTestId('recommended-badge')).toBeInTheDocument();
-    await u.type(screen.getByRole('textbox', { name: /^To\b/ }), 'a@b.example');
+    enter(screen.getByRole('textbox', { name: /^To\b/ }), 'a@b.example');
     await next(u);
     expect(await screen.findByTestId('step-action-revise-budget')).toBeInTheDocument();
     expect(screen.queryByTestId('recommended-badge')).toBeNull();
@@ -195,28 +209,23 @@ describe('Path B review records once', () => {
     await fillRevise(u);
     await next(u);
 
-    // Approve variance: its own line says the Decision Record is the approval and nothing else is written (D-19).
-    await screen.findByTestId('step-action-approve-variance');
-    expect(screen.getByTestId('effect-lines')).toHaveTextContent(
-      'The Decision Record is the approval; nothing else is written'
-    );
-    await u.click(button('Skip'));
-
+    // Taking Revise budget, which comes first in plan order, removes Approve variance: the next step in line is Next steps.
     // Next steps: add one To Do.
     await screen.findByTestId('step-next');
     await u.click(screen.getByRole('checkbox', { name: /add to do/i }));
-    expect(stepLabels()).toEqual([
-      'What was found',
-      'Send budget inquiry',
-      'Revise budget',
-      'Approve variance',
-      'Next steps',
-      'Add To Do',
-      'Confirm',
-    ]);
+    await waitFor(() =>
+      expect(stepLabels()).toEqual([
+        'What was found',
+        'Send budget inquiry',
+        'Revise budget',
+        'Next steps',
+        'Add To Do',
+        'Confirm',
+      ])
+    );
     await next(u);
     await screen.findByTestId('step-next-add-todo');
-    await u.type(screen.getByRole('textbox', { name: /^To Do/ }), 'Chase the budget reply');
+    enter(screen.getByRole('textbox', { name: /^To Do/ }), 'Chase the budget reply');
     await u.click(screen.getByPlaceholderText(/search assigned to/i));
     await u.click(await screen.findByText('Dana Whitfield'));
     fireEvent.change(screen.getByLabelText(/^Due/), { target: { value: '2026-10-20' } });
@@ -227,6 +236,9 @@ describe('Path B review records once', () => {
     expect(within(confirm).getByTestId('offered-send-budget-inquiry')).toHaveTextContent('Taken');
     expect(within(confirm).getByTestId('offered-revise-budget')).toHaveTextContent('Taken');
     expect(within(confirm).getByTestId('offered-approve-variance')).toHaveTextContent('Skipped');
+    expect(within(confirm).getByTestId('offered-approve-variance')).toHaveTextContent(
+      'Cannot be combined with Revise budget'
+    );
     expect(within(confirm).getByTestId('next-steps-added')).toHaveTextContent('Add To Do');
     expect(within(confirm).getByTestId('record-class')).toHaveTextContent('a judgement');
     expect(within(confirm).getByTestId('record-class-why')).toHaveTextContent(/next step/i);
@@ -261,7 +273,8 @@ describe('Path B review records once', () => {
     expect(maybeButton('Record decision')).toBeNull();
     expect(screen.queryByRole('textbox')).toBeNull();
     await u.click(button('Next open item'));
-    expect(await screen.findByText('2 of 2')).toBeInTheDocument();
+    await screen.findByTestId('step-found');
+    expect(screen.getByText('2 of 2')).toBeInTheDocument();
   });
 
   it('a double click on Record decision sends exactly one request, and the button stays disabled after success', async () => {
@@ -276,7 +289,7 @@ describe('Path B review records once', () => {
     );
     await loaded();
     await next(u);
-    await u.type(screen.getByRole('textbox', { name: /^Approved overage/ }), '10');
+    enter(screen.getByRole('textbox', { name: /^Approved overage/ }), '10');
     await next(u);
     // Taking Approve variance removed Revise budget: Send budget inquiry is next, then Next steps.
     await u.click(button('Skip'));
@@ -311,7 +324,11 @@ describe('excludes and dismissal', () => {
     await next(u);
     await screen.findByTestId('step-action-approve-variance');
     expect(screen.getByTestId('excludes-note')).toHaveTextContent('Taking this removes Revise budget from this review');
-    await u.type(screen.getByRole('textbox', { name: /^Approved overage/ }), '10');
+    // D-19: this action's own line says the Decision Record is the approval and nothing else is written.
+    expect(screen.getByTestId('effect-lines')).toHaveTextContent(
+      'The Decision Record is the approval; nothing else is written'
+    );
+    enter(screen.getByRole('textbox', { name: /^Approved overage/ }), '10');
     await next(u);
     // The next step in line is Send budget inquiry: Revise budget is gone from the stepper.
     await screen.findByTestId('step-action-send-budget-inquiry');
@@ -373,7 +390,7 @@ describe('excludes and dismissal', () => {
 
     await u.selectOptions(reason, 'other');
     expect(record).toBeDisabled();
-    await u.type(within(confirm).getByRole('textbox', { name: /^Detail/ }), 'Handled by phone');
+    enter(within(confirm).getByRole('textbox', { name: /^Detail/ }), 'Handled by phone');
     expect(record).toBeEnabled();
     await u.click(record);
     await waitFor(() => expect(service.commit).toHaveBeenCalledTimes(1));
@@ -462,7 +479,7 @@ describe('Escape and the backdrop never close; closing asks when anything is unr
     const { onClose } = setup();
     await loaded();
     await next(u);
-    await u.type(await screen.findByRole('textbox', { name: /^To\b/ }), 'typed');
+    enter(await screen.findByRole('textbox', { name: /^To\b/ }), 'typed');
 
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape', code: 'Escape' });
     const backdrop = document.querySelector('.fui-DialogSurface__backdrop, [class*="backdrop"]');
@@ -473,7 +490,7 @@ describe('Escape and the backdrop never close; closing asks when anything is unr
     await u.click(button('Close'));
     expect(await screen.findByText('Discard unrecorded choices?')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
-    const check = screen.getAllByRole('dialog').find(d => within(d).queryByText('Discard unrecorded choices?'))!;
+    const check = await screen.findByRole('alertdialog');
     const buttons = within(check)
       .getAllByRole('button')
       .map(b => b.textContent);
@@ -485,8 +502,9 @@ describe('Escape and the backdrop never close; closing asks when anything is unr
     expect((screen.getByRole('textbox', { name: /^To\b/ }) as HTMLInputElement).value).toBe('typed');
 
     await u.click(button('Close'));
-    const again = screen.getAllByRole('dialog').find(d => within(d).queryByText('Discard unrecorded choices?'))!;
-    await u.click(within(again).getByRole('button', { name: 'Discard and close' }));
+    const again = await screen.findByRole('alertdialog');
+    // Fluent's focus manager (tabster) marks a re-opened nested dialog aria-hidden in jsdom; the button is still the real one.
+    await u.click(within(again).getByRole('button', { name: 'Discard and close', hidden: true }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -495,10 +513,10 @@ describe('Escape and the backdrop never close; closing asks when anything is unr
     const { onClose } = setup();
     await loaded();
     await next(u);
-    await u.type(await screen.findByRole('textbox', { name: /^To\b/ }), 'typed');
+    enter(await screen.findByRole('textbox', { name: /^To\b/ }), 'typed');
     await u.click(screen.getByRole('button', { name: /next record/i }));
-    expect(await screen.findByText('2 of 2')).toBeInTheDocument();
     await screen.findByTestId('step-found');
+    expect(screen.getByText('2 of 2')).toBeInTheDocument();
     await u.click(button('Close'));
     expect(await screen.findByText('Discard unrecorded choices?')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
@@ -513,16 +531,18 @@ describe('browse', () => {
     expect(screen.getByText('1 of 2')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /previous record/i })).toBeDisabled();
     await next(u);
-    await u.type(await screen.findByRole('textbox', { name: /^To\b/ }), 'kept@acme.example');
+    enter(await screen.findByRole('textbox', { name: /^To\b/ }), 'kept@acme.example');
 
     await u.click(screen.getByRole('button', { name: /next record/i }));
-    expect(await screen.findByText('2 of 2')).toBeInTheDocument();
+    await screen.findByTestId('step-found');
+    expect(screen.getByText('2 of 2')).toBeInTheDocument();
     // The subject is the modal title and the headline of What was found.
     expect((await screen.findAllByText('Spend to date against budget')).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /next record/i })).toBeDisabled();
 
     await u.click(screen.getByRole('button', { name: /previous record/i }));
-    expect(await screen.findByText('1 of 2')).toBeInTheDocument();
+    await screen.findByTestId('step-found');
+    expect(screen.getByText('1 of 2')).toBeInTheDocument();
     await loaded();
     await next(u);
     expect(((await screen.findByRole('textbox', { name: /^To\b/ })) as HTMLInputElement).value).toBe(
@@ -565,7 +585,7 @@ describe('a failed record lists the writes that landed and writes no record (D-1
   async function toConfirm(u: ReturnType<typeof user>) {
     await loaded();
     await next(u);
-    await u.type(screen.getByRole('textbox', { name: /^Approved overage/ }), '10');
+    enter(screen.getByRole('textbox', { name: /^Approved overage/ }), '10');
     await next(u);
     await u.click(button('Skip'));
     await next(u);
@@ -656,8 +676,8 @@ describe('a failed record lists the writes that landed and writes no record (D-1
     await u.click(button('Back'));
     await u.click(button('Back'));
     await screen.findByTestId('step-action-approve-variance');
-    await u.clear(screen.getByRole('textbox', { name: /^Approved overage/ }));
-    await u.type(screen.getByRole('textbox', { name: /^Approved overage/ }), '20');
+    enter(screen.getByRole('textbox', { name: /^Approved overage/ }), '');
+    enter(screen.getByRole('textbox', { name: /^Approved overage/ }), '20');
     await next(u);
     await u.click(button('Skip'));
     await next(u);

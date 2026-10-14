@@ -142,18 +142,16 @@ const ShellSync: React.FC<{ handle: IWizardShellHandle; syncRef: React.MutableRe
     const have = new Set(handle.state.steps.map(s => s.id));
     const current = handle.state.steps[handle.state.currentStepIndex]?.id;
     const want = new Set(sync.desiredIds);
-    // Only steps this component manages are ever removed; the step being viewed never is.
+    // Only steps this component manages are ever removed.
     for (const id of have) {
-      if (
-        !want.has(id) &&
-        id !== current &&
-        (id.startsWith(ACTION_PREFIX) || id.startsWith(FOLLOW_ON_PREFIX) || id === NEXT)
-      ) {
-        handle.removeDynamicStep(id);
-        // A step an exclusion removed has not been decided (it will be asked again if the exclusion lifts).
-        const scope = scopeOfStep(id);
-        if (scope && !sync.readOnly) sync.update(d => clearDecision(d, scope));
-      }
+      if (want.has(id) || !(id.startsWith(ACTION_PREFIX) || id.startsWith(FOLLOW_ON_PREFIX) || id === NEXT)) continue;
+      handle.removeDynamicStep(id);
+      // Next on an action that excludes the step after it has already moved the shell onto that step: removing the step
+      // being viewed steps the shell back one, so go forward again, onto what follows it.
+      if (id === current) handle.nextStep();
+      // A step an exclusion removed has not been decided (it will be asked again if the exclusion lifts).
+      const scope = scopeOfStep(id);
+      if (scope && !sync.readOnly) sync.update(d => clearDecision(d, scope));
     }
     for (const id of sync.desiredIds) {
       if (have.has(id)) continue;

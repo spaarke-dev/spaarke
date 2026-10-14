@@ -122,15 +122,13 @@ describe('commit', () => {
 
   it('a refusal (422) carries its reason and lists nothing as landed', async () => {
     const service = createDecisionWizardService({
-      fetch: jest
-        .fn()
-        .mockRejectedValue(
-          apiError(422, {
-            title: 'Unprocessable Entity',
-            detail: 'A budget is required.',
-            reasonCode: 'ontology.decision.review_invalid',
-          })
-        ),
+      fetch: jest.fn().mockRejectedValue(
+        apiError(422, {
+          title: 'Unprocessable Entity',
+          detail: 'A budget is required.',
+          reasonCode: 'ontology.decision.review_invalid',
+        })
+      ),
       baseUrl: BASE,
     });
     const failure = await service.commit(PATH_B_ID, review).catch((e: DecisionCommitError) => e.failure);
