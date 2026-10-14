@@ -28,6 +28,13 @@ name: CI Standalone Checks
 #                                                                 (sdap-ci's Prettier check is NOT carried over:
 #                                                                 it ran after `prettier --write`, so it could
 #                                                                 never fail. Tier 2 `lint` runs the real check.)
+#   unit-tests-outside-     build-test (`dotnet test`, whole       Tier 2 runs only when the Router `bff` filter
+#   router                  solution)                              matches; ControlPlane/Core/Scheduling/
+#                                                                 IntegrationTests/Spe.Integration.Tests are outside it.
+#   bff-seam-contract-      build-test                             seam/contract/domain/tenant tests compile into
+#   tests                                                          Sprk.Bff.Api.Tests but are outside the filter.
+#   verdict-script-tests    (new)                                  Must-fire controls for master-ci-verdict.ps1.
+#   trivy-fs                Security Scan (Trivy, SARIF)           Per-change Security-tab updates; reports only.
 #
 # NOT REQUIRED. The master ruleset requires `Router` and `Client lint (type-aware ratchet)`
 # only; nothing here is added to it. A red job here never blocks a merge. That is why no job
@@ -205,11 +212,9 @@ jobs:
       - name: Publish BFF (Release)
         run: dotnet publish src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -c Release -o ./publish/api --no-restore
 
-      # Master pushes only. deploy-promote.yml's blank `artifact_run_id` takes the latest
-      # SUCCESSFUL run of this workflow on ANY branch (dawidd6/action-download-artifact passes
-      # no branch filter). sdap-ci.yml uploaded on pull requests too, so a blank dispatch could
-      # promote an unmerged PR build. Without a PR artifact that dispatch fails loudly
-      # ("no artifact") instead; pass an explicit master run id.
+      # Master pushes only, so a pull request never carries a promotable build. sdap-ci.yml also
+      # uploaded on PRs; deploy-promote.yml's blank `artifact_run_id` now searches master push runs
+      # only (branch: master, event: push) and fails loudly when none carries the artifact.
       - name: Upload deployment-packages
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         uses: actions/upload-artifact@v6
@@ -432,11 +437,277 @@ jobs:
         run: node_modules/.bin/eslint .
 
   # --------------------------------------------------------------------------
+  # unit-tests-outside-router: test projects that lost their only per-PR runner.
+  #
+  # The legacy `build-test` ran `dotnet test` over the whole solution on every PR. Tier 2's
+  # `Full Unit Tests` shards run only when the Router's `bff` path filter matches
+  # (ci-router.yml: src/server/api/Sprk.Bff.Api, src/server/shared, tests/integration/{auth,
+  # regression}, tests/unit/Sprk.Bff.Api.Tests, the two props files). That filter does NOT
+  # cover src/server/services/**, tests/unit/{Spaarke.Core,Spaarke.Scheduling}.Tests or
+  # tests/integration/{Sprk.Bff.Api.IntegrationTests,Spe.Integration.Tests}, so a PR touching only those ran no test at all. This job runs them on every non-docs PR and push.
+  #
+  # Measured locally: ~26 s of test time for ControlPlane.Tests (2,779 tests), seconds for the
+  # others; the rest is restore + build. Cheap, so no path gate (measured on CI in PR #1863).
+  #
+  # CLEANER FIX (needs the owner to release the no-edit rule on ci-router.yml): widen the
+  # Router's `bff` filter with src/server/services/**, tests/unit/** and tests/integration/**.
+  # Then Tier 2 would run these through its `rest` shard and this job could be deleted.
+  #
+  # No Category / LiveIntegration filter: the live seam tests skip themselves when their
+  # environment is absent (LiveIntegrationFixture, "skip-via-return"), exactly as in Tier 2,
+  # which passes no category filter either.
+  # --------------------------------------------------------------------------
+  unit-tests-outside-router:
+    name: Unit tests the Router bff filter misses
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-standalone-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-standalone-
+            ${{ runner.os }}-nuget-
+
+      # Every project runs even if an earlier one fails, so one red does not hide another.
+      - name: dotnet test
+        shell: bash
+        run: |
+          set -uo pipefail
+          failed=()
+          for proj in \
+            src/server/services/Sprk.Provisioning.ControlPlane.Tests \
+            tests/unit/Spaarke.Core.Tests \
+            tests/unit/Spaarke.Scheduling.Tests             tests/integration/Sprk.Bff.Api.IntegrationTests             tests/integration/Spe.Integration.Tests
+          do
+            echo "::group::dotnet test $proj"
+            dotnet test "$proj" -c Debug --logger "trx;LogFilePrefix=standalone" --results-directory "./TestResults/standalone/$(basename "$proj")" \
+              || failed+=("$proj")
+            echo "::endgroup::"
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            {
+              echo "### ❌ Failing test project(s)"
+              printf -- '- `%s`\n' "${failed[@]}"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "### ✅ ControlPlane, Core, Scheduling, Bff.Api.IntegrationTests and Spe.Integration tests passed" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: standalone-unit-test-results
+          path: ./TestResults/standalone/
+          if-no-files-found: warn
+
+  # --------------------------------------------------------------------------
+  # bff-seam-contract-tests: tests compiled INTO Sprk.Bff.Api.Tests from folders the Router's
+  # `bff` filter does not list. tests/integration/{seam,contract}, tests/unit/domain,
+  # tests/integration/tenant and tests/integration/Shared all compile into that assembly
+  # (Sprk.Bff.Api.Tests.csproj), but only tests/integration/{auth,regression} and
+  # tests/unit/Sprk.Bff.Api.Tests trigger Tier 2. A PR touching only seam/contract tests
+  # ran no test.
+  #
+  # The full assembly is ~14,000 tests (tens of minutes), so this job runs only the test
+  # CLASSES declared in the changed files: it reads each changed .cs file's namespace and
+  # class names and filters on FullyQualifiedName~<namespace>.<class>. Namespaces are not
+  # aligned with folders (seam files declare Sprk.Bff.Api.Tests.Api / .Services.Ai / ...), so a
+  # folder-to-namespace filter would be wrong; the changed file is the only reliable key.
+  # Limits, deliberately accepted: a change to a shared helper or fixture runs the build
+  # (and a compile break fails the job) but no test class, because the helper declares none;
+  # a test whose DEPENDENCY changed is not selected. Production-code changes are Tier 2's job.
+  # On workflow_dispatch there is no diff, so the job only builds.
+  # --------------------------------------------------------------------------
+  bff-seam-contract-tests:
+    name: Seam / contract tests (changed test classes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read   # dorny/paths-filter lists the PR's files
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Push events diff against the previous commit, which needs history (same as the Router).
+          fetch-depth: ${{ github.event_name == 'pull_request' && 1 || 0 }}
+          # `*.docx filter=lfs`: the Compose seam tests parse tests/fixtures/compose-corpus/*.docx;
+          # a pointer file fails ~30 of them (the Tier 2 shards check out with lfs: true for this).
+          lfs: true
+
+      - name: Which test files changed
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@v3
+        with:
+          list-files: shell
+          filters: |
+            tests:
+              - 'tests/integration/seam/**/*.cs'
+              - 'tests/integration/contract/**/*.cs'
+              - 'tests/unit/domain/**/*.cs'
+              - 'tests/integration/tenant/**/*.cs'
+              - 'tests/integration/Shared/**/*.cs'
+
+      - name: Build the test filter
+        id: tests
+        shell: bash
+        env:
+          CHANGED: ${{ steps.filter.outputs.tests_files }}
+        run: |
+          set -euo pipefail
+          terms=()
+          for f in ${CHANGED:-}; do
+            [ -f "$f" ] || continue   # deleted files are listed too
+            ns="$(grep -m1 -E '^namespace[[:space:]]' "$f" | sed -E 's/^namespace[[:space:]]+//; s/[;{[:space:]].*$//' || true)"
+            [ -n "$ns" ] || continue
+            while read -r cls; do
+              [ -n "$cls" ] && terms+=("FullyQualifiedName~${ns}.${cls}")
+            done < <(grep -oE '\bclass[[:space:]]+[A-Za-z0-9_]+' "$f" | awk '{print $2}' | sort -u)
+          done
+          if [ "${#terms[@]}" -eq 0 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No changed test class: nothing to run." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          filter="$(printf '%s|' "${terms[@]}")"; filter="${filter%|}"
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "filter=${filter}" >> "$GITHUB_OUTPUT"
+          { echo "Test classes selected (${#terms[@]}):"; printf -- '- `%s`\n' "${terms[@]}"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup .NET 10
+        if: steps.tests.outputs.run == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache NuGet packages
+        if: steps.tests.outputs.run == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/cache@v6
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-standalone-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-standalone-
+            ${{ runner.os }}-nuget-
+
+      # A dispatch has no diff: build the assembly (a compile check) and stop.
+      - name: Build only (workflow_dispatch has no diff)
+        if: github.event_name == 'workflow_dispatch'
+        run: dotnet build tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug
+
+      - name: dotnet test (changed classes)
+        if: steps.tests.outputs.run == 'true'
+        env:
+          TEST_FILTER: ${{ steps.tests.outputs.filter }}
+        run: |
+          dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug \
+            --filter "$TEST_FILTER" \
+            --logger "trx;LogFilePrefix=standalone-seam" --results-directory ./TestResults/standalone-seam
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: standalone-seam-test-results
+          path: ./TestResults/standalone-seam/
+          if-no-files-found: warn
+
+  # --------------------------------------------------------------------------
+  # verdict-script-tests: the Pester must-fire controls for scripts/ci/master-ci-verdict.ps1
+  # (the decision logic behind the router-master and tier2 alerts). Fake gh, no network.
+  # --------------------------------------------------------------------------
+  verdict-script-tests:
+    name: Master verdict script tests (Pester)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            scripts/ci
+            tests/scripts
+
+      - name: Pester
+        shell: pwsh
+        run: |
+          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -MinimumVersion 5.5.0
+          $r = Invoke-Pester -Path tests/scripts/Master-Ci-Verdict.Tests.ps1 -Output Detailed -PassThru
+          if ($r.FailedCount -gt 0 -or $r.TotalCount -eq 0) { exit 1 }
+
+  # --------------------------------------------------------------------------
+  # trivy-fs: the per-change repository-filesystem scan from sdap-ci.yml's Security Scan job,
+  # so the Security tab keeps updating per PR and per master push (settings copied from
+  # docs/archive/workflows/sdap-ci.yml). It REPORTS, it never gates: the findings backlog is
+  # known (nightly-health.yml trivy-fs counts it), so exit-code is 0 and the job fails only
+  # when the scan itself errors. That is also the only case that raises an alert.
+  #
+  # The SARIF category is the one the legacy job published under, so existing code-scanning
+  # alerts continue as one series and are closed by the next scan instead of going stale.
+  # Uploading needs security-events: write, which fork and Dependabot PRs do not get: the upload
+  # step is continue-on-error and warns, so a missing permission is not a red check.
+  # --------------------------------------------------------------------------
+  trivy-fs:
+    name: Trivy filesystem scan (SARIF)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run Trivy vulnerability scanner
+        # Pinned, not @master: same version as nightly-health.yml and build-provisioning-sidecar.yml.
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          exit-code: '0'  # findings never fail the job (see above)
+          # Skip the knowledge/ repo (reference docs + MCP sample apps - not product code).
+          # The Azurite default key in trey-research/db.ts is a publicly documented
+          # Microsoft test credential; see .trivyignore for full rationale.
+          skip-dirs: 'knowledge'
+          trivyignores: '.trivyignore'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        id: upload
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: '.github/workflows/sdap-ci.yml:security-scan'
+
+      - name: Warn when the upload failed
+        if: always() && steps.upload.outcome == 'failure'
+        run: echo "::warning::Trivy SARIF upload failed (fork and Dependabot PRs cannot write security-events). The scan itself ran."
+
+  # --------------------------------------------------------------------------
   # One table of every job's result, so a PR shows what failed without opening each job.
   # --------------------------------------------------------------------------
   summary:
     name: Summary
-    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint]
+    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint, unit-tests-outside-router, bff-seam-contract-tests, verdict-script-tests, trivy-fs]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -452,7 +723,7 @@ jobs:
             echo
             echo "| Check | Result |"
             echo "|---|---|"
-            for j in dependency-audit release-build compose-client-gate client-typecheck pcf-eslint; do
+            for j in dependency-audit release-build compose-client-gate client-typecheck pcf-eslint unit-tests-outside-router bff-seam-contract-tests verdict-script-tests trivy-fs; do
               r="$(jq -r --arg j "$j" '.[$j].result' <<<"$NEEDS_JSON")"
               case "$r" in success) icon="✅" ;; *) icon="❌" ;; esac
               echo "| \`${j}\` | ${icon} ${r} |"
@@ -470,7 +741,7 @@ jobs:
   # --------------------------------------------------------------------------
   alerts:
     name: Alert ${{ matrix.check }}
-    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint]
+    needs: [dependency-audit, release-build, compose-client-gate, client-typecheck, pcf-eslint, unit-tests-outside-router, bff-seam-contract-tests, verdict-script-tests, trivy-fs]
     if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -497,6 +768,15 @@ jobs:
             job: client-typecheck
           - check: ci-standalone/pcf-eslint
             job: pcf-eslint
+          - check: ci-standalone/unit-tests-outside-router
+            job: unit-tests-outside-router
+          - check: ci-standalone/bff-seam-contract-tests
+            job: bff-seam-contract-tests
+          - check: ci-standalone/verdict-script-tests
+            job: verdict-script-tests
+          # Alerts only when the SCAN errors (the job is red); findings never turn it red.
+          - check: ci-standalone/trivy-fs
+            job: trivy-fs
     steps:
       - name: Checkout (local action only)
         uses: actions/checkout@v6
@@ -520,9 +800,10 @@ jobs:
           # already completed, it has already posted master's current state (its alerts job is
           # part of it); posting this older result now would overwrite that, e.g. close an alert
           # the newer run opened. Every job here runs on every non-docs push, so the newest
-          # completed run is always a full verdict. If the check itself fails, post anyway.
+          # completed run is always a full verdict. A CANCELLED newer run posted nothing (its alerts job
+          # never ran), so it does not supersede: those are skipped. If the check itself fails, post anyway.
           if [ "$EVENT" = "push" ]; then
-            newest="$(gh api "repos/${REPO}/actions/workflows/ci-standalone-checks.yml/runs?branch=master&event=push&status=completed&per_page=1" --jq '.workflow_runs[0].run_number // 0' 2>/dev/null || true)"
+            newest="$(gh api "repos/${REPO}/actions/workflows/ci-standalone-checks.yml/runs?branch=master&event=push&status=completed&per_page=20" --jq '[.workflow_runs[] | select(.conclusion != "cancelled")][0].run_number // 0' 2>/dev/null || true)"
             # On an API error gh prints the error body; anything not a plain number means "unknown: post".
             case "$newest" in ''|*[!0-9]*) newest=0 ;; esac
             if [ "$newest" -gt "$RUN_NUMBER" ]; then
