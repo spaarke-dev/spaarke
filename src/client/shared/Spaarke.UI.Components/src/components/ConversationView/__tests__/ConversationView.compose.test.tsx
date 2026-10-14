@@ -274,3 +274,37 @@ describe('ConversationView — in-conversation compose (FR-06)', () => {
     expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// "Internal Only" switch (task 068; owner 2026-10-14)
+// ---------------------------------------------------------------------------
+
+describe('ConversationView - compose bar Internal Only switch', () => {
+  it('shows one switch labelled "Internal Only", off by default, and sends isInternalOnly: false', async () => {
+    const { fetchMock, store } = buildStatefulFetch();
+    renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
+
+    expect(screen.getAllByRole('switch', { name: 'Internal Only' })).toHaveLength(1);
+    expect(screen.getByRole('switch', { name: 'Internal Only' })).not.toBeChecked();
+
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'plain');
+    await userEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    await waitFor(() => expect(store.sends).toHaveLength(1));
+    expect(store.sends[0]).toHaveProperty('isInternalOnly', false);
+  });
+
+  it('sends isInternalOnly: true when switched on, and the switch returns to off after the send', async () => {
+    const { fetchMock, store } = buildStatefulFetch();
+    renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
+
+    await userEvent.click(screen.getByRole('switch', { name: 'Internal Only' }));
+    expect(screen.getByRole('switch', { name: 'Internal Only' })).toBeChecked();
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'staff only');
+    await userEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    await waitFor(() => expect(store.sends).toHaveLength(1));
+    expect(store.sends[0]).toHaveProperty('isInternalOnly', true);
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Internal Only' })).not.toBeChecked());
+  });
+});

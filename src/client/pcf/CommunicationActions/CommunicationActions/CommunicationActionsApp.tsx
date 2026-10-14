@@ -270,6 +270,9 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   const [busy, setBusy] = React.useState(false);
   const [composerMode, setComposerMode] = React.useState<ComposerMode | null>(null);
   const [prefill, setPrefill] = React.useState<IRecordPrefill | null>(null);
+  // The source communication's `sprk_isinternalonly` - read by the SAME record retrieve as the pre-fill below (no
+  // extra read). A reply / reply all / forward of an internal-only email starts with "Internal Only" on (task 068).
+  const [sourceIsInternalOnly, setSourceIsInternalOnly] = React.useState(false);
   // Source-communication attachment documents, offered for inclusion on reply/forward
   // (task 104). Enumerated once from the record via the shared attachment data model.
   const [sourceAttachments, setSourceAttachments] = React.useState<IAttachmentItem[]>([]);
@@ -327,7 +330,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
         const rec = await context.webAPI.retrieveRecord(
           'sprk_communication',
           communicationId,
-          `?$select=sprk_from,sprk_to,sprk_cc,sprk_subject,sprk_body,sprk_associationprovenance,createdon,${regardingSelect}`
+          `?$select=sprk_from,sprk_to,sprk_cc,sprk_subject,sprk_body,sprk_associationprovenance,sprk_isinternalonly,createdon,${regardingSelect}`
         );
         if (cancelled) return;
         const recAny = rec as Record<string, unknown>;
@@ -339,6 +342,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           body: (rec.sprk_body as string) ?? '',
           sent: (recAny['createdon@OData.Community.Display.V1.FormattedValue'] as string) ?? '',
         });
+        setSourceIsInternalOnly(recAny['sprk_isinternalonly'] === true);
         // Inherit the parent's filed regarding associations (owner UAT 2026-07-24) — read each
         // populated denormalized lookup + its formatted name/logical-name annotations.
         const base = resolveDataverseUrl();
@@ -546,6 +550,9 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       // Reply / Reply All / Forward inherit the parent's filed associations (owner UAT 2026-07-24);
       // '+ New' (compose) starts with none.
       associations: composerMode === 'compose' ? undefined : parentAssociations,
+      // Reply / Reply All / Forward of an internal-only email start with "Internal Only" on (task 068); '+ New'
+      // (compose) is a fresh message and starts off. The BFF raises the same cases regardless (task 065).
+      sourceIsInternalOnly: composerMode === 'compose' ? undefined : sourceIsInternalOnly,
       initialAttachments: carryAttachments && carryAttachments.length > 0 ? carryAttachments : undefined,
       onSent: () => {
         setComposerMode(null);
@@ -566,6 +573,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     handleAddRelationship,
     sourceAttachments,
     parentAssociations,
+    sourceIsInternalOnly,
   ]);
 
   if (authError) {
