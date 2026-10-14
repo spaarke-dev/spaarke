@@ -68,7 +68,7 @@ A per-stamp registration (`spaarke-bff-api-{customerId}-{env}`), or intake refus
 
 | Field | Value |
 |---|---|
-| **Status** | Open — investigate (known limit; no cross-customer data path found) |
+| **Status** | Owner approved the fix 2026-10-14 (plan D37): `appRoleAssignmentRequired` on each stamp BFF service principal, assigned to `sprk-{customerId}-users`. Built after the A9 design settles home-directory workforce admission |
 | **Urgency** | before the first external customer |
 | **Filed** | 2026-10-07 |
 | **Source** | T240a review, verifier pass 2 |
@@ -345,7 +345,7 @@ principal. F2, F4 and F5 are unchanged.
 
 | Field | Value |
 |---|---|
-| **Status** | Open — recommendations below; owner decides |
+| **Status** | Owner approved all three recommendations 2026-10-14 (plan D36). Open for the build: the H4b SignalR managed-identity string and the manifest note |
 | **Urgency** | soon (a stamp starts without them; nothing is broken at boot) |
 | **Filed** | 2026-10-09 (from the auth-system-of-record-r1 note §3, analysis only) |
 | **Source** | `notes/coordination/2026-10-09-from-auth-system-of-record-r1-webhooks.md` §3; `scripts/canonical-secret-catalog/manifest.yaml` has none of the three keys |
