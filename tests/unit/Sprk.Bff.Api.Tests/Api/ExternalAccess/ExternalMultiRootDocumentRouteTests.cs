@@ -529,6 +529,7 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
         private readonly ExternalTodoScopeTestFixture.StubCallerPrincipalResolver _principals = new();
         private int _pointerResolutions;
         private int _fileReads;
+        private int _uploads;
 
         public ExternalRootEventReadTests.FakeDataverse Data { get; } = new();
 
@@ -544,6 +545,9 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
         /// <summary>How many times SPE content or versions were read.</summary>
         public int FileReads => Volatile.Read(ref _fileReads);
 
+        /// <summary>How many SPE uploads were attempted (task 187 fix round 2, F1).</summary>
+        public int Uploads => Volatile.Read(ref _uploads);
+
         public void Reset()
         {
             Principal = null;
@@ -555,6 +559,7 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
         {
             Interlocked.Exchange(ref _pointerResolutions, 0);
             Interlocked.Exchange(ref _fileReads, 0);
+            Interlocked.Exchange(ref _uploads, 0);
         }
 
         /// <summary>A real data service over <see cref="Data"/>, for the read-level tests.</summary>
@@ -598,6 +603,13 @@ public sealed class ExternalMultiRootDocumentRouteTests : IClassFixture<External
                     {
                         Interlocked.Increment(ref _fileReads);
                         return Task.FromResult<IReadOnlyList<VersionInfoDto>?>(new List<VersionInfoDto>());
+                    });
+                files.Setup(f => f.UploadSmallAsync(
+                        It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<ConflictBehavior>(), It.IsAny<CancellationToken>()))
+                    .Returns(() =>
+                    {
+                        Interlocked.Increment(ref _uploads);
+                        return Task.FromResult<FileHandleDto?>(null);
                     });
                 services.RemoveAll<ISpeFileOperations>();
                 services.AddSingleton(files.Object);

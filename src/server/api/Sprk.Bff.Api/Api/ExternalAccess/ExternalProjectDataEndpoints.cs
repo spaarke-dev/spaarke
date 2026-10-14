@@ -878,7 +878,7 @@ public static class ExternalProjectDataEndpoints
             case ExternalDataService.DocumentParentKind.Invoice:
                 try
                 {
-                    return (await RightsForInvoiceAsync(caller, parentId, dataService, ct), null);
+                    return (await RightsForInvoiceAsync(caller, parentId, dataService, modules, ct), null);
                 }
                 catch (ExternalDataService.DataverseUnavailableException)
                 {
@@ -921,11 +921,22 @@ public static class ExternalProjectDataEndpoints
     /// versions; Create on either parent uploads; a ViewOnly parent alone gives Read without Create.</para>
     /// <para>A caller holding Read on no matter and no project is denied before any read (the read could not change the
     /// answer). A missing invoice and an invoice under records the caller cannot read deny identically (no oracle).</para>
+    /// <para><b>Create passes the invoice gate</b> (unified-access-control-r2 task 187, fix round 2, F1). When the union
+    /// carries Create, the invoice is put to the gate the invoice thread uses
+    /// (<see cref="ExternalMessageEndpoints.GetRecordRightsDecisionAsync"/>: the rule attributes, the live parents, the
+    /// secure flags, then the invoices module's <c>ScopeRows</c>, D4). An invoice whose live roots include a SECURE root the
+    /// caller cannot read loses Create, so an upload is refused before SPE or Dataverse is touched (and the list offers no
+    /// upload); without this a Create on ordinary matter M wrote the file into secure project X's container. Read is
+    /// unchanged: the read routes withhold such an invoice's documents through the document walk (D4), with their own
+    /// shapes. A gate read that could not decide throws <see cref="ExternalDataService.DataverseUnavailableException"/>,
+    /// which <see cref="RightsForDocumentParentAsync"/> answers with the <see cref="InvoiceUnreadableReasonCode"/> 503.
+    /// A caller without Create causes no gate read.</para>
     /// </remarks>
     private static async Task<Spaarke.Dataverse.AccessRights> RightsForInvoiceAsync(
         CallerPrincipal caller,
         Guid invoiceId,
         ExternalDataService dataService,
+        ExternalModuleRegistry modules,
         CancellationToken ct)
     {
         if (caller.GetAccessibleMatterIds().Count == 0 && !caller.GetAccessibleProjectIds().Any())
@@ -941,7 +952,20 @@ public static class ExternalProjectDataEndpoints
         if (invoiceParents.ProjectId is { } projectId)
             rights |= RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, projectId);
 
-        return rights;
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
+            return rights;
+
+        var (gate, undecided) = await ExternalMessageEndpoints.GetRecordRightsDecisionAsync(
+                ExternalMessageEndpoints.Roots["invoices"], invoiceId, caller, modules,
+                (_, id, attributes, token) => dataService.GetInvoiceLookupsAsync(id, attributes ?? Array.Empty<string>(), token),
+                dataService.Logger, ct, dataService.GetNonSecureRootsAsync, dataService.GetLiveParentRootsAsync)
+            .ConfigureAwait(false);
+        if (undecided)
+            throw new ExternalDataService.DataverseUnavailableException("The invoice's secure roots could not be read.");
+
+        return gate.HasFlag(Spaarke.Dataverse.AccessRights.Read)
+            ? rights
+            : rights & ~Spaarke.Dataverse.AccessRights.Create;
     }
 
     /// <summary>

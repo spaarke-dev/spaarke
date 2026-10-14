@@ -1160,6 +1160,52 @@ public class ExternalDataService
         return row is null ? null : (GuidValue(row, "_sprk_matter_value"), GuidValue(row, "_sprk_project_value"));
     }
 
+    /// <summary>
+    /// An invoice's <paramref name="lookups"/> (logical names, e.g. <c>sprk_matter</c>, <c>sprk_regardingagreement</c>), read
+    /// app-only, in the shape the record gate reads a record (<c>ExternalMessageEndpoints.GetRecordRightsDecisionAsync</c>):
+    /// a set lookup is its id, an unset one is absent, and a value that is not a GUID is passed through as it came (the gate
+    /// reads it as malformed and fails closed).
+    /// </summary>
+    /// <remarks>
+    /// Task 187 fix round 2 (F1): the invoice document upload asks the gate the invoice thread uses, so an invoice behind a
+    /// secure root's wall cannot take a file through an ordinary parent. A missing invoice throws
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException"/> (the gate's "no such record"); a read that FAILS throws
+    /// <see cref="DataverseUnavailableException"/>, never an empty row.
+    /// </remarks>
+    /// <exception cref="DataverseUnavailableException">The read could not be completed.</exception>
+    /// <exception cref="Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException">There is no such invoice.</exception>
+    public virtual async Task<IReadOnlyDictionary<string, object?>> GetInvoiceLookupsAsync(
+        Guid invoiceId, IReadOnlyCollection<string> lookups, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(lookups);
+        var columns = lookups.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (columns.Count == 0 || columns.Any(c => !LookupNamePattern.IsMatch(c)))
+            throw new ArgumentException("Lookup names must be logical names.", nameof(lookups));
+
+        var url = $"{GetApiUrl()}/sprk_invoices({invoiceId})?$select={string.Join(",", columns.Select(c => $"_{c}_value"))}";
+        var row = await GetSingleOrThrowAsync<Dictionary<string, JsonElement>>(url, ct)
+                  ?? throw new Sprk.Bff.Api.Services.Dataverse.RecordNotFoundException("sprk_invoice", invoiceId);
+
+        var lookupsRead = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in columns)
+        {
+            if (!row.TryGetValue($"_{column}_value", out var value) || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                continue; // not filed there
+            lookupsRead[column] = value.ValueKind == JsonValueKind.String && Guid.TryParse(value.GetString(), out var id)
+                ? id
+                : value.ToString();
+        }
+
+        return lookupsRead;
+    }
+
+    /// <summary>A Dataverse logical name (what <see cref="GetInvoiceLookupsAsync"/> puts in a <c>$select</c>).</summary>
+    private static readonly System.Text.RegularExpressions.Regex LookupNamePattern =
+        new("^[a-z][a-z0-9_]*$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>This service's logger, for the endpoint-side rule reads that run over its readers (task 187 F1).</summary>
+    internal ILogger Logger => _logger;
+
     // ---------------------------------------------------------------------------
     // In-portal notification feed (spaarke-SPA-external-access-platform-r3 task 037, FR-08)
     //

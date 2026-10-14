@@ -189,6 +189,80 @@ public sealed class ExternalLiveParentDocumentTests : IClassFixture<ExternalMult
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
+    // ---- Task 187, fix round 2 (F1): an upload to an invoice passes the invoice gate, over the REAL reads ----
+    //
+    // A caller with Collaborate on ordinary matter O; invoice I under O and project X. Through the real invoice read, the real
+    // secure-flag read and the invoices module's predicate: X secure and unreadable refuses the upload (403) before SPE or
+    // Dataverse is touched; X ordinary keeps option A (the list offers an upload); a flag read that fails is the 503.
+
+    private static CallerPrincipal CollaboratorOn(Guid matter) => new()
+    {
+        Plane = CallerPrincipalPlane.CiamContact,
+        ContactId = Guid.NewGuid(),
+        Email = "external.user@example.test",
+        ProjectAccess = Array.Empty<CallerProjectAccess>(),
+        MatterAccess = new Dictionary<Guid, AccessRights> { [matter] = ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate) },
+        WorkAssignmentAccess = new Dictionary<Guid, AccessRights>(),
+    };
+
+    private void SeedInvoiceUnderOAndProjectX(bool? secureX)
+    {
+        _fixture.Data.AddInvoice(I, matter: O, project: X);
+        _fixture.Data.AddOpenRoot(ExternalGrantRootType.Matter, O);
+        if (secureX is { } secure) _fixture.Data.AddRoot(ExternalGrantRootType.Project, X, secure);
+        _fixture.Principal = CollaboratorOn(O);
+    }
+
+    private async Task<HttpResponseMessage> UploadToInvoice()
+    {
+        using var client = _fixture.CreateAuthenticatedClient();
+        using var form = new MultipartFormDataContent { { new ByteArrayContent(new byte[] { 1, 2, 3 }), "file", "brief.pdf" } };
+        return await client.PostAsync($"/api/v1/external/invoices/{I}/documents", form);
+    }
+
+    private void NothingWasWritten()
+    {
+        _fixture.Uploads.Should().Be(0, "nothing reaches SPE");
+        _fixture.Data.Requests.Should().OnlyContain(r => r.StartsWith("GET ", StringComparison.Ordinal),
+            "nothing is written to Dataverse");
+    }
+
+    [Fact]
+    public async Task UploadToAnInvoiceAlsoUnderSecureProjectX_IsRefused_403_BeforeAnyWrite_F1()
+    {
+        SeedInvoiceUnderOAndProjectX(secureX: true);
+
+        using var response = await UploadToInvoice();
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        NothingWasWritten();
+        _fixture.Data.Urls.Should().Contain(u => u.Contains("/sprk_invoices(", StringComparison.Ordinal)
+                                                 && u.Contains("_sprk_regardingagreement_value", StringComparison.Ordinal),
+            "the gate reads every attribute the rule needs, the agreement included");
+        (await InvoiceDocuments()).CanCreate.Should().BeFalse("the list offers no upload that can only fail");
+    }
+
+    [Fact]
+    public async Task AnInvoiceAlsoUnderAnOrdinaryProjectX_KeepsCreate_OptionA_F1()
+    {
+        SeedInvoiceUnderOAndProjectX(secureX: false);
+
+        (await InvoiceDocuments()).CanCreate.Should().BeTrue("option A: Create on O admits an upload");
+    }
+
+    [Fact]
+    public async Task UploadToAnInvoice_WhenTheSecureFlagReadFails_Is503_BeforeAnyWrite_F1()
+    {
+        SeedInvoiceUnderOAndProjectX(secureX: false);
+        _fixture.Data.FlagReadThrows = true;
+
+        using var response = await UploadToInvoice();
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("sdap.access.invoice_unreadable");
+        NothingWasWritten();
+    }
+
     private async Task<ExternalDocumentListResponse> InvoiceDocuments()
     {
         using var client = _fixture.CreateAuthenticatedClient();
