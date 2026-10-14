@@ -62,6 +62,15 @@ internal static class PersonalToDoAssignee
     /// <summary>Reads the To Do app-only and answers its Assigned To's one enabled systemuser; <c>null</c> for no single user.</summary>
     /// <exception cref="Exception">A Dataverse fault (other than the row not existing) propagates.</exception>
     internal static async Task<Guid?> ResolveAsync(
+        IGenericEntityService entities, AssignedAccessStore links, Guid todoId, CancellationToken ct) =>
+        (await ClassifyAsync(entities, links, todoId, ct).ConfigureAwait(false)).UserId;
+
+    /// <summary>
+    /// <see cref="ResolveAsync"/> with WHY there is no single user (task 148: the follow-the-assignee job counts each fallback
+    /// separately). The same reads and the same rule; <see cref="Answer.UserId"/> is <see cref="ResolveAsync"/>'s answer.
+    /// </summary>
+    /// <exception cref="Exception">A Dataverse fault (other than the row not existing) propagates.</exception>
+    internal static async Task<Answer> ClassifyAsync(
         IGenericEntityService entities, AssignedAccessStore links, Guid todoId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(entities);
@@ -74,16 +83,46 @@ internal static class PersonalToDoAssignee
         }
         catch (Exception ex) when (ex is not OperationCanceledException && IsNotFound(ex))
         {
-            return null;
+            return new Answer(null, Outcome.ToDoNotFound);
         }
 
-        if (todo is null || IsFiled(todo))
-            return null;
+        if (todo is null)
+            return new Answer(null, Outcome.ToDoNotFound);
+        if (IsFiled(todo))
+            return new Answer(null, Outcome.Filed);
+        if (todo.GetAttributeValue<EntityReference>(AssignedToDefaults.AssignedToAttribute) is not { } assignedTo || assignedTo.Id == Guid.Empty)
+            return new Answer(null, Outcome.NoAssignedTo);
 
-        return todo.GetAttributeValue<EntityReference>(AssignedToDefaults.AssignedToAttribute) is { } assignedTo && assignedTo.Id != Guid.Empty
-            ? await SingleEnabledUserAsync(links, assignedTo.Id, ct).ConfigureAwait(false)
-            : null;
+        return await ClassifyLinkedUsersAsync(links, assignedTo.Id, ct).ConfigureAwait(false);
     }
+
+    /// <summary>Why <see cref="ClassifyAsync"/> named a user or none.</summary>
+    internal enum Outcome
+    {
+        /// <summary>Exactly one eligible user: <see cref="Answer.UserId"/> is set.</summary>
+        SingleUser,
+
+        /// <summary>The To Do does not exist.</summary>
+        ToDoNotFound,
+
+        /// <summary>The To Do is filed under something (any regarding lookup, or the pair): not personal (owner K2).</summary>
+        Filed,
+
+        /// <summary>The To Do has no Assigned To.</summary>
+        NoAssignedTo,
+
+        /// <summary>No systemuser links to the Assigned To contact.</summary>
+        NoLinkedUser,
+
+        /// <summary>Several eligible systemusers link to the contact (D-135 item 5).</summary>
+        SeveralUsers,
+
+        /// <summary>Only ineligible users link to it: disabled, application, non-interactive or external (D-135 item 6).</summary>
+        OnlyIneligibleUsers,
+    }
+
+    /// <summary>The assignee answer: the one eligible user (or <c>null</c>) and why.</summary>
+    internal sealed record Answer(Guid? UserId, Outcome Outcome);
 
     /// <summary>True when the To Do is filed under anything: a regarding lookup is set, or the ADR-024 pair names a record.</summary>
     private static bool IsFiled(Entity todo) =>
@@ -98,19 +137,32 @@ internal static class PersonalToDoAssignee
         if (contactId == Guid.Empty)
             return null;
 
-        var candidates = await links.ReadLinkCandidatesAsync(contactId, boundOid: null, ct).ConfigureAwait(false);
+        return (await ClassifyLinkedUsersAsync(links, contactId, ct).ConfigureAwait(false)).UserId;
+    }
+
+    /// <summary><see cref="SingleEnabledUserAsync"/> with why there is no single user. A fault propagates.</summary>
+    private static async Task<Answer> ClassifyLinkedUsersAsync(AssignedAccessStore links, Guid contactId, CancellationToken ct)
+    {
+        var linked = (await links.ReadLinkCandidatesAsync(contactId, boundOid: null, ct).ConfigureAwait(false))
+            .Where(c => c.PrimaryContactId == contactId)
+            .ToList();
         // Only a person who can be shared with counts (the ONE rule AssignedAccessMaterializer applies, InternalShareEndpoints
         // .ClassifyEligibility): an application user, a non-interactive account, an external-flagged one or a disabled one never
         // counts toward "exactly one". rootIsRestricted is null (not read here), which ClassifyEligibility documents as fail
         // closed: an external-flagged user is refused. (false would admit one, as it does for a share on an ordinary record.)
-        var enabled = candidates
-            .Where(c => c.PrimaryContactId == contactId
-                && InternalShareEndpoints.ClassifyEligibility(c.IsDisabled, c.AccessMode, c.ApplicationId, c.IsExternal, rootIsRestricted: null)
+        var enabled = linked
+            .Where(c => InternalShareEndpoints.ClassifyEligibility(c.IsDisabled, c.AccessMode, c.ApplicationId, c.IsExternal, rootIsRestricted: null)
                     == InternalShareEndpoints.ShareEligibility.Eligible)
             .Select(c => c.SystemUserId)
             .Distinct()
             .ToList();
-        return enabled.Count == 1 ? enabled[0] : null;
+
+        return enabled.Count switch
+        {
+            1 => new Answer(enabled[0], Outcome.SingleUser),
+            > 1 => new Answer(null, Outcome.SeveralUsers),
+            _ => new Answer(null, linked.Count == 0 ? Outcome.NoLinkedUser : Outcome.OnlyIneligibleUsers),
+        };
     }
 
     private static bool IsNotFound(Exception ex)
