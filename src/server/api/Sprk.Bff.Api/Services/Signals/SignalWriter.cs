@@ -489,6 +489,7 @@ public sealed partial class SignalWriter
             throw new ArgumentException($"Episode {request.Episode} is not a whole number from 1 (D-13).", nameof(request));
 
         var cleanSubjectId = request.SubjectId.ToString("D", CultureInfo.InvariantCulture).ToLowerInvariant();
+        Guid? ownerTeamId = null; // named on the privilege refusal below: the team whose role lacks Read on sprk_signal
 
         try
         {
@@ -511,6 +512,7 @@ public sealed partial class SignalWriter
             // no-core item's in D-134's order. A refusal (or an answer naming no team) writes nothing at all, not even a
             // re-evaluation touch.
             var owner = await ResolveOwnerAsync(core, subjectEntity, request.SubjectId, request.RequestedBy, ct).ConfigureAwait(false);
+            ownerTeamId = owner.OwningTeamId;
             if (!owner.IsOwned)
             {
                 var refusalCode = owner.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource;
@@ -694,8 +696,9 @@ public sealed partial class SignalWriter
         catch (Exception ex) when (IsDataverseAccessDenied(ex))
         {
             _logger.LogError(OntologyWriterEvents.WriteRefused, ex,
-                "Signal writer refused for policy {PolicyCode} (reason={Reason}).",
-                request.PolicyCode, OntologyWriterFailureReason.DataverseAccessDenied);
+                "Signal writer refused for policy {PolicyCode} (reason={Reason}, ownerTeam={OwnerTeamId}): the team's role lacks a " +
+                "privilege on sprk_signal (a redelivery cannot fix it).",
+                request.PolicyCode, OntologyWriterFailureReason.DataverseAccessDenied, ownerTeamId);
             OntologyWriterTelemetry.RecordFailure(OntologyWriterFailureReason.DataverseAccessDenied);
             throw;
         }
@@ -964,8 +967,8 @@ public sealed partial class SignalWriter
         {
             var faultReason = IsDataverseAccessDenied(ex) ? OntologyWriterFailureReason.DataverseAccessDenied : OntologyWriterFailureReason.SignalReassignFailed;
             _logger.LogError(OntologyWriterEvents.WriteRefused, ex,
-                "No-core Signal re-own failed for policy {PolicyCode}, signal {SignalId} (reason={Reason}).",
-                policyCode, signalId, faultReason);
+                "No-core Signal re-own failed for policy {PolicyCode}, signal {SignalId}, owner team {OwnerTeamId} (reason={Reason}).",
+                policyCode, signalId, owner.Id, faultReason);
             OntologyWriterTelemetry.RecordFailure(faultReason);
             throw;
         }
@@ -992,8 +995,8 @@ public sealed partial class SignalWriter
                     ? OntologyWriterFailureReason.DataverseAccessDenied
                     : OntologyWriterFailureReason.SignalReassignFailed;
                 _logger.LogError(OntologyWriterEvents.WriteRefused,
-                    "No-core Signal re-own failed for policy {PolicyCode}, signal {SignalId}: {Detail} (reason={Reason}).",
-                    policyCode, signalId, result.Detail, failedReason);
+                    "No-core Signal re-own failed for policy {PolicyCode}, signal {SignalId}, owner team {OwnerTeamId}: {Detail} (reason={Reason}).",
+                    policyCode, signalId, owner.Id, result.Detail, failedReason);
                 OntologyWriterTelemetry.RecordFailure(failedReason);
                 throw new InvalidOperationException($"The no-core Signal {signalId:D} could not be re-owned: {result.Detail}");
         }

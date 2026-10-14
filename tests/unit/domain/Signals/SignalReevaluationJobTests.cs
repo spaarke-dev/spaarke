@@ -2756,6 +2756,9 @@ public partial class SignalReevaluationJobTests
         public bool FailConditionalUpdates { get; set; }
         public bool FailCreates { get; set; }
 
+        /// <summary>K1: when set, every create throws exactly this (a typed Dataverse fault, say), instead of the plain failure.</summary>
+        public Exception? CreateFault { get; set; }
+
         public void ResetCounts()
         {
             CreateCalls = 0;
@@ -2815,6 +2818,11 @@ public partial class SignalReevaluationJobTests
         public Task<Guid> CreateAsync(Entity entity, CancellationToken cancellationToken)
         {
             CreateCalls++;
+            if (CreateFault is not null)
+            {
+                throw CreateFault;
+            }
+
             if (FailCreates)
             {
                 throw new InvalidOperationException("Simulated Dataverse failure on the create.");

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Signals;
 
@@ -40,6 +41,10 @@ public static class SignalTriggerEvents
     /// <c>FiledCommunicationSignalTrigger.ReadTimeout</c>), so no Signal trigger was queued for it (D-48, #1659); the nightly
     /// pass covers it.</summary>
     public static readonly EventId FilingReadFailed = new(50344, nameof(FilingReadFailed));
+
+    /// <summary>Warning: a trigger finished, but Dataverse refused one or more Signal writes for want of a privilege (0x80040299 /
+    /// 0x80040220). Deterministic, so the message is completed, not redelivered (K1); the writer's Error names the owner team.</summary>
+    public static readonly EventId HandlerAccessDenied = new(50345, nameof(HandlerAccessDenied));
 }
 
 /// <summary>
@@ -189,6 +194,18 @@ public sealed class SignalEvaluationTriggerHandler : IJobHandler
                     kind, subjectEntity, subjectId, result.PolicyFailures, result.Refused, job.Attempt, job.DeliveryCount);
                 return JobOutcome.Failure(job.JobId, JobType,
                     $"policyFailures={result.PolicyFailures}, refused={result.Refused}", job.Attempt, stopwatch.Elapsed);
+            }
+
+            if (result.AccessDenied > 0)
+            {
+                // K1: a privilege refusal is a defined outcome, not a fault. Completing the message is the only honest answer: a
+                // redelivery is refused the same way until an administrator fixes the team's role, and would only repeat the Error.
+                // The writer's WriteRefused Error (once) names the owner team; the nightly pass writes the Signal once it is fixed.
+                _logger.LogWarning(SignalTriggerEvents.HandlerAccessDenied,
+                    "[SIGNAL-TRIGGER] {Kind} trigger for {SubjectEntity} {SubjectId} completed WITHOUT {AccessDenied} Signal write(s): " +
+                    "Dataverse refused them (reason={Reason}). Not retried: grant the owner team's role Read on sprk_signal " +
+                    "(the owner team is on the preceding WriteRefused log); the nightly pass picks the subject up after that.",
+                    kind, subjectEntity, subjectId, result.AccessDenied, OntologyWriterFailureReason.DataverseAccessDenied);
             }
 
             _logger.LogInformation(SignalTriggerEvents.HandlerCompleted,

@@ -248,6 +248,66 @@ public partial class SignalReevaluationJobTests
         h.Log.Should().Contain(e => e.Level == LogLevel.Error && e.EventId == SignalTriggerEvents.HandlerFailed);
     }
 
+    // K1 (task 143 follow-up): 0x80040299 is a defined outcome (dataverse_access_denied), not a fault. Redelivering the message
+    // is refused the same way until an administrator fixes the team's role, so it completes and logs once.
+    [Theory]
+    [InlineData(0x80040299)]
+    [InlineData(0x80040220)]
+    public async Task Trigger_WhenDataverseRefusesTheOwnerPrivilege_CompletesTheMessage_AndLogsOnce_NoRetry(uint errorCode)
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        h.Org.CreateFault = new System.ServiceModel.FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = unchecked((int)errorCode), Message = "Read Privilege Check For Owner failed" },
+            "Read Privilege Check For Owner failed");
+
+        var outcome = await RunTriggerAsync(h, SignalTriggerKind.Classification, MatterId, CommunicationId);
+
+        outcome.Status.Should().Be(JobStatus.Completed, "a redelivery cannot change a privilege, so the message is completed, not abandoned");
+        h.Org.CreateCalls.Should().Be(1, "one attempt: the refusal is not retried inside the pass either");
+        h.Log.Should().NotContain(e => e.EventId == SignalTriggerEvents.HandlerFailed, "this is not a fault the queue should redeliver");
+        h.Log.Should().NotContain(e => e.Level == LogLevel.Error && e.EventId == OntologyWriterEvents.EvaluatorPolicyFailed,
+            "the job counts it without a second Error");
+        h.Log.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.EventId == SignalTriggerEvents.HandlerAccessDenied)
+            .Which.Message.Should().Contain("dataverse_access_denied");
+        h.Log.Should().ContainSingle(e => e.Level == LogLevel.Error && e.EventId == OntologyWriterEvents.WriteRefused,
+                "the writer logs the refusal once, with the reason")
+            .Which.Message.Should().Contain("dataverse_access_denied").And.Contain(DefaultTeamId.ToString(),
+                "and names the owner team whose role lacks the privilege");
+    }
+
+    [Theory]
+    [InlineData("throttle")]
+    [InlineData("timeout")]
+    [InlineData("unavailable")]
+    public async Task Trigger_WhenDataverseFailsTransiently_StillFailsTheMessage_ForRedelivery(string fault)
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        h.Org.CreateFault = fault switch
+        {
+            "throttle" => new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = unchecked((int)0x80072322), Message = "Number of requests exceeded the limit of 6000 over time window of 300 seconds." },
+                "Number of requests exceeded the limit of 6000 over time window of 300 seconds."),
+            "timeout" => new TimeoutException("The request channel timed out while waiting for a reply."),
+            _ => new HttpRequestException("Response status code does not indicate success: 503 (Service Unavailable)."),
+        };
+
+        var outcome = await RunTriggerAsync(h, SignalTriggerKind.Classification, MatterId, CommunicationId);
+
+        outcome.Status.Should().Be(JobStatus.Failed, "a transient fault is retryable: the message is abandoned and redelivered");
+        h.Log.Should().Contain(e => e.Level == LogLevel.Error && e.EventId == SignalTriggerEvents.HandlerFailed);
+        h.Log.Should().NotContain(e => e.EventId == SignalTriggerEvents.HandlerAccessDenied);
+    }
+
+    [Fact]
+    public void Trigger_WhenOnlySomeWritesAreDenied_AndAnotherFailsTransiently_StillRetries()
+    {
+        // The retry decision is per refusal, not per message: a denied write does not hide a retryable one.
+        var counts = new SubjectEvaluationResult(1, 2, 0, 0, 0, Refused: 2, PolicyFailures: 0, InvalidPolicies: 0, ScopedNotEvaluated: 0, AccessDenied: 1);
+        counts.NeedsRetry.Should().BeTrue();
+        (counts with { AccessDenied = 2 }).NeedsRetry.Should().BeFalse();
+        (counts with { AccessDenied = 2, PolicyFailures = 1 }).NeedsRetry.Should().BeTrue();
+    }
+
     [Fact]
     public async Task Trigger_WhenThePoliciesCannotBeRead_ReturnsFailure_AndLogsTheException()
     {

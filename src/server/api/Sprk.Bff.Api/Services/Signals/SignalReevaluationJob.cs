@@ -473,6 +473,21 @@ public sealed class SignalReevaluationJob : IScheduledJob
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             counts.Refused++;
+            if (SignalWriter.IsDataverseAccessDenied(ex))
+            {
+                // K1 (task 143 follow-up): a privilege refusal (0x80040299 / 0x80040220) is deterministic: the same write is refused
+                // the same way on a redelivery, so it is counted apart from the refusals a retry can change (SubjectEvaluationResult
+                // does not retry on it). The writer already logged it at Error with the exception and its owner team, and metered it
+                // as dataverse_access_denied, so this is a Warning without a second Error or a second metric. The nightly run still
+                // counts it Refused: the misconfigured team stays a failed heartbeat until its role is fixed.
+                counts.AccessDenied++;
+                _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                    "Signal {Action} refused for policy {PolicyCode}, subject {SubjectId} (reason={Reason}); nothing was changed for it. " +
+                    "A retry cannot fix a missing privilege.",
+                    action, policy.Code, subjectId, OntologyWriterFailureReason.DataverseAccessDenied);
+                return;
+            }
+
             _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
                 "Signal {Action} failed for policy {PolicyCode}, subject {SubjectId} ({ExceptionType}); nothing was changed for it.",
                 action, policy.Code, subjectId, ex.GetType().Name);
@@ -576,7 +591,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
         return new SubjectEvaluationResult(
             counts.PoliciesEvaluated, counts.Hits, counts.Written + counts.Reraised, counts.Updated, counts.Closed,
-            counts.Refused, counts.PolicyFailures, counts.InvalidPolicies, counts.ScopedNotEvaluated);
+            counts.Refused, counts.PolicyFailures, counts.InvalidPolicies, counts.ScopedNotEvaluated, counts.AccessDenied);
     }
 
     /// <summary>The rule body's <c>subject</c> table, or null when the body cannot be read (the evaluator's gate then logs and
@@ -748,6 +763,9 @@ public sealed class SignalReevaluationJob : IScheduledJob
     {
         public int PoliciesEvaluated, DecideLanePolicies, DoLanePolicies, InvalidPolicies, PolicyFailures, ScopedNotEvaluated;
         public int Hits, Written, Reraised, Updated, Closed, Reassigned, Refused, ChangedSinceRead;
+
+        /// <summary>K1: the part of <see cref="Refused"/> that is a Dataverse privilege refusal (deterministic, so not retried by a trigger).</summary>
+        public int AccessDenied;
         public int SupersededClosed, RetiredClosed;
         public int ClearedMarked, Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred, NotApplicable, MissingInputs;
 
@@ -1173,10 +1191,11 @@ internal static class SignalEpisodePlanner
 
 /// <summary>What one event-triggered pass did (task 032). <see cref="PolicyFailures"/> (a read or write that threw) and
 /// <see cref="Refused"/> (a write the writer refused) are the outcomes a retry can change; the rest were already logged by the
-/// code that found them.</summary>
+/// code that found them. <see cref="AccessDenied"/> is the part of <see cref="Refused"/> that is a Dataverse privilege refusal
+/// (0x80040299 / 0x80040220): deterministic, so a redelivery would be refused the same way and does not count toward a retry.</summary>
 internal sealed record SubjectEvaluationResult(
     int PoliciesEvaluated, int Hits, int Created, int Updated, int Closed, int Refused, int PolicyFailures, int InvalidPolicies,
-    int ScopedNotEvaluated)
+    int ScopedNotEvaluated, int AccessDenied = 0)
 {
-    public bool NeedsRetry => PolicyFailures > 0 || Refused > 0;
+    public bool NeedsRetry => PolicyFailures > 0 || Refused > AccessDenied;
 }
