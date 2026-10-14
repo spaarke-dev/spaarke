@@ -429,10 +429,14 @@ public static class ExternalAccessModule
         // Invoices — visible when attached to an accessible matter OR project (invoices carry both
         // sprk_matter and sprk_project lookups; R1's project-only scope silently hid matter-parented
         // invoices — the concrete over-hide task 028 fixes).
+        // unified-access-control-r2 task 187, fix round 1, owner decision D2 (round 100): still reached through ANY accessible
+        // parent (option A), but an invoice whose LIVE roots include a SECURE root the caller cannot read (its own matter or
+        // project, or the root its agreement is filed under) is withheld, the secure-family rule every child list applies.
         services.AddExternalModule(new ExternalModuleDescriptor
         {
             Name = "invoices",
             RecordEntity = "sprk_invoice",
+            RequireReadOnSecureRoots = true,
             ScopeDimensions = new[]
             {
                 new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },

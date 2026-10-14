@@ -475,6 +475,28 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
         _fixture.Steps.Should().BeEmpty("nothing is deleted when the document row could not be read");
     }
 
+    // Task 187, fix round 1, owner decision D3: a document's delete-own runs the same live-parent check as a to-do's and an
+    // event's: behind a secure root's wall it is the uniform 403, a read that could not decide is the 503, and nothing is
+    // deleted (neither the SPE file nor the row).
+
+    [Theory]
+    [InlineData(LiveParentDecision.Withheld, HttpStatusCode.Forbidden, "sdap.access.deny.delete_own")]
+    [InlineData(LiveParentDecision.Unavailable, HttpStatusCode.ServiceUnavailable, "sdap.access.delete_own_unavailable")]
+    public async Task Document_WhoseLiveParentCheckRefuses_IsRefused_AndNothingIsDeleted(
+        LiveParentDecision decision, HttpStatusCode expected, string reasonCode)
+    {
+        var id = _fixture.Seed(DeletableKind.Document, contact: CallerContact, parents: Project(RecordA));
+        _fixture.Principal = ContactOn(RecordA, ExternalAccessLevel.Collaborate);
+        _fixture.Data.LiveParents[(DeletableKind.Document, id)] = decision;
+
+        using var response = await Delete("documents", id);
+
+        response.StatusCode.Should().Be(expected);
+        ProblemCode(await response.Content.ReadAsStringAsync()).Should().Be(reasonCode);
+        _fixture.Exists(DeletableKind.Document, id).Should().BeTrue();
+        _fixture.Steps.Should().BeEmpty("neither the file nor the row is deleted");
+    }
+
     [Fact]
     public async Task RequesterReadFault_OnAServiceRequestParent_Is503_AndNothingIsDeleted()
     {
@@ -1002,6 +1024,13 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
 
         public ConcurrentDictionary<(DeletableKind Kind, Guid Id), DeleteTarget> Targets { get; } = new();
 
+        /// <summary>Task 187: what the live-parent check answers per row (Readable when a test sets nothing).</summary>
+        public ConcurrentDictionary<(DeletableKind Kind, Guid Id), LiveParentDecision> LiveParents { get; } = new();
+
+        public override Task<LiveParentDecision> CheckLiveParentsAsync(
+            DeletableKind kind, Guid id, CallerPrincipal caller, CancellationToken ct = default) =>
+            Task.FromResult(LiveParents.TryGetValue((kind, id), out var decision) ? decision : LiveParentDecision.Readable);
+
         public ConcurrentDictionary<Guid, Guid> Requesters { get; } = new();
 
         public Exception? TargetFault { get; set; }
@@ -1038,6 +1067,7 @@ public sealed class ExternalDeleteOwnTests : IClassFixture<ExternalDeleteOwnTest
             UnreadableRelationship = null;
             ServiceRequestDeletes.Clear();
             Targets.Clear();
+            LiveParents.Clear();
             Requesters.Clear();
             States.Clear();
             Volatile.Write(ref _requesterAndStateReads, 0);
