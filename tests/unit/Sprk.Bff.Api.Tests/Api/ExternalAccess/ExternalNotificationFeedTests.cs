@@ -69,7 +69,13 @@ public class ExternalNotificationFeedTests
             // row is projected through the query's $select, so a column the query dropped is absent (r3 task 039, K3).
             .Returns<string, string?, CancellationToken>((_, odata, _) =>
                 Task.FromResult<IReadOnlyList<Dictionary<string, JsonElement>>>(AppOnlySelectProjection.Project(
-                    _messageRows.OrderByDescending(r => r["createdon"].GetDateTimeOffset()), odata)));
+                    AppOnlySelectProjection.WithOpenThread(_messageRows).OrderByDescending(r => r["createdon"].GetDateTimeOffset()), odata)));
+        // Owner decision D7: the feed shows a row only when its thread reads Open. These cases are not about D7, so every row
+        // sits in one Open thread.
+        _appOnly
+            .Setup(q => q.QueryAsync("sprk_communicationthreads", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string?, CancellationToken>((_, odata, _) =>
+                Task.FromResult(AppOnlySelectProjection.OpenThreadAnswer(odata)));
     }
 
     // ── principals ──────────────────────────────────────────────────────────────────────────────────
@@ -1007,8 +1013,8 @@ public class ExternalNotificationFeedTests
         var select = query[..query.IndexOf('&')];
         select.Should().Be(
             "$select=sprk_communicationid,sprk_direction,_sprk_sentby_value,_sprk_createdbycontact_value,_createdby_value,createdon," +
-            "sprk_isinternalonly,sprk_privilegeclassification,statuscode,_sprk_regardingproject_value," +
-            "_sprk_regardingmatter_value,_sprk_regardingworkassignment_value");
+            "sprk_isinternalonly,sprk_privilegeclassification,statuscode,_sprk_communicationthread_value," +
+            "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardingworkassignment_value");
         select.Should().NotContain("sprk_body").And.NotContain("sprk_subject");
         // Task 062 rework: createdby is expanded to its applicationid + accessmode so the sender-name fallback can tell a
         // person from the BFF's application user (nothing else of the user is read).

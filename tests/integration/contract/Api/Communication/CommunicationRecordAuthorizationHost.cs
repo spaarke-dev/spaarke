@@ -384,12 +384,16 @@ public sealed class FakeImpersonatedQuery : IImpersonatedCommunicationQuery
     /// <summary>When true, every query throws.</summary>
     public bool ThrowOnEverySet { get; set; }
 
+    /// <summary>When set, a query whose OData text contains this fragment throws (a fault on ONE read of a set, not all).</summary>
+    public string? ThrowWhenQueryContains { get; set; }
+
     public void Reset()
     {
         _rows.Clear();
         Calls.Clear();
         ThrowOnSet = null;
         ThrowOnEverySet = false;
+        ThrowWhenQueryContains = null;
     }
 
     /// <summary>Makes a row visible to the caller. <paramref name="columns"/> is JSON for the row's other columns.</summary>
@@ -405,7 +409,8 @@ public sealed class FakeImpersonatedQuery : IImpersonatedCommunicationQuery
         string entitySetName, string? odataQuery, Guid callerSystemUserId, CancellationToken ct)
     {
         Calls.Add((entitySetName, odataQuery, callerSystemUserId));
-        if (ThrowOnEverySet || ThrowOnSet == entitySetName)
+        if (ThrowOnEverySet || ThrowOnSet == entitySetName
+            || (ThrowWhenQueryContains is not null && (odataQuery ?? string.Empty).Contains(ThrowWhenQueryContains, StringComparison.Ordinal)))
         {
             throw new HttpRequestException($"impersonated read of {entitySetName} faulted");
         }
