@@ -4,7 +4,7 @@ Date: 2026-10-14. Scope executed: steps 0-5. Step 6 (dev import) is NOT done and
 
 ## What it does
 
-A single switch labelled exactly "Internal Only" (helper text "Only people in your organization can see this") on the message and email compose surfaces. The value always goes to `POST /api/communications/send` as an explicit boolean `isInternalOnly` (never omitted by these surfaces; default `false`). It starts on for a reply or forward whose source is known internal-only. It is shown on and disabled when the surface knows the target thread is Private. The BFF (task 065) still floors it: it only ever raises the flag (Private, no-privacy or unreadable thread, reply or forward of an internal source), so a client that is wrong or silent cannot leak.
+A single switch labelled exactly "Internal Only" (helper text "Only people in your organization can see this") on the message and email compose surfaces. The value always goes to `POST /api/communications/send` as an explicit boolean `isInternalOnly` (default `false`), except an untouched reply or forward of a source whose flag the host does not know, which omits it (see Fix round 1). It starts on for a reply or forward whose source is known internal-only. It is shown on and disabled when the surface knows the target thread is Private. The BFF (task 065) still floors it: it only ever raises the flag (Private, no-privacy or unreadable thread, reply or forward of an internal source), so a client that is wrong or silent cannot leak.
 
 ## Files changed
 
@@ -52,14 +52,14 @@ The Private lock is real only where the host already holds the thread's privacy 
 2. **EmailComposer used by an auto-send flow with no composing person:** none found.
    - `DocumentUploadWizard` `DocumentEmailStep.tsx` (`src/solutions`, not touched) embeds an inline `EmailComposer` and calls `composerRef.current.send()` from the wizard Finish guard; the user composes in a visible composer, so the switch is visible there. Not fired.
    - Word add-in Email tab (`EmailView` -> `SendEmailPane`) picks up the switch on its next build.
-   - `SendEmailDialog` / `useEmailComposeActions` (Console) and `CommunicationPage` do not pass `sourceIsInternalOnly`, so a reply there starts off. The BFF still raises it for a reply or forward of an internal source. See follow-ups.
+   - `SendEmailDialog` / `useEmailComposeActions` (Console) and `CommunicationPage` do not pass `sourceIsInternalOnly`, so a reply there starts off. The send omits `isInternalOnly` for an untouched reply or forward of an unknown source, so the BFF raises it (explicit false would win). See Fix round 1 and follow-ups.
    - `EmailStep/SendEmailStep` is a different, older component and was not changed.
 
 ## Decisions
 
 1. The label is exactly "Internal Only"; helper text exactly "Only people in your organization can see this" (owner wording 2026-10-14). The Conversation compose bar omits the helper text to keep the bar compact.
 2. One shared `InternalOnlySwitch` component, so the label, helper text and Private behaviour exist once.
-3. The client always sends an explicit boolean (`false` by default). `SendCommunicationOptions.isInternalOnly` stays optional so non-switch callers are unchanged and the BFF decides.
+3. The client sends an explicit boolean (`false` by default), except an untouched reply or forward of an unknown source, which omits the field so the BFF raises it (Fix round 1). `SendCommunicationOptions.isInternalOnly` stays optional so non-switch callers are unchanged and the BFF decides.
 4. Private is shown as on and disabled, and the send value is `threadIsPrivate || switch`, so it cannot be turned off in the UI. The BFF floor remains the authority.
 5. A compose (new) never starts on from `sourceIsInternalOnly`; only reply and forward do. A prefill only ever raises the switch.
 6. The switch is user-dirtying in `EmailComposer` (`SET_INTERNAL_ONLY` sets `isDirty`).
@@ -139,3 +139,33 @@ Verify after import: hard refresh (Ctrl+Shift+R); on a Message form and a thread
 1. Re-import the previous PCF versions: CommunicationActions 1.3.19, CommunicationMessageActions 1.0.5, CommunicationTimeline 1.0.4. Build the ZIPs from the previous commit's `Solution` folders (`git show HEAD:<path>` for the five version files plus the committed bundle, or check out the prior commit in a scratch worktree and run `pack.ps1`). A model-driven app only reloads a control on a version change, so import the old version as-is; if a PCF keeps showing new behaviour, `pac solution delete --solution-name <X>` and re-import.
 2. Restore the "Is Internal Only" column display name and Message form label (revert the two SpaarkeMaster XML files, or set the labels back live, and publish customizations).
 3. No BFF or data change is involved, so no data rollback is needed. Messages already sent keep their stored `sprk_isinternalonly` value.
+
+## Fix round 1 (review finding F1)
+
+**Defect.** `EmailComposer` always sent an explicit `isInternalOnly`. The BFF (`CommunicationService.cs:2286`, pinned by `DataverseRecordCreationTests.cs:701-703`) raises a reply or forward of an internal source to true ONLY when `request.IsInternalOnly` is null; an explicit `false` is the sender's choice and wins. So a reply or forward whose source flag the host did not pass (Console Reply/Forward card `useEmailComposeActions.tsx:241-242`, CommunicationPage `?mode=reply` `EmailComposerSlot.tsx:100-101`, CommunicationActions PCF null flag mapped by `=== true`) got the switch off, sent explicit false, and switched the server raise off. A partner could then see a reply that quotes an internal email. The earlier statements "the BFF still raises it" (in `communicationApi.ts`, `EmailComposer.types.ts` and these notes) were wrong for an explicit false.
+
+**Rule now.** Explicit false wins on the server. An untouched reply or forward (mode reply/forward with a `communicationId`, the same condition that sets `inheritRegardingFromCommunicationId`) of a source whose flag is unknown OMITS `isInternalOnly`, so the server raise applies. Anything else sends the explicit boolean. `threadIsPrivate === true` always sends `true`. The BFF is unchanged.
+
+**Acceptance criterion wording (task notes only; the POML is not edited).** Original: "sendCommunication sends isInternalOnly: true when the switch is on and isInternalOnly: false when it is off. It never omits the field from these surfaces." Now: "... It omits the field only for an untouched reply or forward of an unknown source, so the server raise applies; otherwise it is explicit."
+
+**Changes.**
+- `EmailComposer.types.ts`: `EmailComposerState` gains `internalOnlyTouched: boolean` and `sourceIsInternalOnly?: boolean`; the `sourceIsInternalOnly` prop doc and the state doc now state the real rule.
+- `EmailComposer.reducer.ts`: `initialState` seeds both; `SET_INTERNAL_ONLY` sets `internalOnlyTouched: true`; `RESET` (returns a fresh `initialState`) clears it; new `resolveIsInternalOnly()` and `mapStateToSendRequest` omit the key (no `isInternalOnly` property at all) for an untouched reply/forward of an unknown source with no Private thread.
+- `communicationApi.ts`: `SendCommunicationOptions.isInternalOnly` doc corrected (the field was already optional; no type change).
+- `CommunicationActionsApp.tsx`: the source flag is read three ways (true / false / undefined) through the new `sourceInternalOnly.ts` `readSourceIsInternalOnly()`; state starts `undefined`, so a null flag or a failed read is unknown and the field is omitted. New file justification: a pure helper the PCF jest suite can import without the React app (same pattern as `archiveFailure.ts`); without it a null flag is silently sent as explicit false.
+
+**Tests.** `EmailComposer.internalOnly.test.tsx` (now 19): untouched reply (with `communicationId`, no source flag) has NO `isInternalOnly` property; untouched forward likewise; reply toggled on, off, on sends true; toggled on then off sends explicit false; source known false sends false; source known true starts on and sends true (existing test); Private thread with an unknown source still sends true; reducer: `SET_INTERNAL_ONLY` marks touched and `RESET` clears it. PCF `sourceInternalOnly.test.ts` (4): true, false, null and non-boolean mapping (null gives undefined, so the field is omitted).
+
+**Seeding proof.** With the omission disabled (`resolveIsInternalOnly` never returning undefined) the EmailComposer file fails 3 of 19: "an untouched reply with a communicationId and no sourceIsInternalOnly sends NO isInternalOnly property", "an untouched forward of an unknown source also omits the field", "SET_INTERNAL_ONLY marks the switch touched and RESET clears it". Restored: 19 of 19 pass.
+
+**Results.** Shared lib jest (four 068 files, `--maxWorkers=2`): 4 suites, 62 tests pass. PCF jest: CommunicationActions 34 (30 + 4 new), CommunicationMessageActions 12, CommunicationTimeline 10, all pass. `tsc --noEmit` clean for `Spaarke.UI.Components` and `Spaarke.Communication.Components`. Rebuilt with `npm run build:prod`: CommunicationActions only (1.3.20, not deployed yet, so no version bump); its bundle was copied into `Solution/Controls/sprk_Spaarke.Controls.CommunicationActions/bundle.js`. CommunicationMessageActions and CommunicationTimeline were NOT rebuilt: their bundles do not contain `EmailComposer`/its reducer (`SET_INTERNAL_ONLY`, `emailComposerReducer` absent), and the `communicationApi.ts` change is comment-only.
+
+**AC7 test justifications (previously missing).**
+- ConversationView (2): the conversation compose bar builds its own `sendCommunication` call, so its default-off explicit false and its on-then-reset-after-send behaviour are not covered by the TimelineComposeBox or EmailComposer tests; without them a regression there would reach the BFF unseen.
+- communicationApi (2): `sendCommunication` is the single request shape every surface shares; one test pins that true and false are copied through, the other pins that a caller passing nothing leaves the key out (so the omit path added in this round reaches the BFF as a null, not as false).
+
+**Known limits (recorded, not fixed).**
+- K1: draft mode ignores the draft row's own flag (the switch starts from props only, off unless the host says otherwise).
+- K2: thread privacy is read once at form mount (a thread made Private while the form is open keeps the old lock state; the BFF floor still applies on send).
+- K2: the CommunicationTimeline PCF's own compose sends no `threadId` (`CommunicationTimeline.tsx:336-355`), so its client Private lock is the only Private guard on that path. That predates 068.
+- Hosts that do not pass `sourceIsInternalOnly` (Console Reply/Forward card, CommunicationPage `?mode=reply`) now rely on the omit path, which is correct; passing the flag there remains follow-up 3 so the switch can start on.

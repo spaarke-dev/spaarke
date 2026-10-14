@@ -152,10 +152,11 @@ export interface SendCommunicationOptions {
   inheritRegardingFromCommunicationId?: string;
   /**
    * "Internal Only" (owner 2026-10-14): `true` hides the sent communication from every non-systemuser caller
-   * (CIAM partners and workforce contacts alike). The compose surfaces (TimelineComposeBox, EmailComposer,
-   * the conversation chat bar) always send an explicit boolean. Omitted = the BFF decides (task 065: `false`,
-   * or `true` when the target thread is Private or the source of a reply/forward is internal). The BFF raises
-   * the value to `true` in those two cases even on an explicit `false`; it never lowers it.
+   * (CIAM partners and workforce contacts alike). The compose surfaces (TimelineComposeBox, ConversationView,
+   * EmailComposer) send an explicit boolean, except an untouched reply/forward of a source whose flag the host
+   * does not know, which omits it. Omitted = the BFF decides (task 065: `false`, or `true` when the source of a
+   * reply/forward is internal or unreadable). An explicit `false` is the sender's choice and WINS over that
+   * reply/forward raise; only a Private target thread still floors it to `true`.
    */
   isInternalOnly?: boolean;
   /** Send mode. Default `'sharedMailbox'`. */

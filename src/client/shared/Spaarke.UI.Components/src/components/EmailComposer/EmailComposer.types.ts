@@ -325,9 +325,14 @@ export interface EmailComposerState {
   /**
    * "Internal Only" switch (task 068). Starts `false`; starts `true` for a reply/forward whose source is known
    * internal-only (`sourceIsInternalOnly`) or when the target thread is known Private (`threadIsPrivate`).
-   * Always sent as an explicit boolean.
+   * Sent as an explicit boolean, except for an untouched reply/forward whose source flag is unknown (see
+   * `internalOnlyTouched`, `sourceIsInternalOnly`), where it is omitted so the BFF raises it.
    */
   isInternalOnly: boolean;
+  /** True once the user has toggled the switch (`SET_INTERNAL_ONLY`); `RESET` clears it. */
+  internalOnlyTouched: boolean;
+  /** The host-supplied `sourceIsInternalOnly`; `undefined` = the host does not know the source's flag. */
+  sourceIsInternalOnly?: boolean;
   isDirty: boolean;
   isSending: boolean;
   isSavingDraft: boolean;
@@ -420,8 +425,10 @@ export interface IEmailComposerProps {
   // — "Internal Only" (task 068; owner 2026-10-14) — both optional/additive —
   /**
    * The source communication of a reply/forward is known to be internal-only (`sprk_isinternalonly`): the
-   * "Internal Only" switch starts on. Ignored for compose/draft/view. Omitted = the switch starts off; the
-   * BFF still raises a reply/forward of an internal source to internal-only (task 065).
+   * "Internal Only" switch starts on. Ignored for compose/draft/view. Pass `false` when the source is known
+   * NOT internal. Omitted = the host does not know: the switch starts off, and while the user leaves it
+   * untouched the send OMITS `isInternalOnly` so the BFF raises an internal or unreadable source (task 065).
+   * An explicit `false` wins over that raise, which is why the field is omitted rather than sent as `false`.
    */
   sourceIsInternalOnly?: boolean;
   /**

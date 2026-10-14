@@ -65,7 +65,7 @@ describe('EmailComposer - Internal Only switch', () => {
     expect(screen.getByText('Only people in your organization can see this')).toBeInTheDocument();
   });
 
-  it('sends isInternalOnly: false when the switch is left off (the field is never omitted)', async () => {
+  it('a compose sends isInternalOnly: false when the switch is left off (an explicit false, never omitted)', async () => {
     const { ref, authenticatedFetch } = renderComposer();
     const body = await sentBody(ref, authenticatedFetch);
     expect(body).toHaveProperty('isInternalOnly', false);
@@ -99,6 +99,63 @@ describe('EmailComposer - Internal Only switch', () => {
   it('a reply whose source is NOT known internal starts off', () => {
     renderComposer({ mode: 'reply', communicationId: 'src-1' });
     expect(screen.getByRole('switch', { name: 'Internal Only' })).not.toBeChecked();
+  });
+
+  // Fix round 1 (F1): the BFF honours an explicit false over its reply/forward raise, so an untouched reply or
+  // forward of a source the host does not know must OMIT the field and let the server raise it.
+  it('an untouched reply with a communicationId and no sourceIsInternalOnly sends NO isInternalOnly property', async () => {
+    const { ref, authenticatedFetch } = renderComposer({ mode: 'reply', communicationId: 'src-1' });
+    const body = await sentBody(ref, authenticatedFetch);
+    expect(body).not.toHaveProperty('isInternalOnly');
+    expect(body).toHaveProperty('inheritRegardingFromCommunicationId', 'src-1');
+  });
+
+  it('the same reply after the user toggles off then on sends an explicit true', async () => {
+    const { ref, authenticatedFetch } = renderComposer({ mode: 'reply', communicationId: 'src-1' });
+    const toggle = screen.getByRole('switch', { name: 'Internal Only' });
+    fireEvent.click(toggle); // on
+    fireEvent.click(toggle); // off
+    fireEvent.click(toggle); // on
+    expect(toggle).toBeChecked();
+    const body = await sentBody(ref, authenticatedFetch);
+    expect(body).toHaveProperty('isInternalOnly', true);
+  });
+
+  it('the same reply after the user toggles on then off sends an explicit false (the sender chose it)', async () => {
+    const { ref, authenticatedFetch } = renderComposer({ mode: 'reply', communicationId: 'src-1' });
+    const toggle = screen.getByRole('switch', { name: 'Internal Only' });
+    fireEvent.click(toggle); // on
+    fireEvent.click(toggle); // off
+    expect(toggle).not.toBeChecked();
+    const body = await sentBody(ref, authenticatedFetch);
+    expect(body).toHaveProperty('isInternalOnly', false);
+  });
+
+  it('an untouched forward of an unknown source also omits the field', async () => {
+    const { ref, authenticatedFetch } = renderComposer({ mode: 'forward', communicationId: 'src-1' });
+    const body = await sentBody(ref, authenticatedFetch);
+    expect(body).not.toHaveProperty('isInternalOnly');
+  });
+
+  it('a reply whose source is known NOT internal sends an explicit false', async () => {
+    const { ref, authenticatedFetch } = renderComposer({
+      mode: 'reply',
+      communicationId: 'src-1',
+      sourceIsInternalOnly: false,
+    });
+    expect(screen.getByRole('switch', { name: 'Internal Only' })).not.toBeChecked();
+    const body = await sentBody(ref, authenticatedFetch);
+    expect(body).toHaveProperty('isInternalOnly', false);
+  });
+
+  it('an untouched reply on a Private thread still sends true even when the source is unknown', async () => {
+    const { ref, authenticatedFetch } = renderComposer({
+      mode: 'reply',
+      communicationId: 'src-1',
+      threadIsPrivate: true,
+    });
+    const body = await sentBody(ref, authenticatedFetch);
+    expect(body).toHaveProperty('isInternalOnly', true);
   });
 
   it('a host that knows the thread is Private gets the switch on and disabled, and send carries true', async () => {
@@ -160,7 +217,20 @@ describe('Internal Only - reducer and request mapping', () => {
     expect(initialInternalOnly({ mode: 'compose', threadIsPrivate: true })).toBe(true);
   });
 
-  it('SET_INTERNAL_ONLY changes the state and mapStateToSendRequest always carries an explicit boolean', () => {
+  it('SET_INTERNAL_ONLY marks the switch touched and RESET clears it', () => {
+    const props = { ...base, mode: 'reply', communicationId: 'src-1' } as IEmailComposerProps;
+    const start = initialState(props);
+    expect(start.internalOnlyTouched).toBe(false);
+    const touched = emailComposerReducer(start, { type: 'SET_INTERNAL_ONLY', value: false });
+    expect(touched.internalOnlyTouched).toBe(true);
+    expect(mapStateToSendRequest(start)).not.toHaveProperty('isInternalOnly');
+    expect(mapStateToSendRequest(touched)).toHaveProperty('isInternalOnly', false);
+    const reset = emailComposerReducer(touched, { type: 'RESET', state: initialState(props) });
+    expect(reset.internalOnlyTouched).toBe(false);
+    expect(mapStateToSendRequest(reset)).not.toHaveProperty('isInternalOnly');
+  });
+
+  it('SET_INTERNAL_ONLY changes the state and a compose request carries an explicit boolean', () => {
     const start = initialState({ ...base, mode: 'compose' } as IEmailComposerProps);
     expect(mapStateToSendRequest(start).isInternalOnly).toBe(false);
     const on = emailComposerReducer(start, { type: 'SET_INTERNAL_ONLY', value: true });

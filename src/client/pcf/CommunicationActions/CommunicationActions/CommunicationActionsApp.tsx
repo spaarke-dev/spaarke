@@ -56,6 +56,7 @@ import {
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
 import { archiveFailureMessage } from './archiveFailure';
+import { readSourceIsInternalOnly } from './sourceInternalOnly';
 // Task 022: the Layer-1 action-bar / composer-prefill / suggested-create logic now
 // lives in `@spaarke/communication-components` — the local `./composerPrefill`,
 // `./attachmentsSource`, and `./launchCreate` copies are deleted
@@ -272,7 +273,9 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   const [prefill, setPrefill] = React.useState<IRecordPrefill | null>(null);
   // The source communication's `sprk_isinternalonly` - read by the SAME record retrieve as the pre-fill below (no
   // extra read). A reply / reply all / forward of an internal-only email starts with "Internal Only" on (task 068).
-  const [sourceIsInternalOnly, setSourceIsInternalOnly] = React.useState(false);
+  // Three-way: true / false / undefined (unknown: null flag or the read failed), so an unknown source is raised by
+  // the BFF instead of being sent as an explicit false.
+  const [sourceIsInternalOnly, setSourceIsInternalOnly] = React.useState<boolean | undefined>(undefined);
   // Source-communication attachment documents, offered for inclusion on reply/forward
   // (task 104). Enumerated once from the record via the shared attachment data model.
   const [sourceAttachments, setSourceAttachments] = React.useState<IAttachmentItem[]>([]);
@@ -342,7 +345,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           body: (rec.sprk_body as string) ?? '',
           sent: (recAny['createdon@OData.Community.Display.V1.FormattedValue'] as string) ?? '',
         });
-        setSourceIsInternalOnly(recAny['sprk_isinternalonly'] === true);
+        setSourceIsInternalOnly(readSourceIsInternalOnly(recAny['sprk_isinternalonly']));
         // Inherit the parent's filed regarding associations (owner UAT 2026-07-24) — read each
         // populated denormalized lookup + its formatted name/logical-name annotations.
         const base = resolveDataverseUrl();
@@ -551,7 +554,8 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       // '+ New' (compose) starts with none.
       associations: composerMode === 'compose' ? undefined : parentAssociations,
       // Reply / Reply All / Forward of an internal-only email start with "Internal Only" on (task 068); '+ New'
-      // (compose) is a fresh message and starts off. The BFF raises the same cases regardless (task 065).
+      // (compose) is a fresh message and starts off. An unknown source flag is left undefined: the composer then omits the
+      // field on an untouched reply/forward and the BFF raises it (task 065); an explicit false would win over that.
       sourceIsInternalOnly: composerMode === 'compose' ? undefined : sourceIsInternalOnly,
       initialAttachments: carryAttachments && carryAttachments.length > 0 ? carryAttachments : undefined,
       onSent: () => {
