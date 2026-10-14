@@ -226,6 +226,7 @@ Contract: `git show origin/work/unified-access-control-r2:projects/unified-acces
 | 🔲 [open] 146 | [Live gate: contract §5, 11 items](146-child-contract-live-gate.poml) | FULL | sonnet/high | 140–145 | CC6 | After the BFF with 141–145 is on dev and the DR metadata cache key has expired · **[uac]** |
 | ✅ [done] 147 | [Budget revision records its requester (`sprk_createdbyperson`); drop 182's exemption](147-budgetrevision-creator-person.poml) | FULL | sonnet/high | #1780 merged | CC2 | **D-135** (Q27; #1777). Column created on dev by the owner · **[uac]** |
 | ✅ [done] 148 | [Follow the assignee: `TodoAssigneeOwnerReconciliationJob`](148-todo-assignee-owner-reconciler.poml) | FULL | **opus**/high | 142, 143, #1665, UAC `ReownOrdinaryRowAsync` | CC5 | **D-135** item 2. Shape approved by uac-r2 (F1 live filing, F2 nightly recompute, F3 re-owns via UAC's entry point). Report-only by default · **[uac]** · **Done** 2026-10-14: [#1858](https://github.com/spaarke-dev/spaarke/pull/1858) merged `d4adb1b57` (uac-r2 CLEAN at `159f069e4`); writes OFF until a report-only dev run is reviewed (D-138 delegates enabling) |
+| 🔲 [open] 149 | [Gate Decision Records: one per decision, written by an ADR-004 queue job](149-gate-decision-record-queue-idempotent.poml) | FULL | sonnet/xhigh | 042 (#1878) | CC6 | **D-139** (owner 2026-10-14, from uac-r2 review of 042 K2/K4). Idempotent on (communication, outcome); the gate never waits on the write · **[uac]** |
 
 ### Phase 5 — The worklist surface
 
