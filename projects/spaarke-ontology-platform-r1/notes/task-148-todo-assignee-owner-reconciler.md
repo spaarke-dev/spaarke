@@ -102,6 +102,23 @@ Every new or changed test fails against the pre-fix job (7 of 26) and passes aft
   - a 403 for a reason other than a missing role is also held 24 h, but it is still visible (partial plus ErrorMessage);
   - a standing data refusal (`ParentUnresolved`, a permanent core) shows only as a count and a warning, per B2's closed list.
 
+### uac-r2 review of #1858 at `20e6a0bcf` (clean, no F); two known limits fixed before merge
+
+Both affect the report-only output the owner will use to decide on writes.
+
+- **uac-r2 K1.** The Secure guard recognised only the one named Secure owner team, so a row owned by a per-family team in the
+  Secure BU showed in `sampleStale` as a would-be re-own that `ReownOrdinaryRowAsync` would refuse. **Fixed:**
+  `IsOwnedInSecureBusinessUnitAsync` applies the reconciler's own guard before a row is listed stale. The row's
+  `owningbusinessunit`, or its owning team's business unit, equal to the Secure BU skips it. The Secure BU is identified by
+  reusing `SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync`, the reconciler's identification. An ambiguous Secure BU
+  leaves the row not decided. The named-team check stays. Test: `SecureBusinessUnitTeamRow_IsSkipped_NotListedStale`.
+- **uac-r2 K4.** A non-configuration refusal of the assignee's team (including an assignee in the Secure BU) counted
+  `skippedRefused` on an `ok` run. **Fixed:** `assigneeTeamRefusals` makes the run partial, with a reason in `ErrorMessage`. Test:
+  `AssigneeTeamRefused_RunIsPartial_WithAReason`.
+- Both tests fail against `20e6a0bcf` and pass after (32/32). The related suites pass 2072/2072, and the BFF builds with 0 warnings.
+- Left as known limits, per uac-r2: their K2 (the per-instance watermark and carried set, B3 below) and their K3 (the census regex
+  misses method-group calls, A10 below).
+
 ### Known limits (recorded, not fixed)
 
 - **K1 — load (A8, B4).** One table failing its scan keeps the full pass due all day, and a table without a cursor is rescanned
@@ -156,8 +173,8 @@ job's single call site follows it.
 
 ## Verification
 
-- New tests: `tests/integration/data-mutation/Signals/TodoAssigneeOwnerReconciliationJobTests.cs`, **30/30 pass** (22 first
-  round, plus the fix round and the re-check). The real resolver, reconciler and `CoreAncestorResolver` run over
+- New tests: `tests/integration/data-mutation/Signals/TodoAssigneeOwnerReconciliationJobTests.cs`, **32/32 pass** (22 first
+  round, plus the fix round, the re-check and uac-r2's K1/K4). The real resolver, reconciler and `CoreAncestorResolver` run over
   `SecureChildShareWorld`.
 - Fix round: the 7 new or changed tests fail against the pre-fix job (`e43fa8201`) and pass after.
 - Mutation proofs, re-run on the fixed job, each restored afterwards:

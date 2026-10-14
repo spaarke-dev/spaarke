@@ -210,7 +210,7 @@ public class TodoAssigneeOwnerReconciliationJobTests
     [Theory(DisplayName = "148: a secure parent, a Secure-team owner, or a UAC Secure refusal — never written, SkippedSecure")]
     [InlineData("secure-parent")]                 // mutation target: the secure-wins guard (Expected → IsSecureOwner)
     [InlineData("secure-owned")]
-    [InlineData("refused-by-reown")]              // a per-family team in the Secure BU: only UAC's guard knows it
+    [InlineData("refused-by-reown")]              // a per-family team in the Secure BU (the job's guard, as UAC's)
     [InlineData("record-resolved-secure-signal")] // the DR's resolved Signal sits under a secure matter (uac-r2 F1)
     [InlineData("secure-parent-non-core")]        // the same guards for a To Do filed under a non-core record (D-135 K2)
     [InlineData("secure-owned-non-core")]
@@ -243,6 +243,40 @@ public class TodoAssigneeOwnerReconciliationJobTests
         Result(run).GetProperty("reowned").GetInt32().Should().Be(0);
         _world.OwnerOf(table, id).Should().Be(DataversePrincipalRef.Team(owner));
         _webApi.ConditionalWrites.Should().BeEmpty("nothing secure is ever written");
+    }
+
+    [Fact(DisplayName = "148 (uac-r2 K1): a row owned by a per-family team in the Secure BU — report-only does not list it as a would-be re-own")]
+    public async Task SecureBusinessUnitTeamRow_IsSkipped_NotListedStale()
+    {
+        PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
+        LinkAssignee(Eligible(Assignee));
+        var signal = Row("sprk_signal", SecureFamilyTeam); // not the named Secure owner team; its business unit is the Secure one
+
+        var run = await Job(writes: null).ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        Result(run).GetProperty("skippedSecure").GetInt32().Should().Be(1);
+        Result(run).GetProperty("stale").GetInt32().Should().Be(0, "ReownOrdinaryRowAsync would refuse it (RefusedSecure)");
+        Result(run).GetProperty("sampleStale").GetArrayLength().Should().Be(0);
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(SecureFamilyTeam));
+    }
+
+    [Fact(DisplayName = "148 (uac-r2 K4): the assignee's business-unit team is refused (assignee in the Secure BU) — not written, run partial with a reason")]
+    public async Task AssigneeTeamRefused_RunIsPartial_WithAReason()
+    {
+        PersonalToDo(modified: BeforeNightly.AddMinutes(-1));
+        LinkAssignee(Eligible(Assignee));
+        _world.Set("systemuser", Assignee, "businessunitid", new EntityReference("businessunit", SecureChildShareWorld.SecureBu));
+        var signal = Row("sprk_signal", GeneralTeam);
+
+        var run = await Job(writes: "true").ExecuteAsync(Context(), CancellationToken.None);
+
+        Result(run).GetProperty("assigneeTeamRefusals").GetInt32().Should().Be(1);
+        Result(run).GetProperty("skippedRefused").GetInt32().Should().Be(1);
+        Result(run).GetProperty("status").GetString().Should().Be(TodoAssigneeOwnerReconciliationJob.StatusPartial);
+        run.ErrorMessage.Should().Contain("assignee's business-unit team was refused");
+        _world.OwnerOf("sprk_signal", signal).Should().Be(DataversePrincipalRef.Team(GeneralTeam));
+        _webApi.ConditionalWrites.Should().BeEmpty();
     }
 
     [Theory(DisplayName = "148: the ownership resolver refuses the row's parents — never written, SkippedRefused; a configuration refusal makes the run partial")]

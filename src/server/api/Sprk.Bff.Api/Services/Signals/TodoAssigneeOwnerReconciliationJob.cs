@@ -105,6 +105,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
     private const string ModifiedOnColumn = "modifiedon";
     private const string OwningTeamColumn = "owningteam";
     private const string OwningUserColumn = "owninguser";
+    private const string OwningBusinessUnitColumn = "owningbusinessunit";
     private const string SignalDecisionRecordColumn = "sprk_decisionrecord";
 
     /// <summary>How many would-be / done re-owns <see cref="JobRunResult.ResultJson"/> lists; every one is in the log.</summary>
@@ -279,7 +280,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         else if (status == StatusOk
                  && (counts.RepairFailures > 0 || counts.Unverified > 0 || counts.Truncated || counts.Resumed
                      || counts.ClaimHeld > 0 || counts.AccessDenied > 0 || counts.AccessDeniedHeld > 0
-                     || counts.ConfigurationRefusals > 0))
+                     || counts.ConfigurationRefusals > 0 || counts.AssigneeTeamRefusals > 0))
         {
             // A run that did not decide every row, or did not settle every re-own it attempted, is never reported clean.
             // Conflict and Gone are not here: nothing was owed (the row changed or went), and a Conflict is carried.
@@ -293,7 +294,9 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
                 $"Partial: {counts.Unverified} row(s) not decided, {counts.RepairFailures} re-own(s) failed, "
                 + $"{counts.AccessDenied + counts.AccessDeniedHeld} refused or held for a missing privilege, "
                 + $"{counts.ClaimHeld} claimed by another run, {counts.ConfigurationRefusals} refused by configuration "
-                + $"(Secure Record unit or team, or a unit's default team); not-decided To Dos are carried to the next run."));
+                + $"(Secure Record unit or team, or a unit's default team), {counts.AssigneeTeamRefusals} not moved because the "
+                + $"assignee's business-unit team was refused (no single default team, or the Secure Record unit); not-decided "
+                + $"To Dos are carried to the next run."));
         }
 
         var duration = _timeProvider.GetElapsedTime(started);
@@ -304,14 +307,14 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
             "{Prefix} heartbeat status={Status} mode={Mode} attempt={Attempt} fullPass={FullPass} recentToDos={RecentToDos} "
             + "carriedToDos={CarriedToDos} scanned={Scanned} stale={Stale} reowned={Reowned} alreadyApplied={AlreadyApplied} "
             + "skippedCored={SkippedCored} filedNonCore={FiledNonCore} skippedSecure={SkippedSecure} "
-            + "skippedRefused={SkippedRefused} configurationRefusals={ConfigurationRefusals} skippedUserOwned={SkippedUserOwned} skippedGone={SkippedGone} "
+            + "skippedRefused={SkippedRefused} configurationRefusals={ConfigurationRefusals} assigneeTeamRefusals={AssigneeTeamRefusals} skippedUserOwned={SkippedUserOwned} skippedGone={SkippedGone} "
             + "skippedConflict={SkippedConflict} fallbackNoAssignee={FallbackNoAssignee} fallbackAmbiguous={FallbackAmbiguous} "
             + "fallbackDisabled={FallbackDisabled} accessDenied={AccessDenied} accessDeniedHeld={AccessDeniedHeld} "
             + "claimHeld={ClaimHeld} repairFailures={RepairFailures} unverified={Unverified} scanFailures={ScanFailures} "
             + "truncated={Truncated} resumed={Resumed} durationMs={DurationMs} trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             LogPrefix, status, mode, context.Attempt, counts.FullPass, counts.RecentToDos, counts.CarriedToDos, counts.Scanned,
             counts.Stale, counts.Reowned, counts.AlreadyApplied, counts.SkippedCored, counts.FiledNonCore,
-            counts.SkippedSecure, counts.SkippedRefused, counts.ConfigurationRefusals, counts.SkippedUserOwned, counts.SkippedGone, counts.SkippedConflict,
+            counts.SkippedSecure, counts.SkippedRefused, counts.ConfigurationRefusals, counts.AssigneeTeamRefusals, counts.SkippedUserOwned, counts.SkippedGone, counts.SkippedConflict,
             counts.FallbackNoAssignee, counts.FallbackAmbiguous, counts.FallbackDisabled, counts.AccessDenied,
             counts.AccessDeniedHeld, counts.ClaimHeld, counts.RepairFailures, counts.Unverified, counts.ScanFailures,
             counts.Truncated, counts.Resumed, (long)duration.TotalMilliseconds, context.Trigger, context.RunId,
@@ -341,6 +344,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
                     counts.SkippedSecure,
                     counts.SkippedRefused,
                     counts.ConfigurationRefusals,
+                    counts.AssigneeTeamRefusals,
                     counts.SkippedUserOwned,
                     counts.SkippedGone,
                     counts.SkippedConflict,
@@ -548,7 +552,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
     {
         var query = new QueryExpression(table)
         {
-            ColumnSet = new ColumnSet(new[] { table + "id", RegardingTodoColumn, OwningTeamColumn, OwningUserColumn }
+            ColumnSet = new ColumnSet(new[] { table + "id", RegardingTodoColumn, OwningTeamColumn, OwningUserColumn, OwningBusinessUnitColumn }
                 .Concat(host.Parents).Concat(host.Stamps).Distinct(StringComparer.Ordinal).ToArray()),
             NoLock = true,
         };
@@ -728,7 +732,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
                 return null;
             }
 
-            if (await IsSecureTeamAsync(run, owning.Id, ct).ConfigureAwait(false))
+            if (await IsOwnedInSecureBusinessUnitAsync(run, row, owning.Id, ct).ConfigureAwait(false))
             {
                 counts.SkippedSecure++;
                 return null;
@@ -795,7 +799,11 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         if (todo.AssigneeTeam is { IsOwned: true, IsSecureOwner: false } team)
             return team.OwningTeamId;
 
+        // The assignee's own business-unit team cannot be used (no single default team, a unit the resolver refuses, or an
+        // assignee in the Secure Record unit): the To Do's rows cannot follow its assignee, which is this job's whole point, so
+        // the run is partial and says so (uac-r2 K4), never a clean "nothing to do".
         run.Counts.SkippedRefused++;
+        run.Counts.AssigneeTeamRefusals++;
         if (IsConfigurationRefusal(todo.AssigneeTeam?.RefusalCode))
             run.Counts.ConfigurationRefusals++;
         _logger.LogWarning("{Prefix} {Table} {Id}: the business-unit team of the assignee {UserId} was refused ({Code}: {Reason}); "
@@ -828,6 +836,48 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         }
 
         return answer;
+    }
+
+    /// <summary>
+    /// uac-r2's Secure guard (<see cref="SecureChildReconciler.ReownOrdinaryRowAsync"/>: "never OUT of the Secure Record business
+    /// unit"), asked BEFORE a row is listed stale, so report-only never lists a re-own the reconciler would refuse: the row's
+    /// own business unit, or its owning team's, is the Secure Record unit (ANY team there, a per-family team included, not
+    /// only the named owner team), with the unit identified exactly as the reconciler identifies it
+    /// (<see cref="SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync"/>). The named owner team is also checked, as
+    /// before. More than one unit carrying the Secure Record name, or a fault, throws: the row is not decided.
+    /// </summary>
+    private async Task<bool> IsOwnedInSecureBusinessUnitAsync(Run run, Entity row, Guid owningTeamId, CancellationToken ct)
+    {
+        if (!run.SecureBuRead)
+        {
+            var bu = await SecureChildShareSynchronizer.ResolveSecureBusinessUnitAsync(run.Entities, _configuration, ct)
+                .ConfigureAwait(false);
+            if (bu.Ambiguous)
+                throw new InvalidOperationException("more than one business unit carries the Secure Record name, so whether the row is "
+                    + "owned in it cannot be told");
+            run.SecureBu = bu.Id;
+            run.SecureBuRead = true;
+        }
+
+        if (run.SecureBu is { } secureBu)
+        {
+            if (row.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id == secureBu)
+                return true;
+
+            if (!run.TeamUnits.TryGetValue(owningTeamId, out var teamBu))
+            {
+                var query = new QueryExpression("team") { ColumnSet = new ColumnSet("businessunitid"), TopCount = 1, NoLock = true };
+                query.Criteria.AddCondition("teamid", ConditionOperator.Equal, owningTeamId);
+                teamBu = (await run.Entities.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault()
+                    ?.GetAttributeValue<EntityReference>("businessunitid")?.Id;
+                run.TeamUnits[owningTeamId] = teamBu;
+            }
+
+            if (teamBu == secureBu)
+                return true;
+        }
+
+        return await IsSecureTeamAsync(run, owningTeamId, ct).ConfigureAwait(false);
     }
 
     /// <summary>Whether a team is the Secure Record owner team, once per team per run. A fault propagates (not decided).</summary>
@@ -1141,6 +1191,11 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         public Dictionary<Guid, RecordOwnerResolution> UserTeams { get; } = [];
         public Dictionary<string, RecordOwnerResolution> ParentAnswers { get; } = new(StringComparer.Ordinal);
         public Dictionary<Guid, bool> SecureTeams { get; } = [];
+        public Dictionary<Guid, Guid?> TeamUnits { get; } = [];
+
+        /// <summary>The Secure Record business unit, read once per run (<see cref="SecureBuRead"/>), as the reconciler reads it.</summary>
+        public Guid? SecureBu { get; set; }
+        public bool SecureBuRead { get; set; }
 
         /// <summary>To Dos with work this run could not settle: carried to the next run.</summary>
         public HashSet<Guid> Unsettled { get; } = [];
@@ -1220,6 +1275,7 @@ public sealed class TodoAssigneeOwnerReconciliationJob : IScheduledJob
         public int SkippedSecure;
         public int SkippedRefused;
         public int ConfigurationRefusals;
+        public int AssigneeTeamRefusals;
         public int SkippedUserOwned;
         public int SkippedGone;
         public int SkippedConflict;

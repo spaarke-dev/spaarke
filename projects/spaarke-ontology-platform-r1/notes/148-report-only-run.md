@@ -13,7 +13,7 @@ Status 2026-10-14: **pending, not run.**
    Without it, the first run at or after 02:00 UTC takes the nightly pass.
 3. Read the run's `ResultJson` (and the `[TODO-ASSIGNEE-OWNER]` heartbeat line). Record here:
    - `status`, `fullPass`, `scanned`, `stale`;
-   - the skip counters (`skippedCored`, `skippedSecure`, `skippedRefused`, `configurationRefusals`, `skippedUserOwned`);
+   - the skip counters (`skippedCored`, `skippedSecure`, `skippedRefused`, `configurationRefusals`, `assigneeTeamRefusals`, `skippedUserOwned`);
    - the own-team counters (`fallbackNoAssignee`, `fallbackAmbiguous`, `fallbackDisabled`, `filedNonCore`);
    - the read count against the shared identity (review K1: a full pass costs about 2-6 reads per distinct To Do);
    - `unverified`, `scanFailures`, `truncated`;
