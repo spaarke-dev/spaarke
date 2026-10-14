@@ -85,7 +85,7 @@
 
   <notes>spec.md FR-63; D-29.</notes>
 
-  <completion>COMPLETED 2026-10-09: PR #1525 merged into docs/ontology-platform-design (ee9617058) after independent review (approved, no F-class). One shared function computeTodoScoreBreakdown/todoUrgencyRaw in Spaarke.UI.Components/src/utils/dateLocal.ts on calendar days (daysBetweenLocalMidnight + dueUrgencyForDays); five old copies removed or delegated; New_York DST tests (9/12 fail on the old math). Deviation: placed in ui-components (TodoDetail cannot import SmartTodo.Components); kanbanParity test left unchanged (covered by the new NY test). Built bundles carry the old math until redeployed. D-106 items: F-30..F-32, F-40.</completion>
+  <completion>COMPLETED 2026-10-09: PR #1525 merged into docs/ontology-platform-design (ee9617058) after independent review (approved, no F-class). One shared function computeTodoScoreBreakdown/todoUrgencyRaw in Spaarke.UI.Components/src/utils/dateLocal.ts on calendar days (daysBetweenLocalMidnight + dueUrgencyForDays); five old copies removed or delegated; New_York DST tests (9/12 fail on the old math). Deviation: placed in ui-components (TodoDetail cannot import SmartTodo.Components); kanbanParity test left unchanged (covered by the new NY test). Built bundles carry the old math until redeployed. D-106 items: DI-30..DI-32, DI-40.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

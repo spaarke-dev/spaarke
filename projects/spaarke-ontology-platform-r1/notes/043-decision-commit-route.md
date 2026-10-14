@@ -157,7 +157,7 @@ A failure before step 5 writes no record and changes no Signal. The result lists
 - **K3: the durable lookup has not run against Dataverse.** `sprk_steps LIKE %"reviewId":"<id>"%` on a memo column is pinned only against the writer's serialized text in unit tests.
 - **A crash during a resume.** The resumed failure lives in the 10-minute in-progress marker; if the process dies mid-resume and the marker expires, the failure is forgotten and a later retry runs from the start (the durable record lookup still prevents a second record).
 - **Also resolve is capped at 25 items**; a longer list is `review_invalid`.
-- **A decision-created work assignment has the business-unit search-index cascade issue F-60 (#1607).** This is the same as the wizard and already filed.
+- **A decision-created work assignment has the business-unit search-index cascade issue DI-60 (#1607).** This is the same as the wizard and already filed.
 
 ## Tests and why each exists
 

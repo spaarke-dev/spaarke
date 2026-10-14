@@ -118,7 +118,7 @@
 
   <notes>spec.md FR-29. design.md section 5.1 and decision 29. Amended 2026-10-07 per reconciliation B.2 row 054, W-11, and #18/#36.</notes>
 
-  <completion>COMPLETED 2026-10-09: PR #1531 merged into docs/ontology-platform-design (4245e605f) after independent review + 2 rounds. Reconciliation tab + aggregate item; count from the Needs Review grid config; placement moved to 059, misresolution to 034. Documented, not fixed (D-106): F-45.</completion>
+  <completion>COMPLETED 2026-10-09: PR #1531 merged into docs/ontology-platform-design (4245e605f) after independent review + 2 rounds. Reconciliation tab + aggregate item; count from the Needs Review grid config; placement moved to 059, misresolution to 034. Documented, not fixed (D-106): DI-45.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

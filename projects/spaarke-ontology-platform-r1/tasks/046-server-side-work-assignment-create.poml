@@ -104,7 +104,7 @@
 
   <notes>spec.md FR-53, NFR-10; D-21.</notes>
 
-  <completion>COMPLETED 2026-10-11: PR #1609 merged into docs/ontology-platform-design as 4c1490340 after independent review (two passes, security-tagged), fix rounds, re-checks and uac-r2 approval. Work assignments are created server-side through the child-record route and uac-r2's OwnedChildWrite core (D-65); no route-local pair rule. Re-asserted to uac-r2 #1628/#1643 on 2026-10-11 (a typed pair counts only when the typed lookup repeats it; an untyped invoice/event pair files under that lookup); uac-r2 confirmed the expectations. Deferred (D-106): F-60 (#1607), F-61 (#1608).</completion>
+  <completion>COMPLETED 2026-10-11: PR #1609 merged into docs/ontology-platform-design as 4c1490340 after independent review (two passes, security-tagged), fix rounds, re-checks and uac-r2 approval. Work assignments are created server-side through the child-record route and uac-r2's OwnedChildWrite core (D-65); no route-local pair rule. Re-asserted to uac-r2 #1628/#1643 on 2026-10-11 (a typed pair counts only when the typed lookup repeats it; an untyped invoice/event pair files under that lookup); uac-r2 confirmed the expectations. Deferred (D-106): DI-60 (#1607), DI-61 (#1608).</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -115,14 +115,14 @@ both (243 s).
 
 ## F. Found, not fixed (D-106 — document only)
 
-1. ([#1607](https://github.com/spaarke-dev/spaarke/issues/1607), F-60) **Ordinary users cannot create a work assignment through today's wizard when their BU names an AI search index**:
+1. ([#1607](https://github.com/spaarke-dev/spaarke/issues/1607), DI-60) **Ordinary users cannot create a work assignment through today's wizard when their BU names an AI search index**:
    Spaarke Basic User + Core User hold Read but not AppendTo on `sprk_aisearchindex`; the wizard always binds
    `sprk_AI_Search_Index` from the user's BU (live 403 above). The same bind is in the Matter / Project / Event / Invoice
    wizards (`EntityCreationService` cascade). Fix = a role privilege (AppendTo on `sprk_aisearchindex`) — a role change
    for the owner/uac-r2, not made here.
-2. ([#1608](https://github.com/spaarke-dev/spaarke/issues/1608), F-61) The G5 core answers a missing **privilege** on a user-owned lookup target (here AppendTo on the AI index) with the
+2. ([#1608](https://github.com/spaarke-dev/spaarke/issues/1608), DI-61) The G5 core answers a missing **privilege** on a user-owned lookup target (here AppendTo on the AI index) with the
    uniform "A record … was not found" 404 — misleading for that case (uac-r2's core; related to task 126's rule).
-3. ([#1608](https://github.com/spaarke-dev/spaarke/issues/1608), F-61) `OwnedChildWrite.ServerOwnedColumns` does not protect a root's `sprk_containerid` / `sprk_securitybu`, so the chat
+3. ([#1608](https://github.com/spaarke-dev/spaarke/issues/1608), DI-61) `OwnedChildWrite.ServerOwnedColumns` does not protect a root's `sprk_containerid` / `sprk_securitybu`, so the chat
    `dataverse.create_record` tool can still carry a caller-chosen container on a work-assignment or project create (the
    route now refuses them; the chat tool does not). uac-r2's core.
 4. The opt-in live harness cannot authorise the inline Assigned-To step's secure-flag read
