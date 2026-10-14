@@ -1209,11 +1209,12 @@ public class SignalWriterTests
     private static readonly Guid AssigneeUserId = Guid.Parse("55555555-0000-4000-8000-0000000000a1");
     private static readonly Guid AssigneeTeamId = Guid.Parse("55555555-0000-4000-8000-0000000000b1");
 
-    private static FakeSysadminClient PersonalTodo(Guid? assignedTo = null, bool filedUnderMatter = false)
+    private static FakeSysadminClient PersonalTodo(Guid? assignedTo = null, bool filedUnderMatter = false, bool alsoFiledUnderProject = false)
     {
         var todo = new Entity("sprk_todo", TodoId) { ["ownerid"] = new EntityReference("systemuser", TodoOwnerUserId) };
         if (assignedTo is { } contact) todo["sprk_assignedto"] = new EntityReference("contact", contact);
         if (filedUnderMatter) todo["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId);
+        if (alsoFiledUnderProject) todo["sprk_regardingproject"] = new EntityReference("sprk_project", ProjectId);
         return new FakeSysadminClient().WithMatterBusinessUnit(MatterId, BusinessUnitId).Stub(todo);
     }
 
@@ -1526,6 +1527,8 @@ public class SignalWriterTests
     public static TheoryData<string> OwnerParityShapes() => new()
     {
         "one-assignee", "no-assigned-to", "filed-under-matter", "assignee-unit-has-no-team",
+        // K2 (task 143 follow-up): the two secure shapes. A secure answer wins over every ordinary one and over the assignee.
+        "ordinary-core-secure-stamp-parent", "secure-todo",
     };
 
     [Theory]
@@ -1535,7 +1538,9 @@ public class SignalWriterTests
         // Review F3 (criterion "the Signal and its DR agree"): ONE world, uac-r2's REAL resolver, BOTH writers. The Decision
         // Record's assignee is read as DecisionCommitService reads it (PersonalToDoAssignee, only when the review has no core).
         // The To Do sits in the child unit, its Assigned To user in the general unit, a filed To Do's matter in the child unit.
-        var filed = shape == "filed-under-matter";
+        var secureStamp = shape == "ordinary-core-secure-stamp-parent"; // filed under an ordinary matter (the core) AND a secure project (a stamp)
+        var secureTodo = shape == "secure-todo";                        // the To Do itself is owned in the Secure Record BU; it has no core
+        var filed = shape == "filed-under-matter" || secureStamp;
         var lonelyBu = Guid.Parse("55555555-0000-4000-8000-0000000000e1");
         var directory = TestInfrastructure.OwnershipDirectory.Standard()
             .WithOrdinaryRoot("sprk_matter", MatterId)
@@ -1543,10 +1548,19 @@ public class SignalWriterTests
             .WithUser(AssigneeUserId, Guid.NewGuid(),
                 shape == "assignee-unit-has-no-team" ? lonelyBu : TestInfrastructure.OwnershipDirectory.GeneralBu)
             .WithRecord("sprk_todo", TodoId,
-                filed ? TestInfrastructure.OwnershipDirectory.GeneralBu : TestInfrastructure.OwnershipDirectory.ChildBu,
+                secureTodo ? TestInfrastructure.OwnershipDirectory.SecureBu
+                    : filed ? TestInfrastructure.OwnershipDirectory.GeneralBu : TestInfrastructure.OwnershipDirectory.ChildBu,
+                owningTeam: secureTodo ? TestInfrastructure.OwnershipDirectory.SecureNamedTeam : null,
+                // The secure project is deliberately NOT a lookup on the directory's row: it reaches both writers only as a core-ancestor stamp
+                // (read from the To Do by CoreAncestorResolver), so dropping the stamp parents from a writer's question changes its answer.
                 extra: filed ? new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) } : null);
+        if (secureStamp)
+        {
+            directory.WithSecureRoot("sprk_project", ProjectId);
+        }
+
         var resolver = directory.Resolver();
-        var sysadmin = PersonalTodo(shape == "no-assigned-to" ? null : AssigneeContactId, filedUnderMatter: filed);
+        var sysadmin = PersonalTodo(shape == "no-assigned-to" ? null : AssigneeContactId, filedUnderMatter: filed, alsoFiledUnderProject: secureStamp);
         var links = LinkedAssignee();
 
         var writerOrg = new FakeOrganizationService
@@ -1555,6 +1569,7 @@ public class SignalWriterTests
             {
                 [TestInfrastructure.OwnershipDirectory.GeneralTeam] = TestInfrastructure.OwnershipDirectory.GeneralBu,
                 [TestInfrastructure.OwnershipDirectory.ChildTeam] = TestInfrastructure.OwnershipDirectory.ChildBu,
+                [TestInfrastructure.OwnershipDirectory.SecureNamedTeam] = TestInfrastructure.OwnershipDirectory.SecureBu,
             },
         };
         var signal = await Build(writerOrg, sysadmin, new FakeTimeProvider(FirstRun), ownership: resolver, links: links)
@@ -1586,6 +1601,7 @@ public class SignalWriterTests
             "one-assignee" => TestInfrastructure.OwnershipDirectory.GeneralTeam,   // the Assigned To user's unit's team
             "no-assigned-to" => TestInfrastructure.OwnershipDirectory.ChildTeam,   // the To Do's own unit's team
             "filed-under-matter" => TestInfrastructure.OwnershipDirectory.ChildTeam, // the matter's team: a core filing wins
+            "ordinary-core-secure-stamp-parent" or "secure-todo" => TestInfrastructure.OwnershipDirectory.SecureNamedTeam, // secure-if-any
             _ => null,                                                             // both refuse; neither falls back
         };
         signalOwner.Should().Be(expected, "the Signal's owner");
