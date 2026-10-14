@@ -110,6 +110,12 @@ public sealed class SignalReevaluationJob : IScheduledJob
             await EvaluatePolicyAsync(policy, counts, cancellationToken).ConfigureAwait(false);
         }
 
+        // Task 145 (uac-r2 review F1 on #1874): an in-force policy that stopped before its redaction (invalid rule, no current
+        // version or lane, a version not in force, a partition skip, a fault, or a scoped policy the nightly pass does not
+        // evaluate) still has its stored evidence checked.
+        await SweepStoredEvidenceAsync(
+            policies.Select(p => p.Code), "is in force but was not evaluated to the end this run", counts, cancellationToken).ConfigureAwait(false);
+
         await ClosePoliciesNotInForceAsync(counts, cancellationToken).ConfigureAwait(false);
         await RedactPoliciesNotInForceAsync(counts, cancellationToken).ConfigureAwait(false);
 
@@ -682,6 +688,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
     /// </summary>
     private async Task RedactStoredEvidenceAsync(string policyCode, IReadOnlyList<ExistingSignal> signals, RunCounts counts, CancellationToken ct)
     {
+        // Once per policy per run: the sweeps after the policy loop skip a policy already attempted here (whatever the outcome).
+        counts.EvidenceRedactionAttempted.Add(policyCode);
         var redactions = await _suppression.StoredEvidenceToRedactAsync(policyCode, signals, ct).ConfigureAwait(false);
         if (redactions is null)
         {
@@ -734,9 +742,22 @@ public sealed class SignalReevaluationJob : IScheduledJob
             return;
         }
 
-        foreach (var code in policies.Values.Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(StringComparer.Ordinal))
+        await SweepStoredEvidenceAsync(policies.Values, "is not in force", counts, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 145: reads the Signals of each policy in <paramref name="policyCodes"/> that this run has not yet sent through
+    /// <see cref="RedactStoredEvidenceAsync"/> (<see cref="RunCounts.EvidenceRedactionAttempted"/>), and redacts their stored
+    /// evidence. Never twice per policy per run. A policy whose Signals cannot be read is a policy failure (logged, nothing
+    /// written, the run fails visibly, the next pass retries); a family-read fault is handled by <see cref="RedactStoredEvidenceAsync"/>
+    /// the same way.
+    /// </summary>
+    private async Task SweepStoredEvidenceAsync(IEnumerable<string> policyCodes, string why, RunCounts counts, CancellationToken ct)
+    {
+        foreach (var code in policyCodes.Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(StringComparer.Ordinal).ToList())
         {
             ct.ThrowIfCancellationRequested();
+            if (counts.EvidenceRedactionAttempted.Contains(code)) continue;
             try
             {
                 var signals = await ReadPolicySignalsAsync(code, counts, ct).ConfigureAwait(false);
@@ -744,10 +765,11 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
+                counts.EvidenceRedactionAttempted.Add(code);
                 counts.PolicyFailures++;
                 _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
-                    "Policy {PolicyCode} is not in force and its Signals could not be read ({ExceptionType}); their stored evidence was not checked this run.",
-                    code, ex.GetType().Name);
+                    "Policy {PolicyCode} {Why}, and its Signals could not be read ({ExceptionType}); their stored evidence was not checked this run.",
+                    code, why, ex.GetType().Name);
             }
         }
     }
@@ -862,6 +884,10 @@ public sealed class SignalReevaluationJob : IScheduledJob
         public int SupersededClosed, RetiredClosed;
         /// <summary>Task 145 (review F1): Signals whose stored evidence lost detail outside their secure family this pass.</summary>
         public int EvidenceRedacted;
+
+        /// <summary>Task 145 (uac-r2 F1 on #1874): the policies whose stored evidence this run already checked (or tried to), so the
+        /// sweeps after the policy loop reach every other policy exactly once.</summary>
+        public HashSet<string> EvidenceRedactionAttempted { get; } = new(StringComparer.Ordinal);
         public int ClearedMarked, Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred, NotApplicable, MissingInputs;
 
         /// <summary>#1661 round 2 F3: policies planned NOTHING this pass because their secure-family partitions could not be read (each is
