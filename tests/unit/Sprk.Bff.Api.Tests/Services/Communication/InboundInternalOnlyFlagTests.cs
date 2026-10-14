@@ -243,7 +243,7 @@ public class InboundInternalOnlyFlagTests
 
     private static (EmailUploadCaptureService Capture, Mock<IGenericEntityService> Entities, List<DataverseEntity> Created) UploadCapture(
         string? privacy, bool resolverReturnsThread = true, bool withResolver = true, bool withEntities = true,
-        Mock<IDataverseService>? dvMock = null)
+        Mock<IDataverseService>? dvMock = null, Mock<ICommunicationEnrichmentService>? enrichment = null)
     {
         var created = new List<DataverseEntity>();
         var dv = dvMock ?? new Mock<IDataverseService>();
@@ -273,7 +273,7 @@ public class InboundInternalOnlyFlagTests
             NullLogger<IncomingAssociationResolver>.Instance);
 
         var capture = new EmailUploadCaptureService(
-            dv.Object, associationResolver, Mock.Of<ICommunicationEnrichmentService>(),
+            dv.Object, associationResolver, (enrichment ?? new Mock<ICommunicationEnrichmentService>()).Object,
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             NullLogger<EmailUploadCaptureService>.Instance,
             withResolver ? resolver.Object : null,
@@ -442,6 +442,82 @@ public class InboundInternalOnlyFlagTests
 
         VerifyLowered(entities);
         dv.Verify(d => d.GetCommunicationByInternetMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── Task 065 fix round 6 (K1): the add-in capture stores the parent it names, so the filing sweep can see it ──
+
+    [Fact]
+    public async Task EmailUpload_WithInReplyTo_StoresItOnTheRow()
+    {
+        var (capture, _, created) = UploadCapture("open");
+
+        await capture.CaptureAsync(EmailSaveWithHeaders(inReplyTo: UploadParentMessageId), "user-1", CancellationToken.None);
+
+        created.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_inreplyto").Should().Be(UploadParentMessageId);
+    }
+
+    [Fact]
+    public async Task EmailUpload_WithOnlyReferences_StoresTheNewestReferenceAsTheParent()
+    {
+        var (capture, _, created) = UploadCapture("open");
+
+        await capture.CaptureAsync(EmailSaveWithHeaders(references: "<oldest@contoso.com>  <newest@contoso.com>"), "user-1", CancellationToken.None);
+
+        created.Should().ContainSingle().Which.GetAttributeValue<string>("sprk_inreplyto").Should().Be("<newest@contoso.com>");
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("  ", " ")]
+    public async Task EmailUpload_WithNoReplyHeaders_StoresNoInReplyTo(string? inReplyTo, string? references)
+    {
+        var (capture, _, created) = UploadCapture("open");
+
+        await capture.CaptureAsync(EmailSaveWithHeaders(inReplyTo: inReplyTo, references: references), "user-1", CancellationToken.None);
+
+        created.Should().ContainSingle().Which.Contains("sprk_inreplyto").Should().BeFalse();
+    }
+
+    // ── Task 065 fix round 6 (K2): cancellation after the row exists keeps the row internal-only and the capture goes on ──
+
+    [Theory]
+    [InlineData("thread read")]
+    [InlineData("update")]
+    [InlineData("parent read")]
+    public async Task EmailUpload_WhenCancelledWhileLowering_RowStaysInternalOnly_AndEnrichmentStillRuns(string where)
+    {
+        var enrichment = new Mock<ICommunicationEnrichmentService>();
+        var dv = new Mock<IDataverseService>();
+        var (capture, entities, created) = UploadCapture("open", dvMock: dv, enrichment: enrichment);
+        var save = EmailSave();
+        switch (where)
+        {
+            case "thread read":
+                entities.Setup(g => g.RetrieveAsync("sprk_communicationthread", ThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new OperationCanceledException());
+                break;
+            case "update":
+                entities.Setup(g => g.UpdateAsync("sprk_communication", CommId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new OperationCanceledException());
+                break;
+            default:
+                // The parent check runs only when the upload carries reply headers.
+                dv.Setup(d => d.GetCommunicationByInternetMessageIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new OperationCanceledException());
+                save = EmailSaveWithHeaders(inReplyTo: UploadParentMessageId);
+                break;
+        }
+
+        var id = await capture.CaptureAsync(save, "user-1", CancellationToken.None);
+
+        id.Should().Be(CommId, "the capture completes rather than reporting a failure that invites a duplicate on retry");
+        created.Should().ContainSingle("no second row");
+        created[0].GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+        if (where != "update")
+            VerifyNeverLowered(entities); // (for "update" the lowering write itself was attempted and cancelled)
+        enrichment.Verify(
+            e => e.EnrichAsync(CommId, It.IsAny<CommunicationDirection>(), It.IsAny<NormalizedMessage>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()),
+            Times.Once, "enrichment runs after the cancelled lowering");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════

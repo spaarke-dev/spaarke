@@ -1188,12 +1188,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// comment; ACS-thread-session reuse is R2). <b>(2) Find-or-create</b> — otherwise, the task-040
     /// <see cref="IThreadResolver"/> groups by the authoritative ACS thread id. Both paths are best-effort /
     /// non-fatal (NFR-02) — a resolve failure MUST NOT fail the send. <paramref name="direction"/> is the row's
-    /// direction (Outgoing for every send path; the external thread post passes its computed one). Returns the resolved thread id (or null
+    /// direction (Outgoing for every send path; the external thread post passes its computed one).
+    /// <paramref name="requireOpenDefaultThread"/> (D8; the external thread post only) makes the record-default-thread
+    /// step join only an EXPLICITLY Open default thread, else find-or-create a new Open one. Returns the resolved thread id (or null
     /// on failure/no resolver) so the caller can chain the task-043 Direct-thread message access grant.
     /// </summary>
     private async Task<Guid?> ResolveOutboundMessageThreadAsync(
         Guid communicationId, SendCommunicationRequest request, string? acsThreadId, string correlationId, CancellationToken ct,
-        CommunicationDirection direction = CommunicationDirection.Outgoing)
+        CommunicationDirection direction = CommunicationDirection.Outgoing, bool requireOpenDefaultThread = false)
     {
         if (request.ThreadId.HasValue)
         {
@@ -1219,6 +1221,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     Direction = direction,
                     Message = envelope,
                     AcsThreadId = string.IsNullOrWhiteSpace(acsThreadId) ? null : acsThreadId,
+                    RequireOpenDefaultThread = requireOpenDefaultThread,
                 },
                 ct);
 
@@ -1415,11 +1418,60 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             "External thread post created | Id: {CommunicationId}, Regarding: {EntityType}:{RegardingId}, AuthorKind: {Kind}, CorrelationId: {CorrelationId}",
             communicationId, regardingEntityType, regardingId, fromContact ? "contact" : "systemuser", correlationId);
 
-        // Best-effort (NFR-02): the record's default thread. Never fails the post.
+        // The record's default thread, best-effort (NFR-02) for a send. D8 (task 065 fix round 6): a partner's post joins only
+        // an EXPLICITLY Open default thread, else a new Open one is found-or-created, so it is never filed into a Private
+        // default thread the author cannot read back.
         var threadId = await ResolveOutboundMessageThreadAsync(
-            communicationId, request, acsThreadId: null, correlationId, ct, direction);
+            communicationId, request, acsThreadId: null, correlationId, ct, direction, requireOpenDefaultThread: true);
+
+        // F2 (fix round 6): a row with no thread is invisible to every external reader (D7: no thread = hidden), so a 201 would
+        // acknowledge a post nobody can see. The best-effort thread step failed, so retire the row and tell the caller to retry.
+        if (threadId is null)
+        {
+            await RetirePostWithoutThreadAsync(communicationId, correlationId, ct);
+            throw new SdapProblemException(
+                code: ThreadUnavailableCode,
+                title: "Service Unavailable",
+                detail: "The message could not be filed into a conversation. Nothing was posted; please try again.",
+                statusCode: 503,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
 
         return new ThreadPostResult(communicationId, postedAt, subject, body, BodyFormat.PlainText, direction, threadId);
+    }
+
+    /// <summary>The 503 problem code of an external thread post whose thread step failed (retryable; the row was retired).</summary>
+    public const string ThreadUnavailableCode = "EXT_MESSAGES_THREAD_UNAVAILABLE";
+
+    /// <summary>
+    /// Deactivates (soft-deletes: statecode Inactive, statuscode Deleted) an external post whose thread could not be resolved.
+    /// A fault is logged, never thrown: the caller answers 503 either way, and the row stays hidden from every external reader
+    /// (no thread) and out of every active-only read once retired.
+    /// </summary>
+    private async Task RetirePostWithoutThreadAsync(Guid communicationId, string correlationId, CancellationToken ct)
+    {
+        try
+        {
+            await _genericEntityService.UpdateAsync(
+                "sprk_communication",
+                communicationId,
+                new Dictionary<string, object>
+                {
+                    ["statecode"] = new OptionSetValue(1), // Inactive
+                    ["statuscode"] = new OptionSetValue((int)CommunicationStatus.Deleted),
+                },
+                ct);
+            _logger.LogWarning(
+                "External thread post {CommunicationId} had no thread; the row was deactivated and the caller told to retry | CorrelationId: {CorrelationId}",
+                communicationId, correlationId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(
+                ex,
+                "External thread post {CommunicationId} had no thread and could not be deactivated | CorrelationId: {CorrelationId}",
+                communicationId, correlationId);
+        }
     }
 
     /// <summary>

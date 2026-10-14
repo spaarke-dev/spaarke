@@ -4,6 +4,7 @@ using System.Text.Json;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 
@@ -162,14 +163,29 @@ public sealed class EmailDraftToolHandler : IToolHandler
     /// <summary>Task 146 r2 (S1 / G5): the app-only create of a FILED draft, after the as-the-caller check.</summary>
     private readonly Spaarke.Dataverse.IFieldMappingDataverseService _appOnly;
 
+    /// <summary>
+    /// Task 065 fix round 6 (F1, defensive): the one communication-visibility decision (the flag rule and, for an external
+    /// caller, D7). An AI handler reading the Communication CRUD read service is the allowed direction (ADR-013 forbids
+    /// CRUD code taking AI-internal types, not the reverse); no AI type crosses into the Communication services.
+    /// </summary>
+    private readonly CommunicationThreadReadService _communicationVisibility;
+
+    /// <summary>The request principal for the visibility check (the same source the user-OBO Dataverse client reads its token from).</summary>
+    private readonly IHttpContextAccessor _httpContextAccessor;
+
     public EmailDraftToolHandler(
         IDataverseUserClient dataverse,
         IEmailDraftAi emailDraftAi,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         ILogger<EmailDraftToolHandler> logger,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
-        Spaarke.Dataverse.IFieldMappingDataverseService appOnly)
+        Spaarke.Dataverse.IFieldMappingDataverseService appOnly,
+        CommunicationThreadReadService communicationVisibility,
+        IHttpContextAccessor httpContextAccessor)
     {
+        // Registered unconditionally (CommunicationModule scoped; the accessor by AddHttpContextAccessor): no asymmetric registration (§10 F.1).
+        _communicationVisibility = communicationVisibility ?? throw new ArgumentNullException(nameof(communicationVisibility));
+        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         // Both unconditionally registered (MetadataServiceExtensions / GraphModule): no asymmetric registration (§10 F.1).
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _appOnly = appOnly ?? throw new ArgumentNullException(nameof(appOnly));
@@ -775,6 +791,22 @@ public sealed class EmailDraftToolHandler : IToolHandler
         DateTimeOffset startedAt,
         CancellationToken cancellationToken)
     {
+        // Task 065 fix round 6 (F1): the communication must be visible to the caller under the shared communication rule
+        // (internal-only flag; for an external caller also D7, an explicitly Open thread) BEFORE any content is read. A
+        // row the caller may not see answers exactly like one the user client cannot find. No request principal, or a
+        // visibility fault, never reads the content (fail closed).
+        var principal = _httpContextAccessor.HttpContext?.User;
+        if (principal is null
+            || await _communicationVisibility.ReadVisibleCommunicationAsync(communicationId, principal, null, cancellationToken)
+                .ConfigureAwait(false) is null)
+        {
+            return (null, ToolResult.Error(
+                HandlerId, tool.Id, tool.Name,
+                "The email was not found or is not visible to the calling user.",
+                DataverseUserClientErrorCodes.NotFound,
+                Timed(startedAt)));
+        }
+
         var recordResponse = await _dataverse.GetAsync(
             $"{CommunicationEntitySet}({communicationId:D})?$select=sprk_subject,sprk_body,sprk_bodyformat",
             cancellationToken).ConfigureAwait(false);

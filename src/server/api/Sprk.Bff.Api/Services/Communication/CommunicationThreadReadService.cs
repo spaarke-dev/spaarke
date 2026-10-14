@@ -356,8 +356,13 @@ public sealed class CommunicationThreadReadService
         // 1) Impersonated thread query by the typed regarding lookup (entity-set-agnostic; task 002 lookups).
         // PinnedField added (task 041 / FR-24) so the record-mode thread list can mark/sort pinned threads too.
         var threadSelect = string.Join(',', new[] { ThreadPkField, ThreadNameField, PinnedField });
+        // Fix round 6 (F1): an external caller (a contact, or a systemuser flagged sprk_isexternal) lists only EXPLICITLY Open
+        // threads, in the query itself, so a Private thread's name never leaves Dataverse. Internal callers are unchanged.
+        var openOnly = await _identityResolver.IsExternalAsync(callerSystemUserId, ct)
+            ? $" and {CommunicationOpenThreadGate.OpenOnlyThreadFilterClause}"
+            : string.Empty;
         var threadOData =
-            $"$select={threadSelect}&$filter=_{regardingField}_value eq {recordId} and {ActiveOnlyClause}" +
+            $"$select={threadSelect}&$filter=_{regardingField}_value eq {recordId} and {ActiveOnlyClause}{openOnly}" +
             $"&$orderby={CreatedOnField} asc&$top={MaxThreads}";
         var threadRows = await _query.QueryAsync(ThreadSet, threadOData, callerSystemUserId, ct);
 
@@ -754,6 +759,10 @@ public sealed class CommunicationThreadReadService
         // Build the filter: NO regarding scoping (record-less inclusion) + optional name search + keyset cursor.
         // Active-only (round-8): deactivated (soft-deleted) threads must drop out of the list.
         var clauses = new List<string> { ActiveOnlyClause };
+        // Fix round 6 (F1): an external caller lists only EXPLICITLY Open threads. The clause is part of the query's
+        // $filter, so $top, the over-fetch row and the keyset next-page token are all computed over visible threads.
+        if (await _identityResolver.IsExternalAsync(callerSystemUserId, ct))
+            clauses.Add(CommunicationOpenThreadGate.OpenOnlyThreadFilterClause);
         if (!string.IsNullOrWhiteSpace(search))
         {
             // Two-stage escape: (1) double single quotes so the value cannot break out of the OData string literal;
@@ -1210,11 +1219,18 @@ public sealed class CommunicationThreadReadService
     /// thread they cannot see (ADR-028 / NFR-01). Because it is impersonated, a caller with no read access simply
     /// gets zero rows (no existence leak — NFR-06). Fail-closed: an unresolved caller throws 403 (no app-only
     /// fallback that would widen access).
+    /// <para><b>D9 (task 065 fix round 6, owner decision 2026-10-14):</b> an EXTERNAL caller (a systemuser flagged
+    /// <c>sprk_isexternal</c>) can see, and so rename, pin or deactivate, only a thread that reads EXPLICITLY Open. The
+    /// clause is part of the same one query, so a Private thread answers exactly like a missing one (no existence leak).
+    /// Internal callers are unchanged.</para>
     /// </summary>
     public async Task<bool> CanCallerSeeThreadAsync(Guid threadId, ClaimsPrincipal? caller, CancellationToken ct)
     {
         var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
-        var odata = $"$select={ThreadPkField}&$filter={ThreadPkField} eq {threadId}&$top=1";
+        var openOnly = await _identityResolver.IsExternalAsync(callerSystemUserId, ct)
+            ? $" and {CommunicationOpenThreadGate.OpenOnlyThreadFilterClause}"
+            : string.Empty;
+        var odata = $"$select={ThreadPkField}&$filter={ThreadPkField} eq {threadId}{openOnly}&$top=1";
         var rows = await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct);
         return rows.Count > 0;
     }

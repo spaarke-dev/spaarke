@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Xrm.Sdk;
+using Sprk.Bff.Api.Services.Communication.Membership;
 
 namespace Sprk.Bff.Api.Services.Communication;
 
@@ -38,6 +39,15 @@ internal static class CommunicationOpenThreadGate
 
     /// <summary>Thread ids per query: one OR filter over this many ids keeps the GET URL well inside the limit.</summary>
     internal const int ChunkSize = 50;
+
+    /// <summary>
+    /// The thread <c>$filter</c> clause an EXTERNAL caller's thread LIST query carries (fix round 6, F1): only threads whose
+    /// privacy reads EXPLICITLY Open. It rides in the query itself, so paging and the next-page token are computed over
+    /// threads the caller may see and a Private thread's name never leaves Dataverse. Built from the floor's column and the
+    /// <see cref="ThreadPrivacyState"/> Open value; neither is redefined.
+    /// </summary>
+    internal static string OpenOnlyThreadFilterClause =>
+        $"{CommunicationInternalOnlyFloor.ThreadPrivacyField} eq {(int)ThreadPrivacyState.Open}";
 
     /// <summary>Runs an OData query on <see cref="ThreadSet"/> under the caller's identity (app-only or impersonated).</summary>
     internal delegate Task<IReadOnlyList<Dictionary<string, JsonElement>>> ThreadRowQuery(string odata, CancellationToken ct);

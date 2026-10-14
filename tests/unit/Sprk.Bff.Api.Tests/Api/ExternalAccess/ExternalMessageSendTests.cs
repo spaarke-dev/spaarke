@@ -876,4 +876,107 @@ public class ExternalMessageSendTests
         seen!.Direction.Should().Be(CommunicationDirection.Outgoing);
         seen.Message.Direction.Should().Be(CommunicationDirection.Outgoing);
     }
+
+    // ── Task 065 fix round 6 (F2): a post nobody can see is never acknowledged ────────────────────────────────────
+
+    private static void ShouldBeThreadUnavailable(IResult result)
+    {
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        problem.ProblemDetails.Extensions["errorCode"].Should().Be(CommunicationService.ThreadUnavailableCode);
+    }
+
+    private (Guid CreatedId, List<Dictionary<string, object>> Updates) CaptureCreatesAndUpdates()
+    {
+        var createdId = Guid.NewGuid();
+        _entities
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => _created.Add(e))
+            .ReturnsAsync(createdId);
+        var updates = new List<Dictionary<string, object>>();
+        _entities
+            .Setup(s => s.UpdateAsync("sprk_communication", createdId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, fields, _) => updates.Add(fields))
+            .Returns(Task.CompletedTask);
+        return (createdId, updates);
+    }
+
+    [Fact]
+    public async Task WhenTheThreadStepResolvesNoThread_Is503Retryable_AndTheCreatedRowIsDeactivated()
+    {
+        var project = Guid.NewGuid();
+        var (createdId, updates) = CaptureCreatesAndUpdates();
+        _threads
+            .Setup(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ThreadAssignment?)null);
+
+        var result = await Post("projects", project, Ciam(project: project));
+
+        ShouldBeThreadUnavailable(result);
+        TheRow(); // the row was created before the thread step ran...
+        var retire = updates.Should().ContainSingle("...and is retired, not left behind").Subject;
+        ((OptionSetValue)retire["statecode"]).Value.Should().Be(1, "Inactive");
+        ((OptionSetValue)retire["statuscode"]).Value.Should().Be((int)CommunicationStatus.Deleted);
+        result.Should().NotBeOfType<Created<ExternalMessageDto>>("no 201 for a post nobody can see");
+        createdId.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task WhenTheThreadStepThrows_Is503Retryable_AndTheCreatedRowIsDeactivated()
+    {
+        var project = Guid.NewGuid();
+        var (_, updates) = CaptureCreatesAndUpdates();
+        _threads
+            .Setup(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse unavailable"));
+
+        ShouldBeThreadUnavailable(await Post("projects", project, Ciam(project: project)));
+
+        updates.Should().ContainSingle().Which["statecode"].Should().BeOfType<OptionSetValue>().Which.Value.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task WhenTheThreadStepFails_AndTheRowCannotBeDeactivatedEither_StillAnswers503_NeverA201()
+    {
+        var project = Guid.NewGuid();
+        var (createdId, _) = CaptureCreatesAndUpdates();
+        _entities
+            .Setup(s => s.UpdateAsync("sprk_communication", createdId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse unavailable"));
+        _threads
+            .Setup(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ThreadAssignment?)null);
+
+        ShouldBeThreadUnavailable(await Post("projects", project, Ciam(project: project)));
+    }
+
+    [Fact]
+    public async Task WhenTheThreadResolves_TheRowIsNotDeactivated()
+    {
+        var project = Guid.NewGuid();
+        var (_, updates) = CaptureCreatesAndUpdates();
+
+        Created(await Post("projects", project, Ciam(project: project)));
+
+        updates.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task APartnersPost_AsksTheResolverForAnOpenDefaultThread_D8(bool systemUserAuthor)
+    {
+        var project = Guid.NewGuid();
+        ThreadResolutionRequest? seen = null;
+        _threads
+            .Setup(t => t.ResolveAndAssignAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<ThreadResolutionRequest, CancellationToken>((r, _) => seen = r)
+            .ReturnsAsync(ThreadAssignment.NoGrant(_threadId));
+
+        Created(await Post("projects", project, systemUserAuthor ? SystemUser(Guid.NewGuid(), project) : Ciam(project: project)));
+
+        seen.Should().NotBeNull();
+        seen!.RequireOpenDefaultThread.Should().BeTrue(
+            "D8: the post must not be filed into a Private default thread the author cannot read back");
+    }
 }

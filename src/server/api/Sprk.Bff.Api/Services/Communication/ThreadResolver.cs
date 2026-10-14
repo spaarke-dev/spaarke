@@ -357,7 +357,8 @@ public sealed class ThreadResolver : IThreadResolver
         var anchor = await ReadRegardingAnchorAsync(request.CommunicationId, ct);
         if (anchor is not null)
         {
-            var recordThreadId = await FindOrCreateDefaultThreadAsync(anchor.RecordType, anchor.RecordId, anchor, ct);
+            var recordThreadId = await FindOrCreateDefaultThreadAsync(
+                anchor.RecordType, anchor.RecordId, anchor, request.RequireOpenDefaultThread, ct);
             await AssignThreadAsync(request.CommunicationId, recordThreadId, ct);
             _logger.LogInformation(
                 "Resolved per-record default thread {ThreadId} (Tier 2) | CommunicationId: {CommunicationId}, Regarding: {RecordType}:{RecordId}",
@@ -380,7 +381,7 @@ public sealed class ThreadResolver : IThreadResolver
         }
 
         var masterThreadId = await FindOrCreateDefaultThreadAsync(
-            MasterThreadOwnerKeyType, owner.ToString(), anchor: null, ct);
+            MasterThreadOwnerKeyType, owner.ToString(), anchor: null, request.RequireOpenDefaultThread, ct);
         await AssignThreadAsync(request.CommunicationId, masterThreadId, ct);
         _logger.LogInformation(
             "Resolved per-user master thread {ThreadId} (Tier 3) | CommunicationId: {CommunicationId}, Owner: {OwnerId}",
@@ -511,6 +512,7 @@ public sealed class ThreadResolver : IThreadResolver
     private const string SubjectField = "sprk_subject";
     private const string DirectionField = "sprk_direction";
     private const string GraphMessageIdField = "sprk_graphmessageid";
+    private const string InReplyToField = "sprk_inreplyto";
     private const string OwningTeamField = "owningteam";
     private const string OwnerIdField = "ownerid";
     private const string PrivacyStateField = "sprk_privacystate";
@@ -541,6 +543,7 @@ public sealed class ThreadResolver : IThreadResolver
             columns.Add(SubjectField);
             columns.Add(DirectionField);
             columns.Add(GraphMessageIdField);
+            columns.Add(InReplyToField);
             var email = await _entityService.RetrieveAsync("sprk_communication", communicationId, columns.ToArray(), ct);
 
             if (email.GetAttributeValue<OptionSetValue>(CommunicationTypeField)?.Value != (int)CommunicationType.Email)
@@ -1004,7 +1007,8 @@ public sealed class ThreadResolver : IThreadResolver
     private async Task<bool> MoveToRecordDefaultThreadAsync(
         Guid fromThreadId, Guid communicationId, RegardingAnchor regarding, CancellationToken ct)
     {
-        var recordThreadId = await FindOrCreateDefaultThreadAsync(regarding.RecordType, regarding.RecordId, regarding, ct);
+        var recordThreadId = await FindOrCreateDefaultThreadAsync(
+            regarding.RecordType, regarding.RecordId, regarding, requireOpen: false, ct);
         if (recordThreadId == fromThreadId)
             return false;
 
@@ -1084,16 +1088,18 @@ public sealed class ThreadResolver : IThreadResolver
 
         // Task 065 fix round 4 (K1): a RECEIVED email is written internal-only until its thread is known; this sweep is the
         // last chance to lower it, or it stays hidden from partners for good. Same shared rule as the capture paths: lower
-        // only when the thread reads Open AND the parent is not a blocker. A received row stores no In-Reply-To /
-        // References, so the sweep cannot read its parent: a row with a Graph message id is a mailbox email whose headers
-        // were lost, so it stays internal-only (cannot evaluate = fail closed); a row without one is an add-in save, which
-        // is header-less by construction and follows the AddInSaveWithoutReplyHeadersIsShareable decision (owner D6, 2026-10-14: stays shareable).
+        // only when the thread reads Open AND the parent is not a blocker. The sweep cannot evaluate a parent, so: a row with a
+        // Graph message id is a mailbox email whose headers were lost, so it stays internal-only (cannot evaluate = fail
+        // closed); a row with a non-blank sprk_inreplyto (fix round 6, K1: the add-in capture stores it when the upload carried
+        // reply headers) replies to a parent the sweep does not read, so it also stays internal-only; a row with neither is a
+        // header-less add-in save and follows the AddInSaveWithoutReplyHeadersIsShareable decision (owner D6, 2026-10-14: stays shareable).
         // Only an explicit Incoming direction is lowered; fail closed otherwise. Never throws except on cancellation.
         var isIncoming = email.GetAttributeValue<OptionSetValue>(DirectionField)?.Value == (int)CommunicationDirection.Incoming;
         if (isIncoming)
         {
             var isMailboxRow = !string.IsNullOrWhiteSpace(email.GetAttributeValue<string>(GraphMessageIdField));
-            var parentNotShareable = isMailboxRow || !CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable;
+            var repliesToAParent = !string.IsNullOrWhiteSpace(email.GetAttributeValue<string>(InReplyToField));
+            var parentNotShareable = isMailboxRow || repliesToAParent || !CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable;
             await CommunicationInternalOnlyFloor.LowerWhenSafeAsync(
                 _entityService, communicationId, assignment.ThreadId, parentNotShareable, _logger, ct);
         }
@@ -1401,9 +1407,9 @@ public sealed class ThreadResolver : IThreadResolver
     /// is out of scope for FR-09 (point-forward only).
     /// </remarks>
     private async Task<Guid> FindOrCreateDefaultThreadAsync(
-        string keyType, string keyId, RegardingAnchor? anchor, CancellationToken ct)
+        string keyType, string keyId, RegardingAnchor? anchor, bool requireOpen, CancellationToken ct)
     {
-        if (await FindDefaultThreadAsync(keyType, keyId, ct) is { } existing)
+        if (await FindDefaultThreadAsync(keyType, keyId, requireOpen, ct) is { } existing)
             return existing;
 
         // Task 146 / S6: a Tier-2 per-record default thread is owned by its record's team; the Tier-3 per-user master
@@ -1464,8 +1470,13 @@ public sealed class ThreadResolver : IThreadResolver
     /// construction (F-B). A user can still mark a thread of their own this way for a record they can AppendTo and so
     /// misroute its default-thread messages, with no access gained (#1645). The Tier-3 master (key "systemuser", not an
     /// ADR-024 family) has no typed lookup to repeat its key and keeps the marker + pointer match (#1637); it grants nobody.
+    /// <para><b>D8 (task 065 fix round 6):</b> with <paramref name="requireOpen"/> (a partner's portal post only) a default
+    /// thread is found only when <c>sprk_privacystate</c> reads EXPLICITLY Open; a Private default is skipped and the caller
+    /// creates a new Open one. The lookup takes the OLDEST match (<c>createdon</c> ascending), so once an Open default sits
+    /// beside a Private one the internal lookup (which does not filter on privacy) still answers with the original
+    /// deterministically. Without <paramref name="requireOpen"/> the conditions are those they always were.</para>
     /// </remarks>
-    private async Task<Guid?> FindDefaultThreadAsync(string keyType, string keyId, CancellationToken ct)
+    private async Task<Guid?> FindDefaultThreadAsync(string keyType, string keyId, bool requireOpen, CancellationToken ct)
     {
         var query = new QueryExpression("sprk_communicationthread")
         {
@@ -1487,6 +1498,10 @@ public sealed class ThreadResolver : IThreadResolver
                 },
             },
         };
+
+        if (requireOpen)
+            query.Criteria.Conditions.Add(new ConditionExpression("sprk_privacystate", ConditionOperator.Equal, PrivacyStateOpen));
+        query.Orders.Add(new OrderExpression("createdon", OrderType.Ascending));
 
         if (!string.Equals(keyType, MasterThreadOwnerKeyType, StringComparison.OrdinalIgnoreCase))
         {

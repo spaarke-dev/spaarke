@@ -504,3 +504,62 @@ gained the thread column.
 - **Seeding proof, D7 gate.** With the `FilterExternalMessagesAsync` gate disabled (`if (false && !isInternal ...)`), 10 tests failed (Private thread hidden, no privacy value, no thread, unreadable
   thread, thread switched to Private after the send (D7), mixed page, chunking, query shape, fault, feed). Restored; the same run is 82 / 82 green.
 - **Seeding proof, retry gap.** With the new catch made inert (`when (ex.Message == "never")`), both new `Mailbox_*Cancelled*` tests failed; restored, 49 / 49 green in `InboundInternalOnly`.
+
+## Fix round 6 (owner decisions D8/D9, 2026-10-14)
+
+### Owner decisions recorded
+
+- **D8.** If a record's default thread is Private, a partner's portal post goes into a NEW Open default thread on that record (the partner can then read their own post back).
+- **D9.** External callers cannot rename, pin or deactivate Private threads.
+- **Visibility rule (restated).** "External caller" = a contact on either plane, or a systemuser flagged `sprk_isexternal` (`IsExternalAsync` true; fails closed). An external caller sees a
+  communication only if `sprk_isinternalonly` is explicitly false AND its thread exists and is explicitly Open at read time. Licensed-external users are treated like partners for Private threads.
+
+### Changes, by item
+
+All paths under `src/server/api/Sprk.Bff.Api/`.
+
+1. **F1, attachment-text bypass.** `Services/Communication/CommunicationAttachmentTextService.cs:115`: `GetAttachmentTextAsync` runs the id through
+   `CommunicationThreadReadService.ReadVisibleCommunicationAsync` right after caller resolution; null returns the existing empty result. New ctor parameter `threadReadService`.
+2. **F1, Private thread names in thread lists.** `Services/Communication/CommunicationThreadReadService.cs:362` (`ReadByRegardingAsync`) and `:765` (`ListThreadsAsync`): for an external caller the thread
+   `$filter` gains `sprk_privacystate eq <Open>` IN the query (so paging and the keyset token stay right). The clause is `CommunicationOpenThreadGate.OpenOnlyThreadFilterClause`
+   (`CommunicationOpenThreadGate.cs:49`), built from `CommunicationInternalOnlyFloor.ThreadPrivacyField` and `ThreadPrivacyState.Open`.
+3. **F1, defensive, AI tool.** `Services/Ai/Handlers/EmailDraftToolHandler.cs:800`: `FetchThreadAsync` first calls `ReadVisibleCommunicationAsync`; null (or no principal) gives the tool's normal not-found error.
+   It covers `email.summarize_thread`, reply and forward (they share the fetch). ADR-013 check: an AI handler calling a CRUD read service is the allowed direction (no CRUD code takes an AI type), so no STOP.
+4. **F2, a partner's post can vanish.**
+   - (A) `Services/Communication/CommunicationService.cs:1431`: a null thread id retires the created row (`RetirePostWithoutThreadAsync`, :1451; statecode 1, statuscode Deleted; a fault there is logged, not thrown) and throws
+     `SdapProblemException` 503 with code `ThreadUnavailableCode = "EXT_MESSAGES_THREAD_UNAVAILABLE"` (:1444). The existing `catch (SdapProblemException)` in `ExternalMessageEndpoints` already maps it to the external problem shape, so the endpoint file is unchanged.
+   - (B, D8) `IThreadResolver.cs`: `ThreadResolutionRequest.RequireOpenDefaultThread`. `CommunicationService.cs:1198/1425` sets it for the external post only. `ThreadResolver.cs:1479` (`FindDefaultThreadAsync`) adds `sprk_privacystate == Open` when asked, so a Private default is skipped and an Open default is found or created.
+     The filing reconcile (`ThreadResolver.cs:1011`) passes `requireOpen: false` (unchanged).
+   - **Race guard: none exists.** The default-thread find-or-create has no lock or unique key (documented as "rare, benign duplicate"). Two concurrent partner posts onto a record with only a Private default could each create an Open default thread. Not fixed here; reported.
+   - Side effect to note: after D8 a Private and an Open default can coexist, so the lookup now orders by `createdon` ascending (oldest first) for determinism. This also applies to internal lookups (previously unordered); it picks the same row whenever there is only one.
+5. **D9.** `CommunicationThreadReadService.CanCallerSeeThreadAsync` (:1227, clause at :1231) adds the same Open-only clause for an external caller. Rename, pin and deactivate (`Api/CommunicationEndpoints.cs:893/934/964`, which already call it) therefore return their existing "not found or forbidden" response for a thread that is not explicitly Open. Internal callers unchanged.
+   Side effect: the send-route filter `CommunicationRecordAuthorizationFilter.CanSeeThreadAsync` shares this method, so an external caller sending INTO a non-Open thread is now denied too (consistent with the rule).
+   The three handlers were made `internal static` (were `private static`) so they can be unit-tested.
+6. **F3.** Deleted `CommunicationOpenThreadGateTests.ExternalRead_WithoutTheAppOnlySeam_Refuses`. Added tests for a flagged-external systemuser on the external routes and the feed; they fail if `!isInternal` becomes `callerSystemUserId is null`.
+7. **K1.** `Services/Communication/EmailUploadCaptureService.cs:436`: when headers are present the row stores `sprk_inreplyto` (In-Reply-To, else the newest non-blank Reference; the Reference fallback goes slightly beyond "when headers are present"). `ThreadResolver.cs:1101`: the filing sweep treats a non-blank `sprk_inreplyto` on an Incoming row as not shareable (`InReplyToField` :515, selected at :546). Header-less add-in saves stay shareable (D6).
+8. **K2.** `EmailUploadCaptureService.cs:250`: `catch (OperationCanceledException)` around the parent check and the lowering; the row stays `true`, a warning is logged, the capture continues so enrichment runs (same approach as `MessagingIngestor`).
+9. **Known limit (notes only).** An old Private thread with 500 or more messages can hide older Open-thread messages while "Truncated" still shows: the page cap applies before the visibility filters. The flag rule has the same limit. Accepted, not fixed.
+
+### Tests
+
+New fixture `tests/unit/Sprk.Bff.Api.Tests/TestInfrastructure/CommunicationVisibilityFixtures.cs` (a real `CommunicationThreadReadService` over doubles). New or changed tests:
+`CommunicationAttachmentTextServiceTests` (6: external+internal-only, external+Private, external+no-privacy-value, not readable, internal gets text, external+Open gets text);
+`CommunicationOpenThreadGateTests` (thread-list external/paging/internal, by-regarding query pin, D9 rename/pin/deactivate refused and allowed, `CanCallerSeeThread` query shapes, F3 flagged-external on the routes and feed);
+`EmailDraftToolHandlerPerItemToolsTests` (7: external denied, internal summary, no principal, ...);
+`ExternalMessageSendTests` (null thread gives 503 plus deactivated row; thread step throws; deactivation also fails still 503; resolved thread not deactivated; resolver asked for an Open default);
+`ThreadResolverTests` (6 D8: Private default gives a new Open thread read back through `ReadOpenThreadIdsAsync`; Open reused; Private+Open joins Open; no-privacy-value default not joined; internal unchanged; oldest-first; plus 2 K1 sweep);
+`InboundInternalOnlyFlagTests` (3 K1 store, 3 K2 cancellation cases). Existing ctor sites of `EmailDraftToolHandler` and the two thread contract-test factories were updated (an identity-resolver mock; without it the real resolver returned 500).
+
+### Results and seeding proof
+
+- Filtered run (`Communication|ExternalMessage|ExternalNotificationFeed|QueueFeed|InboundInternalOnly|EmailUploadCapture|EmailDraftTool|ThreadResolver|CommunicationRecordAuthorization`): 0 failed / 1993 passed / 2 skipped (the two pre-existing `CommunicationIntegrationTests` skips). Extra run of `SecureChildOwnershipAiTool|CommunicationRenameThread|CommunicationSetThreadPinned`: 199 / 199.
+  `Spaarke.ArchTests` filtered to `Census|RouteAuthorization|Ai`: 0 failed / 258 passed. `dotnet build src/server/api/Sprk.Bff.Api/ -warnaserror`: 0 warnings, 0 errors.
+- **Seeding proof, attachment-text check** (`... is null && false`): 4 failures (internal-only, Private, no privacy value, not readable). Restored.
+- **Seeding proof, thread-list filter.** Clause removed from `ListThreadsAsync`: 2 failures; removed from `ReadByRegardingAsync`: 1 failure. Restored.
+- **Seeding proof, D9 action check.** Clause removed from `CanCallerSeeThreadAsync`: 7 failures (rename/pin/deactivate Private, three no-privacy-value cases, query shape). Restored.
+- Extra mutations (all restored): F3 (`!isInternal` replaced by `callerSystemUserId is null`) 2 failures; AI handler check neutralised 5; F2 503 removed 3; D8 `requireOpen` neutralised 3; K1 sweep 2; K1 store 2; K2 catch inert 3.
+
+### Not done / for the operator
+
+- No race guard on the default-thread find-or-create (see item 4).
+- The ArchTests ledger reason text for `attachments/text` (`RouteAuthorizationGuardTests.Ledger.cs`, near line 1463) does not yet mention the new visibility check (text only; tests pass).

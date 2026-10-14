@@ -233,14 +233,27 @@ public sealed class EmailUploadCaptureService
             //    References (optional EmailMetadata fields; the current add-in sends none): then the SAME rule as the mailbox
             //    path applies (CommunicationInternalOnlyFloor.HasParentNotExplicitlyShareableAsync). With no headers the
             //    capture follows CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable. Fail closed, non-fatal. ──
+            //    Fix round 6 (K2): cancellation is caught here, as MessagingIngestor does: the row exists, so it stays internal-only
+            //    (true), a warning is logged and the capture continues to enrichment, rather than escaping to the outer catch,
+            //    which would skip enrichment. ──
             if (_genericEntityService is not null && threadId is not null)
             {
-                var parentNotShareable = HasReplyHeaders(envelope)
-                    ? await CommunicationInternalOnlyFloor.HasParentNotExplicitlyShareableAsync(
-                        _communicationService, _genericEntityService, envelope, _logger, ct)
-                    : !CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable;
-                await CommunicationInternalOnlyFloor.LowerWhenSafeAsync(
-                    _genericEntityService, communicationId, threadId, parentNotShareable, _logger, ct);
+                try
+                {
+                    var parentNotShareable = HasReplyHeaders(envelope)
+                        ? await CommunicationInternalOnlyFloor.HasParentNotExplicitlyShareableAsync(
+                            _communicationService, _genericEntityService, envelope, _logger, ct)
+                        : !CommunicationInternalOnlyFloor.AddInSaveWithoutReplyHeadersIsShareable;
+                    await CommunicationInternalOnlyFloor.LowerWhenSafeAsync(
+                        _genericEntityService, communicationId, threadId, parentNotShareable, _logger, ct);
+                }
+                catch (OperationCanceledException ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Internal-only lowering cancelled (non-fatal; the row stays internal-only) | CommunicationId: {CommunicationId}",
+                        communicationId);
+                }
             }
 
             // ── Triage/enrichment: the SAME entry point the inbound + outbound paths invoke, so upload capture
@@ -412,6 +425,15 @@ public sealed class EmailUploadCaptureService
             // lowers it (CommunicationInternalOnlyFloor.LowerWhenSafeAsync) once the thread is resolved and Open.
             [CommunicationInternalOnlyFloor.InternalOnlyField] = true,
         };
+
+        // Task 065 fix round 6 (K1): store the parent the upload names, so the filing sweep (which cannot read headers) can tell a
+        // reply from a header-less save. The In-Reply-To, else the newest References entry (the parent by the same rule the email
+        // thread key uses); absent when the upload carried neither.
+        var parentReference = !string.IsNullOrWhiteSpace(envelope.InReplyTo)
+            ? envelope.InReplyTo
+            : envelope.References.LastOrDefault(r => !string.IsNullOrWhiteSpace(r));
+        if (!string.IsNullOrWhiteSpace(parentReference))
+            communication["sprk_inreplyto"] = parentReference;
 
         // Stamp the internet-message-id when present (it is ALSO the race-proof create's dedup key). A
         // null/blank id leaves the attribute unset — the alternate key excludes nulls (unguarded create).
