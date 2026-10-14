@@ -23,7 +23,7 @@
   - #1854 (143 K1/K2): CLEAN at `d4a98260d`; they merge.
   - Task 144 resumes on guard option A with UAC's 5 conditions. UAC reviews its exemption commit in 144's PR.
   - Task 183 (#1797) closes after ontology's 148 live gate (412 → Conflict).
-- **Provisioning:** owns 185's release gate: a CI-built SpaarkeMaster release carrying `sprk_externalinvitecodehash` before T240d production. They'll send the version number. T240d builds on `6da771b96`.
+- **Provisioning:** 185's release gate is MET. SpaarkeMaster 1.2.3.0 is published (CI run 38603706393, master `bd52b6290`, PR #1860) and carries `contact.sprk_externalinvitecodehash`, secured: Writers 4/4/4, Readers no row. T240d builds on `6da771b96`.
 - **SPA-r3:** has master merged into R3. 046 (WorkforcePrincipalResolver and the binder), 047, 048 (systemuser home-link columns, owner-approved schema) and 058 come to UAC for review.
 - **word-add-in:** the owner is UATing add-ins on dev at `6da771b96`. Their #1815 changes `Set-ExternalFlagForB2BGuests.ps1`. UAC's "no -Apply in Model 1" rule stays until the owner restates it.
 - **Task 186 (baseline access only):** pending SPA-r3's principal contract. Tell provisioning when the Workforce role is final.

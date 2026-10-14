@@ -503,3 +503,5 @@ The implementation is split into slices A, B1, B2, C, D, E and F, committed in o
   - The owner accepted it as low-value ("this email has a Spaarke external account somewhere"), and it is visible in Dataverse anyway.
   - The rejected alternative was to defer the new-account bind to the first sign-in with the code. It would have stopped new users signing in from a device without the link, and changed 184's new-account path.
   - Provisioning records it as K in the T240d gate.
+
+**Release record (2026-10-14, provisioning):** SpaarkeMaster **1.2.3.0** is published by CI run 38603706393 from master `bd52b6290` (PR #1860). It carries `contact.sprk_externalinvitecodehash`, secured (Writers 4/4/4, Readers no row), with nothing removed from the package. The T240d production release gate is met.
