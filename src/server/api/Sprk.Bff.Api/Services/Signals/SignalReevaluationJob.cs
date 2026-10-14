@@ -292,6 +292,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
             }
 
             await ApplyAsync(policy, spec, plan, counts, ct).ConfigureAwait(false);
+            // Last, so its conditional writes never invalidate the version this pass's own closes and reconciles were planned on.
+            await RedactStoredEvidenceAsync(policy, existing, counts, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -669,6 +671,47 @@ public sealed class SignalReevaluationJob : IScheduledJob
 
     /// <summary>Every Signal of the policy, by the begins-with query D-13 names, keyed exactly by the parsed key. A key that
     /// does not parse is an Error and fails the run (its subject's episode cannot be known).</summary>
+    /// <summary>
+    /// Ontology task 145, review F1 (D-123; main session 2026-10-14, option A): every Signal of the policy read this pass, open AND
+    /// resolved, loses the stored evidence detail that is no longer within its secure family
+    /// (<see cref="SignalSuppressionService.StoredEvidenceToRedactAsync"/>), through <see cref="SignalWriter.RedactEvidenceAsync"/>,
+    /// conditional on the version read. Monotonic (detail is removed, never added). A Signal changed since the read is counted
+    /// <c>changedSinceRead</c> and retried next pass; when the families cannot be read nothing is written (a policy failure, retried
+    /// next pass); a write failure is a refusal. Evidence is not a stamp, so task 144's report-only tables do not apply.
+    /// </summary>
+    private async Task RedactStoredEvidenceAsync(PolicyRow policy, IReadOnlyList<ExistingSignal> signals, RunCounts counts, CancellationToken ct)
+    {
+        var redactions = await _suppression.StoredEvidenceToRedactAsync(policy.Code, signals, ct).ConfigureAwait(false);
+        if (redactions is null)
+        {
+            counts.PolicyFailures++;
+            return;
+        }
+
+        foreach (var signal in signals)
+        {
+            if (!redactions.TryGetValue(signal.Id, out var redacted)) continue;
+            if (string.IsNullOrWhiteSpace(signal.RowVersion))
+            {
+                counts.Refused++;
+                _logger.LogWarning(
+                    "Policy {PolicyCode}: Signal {SignalId} has stored evidence to clear but no version was read, so it cannot be written conditionally; the next pass retries.",
+                    policy.Code, signal.Id);
+                continue;
+            }
+
+            try
+            {
+                if (await _writer.RedactEvidenceAsync(signal.Id, signal.RowVersion, redacted, policy.Code, ct).ConfigureAwait(false)) counts.EvidenceRedacted++;
+                else counts.ChangedSinceRead++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                counts.Refused++; // logged and metered by the writer
+            }
+        }
+    }
+
     private async Task<IReadOnlyList<ExistingSignal>> ReadPolicySignalsAsync(
         string policyCode, RunCounts counts, CancellationToken ct, SubjectScope? scope = null)
     {
@@ -685,6 +728,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
                 "sprk_dedupekey", "sprk_signalstatus", "sprk_resolutiontype", "sprk_resolvedon",
                 "sprk_suppresseduntil", "sprk_duedate", "sprk_corerecordtype", "sprk_corerecordid", "ownerid", "versionnumber",
                 "sprk_policyversion", "sprk_lastevaluated", "sprk_decisionrecord",
+                // Task 145 (review F1): the stored evidence, for the redaction pass (RedactStoredEvidenceAsync).
+                SignalSuppressionService.EvidenceColumn,
             }.Concat(SignalSuppressionService.SignalLineageColumns).Distinct(StringComparer.Ordinal).ToArray()),
             PageInfo = new PagingInfo { Count = SignalEvaluator.PageSize, PageNumber = 1 },
         };
@@ -775,6 +820,8 @@ public sealed class SignalReevaluationJob : IScheduledJob
         /// <summary>K1: the part of <see cref="Refused"/> that is a Dataverse privilege refusal (deterministic, so not retried by a trigger).</summary>
         public int AccessDenied;
         public int SupersededClosed, RetiredClosed;
+        /// <summary>Task 145 (review F1): Signals whose stored evidence lost detail outside their secure family this pass.</summary>
+        public int EvidenceRedacted;
         public int ClearedMarked, Unchanged, Suppressed, QuietWindow, DateUnchanged, AwaitingEvidence, NoDatedEvidence, UnparseableKeys, Anomalies, CreatesDeferred, NotApplicable, MissingInputs;
 
         /// <summary>#1661 round 2 F3: policies planned NOTHING this pass because their secure-family partitions could not be read (each is
@@ -852,6 +899,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             awaitingEvidence = AwaitingEvidence,
             noDatedEvidence = NoDatedEvidence,
             clearedMarked = ClearedMarked,
+            evidenceRedacted = EvidenceRedacted,
             missingInputs = MissingInputs,
             unparseableKeys = UnparseableKeys,
             anomalies = Anomalies,

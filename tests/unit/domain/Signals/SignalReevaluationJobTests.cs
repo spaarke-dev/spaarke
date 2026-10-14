@@ -403,10 +403,8 @@ public partial class SignalReevaluationJobTests
         // Run_PathBHit_WritesOneWitnessLinePerExistsClause_AndNoWitnessValueInTheSentence is the ordinary control (detail kept).
         var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
         var secureProject = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001a5");
-        h.Sysadmin.SecureProject(secureProject);
-        var witness = h.Sysadmin.WitnessRows["sprk_communication"].Single();
-        witness["sprk_regardingproject"] = new EntityReference("sprk_project", secureProject);
-        witness["owningteam"] = new EntityReference("team", h.Sysadmin.SecureTeamId!.Value);
+        OrdinaryMatterBesideSecureX(h, secureProject);
+        RefileTheWitnessUnder(h, secureProject);
 
         await h.RunAsync();
 
@@ -430,10 +428,8 @@ public partial class SignalReevaluationJobTests
         // A different due date is what makes the planner reconcile (an identical one is "unchanged" and writes nothing).
         h.Org.SeedSignal(Key(PolicyCode, "sprk_matter", MatterId, 1), SignalWriter.SignalStatusOpen, coreId: MatterId, due: new DateTime(2020, 1, 1));
         var secureProject = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001a5");
-        h.Sysadmin.SecureProject(secureProject);
-        var witness = h.Sysadmin.WitnessRows["sprk_communication"].Single();
-        witness["sprk_regardingproject"] = new EntityReference("sprk_project", secureProject);
-        witness["owningteam"] = new EntityReference("team", h.Sysadmin.SecureTeamId!.Value);
+        OrdinaryMatterBesideSecureX(h, secureProject);
+        RefileTheWitnessUnder(h, secureProject);
         var attempted = new List<Entity>();
         h.Org.CreateFaultFor = e => { attempted.Add(e); return null; };
 
@@ -444,6 +440,131 @@ public partial class SignalReevaluationJobTests
         var evidence = attempted.Should().ContainSingle().Subject.GetAttributeValue<string>("sprk_evidencerefs");
         evidence.Should().Contain($"sprk_communication:{Lower(CommunicationId)}")
             .And.NotContain("Rate increase").And.NotContain("partner@firm.example");
+    }
+
+    // ── Task 145 review F1 (main session 2026-10-14, option A): the redaction pass over STORED evidence ─────────────────────────────
+
+    /// <summary>A matter Signal created while its witness communication was ordinary (so its evidence carries the subject and sender),
+    /// with secure project X known to the environment. Returns the Signal row.</summary>
+    private static async Task<Entity> SignalCreatedWithAnOrdinaryWitness(Harness h, Guid secureProject)
+    {
+        OrdinaryMatterBesideSecureX(h, secureProject);
+        await h.RunAsync();
+        var signal = h.Org.Rows.Values.Single();
+        signal.GetAttributeValue<string>("sprk_evidencerefs").Should().Contain("Rate increase", "the precondition: created with the detail");
+        h.Org.ResetCounts();
+        return signal;
+    }
+
+    /// <summary>An environment with a Secure Record owner team and secure project X, in which matter M, the witness communication and the
+    /// matter Signal are ORDINARY: M is a readable, non-secure root owned by its business-unit team, as is the witness. Without M as a
+    /// readable root the walk cannot name M's family, and every line would be cleared as undetermined, proving nothing.</summary>
+    private static void OrdinaryMatterBesideSecureX(Harness h, Guid secureProject)
+    {
+        h.Sysadmin.SecureProject(secureProject);
+        h.Sysadmin.Stub(new Entity("sprk_matter", MatterId) { ["owningteam"] = new EntityReference("team", DefaultTeamId), ["sprk_issecure"] = false });
+        h.Sysadmin.SubjectRows["sprk_matter"].Single()["owningteam"] = new EntityReference("team", DefaultTeamId);
+        h.Sysadmin.WitnessRows["sprk_communication"].Single()["owningteam"] = new EntityReference("team", DefaultTeamId);
+    }
+
+    private static void RefileTheWitnessUnder(Harness h, Guid secureProject)
+    {
+        var witness = h.Sysadmin.WitnessRows["sprk_communication"].Single();
+        witness["sprk_regardingproject"] = new EntityReference("sprk_project", secureProject);
+        witness["owningteam"] = new EntityReference("team", h.Sysadmin.SecureTeamId!.Value);
+    }
+
+    [Fact]
+    public async Task Run_T145F1_AWitnessRefiledIntoSecureXAfterTheSignalWasCreated_LosesItsDetailOnTheNextPass_Once()
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var secureProject = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001a6");
+        var signal = await SignalCreatedWithAnOrdinaryWitness(h, secureProject);
+        RefileTheWitnessUnder(h, secureProject);
+
+        var second = await h.RunAsync();
+
+        var update = h.Org.ConditionalUpdates.Should().ContainSingle("one conditional write, on the version read").Subject;
+        update.Id.Should().Be(signal.Id);
+        update.Fields.Keys.Should().BeEquivalentTo(new[] { "sprk_evidencerefs" }, "the redaction writes nothing else");
+        var stored = System.Text.Json.JsonDocument.Parse((string)update.Fields["sprk_evidencerefs"]).RootElement;
+        stored.GetArrayLength().Should().Be(1);
+        stored[0].TryGetProperty("text", out _).Should().BeFalse("the subject is now behind secure X's wall");
+        stored[0].TryGetProperty("source", out _).Should().BeFalse("and so is the sender");
+        stored[0].GetProperty("ref").GetString().Should().Be($"sprk_communication:{Lower(CommunicationId)}");
+        stored[0].GetProperty("asOf").GetString().Should().Be("2026-10-05T09:15:00Z");
+        stored[0].GetProperty("clause").GetString().Should().Be("all[0]");
+        second.ResultJson.Should().Contain("\"evidenceRedacted\":1");
+        second.Success.Should().BeTrue();
+
+        h.Org.ResetCounts();
+        var third = await h.RunAsync();
+        h.Org.ConditionalUpdates.Should().BeEmpty("monotonic: nothing left to clear, and nothing is ever restored");
+        third.ResultJson.Should().Contain("\"evidenceRedacted\":0");
+    }
+
+    [Fact]
+    public async Task Run_T145F1_ASignalChangedSinceTheRead_IsNotOverwritten_AndOnceResolvedIsStillRedactedNextPass()
+    {
+        // The redaction is conditional on the version read: a person resolving the Signal between the read and the write wins, and the
+        // next pass (which reads the now RESOLVED Signal) clears the detail on the new version.
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var secureProject = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001a9");
+        var signal = await SignalCreatedWithAnOrdinaryWitness(h, secureProject);
+        RefileTheWitnessUnder(h, secureProject);
+        h.Org.ResolveByPersonBeforeConditionalUpdate.Add(signal.Id);
+
+        var raced = await h.RunAsync();
+
+        raced.Success.Should().BeTrue();
+        raced.ResultJson.Should().Contain("\"changedSinceRead\":1").And.Contain("\"evidenceRedacted\":0");
+        h.Org.ConditionalUpdates.Should().BeEmpty("the row-version check refused the redaction");
+        h.Org.Updates.Should().BeEmpty("never retried unconditionally");
+        h.Org.Rows[signal.Id].GetAttributeValue<OptionSetValue>("sprk_resolutiontype")!.Value
+            .Should().Be(SignalWriter.ResolutionDismissed, "the person's resolution is untouched");
+
+        h.Org.ResolveByPersonBeforeConditionalUpdate.Clear();
+        h.Org.ResetCounts();
+        var next = await h.RunAsync();
+
+        next.ResultJson.Should().Contain("\"evidenceRedacted\":1", "a resolved Signal's stored evidence is redacted too");
+        h.Org.ConditionalUpdates.Should().ContainSingle().Which.Fields["sprk_evidencerefs"].As<string>().Should().NotContain("Rate increase");
+    }
+
+    [Fact]
+    public async Task Run_T145F1_AWitnessThatStaysInTheSignalsFamily_KeepsItsDetail()
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var signal = await SignalCreatedWithAnOrdinaryWitness(h, Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001a7"));
+
+        var second = await h.RunAsync();
+
+        h.Org.ConditionalUpdates.Should().BeEmpty("an ordinary witness on an ordinary Signal is the same family");
+        h.Org.Rows[signal.Id].GetAttributeValue<string>("sprk_evidencerefs").Should().Contain("Rate increase").And.Contain("partner@firm.example");
+        second.ResultJson.Should().Contain("\"evidenceRedacted\":0");
+    }
+
+    [Fact]
+    public async Task Run_T145F1_AFamilyReadFault_LeavesTheStoredLinesUntouchedThatPass_AndTheNextPassClearsThem()
+    {
+        var h = new Harness().WithPathBPolicy().WithMatterHit(MatterId);
+        var secureProject = Guid.Parse("7a1c2b3d-0000-4000-8000-0000000001a8");
+        var signal = await SignalCreatedWithAnOrdinaryWitness(h, secureProject);
+        RefileTheWitnessUnder(h, secureProject);
+        h.Sysadmin.FailWitnessReads = true;
+
+        var faulted = await h.RunAsync();
+
+        h.Org.ConditionalUpdates.Should().BeEmpty("a fault neither strips detail nor adds any: nothing is written that pass");
+        h.Org.Rows[signal.Id].GetAttributeValue<string>("sprk_evidencerefs").Should().Contain("Rate increase");
+        faulted.ResultJson.Should().Contain("\"policyFailures\":1", "the fault is reported, never silent");
+        h.Log.Should().Contain(e => e.EventId.Id == SuppressionEvents.Failed.Id, "the stored-evidence family read is what faulted");
+
+        h.Sysadmin.FailWitnessReads = false;
+        h.Org.ResetCounts();
+        await h.RunAsync();
+        h.Org.ConditionalUpdates.Should().ContainSingle("the next pass retries").Which.Fields["sprk_evidencerefs"].As<string>()
+            .Should().NotContain("Rate increase");
     }
 
     [Fact]
@@ -2427,6 +2548,9 @@ public partial class SignalReevaluationJobTests
         /// <summary>#1661: the Secure Record owner team (null: this World has none, so nothing is secure and nothing is walked).</summary>
         public Guid? SecureTeamId { get; private set; }
 
+        /// <summary>Task 145 F1: a witness communication read by id (the evidence family read) faults.</summary>
+        public bool FailWitnessReads { get; set; }
+
         private static readonly Guid SecureBusinessUnitId = Guid.Parse("5ec0be00-0000-4000-8000-0000000000b1");
 
         /// <summary>Task 143: this World's Secure Record business unit (answered once <see cref="SecureTeamId"/> exists).</summary>
@@ -2637,6 +2761,7 @@ public partial class SignalReevaluationJobTests
                     result.Entities.Add(project);
                     break;
                 case "sprk_communication" when query.Criteria.Conditions.FirstOrDefault(c => c.AttributeName == "sprk_communicationid") is { } byId:
+                    if (FailWitnessReads) throw new InvalidOperationException("Simulated failure reading a witness row.");
                     foreach (var witness in WitnessRows["sprk_communication"].Where(w => byId.Values.Contains(w.Id))) result.Entities.Add(witness);
                     break;
                 // #1661 round 3 F-T1: the Decision Records the Signals cite, for both reads of them (the lineage walk's, with the lookup
