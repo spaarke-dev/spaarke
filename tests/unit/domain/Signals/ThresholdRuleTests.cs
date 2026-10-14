@@ -389,7 +389,7 @@ public class ThresholdRuleTests
         var existence = Defs("existence-rule.schema.json");
         var threshold = Defs("threshold-rule.schema.json");
 
-        threshold.Select(kv => kv.Key).Should().BeEquivalentTo("filterConditions", "filterValue", "dateRange", "relativeDate", "scalar");
+        threshold.Select(kv => kv.Key).Should().BeEquivalentTo("filterConditions", "filterValue", "nullTest", "dateRange", "relativeDate", "scalar");
         foreach (var (name, node) in threshold)
         {
             JsonNode.DeepEquals(node, existence[name]).Should().BeTrue($"$defs/{name} must match existence-rule.schema.json");

@@ -2623,6 +2623,20 @@ public partial class SignalReevaluationJobTests
                 };
             });
 
+        /// <summary>
+        /// Task 061 (D-54): the subject's OWN null tests, as Dataverse answers them: <c>null</c> holds when the column has no value,
+        /// <c>not-null</c> when it has one. Only a condition WITHOUT an <c>entityname</c> is the subject's: the notExists anti-join's
+        /// own <c>null</c> carries the link alias and is modelled by the test's rows, so it must not be read as a column test here.
+        /// </summary>
+        private static bool HoldsNullTests(Entity row, XElement entity) =>
+            (entity.Element("filter")?.Elements("condition") ?? Enumerable.Empty<XElement>())
+            .Where(c => c.Attribute("entityname") is null && (string?)c.Attribute("operator") is "null" or "not-null")
+            .All(c =>
+            {
+                var hasValue = row.Attributes.TryGetValue((string)c.Attribute("attribute")!, out var v) && v is not null;
+                return (string)c.Attribute("operator")! == "null" ? !hasValue : hasValue;
+            });
+
         private static bool Matches(Entity row, string attribute, object expected) => row.Attributes.TryGetValue(attribute, out var actual) && actual switch
         {
             OptionSetValue o => Equals(o.Value, expected),
@@ -2671,7 +2685,7 @@ public partial class SignalReevaluationJobTests
             var result = new EntityCollection();
             if (SubjectRows.TryGetValue(name, out var subjects))
             {
-                foreach (var row in subjects.Where(r => HoldsNumericConditions(r, entity) && InnerLinksSatisfied(entity, r))) result.Entities.Add(row);
+                foreach (var row in subjects.Where(r => HoldsNumericConditions(r, entity) && HoldsNullTests(r, entity) && InnerLinksSatisfied(entity, r))) result.Entities.Add(row);
             }
             else if (WitnessRows.TryGetValue(name, out var witnesses))
             {
