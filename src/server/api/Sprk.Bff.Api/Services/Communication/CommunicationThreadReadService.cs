@@ -136,6 +136,26 @@ public sealed class CommunicationThreadReadService
     // (the contact's name) is the sender name when sprk_sentby is unset.
     private const string CreatedByContactValue = "_sprk_createdbycontact_value";
     private const string CreatedByContactFormattedValue = "_sprk_createdbycontact_value@OData.Community.Display.V1.FormattedValue";
+    // spaarke-SPA-external-access-platform-r3 task 062 (owner check-2 issue 4): a message created in the model-driven app has
+    // neither sprk_sentby nor a creator contact, so the sender name was null ("Unknown sender", bell "Someone"). The row's
+    // createdby (the creating systemuser) FormattedValue is the last fallback: sprk_sentby name -> creator contact name ->
+    // createdby name -> null. Only the display name is projected (the annotation); the id is selected solely so Dataverse
+    // returns the annotation and is never mapped to a DTO field.
+    // Person-only (owner decision 2026-10-13): the BFF creates communication rows through the APP identity, so for a BFF-sent
+    // message createdby is the BFF's application user and its name must never be shown as the sender. The createdby name is
+    // used only when createdby is a real person: the same read expands createdby to its applicationid + accessmode (no extra
+    // round trip) and ClassifyCreatedBy requires no applicationid and an interactive access mode. Anything that cannot be
+    // classified is NOT a person (null name). Same rule as RecordContainerResolver.ReadRowCreatorAsync (person = no
+    // applicationid) and SecureBuRoleDepthCensusBuilder.IsHumanPrincipal (access mode 3/4 are not people).
+    private const string CreatedByValue = "_createdby_value";
+    private const string CreatedByFormattedValue = "_createdby_value@OData.Community.Display.V1.FormattedValue";
+    private const string CreatedByNavigation = "createdby";
+    private const string CreatedByApplicationIdColumn = "applicationid";
+    private const string CreatedByAccessModeColumn = "accessmode";
+    private const string CreatedByExpand =
+        "$expand=" + CreatedByNavigation + "(" + "$select=" + CreatedByApplicationIdColumn + "," + CreatedByAccessModeColumn + ")";
+    private const int AccessModeSupportUser = 3;
+    private const int AccessModeNonInteractive = 4;
 
     // sprk_communicationattachment columns (pre-existing intersection, task 070).
     private const string AttachmentPkField = "sprk_communicationattachmentid";
@@ -212,14 +232,14 @@ public sealed class CommunicationThreadReadService
             // sprk_sentbyname is NOT selected — it is broken in the env (IsValidODataAttribute=false) and 400s the
             // whole read. The sender display name instead comes from the _sprk_sentby_value lookup's FormattedValue
             // annotation (the impersonated query requests annotations; ParseMessageRow reads it) — messaging-r3 2026-07-22.
-            DirectionField, SentByValue,
+            DirectionField, SentByValue, CreatedByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField,
         });
         var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId} and {ActiveOnlyClause}");
         if (since is { } s)
             filter.Append($" and {CreatedOnField} gt {FormatOData(s)}");
 
-        var odata = $"$select={select}&$filter={filter}&$orderby={CreatedOnField} asc&$top={pageSize}";
+        var odata = $"$select={select}&{CreatedByExpand}&$filter={filter}&$orderby={CreatedOnField} asc&$top={pageSize}";
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
 
         // 2) Apply the SHARED internal-only + privilege filter on top of the already-scoped rows.
@@ -433,7 +453,7 @@ public sealed class CommunicationThreadReadService
         // below. Active AND sent/received only (ExternalStatusClause) — a Draft/Queued/Failed/Bounded/Recalled row is
         // never read for the external plane.
         var odata =
-            $"$select={select}&$filter={regardingValue} eq {recordId} and {ActiveOnlyClause} and {ExternalStatusClause}" +
+            $"$select={select}&{CreatedByExpand}&$filter={regardingValue} eq {recordId} and {ActiveOnlyClause} and {ExternalStatusClause}" +
             $" and {ExternalPrivilegeFilterClause}" +
             $"&$orderby={CreatedOnField} desc,{PkField} desc&$top={MaxRegardingScan + 1}";
         var rows = await appOnlyQuery.QueryAsync(CommunicationSet, odata, ct);
@@ -515,7 +535,7 @@ public sealed class CommunicationThreadReadService
 
         columns.AddRange(new[]
         {
-            DirectionField, SentByValue, CreatedByContactValue, CreatedOnField, InternalOnlyField, PrivilegeField,
+            DirectionField, SentByValue, CreatedByContactValue, CreatedByValue, CreatedOnField, InternalOnlyField, PrivilegeField,
             StatusCodeAttribute,
         });
         return string.Join(',', columns.Concat(regardingValues));
@@ -620,7 +640,7 @@ public sealed class CommunicationThreadReadService
             var regardingValues = chunk.Select(r => r.Value).Distinct().ToList();
             var idFilter = string.Join(" or ", chunk.Select(r => $"{r.Value} eq {r.RecordId}"));
             var odata =
-                $"$select={ExternalSelect(regardingValues, includeContent: false)}" +
+                $"$select={ExternalSelect(regardingValues, includeContent: false)}&{CreatedByExpand}" +
                 $"&$filter=({idFilter}) and {ActiveOnlyClause} and {ExternalStatusClause} and {ExternalPrivilegeFilterClause}" +
                 $" and {CreatedOnField} ge {FormatOData(since)}" +
                 $"&$orderby={CreatedOnField} desc,{PkField} desc&$top={max + 1}";
@@ -1017,12 +1037,12 @@ public sealed class CommunicationThreadReadService
             // sprk_sentbyname is NOT selected — broken in the env (IsValidODataAttribute=false) → 400 → 500 on the
             // by-regarding + filtered-query paths. Sender name comes from the _sprk_sentby_value FormattedValue
             // annotation instead (see ReadThreadAsync + ParseMessageRow) — messaging-r3 2026-07-22.
-            DirectionField, SentByValue,
+            DirectionField, SentByValue, CreatedByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField, ThreadLookupValue,
         });
         // Active-only (round-8): deactivated (soft-deleted) messages must drop out of every by-regarding / filtered
         // read that composes onto this shared pipeline. Wrap the caller filter so the AND binds correctly.
-        var odata = $"$select={select}&$filter=({odataFilter}) and {ActiveOnlyClause}&$orderby={CreatedOnField} asc&$top={top}";
+        var odata = $"$select={select}&{CreatedByExpand}&$filter=({odataFilter}) and {ActiveOnlyClause}&$orderby={CreatedOnField} asc&$top={top}";
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
 
         // #675 / ISS-006: authoritative per-caller internal/external bit (fail-closed external) on the SHARED read
@@ -1286,13 +1306,35 @@ public sealed class CommunicationThreadReadService
             Direction = TryInt(row, DirectionField),
             SentBy = TryGuid(row, SentByValue),
             CreatedByContactId = TryGuid(row, CreatedByContactValue),
-            // The systemuser sender's name; else (task 034) the contact author's name — selected only by the external read.
-            SentByName = TryString(row, SentByFormattedValue) ?? TryString(row, CreatedByContactFormattedValue),
+            // The systemuser sender's name; else (task 034) the contact author's name — selected only by the external read;
+            // else (task 062) the creating user's name (an MDA-sent message stamps neither) — ONLY when createdby is a person,
+            // never the BFF's application user; else null.
+            SentByName = TryString(row, SentByFormattedValue)
+                ?? TryString(row, CreatedByContactFormattedValue)
+                ?? (CreatedByIsAPerson(row) ? TryString(row, CreatedByFormattedValue) : null),
             SentAt = TryDateTimeOffset(row, SentAtField),
             CreatedOn = TryDateTimeOffset(row, CreatedOnField),
             InReplyTo = TryString(row, InReplyToField),
             Entity = entity,
         };
+    }
+
+    /// <summary>
+    /// True only when the row's expanded <c>createdby</c> is positively a person: the nested object is present, its
+    /// <c>applicationid</c> is present and JSON null (an application user has one), and its <c>accessmode</c> is a number that
+    /// is not Support User (3) or Non-interactive (4). A missing expand, a missing/odd member, or any other shape is "not a
+    /// person" (fail toward a null sender name — the application user's name is never shown).
+    /// </summary>
+    private static bool CreatedByIsAPerson(Dictionary<string, JsonElement> row)
+    {
+        if (!row.TryGetValue(CreatedByNavigation, out var createdBy) || createdBy.ValueKind != JsonValueKind.Object)
+            return false;
+        if (!createdBy.TryGetProperty(CreatedByApplicationIdColumn, out var applicationId) || applicationId.ValueKind != JsonValueKind.Null)
+            return false;
+        return createdBy.TryGetProperty(CreatedByAccessModeColumn, out var accessMode)
+            && accessMode.ValueKind == JsonValueKind.Number
+            && accessMode.TryGetInt32(out var mode)
+            && mode is not (AccessModeSupportUser or AccessModeNonInteractive);
     }
 
     private sealed class ParsedMessage
