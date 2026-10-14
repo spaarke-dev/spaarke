@@ -40,6 +40,10 @@
 | PRQ-E-13 | Registry placeholder row on spaarkedev1 | Spaarke (skill Step 1) | pending |
 | — | SpaarkeMaster release carrying `contact.sprk_externalinvitecodehash` (1.2.3.0) | Spaarke | **published 2026-10-14** (owner OK): PR #1860 → master `bd52b6290`, CI run 38603706393; manifest reads 1.2.3.0, managed sha256 `e84cd5d9…3f662e`. T186's H6 imports this version |
 
+## 2b. Control plane for the run
+
+Dev control plane redeployed 2026-10-14 (owner OK) from the work branch at master `9dfc0576b` (PR #1867: the H11 `restrictGuestUserAccess` fix, L9). Command: `Deploy-ControlPlane.ps1 -Environment dev -Target Both -Swap -Confirm:$false`, run in-process. Results: Api swapped to production; Worker deployed and passes `/healthz`; queue `sprk-provisioning-jobs` has requiresSession and duplicate detection on; Api and Worker config keys are present. The PRQ-C-11 skill fix (L12) is skill-only and runs from the worktree; it goes to master in PR #1885.
+
 ## 3. Pre-run clean-up of the old demo (owner D35)
 
 The old `spaarke-demo` stack predates the Model 1 dedicated-stamp design and is not reused: its Dataverse environment
