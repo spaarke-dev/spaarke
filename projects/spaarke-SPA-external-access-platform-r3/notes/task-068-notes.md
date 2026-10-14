@@ -169,3 +169,14 @@ Verify after import: hard refresh (Ctrl+Shift+R); on a Message form and a thread
 - K2: thread privacy is read once at form mount (a thread made Private while the form is open keeps the old lock state; the BFF floor still applies on send).
 - K2: the CommunicationTimeline PCF's own compose sends no `threadId` (`CommunicationTimeline.tsx:336-355`), so its client Private lock is the only Private guard on that path. That predates 068.
 - Hosts that do not pass `sourceIsInternalOnly` (Console Reply/Forward card, CommunicationPage `?mode=reply`) now rely on the omit path, which is correct; passing the flag there remains follow-up 3 so the switch can start on.
+
+## Fix round 1 re-check (2026-10-14, sonnet adversarial-reviewer): no F-class finding
+
+EmailComposer 296/296 and CommunicationActions 34/34 pass. Known limits:
+- K1: `sourceIsInternalOnly` is a snapshot taken at mount. No current host changes it after mount, and a stale `undefined` omits the field (fail-safe).
+- K2: an untouched reply to a source whose flag is unknown shows the switch off, but the server raises it to internal. That is fail-closed. Follow-up 3 (hosts pass the flag) makes the switch start on.
+- K3: the reply/forward predicate exists twice (`EmailComposer.reducer.ts:383` and `:439`). A future edit must change both; a candidate for a shared helper.
+- K4: tests are missing for: a `sourceRecord` reply with no `communicationId` prop; a key change followed by RESET through the component; and the `CommunicationActionsApp` wiring.
+- K5 (pre-existing): if `threadIsPrivate` arrives after mount, the switch shows off and locked, while the send still carries true.
+
+**Deploy order:** the BFF with task 065 must be on dev before these PCFs. The dev BFF predates 065, so it would ignore `isInternalOnly`.
