@@ -24,22 +24,22 @@ Rigor FULL, sonnet @ high. Branch `task/ontology-025-threshold` from `origin/doc
 ## Known limits (K-class, one line each)
 
 - Dataverse compares nothing with null: a matter with no roll-up never fires, for any operator, including `<` (K2: fails closed; stated in the schema description).
-- Roll-up freshness is the finance module's (F-69 / #1663).
+- Roll-up freshness is the finance module's (DI-69 / #1663).
 - Money columns compare in the record's own currency (no conversion); the rule is a number, not an amount in a currency (K2; the three listed roll-ups are the matter's own currency).
 
 ## Evidence
 
 - Unit: `ThresholdRuleTests` (compile, 4 operators, 3 columns, canonical numbers, when + subject narrowing, golden FetchXML vs hand-written reference, 16 schema refusals, reserved members, compiler-only refusals with the schema skipped, Switch, evaluation gate, template eligibility, schema drift guard, describer) and four job tests in `SignalReevaluationJobTests`.
 - Live, read-only, spaarkedev1 as the writer principal (`AZURE_TOKEN_CREDENTIALS=AzureCliCredential`, `SIGNALS_LIVE_CALLER_ID=3121bf1b-...`), 2026-10-11: `ThresholdColumns_AreNumericOnTheLiveSchema`, `ThresholdFixture_ReturnsExactlyTheRowsOfTheHandWrittenFetchXml...` (spend >= 20000 -> the 25000 and 250000 matters in, the 10000 matter and every null-spend matter out, equal to the hand-written query), and four operator/column cases (strict `>` excludes the boundary row, `<=` includes it, Currency and Decimal columns). No data was written; the job's Signal write is proven in the unit harness, not live (no Dataverse writes in this task).
-- Live seam `DateOnlyColumns_MatchTheLiveSchema_InBothDirections` fails on the project branch for a reason unrelated to this task (F-68 / #1662).
+- Live seam `DateOnlyColumns_MatchTheLiveSchema_InBothDirections` fails on the project branch for a reason unrelated to this task (DI-68 / #1662).
 
 ## Fix round (review of #1664), 2026-10-11
 
-1. **F-68 fixed here.** `("sprk_workassignment", "sprk_respondedon")` added to `DateOnlyColumns`; `DateOnlyColumns_MatchTheLiveSchema_InBothDirections` passes live (22/22). Unit: `Compile_WorkAssignmentRespondedOn_IsReportedAsDateOnly`, `Evaluate_DateOnlyBoundOnRespondedOn_IsWidenedLikeTheOtherDateOnlyColumns`. F-68 / #1662 marked resolved in defer-issues.md; close #1662 on merge.
+1. **DI-68 fixed here.** `("sprk_workassignment", "sprk_respondedon")` added to `DateOnlyColumns`; `DateOnlyColumns_MatchTheLiveSchema_InBothDirections` passes live (22/22). Unit: `Compile_WorkAssignmentRespondedOn_IsReportedAsDateOnly`, `Evaluate_DateOnlyBoundOnRespondedOn_IsWidenedLikeTheOtherDateOnlyColumns`. DI-68 / #1662 marked resolved in defer-issues.md; close #1662 on merge.
 2. **Describer matches the compiled query.** Numbers print in the compiler's canonical form (`1e2` reads 100; a 32-digit value reads the rounded decimal the query compares); a numeric `when` operand uses at least / more than / at most / less than in Threshold and Existence bodies, dates keep date wording.
 3. **Live finding (read-only, spaarkedev1, 2026-10-11): the SDK returns both Money and Decimal columns at scale 10** (`sprk_totalspendtodate` Money 25000.0000000000, `sprk_totalbudget` Money 150000.0000000000, `sprk_budgetutilizationpercent` Decimal 1.2500000000), although the column metadata precision is 2. So `SignalWriter.FormatFactValue` trims trailing zeros for decimal and Money (`25000`, `94.5`); the job tests now feed scale-10 values. Recorded by `ThresholdColumns_RangesFitTheLiveColumnMetadata_AndTheSdkReturnsTheirValuesAtTheColumnScale`.
 4. **K1 guard.** `PredicateCompiler.ThresholdColumnRanges` (ThresholdColumns is now derived from it): Money columns +-922,337,203,685,477, the percent column +-100,000,000,000 (live Decimal metadata min/max). A value outside is refused at save ("outside the range Dataverse holds"); the live seam asserts each range lies inside the live metadata.
-5. **K2** noted next to F-69 in defer-issues.md.
+5. **K2** noted next to DI-69 in defer-issues.md.
 6. **Test fake.** `HoldsNumericConditions` now compares only Money/decimal columns, ignores option set and other non-numeric values (statecode eq 0), and still excludes a missing value for ordered comparisons. Control: `Run_ThresholdPolicy_WithAnOptionSetWhenCondition_IsNotExcludedByTheFake_ControlForTheNumericFilter`.
 
 
