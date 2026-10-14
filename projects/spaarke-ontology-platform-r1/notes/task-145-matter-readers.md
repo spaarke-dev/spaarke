@@ -132,6 +132,7 @@ Review F1 (option A), through the job's real write path:
 | Test | Proves |
 |---|---|
 | `Run_T145F1_AWitnessRefiledIntoSecureXAfterTheSignalWasCreated_LosesItsDetailOnTheNextPass_Once` | Created with the detail; after a re-file into secure X the next pass makes one conditional write of `sprk_evidencerefs` only (ref, asOf and clause stay). A third pass writes nothing (monotonic). |
+| `Run_T145F1_ASignalOfAPolicySwitchedOffLater_IsStillRedacted_ThoughThePolicyIsNotEvaluated` | An Off or Retired policy is never evaluated, so its Signals reach the redaction only through the nightly not-in-force sweep (`RedactPoliciesNotInForceAsync`). The test fails when the sweep is removed. |
 | `Run_T145F1_AWitnessThatStaysInTheSignalsFamily_KeepsItsDetail` | Ordinary, same family: no write, and the detail stays. With a Secure team present, this is also the create-path ordinary control. |
 | `Run_T145F1_AFamilyReadFault_LeavesTheStoredLinesUntouchedThatPass_AndTheNextPassClearsThem` | A fault writes nothing (`policyFailures:1`, `SuppressionEvents.Failed` logged); the next pass clears. |
 | `Run_T145F1_ASignalChangedSinceTheRead_IsNotOverwritten_AndOnceResolvedIsStillRedactedNextPass` | A person's resolve between read and write wins (`changedSinceRead:1`, nothing written unconditionally). The next pass redacts the now **resolved** Signal. |
@@ -152,6 +153,16 @@ Mutations killed:
 - keeping detail on a fault: 1 fails;
 - the job not calling the filter: 1 fails;
 - the backfill marking a typed column as "in stamp": 2 fail.
+
+### Review record
+
+- **Pass 1** (adversarial-reviewer, Opus) found F1 plus three test gaps. Fixed in `b5f0c98d4` and `fcb930525`; the census ArchTest
+  was fixed in `1365e9a43`.
+- **Scoped re-check of the F1 fix.** It was done in-session, because the concurrent-subagent cap refused a reviewer agent. It
+  found one gap: the Signals of Off or Retired policies were never read, so they were never redacted. Fixed in `a13204cd9`
+  (`SignalClosureService.PoliciesNotInForceAsync` is extracted, so "not in force" stays one query).
+- **Pass 2 is REQUIRED** because this is tenant-isolation-class work (the D-123 secure-family wall; CLAUDE.md §8.5). It was NOT
+  run: the concurrent-subagent cap refused the launch twice. It must run before merge.
 
 ## 5. Component justification (CLAUDE.md §11)
 
@@ -174,6 +185,10 @@ factored out of `EvidenceWithinPartitionAsync`:
 2. **Extension:** it extends the same service and shares its helpers; there is no new class, interface or DI registration.
 3. **Cost of doing nothing:** a Signal created before its witness moved into a secure family keeps that family's subject and
    sender (review F1).
+
+`SignalClosureService.PoliciesNotInForceAsync` (internal) is extracted from `ClosePoliciesNotInForceAsync`, not added, so the
+query has one owner. The job's `RedactPoliciesNotInForceAsync` (private) exists because the Signals of an Off or Retired policy are
+otherwise never read again (cost of doing nothing: their stored detail is never redacted).
 
 `SignalWriter.RedactEvidenceAsync`, the failure reason `OntologyWriterFailureReason.SignalEvidenceRedactFailed` and the run
 counter `evidenceRedacted`:
