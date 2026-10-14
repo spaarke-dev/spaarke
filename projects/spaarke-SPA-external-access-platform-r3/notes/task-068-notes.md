@@ -180,3 +180,26 @@ EmailComposer 296/296 and CommunicationActions 34/34 pass. Known limits:
 - K5 (pre-existing): if `threadIsPrivate` arrives after mount, the switch shows off and locked, while the send still carries true.
 
 **Deploy order:** the BFF with task 065 must be on dev before these PCFs. The dev BFF predates 065, so it would ignore `isInternalOnly`.
+
+## Step 6 - dev deploy record (2026-10-14, owner-approved)
+
+The owner approved all four dev changes: 044 apply, BFF from R3, three PCF imports, live label rename.
+
+1. **BFF**:
+   - Deployed R3 `4e23edeb2` (contains all of origin/master, including UAC `8a1f3bb11`) to `spaarke-bff-dev` with `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1`.
+   - Hash-verify matched, `/healthz` passed, CORS OK. Full BFF unit suite at that SHA: 21,491 passed, 0 failed.
+   - Announced beforehand to UAC-r2, word-add-in-r1 and ontology-r1. The next master deploy by any of them removes R3's unmerged changes from dev; ontology will message before its 035 deploy.
+   - Rollback: redeploy from master.
+2. **PCFs**: imported with `scripts/Import-SolutionScoped.ps1` (scoped publish, no tenant-wide publish). Versions read back from `solutions`:
+   - CommunicationActionsSolution 1.3.20
+   - CommunicationMessageActionsSolution 1.0.6
+   - CommunicationTimelineSolution 1.0.5
+
+   The bundles committed with 068 were current, because the master merge changed nothing under `src/client/shared` or these PCFs. Rollback ZIPs (1.3.19 / 1.0.5 / 1.0.4) are packed in the scratch worktree `C:\wtr3-068rb` (detached at `ceb699193`), under each `src/client/pcf/<P>/Solution/bin/`.
+3. **Label, live**:
+   - `sprk_communication.sprk_isinternalonly` display name changed "Is Internal Only" → "Internal Only": a PUT of the BooleanAttributeMetadata with `MSCRM.MergeLabels: true`.
+   - The Message main form `{b58ec3d8-0982-f111-8076-7ced8ddc4cc6}` cell label changed to "Internal Only": a PATCH of `formxml`, exactly one cell.
+   - `PublishXml` for `sprk_communication`. All three calls returned 204, and both labels read back as "Internal Only".
+   - Rollback: the before-images (attribute JSON and form JSON) are in the session scratchpad. The reverse is the same PUT and PATCH with "Is Internal Only", then publish.
+
+**Pending:** the owner checks on dev, using the "Verify after import" list above.
