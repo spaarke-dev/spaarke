@@ -253,10 +253,16 @@ def log_launch(event, tool, tool_input, project_dir):
             csv.writer(sink, lineterminator="\n").writerow(fields)
             return sink.getvalue()
         line = csv_line(rec)
-        with open(path, "a", encoding="utf-8", newline="") as fh:
-            if fh.tell() == 0:                          # new or empty file: header first, in the same write
-                line = csv_line(LAUNCH_COLUMNS) + line
-            fh.write(line)                              # one write: a concurrent launch cannot split a line
+        try:                                            # O_EXCL: exactly one launch creates the file and writes the header
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            fd = None
+        if fd is not None:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+                fh.write(csv_line(LAUNCH_COLUMNS) + line)   # header + first line in one write
+        else:
+            with open(path, "a", encoding="utf-8", newline="") as fh:
+                fh.write(line)                          # one write: a concurrent launch cannot split a line
     except Exception as ex:                             # stderr only
         print(f"require-agent-model: launch not logged: {ex}", file=sys.stderr)
 

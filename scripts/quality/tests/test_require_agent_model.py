@@ -190,6 +190,36 @@ class LaunchLog(unittest.TestCase):
         self.assertTrue(lines[0].startswith("ts_utc,session_id,transcript_path,project,tool,subagent_type,model,effort,description"))
         self.assertEqual(sum(1 for l in lines if l.startswith("ts_utc,")), 1)
 
+    def test_existing_log_is_appended_to_without_a_second_header(self):
+        log = self.log_path()
+        os.makedirs(os.path.dirname(log))
+        with open(log, "w", encoding="utf-8", newline="") as fh:       # another launch already created it
+            fh.write("ts_utc,session_id,transcript_path,project,tool,subagent_type,model,effort,description,tool_use_id\n"
+                     "2026-01-01T00:00:00Z,s,,p,Agent,,sonnet,,earlier,t0\n")
+        code, out = run({"tool_name": "Agent", "tool_input": {"prompt": "p", "model": "haiku", "description": "later"}},
+                        self.tmp.name, log)
+        self.assertEqual((code, out), (0, ""))
+        with open(log, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(sum(1 for l in lines if l.startswith("ts_utc,")), 1)
+        self.assertEqual([r["description"] for r in read_log(log)], ["earlier", "later"])
+
+    def test_parallel_first_launches_write_one_header(self):
+        log = self.log_path()
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=self.tmp.name, SPAARKE_AGENT_LAUNCH_LOG=log)
+        ev = json.dumps({"tool_name": "Agent", "tool_input": {"prompt": "p", "model": "haiku", "description": "x"}})
+        procs = [subprocess.Popen([sys.executable, HOOK], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True, env=env) for _ in range(6)]
+        for pr in procs:
+            pr.communicate(ev, timeout=30)
+            self.assertEqual(pr.returncode, 0)
+        with open(log, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        self.assertEqual(sum(1 for l in lines if l.startswith("ts_utc,")), 1)
+        self.assertTrue(lines[0].startswith("ts_utc,"))
+        self.assertEqual(len(lines), 7)
+
     def test_definition_supplies_model_and_effort(self):
         log = self.log_path()
         run({"tool_name": "Agent", "tool_input": {"prompt": "p", "subagent_type": "reviewer", "description": "review"}},

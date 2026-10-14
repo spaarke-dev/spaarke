@@ -6,8 +6,10 @@ For each board project the planned figure is read from the FIRST committed versi
 
     planned = max(task rows in that version, *.poml files in tasks/ at that commit)
 
-A task row is a table row whose first cell is a task number (`| 001 |`, `| [001](x.poml) |`, `| **001** |`),
-counted once per distinct number. Task Count on the board counts `tasks/*.poml` (see the devops-project-sync
+A task row is a table row whose first cell is a zero-padded task number (`| 001 |`, `| [001](x.poml) |`, `| **001** |`),
+counted once per distinct number; a bare `| 1 |` (phase, group or serial-number column) is not a task, even
+when the id sits in the 2nd cell (`| 1 | [001](x.poml) |`): the POML count below covers such indexes.
+Task Count on the board counts `tasks/*.poml` (see the devops-project-sync
 skill); the max() covers an index that was committed before its POMLs, or in a format with no numbered rows.
 It is a heuristic: a project first merged in one squash commit reports its size at that merge.
 
@@ -38,7 +40,8 @@ _spec.loader.exec_module(ubs)
 
 FIELD_NAME = "Tasks Planned"
 INDEX_GLOB = "projects/*/tasks/TASK-INDEX.md"
-TASK_ROW = re.compile(r"^\|\s*(?:\[)?\**(\d{1,4}[a-z]?)\**(?:\])?(?:\([^)]*\))?\s*\|")
+# Zero-padded ids only (every real index uses 001, 010a...): a bare `1` is a phase / group / serial-number column.
+TASK_ROW = re.compile(r"^\|\s*(?:\[)?\**(\d{3,4}[a-z]?)\**(?:\])?(?:\([^)]*\))?\s*\|")
 SHA = re.compile(r"[0-9a-f]{40}")
 
 
@@ -48,8 +51,7 @@ def count_task_rows(text):
     for line in text.splitlines():
         m = TASK_ROW.match(line)
         if m:
-            num = re.match(r"(\d+)(.*)", m.group(1).lower())
-            ids.add((int(num.group(1)), num.group(2)))          # 001 and 1 are the same task
+            ids.add(m.group(1).lower())
     return len(ids)
 
 
@@ -63,8 +65,10 @@ def git(repo, *args):
 
 def first_versions(repo, ref=None):
     """{TASK-INDEX path: oldest commit that added it}. `ref` limits the history to one ref; the default is every
-    ref, so a project whose branch has not merged yet is counted too."""
-    out = git(repo, "log", ref or "--all", "--diff-filter=A", "--format=%H", "--name-only", "--", INDEX_GLOB)
+    branch and remote branch (not refs/stash), so a project whose branch has not merged yet is counted too.
+    --no-renames keeps a renamed project's file as an add at its new path."""
+    refs = [ref] if ref else ["--branches", "--remotes"]
+    out = git(repo, "log", *refs, "--no-renames", "--diff-filter=A", "--format=%H", "--name-only", "--", INDEX_GLOB)
     first, cur = {}, None
     for line in out.splitlines():
         line = line.strip()

@@ -535,7 +535,7 @@ TYPE_CATEGORY = {"code-mapper": "map", "explore": "map", "adversarial-reviewer":
                  "claude-code-guide": "lookup"}
 
 REWORK_LINE = re.compile(r"^[\s>*\-`#]*\**rework\**:\s*\**\s*(none|fix-round-(\d+)|escalated-to-([A-Za-z0-9._-]+))"
-                         r"(?![A-Za-z0-9_-])(.*)$", re.I)
+                         r"(?![A-Za-z0-9_-])(?!\s*\|)(.*)$", re.I)
 TASK_REF = re.compile(r"\btask[\s#_-]*(\d{1,4})\b", re.I)
 REWORK_RANK = {"none": 0, "fix": 1, "escalated": 2}
 

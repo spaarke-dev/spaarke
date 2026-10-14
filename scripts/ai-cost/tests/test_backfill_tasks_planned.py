@@ -27,11 +27,22 @@ class Counting(unittest.TestCase):
 
     def test_link_bold_and_letter_suffix_forms(self):
         text = "| [001](001-a.poml) | x |\n| **002** | x |\n| 003a | x |\n| 3 | x |\n"
-        self.assertEqual(bf.count_task_rows(text), 4)
+        self.assertEqual(bf.count_task_rows(text), 3)           # `| 3 |` is not zero-padded: not a task
 
     def test_header_separator_prose_and_non_task_tables_do_not_count(self):
         text = ("| ID | Title |\n|---|---|\n| Phase 1 | x |\n| FR-01 | x |\n"
                 "Task 004 is described here.\n- 005 not a table\n")
+        self.assertEqual(bf.count_task_rows(text), 0)
+
+    def test_phase_and_parallel_group_tables_do_not_count_their_first_cell(self):
+        text = ("| Phase | Tasks | Notes |\n|---|---|---|\n| 1 | 010, 011 | setup |\n| 2 | 020 | build |\n"
+                "| Group A | 030 | x |\n")
+        self.assertEqual(bf.count_task_rows(text), 0)
+
+    def test_serial_number_column_is_not_a_task_id(self):
+        # `| # | Task |` indexes: the id sits in the 2nd cell and the 1st is a running number. Such rows are
+        # not counted from the table (the *.poml count at that commit covers them); the 1st cell never counts.
+        text = "| # | Task |\n|---|---|\n| 1 | [001](001-a.poml) |\n| 2 | [002](002-b.poml) |\n"
         self.assertEqual(bf.count_task_rows(text), 0)
 
     def test_a_number_repeated_in_two_tables_counts_once(self):
@@ -114,6 +125,26 @@ class History(unittest.TestCase):
         self.git("commit", "-q", "-m", "retire")
         self.commit({idx: index("001", "002", "003", "004")}, "revived")
         self.assertEqual(bf.planned_for(self.repo, idx, bf.first_versions(self.repo)[idx])[0], 2)
+
+    def test_renamed_project_folder_is_seen_at_its_new_path(self):
+        old, new = "projects/old-name/tasks/TASK-INDEX.md", "projects/new-name/tasks/TASK-INDEX.md"
+        self.commit({old: index("001", "002", "003")}, "plan")
+        self.git("mv", "projects/old-name", "projects/new-name")
+        self.git("commit", "-q", "-m", "rename")
+        firsts = bf.first_versions(self.repo)
+        self.assertIn(new, firsts)                                   # without --no-renames: only the old path
+        self.assertEqual(bf.planned_for(self.repo, new, firsts[new])[0], 3)
+
+    def test_stash_ref_is_not_history(self):
+        # refs/stash (shared across worktrees) must not count as a project's first version.
+        self.commit({"README.md": "x"}, "base")
+        stash_idx = "projects/ghost/tasks/TASK-INDEX.md"
+        os.makedirs(os.path.join(self.repo, os.path.dirname(stash_idx)))
+        with open(os.path.join(self.repo, stash_idx), "w", encoding="utf-8") as fh:
+            fh.write(index("001"))
+        self.git("add", "-A")
+        self.git("stash", "push", "-q")                              # throwaway temp repo, not the real one
+        self.assertNotIn(stash_idx, bf.first_versions(self.repo))
 
     def test_projects_without_an_index_are_not_listed(self):
         self.commit({"projects/other/README.md": "x", "projects/demo/tasks/TASK-INDEX.md": index("001")}, "x")

@@ -113,7 +113,8 @@ Task or Workflow launch it allows (a denied launch is not logged) to
 Columns: `ts_utc, session_id, transcript_path, project, tool, subagent_type, model, effort, description, tool_use_id`.
 `model` and `effort` are what the call or the agent definition set (`inherit` when neither did). The description
 is cut to 120 characters. The prompt is never logged. A logging failure goes to stderr only and cannot change the
-hook's decision. Nothing is logged for launches before the hook change, so a fresh log starts empty.
+hook's decision. The file holds session ids and local paths (including the Windows username): never commit it
+(~13 MB/year, no rotation). Nothing is logged for launches before the hook change, so a fresh log starts empty.
 
 **Sub-agent transcripts.** Claude Code stores each sub-agent as
 `~/.claude/projects/<project>/<session>/subagents/agent-<id>.jsonl` with a sibling `agent-<id>.meta.json` holding
@@ -173,7 +174,7 @@ Only the checkout the script runs from is read, so run it from a tree that has t
 The board field `Tasks Planned` (number) holds how many tasks a project started with; `Task Count` is what it has
 now, so `Task Count / Tasks Planned` is scope growth. The script fills it from git history: the oldest committed
 version of `projects/<slug>/tasks/TASK-INDEX.md` across all refs, counting distinct numbered task rows
-(`| 001 |`, `| [001](..) |`, `| **001** |`), and at least the `tasks/*.poml` files present at that commit (an index
+(zero-padded: `| 001 |`, `| [001](..) |`, `| **001** |`; a bare `| 1 |` does not count), and at least the `tasks/*.poml` files present at that commit (an index
 committed before its POMLs, or without numbered rows). Task Count itself counts `tasks/*.poml` (see the
 `devops-project-sync` skill). A project first merged in one squash commit reports its size at that merge, so treat
 small ratios as lower bounds.

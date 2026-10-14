@@ -259,6 +259,13 @@ class Reworks(unittest.TestCase):
                 "rework: maybe\nrework: fix-round\nrework: fix-round-x\nrework: escalated-to-\nno rework: none here\n")
         self.assertEqual(self.parse([("demo-r1", "task-007-a.md", text)]), {})
 
+    def test_the_template_line_is_not_a_record(self):
+        tmpl = "rework: none | fix-round-<N> | escalated-to-<model>\n"
+        self.assertEqual(self.parse([("demo-r1", "task-007-a.md", tmpl)]), {})
+        self.assertEqual(self.parse([("demo-r1", "task-007-a.md", "- `" + tmpl.strip() + "`\n")]), {})
+        got = self.parse([("demo-r1", "summary.md", "rework: fix-round-2 task 042\nrework: none task 043\n" + tmpl)])
+        self.assertEqual(got, {("demo-r1", 42): ("fix", "2"), ("demo-r1", 43): ("none", "")})
+
     def test_other_projects_do_not_collide(self):
         got = self.parse([("demo-r1", "task-001-a.md", "rework: none\n"), ("other-r2", "task-001-a.md", "rework: fix-round-1\n")])
         self.assertEqual(got[("demo-r1", 1)][0], "none")
