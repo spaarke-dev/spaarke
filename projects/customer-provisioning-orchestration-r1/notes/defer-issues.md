@@ -141,7 +141,7 @@ Remove `Dedicated` (needed → build, else remove) or have H2b create its index;
 
 | Field | Value |
 |---|---|
-| **Status** | Open — before T186; needs an owner-approved live step |
+| **Status** | Fix applied live — dev Api `CustomerRunGuard__Enabled=True` (deployed 2026-10-13 from `67c80623f`). Open only for the live proof at T186: a second concurrent POST for the same customer is refused |
 | **Urgency** | before T186 |
 | **Filed** | 2026-10-09 (punch-list re-verification, 203b row A27) |
 | **Source** | `infrastructure/bicep/platform-controlplane.bicep` `customerRunGuardEnabled` default false; no `.bicepparam` sets it; live dev Api `CustomerRunGuard__Enabled = False` |
@@ -333,6 +333,13 @@ the BFF's owning project.
 
 **Concrete failure without a fix:** H3 and H10 403 on the first live run (F3); OBO SPE calls on a new stamp may 403
 (F6).
+
+**Update 2026-10-14.** F3 resolved: read live, `sprk-controlplane-dev-uami` (principal `38f7693f…`) holds
+`Application.ReadWrite.OwnedBy` and `AppRoleAssignment.ReadWrite.All`. The optional removal of the roles it no longer
+needs is still open; it holds `Mail.ReadWrite`, `Mail.Send` and `MailboxSettings.Read` by owner decision D33. F6 is
+being fixed before T186: the delegated Files.ReadWrite.All id becomes `863451e7-0667-486c-a5d6-d135439485f0`, and
+delegated FileStorageContainer.Selected (`085ca537-…`) is added. Both ids were read live from the Graph service
+principal. F2, F4 and F5 are unchanged.
 
 ### ISS-022 — Three BFF secrets absent from the canonical catalog: `PowerBi__ClientSecret`, `Rag__ApiKey`, `Notifications__SignalR__ConnectionString`
 
