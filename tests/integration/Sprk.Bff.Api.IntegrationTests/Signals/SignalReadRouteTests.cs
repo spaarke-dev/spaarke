@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
@@ -571,6 +572,90 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         _ = s;
     }
 
+    [Fact]
+    public async Task AWitnessFiledUnderSecureXButNotYetReOwned_IsWithheld()
+    {
+        // The re-own window (task 145's case; 038 pass 2 F1): the witness is filed under secure project X but still owned by an
+        // ordinary team. Its family is X's (from its roots), so the ordinary matter's Signal does not show its detail.
+        var world = new World { SecureTeamExists = true };
+        var m = world.Matter(readers: [Alice]);
+        world.AppRoot("sprk_matter", m, secure: false);
+        var secureProject = Guid.NewGuid();
+        world.AppRoot("sprk_project", secureProject, secure: true);
+        var windowed = world.AppCommunication(secureOwned: false,
+            ("sprk_regardingmatter", "sprk_matter", m), ("sprk_regardingproject", "sprk_project", secureProject));
+        var s = world.Signal(Decide, core: (MatterType, m), evidence: EvidenceQuoting(windowed));
+        world.AppSignal(s, m, secureOwned: false);
+
+        var line = EvidenceOf(await OkAsync(world, Alice), s).Single();
+        line.TryGetProperty("text", out _).Should().BeFalse();
+        line.GetProperty("withheld").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task WhenTheAppOnlyFamilyReadFaults_EveryDetailIsWithheld_AndTheListIsUnchanged()
+    {
+        // 038 pass 2 F2: a FAULT (not a missing row) in the placement. Fail closed on the detail; the list is the same list.
+        var world = new World { SecureTeamExists = true };
+        var m = world.Matter(readers: [Alice]);
+        world.AppRoot("sprk_matter", m, secure: false);
+        var ordinary = world.AppCommunication(secureOwned: false, ("sprk_regardingmatter", "sprk_matter", m));
+        var s = world.Signal(Decide, core: (MatterType, m), evidence: EvidenceQuoting(ordinary));
+        var plain = world.Signal(Decide, core: (MatterType, m));
+        world.AppSignal(s, m, secureOwned: false);
+        world.FaultAppOnlyTables.Add("sprk_signal");
+
+        var body = await OkAsync(world, Alice);
+        Ids(body).Should().BeEquivalentTo([s, plain]);
+        var line = EvidenceOf(body, s).Single();
+        line.TryGetProperty("text", out _).Should().BeFalse();
+        line.TryGetProperty("source", out _).Should().BeFalse();
+        line.GetProperty("withheld").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DetailInAnyCasing_IsJudged_AndCollidingNamesWithholdThatSignalsEvidenceOnly()
+    {
+        // 038 pass 2 K1: "Text"/"SOURCE" are detail too; a line with both "text" and "Text" cannot be judged, so that Signal's
+        // evidence is withheld (null) and the request is still 200.
+        var world = new World { SecureTeamExists = true };
+        var m = world.Matter(readers: [Alice]);
+        world.AppRoot("sprk_matter", m, secure: false);
+        var secureProject = Guid.NewGuid();
+        world.AppRoot("sprk_project", secureProject, secure: true);
+        var refiled = world.AppCommunication(secureOwned: true,
+            ("sprk_regardingmatter", "sprk_matter", m), ("sprk_regardingproject", "sprk_project", secureProject));
+        var cased = world.Signal(Decide, core: (MatterType, m), evidence:
+            $"[{{\"ref\":\"sprk_communication:{refiled:D}\",\"Text\":\"{WitnessSubject}\",\"SOURCE\":\"{WitnessSender}\",\"asOf\":\"2026-10-05T09:15:00Z\"}}]");
+        world.AppSignal(cased, m, secureOwned: false);
+        var colliding = world.Signal(Decide, core: (MatterType, m), evidence:
+            $"[{{\"ref\":\"sprk_communication:{refiled:D}\",\"text\":\"a\",\"Text\":\"{WitnessSubject}\"}}]");
+        world.AppSignal(colliding, m, secureOwned: false);
+
+        var body = await OkAsync(world, Alice);
+        var raw = AllItems(body).Single(i => i.GetProperty("signalId").GetGuid() == cased).GetProperty("evidenceRefs").GetString()!;
+        raw.Should().NotContain(WitnessSubject).And.NotContain(WitnessSender);
+        EvidenceOf(body, cased).Single().GetProperty("withheld").GetBoolean().Should().BeTrue();
+        AllItems(body).Single(i => i.GetProperty("signalId").GetGuid() == colliding).GetProperty("evidenceRefs").ValueKind
+            .Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task ClosedSets_AnAssigneeDayThatCannotBeRead_FallsBackToUtc_WithAWarning()
+    {
+        // Outside-diff finding (038 pass 2): DataverseRecipientDays reports a read fault in RecipientDay.Error; the route logs it.
+        var world = new World { Now = DateTimeOffset.Parse("2026-10-14T02:30:00Z", System.Globalization.CultureInfo.InvariantCulture) };
+        world.EasternUserOf(AliceContact);
+        world.FaultAppOnlyTables.Add("systemuser");
+        var m = world.Matter(readers: [Alice]);
+        var s = world.Signal(Do, core: (MatterType, m), subject: (EventType, world.Event(owner: Team, assignedTo: AliceContact)),
+            sets: ["closedToday", "closedEarlier"], resolvedOn: DateTimeOffset.Parse("2026-10-13T23:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
+        _factory.Logs.Warnings.Clear();
+
+        Ids(await OkAsync(world, Alice, "?set=closedEarlier")).Should().Equal([s], "the UTC date decides when the zone cannot be read");
+        _factory.Logs.Warnings.Should().Contain(w => w.Contains("the assignee's day could not be read", StringComparison.Ordinal));
+    }
+
     // ---------------------------------------------------------------------------------------------------------------
     // Configuration, paging
     // ---------------------------------------------------------------------------------------------------------------
@@ -696,6 +781,9 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         /// <summary>App-only Dataverse (the secure-family walk, the time-zone reads): rows by table, evaluated by condition.</summary>
         public List<Entity> AppRows { get; } = [];
         public bool SecureTeamExists { get; set; }
+
+        /// <summary>App-only reads of these tables throw, like a Dataverse timeout.</summary>
+        public HashSet<string> FaultAppOnlyTables { get; } = new(StringComparer.Ordinal);
         public Dictionary<Guid, Guid> UserOfContact { get; } = [];
         public Dictionary<Guid, int> ZoneCodeOfUser { get; } = [];
         public List<string> Requests { get; } = [];
@@ -864,6 +952,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
 
         public EntityCollection AppOnly(QueryExpression q)
         {
+            if (FaultAppOnlyTables.Contains(q.EntityName)) throw new TimeoutException($"app-only read of {q.EntityName} timed out");
             switch (q.EntityName)
             {
                 case "businessunit":
@@ -889,9 +978,23 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                         : new EntityCollection();
                 default:
                     var result = new EntityCollection();
-                    foreach (var row in AppRows.Where(r => r.LogicalName == q.EntityName && Matches(r, q.Criteria))) result.Entities.Add(row);
+                    foreach (var row in AppRows.Where(r => r.LogicalName == q.EntityName && Matches(r, q.Criteria))) result.Entities.Add(Projected(row, q.ColumnSet));
                     return result;
             }
+        }
+
+        /// <summary>The row as Dataverse returns it for <paramref name="columns"/>: only the asked columns (all only for AllColumns), so
+        /// code that reads a column it did not ask for sees null, as it would live.</summary>
+        private static Entity Projected(Entity row, ColumnSet columns)
+        {
+            if (columns.AllColumns) return row;
+            var copy = new Entity(row.LogicalName, row.Id);
+            foreach (var column in columns.Columns)
+            {
+                if (row.Contains(column)) copy[column] = row[column];
+            }
+
+            return copy;
         }
 
         private static bool Matches(Entity row, FilterExpression filter)
@@ -1021,9 +1124,35 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
         public override DateTimeOffset GetUtcNow() => factory.World.Now;
     }
 
+    /// <summary>Every Warning the host logs, for the tests that pin a fallback's warning.</summary>
+    internal sealed class LogCapture : ILoggerProvider
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<string> Warnings { get; } = new();
+
+        public ILogger CreateLogger(string categoryName) => new Logger(this);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Logger(LogCapture owner) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Warning;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                if (logLevel >= LogLevel.Warning) owner.Warnings.Enqueue(formatter(state, exception));
+            }
+        }
+    }
+
     public sealed class WorklistFactory : DataverseIntegrationTestFixture
     {
         internal World World { get; set; } = new();
+
+        internal LogCapture Logs { get; } = new();
 
         internal static string RepoRoot { get; } = FindRepoRoot();
 
@@ -1071,6 +1200,7 @@ public sealed class SignalReadRouteTests : IClassFixture<SignalReadRouteTests.Wo
                 services.AddSingleton<IIdentityNormalizationService>(_ => new FakeIdentity(this));
                 services.RemoveAll<TimeProvider>();
                 services.AddSingleton<TimeProvider>(new WorldClock(this));
+                services.AddSingleton<ILoggerProvider>(Logs);
             });
         }
 

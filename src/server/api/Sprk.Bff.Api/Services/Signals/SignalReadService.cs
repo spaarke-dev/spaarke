@@ -829,6 +829,11 @@ public sealed class SignalReadService
 
             // D-25 as amended by D-129: the assignee's linked user's zone, else UTC; never the owner (records are owned by teams).
             var recipient = await days.ForAsync(row.AssigneeContact, owner: null, ct).ConfigureAwait(false);
+            if (recipient.Error is { } dayError)
+            {
+                _logger.LogWarning("Signal read: the assignee's day could not be read ({Reason}, {ExceptionType}); the UTC date is used for this item.",
+                    recipient.FallbackReason, dayError.GetType().Name);
+            }
             TimeZoneInfo? zone = null;
             if (recipient.Source == RecipientDaySource.Assignee && recipient.SystemUserId is { } user)
             {
@@ -934,13 +939,27 @@ public sealed class SignalReadService
     }
 
     /// <summary>The stored evidence as a JSON array of lines, or null when it is not one (never judged, never shown).</summary>
+    /// <remarks>Property names are matched case-insensitively (a <c>Text</c> or <c>SOURCE</c> is detail too). A line whose names
+    /// collide under that rule (<c>text</c> and <c>Text</c>) cannot be judged, so the Signal's whole evidence is withheld (null).</remarks>
     private static JsonArray? ParseEvidence(string json)
     {
         try
         {
-            return JsonNode.Parse(json) is JsonArray lines && lines.All(l => l is JsonObject) ? lines : null;
+            if (JsonNode.Parse(json, new JsonNodeOptions { PropertyNameCaseInsensitive = true }) is not JsonArray lines
+                || !lines.All(l => l is JsonObject))
+            {
+                return null;
+            }
+
+            // JsonObject builds its property table lazily; build it now so a duplicate name fails here, for this Signal only.
+            foreach (var line in lines.OfType<JsonObject>())
+            {
+                _ = line.Count;
+            }
+
+            return lines;
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or ArgumentException)
         {
             return null;
         }

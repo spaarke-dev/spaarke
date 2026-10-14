@@ -1807,8 +1807,22 @@ public partial class SignalSuppressionTests
                 _ => throw new NotSupportedException(q.EntityName),
             };
             var result = new EntityCollection();
-            foreach (var row in source.Where(r => Matches(r, q.Criteria))) result.Entities.Add(row);
+            foreach (var row in source.Where(r => Matches(r, q.Criteria))) result.Entities.Add(Projected(row, q.ColumnSet));
             return result;
+        }
+
+        /// <summary>The row as Dataverse returns it for <paramref name="columns"/>: only the asked columns (all only for AllColumns), so
+        /// code that reads a column it did not ask for sees null, as it would live.</summary>
+        private static Entity Projected(Entity row, ColumnSet columns)
+        {
+            if (columns.AllColumns) return row;
+            var copy = new Entity(row.LogicalName, row.Id);
+            foreach (var column in columns.Columns)
+            {
+                if (row.Contains(column)) copy[column] = row[column];
+            }
+
+            return copy;
         }
 
         private static bool Matches(Entity row, FilterExpression filter)

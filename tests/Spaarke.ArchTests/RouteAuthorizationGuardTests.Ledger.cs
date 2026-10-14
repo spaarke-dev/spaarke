@@ -1637,10 +1637,10 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/v1/signals/worklist", "GetWorklistAsync", "IDataverseUserClient",
             new[] { "SignalReadService.ReadAsync" },
             "Ontology task 038: the handler's only I/O is SignalReadService.ReadAsync (SignalReadEndpoints.cs:59). It resolves the caller "
-            + "with WhoAmI AS THE CALLER (SignalReadService.cs:238; unresolved: the single 403 at SignalReadEndpoints.cs:63), runs the "
-            + "worklist FetchXML as the caller (:508), keeps a row only when the caller's own batched read of its catalog-named core "
-            + "table returns its core id (:669; the table must be in CoreAncestorResolver.CoreRecordEntities), and keeps a Do-lane row "
-            + "only when the caller's own read of its subject, filtered to the caller's work, returns it (:724). Nothing app-only is "
+            + "with WhoAmI AS THE CALLER (SignalReadService.cs:240; unresolved: the single 403 at SignalReadEndpoints.cs:63), runs the "
+            + "worklist FetchXML as the caller (:510), keeps a row only when the caller's own batched read of its catalog-named core "
+            + "table returns its core id (:671; the table must be in CoreAncestorResolver.CoreRecordEntities), and keeps a Do-lane row "
+            + "only when the caller's own read of its subject, filtered to the caller's work, returns it (:726). Nothing app-only is "
             + "returned unless the caller's read admitted its row (the app-only secure-family placement only WITHHOLDS evidence detail, "
             + "D-123); a fault is 503 (SignalReadEndpoints.cs:72), never a shorter list."),
         new HandlerDecision("POST /api/v1/child-records/{table}", "CreateAsync", "IDataverseUserClient", Array.Empty<string>(),

@@ -92,6 +92,10 @@ public static class SuppressionEvents
 
     /// <summary>Information: stamps a partition's own dismissals no longer justify were lowered or cleared (#1661 F1).</summary>
     public static readonly EventId Withdrawn = new(50352, nameof(Withdrawn));
+
+    /// <summary>Warning: the read-time witness rule (task 038, D-123) could not place the families, so every detail on the worklist page
+    /// is withheld (fail closed). Properties: Signal count, exception type.</summary>
+    public static readonly EventId WitnessReadFailed = new(50353, nameof(WitnessReadFailed));
 }
 
 /// <summary>What the nightly suppression pass hands the planner (#1661 round 2 F3).</summary>
@@ -320,14 +324,17 @@ public sealed class SignalSuppressionService
     /// Signal row and its subject row (uac-r2's <see cref="SecureChildShareSynchronizer.SecureRootsAboveAsync"/>, never re-implemented);
     /// undetermined, or a Secure-team-owned Signal with no root found (for a hit, a Secure-team-owned SUBJECT, round 2 N2):
     /// <see cref="SuppressionPartition.Undetermined"/>. No Secure team in this environment: every item is ordinary. An ambiguous team, a
-    /// walk that does not complete or a fault throws: the caller never places part of a set (round 2 F2/F3).
+    /// walk that does not complete or a fault throws: the caller never places part of a set (round 2 F2/F3). Every distinct lineage is
+    /// walked in ONE run of uac-r2's walker (<see cref="SecureChildShareSynchronizer.SecureRootsAboveEachAsync"/>), so each parent row
+    /// is read once per call whatever the number of items (task 038). <paramref name="knownSecureTeam"/>: the Secure team the caller
+    /// already identified in this request (by <see cref="ResolveSecureTeamAsync"/>), so it is not identified again.
     /// </summary>
-    private async Task<SuppressionPartition[]> PartitionsAsync(IReadOnlyList<PartitionItem> items, CancellationToken ct)
+    private async Task<SuppressionPartition[]> PartitionsAsync(IReadOnlyList<PartitionItem> items, CancellationToken ct, Guid? knownSecureTeam = null)
     {
         var result = new SuppressionPartition[items.Count];
         if (items.Count == 0) return result;
 
-        var secureTeamId = await ResolveSecureTeamAsync(ct).ConfigureAwait(false);
+        var secureTeamId = knownSecureTeam ?? await ResolveSecureTeamAsync(ct).ConfigureAwait(false);
         if (secureTeamId is null)
         {
             Array.Fill(result, SuppressionPartition.Ordinary);
@@ -348,26 +355,22 @@ public sealed class SignalSuppressionService
         using var scope = _scopes.CreateScope();
         var walker = scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>();
 
-        // One walk over every row first: most pairings have no secure root anywhere, and then no Signal needs a walk of its own.
-        var everything = RequireAnswer(await walker.SecureRootsAboveAsync(lineages.SelectMany(l => l).ToList(), ct).ConfigureAwait(false));
-        if (everything.Roots.Count == 0 && everything.Undetermined.Count == 0)
+        // Rows with the same lookups sit under the same roots (the walk ignores the owners of the rows it is given), so each distinct
+        // lineage is walked once, and all of them share ONE run (one read cache).
+        var keys = lineages.Select(LineageKey).ToList();
+        var distinct = keys.Select((key, i) => (key, i)).DistinctBy(k => k.key, StringComparer.Ordinal).ToList();
+        var answers = await walker.SecureRootsAboveEachAsync(
+            distinct.Select(k => (IReadOnlyCollection<Entity>)lineages[k.i]).ToList(), secureTeamId.Value, ct).ConfigureAwait(false);
+        var byLineage = new Dictionary<string, SuppressionPartition>(StringComparer.Ordinal);
+        for (var d = 0; d < distinct.Count; d++)
         {
-            for (var i = 0; i < items.Count; i++) result[i] = SecureOwned(i) ? SuppressionPartition.Undetermined : SuppressionPartition.Ordinary;
-            return result;
+            var above = RequireAnswer(answers[d]);
+            byLineage[distinct[d].key] = above.Undetermined.Count > 0 ? SuppressionPartition.Undetermined : SuppressionPartition.Secure(above.Roots);
         }
 
-        // Rows with the same lookups sit under the same roots (the walk ignores the owners of the rows it is given).
-        var byLineage = new Dictionary<string, SuppressionPartition>(StringComparer.Ordinal);
         for (var i = 0; i < items.Count; i++)
         {
-            var key = LineageKey(lineages[i]);
-            if (!byLineage.TryGetValue(key, out var found))
-            {
-                var above = RequireAnswer(await walker.SecureRootsAboveAsync(lineages[i], ct).ConfigureAwait(false));
-                found = above.Undetermined.Count > 0 ? SuppressionPartition.Undetermined : SuppressionPartition.Secure(above.Roots);
-                byLineage[key] = found;
-            }
-
+            var found = byLineage[keys[i]];
             result[i] = found.IsOrdinary && SecureOwned(i) ? SuppressionPartition.Undetermined : found;
         }
 
@@ -1030,20 +1033,20 @@ public sealed class SignalSuppressionService
     /// of that Signal, judged NOW: a reference keeps its detail only when its witness row's secure family is KNOWN and EQUAL to the
     /// Signal's own family (D-123; the same rule as the evaluator's write-time check, task 145). Evidence is written once, so a
     /// witness re-filed under a secure family afterwards would otherwise show detail its Signal's readers may no longer see until the
-    /// job's next pass. Both families come from THE partition truth (<see cref="PartitionsAsync"/>): the Signal is read app-only
-    /// with its lineage lookups and owner, the witness row with its lookups and owner. A reference that names no lineage child, a
-    /// witness or Signal row that cannot be read, or an undetermined family on either side keeps nothing. No Secure Record owner
-    /// team in this environment: every family is ordinary and every reference keeps its detail. A fault (an ambiguous team, a walk
-    /// that does not complete, a read failure) returns null, logged at Warning: the caller then withholds every line's detail
-    /// (fail closed), never shows it.
+    /// job's next pass. Both families come from THE partition truth (<see cref="PartitionsAsync"/>, read from the ROOTS, never from
+    /// an owner alone): the Signals are read app-only with their lineage lookups and owner, the witness rows with their lookups and
+    /// owner, and every lineage is placed in ONE call (the Secure team identified once, one walker run, so the reads are bounded by
+    /// the distinct rows and parents). A reference that names no lineage child, a witness or Signal row that cannot be read, or an
+    /// undetermined family on either side keeps nothing. No Secure Record owner team in this environment: every family is ordinary
+    /// and every reference keeps its detail. A fault (an ambiguous team, a walk that does not complete, a read failure) returns null,
+    /// logged at Warning (<see cref="SuppressionEvents.WitnessReadFailed"/>): the caller then withholds every line's detail.
     /// </summary>
     /// <remarks>Component justification (CLAUDE.md section 11). Existing: <see cref="PartitionsAsync"/> (the one partition truth) and
     /// <see cref="ReadSubjectRowsAsync"/>; task 145's <c>EvidenceWithinPartitionAsync</c> / <c>StoredEvidenceToRedactAsync</c> apply
-    /// the same rule to hits and stored rows but are not on this branch's base. Extension: the private helpers below
-    /// (<see cref="ReadWitnessFamiliesOnReadAsync"/>, <see cref="WitnessDetailWithinFamily"/>, <see cref="WitnessOnRead"/>) mirror
-    /// 145's <c>WitnessFamiliesAsync</c> / <c>KeepsDetail</c> / <c>WitnessOf</c> line for line and fold into them when 145 merges
-    /// (one rule, one helper). Cost of doing nothing: until the job's next pass, a matter's readers see the subject and sender of a
-    /// communication that has since been filed under another secure family (D-123).</remarks>
+    /// the same rule to hits and stored rows but are not on this branch's base. Extension: <see cref="WitnessDetailWithinFamily"/> and
+    /// <see cref="WitnessOnRead"/> mirror 145's <c>KeepsDetail</c> / <c>WitnessOf</c> line for line and are replaced by them when 145
+    /// merges (one rule, one helper). Cost of doing nothing: until the job's next pass, a matter's readers see the subject and sender
+    /// of a communication that has since been filed under another secure family (D-123).</remarks>
     internal async Task<IReadOnlyDictionary<Guid, IReadOnlySet<string>>?> WitnessDetailShownOnReadAsync(
         IReadOnlyList<(Guid SignalId, IReadOnlyList<string> References)> signals, CancellationToken ct)
     {
@@ -1056,7 +1059,7 @@ public sealed class SignalSuppressionService
 
         try
         {
-            // No Secure Record owner team in this environment: every family is ordinary (PartitionsAsync's own rule).
+            // The Secure team, identified ONCE for the request. None in this environment: every family is ordinary.
             if (await ResolveSecureTeamAsync(ct).ConfigureAwait(false) is not { } secureTeam)
             {
                 foreach (var (id, references) in wanted) shown[id] = references.ToHashSet(StringComparer.Ordinal);
@@ -1078,13 +1081,27 @@ public sealed class SignalSuppressionService
             }
 
             var placed = wanted.Where(w => rows.ContainsKey(w.SignalId)).ToList();
-            var signalFamilies = await PartitionsAsync(placed.Select(w => ItemOf(rows[w.SignalId])).ToList(), ct).ConfigureAwait(false);
-            var familyOfWitness = await ReadWitnessFamiliesOnReadAsync(placed.SelectMany(w => w.References), secureTeam, ct).ConfigureAwait(false);
+
+            // The witness rows (with their lineage lookups and owner); a witness that cannot be read keeps nothing.
+            var witnesses = placed.SelectMany(w => w.References).Select(WitnessOnRead).OfType<(string Table, Guid Id)>().Distinct().ToList();
+            var witnessRows = await ReadSubjectRowsAsync(
+                witnesses.Select(w => new PartitionItem(new Entity(w.Table, w.Id), null, w.Table, w.Id)).ToList(), ct).ConfigureAwait(false);
+            var readable = witnesses.Where(witnessRows.ContainsKey).ToList();
+
+            // ONE placement for the Signals and the witnesses together. A witness's family comes from its roots: a row already filed
+            // under secure X but not yet re-owned by the Secure team (the re-own window) is in X's family, never ordinary.
+            var families = await PartitionsAsync(
+                placed.Select(w => ItemOf(rows[w.SignalId]))
+                    .Concat(readable.Select(w => new PartitionItem(witnessRows[w], witnessRows[w].GetAttributeValue<EntityReference>("owningteam"), null, Guid.Empty)))
+                    .ToList(),
+                ct, secureTeam).ConfigureAwait(false);
+            var familyOfWitness = new Dictionary<(string, Guid), SuppressionPartition>();
+            for (var i = 0; i < readable.Count; i++) familyOfWitness[readable[i]] = families[placed.Count + i];
 
             for (var i = 0; i < placed.Count; i++)
             {
                 shown[placed[i].SignalId] = placed[i].References
-                    .Where(r => WitnessDetailWithinFamily(signalFamilies[i], r, familyOfWitness))
+                    .Where(r => WitnessDetailWithinFamily(families[i], r, familyOfWitness))
                     .ToHashSet(StringComparer.Ordinal);
             }
 
@@ -1093,38 +1110,11 @@ public sealed class SignalSuppressionService
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning(SuppressionEvents.Failed,
+            _logger.LogWarning(SuppressionEvents.WitnessReadFailed,
                 "Signal read: the secure families of {Count} Signal(s)' witnesses could not be read ({ExceptionType}); every witness line is shown without its detail (D-123, fail closed).",
                 wanted.Count, ex.GetType().Name);
             return null;
         }
-    }
-
-    /// <summary>Task 038 copy of task 145's <c>WitnessFamiliesAsync</c> (fold into it when 145 merges): the secure family of each
-    /// witness the <paramref name="references"/> name, from its row as read and THE partition truth. A witness that names no lineage
-    /// table, or whose row cannot be read, is absent (its detail is never shown).</summary>
-    private async Task<Dictionary<(string, Guid), SuppressionPartition>> ReadWitnessFamiliesOnReadAsync(
-        IEnumerable<string?> references, Guid secureTeam, CancellationToken ct)
-    {
-        var witnesses = references.Select(WitnessOnRead).OfType<(string Table, Guid Id)>().Distinct().ToList();
-        var familyOfWitness = new Dictionary<(string, Guid), SuppressionPartition>();
-        if (witnesses.Count == 0) return familyOfWitness;
-
-        // ReadSubjectRowsAsync reads only the subject pair; the item's row is an in-memory reference to the witness, never written.
-        var rows = await ReadSubjectRowsAsync(
-            witnesses.Select(w => new PartitionItem(new Entity(w.Table, w.Id), null, w.Table, w.Id)).ToList(), ct).ConfigureAwait(false);
-        var readable = witnesses.Where(rows.ContainsKey).ToList();
-        var witnessPartitions = await PartitionsAsync(
-            readable.Select(w => new PartitionItem(rows[w], rows[w].GetAttributeValue<EntityReference>("owningteam"), null, Guid.Empty)).ToList(),
-            ct).ConfigureAwait(false);
-        for (var i = 0; i < readable.Count; i++)
-        {
-            familyOfWitness[readable[i]] = rows[readable[i]].GetAttributeValue<EntityReference>("owningteam")?.Id == secureTeam
-                ? witnessPartitions[i]
-                : SuppressionPartition.Ordinary;
-        }
-
-        return familyOfWitness;
     }
 
     /// <summary>Task 038 copy of task 145's <c>KeepsDetail</c>: both families KNOWN and EQUAL (Undetermined equals nothing).</summary>

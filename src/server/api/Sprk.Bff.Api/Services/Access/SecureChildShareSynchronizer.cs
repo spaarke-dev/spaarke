@@ -704,6 +704,56 @@ public sealed class SecureChildShareSynchronizer
     }
 
     /// <summary>
+    /// <see cref="SecureRootsAboveAsync"/> for several independent groups of rows in ONE run: the same upward walk and the same
+    /// answer per group, but every parent row is read once for all groups (the run's read cache), so the cost is bounded by the
+    /// distinct parents rather than groups × walk. <paramref name="secureTeamId"/> is the Secure Record owner team the caller has
+    /// ALREADY identified with <see cref="ResolveSecureOwnerTeamAsync"/> (this method does not identify it again). A Dataverse
+    /// fault propagates (the caller decides nothing).
+    /// </summary>
+    /// <remarks>Ontology task 038 (component justification, CLAUDE.md section 11). Existing: <see cref="SecureRootsAboveAsync"/>,
+    /// whose run already caches reads. Extension: that method answers one union per call, so a caller that needs one answer per
+    /// group calls it per group and re-reads every shared parent in a fresh run. Cost of doing nothing: the worklist's read-time
+    /// witness rule (D-123) would walk each Signal's and each witness's lineage in its own run on every page load.</remarks>
+    internal async Task<IReadOnlyList<SecureRootsAbove>> SecureRootsAboveEachAsync(
+        IReadOnlyList<IReadOnlyCollection<Entity>> groups, Guid secureTeamId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(groups);
+        foreach (var row in groups.SelectMany(g => g))
+        {
+            if (!SecureChildLineage.IsChild(row.LogicalName))
+                throw new ArgumentOutOfRangeException(nameof(groups), row.LogicalName, "Not a secure-child table.");
+        }
+
+        var run = new Run(this, secureTeamId, ct);
+        var answers = new List<SecureRootsAbove>(groups.Count);
+        foreach (var group in groups)
+        {
+            var roots = new HashSet<RowRef>();
+            var undetermined = new List<string>();
+            var undeterminedRows = new List<(string Table, Guid Id)>();
+            foreach (var entity in group.DistinctBy(r => (r.LogicalName.ToLowerInvariant(), r.Id)))
+            {
+                var (reference, lineage) = await run.LineageOfReadRowAsync(entity).ConfigureAwait(false);
+                roots.UnionWith(lineage.SecureRoots);
+                if (lineage.Undetermined is { } why)
+                {
+                    undetermined.Add($"{reference}: {why}");
+                    undeterminedRows.Add((reference.Table, reference.Id));
+                }
+            }
+
+            answers.Add(new SecureRootsAbove(
+                SecureChildShareSyncStatus.Completed,
+                roots.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id).Select(r => (r.Table, r.Id)).ToList(),
+                undetermined,
+                null,
+                undeterminedRows));
+        }
+
+        return answers;
+    }
+
+    /// <summary>
     /// unified-access-control-r2 task 158 (owner round 6: "The parent's sharees can see it") — gives a secure work
     /// assignment or project that is FILED UNDER secure matters / projects (<paramref name="secureParents"/>) the internal
     /// sharees of those parents, by this class's mirror rule: each parent sharee's rights restricted to
