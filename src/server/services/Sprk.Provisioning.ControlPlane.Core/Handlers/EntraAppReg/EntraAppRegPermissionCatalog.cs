@@ -3,10 +3,12 @@
 //
 // Task 130 (Wave G-3, H3 Graph SDK port) — single source of truth for the 6
 // DELEGATED (OAuth2PermissionScope) permissions the BFF API app-registration
-// requests, ported verbatim from scripts/Register-EntraAppRegistrations.ps1's
-// $RequiredPermissions catalog (script lines ~157-180). Shared by BOTH
-// GraphAppRegistrationProvisioner (Model 2 requiredResourceAccess reconciler)
-// and GraphAdminConsentVerifier (expected-scope-value check against
+// requests, ported from the permission-id variables in
+// scripts/Register-EntraAppRegistrations.ps1 ($GraphFilesReadWriteAll,
+// $GraphFileStorageContainerSelectedDelegated, ... lines ~287-296, consumed by its
+// `az ad app permission add` calls). Shared by BOTH
+// GraphAppRegistrationProvisioner (requiredResourceAccess reconciler, both
+// tenancy models since task 222) and GraphAdminConsentVerifier (expected-scope-value check against
 // oauth2PermissionGrants) so the two collaborators can never drift apart on
 // "what does admin consent need to cover".
 //
@@ -46,8 +48,8 @@ public sealed record EntraAppRegPermission(
 /// <summary>
 /// The 6 delegated permissions requested by the BFF API app-registration.
 /// Ported verbatim (GUIDs + scope values) from
-/// scripts/Register-EntraAppRegistrations.ps1's <c>$RequiredPermissions</c>
-/// array — do NOT re-derive from memory; any change requires the same live
+/// scripts/Register-EntraAppRegistrations.ps1's <c>$Graph*</c> / <c>$DynamicsCrm*</c> id variables
+/// — do NOT re-derive from memory; any change requires the same live
 /// re-enumeration discipline GraphAppRoles.cs documents for the app-role catalog.
 /// </summary>
 public static class EntraAppRegPermissionCatalog

@@ -821,6 +821,21 @@ public sealed class SecureRecordSetupProcedureTests
     }
 
     [Fact]
+    public async Task InviteCodeHash_ReadFault_Propagates_NeverTreatedAsAbsent()
+    {
+        var dv = NewEnv();
+        var codeHashKey = FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash");
+        dv.ColumnReadFault = key => key.Equals(codeHashKey, StringComparison.OrdinalIgnoreCase)
+            ? new SecureRecordSetupDataverseException(SecureRecordSetupFaultKind.Other, "503")
+            : null;
+
+        var act = () => RunAsync(dv);
+
+        await act.Should().ThrowAsync<SecureRecordSetupDataverseException>("a failed read is not 'column absent'");
+        dv.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task InviteMarkerRefusal_NamesTheColumn_AndTheRemedy()
     {
         var dv = NewEnv();

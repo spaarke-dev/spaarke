@@ -1100,6 +1100,8 @@ former `scripts/Register-EntraAppRegistrations.ps1` path was retired by task 130
   not create (H3 keeps exactly `spaarke-uami-trust` and `spaarke-l2-worker`, repairing either by triple), or when anyone but
   the control plane owns it (`appreg-adoption-refused`; nothing is written). The name
   `spaarke-bff-api-{customerId}` is predictable, and an adopted registration gets the stamp's FIC and Dataverse admin.
+- **admin-consent gate (Model 1, Spaarke tenant):** when the run waits on H3's `admin-consent` gate, a Spaarke-tenant admin opens Entra admin center -> App registrations -> `spaarke-bff-api-{customerId}` -> API permissions -> **Grant admin consent for Spaarke**; that covers all 6 delegated permissions in `EntraAppRegPermissionCatalog`. Then advance the gate with `POST /api/runs/{id}/gates/admin-consent/advance` (API surface table above).
+  Known limit (ISS-018 K1): an app registration H3 created before 2026-10-14 would keep a stale delegated entry with id `75359482-...` (the reconcile only adds); none exists, because H3 had never run live.
 
 **Office add-in and Teams sign-in redirects are NOT on the customer's registration.** The shared clients sign in with
 their OWN app registrations (production add-in: `1958aec2…` "Spaarke Office Add-in (Production)"), so `brk-multihub://<host>` and

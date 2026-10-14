@@ -332,6 +332,24 @@ public sealed class H7bSecureRecordSetupHandlerTests
     }
 
     [Fact]
+    public async Task InviteCodeHashReadFault_FailsResumable_NotSuccess()
+    {
+        var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);
+        var codeHashKey = FakeSecureRecordSetupDataverse.ColumnKey("contact", "sprk_externalinvitecodehash");
+        dv.ColumnReadFault = key => key.Equals(codeHashKey, StringComparison.OrdinalIgnoreCase)
+            ? new SecureRecordSetupDataverseException(SecureRecordSetupFaultKind.Other, "503")
+            : null;
+        var repo = new FakeRepository(BuildRun(dv));
+
+        var result = await BuildHandler(repo, dv).HandleAsync(Envelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.RejectionCode.Should().Be(SecureRecordSetupRejectionCodes.DataverseInvocationFailed);
+        failure.Class.Should().Be(FailureClass.Resumable);
+        repo.LastWrittenRun!.CompletedPhases.Should().NotContain(p => p.Phase == "H7b");
+    }
+
+    [Fact]
     public async Task UnexpectedException_IsResumable_AndCancellationPropagates()
     {
         var dv = FakeSecureRecordSetupDataverse.NewEnvironment(Set);

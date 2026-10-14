@@ -150,7 +150,8 @@ public static class SecureRecordSetupRejectionCodes
 
     /// <summary>
     /// S22: <c>contact.sprk_externalinvitedon</c> (ships in SpaarkeMaster 1.2.2.0) is absent or not secured, the Readers profile
-    /// does not hold exactly Read on it (4/0/0), or the Writers profile does not hold 4/4/4 (Resumable: import SpaarkeMaster, H6).
+    /// does not hold Read on it (read != 4), or the Writers profile does not hold 4/4/4 (Resumable: import SpaarkeMaster, H6).
+    /// A Readers row that can create or update the column is <see cref="InviteMarkerLockOtherWriter"/> instead.
     /// </summary>
     public const string InviteMarkerLockIncomplete = "secure_setup.invite_marker_lock_incomplete";
 

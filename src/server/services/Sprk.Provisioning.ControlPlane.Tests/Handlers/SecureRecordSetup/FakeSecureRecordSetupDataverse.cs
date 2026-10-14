@@ -71,6 +71,9 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     /// <summary>Optional fault: thrown by every member whose name the predicate accepts.</summary>
     internal Func<string, Exception?>? Fault { get; set; }
 
+    /// <summary>Optional fault thrown by <c>IsAttributeSecuredAsync</c> for the <c>"table.column"</c> keys the predicate accepts.</summary>
+    internal Func<string, Exception?>? ColumnReadFault { get; set; }
+
     internal Guid RootUnitId { get; private set; }
     internal Guid RootDefaultTeamId { get; private set; }
 
@@ -393,7 +396,12 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
     public Task<bool?> IsAttributeSecuredAsync(SecureRecordSetupTarget target, string tableLogicalName, string attributeLogicalName, CancellationToken cancellationToken)
     {
         Read(nameof(IsAttributeSecuredAsync));
-        return Task.FromResult(SecuredColumns.GetValueOrDefault(ColumnKey(tableLogicalName, attributeLogicalName)));
+        var key = ColumnKey(tableLogicalName, attributeLogicalName);
+        if (ColumnReadFault?.Invoke(key) is { } ex)
+        {
+            throw ex;
+        }
+        return Task.FromResult(SecuredColumns.GetValueOrDefault(key));
     }
 
     public Task<SecureSetupTableIdentity> GetTableIdentityAsync(SecureRecordSetupTarget target, string tableLogicalName, CancellationToken cancellationToken)
