@@ -161,8 +161,6 @@ Spaarke.Documents.getApiBaseUrl = function () {
         // Determine environment based on Dataverse URL
         if (clientUrl.includes('spaarkedev1.crm.dynamics.com')) {
             return "https://spe-api-dev-67e2xz.azurewebsites.net";
-        } else if (clientUrl.includes('spaarke-demo.crm.dynamics.com')) {
-            return "https://spaarke-bff-prod.azurewebsites.net";
         } else if (clientUrl.includes('spaarkeuat.crm.dynamics.com')) {
             return "https://spaarke-bff-uat.azurewebsites.net";
         } else if (clientUrl.includes('spaarkeprod.crm.dynamics.com')) {

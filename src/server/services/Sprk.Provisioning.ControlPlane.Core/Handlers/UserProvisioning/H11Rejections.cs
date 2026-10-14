@@ -76,7 +76,7 @@ public static class H11Rejections
     public const string SecurityRoleNotFound = "userprov-security-role-not-found";
 
     /// <summary>
-    /// Task 232: the environment restricts guest access (<c>organization.restrictguestuseraccess</c>, default on) or the
+    /// Task 232: the environment restricts guest access (<c>organization.restrictGuestUserAccess</c>, default on) or the
     /// setting could not be read — refused before anyone is invited (prerequisite PRQ-C-12).
     /// </summary>
     public const string GuestAccessRestricted = "userprov-guest-access-restricted";

@@ -314,9 +314,9 @@ Describe 'prereqs.yaml recipes honour the exit-code contract' {
 
     Context 'PRQ-C-12 guest access' {
         It 'exits 1 while guest access is restricted, 0 once it is off' {
-            Set-Rules $script:Dir az @(, @('restrictguestuseraccess', '0', 'True\r\n'))
+            Set-Rules $script:Dir az @(, @('restrictGuestUserAccess', '0', 'True\r\n'))
             (Invoke-Recipe 'PRQ-C-12' $script:Common $script:Dir).Exit | Should Be 1
-            Set-Rules $script:Dir az @(, @('restrictguestuseraccess', '0', 'False\r\n'))
+            Set-Rules $script:Dir az @(, @('restrictGuestUserAccess', '0', 'False\r\n'))
             (Invoke-Recipe 'PRQ-C-12' $script:Common $script:Dir).Exit | Should Be 0
         }
     }

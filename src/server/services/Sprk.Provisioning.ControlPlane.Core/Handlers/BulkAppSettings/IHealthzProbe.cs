@@ -31,7 +31,7 @@ public interface IHealthzProbe
     /// internal backoff budget is exhausted. Backoff schedule:
     /// 30s / 60s / 90s / 120s / 180s (5 probes, ~8-min total).
     /// </summary>
-    /// <param name="healthzUrl">The healthz URL (e.g. https://spaarke-bff-demo.azurewebsites.net/healthz).</param>
+    /// <param name="healthzUrl">The healthz URL (e.g. https://spaarke-bff-dev.azurewebsites.net/healthz).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// <see cref="HealthzResult.Success"/> on first HTTP 200 observed;

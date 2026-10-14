@@ -22,7 +22,7 @@
     Resource group.
 
 .PARAMETER AppServiceName
-    App Service name (e.g. spaarke-bff-demo).
+    App Service name (e.g. spaarke-bff-dev).
 
 .PARAMETER VaultName
     Key Vault name (canonical sprk-{env}-kv, or spaarke-spekvcert dev exception).
