@@ -78,6 +78,15 @@ public class ExternalDataService
     internal const int CollectionPageSize = 200;
 
     /// <summary>
+    /// The <c>Prefer</c> value every collection page carries: server-driven paging (<see cref="CollectionPageSize"/>) and the
+    /// formatted-value annotations (task 064), so a choice column arrives with its label beside its number
+    /// (<c>sprk_documenttype@OData.Community.Display.V1.FormattedValue</c>). Preferences are comma-separated (Microsoft
+    /// Learn, "Formatted values"). A <c>nextLink</c> is followed with the same value.
+    /// </summary>
+    internal static readonly string CollectionPrefer =
+        $"odata.maxpagesize={CollectionPageSize},odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"";
+
+    /// <summary>
     /// How many pages one collection read follows before it stops and reports itself TRUNCATED — a row cap of
     /// <see cref="MaxCollectionRows"/>, the same 5,000 as the evaluator's NFR-03 ceiling. A detector, not a target:
     /// hitting it with a <c>nextLink</c> still present is reported, never returned as a complete list.
@@ -139,7 +148,11 @@ public class ExternalDataService
     {
         [JsonPropertyName("sprk_documentid")] public string? SprkDocumentid { get; set; }
         [JsonPropertyName("sprk_documentname")] public string? SprkName { get; set; }
-        [JsonPropertyName("sprk_documenttype")] public string? SprkDocumenttype { get; set; }
+        // Task 064: sprk_documenttype is a CHOICE column (Entity.xml: picklist), so Dataverse sends its NUMBER. Typed string?
+        // it failed the whole page ("could not be converted to System.String ... token type 'Number'"). The raw value is an
+        // int?; the label comes from the formatted-value annotation the collection reads ask for (CollectionPrefer).
+        [JsonPropertyName("sprk_documenttype")] public int? SprkDocumenttype { get; set; }
+        [JsonPropertyName("sprk_documenttype@OData.Community.Display.V1.FormattedValue")] public string? SprkDocumenttypeLabel { get; set; }
         [JsonPropertyName("sprk_filesummary")] public string? SprkSummary { get; set; }
         [JsonPropertyName("_sprk_project_value")] public string? SprkProjectidValue { get; set; }
         // Fix round for task 039: the other root links, read so the list can withhold a document also filed to a root the
@@ -3228,7 +3241,7 @@ public class ExternalDataService
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             request.Headers.Add("OData-MaxVersion", "4.0");
             request.Headers.Add("OData-Version", "4.0");
-            request.Headers.Add("Prefer", $"odata.maxpagesize={CollectionPageSize}");
+            request.Headers.Add("Prefer", CollectionPrefer);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
             using var response = await _httpClient.SendAsync(request, ct);
@@ -3404,7 +3417,10 @@ public class ExternalDataService
     {
         SprkDocumentid = r.SprkDocumentid ?? "",
         SprkName = r.SprkName ?? "",
-        SprkDocumenttype = r.SprkDocumenttype,
+        // The choice LABEL when a value is set and Dataverse supplied its label; otherwise null — never the number.
+        SprkDocumenttype = r.SprkDocumenttype is not null && !string.IsNullOrWhiteSpace(r.SprkDocumenttypeLabel)
+            ? r.SprkDocumenttypeLabel
+            : null,
         SprkSummary = r.SprkSummary,
         SprkProjectidValue = r.SprkProjectidValue,
         Createdon = r.Createdon,
