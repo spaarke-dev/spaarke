@@ -166,14 +166,16 @@ public sealed class RuleGatedAssessedConsumerDecisionRecordTests
     }
 
     [Fact]
-    public async Task AnUnfiledCommunication_IsSkippedByDesign_LoggedAtInformation_OwnTag_NoErrorNoFailureMetric_AndTheRealResolverRefusesIt()
+    public async Task AnUnfiledCommunication_IsSkippedByDesign_LoggedAtInformation_OwnSkipCounter_NoErrorNoFailureMetric_AndTheRealResolverRefusesIt()
     {
         // K1a + K3: REAL RecordOwnershipResolver. An unfiled communication keeps its creator (E1), so no record is written; that is not an
         // alert: no Error, no decision_owner_refused metric, one Information entry and the tag gate_dr_skipped_unfiled.
         var scope = Guid.NewGuid();
         MetricScope.Value = scope;
         var (listener, reasons) = ListenReasons(scope);
+        var (skipListener, skips) = ListenReasons(scope, "ontology.writer.skips");
         using var _ = listener;
+        using var __ = skipListener;
         var directory = OwnershipDirectory.Standard().WithRecord("sprk_communication", CommunicationId, OwnershipDirectory.ChildBu);
         var rig = new Rig(realResolver: directory.Resolver());
 
@@ -184,7 +186,8 @@ public sealed class RuleGatedAssessedConsumerDecisionRecordTests
         rig.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning, "the consumer logs nothing for a by-design skip");
         rig.Writer.Log.Entries.Should().NotContain(e => e.Level >= LogLevel.Warning && e.EventId.Id != 0);
         rig.Writer.Log.Entries.Should().ContainSingle(e => e.EventId == DecisionRecordEvents.GateDecisionSkippedUnfiled).Which.Level.Should().Be(LogLevel.Information);
-        reasons.Should().Equal(DecisionRecordRefusalReason.GateSkippedUnfiled);
+        reasons.Should().BeEmpty("a by-design skip is not a failure: an alert on ontology.writer.failures stays unfiltered and quiet");
+        skips.Should().Equal(DecisionRecordRefusalReason.GateSkippedUnfiled);
     }
 
     [Fact]
@@ -256,14 +259,14 @@ public sealed class RuleGatedAssessedConsumerDecisionRecordTests
         return dir?.FullName ?? throw new InvalidOperationException("repository root not found");
     }
 
-    private static (MeterListener Listener, List<string?> Reasons) ListenReasons(Guid scope)
+    private static (MeterListener Listener, List<string?> Reasons) ListenReasons(Guid scope, string instrumentName = "ontology.writer.failures")
     {
         var reasons = new List<string?>();
         var listener = new MeterListener
         {
             InstrumentPublished = (instrument, l) =>
             {
-                if (instrument.Meter.Name == OntologyWriterTelemetry.MeterName && instrument.Name == "ontology.writer.failures")
+                if (instrument.Meter.Name == OntologyWriterTelemetry.MeterName && instrument.Name == instrumentName)
                     l.EnableMeasurementEvents(instrument);
             },
         };

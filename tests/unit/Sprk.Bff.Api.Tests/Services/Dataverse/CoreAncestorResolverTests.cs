@@ -715,6 +715,75 @@ public class CoreAncestorResolverTests
     }
 
     // ---------------------------------------------------------------------
+    // StampAsync(..., alreadyDerived) — ontology task 042 (K2 reuse; uac-r2 re-check F1/F2)
+    // ---------------------------------------------------------------------
+
+    private static Entity CommunicationFiledUnderTheMatter()
+    {
+        var row = new Entity("sprk_communication", CommId);
+        row["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId);
+        return row;
+    }
+
+    private static int Reads(Mock<IGenericEntityService> service) =>
+        service.Invocations.Count(i => i.Method.Name == nameof(IGenericEntityService.RetrieveAsync));
+
+    [Fact]
+    public async Task StampAsync_WithAFailedAlreadyDerived_DerivesItself_ReadsOnce_AndAppliesTheStamps()
+    {
+        var service = EntityServiceReturning(CommunicationFiledUnderTheMatter());
+        var resolver = Build(service, Probe([.. CommunicationColumns, .. TodoColumns]));
+        var child = new Entity("sprk_todo");
+
+        var outcome = await resolver.StampAsync(child, "sprk_communication", CommId, default, CoreAncestorResult.Failed("x"));
+
+        outcome.Succeeded.Should().BeTrue();
+        Reads(service).Should().Be(1, "a failed hand-in is not reused: the stamps are derived here");
+        child.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId);
+    }
+
+    [Fact]
+    public async Task StampAsync_WithASucceededAlreadyDerivedForTheSameTarget_ReadsNothing_AndAppliesTheStamps()
+    {
+        var service = EntityServiceReturning(CommunicationFiledUnderTheMatter());
+        var resolver = Build(service, Probe([.. CommunicationColumns, .. TodoColumns]));
+        var derived = await resolver.ResolveStampsAsync("sprk_communication", CommId);
+        service.Invocations.Clear();
+        var child = new Entity("sprk_todo");
+
+        // The entity name is compared case-insensitively.
+        var outcome = await resolver.StampAsync(child, "SPRK_Communication", CommId, default, derived);
+
+        outcome.Succeeded.Should().BeTrue();
+        Reads(service).Should().Be(0, "the hand-in was derived for this target and is reused");
+        child.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId);
+    }
+
+    [Fact]
+    public async Task StampAsync_WithAnAlreadyDerivedForAnotherTarget_OrWithNoTarget_DerivesAgain()
+    {
+        var service = EntityServiceReturning(CommunicationFiledUnderTheMatter());
+        var resolver = Build(service, Probe([.. CommunicationColumns, .. TodoColumns]));
+        var forAnotherRecord = await resolver.ResolveStampsAsync("sprk_communication", Guid.NewGuid());
+        // Built with the public constructor: it names no target, so it can never be matched to one.
+        var noTarget = new CoreAncestorResult(
+            CoreAncestorStatus.CoreTarget, [new CoreAncestorStamp("sprk_project", "sprk_regardingproject", ProjectId)], null);
+
+        foreach (var handedIn in new[] { forAnotherRecord, noTarget })
+        {
+            service.Invocations.Clear();
+            var child = new Entity("sprk_todo");
+
+            var outcome = await resolver.StampAsync(child, "sprk_communication", CommId, default, handedIn);
+
+            outcome.Succeeded.Should().BeTrue();
+            Reads(service).Should().Be(1, "a result for another target is not this target's stamps: derive again");
+            child.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId);
+            child.Contains("sprk_regardingproject").Should().BeFalse("the handed-in project stamp belongs to no row of this target");
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------
 

@@ -158,7 +158,7 @@ public static class DecisionRecordRefusalReason
 
     /// <summary>Task 042 (K1a): a gate decision about an UNFILED communication is not recorded BY DESIGN (E1: it keeps its creator and its
     /// privacy rests on per-participant shares, so no team may own a record about it; DI-84). Not a failure: logged at Information
-    /// (<see cref="DecisionRecordEvents.GateDecisionSkippedUnfiled"/>) and counted under this tag so alerts on real refusals stay quiet.</summary>
+    /// (<see cref="DecisionRecordEvents.GateDecisionSkippedUnfiled"/>) and counted on the SKIP counter (<c>ontology.writer.skips</c>, never <c>ontology.writer.failures</c>) under this tag.</summary>
     public const string GateSkippedUnfiled = "gate_dr_skipped_unfiled";
 
     public const string ReviewInvalid = "decision_review_invalid";
@@ -610,10 +610,10 @@ public sealed class DecisionRecordWriter
     {
         if (ex.Reason == DecisionRecordRefusalReason.GateSkippedUnfiled)
         {
-            // By design, not a failure (K1a): Information, ids only, and counted under its own tag.
+            // By design, not a failure (K1a): Information, ids only, and counted on the SKIP counter (never ontology.writer.failures).
             _logger.LogInformation(DecisionRecordEvents.GateDecisionSkippedUnfiled,
                 "Gate decision {EvaluationId} not recorded: its communication is unfiled (E1), so no team may own a record about it.", reviewId);
-            OntologyWriterTelemetry.RecordFailure(ex.Reason);
+            OntologyWriterTelemetry.RecordSkip(ex.Reason);
             return;
         }
 

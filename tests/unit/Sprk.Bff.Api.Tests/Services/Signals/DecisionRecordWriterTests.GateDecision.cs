@@ -283,8 +283,30 @@ public sealed partial class DecisionRecordWriterTests
         rootReads.Should().Be(2, "one derivation per decision");
         afterFirst.Probes.Should().Be(2, "the communication's root columns and the host table's columns, each once");
         afterFirst.Types.Should().Be(2, "the core's type (sprk_matter) and the communication's type, one query each");
-        h.RecordTypes.Queried.Count.Should().Be(2, "the second decision reads the record-type catalog from the cache, not Dataverse");
+        // A FOUND row is cached (sprk_matter: read once for both decisions). The harness catalog has no sprk_communication row; a miss is not
+        // remembered (uac-r2 re-check K2), so that one is read once per decision, as before the cache.
+        h.RecordTypes.Queried.Count(t => t == "sprk_matter").Should().Be(1, "the second decision reads the found row from the cache, not Dataverse");
+        h.RecordTypes.Queried.Count(t => t == "sprk_communication").Should().Be(2, "a miss is read again so a row added later is picked up");
         h.Created.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task Gate_TheFirstCommunicationReadTimesOut_TheFilingStepDerivesAgain_AndTheRecordIsWrittenWithItsStamps()
+    {
+        // F2c: ResolveGateCoreAsync's derivation FAILS (a transient fault), so there is nothing to hand to the filing step; the filing
+        // step derives again on its own (and would classify a second failure). The record is written, stamped, without the core pair.
+        var h = FiledCommunication(("sprk_regardingmatter", "sprk_matter", MatterId));
+        var reads = 0;
+        var row = h.Rows[("sprk_communication", CommunicationId)];
+        h.Entities.Setup(e => e.RetrieveAsync("sprk_communication", CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns(() => Interlocked.Increment(ref reads) == 1 ? Task.FromException<Entity>(new TimeoutException("dataverse")) : Task.FromResult(row));
+
+        await h.Writer.WriteGateDecisionAsync(Gate());
+
+        reads.Should().Be(2, "the first read faulted, the filing step's own derivation read it again");
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(MatterId, "the stamp from the second derivation");
+        h.Row.GetAttributeValue<EntityReference>("sprk_regardingcommunication").Id.Should().Be(CommunicationId);
+        h.Row.Contains("sprk_corerecordtype").Should().BeFalse("the core could not be decided on the failed first derivation");
     }
 
     [Fact]
