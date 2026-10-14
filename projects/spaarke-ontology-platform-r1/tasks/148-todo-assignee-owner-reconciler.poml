@@ -4,7 +4,7 @@
     <title>Follow the assignee: TodoAssigneeOwnerReconciliationJob re-owns a personal To Do's Signals and Decision Records to its current Assigned To's team (D-135 item 2)</title>
     <phase>4c Standard child-record contract (D-131)</phase>
     <gate>blocked: 142 and 143 merged; #1665 (D-134 helper + ForUserTeam) merged; UAC task 183 (ReownOrdinaryRowAsync, owner-approved round 96) merged. Live gate (UAC 183 K2): when 148 runs live, its server gate shows one stale-ETag 412 → Conflict on sprk_signal and one on sprk_decisionrecord (proves Dataverse honours If-Match on an owner-only PATCH)</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>New scheduled job that changes record ownership (security-relevant).</rigor-reason>
     <model-tier>opus</model-tier>
