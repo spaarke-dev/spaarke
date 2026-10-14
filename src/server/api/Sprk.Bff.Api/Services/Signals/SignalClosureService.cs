@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Signals;
 
@@ -10,11 +11,13 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <param name="ChangedSinceRead">Signals NOT closed because a person resolved them after they were read (row-version check).</param>
 /// <param name="Failed">Signals whose close threw; the writer already logged and metered each one.</param>
 /// <param name="PolicyFailures">Policies whose Signals could not be read or closed at all.</param>
+/// <param name="AccessDenied">The part of <paramref name="Failed"/> that is a Dataverse privilege refusal
+/// (<see cref="SignalWriter.IsDeterministicPrivilegeRefusal"/>): a retry is refused the same way, so a trigger does not redeliver on it.</param>
 /// <remarks>
 /// <b>Callers MUST check <see cref="IsComplete"/>.</b> A caller that reads only <see cref="Closed"/> reports "closed" while
 /// Signals stay open (a failed close is counted here, not thrown, so one bad row cannot strand the rest).
 /// </remarks>
-public sealed record SignalClosureOutcome(int Closed, int ChangedSinceRead, int Failed, int PolicyFailures = 0)
+public sealed record SignalClosureOutcome(int Closed, int ChangedSinceRead, int Failed, int PolicyFailures = 0, int AccessDenied = 0)
 {
     public static SignalClosureOutcome None { get; } = new(0, 0, 0);
 
@@ -24,7 +27,8 @@ public sealed record SignalClosureOutcome(int Closed, int ChangedSinceRead, int 
     public bool IsComplete => Failed == 0 && ChangedSinceRead == 0 && PolicyFailures == 0;
 
     public SignalClosureOutcome Plus(SignalClosureOutcome other) =>
-        new(Closed + other.Closed, ChangedSinceRead + other.ChangedSinceRead, Failed + other.Failed, PolicyFailures + other.PolicyFailures);
+        new(Closed + other.Closed, ChangedSinceRead + other.ChangedSinceRead, Failed + other.Failed, PolicyFailures + other.PolicyFailures,
+            AccessDenied + other.AccessDenied);
 }
 
 /// <summary>
@@ -152,7 +156,7 @@ public sealed class SignalClosureService
     private async Task<SignalClosureOutcome> CloseAsync(
         string policyCode, IReadOnlyList<ExistingSignal> signals, int resolution, CancellationToken ct, HashSet<Guid>? closedIds = null)
     {
-        int closed = 0, changed = 0, failed = 0;
+        int closed = 0, changed = 0, failed = 0, denied = 0;
         foreach (var signal in signals)
         {
             try
@@ -172,13 +176,24 @@ public sealed class SignalClosureService
             {
                 // The writer logged (50300-series WriteRefused) and metered it; the run counts it as refused.
                 failed++;
+                if (SignalWriter.IsDeterministicPrivilegeRefusal(ex))
+                {
+                    // K1: deterministic, so counted apart (a trigger does not redeliver on it) and logged as a Warning without a
+                    // second Error: the writer's Error carries the exception.
+                    denied++;
+                    _logger.LogWarning(OntologyWriterEvents.EvaluatorPolicyFailed,
+                        "Signal {SignalId} of policy {PolicyCode} was not closed (resolution {Resolution}, reason={Reason}); a retry cannot fix a missing privilege.",
+                        signal.Id, policyCode, resolution, OntologyWriterFailureReason.DataverseAccessDenied);
+                    continue;
+                }
+
                 _logger.LogError(OntologyWriterEvents.EvaluatorPolicyFailed, ex,
                     "Signal {SignalId} of policy {PolicyCode} was not closed (resolution {Resolution}, {ExceptionType}).",
                     signal.Id, policyCode, resolution, ex.GetType().Name);
             }
         }
 
-        return new SignalClosureOutcome(closed, changed, failed);
+        return new SignalClosureOutcome(closed, changed, failed, AccessDenied: denied);
     }
 
     /// <summary>Every Open or Acknowledged Signal of the policy (by the policy lookup, so no dedupe-key parsing and no Resolved
