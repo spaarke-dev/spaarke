@@ -88,7 +88,7 @@ A9 home contacts are looked up by plane = WorkforceHome **and** `sprk_externalte
 
 ## 5. Stored link for licensed users
 
-**Store:** two new columns on **systemuser**: `sprk_hometenantid` and `sprk_homeobjectid`. They carry an alternate key on the pair and are field-secured to the BFF writers. This is "its own field", per UAC's condition: not `sprk_externalobjectid`, not the plane columns, not contact.
+**Store:** two new columns on **systemuser**: `sprk_hometenantid` and `sprk_homeobjectid`. They are field-secured to the BFF writers. Dataverse refuses an alternate key on a field-secured column, so the uniqueness key sits on two unsecured mirrors, `sprk_hometenantidkey` and `sprk_homeobjectidkey`. This is the contact pattern (`sprk_externalobjectidkey`, owner round 4, B2), approved by the owner on 2026-10-14 (task 044, option A). The BFF writes all four columns in one update. It **looks a link up by the secured pair only**, so editing a mirror can block a link but can never redirect a sign-in. The mirrors exist only to make a duplicate pair fail with 412. This is "its own field", per UAC's condition: not `sprk_externalobjectid`, not the plane columns, not contact.
 - §11:
   1. *Existing:* `TryLinkSystemUserAsync` links systemuser → contact, not home id → systemuser.
   2. *Extension:* it extends the existing systemuser table rather than adding a table.
@@ -222,7 +222,7 @@ Other task changes:
 ## 11. Owner decisions (2026-10-13)
 
 1. **Existing contact with the same email:** no Legal step. The form shows the email; the user confirms it; the existing contact is bound (no duplicate). This is safe because only domain-verified emails from listed customer directories reach the BFF (§4).
-2. **Schema (§4, §5):** approved: one option value, three columns, one alternate key.
+2. **Schema (§4, §5):** approved: one option value, three columns, one alternate key. Amended 2026-10-14 (owner, option A): plus two unsecured key mirrors on systemuser that carry the key (§5).
 3. **Link proof (§5):** "both sign-ins" are the licensed user's company account and their Spaarke guest account. Freshness = each token's own lifetime (the longest possible; 24 hours is not available for access tokens). The UPN consistency check stays.
 4. **Dev setup (§8):** approved step by step in task 059, with commands and rollback shown first.
 

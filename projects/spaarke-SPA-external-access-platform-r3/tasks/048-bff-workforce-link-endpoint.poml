@@ -20,7 +20,7 @@
 
   <prompt>Build POST /api/v1/external/workforce/link exactly as notes/a9-bff-design.md §5 specifies: one request proves a licensed user's home identity (bearer) and Spaarke guest identity (body token), and writes the stored link once. Two adversarial review passes.</prompt>
   <role>SPAARKE platform developer. JWT validation and Entra B2B expert. Follow ADRs strictly.</role>
-  <goal>With a valid home bearer and a valid guest token for the same person, the endpoint writes sprk_hometenantid/sprk_homeobjectid on the guest's enabled systemuser and returns 200; every failed check returns 403 with a reason code and writes nothing; an existing different link is never re-pointed.</goal>
+  <goal>With a valid home bearer and a valid guest token for the same person, the endpoint writes sprk_hometenantid/sprk_homeobjectid and their key mirrors sprk_hometenantidkey/sprk_homeobjectidkey (same values, one update) on the guest's enabled systemuser and returns 200; every failed check returns 403 with a reason code and writes nothing; an existing different link is never re-pointed.</goal>
 
   <context>
     <background>Design note §5 and owner decision §11 item 3 ("both sign-ins" = the licensed user's company account and their Spaarke guest account; freshness = each token's own lifetime, no shorter extra limit; the UPN check stays). No home_oid claim exists (§9). TryParseHomeTenant exists in WorkforceIdentityOptions.cs (:282-340 area). Builds on UAC #1801; rebase onto UAC task 185 if merged.</background>
