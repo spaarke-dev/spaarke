@@ -4,7 +4,7 @@
     <title>Child-record contract T4: register sprk_signal and sprk_decisionrecord with CoreAncestorRestamper / StampSourceColumns so every re-file re-stamps and re-owns them (audit F5)</title>
     <phase>4c Standard child-record contract (D-131)</phase>
     <gate>blocked: 142 and 143 done; uac-r2 lineage + census PR (C4/C7) merged; #1747 merged</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Edits UAC-owned stamping code; secure-family reach on re-file.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -70,6 +70,15 @@
   </knowledge>
 
   <notes>Created 2026-10-12 (D-131); conditions from uac-r2 messages of 2026-10-12.</notes>
+
+  <completion>2026-10-14, branch task/ontology-144-restamper-refile. Signal and Decision Record registered in StampSourceColumns
+    behind uac-r2's option A exemption (StampedOutsideAccessTaxonomy + reason, pinned both ways, full-lineage guard with one
+    allowlisted narrowing edge Signal-&gt;DR). Filing route, dataverse.update_record and ReconciledEmailFiling (fault-isolated) re-stamp
+    and re-own them in the same operation; D-34 context byte-identical. The reconciliation job holds them report-only by default
+    (CoreAncestor:StampReconciliation:ReportOnlyTables; owner turns writes on). K7 fixed in the suppression probe; K4 is a
+    characterisation only (a restamper stamp cannot be shown load-bearing; see notes). Window trace: 144 closes only the
+    Office-save case; the stale-stamp external read is uac-r2's. Dev read-only run: 0 rows, 0 stale. Details, dispositions and
+    hazards: notes/task-144-restamper-registration-refile.md.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
