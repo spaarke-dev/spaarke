@@ -604,6 +604,76 @@ public class RecordOwnerAssignmentCensusTests
         Assert.False(OrdinaryReownGuardsComeFirst("{ " + write + " " + guarded[1..]), "a write before the guards");
     }
 
+    /// <summary>
+    /// Ontology task 148 (uac-r2 F3): every CALLER of <c>SecureChildReconciler.ReownOrdinaryRowAsync</c>, by member, with its
+    /// count. The entry point's team is the caller's, so each caller must decide it from the resolver's answer (D-130/D-134)
+    /// with secure-parent precedence; a new caller is reviewed here, not found later.
+    /// </summary>
+    private sealed record OrdinaryReownCaller(string FileName, string Member, int Calls, string Reason);
+
+    private static readonly IReadOnlyList<OrdinaryReownCaller> OrdinaryReownCallers = new[]
+    {
+        new OrdinaryReownCaller("SignalWriter.cs", "ReassignNoCoreOwnerAsync", 1,
+            "Ontology task 143: the nightly evaluator's no-core Signal follows its item's owner answer (the team DeriveCoreRecordAsync " +
+            "resolved through IRecordOwnershipResolver, D-130/D-134)."),
+        new OrdinaryReownCaller("TodoAssigneeOwnerReconciliationJob.cs", "RepairAsync", 1,
+            "Ontology task 148 (D-135 item 2): a personal To Do's Signal or Decision Record follows its current Assigned To's team " +
+            "(PersonalToDoAssignee + IRecordOwnershipResolver.ForUserTeam), or the resolver's answer for the To Do; skipped when " +
+            "the row's parents resolve secure or refuse, when the row is cored, user-owned or Secure-team-owned. Report-only " +
+            "unless Ontology:TodoAssigneeOwner:WritesEnabled=true."),
+    };
+
+    private static readonly Regex OrdinaryReownCall = new(@"\.ReownOrdinaryRowAsync\s*\(", RegexOptions.Compiled);
+
+    [Fact(DisplayName = "Ontology 148: every caller of ReownOrdinaryRowAsync is censused, by member, with its count")]
+    public void EveryOrdinaryReownCallerIsCensused()
+    {
+        var actual = ScanCalls(ServerFiles(), OrdinaryReownCall);
+        var expected = OrdinaryReownCallers.ToDictionary(c => (c.FileName, c.Member), c => c.Calls);
+        var problems = new List<string>();
+        foreach (var ((file, member), lines) in actual.OrderBy(kv => kv.Key.File, StringComparer.Ordinal))
+        {
+            if (!expected.TryGetValue((file, member), out var count))
+                problems.Add($"UNLISTED re-own caller {file}.{member}: lines {string.Join(", ", lines)}");
+            else if (count != lines.Count)
+                problems.Add($"COUNT CHANGED for {file}.{member}: census says {count}, source has {lines.Count}");
+        }
+
+        problems.AddRange(expected.Keys.Where(k => !actual.ContainsKey(k)).Select(k => $"STALE census entry {k.FileName}.{k.Member}"));
+        Assert.True(problems.Count == 0,
+            "The ReownOrdinaryRowAsync caller census does not match the source (ontology task 148, uac-r2 F3). A caller names the " +
+            "team, so it must take it from the resolver with secure-parent precedence; list it with its reason:\n" +
+            string.Join("\n", problems));
+
+        // Negative control: the scan sees a call (and attributes it to its member) and ignores the declaration.
+        var seeded = new Dictionary<string, string>
+        {
+            ["Seed.cs"] = "public sealed class Seed {\n public async Task<int> Caller(Guid id) {\n" +
+                          "  var r = await reconciler.ReownOrdinaryRowAsync(\"sprk_signal\", id, team, ct);\n return 1; }\n" +
+                          " public async Task<OrdinaryRowReownResult> ReownOrdinaryRowAsync(string table, Guid id, Guid teamId, CancellationToken ct) { return null; }\n}",
+        };
+        Assert.Equal(new[] { ("Seed.cs", "Caller") }, ScanCalls(seeded, OrdinaryReownCall).Keys.ToArray());
+    }
+
+    /// <summary>(file, member) → the 1-based lines of each match of <paramref name="call"/>.</summary>
+    private static Dictionary<(string File, string Member), List<int>> ScanCalls(IReadOnlyDictionary<string, string> files, Regex call)
+    {
+        var sites = new Dictionary<(string, string), List<int>>();
+        foreach (var (fileName, code) in files)
+        {
+            var members = MemberDeclaration.Matches(code).ToList();
+            foreach (Match match in call.Matches(code))
+            {
+                var site = (fileName, MemberNameAt(code, members, match.Index));
+                if (!sites.TryGetValue(site, out var list))
+                    sites[site] = list = new List<int>();
+                list.Add(SourceScan.LineOf(code, match.Index));
+            }
+        }
+
+        return sites;
+    }
+
     /// <summary>True when every <see cref="OrdinaryReownGuards"/> appears, in order, before the member's first owner write.</summary>
     private static bool OrdinaryReownGuardsComeFirst(string memberBody, IReadOnlySet<string>? globalKeys = null)
     {
