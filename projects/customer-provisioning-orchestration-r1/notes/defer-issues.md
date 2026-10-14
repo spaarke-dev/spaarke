@@ -460,6 +460,25 @@ customer admins. **Needs:** a Microsoft AI Cloud Partner Program account, and a 
 `*.onmicrosoft.com`) set on those apps. Provisioning's A9 work (H3 v2 tokens + `knownClientApplications`, intake
 `customerWorkforceTenantIds`, admin-consent link): `notes/coordination/2026-10-13-from-spa-r3-adr028-a9-workforce-signin.md`.
 
+**Update 2026-10-14 (owner + research).** Spaarke has a Partner Program account: Partner ID `7011236`, publisher name
+"Spaarke Legal Collaboration Platform". Research on Microsoft Learn (researcher note
+`.claude/agent-memory/researcher/publisher-verification-2026-10-14.md`):
+- The ID must be the partner **global** account (`PartnerGlobal`); a location ID is rejected.
+- The Spaarke tenant must be associated with that account in Partner Center (Settings → Account settings → Tenants).
+- The Partner Center primary-contact email domain must be `spaarke.com`; it is the tenant's verified default domain and
+  the apps' `publisherDomain`.
+- `setVerifiedPublisher` is **delegated-only**: a person with Cloud Application Administrator in Entra and Accounts
+  Admin (or Cloud Partner Program Admin) in Partner Center, with fresh MFA. H3's app-only identity cannot set it, so
+  each customer's BFF app needs an operator step after provisioning.
+- Admin consent is **not** blocked for unverified apps (the prompt shows "Unverified"). Risk-based step-up affects user
+  consent only. So verification does not gate onboarding or T186.
+
+**Plan:** (1) An operator confirms the three Partner Center facts above. (2) One-time: set the Partner ID on the shared
+workforce SPA client, the Office add-in apps and the Teams app (portal: App registrations → Branding & properties →
+Partner ID). (3) Per customer: an operator step in the hand-off checklist (`POST /applications/{id}/setVerifiedPublisher`
+`{"verifiedPublisherId":"7011236"}`), verified with `GET ?$select=verifiedPublisher`. (4) Test whether an unverified
+per-customer API app (a resource, not the client) changes the consent prompt at all. If it does not, step 3 is optional.
+
 ## Resolved
 
 <!-- Resolved entries move here with the resolution date and commit/PR. -->
