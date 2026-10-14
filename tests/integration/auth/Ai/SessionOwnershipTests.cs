@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Tests.Api.Ai;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
@@ -325,12 +326,19 @@ public sealed class SessionOwnershipTests
         var manager = BuildManager();
         var mine = await manager.CreateSessionAsync(Tenant, TestSessionOwner.Oid, documentId: null);
 
-        var result = await SessionOwnershipFilterExtensions.EvaluateAsync(
-            ContextFor(TestSessionOwner.Oid, mine.SessionId), manager);
+        var ctx = ContextFor(TestSessionOwner.Oid, mine.SessionId);
+        var result = await SessionOwnershipFilterExtensions.EvaluateAsync(ctx, manager);
 
         result.Should().BeNull(
             "null means 'allow'. Without this, a filter that denied every request would satisfy every "
             + "other test in this file and lock every user out of their own conversations");
+
+        // The session the filter just read is handed to the filters after it, so a turn reads it once
+        // (AiAuthorizationFilter.ReadRouteSessionAsync takes it from here before falling back to a re-read).
+        ctx.Items.Should().ContainKey(SessionOwnershipFilterExtensions.OwnedSessionItemKey);
+        var shared = ctx.Items[SessionOwnershipFilterExtensions.OwnedSessionItemKey].Should().BeOfType<ChatSession>().Subject;
+        shared.SessionId.Should().Be(mine.SessionId);
+        shared.OwnerOid.Should().Be(TestSessionOwner.Oid);
     }
 
     [Fact]

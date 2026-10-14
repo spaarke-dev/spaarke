@@ -187,8 +187,7 @@ public sealed class SessionOwnershipFilterContractTests : IAsyncLifetime
         body.GetProperty("title").GetString().Should().Be("Unauthorized");
         body.GetProperty("detail").GetString().Should().Be("User identity not found");
         body.GetProperty("type").GetString().Should().Be("https://tools.ietf.org/html/rfc7235#section-3.1");
-        body.TryGetProperty("errorCode", out _).Should().BeFalse(
-            "the no-identity 401 carries no errorCode; only the tid-missing 401 does");
+        // errorCode / correlationId on this 401 are deliberately NOT asserted either way: ADR-019 requires them and #1853 will add them.
         _handlerInvocations.Should().Be(0);
     }
 

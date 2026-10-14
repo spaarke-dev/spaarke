@@ -43,12 +43,14 @@ public class KeylessProofAuthorizationFilterTests
     private const string OtherTenant = "11111111-1111-1111-1111-111111111111";
 
     [Fact]
-    public void IsAdmitted_WhenTidAndLegacyTenantClaimDisagree_AdmitsOnTidMatchingTheConfiguredTenant()
+    public void IsAdmitted_WhenTidMatchesTheConfiguredTenantAndNoLegacyClaimIsPresent_IsAdmitted()
     {
-        // `tid` is authoritative. The legacy mapped claim is only a fallback for when `tid` is absent, so a
-        // stale or conflicting legacy value must not veto a token whose `tid` is this tenant.
+        // `tid` is the primary tenant claim: with it present and matching, the legacy mapped claim is not needed.
+        // (Which claim wins when BOTH are present and disagree is deliberately not pinned: real Entra tokens never
+        // carry both with different values, and a stricter "conflicting claims -> refuse" policy must stay possible.
+        // The sibling test below is what pins that `tid` is read before the legacy claim.)
         var user = Principal(("roles", KeylessProofContract.AppRoleValue), ("aud", ClientId),
-            ("tid", Tenant), (LegacyTenantClaim, OtherTenant));
+            ("tid", Tenant));
 
         KeylessProofAuthorizationFilter.IsAdmitted(user, Tenant, ClientId).Should().BeTrue();
     }

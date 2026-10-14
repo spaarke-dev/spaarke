@@ -350,6 +350,33 @@ public sealed class ChatMessageStreamingContractTests : IClassFixture<ChatMessag
     }
 
     // =========================================================================================
+    // 6. Session ownership on the production route
+    // =========================================================================================
+
+    [Fact]
+    public async Task SendMessage_ToAnotherUsersSession_Returns404_AndTheModelIsNeverCalled()
+    {
+        // SessionOwnershipFilter is attached to this production route (ChatEndpoints, POST /sessions/{sessionId}/messages).
+        // Remove .AddSessionOwnershipFilter() there and this goes red: a colleague in the same tenant would
+        // stream a turn into — and persist a message onto — someone else's conversation.
+        var owner = NewCaller();
+        var intruder = NewCaller();
+        var victimSession = await _fixture.CreateSessionAsync(owner);
+        _fixture.ChatClient.ScriptTokens(["should ", "never ", "be ", "sent."]);
+        var modelCallsBefore = _fixture.ChatClient.StreamingCalls;
+
+        var (response, body) = await SendTurnAsync(victimSession, intruder);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "404, not 403: a 403 would confirm the session id is real");
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        body.Should().NotContain("data: ", "no SSE frame may have been written for a session the caller does not own");
+        _fixture.ChatClient.StreamingCalls.Should().Be(modelCallsBefore, "the handler must not run for a non-owner");
+        var stored = await _fixture.ReadSessionAsync(victimSession);
+        stored!.Messages.Should().BeEmpty("the intruder's message must not be persisted onto the owner's session");
+    }
+
+    // =========================================================================================
     // Helpers
     // =========================================================================================
 
@@ -632,9 +659,17 @@ public sealed class ScriptedChatClient : IChatClient
         return script;
     }
 
+    private int _streamingCalls;
+
+    /// <summary>How many times the model boundary was asked for a streaming response — 0 proves the handler never ran.</summary>
+    public int StreamingCalls => Volatile.Read(ref _streamingCalls);
+
     public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-        IEnumerable<AiChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
-        _script(cancellationToken);
+        IEnumerable<AiChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        Interlocked.Increment(ref _streamingCalls);
+        return _script(cancellationToken);
+    }
 
     public Task<ChatResponse> GetResponseAsync(
         IEnumerable<AiChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
