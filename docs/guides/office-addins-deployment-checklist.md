@@ -1,7 +1,7 @@
 # Spaarke Office Add-ins Deployment Checklist
 
 > **Version**: 1.3
-> **Last Updated**: 2026-09-10 — corrected manifest upload guidance: use the manifest served by the deployed SWA, not a local `dist/` build; fixed Outlook build-output filename (`outlook-manifest.xml`, not `manifest.xml`)
+> **Last Updated**: 2026-10-14 — security role block corrected (base role, not "Spaarke Office Add In User"). 2026-09-10 — corrected manifest upload guidance: use the manifest served by the deployed SWA, not a local `dist/` build; fixed Outlook build-output filename (`outlook-manifest.xml`, not `manifest.xml`)
 > **Purpose**: Pre-deployment verification for IT Administrators
 
 ---
@@ -82,26 +82,13 @@ pac entity list --environment {env-id} | Select-String "sprk_processingjob|sprk_
 ```
 
 #### Security Role Configuration
-- [ ] Security role created: "Spaarke Office Add In User"
-- [ ] Role added to "Spaarke Office Add In" solution
-- [ ] **User-level permissions** configured for Office tables:
-  - [ ] `sprk_processingjob`: Create, Read, Write, Append
-  - [ ] `sprk_emailartifact`: Create, Read, Write, Append
-  - [ ] `sprk_attachmentartifact`: Create, Read, Write, Append
-  - [ ] `sprk_document`: Create, Read, Write, Append
-- [ ] **Organization-level Read permissions** for lookup entities:
-  - [ ] `sprk_matter`: Read
-  - [ ] `sprk_project`: Read
-  - [ ] `sprk_contact`: Read
-  - [ ] `sprk_account`: Read
-- [ ] Role assigned to all Office add-in users
+> Corrected 2026-10-14: the add-ins do not need the "Spaarke Office Add In User" role. See the admin guide, Section 7.5.
+
+- [ ] Every add-in user holds one base role: **Spaarke Basic User** or **Spaarke Core User**, directly or through a team
+- [ ] "Spaarke Office Add In User" (optional) is assigned only to users who should create and edit matters, projects, events, invoices, memos and work assignments across their business unit. Check team assignments: a team's roles apply to every member.
 - [ ] Service principal (app user) verified to have System Administrator role
 
-**Verification**:
-```powershell
-# Verify security role exists
-pac security-role list --environment {env-id} | Select-String "Spaarke Office Add In User"
-```
+**Verification**: in the Power Platform admin center, open **Environment > Settings > Users + permissions > Users**, select a pilot user and choose **Manage security roles**. Confirm the base role, then check the roles of the user's teams. Who receives the add-in is set separately, in the M365 admin center (Section 5).
 
 ### 3. Azure AD Configuration
 
