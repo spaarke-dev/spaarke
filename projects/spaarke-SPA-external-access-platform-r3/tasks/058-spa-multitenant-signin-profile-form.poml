@@ -127,7 +127,9 @@
     <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Design note §5/§7. Supersedes 056's registration-service hand-off.</notes>
+  <notes>Design note §5/§7. Supersedes 056's registration-service hand-off.
+
+    UAC task 185 (PR #1827) also edits src/client/external-spa: new src/auth/invite-code.ts (first line of main()), bff-client.ts sends X-Spaarke-Invite-Code on CIAM calls, small edits to BffAccessState.tsx, WorkspaceHomePage.tsx and App.tsx. Start this task only after #1827 is merged into R3, and keep the invite-code header on CIAM calls only (never on home-token calls).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
