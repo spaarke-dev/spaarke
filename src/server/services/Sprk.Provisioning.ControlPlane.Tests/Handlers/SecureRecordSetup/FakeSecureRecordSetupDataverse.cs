@@ -142,6 +142,15 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
             new SecureSetupFieldPermission(dv.StandingGrantProfileId, SecureRecordSetupProcedure.StandingGrantTable, 4, 4, 4));
         dv.SecuredColumns[ColumnKey(SecureRecordSetupProcedure.StandingGrantTable, SecureRecordSetupProcedure.StandingGrantColumn)] = true;
 
+        // ISS-025: contact.sprk_externalinvitedon as SpaarkeMaster 1.2.2.0 ships it (secured; Readers 4/0/0, Writers 4/4/4, plus
+        // the platform's System Administrator profile). sprk_externalinvitecodehash is NOT there yet (UAC task 185 ships later):
+        // see AddInviteCodeHash.
+        var markerPermissions = dv.ColumnPermissions(SecureRecordSetupProcedure.InviteMarkerColumn);
+        markerPermissions.Add(new SecureSetupFieldPermission(dv.ReaderProfileId, SecureRecordSetupProcedure.InviteTable, 4, 0, 0));
+        markerPermissions.Add(new SecureSetupFieldPermission(dv.WriterProfileId, SecureRecordSetupProcedure.InviteTable, 4, 4, 4));
+        markerPermissions.Add(new SecureSetupFieldPermission(dv.SystemAdministratorProfileId, SecureRecordSetupProcedure.InviteTable, 4, 4, 4));
+        dv.SecuredColumns[ColumnKey(SecureRecordSetupProcedure.InviteTable, SecureRecordSetupProcedure.InviteMarkerColumn)] = true;
+
         // ... and task 154's role split as it ships: the Access Administrator holds Read on No Access entries at Global
         // (root unit), Spaarke Core User holds none.
         var entryRead = new SecureSetupPrivilege(Guid.NewGuid(), "prvReadsprk_noaccessentry");
@@ -159,6 +168,18 @@ public sealed class FakeSecureRecordSetupDataverse : ISecureRecordSetupDataverse
         dv.UserUnit[dv.BffAppUser] = dv.CustomerUnitId;
         dv.UserUnit[dv.MiAppUser] = dv.CustomerUnitId;
         return dv;
+    }
+
+    /// <summary>
+    /// A later SpaarkeMaster release has landed <c>contact.sprk_externalinvitecodehash</c> as UAC task 185's script leaves it:
+    /// secured, Writers 4/4/4, the platform's System Administrator profile with full access, and NO Readers row.
+    /// </summary>
+    internal void AddInviteCodeHash()
+    {
+        var permissions = ColumnPermissions(SecureRecordSetupProcedure.InviteCodeHashColumn);
+        permissions.Add(new SecureSetupFieldPermission(WriterProfileId, SecureRecordSetupProcedure.InviteTable, 4, 4, 4));
+        permissions.Add(new SecureSetupFieldPermission(SystemAdministratorProfileId, SecureRecordSetupProcedure.InviteTable, 4, 4, 4));
+        SecuredColumns[ColumnKey(SecureRecordSetupProcedure.InviteTable, SecureRecordSetupProcedure.InviteCodeHashColumn)] = true;
     }
 
     internal Guid AddTeam(Guid unitId, string name, bool isDefault)
