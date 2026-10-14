@@ -2,6 +2,8 @@
 
 Run: python -m unittest discover -s scripts/quality/tests
 """
+import csv
+import importlib.util
 import json
 import os
 import subprocess
@@ -10,10 +12,15 @@ import tempfile
 import unittest
 
 HOOK = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "require-agent-model.py")
+SPEND_REPORT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                            "ai-cost", "spend-report.py")
+# Every run writes its launch log under a temp folder, never to the real ~/.claude/spend-archive file.
+_LOG_DIR = tempfile.TemporaryDirectory()
+DEFAULT_LOG = os.path.join(_LOG_DIR.name, "default-launches.csv")
 
 
-def run(event, project_dir):
-    env = dict(os.environ, CLAUDE_PROJECT_DIR=project_dir)
+def run(event, project_dir, log=None):
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=project_dir, SPAARKE_AGENT_LAUNCH_LOG=log or DEFAULT_LOG)
     out = subprocess.run([sys.executable, HOOK], input=json.dumps(event) if not isinstance(event, str) else event,
                          capture_output=True, text=True, env=env, timeout=20)
     return out.returncode, out.stdout.strip()
@@ -126,6 +133,137 @@ class RequireAgentModel(unittest.TestCase):
     def test_workflow_model_shorthand(self):
         script = "const model = 'opus'\nawait agent('x', {label: 'a', model})"
         self.check({"tool_name": "Workflow", "tool_input": {"script": script}}, False)
+
+
+def read_log(path):
+    with open(path, encoding="utf-8", newline="") as fh:
+        return list(csv.DictReader(fh))
+
+
+class LaunchLog(unittest.TestCase):
+    """The launch log (one CSV line per ALLOWED launch) and its independence from the decision."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        agents = os.path.join(cls.tmp.name, ".claude", "agents")
+        os.makedirs(agents)
+        with open(os.path.join(agents, "reviewer.md"), "w", encoding="utf-8") as f:
+            f.write("---\nname: reviewer\ndescription: x\nmodel: opus\neffort: high\n---\nbody\n")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def log_path(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        return os.path.join(d.name, "nested", "agent-launches.csv")   # folder does not exist yet
+
+    def test_allowed_launch_is_logged_with_fields(self):
+        log = self.log_path()
+        ev = {"tool_name": "Agent", "session_id": "sess-1", "tool_use_id": "toolu_1",
+              "transcript_path": "C:/Users/x/.claude/projects/c--code-files-spaarke-wt-demo-r1/sess-1.jsonl",
+              "tool_input": {"prompt": "SECRET PROMPT TEXT", "model": "sonnet", "subagent_type": "implementer",
+                             "description": "implement task 042"}}
+        code, out = run(ev, self.tmp.name, log)
+        self.assertEqual((code, out), (0, ""))
+        rows = read_log(log)
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual((r["session_id"], r["project"], r["tool"], r["subagent_type"], r["model"], r["description"],
+                          r["tool_use_id"]),
+                         ("sess-1", "demo-r1", "Agent", "implementer", "sonnet", "implement task 042", "toolu_1"))
+        self.assertEqual(r["transcript_path"], ev["transcript_path"])
+        self.assertRegex(r["ts_utc"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        with open(log, encoding="utf-8") as fh:
+            self.assertNotIn("SECRET PROMPT TEXT", fh.read())      # never the prompt
+
+    def test_header_written_once_and_lines_appended(self):
+        log = self.log_path()
+        for i in range(3):
+            run({"tool_name": "Task", "tool_input": {"prompt": "p", "model": "haiku", "description": f"d{i}"}},
+                self.tmp.name, log)
+        with open(log, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+        self.assertEqual(len(lines), 4)
+        self.assertTrue(lines[0].startswith("ts_utc,session_id,transcript_path,project,tool,subagent_type,model,effort,description"))
+        self.assertEqual(sum(1 for l in lines if l.startswith("ts_utc,")), 1)
+
+    def test_definition_supplies_model_and_effort(self):
+        log = self.log_path()
+        run({"tool_name": "Agent", "tool_input": {"prompt": "p", "subagent_type": "reviewer", "description": "review"}},
+            self.tmp.name, log)
+        r = read_log(log)[0]
+        self.assertEqual((r["model"], r["effort"]), ("opus", "high"))
+
+    def test_description_truncated_and_single_line(self):
+        log = self.log_path()
+        desc = "line one\nline two " + "x" * 300
+        run({"tool_name": "Agent", "tool_input": {"prompt": "p", "model": "sonnet", "description": desc}}, self.tmp.name, log)
+        r = read_log(log)[0]
+        self.assertEqual(len(r["description"]), 120)
+        self.assertNotIn("\n", r["description"])
+
+    def test_workflow_launch_logged(self):
+        log = self.log_path()
+        script = "await agent('y', {model: 'sonnet'})"
+        run({"tool_name": "Workflow", "tool_input": {"script": script, "description": "fan-out"}}, self.tmp.name, log)
+        r = read_log(log)[0]
+        self.assertEqual((r["tool"], r["description"]), ("Workflow", "fan-out"))
+
+    # not logged
+    def test_denied_launch_is_not_logged(self):
+        log = self.log_path()
+        code, out = run({"tool_name": "Agent", "tool_input": {"prompt": "p", "description": "d"}}, self.tmp.name, log)
+        self.assertTrue(denied(out))
+        self.assertFalse(os.path.exists(log))
+
+    def test_other_tool_and_malformed_input_not_logged(self):
+        log = self.log_path()
+        run({"tool_name": "Bash", "tool_input": {"command": "ls"}}, self.tmp.name, log)
+        run("not json", self.tmp.name, log)
+        self.assertFalse(os.path.exists(log))
+
+    # logging never changes the decision
+    def test_unwritable_log_does_not_change_allow(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        blocker = os.path.join(d.name, "afile")
+        with open(blocker, "w") as f:
+            f.write("x")
+        bad = os.path.join(blocker, "sub", "launches.csv")        # a file where a folder is needed
+        code, out = run({"tool_name": "Agent", "tool_input": {"prompt": "p", "model": "sonnet"}}, self.tmp.name, bad)
+        self.assertEqual((code, out), (0, ""))
+
+    def test_unwritable_log_does_not_change_deny(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        code, out = run({"tool_name": "Agent", "tool_input": {"prompt": "p"}}, self.tmp.name, d.name)  # a folder, not a file
+        self.assertEqual(code, 0)
+        self.assertTrue(denied(out))
+
+    def test_unwritable_log_reports_on_stderr_only(self):
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=self.tmp.name, SPAARKE_AGENT_LAUNCH_LOG=d.name)
+        p = subprocess.run([sys.executable, HOOK], input=json.dumps(
+            {"tool_name": "Agent", "tool_input": {"prompt": "p", "model": "sonnet"}}),
+            capture_output=True, text=True, env=env, timeout=20)
+        self.assertEqual((p.returncode, p.stdout), (0, ""))
+        self.assertIn("launch not logged", p.stderr)
+
+    # the folder -> project rule is shared with spend-report
+    def test_project_name_matches_spend_report(self):
+        def load(path, name):
+            spec = importlib.util.spec_from_file_location(name, path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+        hook, sr = load(HOOK, "hook"), load(SPEND_REPORT, "sr")
+        for folder in ["c--code-files-spaarke-wt-demo-r1", "C--code-files-spaarke", "c--code-files-spaarke-website",
+                       "C--wtf2", "other-folder", "C--code-files-spaarke-WT-Mixed"]:
+            self.assertEqual(hook.project_name(folder), sr.project_name(folder), folder)
 
 
 if __name__ == "__main__":
