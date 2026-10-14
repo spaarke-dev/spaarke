@@ -597,6 +597,66 @@ public class CommunicationServiceMessageSendTests
         persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
     }
 
+    [Fact]
+    public async Task SendAsync_ForMessageType_IntoThreadWhosePrivacyReadThrows_PersistsInternalOnly()
+    {
+        Entity? persisted = null;
+        var entity = EntityServiceCapturing(e => persisted = e);
+        entity.Setup(s => s.RetrieveAsync(
+                "sprk_communicationthread", TargetThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse unavailable"));
+        var sut = BuildOutboundSut(new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(MessageRequest() with { ThreadId = TargetThreadId }, AuthenticatedContext(), CancellationToken.None);
+
+        persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue(
+            "a thread whose privacy cannot be read is not confirmed Open (fail closed)");
+    }
+
+    [Fact]
+    public async Task SendAsync_ForMessageType_IntoThreadWhosePrivacyRowIsNull_PersistsInternalOnly()
+    {
+        Entity? persisted = null;
+        var entity = EntityServiceCapturing(e => persisted = e);
+        entity.Setup(s => s.RetrieveAsync(
+                "sprk_communicationthread", TargetThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+        var sut = BuildOutboundSut(new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(MessageRequest() with { ThreadId = TargetThreadId }, AuthenticatedContext(), CancellationToken.None);
+
+        persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    // Message sends share SendCommunicationRequest and ResolveOutboundOwnerAsync with email, so a Message reply that
+    // names InheritRegardingFromCommunicationId follows the same quoted-parent rule (fix round 1, F1).
+    private static readonly Guid ReplySourceId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    [Theory]
+    [InlineData(true, null, true)]     // source flagged internal-only
+    [InlineData(null, null, true)]     // source flag unset
+    [InlineData(false, null, false)]   // source explicitly not internal-only
+    [InlineData(true, false, false)]   // explicit request value wins over a source flagged true
+    [InlineData(false, true, true)]    // explicit request value wins over a source explicitly false
+    public async Task SendAsync_ForMessageType_ReplyInheritingFromParent_FollowsTheParentsFlagUnlessExplicit(
+        bool? sourceFlag, bool? explicitFlag, bool expected)
+    {
+        Entity? persisted = null;
+        var entity = EntityServiceCapturing(e => persisted = e);
+        var source = new Entity("sprk_communication", ReplySourceId);
+        if (sourceFlag is { } flag)
+            source["sprk_isinternalonly"] = flag;
+        entity.Setup(s => s.RetrieveAsync("sprk_communication", ReplySourceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(source);
+        var sut = BuildOutboundSut(new RecordingMessagingSender(), entity.Object, new FakeIdempotencyService());
+
+        await sut.SendAsync(
+            MessageRequest() with { InheritRegardingFromCommunicationId = ReplySourceId, IsInternalOnly = explicitFlag },
+            AuthenticatedContext(), CancellationToken.None);
+
+        persisted!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().Be(expected);
+    }
+
     // ── Inbound-echo scaffolding: the REAL handler + REAL ingestor over the shared boundary ──
     private static IncomingMessagingJobHandler BuildInboundHandler(
         IGenericEntityService entityService, IIdempotencyService idempotency)

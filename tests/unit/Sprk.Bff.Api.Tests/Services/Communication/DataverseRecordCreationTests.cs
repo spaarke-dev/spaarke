@@ -614,6 +614,190 @@ public class DataverseRecordCreationTests
         _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
     }
 
+    // ── Fix round 1 (adversarial pass): reply/forward quoting a parent, and emails into a Private thread ──
+
+    private static readonly Guid ReplySourceId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+    private static readonly Guid TargetThreadId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+
+    private SendCommunicationRequest EmailRequest(bool userMode, bool? isInternalOnly, Guid? inheritFrom = null, Guid? threadId = null)
+    {
+        var request = userMode ? UserModeRequest(isInternalOnly) : CreateValidRequest() with { IsInternalOnly = isInternalOnly };
+        return request with { InheritRegardingFromCommunicationId = inheritFrom, ThreadId = threadId };
+    }
+
+    private Task SendEmailAsync(SendCommunicationRequest request) =>
+        CreateService().SendAsync(request, CallerContext());
+
+    private void ReplySourceReturns(bool? internalOnlyFlag)
+    {
+        var source = new DataverseEntity("sprk_communication", ReplySourceId);
+        if (internalOnlyFlag is { } flag)
+            source["sprk_isinternalonly"] = flag;
+        _genericEntityServiceMock
+            .Setup(s => s.RetrieveAsync("sprk_communication", ReplySourceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(source);
+    }
+
+    private void ThreadPrivacyReturns(int? privacyState)
+    {
+        var thread = new DataverseEntity("sprk_communicationthread", TargetThreadId);
+        if (privacyState is { } state)
+            thread["sprk_privacystate"] = new OptionSetValue(state);
+        _genericEntityServiceMock
+            .Setup(s => s.RetrieveAsync("sprk_communicationthread", TargetThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(thread);
+    }
+
+    [Theory]
+    [InlineData(false, true, true)]    // source flagged internal-only -> internal-only
+    [InlineData(false, null, true)]    // source flag unset (legacy row) -> internal-only (fail closed)
+    [InlineData(false, false, false)]  // source explicitly not internal-only -> not internal-only
+    [InlineData(true, true, true)]
+    [InlineData(true, null, true)]
+    [InlineData(true, false, false)]
+    public async Task SendAsync_EmailReplyWithoutExplicitFlag_FollowsTheQuotedParentsFlag(bool userMode, bool? sourceFlag, bool expected)
+    {
+        ReplySourceReturns(sourceFlag);
+
+        await SendEmailAsync(EmailRequest(userMode, isInternalOnly: null, inheritFrom: ReplySourceId));
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SendAsync_EmailReplyWhoseParentReadFails_WritesInternalOnly(bool userMode)
+    {
+        _genericEntityServiceMock
+            .Setup(s => s.RetrieveAsync("sprk_communication", ReplySourceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse unavailable"));
+
+        await SendEmailAsync(EmailRequest(userMode, isInternalOnly: null, inheritFrom: ReplySourceId));
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SendAsync_EmailReplyWhoseParentRowIsNull_WritesInternalOnly(bool userMode)
+    {
+        _genericEntityServiceMock
+            .Setup(s => s.RetrieveAsync("sprk_communication", ReplySourceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity)null!);
+
+        await SendEmailAsync(EmailRequest(userMode, isInternalOnly: null, inheritFrom: ReplySourceId));
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(false, true, false, false)]   // explicit false beats a source flagged true
+    [InlineData(false, false, true, true)]    // explicit true beats a source explicitly false
+    [InlineData(false, null, false, false)]   // explicit false beats an unset source flag
+    [InlineData(true, true, false, false)]
+    [InlineData(true, false, true, true)]
+    [InlineData(true, null, false, false)]
+    public async Task SendAsync_EmailReplyWithExplicitFlag_TheExplicitValueWins(bool userMode, bool? sourceFlag, bool explicitFlag, bool expected)
+    {
+        ReplySourceReturns(sourceFlag);
+
+        await SendEmailAsync(EmailRequest(userMode, isInternalOnly: explicitFlag, inheritFrom: ReplySourceId));
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SendAsync_EmailReplyWithExplicitFlagAndFailingParentRead_TheExplicitValueWins(bool userMode)
+    {
+        _genericEntityServiceMock
+            .Setup(s => s.RetrieveAsync("sprk_communication", ReplySourceId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse unavailable"));
+
+        await SendEmailAsync(EmailRequest(userMode, isInternalOnly: false, inheritFrom: ReplySourceId));
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(false, 100000001, true)]   // Private thread -> internal-only
+    [InlineData(false, 100000000, false)]  // Open thread -> not internal-only
+    [InlineData(false, null, true)]        // privacy value missing -> not confirmed Open -> internal-only
+    [InlineData(true, 100000001, true)]
+    [InlineData(true, 100000000, false)]
+    [InlineData(true, null, true)]
+    public async Task SendAsync_EmailIntoThreadWithoutExplicitFlag_FollowsThreadPrivacy(bool userMode, int? privacyState, bool expected)
+    {
+        ThreadPrivacyReturns(privacyState);
+
+        await SendEmailAsync(EmailRequest(userMode, isInternalOnly: null, threadId: TargetThreadId));
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SendAsync_EmailIntoThreadWhosePrivacyReadThrows_WritesInternalOnly(bool userMode)
+    {
+        _genericEntityServiceMock
+            .Setup(s => s.RetrieveAsync("sprk_communicationthread", TargetThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("dataverse unavailable"));
+
+        await SendEmailAsync(EmailRequest(userMode, isInternalOnly: null, threadId: TargetThreadId));
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SendAsync_EmailIntoThreadWhosePrivacyRowIsNull_WritesInternalOnly(bool userMode)
+    {
+        _genericEntityServiceMock
+            .Setup(s => s.RetrieveAsync("sprk_communicationthread", TargetThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity)null!);
+
+        await SendEmailAsync(EmailRequest(userMode, isInternalOnly: null, threadId: TargetThreadId));
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SendAsync_EmailIntoPrivateThreadWithExplicitFalse_TheExplicitValueWins(bool userMode)
+    {
+        ThreadPrivacyReturns(100000001); // Private
+
+        await SendEmailAsync(EmailRequest(userMode, isInternalOnly: false, threadId: TargetThreadId));
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SendAsync_EmailReplyIntoPrivateThreadWhoseParentIsNotInternal_WritesInternalOnly()
+    {
+        // Either signal saying "internal-only" is enough: an Open parent does not lift a Private target thread.
+        ReplySourceReturns(false);
+        ThreadPrivacyReturns(100000001); // Private
+
+        await SendEmailAsync(EmailRequest(userMode: false, isInternalOnly: null, inheritFrom: ReplySourceId, threadId: TargetThreadId));
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SendAsync_EmailWithNoParentAndNoThread_StillWritesNotInternalOnly()
+    {
+        await SendEmailAsync(EmailRequest(userMode: false, isInternalOnly: null));
+
+        _capturedEntity!.GetAttributeValue<bool?>("sprk_isinternalonly").Should().BeFalse();
+    }
+
     [Fact]
     public async Task SendAsync_SharedMailbox_StampsSentByWithTheCallingSystemUser()
     {

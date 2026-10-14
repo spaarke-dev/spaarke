@@ -136,3 +136,32 @@ to set `sprk_isinternalonly`. Not built (not asked for by the POML).
   and additive. Publish-size delta: not measured; no fresh master build was run in this worktree.
 - Contract: `isInternalOnly` is optional; existing clients are unchanged and get `false`.
 - The adversarial pass is left to the main session (brief).
+
+## Fix round 1 (adversarial pass)
+
+Fail-closed decisions from the main session. Nothing else changed.
+
+| # | Finding | Status | Where |
+|---|---------|--------|-------|
+| F1 | Reply/forward quotes the parent but wrote `isInternalOnly ?? false` | Fixed | `ResolveOutboundOwnerAsync` raises the flag to true after `CopyRegardingFromSourceAsync` (which now also reads `sprk_isinternalonly` and returns "source explicitly false"), when `request.IsInternalOnly` is null |
+| K2 | Email into a Private thread was written false | Fixed | New `ResolveRequestedInternalOnlyAsync` (explicit value, else `TargetThreadIsNotConfirmedOpenAsync`) used by all three builders |
+| K3 | Unreadable-thread branch untested | Fixed | Tests where the thread read throws or returns a null row, for email (both modes) and Message |
+| O1 | Messages carry no regarding | Open (owner) | Unchanged |
+| O2 | Every filed email is visible to external callers; no client opt-out | Open (owner) | Unchanged |
+| O3 | Shared-mailbox sends show the individual sender | Open (owner) | Unchanged |
+
+Rule: with no explicit `IsInternalOnly` and an `InheritRegardingFromCommunicationId`, the row is true unless the source
+flag is explicitly false. A true or null flag, a null source row or a failed source read gives true. An explicit request
+value always wins. It is raise-only, so the private-thread result is never lowered by an Open parent. The flag rides on the
+existing source read (no second read).
+
+Message sends: yes, they can carry `inheritRegardingFromCommunicationId`. The Message builder calls the same
+`ResolveOutboundOwnerAsync` with the same `SendCommunicationRequest`, so the rule covers it. A Message test was added.
+
+Seeding proof (unit tests, filtered to `DataverseRecordCreationTests` + `CommunicationServiceMessageSendTests`):
+- Inherit rule disabled (`if (false && ...)`): 10 failed / 76 passed, including `source true -> true`, `source null -> true`,
+  the null-row and failed-read cases, and the Message reply cases. Restored.
+- Thread check disabled (private-thread check never evaluated): 13 failed / 73 passed, including the email Private-thread,
+  unreadable-thread (throws, null row) and Message cases. Restored.
+- Restored: 86 passed in those two classes; `Sprk.Bff.Api.Tests.Services.Communication` + `CommunicationAccessFilter` +
+  `CommunicationRecordAuthorization`: 1221 passed, 0 failed. `dotnet build Sprk.Bff.Api -warnaserror`: 0 warnings, 0 errors.

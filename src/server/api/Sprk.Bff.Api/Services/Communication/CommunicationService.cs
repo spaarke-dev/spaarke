@@ -896,8 +896,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
     {
         var subject = string.IsNullOrWhiteSpace(request.Subject) ? "(No Subject)" : request.Subject;
-        var isInternalOnly = request.IsInternalOnly
-            ?? (request.ThreadId is { } threadId && await TargetThreadIsNotConfirmedOpenAsync(threadId, correlationId, ct));
+        var isInternalOnly = await ResolveRequestedInternalOnlyAsync(request, correlationId, ct);
 
         var communication = new DataverseEntity("sprk_communication")
         {
@@ -934,6 +933,18 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         return communication;
     }
+
+    /// <summary>
+    /// The <c>sprk_isinternalonly</c> an outbound row is built with BEFORE the reply-inheritance check (task 065, owner
+    /// 2026-10-13; fix round 1): the request's explicit value always wins; otherwise <c>true</c> when the send targets a
+    /// <see cref="SendCommunicationRequest.ThreadId"/> not confirmed Open (<see cref="TargetThreadIsNotConfirmedOpenAsync"/>),
+    /// else <c>false</c>. <see cref="ResolveOutboundOwnerAsync"/> may then raise it to <c>true</c> for a reply/forward that
+    /// quotes a parent not explicitly marked shareable (<see cref="CopyRegardingFromSourceAsync"/>). Used by all three builders.
+    /// </summary>
+    private async Task<bool> ResolveRequestedInternalOnlyAsync(
+        SendCommunicationRequest request, string correlationId, CancellationToken ct) =>
+        request.IsInternalOnly
+        ?? (request.ThreadId is { } threadId && await TargetThreadIsNotConfirmedOpenAsync(threadId, correlationId, ct));
 
     /// <summary>
     /// True unless the target <c>sprk_communicationthread</c>'s <c>sprk_privacystate</c> is EXPLICITLY Open — a Private
@@ -2012,8 +2023,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_from"] = userEmail,
             ["sprk_subject"] = request.Subject,
             ["sprk_body"] = request.Body,
-            // Task 065 (owner 2026-10-13): explicit for every type — the request's value, else false.
-            ["sprk_isinternalonly"] = request.IsInternalOnly ?? false,
+            // Task 065 (owner 2026-10-13): explicit for every type — the request's value, else false; true into a
+            // thread not confirmed Open or when quoting a parent not explicitly shareable (fix round 1).
+            ["sprk_isinternalonly"] = await ResolveRequestedInternalOnlyAsync(request, correlationId, ct),
             ["sprk_graphmessageid"] = correlationId,
             ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
             ["sprk_correlationid"] = correlationId
@@ -2073,7 +2085,16 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // mapping any explicit association, so an explicitly-supplied association still wins on its field
         // (CopyRegardingFromSourceAsync skips already-set fields).
         if (request.InheritRegardingFromCommunicationId is { } srcCommId)
-            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
+        {
+            var sourceExplicitlyNotInternal = await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
+
+            // Task 065 fix round 1 (F1): a reply/forward quotes the parent's body, so with no explicit choice it is
+            // internal-only unless the parent is EXPLICITLY not internal-only. A true, null or unreadable parent flag, or
+            // a failed source read, gives true (fail closed). An explicit request value always wins. Raise-only: the
+            // thread check in ResolveRequestedInternalOnlyAsync may already have set it.
+            if (request.IsInternalOnly is null && !sourceExplicitlyNotInternal)
+                communication["sprk_isinternalonly"] = true;
+        }
 
         // Map primary association (regarding lookup + FR-26 stamp + denormalized fields)
         await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
@@ -2197,7 +2218,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_from"] = sender.Email,
             ["sprk_subject"] = request.Subject,
             ["sprk_body"] = request.Body,
-            ["sprk_isinternalonly"] = request.IsInternalOnly ?? false,
+            ["sprk_isinternalonly"] = await ResolveRequestedInternalOnlyAsync(request, correlationId, ct),
             ["sprk_graphmessageid"] = correlationId,
             ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
             ["sprk_correlationid"] = correlationId
@@ -2328,7 +2349,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// are set; a sibling regarding field is never cleared (mirrors task-042 write semantics). Best-effort /
     /// non-fatal — an inheritance-read failure MUST NOT fail the send (NFR-02).
     /// </summary>
-    private async Task CopyRegardingFromSourceAsync(
+    /// <returns>
+    /// <c>true</c> only when the source row was read AND its <c>sprk_isinternalonly</c> is explicitly <c>false</c>
+    /// (task 065 fix round 1: the flag rides on the one source read, no second read). A true or null flag, a null row or
+    /// a failed read returns <c>false</c> so the caller fails closed.
+    /// </returns>
+    private async Task<bool> CopyRegardingFromSourceAsync(
         DataverseEntity communication, Guid sourceCommunicationId, string correlationId, CancellationToken ct)
     {
         try
@@ -2336,7 +2362,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             var columns = new List<string>
             {
                 "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordname",
-                "sprk_regardingrecordurl", "sprk_associationcount",
+                "sprk_regardingrecordurl", "sprk_associationcount", "sprk_isinternalonly",
             };
             columns.AddRange(Engine.RegardingFieldMap.AllRegardingFields);
 
@@ -2370,6 +2396,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             _logger.LogInformation(
                 "Inherited {Count} regarding lookup(s) from source communication {SourceId} onto new draft | CorrelationId: {CorrelationId}",
                 copied, sourceCommunicationId, correlationId);
+
+            return source.GetAttributeValue<bool?>("sprk_isinternalonly") == false;
         }
         catch (Exception ex)
         {
@@ -2377,6 +2405,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 ex,
                 "Regarding inheritance from source communication {SourceId} failed (non-fatal) | CorrelationId: {CorrelationId}",
                 sourceCommunicationId, correlationId);
+
+            // Fail closed (task 065 fix round 1): the parent's flag is unknown, so the reply is not shareable.
+            return false;
         }
     }
 
