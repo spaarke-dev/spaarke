@@ -38,7 +38,7 @@
 | PRQ-C-13 | ACME workforce tenant id(s) | owner | pending |
 | PRQ-C-14 | ACME outbound B2B attestation | owner (as ACME's Entra admin) | pending |
 | PRQ-E-13 | Registry placeholder row on spaarkedev1 | Spaarke (skill Step 1) | pending |
-| — | SpaarkeMaster release carrying `contact.sprk_externalinvitecodehash` (1.2.3.0) | Spaarke | in progress 2026-10-14 (owner OK) — not needed by T186 itself, needed before T240d production |
+| — | SpaarkeMaster release carrying `contact.sprk_externalinvitecodehash` (1.2.3.0) | Spaarke | **published 2026-10-14** (owner OK): PR #1860 → master `bd52b6290`, CI run 38603706393; manifest reads 1.2.3.0, managed sha256 `e84cd5d9…3f662e`. T186's H6 imports this version |
 
 ## 3. Pre-run clean-up of the old demo (owner D35)
 
