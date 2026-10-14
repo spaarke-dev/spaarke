@@ -29,7 +29,7 @@ Legend: Tier S = sonnet, O = opus · Effort h = high · status tokens `[open]` `
 | 040 | Workforce client switch (FR-16) | P4 | 🔄 [wip] | 001 (+ owner client registration) | O/h | FULL | Wave 2 |
 | 041 | Run-time backend selection (FR-17) | P4 | ✅ [done] | 040 | O/h | FULL | Wave 3 |
 | 042 | Out-of-plane pages + no production mock (FR-18) | P4 | ✅ [done] | 041 | O/h | FULL | Wave 4 |
-| 044 | A9 schema: contact sprk_externaltenantid + plane WorkforceHome; systemuser home-id link + key | P4b | 🔲 [open] | none (owner-gated dev import) | S/h | STANDARD | A9 Wave 1 |
+| 044 | A9 schema: contact sprk_externaltenantid + plane WorkforceHome; systemuser home-id link + key | P4b | ✅ [done] | none (owner-gated dev import) | S/h | STANDARD | A9 Wave 1 |
 | 045 | BFF WorkforceHome scheme, ExternalCollaboration only, census ArchTest, must-reject tests | P4b | ✅ [done] merged e6f6c6cd7; ships only with 046 (resolver denies WorkforceHome until then) | none | O/h | FULL | A9 Wave 1 |
 | 046 | BFF home principal resolution (link, contact by tid+oid, registration_required, guards d/e) | P4b | 🔲 [open] | 044, 045 | O/h | FULL | A9 Wave 2 |
 | 047 | BFF registration endpoint POST /api/v1/external/registration | P4b | 🔲 [open] | 046 | O/h | FULL | A9 Wave 3 |

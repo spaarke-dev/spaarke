@@ -426,7 +426,8 @@ foreach ($col in $Columns) {
                 MaxLength     = $ColumnLength
                 FormatName    = @{ Value = 'Text' }
             } | Out-Null
-            $s = Wait-DvCondition { Get-ColumnState $col.Entity $col.Logical } "$id metadata to become readable"
+            # The typed StringAttributeMetadata read can lag the base attribute read: wait for both, or IsString reads false.
+            $s = Wait-DvCondition { $x = Get-ColumnState $col.Entity $col.Logical; if ($x -and $x.IsString) { $x } } "$id metadata to become readable"
             # The data endpoint can lag the metadata endpoint: later steps select the column, so wait for that too.
             Wait-DvRead "$($col.Set)?`$select=$($col.IdName),$($col.Logical)&`$top=1" "$id in data queries" | Out-Null
             Report 'DONE' "created $id (read back: Text, MaxLength $($s.MaxLength))"

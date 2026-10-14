@@ -4,7 +4,7 @@
     <title>A9 schema: contact sprk_externaltenantid + plane WorkforceHome; systemuser home-id link columns + unsecured key mirrors + alternate key</title>
     <phase>4b A9 workforce home sign-in</phase>
     <gate>startable (owner approved the schema 2026-10-13, design note §11 item 2); the dev import is a live change shown to the owner first</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Dataverse schema in the solution plus an owner-gated dev import; no C# or TS code</rigor-reason>
     <model-tier>sonnet</model-tier>
