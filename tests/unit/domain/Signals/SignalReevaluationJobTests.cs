@@ -513,11 +513,12 @@ public partial class SignalReevaluationJobTests
     [Fact]
     public async Task Run_NoCoreReown_DataverseRefusesTheTeamsRead_IsMeteredAsAnAccessDenial()
     {
-        // Review F1: F2's 0x80040299 on the re-own comes back from the reconciler as text (Failed); it is metered and logged as
-        // the access denial it is, not only as a generic re-own failure.
+        // Review F1 + K1 (re-own): in production the shared Web API client throws a bare HttpRequestException carrying only the
+        // status for a 403 (it maps 412 and 404 only), so the denial is read from the status, not from any Dataverse code in the text.
         var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
         await h.RunAsync();
-        h.ReownApi.WriteFault = new HttpRequestException("Read Privilege Check For Owner failed (0x80040299).");
+        h.ReownApi.WriteFault = new HttpRequestException(
+            "Response status code does not indicate success: 403 (Forbidden).", null, System.Net.HttpStatusCode.Forbidden);
         h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Owned(OtherTeamId);
         h.Org.ResetCounts();
 
@@ -525,10 +526,13 @@ public partial class SignalReevaluationJobTests
         var second = await h.RunAsync();
 
         second.Success.Should().BeFalse();
-        second.ResultJson.Should().Contain("\"reassigned\":0").And.Contain("\"refused\":1");
+        second.ResultJson.Should().Contain("\"reassigned\":0").And.Contain("\"refused\":1").And.Contain("\"accessDenied\":1");
         h.Org.Rows.Values.Single().GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(DefaultTeamId, "nothing was re-owned");
         h.Log.Should().Contain(e => e.EventId.Id == OntologyWriterEvents.WriteRefused.Id && e.Level == LogLevel.Error
-            && e.Message.Contains(OntologyWriterFailureReason.DataverseAccessDenied) && e.Message.Contains("0x80040299"));
+            && e.Message.Contains(OntologyWriterFailureReason.DataverseAccessDenied) && e.Message.Contains("403 (Forbidden)")
+            && e.Message.Contains(OtherTeamId.ToString()));
+        h.Log.Should().NotContain(e => e.EventId.Id == OntologyWriterEvents.EvaluatorPolicyFailed.Id && e.Level == LogLevel.Error,
+            "a counted privilege refusal adds a Warning, not a second Error");
         metrics.Counter("ontology.writer.failures", "reason", OntologyWriterFailureReason.DataverseAccessDenied).Should().BeGreaterThanOrEqualTo(1);
     }
 

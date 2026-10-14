@@ -318,6 +318,29 @@ public partial class SignalReevaluationJobTests
             "the job does not add a second Error for the same refusal");
     }
 
+    // K1 (re-own). The re-own is the no-core, Do-lane path, which the event trigger never evaluates (the handler runs the Decide
+    // lane only), so it is proved at the job: the denial is counted AccessDenied (the part of Refused a trigger would not retry)
+    // from the HTTP status alone, and a non-403 failure is not.
+    [Theory]
+    [InlineData(System.Net.HttpStatusCode.Forbidden, 1)]
+    [InlineData(System.Net.HttpStatusCode.InternalServerError, 0)]
+    [InlineData(System.Net.HttpStatusCode.TooManyRequests, 0)]
+    public async Task Reown_IsCountedAccessDenied_OnlyForAForbiddenStatus(System.Net.HttpStatusCode status, int accessDenied)
+    {
+        var h = new Harness().WithTodoPolicy().WithTodo(TodoId, due: new DateTime(2026, 10, 1), owner: new EntityReference("systemuser", UserId));
+        await h.RunAsync();
+        h.ReownApi.WriteFault = new HttpRequestException($"Response status code does not indicate success: {(int)status} ({status}).", null, status);
+        h.Ownership.AnswerFor[TodoId] = Ownership.RecordOwnerResolution.Owned(OtherTeamId);
+        h.Org.ResetCounts();
+        h.Log.Clear();
+
+        var result = await h.RunAsync();
+
+        result.ResultJson.Should().Contain("\"refused\":1").And.Contain($"\"accessDenied\":{accessDenied}");
+        h.Log.Any(e => e.Level == LogLevel.Error && e.EventId == OntologyWriterEvents.EvaluatorPolicyFailed).Should().Be(accessDenied == 0,
+            "a retryable failure keeps the job's Error; a denial is a Warning because the writer already logged the Error");
+    }
+
     [Fact]
     public async Task Trigger_WhenTheSupersedeCloseIsDenied_CompletesTheMessage_NoRetry()
     {

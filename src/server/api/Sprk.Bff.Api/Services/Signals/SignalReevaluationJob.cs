@@ -836,6 +836,7 @@ public sealed class SignalReevaluationJob : IScheduledJob
             policyRetiredClosed = RetiredClosed,
             reassigned = Reassigned,
             refused = Refused,
+            accessDenied = AccessDenied,
             changedSinceRead = ChangedSinceRead,
             unchanged = Unchanged,
             suppressed = Suppressed,
