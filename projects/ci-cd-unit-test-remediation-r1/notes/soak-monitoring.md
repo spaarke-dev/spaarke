@@ -1,8 +1,9 @@
 # Soak monitoring — task CICD-075 (7-day green gate, FR-B07 / SC-06)
 
 > **Measured**: 2026-10-14T15:24Z (one retrospective measurement over the post-cutover record, not daily check-ins — the data is all in the Actions API)
-> **Verdict**: ❌ **NOT MET** — counter reset by a legitimate master break on 2026-10-08. **Earliest pass: 2026-10-15T15:57Z**, if master has no further legitimate red.
-> **Consequence**: task 077 (retire `sdap-ci.yml`) stays blocked. Nothing in this note changes any workflow.
+> **Verdict**: ✅ **PASSED by owner ruling (2026-10-14)** — the 2026-10-08 compile break does not reset the soak (see "Owner ruling" below). Window 2026-10-07T15:24Z → 2026-10-14T15:24Z: no failure other than that break and documented flakes.
+> **Literal reading (superseded by the ruling)**: the POML's "legitimate failure → reset" would have put the pass at 2026-10-15T15:57Z.
+> **Consequence**: task 077 (retire `sdap-ci.yml`) unblocked. Declaration with run IDs: `notes/soak-passed.md`.
 
 ---
 
@@ -23,7 +24,7 @@ retired, it is not required, and its `Build & Test` job is not the suite that su
 | Day (UTC) | Completed runs | Red | Classification | Counts toward soak? |
 |---|---|---|---|---|
 | 10-07 | 25 (+3 cancelled) | 0 | — | ✅ |
-| 10-08 | 34 | **2** | **Legitimate**: master did not compile | ❌ **reset** |
+| 10-08 | 34 | **2** | Merge collision: master did not compile (owner ruling: no reset) | ✅ (ruling) |
 | 10-09 | 32 (+3 cancelled) | 0 | (Tier 2 `rest` shard: test host crash, 0 test failures — infra) | ✅ |
 | 10-10 | 26 | 1 | Flake — MI token (#1672 / #1784) | ✅ (flake, no reset) |
 | 10-11 | 6 | 1 | Flake — MI token (#1672 / #1784) | ✅ (flake, no reset) |
@@ -31,13 +32,13 @@ retired, it is not required, and its `Build & Test` job is not the suite that su
 | 10-13 | 12 | 0 | — | ✅ |
 | 10-14 (to 15:24Z) | 7 | 0 | — | ✅ |
 
-**Consecutive green since the reset: 5 d 23.5 h** (2026-10-08T15:57Z → 2026-10-14T15:24Z).
+**7 consecutive days** under the owner ruling (2026-10-07 → 2026-10-14). Under the literal reading it would be 5 d 23.5 h (2026-10-08T15:57Z → 2026-10-14T15:24Z).
 
 ## Failures, classified
 
 | Run | Time (UTC) | Commit | Failed | Classification |
 |---|---|---|---|---|
-| [37775675230](https://github.com/spaarke-dev/spaarke/actions/runs/37775675230) | 10-08 12:16 | `11dc9b0da` (PR #1359) | Tier 1 `Compile (Debug)` + all four Tier 2 shards' `Build` | **Legitimate.** `CS0411` in `tests/integration/Sprk.Bff.Api.IntegrationTests/Events/EventRoutesLiveTests.cs(407,56)`. Two independently green PRs broke master together (a semantic conflict). Issue #1418; fixed by PR **#1424**, merged **2026-10-08T15:57:32Z**. The counter resets to the fix. |
+| [37775675230](https://github.com/spaarke-dev/spaarke/actions/runs/37775675230) | 10-08 12:16 | `11dc9b0da` (PR #1359) | Tier 1 `Compile (Debug)` + all four Tier 2 shards' `Build` | **Merge collision** (genuine break, not a flake). `CS0411` in `tests/integration/Sprk.Bff.Api.IntegrationTests/Events/EventRoutesLiveTests.cs(407,56)`. Two independently green PRs broke master together (a semantic conflict). Issue #1418; fixed by PR **#1424**, merged **2026-10-08T15:57:32Z**. **Owner ruling: does not reset the soak.** |
 | [37780400046](https://github.com/spaarke-dev/spaarke/actions/runs/37780400046) | 10-08 12:55 | `23c359eaf` (PR #1386) | Tier 1 `Compile (Debug)` | Same break, still unfixed at that point. |
 | [38069733811](https://github.com/spaarke-dev/spaarke/actions/runs/38069733811) | 10-10 16:57 | `907fda3b8` (PR #1605) | Tier 1 `Arch Tests` | **Flake.** The `Task 167 f2-v2` Production-boot tests in `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Runtime.cs` reach a real IMDS token (`MsalServiceException: Identity not found`). The next master run, 37 min later on an unrelated commit, was green. Already filed as **#1672** and **#1784** (both OPEN). |
 | [38161601966](https://github.com/spaarke-dev/spaarke/actions/runs/38161601966) | 10-11 17:54 | `848f63913` | Tier 1 `Arch Tests` | **Flake** — same tests, same error; the next master run was green. |
@@ -45,13 +46,13 @@ retired, it is not required, and its `Build & Test` job is not the suite that su
 
 ## Flake rate (spec NFR-03: Tier 1 flake < 1%)
 
-Since the reset (2026-10-08T16:00Z): **710 Tier 1 job executions, 2 failures = 0.28%** — this is the job-level
+From 2026-10-08T16:00Z (after the break was fixed): **710 Tier 1 job executions, 2 failures = 0.28%** — this is the job-level
 metric `notes/cutover-success.md` §4 used. ✅ Within NFR-03.
 
 At **run** level the same 2 flakes are **2 of 101** master runs that executed Tier 1 (**2.0%**), all in the one
 `Arch Tests` job. The job-level number passes; the run-level one would not. The cause is the open defect
 #1672 / #1784, which already has issues. It is not a reason to reset the counter (the POML says flakes do not
-reset), but it is the main threat to the next soak window.
+reset), but it is the strongest source of false reds still in Tier 1.
 
 ## Tier 2 (advisory) record
 
@@ -64,11 +65,11 @@ compile break above, 1 the 10-09 infra crash above. **No test failed both passes
   (Sprk.Bff.Api.Tests had grown to ~49 min), producing no verdict. Fixed 2026-10-05 by sharding Tier 2.
 - 2026-10-05 20:37Z (run 37370930255): Router red because several Tier 1 jobs were **cancelled**, not failed — infra.
 
-## How to re-measure (for the 2026-10-15T15:57Z re-check)
+## How to re-measure
 
 ```bash
-# master Router runs since the reset; any failure after 2026-10-08T15:57Z needs classifying
-gh run list --workflow=ci-router.yml --branch=master --event=push --created ">=2026-10-08" \
+# failed master Router runs in a window; each one needs classifying
+gh run list --workflow=ci-router.yml --branch=master --event=push --created ">=2026-10-07" \
   --limit 400 --json databaseId,conclusion,createdAt,headSha,displayTitle \
   --jq '.[] | select(.conclusion=="failure") | "\(.databaseId) \(.createdAt) \(.headSha[0:9]) \(.displayTitle)"'
 # failing jobs/steps of one run
@@ -77,11 +78,17 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion=="failure") | .n
 gh api repos/spaarke-dev/spaarke/actions/jobs/<aggregator-job-id>/logs | grep -E "verdict-Debug-.*: (pass|fail)|missing"
 ```
 
-## Open owner decision (not taken here)
+## Owner ruling (2026-10-14)
 
-The reset comes from a **semantic-conflict compile break**: two PRs, each green under the Router, broke
-master when both merged. The owner declined a merge queue in task 071, so that failure shape is accepted by
-design, and it says nothing about the stability of the *test suite* that FR-B07 is protecting. If the owner
-rules that semantic-conflict breaks do not reset the soak, the window from 2026-10-07 is green apart from
-documented flakes, and the gate is met now. That is a reading of FR-B07 for the owner to make. Applied
-literally (POML step 3: "legitimate failure → reset"), the gate passes at **2026-10-15T15:57Z**.
+> The 2026-10-08 compile break does **not** reset the soak. Two PRs collided at merge (there is no merge
+> queue); it says nothing about suite stability.
+
+Recorded as given. The ruling narrows POML step 3's "legitimate failure → reset" to failures that reflect on
+the **test suite**: a test that fails deterministically, or a build broken by a single change. A collision
+between two independently green PRs is a consequence of the no-merge-queue choice made in task 071, so it
+does not count.
+
+**What the ruling does not cover:** a merge-collision break still leaves master red for everyone who
+branches from it. On 2026-10-08 that lasted ~3 h 40 min, and nothing told anyone. Task 077 adds the
+`router-master` quality alert (`master-ci-alert.yml`), which opens an owner-assigned issue on the first red
+master Router run. That is the mechanism for this failure shape, now that it no longer resets the soak.

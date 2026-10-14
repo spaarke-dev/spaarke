@@ -1,7 +1,7 @@
 <task id="CICD-075" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>7-day soak gate: verify surviving suite green ≥7 consecutive days before Release matrix lock-in (SC-06)</title>
-    <status>in-progress</status>
+    <status>complete</status>
     <estimated-effort>0.5 hours (passive monitoring + 1 active gate task at cutover+7d)</estimated-effort>
     <phase>3 - Monitoring</phase>
     <stream>A+B - Monitoring</stream>
@@ -50,12 +50,16 @@
     <criterion testable="true">Any failures during soak documented with classification</criterion>
   </acceptance-criteria>
   <notes>
-    2026-10-14T15:24Z — measured, NOT MET. Evidence: notes/soak-monitoring.md.
-    Counter reset by a legitimate master break: CS0411 in EventRoutesLiveTests.cs (runs 37775675230,
-    37780400046; issue #1418), fixed by PR #1424 merged 2026-10-08T15:57:32Z. Green since then:
-    5 d 23.5 h. Two Tier 1 Arch Tests reds on 10-10 / 10-11 are the MI-token flake (#1672, #1784) and
-    do not reset. Earliest pass 2026-10-15T15:57Z if no further legitimate red. 077 stays blocked.
-    The Release-matrix step (FR-B07) cannot be done here as written: it lives in ci-tier2-advisory.yml,
-    which is under the owner's standing no-edit rule — needs an owner call when the gate passes.
+    COMPLETE 2026-10-14 by owner ruling. Declaration: notes/soak-passed.md; full record: notes/soak-monitoring.md.
+    Window 2026-10-07T15:24Z to 2026-10-14T15:24Z, 147 completed master Router runs, 4 red:
+    - 37775675230, 37780400046 (2026-10-08): CS0411 compile break from two colliding PRs (issue #1418, fixed
+      PR #1424 at 15:57Z). OWNER RULING 2026-10-14: does NOT reset the soak; there is no merge queue, and a
+      merge collision says nothing about suite stability. Literal step 3 would have put the pass at 2026-10-15T15:57Z.
+    - 38069733811 (10-10), 38161601966 (10-11): flake, Arch Tests Task 167 f2-v2 reaches a real IMDS token
+      (#1672, #1784 OPEN). Flakes do not reset (step 3).
+    Tier 1 job-level flake rate 2/710 = 0.28% (NFR-03 &lt; 1%). Tier 2: no test failed both passes in 52 master runs.
+    One green run per day is listed with run IDs in soak-passed.md.
+    Release build (FR-B07): by owner ruling it goes into the standalone workflow created by task 077, not into
+    ci-tier2-advisory.yml.
   </notes>
 </task>
