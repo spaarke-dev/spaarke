@@ -18,7 +18,7 @@ BeforeAll {
         if (-not $assign) { throw "The script no longer defines `$$variable" }
         . ([scriptblock]::Create($assign.Extent.Text))
     }
-    foreach ($name in 'Get-LookupId', 'Get-StampBackfillClass', 'Get-StampBackfillSummary') {
+    foreach ($name in 'Get-LookupId', 'Get-StampBackfillClass', 'Get-StampBackfillSummary', 'Get-AppSettingValue') {
         $fn = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
         if (-not $fn) { throw "The script no longer defines $name" }
         . ([scriptblock]::Create($fn.Extent.Text))
@@ -105,5 +105,21 @@ Describe 'Get-StampBackfillSummary' {
         $s = Get-StampBackfillSummary 'sprk_signal' @() @('sprk_matter') 'sprk_signalid' 5
         $s.counts.total | Should -Be 0
         $s.counts.stampEmpty | Should -Be 0
+    }
+}
+
+Describe 'Get-AppSettingValue (pass 2 K5)' {
+    AfterEach { Remove-Item function:global:az -ErrorAction SilentlyContinue }
+
+    It 'must fire: a failed az call throws instead of reading as an absent setting' {
+        function global:az { $global:LASTEXITCODE = 1; '' }
+        { Get-AppSettingValue 'rg' 'app' 'CoreAncestor__StampReconciliation__WritesEnabled' } | Should -Throw '*exit 1*'
+    }
+
+    It 'must not fire: a present setting is returned, and an absent one is empty' {
+        function global:az { $global:LASTEXITCODE = 0; 'false' }
+        Get-AppSettingValue 'rg' 'app' 'CoreAncestor__StampReconciliation__WritesEnabled' | Should -Be 'false'
+        function global:az { $global:LASTEXITCODE = 0 }
+        Get-AppSettingValue 'rg' 'app' 'CoreAncestor__StampReconciliation__ReportOnlyTables' | Should -Be ''
     }
 }

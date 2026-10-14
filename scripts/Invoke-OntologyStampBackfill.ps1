@@ -76,6 +76,14 @@ function Get-LookupId($Row, [string]$Column) {
     if ($p -and $p.Value) { "$($p.Value)".ToLowerInvariant() } else { '' }
 }
 
+# One app setting's value on the web app ('' when the setting is absent). A failed az call THROWS: a fault (no login, no access,
+# a wrong app name) is never read as "absent", which would be the default hold or "writes on" (task 145, pass 2 K5).
+function Get-AppSettingValue([string]$ResourceGroup, [string]$WebAppName, [string]$Name) {
+    $value = az webapp config appsettings list --resource-group $ResourceGroup --name $WebAppName --query "[?name=='$Name'].value | [0]" -o tsv
+    if ($LASTEXITCODE -ne 0) { throw "az webapp config appsettings list failed for $WebAppName (exit $LASTEXITCODE); nothing was changed." }
+    "$value".Trim()
+}
+
 # Classifies one row. The subject is the sprk_regarding* lookup whose id equals the pair id (sprk_regardingrecordid), the
 # rule SignalWriter uses; the stamp is the set of sprk_regarding{core} columns.
 function Get-StampBackfillClass($Row, [string[]]$TypedColumns) {
@@ -185,10 +193,10 @@ if (-not $Apply) {
 }
 
 # ── -Apply: release the stamp job's hold on sprk_signal / sprk_decisionrecord ──
-$current = az webapp config appsettings list --resource-group $ResourceGroup --name $WebAppName --query "[?name=='$SettingName'].value | [0]" -o tsv 2>$null
+$current = Get-AppSettingValue $ResourceGroup $WebAppName $SettingName
 Write-Host "Current $SettingName on $WebAppName = '$current' (absent = the default hold: sprk_signal,sprk_decisionrecord)"
 if ($current -eq $SettingReleaseValue) { Write-Host 'Already released; nothing to change.'; return }
-$writes = az webapp config appsettings list --resource-group $ResourceGroup --name $WebAppName --query "[?name=='CoreAncestor__StampReconciliation__WritesEnabled'].value | [0]" -o tsv 2>$null
+$writes = Get-AppSettingValue $ResourceGroup $WebAppName 'CoreAncestor__StampReconciliation__WritesEnabled'
 if ($writes -and $writes -ne 'true') {
     throw "CoreAncestor__StampReconciliation__WritesEnabled is '$writes' on ${WebAppName}: the stamp job writes nothing, so releasing the hold would not backfill. Turn writes on first (owner decision)."
 }
